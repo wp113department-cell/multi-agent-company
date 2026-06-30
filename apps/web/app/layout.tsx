@@ -1,0 +1,28 @@
+import type { Metadata } from "next";
+import "./globals.css";
+import { Providers } from "./providers";
+
+export const metadata: Metadata = {
+  title: "Mission Control — Gridiron Developer Department",
+  description: "Task queue and agent activity for the Gridiron AI Developer Department.",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body className="min-h-screen bg-slate-50 text-slate-900">
+        <Providers>
+          <div className="mx-auto max-w-6xl px-4 py-6">
+            <header className="mb-6 flex items-center justify-between">
+              <a href="/tasks" className="text-lg font-semibold tracking-tight">
+                Mission Control
+              </a>
+              <span className="text-xs text-slate-400">Stage 0+1+2-lite — see PROJECT.md</span>
+            </header>
+            {children}
+          </div>
+        </Providers>
+      </body>
+    </html>
+  );
+}
