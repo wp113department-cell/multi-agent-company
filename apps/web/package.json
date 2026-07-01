@@ -12,6 +12,12 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@gridiron/agent-runtime": "workspace:*",
+    "@gridiron/context-builder": "workspace:*",
+    "@gridiron/planning-pipeline": "workspace:*",
+    "@gridiron/policy-engine": "workspace:*",
+    "@gridiron/repo-intelligence": "workspace:*",
+    "@gridiron/repo-tools": "workspace:*",
     "@gridiron/shared-db": "workspace:*",
     "@gridiron/shared-types": "workspace:*",
     "@gridiron/task-engine": "workspace:*",

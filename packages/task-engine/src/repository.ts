@@ -1,5 +1,7 @@
 import { query } from "@gridiron/shared-db";
 import {
+  type AgentRun,
+  type AgentRunStatus,
   type CreateTaskInput,
   type CreateTaskLogInput,
   type DevTask,
@@ -21,6 +23,7 @@ interface DevTaskRow {
   project: string | null;
   files_touched: string[];
   plan: string | null;
+  diff: string | null;
   final_summary: string | null;
   created_at: Date;
   updated_at: Date;
@@ -37,6 +40,7 @@ function rowToDevTask(row: DevTaskRow): DevTask {
     project: row.project,
     filesTouched: row.files_touched ?? [],
     plan: row.plan,
+    diff: row.diff,
     finalSummary: row.final_summary,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -60,6 +64,28 @@ function rowToTaskLog(row: TaskLogRow): TaskLog {
     message: row.message,
     metadata: row.metadata,
     createdAt: row.created_at,
+  };
+}
+
+interface AgentRunRow {
+  run_id: string;
+  task_id: string;
+  agent_type: string;
+  status: string;
+  checkpoint_id: string | null;
+  started_at: Date;
+  completed_at: Date | null;
+}
+
+function rowToAgentRun(row: AgentRunRow): AgentRun {
+  return {
+    runId: row.run_id,
+    taskId: row.task_id,
+    agentType: row.agent_type,
+    status: row.status as AgentRunStatus,
+    checkpointId: row.checkpoint_id,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
   };
 }
 
@@ -136,6 +162,7 @@ export async function updateTask(taskId: string, input: UpdateTaskInput): Promis
   if (input.assignedAgent !== undefined) set("assigned_agent", input.assignedAgent);
   if (input.filesTouched !== undefined) set("files_touched", JSON.stringify(input.filesTouched));
   if (input.plan !== undefined) set("plan", input.plan);
+  if (input.diff !== undefined) set("diff", input.diff);
   if (input.finalSummary !== undefined) set("final_summary", input.finalSummary);
   sets.push(`updated_at = now()`);
 
@@ -165,4 +192,34 @@ export async function listTaskLogs(taskId: string): Promise<TaskLog[]> {
     [taskId],
   );
   return result.rows.map(rowToTaskLog);
+}
+
+// --- agent_runs ----------------------------------------------------------------
+
+export async function createAgentRun(taskId: string, agentType: string): Promise<AgentRun> {
+  const result = await query<AgentRunRow>(
+    `INSERT INTO agent_runs (task_id, agent_type, status) VALUES ($1, $2, 'created') RETURNING *`,
+    [taskId, agentType],
+  );
+  return rowToAgentRun(result.rows[0]!);
+}
+
+export async function updateAgentRun(
+  runId: string,
+  status: AgentRunStatus,
+  completedAt?: Date,
+): Promise<AgentRun> {
+  const result = await query<AgentRunRow>(
+    `UPDATE agent_runs SET status = $1, completed_at = $2 WHERE run_id = $3 RETURNING *`,
+    [status, completedAt ?? null, runId],
+  );
+  return rowToAgentRun(result.rows[0]!);
+}
+
+export async function listAgentRuns(taskId: string): Promise<AgentRun[]> {
+  const result = await query<AgentRunRow>(
+    `SELECT * FROM agent_runs WHERE task_id = $1 ORDER BY started_at DESC`,
+    [taskId],
+  );
+  return result.rows.map(rowToAgentRun);
 }

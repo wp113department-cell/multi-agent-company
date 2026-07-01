@@ -1,6 +1,7 @@
 import { UpdateTaskInput } from "@gridiron/shared-types";
 import { getTask, InvalidTransitionError, listTaskLogs, updateTask } from "@gridiron/task-engine";
 import { NextRequest, NextResponse } from "next/server";
+import path from "path";
 
 // GET /tasks/:id — task record plus its full log timeline (08_API_Specification.md)
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
@@ -28,6 +29,17 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   try {
     const task = await updateTask(params.id, parsed.data);
+
+    // Clean up git worktree when a task reaches a terminal state
+    if (parsed.data.status === "completed" || parsed.data.status === "rejected") {
+      const repoPath = path.resolve(process.env["TARGET_REPO_PATH"] ?? process.cwd() + "/../../");
+      setImmediate(() => {
+        import("@gridiron/agent-runtime")
+          .then(({ removeWorktree }) => removeWorktree(repoPath, params.id))
+          .catch(() => { /* best-effort cleanup, don't fail the request */ });
+      });
+    }
+
     return NextResponse.json(task);
   } catch (err) {
     if (err instanceof InvalidTransitionError) {
