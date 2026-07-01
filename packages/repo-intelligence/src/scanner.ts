@@ -263,3 +263,36 @@ export async function indexRepository(repoPath: string): Promise<RepoIndex> {
     imports: allImports,
   };
 }
+
+export async function indexRepositoryWithProject(
+  repoPath: string,
+): Promise<{ index: RepoIndex; project: Project }> {
+  const index = await indexRepository(repoPath);
+  const absRepo = path.resolve(repoPath);
+  const ignorePatterns = IGNORED_DIRS.map((d) => `${d}/**`);
+  const tsFiles = await glob("**/*.{ts,tsx}", {
+    cwd: absRepo,
+    ignore: ignorePatterns,
+    absolute: true,
+    nodir: true,
+  });
+  const { statSync } = await import("fs");
+  const rootTsConfig = path.join(absRepo, "tsconfig.json");
+  const baseTsConfig = path.join(absRepo, "tsconfig.base.json");
+  const packagesTsConfig = (await glob("packages/*/tsconfig.json", { cwd: absRepo, absolute: true }))[0];
+  const tsConfigPath = [rootTsConfig, baseTsConfig, packagesTsConfig].find((p) => {
+    if (!p) return false;
+    try { statSync(p); return true; } catch { return false; }
+  });
+  const project = new Project({
+    ...(tsConfigPath ? { tsConfigFilePath: tsConfigPath } : { useInMemoryFileSystem: false }),
+    skipFileDependencyResolution: true,
+    skipLoadingLibFiles: true,
+    skipAddingFilesFromTsConfig: true,
+    compilerOptions: tsConfigPath ? undefined : { target: 99, moduleResolution: 100, strict: true },
+  });
+  for (const f of tsFiles) {
+    try { project.addSourceFileAtPath(f); } catch { /* skip */ }
+  }
+  return { index, project };
+}

@@ -108,6 +108,12 @@ importers:
       '@gridiron/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
+      '@gridiron/context-builder':
+        specifier: workspace:*
+        version: link:../../packages/context-builder
+      '@gridiron/repo-intelligence':
+        specifier: workspace:*
+        version: link:../../packages/repo-intelligence
       '@gridiron/shared-db':
         specifier: workspace:*
         version: link:../../packages/shared-db
@@ -161,6 +167,9 @@ importers:
       '@gridiron/repo-intelligence':
         specifier: workspace:*
         version: link:../repo-intelligence
+      '@gridiron/shared-db':
+        specifier: workspace:*
+        version: link:../shared-db
       '@gridiron/shared-types':
         specifier: workspace:*
         version: link:../shared-types
@@ -168,6 +177,34 @@ importers:
       '@types/node':
         specifier: ^20.16.0
         version: 20.19.43
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@20.19.43)
+
+  packages/mcp-server:
+    dependencies:
+      '@gridiron/context-builder':
+        specifier: workspace:*
+        version: link:../context-builder
+      '@gridiron/repo-intelligence':
+        specifier: workspace:*
+        version: link:../repo-intelligence
+      '@gridiron/shared-db':
+        specifier: workspace:*
+        version: link:../shared-db
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^20.16.0
+        version: 20.19.43
+      tsx:
+        specifier: ^4.19.0
+        version: 4.22.4
       typescript:
         specifier: ^5.6.0
         version: 5.9.3

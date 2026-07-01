@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@gridiron/agent-runtime": "workspace:*",
+    "@gridiron/context-builder": "workspace:*",
+    "@gridiron/repo-intelligence": "workspace:*",
     "@gridiron/shared-db": "workspace:*",
     "@gridiron/task-engine": "workspace:*"
   },

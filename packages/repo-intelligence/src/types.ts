@@ -53,3 +53,25 @@ export const SymbolGraphSchema = z.object({
   usages: z.record(z.string(), z.array(z.string())),
 });
 export type SymbolGraph = z.infer<typeof SymbolGraphSchema>;
+
+export const CallEdgeSchema = z.object({
+  callerFile: z.string(),
+  callerFn: z.string(),
+  calleeFile: z.string(),
+  calleeFn: z.string(),
+});
+export type CallEdge = z.infer<typeof CallEdgeSchema>;
+
+export const CallGraphSchema = z.object({
+  edges: z.array(CallEdgeSchema),
+  callerMap: z.map(z.string(), z.array(z.string())),
+  calleeMap: z.map(z.string(), z.array(z.string())),
+});
+export type CallGraph = z.infer<typeof CallGraphSchema>;
+
+export const SemanticSearchResultSchema = z.object({
+  filePath: z.string(),
+  similarity: z.number(),
+  content: z.string(),
+});
+export type SemanticSearchResult = z.infer<typeof SemanticSearchResultSchema>;

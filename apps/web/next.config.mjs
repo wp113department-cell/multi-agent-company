@@ -13,7 +13,7 @@ const nextConfig = {
     "@gridiron/planning-pipeline",
   ],
   // Prevent webpack from bundling Node.js-only packages — resolve them as native externals
-  serverExternalPackages: ["@anthropic-ai/sdk", "glob", "ts-morph", "typescript"],
+  serverExternalPackages: ["@anthropic-ai/sdk", "glob", "ts-morph", "typescript", "pg"],
 };
 
 export default nextConfig;
