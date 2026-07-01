@@ -34,6 +34,7 @@ export const DevTask = z.object({
   project: z.string().nullable(),
   filesTouched: z.array(z.string()).default([]),
   plan: z.string().nullable(),
+  diff: z.string().nullable(),
   finalSummary: z.string().nullable(),
   createdAt: z.coerce.date(),
   updatedAt: z.coerce.date(),
@@ -55,6 +56,7 @@ export const UpdateTaskInput = z.object({
   assignedAgent: z.string().nullable().optional(),
   filesTouched: z.array(z.string()).optional(),
   plan: z.string().nullable().optional(),
+  diff: z.string().nullable().optional(),
   finalSummary: z.string().nullable().optional(),
 });
 export type UpdateTaskInput = z.infer<typeof UpdateTaskInput>;

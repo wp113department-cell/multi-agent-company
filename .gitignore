@@ -1,28 +1,23 @@
+# Dependencies
 node_modules/
-.next/
+
+# Build outputs
 dist/
+.next/
 build/
-.turbo/
-*.tsbuildinfo
+coverage/
 
-# env / secrets — never committed, enforced also by the Policy Engine
+# Environment
 .env
-.env.*
-!.env.example
-secrets/
+.env.local
+.env.*.local
 
-# worktrees created by agent-runtime for isolated coding tasks
-.worktrees/
+# Reference repos (cloned locally for research, not part of the codebase)
+repos/
 
-# editor / OS
+# OS
 .DS_Store
-.vscode/*
-!.vscode/extensions.json
+Thumbs.db
 
-# logs
-*.log
-npm-debug.log*
-pnpm-debug.log*
-
-# postgres docker volume
-.pgdata/
+# Turbo
+.turbo/
