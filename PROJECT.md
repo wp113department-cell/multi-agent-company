@@ -2,7 +2,7 @@
 
 **This is a living document. Update it every session — it is the single source of truth for "what actually exists right now," separate from `PLAN.md` (what's intended) and `files/` (the original spec suite, which describes the full 7-stage vision, not the current build).**
 
-Last updated: 2026-07-01 (Phase 0 + 1 + 2 + 3 complete — all 32 turbo tasks pass, pending API key for live E2E test)
+Last updated: 2026-07-01 (Phase 0–3 complete + all gaps filled — 35/35 turbo tasks pass, pending API keys for live E2E test)
 
 ---
 
@@ -12,7 +12,7 @@ Gridiron AI's Developer Department: an AI agent system that takes a plain-Englis
 
 ## Current build target
 
-**Milestone achieved:** Phase 0 (ESLint/Prettier/tooling) + Phase 1 (Task Queue API, Planner Agent, Dashboard v1, Worker process) + Phase 2 (Worktree isolation, Coding Agent, Policy Engine, Diff Review UI, self-correction retry loop) + Phase 3 (Repository Intelligence, Context Builder, pgvector schema, PM→Architect→Decomposer pipeline, Pipeline Dashboard) — all verified via typecheck + lint + unit tests. Full live E2E test requires `ANTHROPIC_API_KEY`.
+**Milestone achieved:** Phase 0–3 complete + all Phase 3 gaps filled — Call Graph, Embedding Pipeline (Voyage AI), MCP Server, Reindex API, Pipeline Resume, Weekly Reindex. 35/35 turbo tasks pass. Live E2E test requires `ANTHROPIC_API_KEY` + `VOYAGE_API_KEY`.
 
 **Target repo the agent operates on:** not yet assigned. `TARGET_REPO_PATH` currently points at this project's own monorepo (self-referential, for testability). Repoint when the real target repo is available.
 
@@ -63,6 +63,18 @@ _(Verified working via real API calls + automated tests, not just "code written.
 - [x] `DiffViewer` component — line-by-line coloured diff (green additions, red deletions, blue hunks)
 - [x] Approve/Reject UI — "Approve Plan & Start Coding" / "Reject Plan" / "Approve & Complete" / "Reject Diff" buttons
 
+### Phase 3 — Repository Intelligence + Planning Subsystem ✅ (gaps filled)
+
+**Phase 3 gap-fill (2026-07-01):**
+- [x] **Call Graph** — `packages/repo-intelligence/src/call-graph.ts`: `buildCallGraph(index, project)` using import-matching. Returns `CallGraph { edges, callerMap, calleeMap }`. `getCallers()` / `getCallees()` helpers exported. Context-builder now includes `callGraphEdges` in `ContextResult`.
+- [x] **Embedding Pipeline** — `packages/repo-intelligence/src/embeddings.ts`: `generateEmbeddings(index, db)` via Voyage AI `voyage-code-2` (1536 dims), SHA-256 content-hash dedup, batch=20. `semanticSearch(query, repoPath, db)` using pgvector cosine similarity. Requires `VOYAGE_API_KEY`.
+- [x] **Migration #7** — `alter-code-embeddings`: adds `content_hash`, `updated_at`, unique constraint on `(repo_path, file_path)`, makes `chunk_index` nullable.
+- [x] **MCP Server** — `packages/mcp-server/`: stdio JSON-RPC 2.0 server. Tools: `index_repository`, `search_symbols`, `build_context`, `semantic_search`. Register with: `claude mcp add gridiron-repo-intelligence -- npx tsx packages/mcp-server/src/index.ts`
+- [x] **Reindex API** — `POST /api/repo/reindex` (fire-and-forget full reindex + embedding generation), `GET /api/repo/reindex` (last indexed timestamp).
+- [x] **Pipeline Resume** — `runPlanningPipeline` now checks existing DB state at start, skips stages where output already populated (crash-safe resume).
+- [x] **Weekly Reindex** — `apps/worker` checks every poll cycle, triggers full reindex + embedding refresh if >7 days since last run.
+- [x] **Context-builder upgraded** — merges keyword scoring + semantic search results; adds `callGraphEdges` + `semanticMatches` fields to `ContextResult`.
+
 ### Phase 3 — Repository Intelligence + Planning Subsystem ✅
 - [x] **`packages/repo-intelligence`** — ts-morph AST scanner (`indexRepository`), Dependency Graph (`buildDependencyGraph`, `scoreFilesByImportCentrality`), Symbol Graph (`buildSymbolGraph`, `searchSymbols`) — **verified: indexes 113 files, 175 symbols from this monorepo**
 - [x] **`packages/context-builder`** — `buildContext(task, repoPath)` returns `{ relevantFiles, dependencyChain, relatedSymbols, summary }` — **verified: correctly scores API route files highest for an "add health check endpoint" task**
@@ -93,11 +105,12 @@ All 10 repos from the Open Source Reference Matrix:
 
 ```
 pnpm turbo run typecheck lint test
-→ 32/32 tasks successful
+→ 35/35 tasks successful
    - policy-engine: 10/10 unit tests pass
    - task-engine: 7/7 unit tests pass
-   - All 11 packages: typecheck clean
-   - All 11 packages: lint clean
+   - All 12 packages: typecheck clean  (added: mcp-server)
+   - All 12 packages: lint clean
+   - Migration #7 (alter-code-embeddings): ran clean on local Docker
 ```
 
 ## Pending live tests (require ANTHROPIC_API_KEY in .env)
@@ -130,6 +143,7 @@ pnpm turbo run typecheck lint test
 ## Open items needed from the user
 
 - **`ANTHROPIC_API_KEY`** — required to run agents. Set in `.env`.
+- **`VOYAGE_API_KEY`** — required for semantic search (embedding pipeline). Get free key at voyageai.com. Set in `.env`. Without it, system falls back to keyword-only search.
 - **Real target repo** — change `TARGET_REPO_PATH` in `.env` when available.
 - Eventually: Supabase + Vercel for production deployment.
 
@@ -138,12 +152,16 @@ pnpm turbo run typecheck lint test
 ```bash
 pnpm install
 cp .env.example .env
-# Fill in ANTHROPIC_API_KEY in .env
+# Fill in ANTHROPIC_API_KEY and VOYAGE_API_KEY in .env
 pnpm db:up                  # start Docker Postgres (pgvector/pgvector:pg16)
-pnpm db:migrate             # run 6 migrations
+pnpm db:migrate             # run 7 migrations
 pnpm dev                    # start Next.js dev server at http://localhost:3000
-# Optional: start background worker (auto-picks up pending tasks)
+# Optional: start background worker (auto-picks up pending tasks + weekly reindex)
 pnpm --filter @gridiron/worker start
+# Optional: register MCP server with Claude Code
+claude mcp add gridiron-repo-intelligence -- npx tsx packages/mcp-server/src/index.ts
+# Trigger a manual reindex + embedding generation (after API keys are set):
+curl -X POST http://localhost:3000/api/repo/reindex
 ```
 
 ## How to resume work in a new session

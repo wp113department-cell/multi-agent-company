@@ -1,22 +1,28 @@
 {
-  "name": "@gridiron/context-builder",
+  "name": "@gridiron/mcp-server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "bin": {
+    "gridiron-mcp": "./src/index.ts"
+  },
   "scripts": {
+    "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@gridiron/context-builder": "workspace:*",
     "@gridiron/repo-intelligence": "workspace:*",
     "@gridiron/shared-db": "workspace:*",
-    "@gridiron/shared-types": "workspace:*"
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^20.16.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   }
