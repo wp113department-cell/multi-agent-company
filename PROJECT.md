@@ -2,7 +2,7 @@
 
 **This is a living document. Update it every session — it is the single source of truth for "what actually exists right now," separate from `PLAN.md` (what's intended) and `files/` (the original spec suite, which describes the full 7-stage vision, not the current build).**
 
-Last updated: 2026-07-02 (Phases 0–4 complete + full Phase 1–4 gap fix pass — 123/123 pytest pass, mypy --strict clean, 14 files changed, commit ed6863c)
+Last updated: 2026-07-02 (Phases 0–4 complete + full Phase 1–4 gap fix pass + gitignore cleanup — 123/123 pytest pass, mypy --strict clean, commit ceb2f59 — Phase 5+6 plan documented, ready to build)
 
 ---
 
@@ -615,3 +615,138 @@ Per MASTER_PROMPT_PACK Prompt 5:
 
 **Pre-conditions for Phase 5:**
 - Same as Phase 4: ANTHROPIC_API_KEY + live Postgres needed for pending tests
+
+---
+
+## Phase 1–4 Gap Fix Session — 2026-07-02 (late evening)
+
+**Session goal:** Line-by-line audit of Prompts 1–4 vs actual code. Found 18 fixable gaps + 8 pending-API items. Fixed all 11 non-credential gaps.
+
+### Gaps fixed
+
+| # | Gap | Files |
+|---|---|---|
+| 1 | LOG_LEVEL env var not wired | `config.py`, `.env.example`, `main.py` |
+| 2 | Token tracking discarded — planner/coder returned 2-tuple, never persisted | `planner.py`, `coder.py`, `api/agents.py` |
+| 3 | Structured error format missing (`{ error: { code, message } }`) | `main.py` exception handlers |
+| 4 | Weekly auto-reindex background task not wired | `main.py` lifespan |
+| 5 | MCP missing `semantic_search` + `get_file_summary` tools | `mcp/server.py` |
+| 6 | Artifacts never saved to disk/DB during pipeline | `api/agents.py`, `artifacts/store.py` |
+| 7 | Artifact API used `db=None` → always returned empty list | `api/artifacts.py` |
+| 8 | Pipeline approve → single coder instead of full manager pipeline | `api/agents.py` |
+| 9 | manager.py sync calls blocked the async event loop | `agents/manager.py` |
+| 10 | Stage 4 UI missing Dev→QA→Review live display | `PipelineView.tsx` |
+| 11 | Task detail page had no artifact inspector | `tasks/[id]/page.tsx`, `lib/api.ts` |
+
+**Additional (gitignore / cleanup):**
+- `__pycache__/`, `.pyc`, `tsconfig.tsbuildinfo` were tracked — removed from git, added to `.gitignore`
+- `.venv/`, `venv/`, `artifacts/`, `repos/` confirmed not tracked
+
+### Test results — gap fix
+
+```
+pytest backend/tests/ -v
+→ 123/123 passed, 47 skipped (all pending skip cleanly without API keys)
+
+mypy backend/ --strict
+→ Success: no issues found in 43 source files
+```
+
+### Commit
+`ceb2f59` — chore: clean .gitignore — remove __pycache__, .pyc, tsconfig.tsbuildinfo (with prior commits covering gap fixes)
+
+### Latest state
+- Branch: `main`
+- Pushed to: `git@github.com:wp113department-cell/CRR2906.git`
+- 273 tracked files (clean working tree)
+- All non-LLM layers verified working via real Python calls (real server start, real file I/O, real DB queries)
+
+---
+
+## Phase 5 + 6 — Ready for next session (2026-07-03)
+
+### Phase 5 (Day 5 — MASTER_PROMPT_PACK Prompt 5)
+
+**New DB tables needed (Alembic migration 003):**
+- `epics` — epic_id (UUID PK), title, description, status, cost_estimate, cost_actual, created_at, updated_at
+- `dev_tasks.epic_id` FK column (nullable) → epics
+- `policies` — id, name, trigger_pattern (glob), required_approval_role, blocking (bool), active
+- `policy_approvals` — id, policy_id FK, task_id/epic_id, approver_role, decision, created_at
+- `users` (or `user_roles`) — user_id, role (viewer | approver)
+
+**New agents needed:**
+- `backend/app/agents/devops.py` — read-only bash (git status, disk usage from allowlist in config), no write, no deploy
+- `backend/roles/devops.md` — role file
+
+**Manager Agent upgrade:**
+- `backend/app/agents/manager.py` — already exists; upgrade to LangGraph supervisor node above the full PM→Arch→Decomp pipeline
+- Creates epic from high-level goal → runs sub-pipeline → tracks subtask statuses via Event Bus → auto-retries failed subtasks (cap from config) → halts epic if ≥2 subtasks fail repeatedly → emits `epic.halted` event → assembles batched approval package
+
+**Cost Controller:**
+- `backend/app/pipeline/cost_controller.py` — `estimate_cost(subtask_count, complexity)` using historical avg from `agent_runs` + config coefficients
+- Config: `COST_APPROVAL_THRESHOLD`, `COST_PER_INPUT_TOKEN`, `COST_PER_OUTPUT_TOKEN`, `MODEL_PLANNER`, `MODEL_CODER`
+- Gate in pipeline: estimate → if over threshold → interrupt() → human approval required before agents start
+
+**Policy Engine v2:**
+- `backend/app/policy/engine_v2.py` — `load_policies(db)`, `match_policy(file_path)` glob match, `record_approval()`
+- Seeds: `**/migrations/**` → human blocking; `api/customer/**` → architect blocking; `auth/**` → flag-only
+
+**RBAC:**
+- `backend/app/middleware/rbac.py` — `require_approver(request)` dependency, 403 if viewer
+- All approve/reject endpoints in `tasks.py`, `agents.py` use this dependency
+
+**API endpoints (Prompt 5):**
+- `POST /api/epics` — create epic
+- `GET /api/epics/:id` — get epic with all subtasks + artifacts + cost
+- `POST /api/epics/:id/approve` — human approves batched package (approver role)
+- `POST /api/epics/:id/reject` — reject (approver role)
+
+**Frontend:**
+- `apps/web/app/epics/` — Epic list + detail page (all subtasks, diffs, QA results, cost estimate vs actual, Approve/Reject)
+- `apps/web/lib/api.ts` — add fetchEpic, approveEpic, rejectEpic
+
+**Tests:**
+- Manager integration: goal → epic → subtasks → batched approval package
+- Halt path: force 2 subtask failures → epic.halted event
+- Cost gate: over-threshold → blocks before agents start
+- Policy v2: `**/migrations/**` subtask → blocks until policy_approvals row exists
+- RBAC: viewer → 403 on all approve endpoints; approver → 200
+
+### Phase 6 (Day 6 — MASTER_PROMPT_PACK Prompt 6)
+
+**Research (Step 0):**
+- Read `/repos/composio` for tool/capability registration patterns → `docs/research/composio-notes.md`
+- Verify web-search MCP server actually exists before wiring
+
+**Agent Registry (migration 004):**
+- `agents` table — agent_id, name, capability_tags (ARRAY), tool_list (JSONB), prompt_ref, version, success_rate, avg_retries, last_computed_at
+- `backend/app/api/registry.py` — `GET /api/agents`, `GET /api/agents/:id/metrics`
+- Seed rows for: planner, pm, architect, decomposer, backend_dev, frontend_dev, qa, reviewer, devops, manager
+- `backend/app/pipeline/dispatcher.py` — refactor to query agents by capability tag, not hardcoded name
+
+**Research Agent:**
+- `backend/roles/research.md` — tools: web_search + GitHub read via MCP, Read; NO Edit/Write/Bash
+- `backend/app/agents/research.py` — output: `{ findings, relevantLibraries, recommendedApproach, risks }`
+- Config flag `RESEARCH_ENABLED` — inserts as optional first pipeline step
+
+**Documentation Agent:**
+- `backend/roles/docs.md` — Edit/Write scoped to `*.md` and `docs/**` ONLY (enforced by policy rule, not prompt)
+- `backend/app/agents/docs.py` — triggered by epic approval event, writes README/changelog in worktree
+
+**Engineering Memory v1 (pgvector):**
+- On task completion/blocked: embed `{problem, plan, patch_summary, outcome, errors, fixes}` → pgvector
+- `backend/app/memory/store.py` — `embed_task_outcome()`, `query_similar_tasks(description, top_k)`
+- Architect Agent + Context Builder now query: "similar past tasks" section appended to context
+- Learning signal: `/api/memory/patterns` — reports prompt/tool combos correlated with retries/failures (human read-only, never auto-applied)
+
+**Tests:**
+- Registry: metrics math correct; capability-tag dispatch selects right agent; new fake agent dispatched via insert only
+- Research agent eval: real run, output validates, sources are real
+- Docs agent security: `.ts` write denied; `.md` write in worktree allowed
+- Memory: complete task → embedding row exists; similar task → architect context contains past-task reference
+
+**How to start Phase 5 (first action next session):**
+1. Read `PROJECT.md` (this file)
+2. `cd backend && .venv/bin/python -m pytest tests/ -v` → confirm 123/123 green
+3. `cd backend && .venv/bin/python -m mypy app/ --strict` → confirm 0 issues in 43 files
+4. Start Phase 5 Step 1: write Alembic migration 003 (epics + policies + policy_approvals + users tables)
