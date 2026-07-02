@@ -275,3 +275,58 @@ DATABASE_URL=postgresql://gridiron:gridiron_dev_only@localhost:5432/gridiron_dev
 # Migrations (run after db:up):
 pnpm db:migrate
 ```
+
+---
+
+## ARCHITECTURE PIVOT — 2026-07-02 (Python Backend)
+
+**Decision:** Full backend rebuild in Python. TypeScript backend archived in `TX/`.
+
+| | Before | After |
+|---|---|---|
+| Backend language | TypeScript (Node.js) | **Python 3.11+** |
+| API framework | Next.js App Router API routes | **FastAPI** |
+| Agent orchestration | Direct Anthropic SDK (TS) | **LangGraph (Python)** |
+| Config validation | Zod + shared-config package | **Pydantic BaseSettings** |
+| ORM | pg (raw SQL) + node-pg-migrate | **SQLAlchemy + Alembic** |
+| Embeddings | HTTP → Voyage AI | **voyageai Python SDK** |
+| Testing | Vitest | **pytest + mypy** |
+| Frontend | Next.js (TypeScript) | Next.js (TypeScript) — **unchanged** |
+
+**What was archived (TX/ folder):**
+- `TX/packages/` — all 11 TypeScript packages (agent-runtime, context-builder, mcp-server, planning-pipeline, policy-engine, repo-intelligence, repo-tools, shared-config, shared-db, shared-types, task-engine)
+- `TX/apps/worker/` — TypeScript background worker
+- `TX/tests/` — Vitest integration tests
+- `TX/api-routes/next-api/` — all Next.js API routes (were in apps/web/app/api/)
+
+**New backend location:** `backend/` (Python)
+
+**Frontend:** `apps/web/` stays completely unchanged — Next.js pages, components, and styles.
+
+**Next steps (Python backend rebuild — 2-day plan):**
+
+### Day 1 (2026-07-02) — Foundation
+1. Python project scaffold (`backend/`, virtualenv, requirements.txt)
+2. Pydantic BaseSettings config (`backend/app/config.py`)
+3. SQLAlchemy models + Alembic migrations (dev_tasks, task_logs, agent_runs, subtasks)
+4. FastAPI app skeleton (`backend/app/main.py`)
+5. Task Queue API — `POST/GET /api/tasks`, `GET/PATCH /api/tasks/:id`, `GET /api/tasks/:id/logs`
+6. Status-transition machine (Python, same rules as TypeScript version)
+7. Policy engine (`backend/app/policy/engine.py`)
+8. Git worktree isolation helpers (`backend/app/repo_tools/worktree.py`)
+9. pytest test suite — config, status transitions, policy engine
+
+### Day 2 (2026-07-03) — Agents + Intelligence
+1. Base agent runner (Anthropic Python SDK, loads role from `backend/roles/*.md`)
+2. LangGraph StateGraph — PM Agent → Architect Agent → Decomposer (with Postgres checkpointing)
+3. Planner Agent node + Coder Agent node
+4. Repo intelligence: AST scanner (tree-sitter Python), call graph, embedding pipeline (voyageai)
+5. Context builder (`buildContext()`)
+6. MCP server (Python stdio JSON-RPC 2.0)
+7. FastAPI routes wired to all agents
+8. pytest integration tests — full pipeline, graph correctness
+
+**How to resume next session:**
+- Read this PROJECT.md
+- Run: `cd backend && source venv/bin/activate && pytest tests/ -v`
+- Start Day 2 from where Day 1 left off
