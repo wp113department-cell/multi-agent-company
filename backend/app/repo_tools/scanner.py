@@ -127,8 +127,17 @@ def _parse_file(path: Path, lang: Language, ext: str) -> tuple[list[SymbolInfo],
     return symbols, imports
 
 
-def index_repository(repo_path: str) -> RepoIndex:
-    """Walk repo_path, parse supported files, return RepoIndex."""
+def index_repository(
+    repo_path: str,
+    known_hashes: dict[str, str] | None = None,
+) -> RepoIndex:
+    """
+    Walk repo_path, parse supported files, return RepoIndex.
+
+    known_hashes: optional {rel_path: content_hash} from a previous index run.
+    Files whose hash hasn't changed are skipped (incremental re-index).
+    Returns a full RepoIndex merging unchanged entries with newly parsed ones.
+    """
     base = Path(repo_path)
     index = RepoIndex(repo_path=repo_path)
 
@@ -150,6 +159,14 @@ def index_repository(repo_path: str) -> RepoIndex:
             try:
                 content = abs_path.read_bytes()
                 chash = _content_hash(content)
+            except Exception:
+                continue
+
+            # Incremental: skip re-parsing if hash matches previous index
+            if known_hashes and known_hashes.get(rel_path) == chash:
+                continue
+
+            try:
                 symbols, imports = _parse_file(abs_path, lang, ext)
             except Exception:
                 continue
@@ -163,6 +180,16 @@ def index_repository(repo_path: str) -> RepoIndex:
             )
 
     return index
+
+
+def merge_indexes(base_index: RepoIndex, new_index: RepoIndex) -> RepoIndex:
+    """
+    Merge a partial new_index (only changed files) into base_index.
+    Returns a new RepoIndex with all files from base_index updated by new_index.
+    """
+    merged = RepoIndex(repo_path=base_index.repo_path, files=dict(base_index.files))
+    merged.files.update(new_index.files)
+    return merged
 
 
 def build_call_graph(index: RepoIndex) -> dict[str, list[str]]:
