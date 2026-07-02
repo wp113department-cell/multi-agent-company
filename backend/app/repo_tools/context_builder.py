@@ -6,7 +6,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.config import get_settings
 from app.repo_tools.scanner import RepoIndex, build_call_graph
 from app.repo_tools.embeddings import semantic_search
 
@@ -70,7 +69,6 @@ def build_context(
         if ck in _context_cache:
             return _context_cache[ck]
 
-    settings = get_settings()
     query_tokens = [w.lower() for w in re.split(r"\W+", task_description) if len(w) > 2]
 
     # Keyword scoring

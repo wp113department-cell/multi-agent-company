@@ -91,6 +91,95 @@ CODER_TOOLS = READ_ONLY_TOOLS + [
     },
 ]
 
+# QA Agent: read + bash (test/build only, no write)
+_QA_BASH_TOOL = {
+    "name": "bash",
+    "description": (
+        "Run test or build commands only. Allowed: pytest, mypy, ruff, tsc, npm test/build/lint. "
+        "No write operations, no deploy commands."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "command": {"type": "string", "description": "Test/build command to run"},
+        },
+        "required": ["command"],
+    },
+}
+
+_SUBMIT_QA_TOOL = {
+    "name": "submit_qa_result",
+    "description": "Submit the final QA result after all checks are complete.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["passed", "failed"]},
+            "tests_run": {"type": "integer"},
+            "tests_passed": {"type": "integer"},
+            "tests_failed": {"type": "integer"},
+            "typecheck_clean": {"type": "boolean"},
+            "lint_clean": {"type": "boolean"},
+            "errors": {"type": "array", "items": {"type": "string"}},
+            "summary": {"type": "string"},
+        },
+        "required": ["status", "tests_run", "tests_passed", "tests_failed", "typecheck_clean", "lint_clean", "errors", "summary"],
+    },
+}
+
+# QA has read tools + bash (test only) + submit_qa_result. NO write_file, NO edit.
+QA_TOOLS = READ_ONLY_TOOLS + [_QA_BASH_TOOL, _SUBMIT_QA_TOOL]
+
+_SUBMIT_REVIEW_TOOL = {
+    "name": "submit_review",
+    "description": "Submit the structured code review findings.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "findings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "severity": {"type": "string", "enum": ["blocking", "non-blocking", "suggestion"]},
+                        "file": {"type": "string"},
+                        "line": {"type": ["integer", "null"]},
+                        "finding": {"type": "string"},
+                        "recommendation": {"type": "string"},
+                    },
+                    "required": ["severity", "file", "finding", "recommendation"],
+                },
+            },
+            "verdict": {"type": "string", "enum": ["approved", "changes_required"]},
+            "summary": {"type": "string"},
+        },
+        "required": ["findings", "verdict", "summary"],
+    },
+}
+
+# Reviewer has read tools ONLY + submit_review. NO bash, NO write, NO edit.
+REVIEWER_TOOLS = READ_ONLY_TOOLS + [_SUBMIT_REVIEW_TOOL]
+
+# Allowed QA bash commands (prefix checks)
+_QA_ALLOWED_PREFIXES = (
+    "pytest",
+    "python -m pytest",
+    "python -m mypy",
+    "python -m ruff",
+    "npx tsc",
+    "npm test",
+    "npm run",
+    "cat ",
+    "head ",
+    "git diff",
+    "git log",
+    "git status",
+)
+
+
+def _is_qa_command_allowed(cmd: str) -> bool:
+    stripped = cmd.strip()
+    return any(stripped.startswith(p) for p in _QA_ALLOWED_PREFIXES)
+
 
 # --- Tool handlers ---
 
@@ -168,4 +257,49 @@ def make_coder_handlers(worktree_path: str, repo_path: str) -> dict[str, Any]:
     handlers["bash"] = bash
     handlers["submit_patch"] = submit_patch
     handlers["_patch_result"] = patch_result  # caller reads this after run
+    return handlers
+
+
+def make_qa_handlers(worktree_path: str, repo_path: str) -> dict[str, Any]:
+    """QA agent: read-only + bash (test/build only) + submit_qa_result. No writes."""
+    handlers = make_read_only_handlers(repo_path)
+    qa_result: dict[str, Any] = {}
+
+    def bash(inp: dict[str, Any]) -> str:
+        cmd = inp["command"]
+        if not _is_qa_command_allowed(cmd):
+            return f"[POLICY DENIED] QA agent may only run test/build commands. Got: {cmd!r}"
+        policy = check_command(cmd)
+        if not policy.allowed:
+            return f"[POLICY DENIED] {policy.reason}"
+        try:
+            result = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, cwd=worktree_path, timeout=120
+            )
+            out = (result.stdout + result.stderr)[:6000]
+            return out if out else "(no output)"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] Command timed out after 120s"
+
+    def submit_qa_result(inp: dict[str, Any]) -> str:
+        qa_result.update(inp)
+        return "QA result submitted"
+
+    handlers["bash"] = bash
+    handlers["submit_qa_result"] = submit_qa_result
+    handlers["_qa_result"] = qa_result  # caller reads this after run
+    return handlers
+
+
+def make_reviewer_handlers(repo_path: str) -> dict[str, Any]:
+    """Reviewer agent: read-only only + submit_review. No bash, no writes."""
+    handlers = make_read_only_handlers(repo_path)
+    review_result: dict[str, Any] = {}
+
+    def submit_review(inp: dict[str, Any]) -> str:
+        review_result.update(inp)
+        return "Review submitted"
+
+    handlers["submit_review"] = submit_review
+    handlers["_review_result"] = review_result  # caller reads this after run
     return handlers

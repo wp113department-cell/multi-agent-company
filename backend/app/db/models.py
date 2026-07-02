@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -151,3 +151,46 @@ class CallEdge(Base):
     callee_file: Mapped[str] = mapped_column(Text)
     callee_symbol: Mapped[str | None] = mapped_column(String(500), nullable=True)
     edge_type: Mapped[str] = mapped_column(String(50), default="import")
+
+
+# ---- Phase 4 tables ----
+
+class Event(Base):
+    """Persisted event bus events. Every publish goes here before delivery."""
+    __tablename__ = "events"
+
+    event_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(100))
+    task_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    epic_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload: Mapped[Any] = mapped_column(JSONB, nullable=True)
+    emitted_by: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class FailedEvent(Base):
+    """Events that exhausted retries — lightweight dead-letter log."""
+    __tablename__ = "failed_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    event_type: Mapped[str] = mapped_column(String(100))
+    task_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload: Mapped[Any] = mapped_column(JSONB, nullable=True)
+    emitted_by: Mapped[str] = mapped_column(String(100))
+    handler_name: Mapped[str] = mapped_column(String(200))
+    error: Mapped[str] = mapped_column(Text)
+    failed_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class Artifact(Base):
+    """Versioned pipeline output artifacts (plan, diff, test_results, review_findings)."""
+    __tablename__ = "artifacts"
+
+    artifact_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    task_id: Mapped[str] = mapped_column(Text)
+    type: Mapped[str] = mapped_column(String(100))
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    storage_path: Mapped[str] = mapped_column(Text)
+    created_by_agent: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
