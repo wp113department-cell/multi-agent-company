@@ -1,30 +1,8 @@
+import { getConfig } from "@gridiron/shared-config";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { SubTaskSchema, type ArchitectPlan, type PmBrief, type SubTask } from "./types";
-
-const MODEL = process.env["AGENT_MODEL"] ?? "claude-sonnet-4-6";
-
-const DECOMPOSER_SYSTEM_PROMPT = `You are a Task Decomposer for Gridiron AI Developer Department.
-
-Your role: break a technical plan into concrete, assignable subtasks.
-
-Output ONLY a valid JSON array matching this schema:
-[
-  {
-    "id": "string",                        // short snake_case identifier (e.g. "add_db_column")
-    "type": "backend|frontend|test|docs|config|migration",
-    "title": "string",
-    "description": "string",              // what exactly needs to be done
-    "filesToEdit": ["string"],             // specific file paths to modify
-    "dependsOn": ["string"]               // ids of subtasks that must complete first
-  }
-]
-
-Rules:
-- Maximum 8 subtasks
-- Each subtask must be completable by a single coding agent in one pass
-- filesToEdit should reference REAL files from the architect plan
-- Use dependsOn to express ordering (e.g. migration before code, code before tests)`;
+import { loadRole } from "./load-role";
 
 function parseJsonSafe<T>(text: string, schema: z.ZodType<T>): T | null {
   const jsonMatch = text.match(/\[[\s\S]*\]/);
@@ -41,7 +19,9 @@ export async function runDecomposer(
   pmBrief: PmBrief,
   architectPlan: ArchitectPlan,
 ): Promise<SubTask[]> {
-  const client = new Anthropic({ apiKey: process.env["ANTHROPIC_API_KEY"] });
+  const systemPrompt = await loadRole("decomposer");
+  const config = getConfig();
+  const client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
   const userMessage = `PM Brief Goals: ${pmBrief.goals.join("; ")}
 
@@ -59,9 +39,9 @@ Testing strategy: ${architectPlan.testingStrategy}
 Produce the subtask JSON array now.`;
 
   const response = await client.messages.create({
-    model: MODEL,
+    model: getConfig().MODEL_PLANNER,
     max_tokens: 2048,
-    system: DECOMPOSER_SYSTEM_PROMPT,
+    system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
   });
 

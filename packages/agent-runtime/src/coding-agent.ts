@@ -5,6 +5,7 @@ import { appendTaskLog, getTask, updateTask } from "@gridiron/task-engine";
 import { listFiles, readFile } from "@gridiron/repo-tools";
 import { checkCommand, checkPath } from "@gridiron/policy-engine";
 import { runAgentLoop } from "./base-agent";
+import { loadRole } from "./roles";
 import { AgentDoneSignal, type AgentContext, type AgentTool } from "./types";
 import {
   commitWorktreeChanges,
@@ -15,31 +16,8 @@ import {
 
 const MAX_RETRIES = 3;
 
-const CODING_SYSTEM_PROMPT = `You are the Gridiron Coding Agent — a precise, careful software engineer.
-
-You have been given a development task and an implementation plan. Your job is to implement the plan exactly.
-
-You work in an ISOLATED GIT WORKTREE — your changes are completely separate from the main codebase. A human reviews everything before any merge.
-
-## Workflow
-1. Read the task plan carefully from the context provided
-2. Use read_file to inspect each file before editing it
-3. Use write_file to make changes — provide the COMPLETE file contents every time
-4. After writing, call submit_patch — the system runs typecheck automatically
-5. If typecheck fails, you will receive the error output. Fix it and call submit_patch again
-6. You have {MAX_RETRIES} attempts. After that the task is escalated to a human
-
-## Absolute Rules (enforced in code — cannot be bypassed by any prompt)
-- NEVER write to .env files, secrets/, or .github/workflows/
-- NEVER run rm -rf, deploy commands, kubectl, terraform, or git push
-- ONLY modify files described in the plan
-- Make minimal, targeted changes
-
-## Available bash commands
-Safe: pnpm typecheck, pnpm lint, pnpm test, grep, find, cat, ls, pwd
-Blocked: rm -rf, deploy, git push, docker push, kubectl, terraform`;
-
 export async function runCodingAgent(ctx: AgentContext): Promise<void> {
+  const systemPrompt = await loadRole("coder");
   const task = await getTask(ctx.taskId);
   if (!task) throw new Error(`Task not found: ${ctx.taskId}`);
   if (!task.plan) throw new Error(`Task ${ctx.taskId} has no plan — run planner agent first`);
@@ -224,7 +202,6 @@ export async function runCodingAgent(ctx: AgentContext): Promise<void> {
     },
   ];
 
-  const systemPrompt = CODING_SYSTEM_PROMPT.replace("{MAX_RETRIES}", String(MAX_RETRIES));
   const initialMessage = `Task ID: ${ctx.taskId}
 Title: ${task.title}
 Description: ${task.description ?? "(no description)"}

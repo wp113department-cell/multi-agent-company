@@ -142,12 +142,18 @@ importers:
       '@gridiron/repo-tools':
         specifier: workspace:*
         version: link:../repo-tools
+      '@gridiron/shared-config':
+        specifier: workspace:*
+        version: link:../shared-config
       '@gridiron/shared-types':
         specifier: workspace:*
         version: link:../shared-types
       '@gridiron/task-engine':
         specifier: workspace:*
         version: link:../task-engine
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
     devDependencies:
       '@types/node':
         specifier: ^20.16.0
@@ -192,6 +198,9 @@ importers:
       '@gridiron/repo-intelligence':
         specifier: workspace:*
         version: link:../repo-intelligence
+      '@gridiron/shared-config':
+        specifier: workspace:*
+        version: link:../shared-config
       '@gridiron/shared-db':
         specifier: workspace:*
         version: link:../shared-db
@@ -220,6 +229,9 @@ importers:
       '@gridiron/context-builder':
         specifier: workspace:*
         version: link:../context-builder
+      '@gridiron/shared-config':
+        specifier: workspace:*
+        version: link:../shared-config
       '@gridiron/shared-db':
         specifier: workspace:*
         version: link:../shared-db
@@ -290,6 +302,22 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@20.19.43)
 
+  packages/shared-config:
+    dependencies:
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^20.16.0
+        version: 20.19.43
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@20.19.43)
+
   packages/shared-db:
     dependencies:
       pg:
@@ -348,6 +376,31 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^2.1.0
+        version: 2.1.9(@types/node@20.19.43)
+
+  tests:
+    dependencies:
+      '@gridiron/agent-runtime':
+        specifier: workspace:*
+        version: link:../packages/agent-runtime
+      '@gridiron/repo-intelligence':
+        specifier: workspace:*
+        version: link:../packages/repo-intelligence
+      '@gridiron/shared-db':
+        specifier: workspace:*
+        version: link:../packages/shared-db
+      '@gridiron/task-engine':
+        specifier: workspace:*
+        version: link:../packages/task-engine
+    devDependencies:
+      '@types/node':
+        specifier: ^20.16.0
+        version: 20.19.43
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
         version: 2.1.9(@types/node@20.19.43)
 
 packages:

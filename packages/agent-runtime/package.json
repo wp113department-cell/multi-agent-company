@@ -14,8 +14,10 @@
     "@anthropic-ai/sdk": "^0.30.0",
     "@gridiron/policy-engine": "workspace:*",
     "@gridiron/repo-tools": "workspace:*",
+    "@gridiron/shared-config": "workspace:*",
     "@gridiron/shared-types": "workspace:*",
-    "@gridiron/task-engine": "workspace:*"
+    "@gridiron/task-engine": "workspace:*",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^20.16.0",

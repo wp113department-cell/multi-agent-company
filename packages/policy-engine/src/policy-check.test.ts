@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkCommand, checkPath } from "./policy-check";
+import { checkCommand, checkPath, checkPathInWorktree } from "./policy-check";
 
 describe("checkPath", () => {
   it("blocks .env variants", () => {
@@ -64,5 +64,46 @@ describe("checkCommand", () => {
     expect(checkCommand("ls -la").allowed).toBe(true);
     expect(checkCommand("cat package.json").allowed).toBe(true);
     expect(checkCommand("find . -name '*.ts'").allowed).toBe(true);
+  });
+
+  it("blocks git push to main and master branches", () => {
+    expect(checkCommand("git push origin main").allowed).toBe(false);
+    expect(checkCommand("git push origin master").allowed).toBe(false);
+  });
+
+  it("blocks docker push", () => {
+    expect(checkCommand("docker push myimage:latest").allowed).toBe(false);
+  });
+
+  it("blocks heroku", () => {
+    expect(checkCommand("heroku deploy").allowed).toBe(false);
+    expect(checkCommand("heroku releases").allowed).toBe(false);
+  });
+});
+
+describe("checkPathInWorktree", () => {
+  const WORKTREE = "/tmp/gridiron/worktrees/task-abc123";
+
+  it("allows paths inside the worktree", () => {
+    expect(checkPathInWorktree("src/index.ts", WORKTREE).allowed).toBe(true);
+    expect(checkPathInWorktree(`${WORKTREE}/src/index.ts`, WORKTREE).allowed).toBe(true);
+    expect(checkPathInWorktree("packages/shared-types/src/types.ts", WORKTREE).allowed).toBe(true);
+  });
+
+  it("blocks path traversal outside worktree", () => {
+    const result = checkPathInWorktree(`${WORKTREE}/../../etc/passwd`, WORKTREE);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("escapes worktree boundary");
+  });
+
+  it("blocks absolute paths outside worktree", () => {
+    const result = checkPathInWorktree("/etc/passwd", WORKTREE);
+    expect(result.allowed).toBe(false);
+  });
+
+  it("still applies .env protection inside worktree", () => {
+    expect(checkPathInWorktree(".env", WORKTREE).allowed).toBe(false);
+    expect(checkPathInWorktree(".env.production", WORKTREE).allowed).toBe(false);
+    expect(checkPathInWorktree(".github/workflows/ci.yml", WORKTREE).allowed).toBe(false);
   });
 });

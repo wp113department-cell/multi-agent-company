@@ -1,5 +1,6 @@
 export { runTaskAgent } from "./runner";
 export { runPlannerAgent } from "./planner-agent";
 export { runCodingAgent } from "./coding-agent";
-export { removeWorktree } from "./worktree";
+export { createWorktree, removeWorktree } from "./worktree";
+export { loadRole } from "./roles";
 export * from "./types";

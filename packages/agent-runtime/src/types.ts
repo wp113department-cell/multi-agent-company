@@ -2,6 +2,7 @@ export interface AgentContext {
   taskId: string;
   repoPath: string;
   worktreePath?: string;
+  agentRunId?: string;
 }
 
 export interface AgentTool {

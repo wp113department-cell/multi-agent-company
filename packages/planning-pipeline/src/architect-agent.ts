@@ -1,26 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
+import { getConfig } from "@gridiron/shared-config";
 import type { ContextResult } from "@gridiron/context-builder";
 import type { DevTask } from "@gridiron/shared-types";
 import { ArchitectPlanSchema, type ArchitectPlan, type PmBrief } from "./types";
-
-const MODEL = process.env["AGENT_MODEL"] ?? "claude-sonnet-4-6";
-
-const ARCHITECT_SYSTEM_PROMPT = `You are an Architect Agent for Gridiron AI Developer Department.
-
-Your role: given a PM brief and codebase context, produce a concrete technical plan.
-
-Output ONLY valid JSON matching this schema:
-{
-  "technicalApproach": "string",         // paragraph describing the implementation approach
-  "impactedSystems": ["string"],         // top-level packages/apps affected (e.g. "packages/task-engine")
-  "impactedFiles": ["string"],           // specific files that need changes
-  "risks": ["string"],                   // technical risks and mitigation ideas
-  "testingStrategy": "string",           // how to validate the changes
-  "implementationNotes": "string"        // concrete guidance for the coding agent
-}
-
-Reference real file paths from the context. Be specific and technical. Avoid vague advice.`;
+import { loadRole } from "./load-role";
 
 function parseJsonSafe<T>(text: string, schema: z.ZodType<T>): T | null {
   const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -38,7 +22,9 @@ export async function runArchitectAgent(
   pmBrief: PmBrief,
   context: ContextResult,
 ): Promise<ArchitectPlan> {
-  const client = new Anthropic({ apiKey: process.env["ANTHROPIC_API_KEY"] });
+  const systemPrompt = await loadRole("architect");
+  const config = getConfig();
+  const client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
   const userMessage = `Task: ${task.title}
 
@@ -67,9 +53,9 @@ ${context.relatedSymbols.slice(0, 10).join("\n")}
 Produce the Architect Plan JSON now.`;
 
   const response = await client.messages.create({
-    model: MODEL,
+    model: getConfig().MODEL_PLANNER,
     max_tokens: 2048,
-    system: ARCHITECT_SYSTEM_PROMPT,
+    system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
   });
 

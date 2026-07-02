@@ -1,13 +1,14 @@
 import { exec, execFile } from "child_process";
 import fs from "fs/promises";
-import os from "os";
 import path from "path";
 import { promisify } from "util";
+import { getConfig } from "@gridiron/shared-config";
 
 const execFileAsync = promisify(execFile);
 
 export function worktreePath(taskId: string): string {
-  return path.join(os.tmpdir(), "gridiron", `task-${taskId}`);
+  const dir = getConfig().WORKTREES_DIR;
+  return path.join(dir, `task-${taskId}`);
 }
 
 export function worktreeBranch(taskId: string): string {

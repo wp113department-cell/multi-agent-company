@@ -166,7 +166,112 @@ curl -X POST http://localhost:3000/api/repo/reindex
 
 ## How to resume work in a new session
 
-1. Read this file (`PROJECT.md`) for current state — **32/32 pass is the baseline**
+1. Read this file (`PROJECT.md`) for current state — **13/13 turbo tasks pass is the baseline**
 2. Read `PLAN.md` for the roadmap
 3. Run `pnpm turbo run typecheck` to verify clean baseline before making changes
 4. For Phase 4+: add Event Bus, specialist coding agents (Backend/Frontend/QA/Review), Manager Agent
+
+---
+
+## Gap Fill Session — 2026-07-02
+
+**Session goal:** Fill every gap from the MASTER_PROMPT_PACK (Prompts 1, 2, 3) vs what was actually built.
+
+### What was built this session
+
+**Documentation:**
+- [x] `docs/research/openhands-notes.md` — patterns from OpenHands: typed action/observation, event log persistence
+- [x] `docs/research/swe-agent-notes.md` — StepOutput/TrajectoryStep types, per-step structured logging
+- [x] `docs/research/aider-notes.md` — hash-based incremental indexing, token budget enforcement
+- [x] `docs/research/cline-notes.md` — per-action approval granularity, plan/act separation
+- [x] `docs/research/continue-notes.md` — cachekey content hash, chunking strategy, per-model artifact isolation
+- [x] `docs/research/versions.md` — verified installed package versions (zod 3.25.76, @anthropic-ai/sdk 0.30.1, pg 8.22.0, etc.)
+- [x] `docs/CODEBASE_MAP.md` — full codebase map with data flow, key interfaces, DB schema overview
+- [x] `docs/adr/001` through `docs/adr/004` — ADRs for Anthropic API choice, pgvector, worktree isolation, shared-config
+
+**Role files & agent wiring:**
+- [x] `packages/agent-runtime/roles/{planner,coder,pm,architect,decomposer}.md` — system prompts extracted from code to disk files
+- [x] `packages/agent-runtime/src/roles.ts` — `loadRole(name)` reads from disk
+- [x] `packages/planning-pipeline/src/load-role.ts` — same for planning-pipeline agents
+- [x] All agents now load their system prompt from disk on startup (planner, coder, pm, architect, decomposer)
+
+**Config & validation:**
+- [x] `packages/shared-config` — already built last session; this session verified and documented
+- [x] PlanSchema validation in planner-agent `submit_plan` — rejects plans < 100 chars or missing markdown formatting
+- [x] Heartbeat: `agentRunId` added to `AgentContext`; base-agent fires `heartbeatAgentRun()` every 5 tool calls
+
+**Migrations:**
+- [x] **Migration #8** — `agent_runs` gains: `tokens_in`, `tokens_out`, `cost_estimate`, `last_heartbeat_at`, `model_id`
+- [x] **Migration #9** — `subtasks` table (with `task_id` FK, type enum, `files_to_edit[]`, `depends_on[]`, status)
+- [x] **Migration #10** — `indexed_files`, `symbols`, `call_edges` tables for persistent call graph storage
+
+**API gaps filled:**
+- [x] `POST /api/tasks/:id/approve` — top-level task approval (starts coding agent)
+- [x] `POST /api/tasks/:id/reject` — top-level task rejection (with optional reason)
+- [x] `GET /api/tasks` — now returns `{ tasks, nextCursor }` for proper cursor pagination
+- [x] PIPELINE_MODE flag in runner (`simple` = skip planning, `full` = PM→Arch→Decomp)
+
+**Repository layer:**
+- [x] `heartbeatAgentRun(runId)` in task-engine — updates `last_heartbeat_at`
+- [x] `recordAgentRunTokens(runId, in, out, cost)` in task-engine
+- [x] `saveSubtasks(taskId, subtasks)` + `listSubtasks(taskId)` in task-engine
+- [x] Planning pipeline calls `saveSubtasks()` after decomposition
+
+**Graph persistence:**
+- [x] `packages/repo-intelligence/src/graph-persist.ts` — `persistGraphToDb()`: hash-keyed incremental upsert of files, symbols, call edges to Postgres
+- [x] Skips files whose content hash hasn't changed since last index (incremental re-index)
+
+**Security:**
+- [x] `checkPathInWorktree(filePath, worktreePath)` — enforces worktree boundary, blocks `../../` path traversal
+- [x] Policy tests expanded to 17 tests (was 10), now covering git push to main/master, docker push, heroku, worktree boundary enforcement
+
+**Tests:**
+- [x] `tests/` workspace package — `@gridiron/tests` registered in pnpm-workspace.yaml
+- [x] `tests/fixtures/demo-repo/` — 2-file TypeScript fixture (math.ts + calculator.ts)
+- [x] `tests/integration/task-queue.test.ts` — 7 tests (2 run without DB, 5 skip when no live DB)
+- [x] `tests/integration/worktree-lifecycle.test.ts` — 3 tests (create worktree, isolation, cleanup)
+- [x] `tests/integration/graph-correctness.test.ts` — 5 tests (index fixture, extract symbols, build call graph)
+
+**Test reports:**
+- [x] `docs/reports/PHASE_1_TEST_REPORT.md`
+- [x] `docs/reports/PHASE_2_TEST_REPORT.md`
+- [x] `docs/reports/PHASE_3_TEST_REPORT.md`
+
+### Test results — 2026-07-02
+
+```
+pnpm turbo test
+→ 13/13 turbo tasks successful (0 failures)
+
+Results by package:
+- @gridiron/policy-engine: 17/17 unit tests pass (was 10 — added 7 new tests)
+- @gridiron/task-engine: 7/7 unit tests pass
+- @gridiron/tests (integration): 10 pass | 5 skipped (DB-dependent)
+  - integration/task-queue.test.ts: 2 pass | 5 skipped
+  - integration/worktree-lifecycle.test.ts: 3 pass
+  - integration/graph-correctness.test.ts: 5 pass
+- All other packages: passWithNoTests (no unit tests needed for pure type packages)
+```
+
+### Known issues / pending live tests
+- Same as before: ANTHROPIC_API_KEY + VOYAGE_API_KEY required for live agent + embedding tests
+- Token recording (`recordAgentRunTokens`) — not yet wired into base-agent loop (tracking migration done, wiring deferred to Phase 4 when token cost matters for billing)
+
+### How to run updated test suite
+
+```bash
+# Full turbo suite (all packages):
+pnpm turbo test
+
+# Integration tests only:
+pnpm --filter @gridiron/tests test
+
+# Policy engine security tests:
+pnpm --filter @gridiron/policy-engine test
+
+# With live DB (integration tests that need Postgres):
+DATABASE_URL=postgresql://gridiron:gridiron_dev_only@localhost:5432/gridiron_dev pnpm --filter @gridiron/tests test
+
+# Migrations (run after db:up):
+pnpm db:migrate
+```

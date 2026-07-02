@@ -1,6 +1,6 @@
 import path from "path";
 import { buildContext } from "@gridiron/context-builder";
-import { getTask, appendTaskLog } from "@gridiron/task-engine";
+import { getTask, appendTaskLog, saveSubtasks } from "@gridiron/task-engine";
 import { runPmAgent } from "./pm-agent";
 import { runArchitectAgent } from "./architect-agent";
 import { runDecomposer } from "./decomposer";
@@ -98,9 +98,10 @@ export async function runPlanningPipeline(
     const subtasks = await runDecomposer(pmBrief!, architectPlan!);
 
     await updatePipelineState(taskId, { subtasks });
+    await saveSubtasks(taskId, subtasks);
     await appendTaskLog(taskId, {
       category: "planning",
-      message: `Task Decomposer: ${subtasks.length} subtask(s) identified`,
+      message: `Task Decomposer: ${subtasks.length} subtask(s) identified and persisted`,
       metadata: { subtaskTitles: subtasks.map((s) => s.title) },
     });
 

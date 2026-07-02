@@ -71,8 +71,13 @@ interface AgentRunRow {
   run_id: string;
   task_id: string;
   agent_type: string;
+  model_id: string | null;
   status: string;
   checkpoint_id: string | null;
+  tokens_in: number | null;
+  tokens_out: number | null;
+  cost_estimate: string | null;
+  last_heartbeat_at: Date | null;
   started_at: Date;
   completed_at: Date | null;
 }
@@ -82,8 +87,13 @@ function rowToAgentRun(row: AgentRunRow): AgentRun {
     runId: row.run_id,
     taskId: row.task_id,
     agentType: row.agent_type,
+    modelId: row.model_id,
     status: row.status as AgentRunStatus,
     checkpointId: row.checkpoint_id,
+    tokensIn: row.tokens_in,
+    tokensOut: row.tokens_out,
+    costEstimate: row.cost_estimate !== null ? parseFloat(row.cost_estimate) : null,
+    lastHeartbeatAt: row.last_heartbeat_at,
     startedAt: row.started_at,
     completedAt: row.completed_at,
   };
@@ -222,4 +232,91 @@ export async function listAgentRuns(taskId: string): Promise<AgentRun[]> {
     [taskId],
   );
   return result.rows.map(rowToAgentRun);
+}
+
+// --- subtasks ------------------------------------------------------------------
+
+export interface SubTaskRecord {
+  subtaskId: string;
+  taskId: string;
+  type: string;
+  title: string;
+  description: string;
+  filesToEdit: string[];
+  dependsOn: string[];
+  status: "pending" | "in_progress" | "done" | "blocked";
+  createdAt: Date;
+}
+
+export async function saveSubtasks(
+  taskId: string,
+  subtasks: Array<{
+    id: string;
+    type: string;
+    title: string;
+    description: string;
+    filesToEdit: string[];
+    dependsOn: string[];
+  }>,
+): Promise<void> {
+  if (subtasks.length === 0) return;
+  for (const s of subtasks) {
+    await query(
+      `INSERT INTO subtasks (subtask_id, task_id, type, title, description, files_to_edit, depends_on)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (subtask_id) DO UPDATE
+         SET title = EXCLUDED.title,
+             description = EXCLUDED.description,
+             files_to_edit = EXCLUDED.files_to_edit,
+             depends_on = EXCLUDED.depends_on`,
+      [s.id, taskId, s.type, s.title, s.description, s.filesToEdit, s.dependsOn],
+    );
+  }
+}
+
+export async function listSubtasks(taskId: string): Promise<SubTaskRecord[]> {
+  interface SubtaskRow {
+    subtask_id: string;
+    task_id: string;
+    type: string;
+    title: string;
+    description: string;
+    files_to_edit: string[];
+    depends_on: string[];
+    status: string;
+    created_at: Date;
+  }
+  const result = await query<SubtaskRow>(
+    `SELECT * FROM subtasks WHERE task_id = $1 ORDER BY created_at ASC`,
+    [taskId],
+  );
+  return result.rows.map((r) => ({
+    subtaskId: r.subtask_id,
+    taskId: r.task_id,
+    type: r.type,
+    title: r.title,
+    description: r.description,
+    filesToEdit: r.files_to_edit,
+    dependsOn: r.depends_on,
+    status: r.status as SubTaskRecord["status"],
+    createdAt: r.created_at,
+  }));
+}
+
+// --- agent_runs heartbeat/tokens -----------------------------------------------
+
+export async function heartbeatAgentRun(runId: string): Promise<void> {
+  await query(`UPDATE agent_runs SET last_heartbeat_at = now() WHERE run_id = $1`, [runId]);
+}
+
+export async function recordAgentRunTokens(
+  runId: string,
+  tokensIn: number,
+  tokensOut: number,
+  costEstimate: number,
+): Promise<void> {
+  await query(
+    `UPDATE agent_runs SET tokens_in = $1, tokens_out = $2, cost_estimate = $3 WHERE run_id = $4`,
+    [tokensIn, tokensOut, costEstimate, runId],
+  );
 }

@@ -1,6 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { appendTaskLog } from "@gridiron/task-engine";
-import { AGENT_MODEL, getAnthropicClient } from "./client";
+import { appendTaskLog, heartbeatAgentRun } from "@gridiron/task-engine";
+import { getAnthropicClient, getPlannerModel } from "./client";
 import { AgentDoneSignal, type AgentContext, type AgentTool } from "./types";
 
 export interface AgentConfig {
@@ -25,9 +25,11 @@ export async function runAgentLoop(
     input_schema: t.inputSchema as Anthropic.Tool["input_schema"],
   }));
 
+  let toolCallCount = 0;
+
   for (let turn = 0; turn < config.maxTurns; turn++) {
     const response = await client.messages.create({
-      model: AGENT_MODEL,
+      model: getPlannerModel(),
       max_tokens: 8192,
       system: config.systemPrompt,
       messages,
@@ -59,6 +61,10 @@ export async function runAgentLoop(
       const input = block.input as Record<string, unknown>;
 
       try {
+        toolCallCount++;
+        if (ctx.agentRunId && toolCallCount % 5 === 0) {
+          heartbeatAgentRun(ctx.agentRunId).catch(() => {});
+        }
         const result = await tool.execute(input, ctx);
         await appendTaskLog(ctx.taskId, {
           category: "files_inspected",

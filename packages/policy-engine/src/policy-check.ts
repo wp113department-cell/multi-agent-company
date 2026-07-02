@@ -40,6 +40,22 @@ export function checkPath(filePath: string): PolicyResult {
   return { allowed: true };
 }
 
+export function checkPathInWorktree(filePath: string, worktreePath: string): PolicyResult {
+  const { resolve, normalize } = require("path") as typeof import("path");
+  const absWorktree = normalize(resolve(worktreePath));
+  const absFile = filePath.startsWith("/")
+    ? normalize(filePath)
+    : normalize(resolve(worktreePath, filePath));
+
+  if (!absFile.startsWith(absWorktree + "/") && absFile !== absWorktree) {
+    return {
+      allowed: false,
+      reason: `Policy denied: path "${filePath}" escapes worktree boundary "${worktreePath}"`,
+    };
+  }
+  return checkPath(filePath);
+}
+
 export function checkCommand(command: string): PolicyResult {
   for (const pattern of DENIED_COMMAND_PATTERNS) {
     if (pattern.test(command)) {

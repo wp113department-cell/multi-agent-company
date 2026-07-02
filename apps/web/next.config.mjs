@@ -2,6 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: [
+    "@gridiron/shared-config",
     "@gridiron/shared-db",
     "@gridiron/shared-types",
     "@gridiron/task-engine",

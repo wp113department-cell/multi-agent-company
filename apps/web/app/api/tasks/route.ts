@@ -37,12 +37,14 @@ export async function GET(req: NextRequest) {
   const cursor = searchParams.get("cursor") ?? undefined;
   const limitParam = searchParams.get("limit");
 
+  const limit = limitParam ? Number(limitParam) : 20;
   const tasks = await listTasks({
     status: status?.data,
     project,
     cursor,
-    limit: limitParam ? Number(limitParam) : undefined,
+    limit,
   });
 
-  return NextResponse.json({ tasks });
+  const nextCursor = tasks.length === limit ? tasks[tasks.length - 1]?.taskId : null;
+  return NextResponse.json({ tasks, nextCursor });
 }

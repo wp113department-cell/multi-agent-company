@@ -13,6 +13,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
     "@gridiron/context-builder": "workspace:*",
+    "@gridiron/shared-config": "workspace:*",
     "@gridiron/shared-db": "workspace:*",
     "@gridiron/shared-types": "workspace:*",
     "@gridiron/task-engine": "workspace:*",

@@ -1,36 +1,28 @@
+import { z } from "zod";
 import { appendTaskLog, getTask, updateTask } from "@gridiron/task-engine";
 import { grepFiles, gitLog, listFiles, readFile } from "@gridiron/repo-tools";
 import { runAgentLoop } from "./base-agent";
+import { loadRole } from "./roles";
 import { AgentDoneSignal, type AgentContext, type AgentTool } from "./types";
 
-const PLANNER_SYSTEM_PROMPT = `You are the Gridiron Planner Agent — the first step in the Gridiron AI Developer Department.
+const PlanSchema = z.object({
+  summary: z.string().min(20, "Plan summary must be at least 20 characters"),
+  filesToChange: z.array(z.string()).min(1, "Plan must list at least one file to change"),
+  complexity: z.enum(["simple", "moderate", "complex"]),
+}).passthrough();
 
-Your job: explore the codebase and produce a precise, actionable implementation plan for the given development task.
-
-You have READ-ONLY access to the repository. You cannot modify any files.
-
-## Workflow
-1. Start with list_files() to understand the project structure
-2. Read the most relevant source files based on the task
-3. Use grep_files() to find specific function names, types, or patterns
-4. Review git_log() to understand recent activity
-5. Synthesize your findings into a complete plan
-
-## Your Plan Must Include
-- Summary: what changes are needed (2-4 sentences)
-- Files to change: exact relative paths + what to change in each
-- New files to create (if any): path and purpose
-- Implementation order if dependencies exist
-- Risks and edge cases
-- Complexity estimate: simple | moderate | complex
-
-## Critical Rules
-- Only reference files and functions that actually exist — verify first
-- Be specific enough that a coding agent can implement without guessing
-- Describe changes in plain English, not code
-- Call submit_plan when you have a complete, grounded plan`;
+function validatePlan(planText: string): { valid: boolean; error?: string } {
+  if (planText.length < 100) {
+    return { valid: false, error: "Plan is too short (minimum 100 characters)" };
+  }
+  if (!planText.includes("##") && !planText.includes("**")) {
+    return { valid: false, error: "Plan must use markdown formatting with headers or bold text" };
+  }
+  return { valid: true };
+}
 
 export async function runPlannerAgent(ctx: AgentContext): Promise<void> {
+  const systemPrompt = await loadRole("planner");
   const task = await getTask(ctx.taskId);
   if (!task) throw new Error(`Task not found: ${ctx.taskId}`);
 
@@ -116,6 +108,10 @@ export async function runPlannerAgent(ctx: AgentContext): Promise<void> {
       },
       execute: async (input, execCtx) => {
         const plan = input["plan"] as string;
+        const validation = validatePlan(plan);
+        if (!validation.valid) {
+          return `Plan rejected: ${validation.error}. Please revise and resubmit.`;
+        }
         await updateTask(execCtx.taskId, {
           status: "ready_for_review",
           plan,
@@ -139,7 +135,7 @@ Repository: ${ctx.repoPath}
 Please explore the repository and produce an implementation plan for this task.`;
 
   try {
-    await runAgentLoop(ctx, { systemPrompt: PLANNER_SYSTEM_PROMPT, tools, maxTurns: 30 }, initialMessage);
+    await runAgentLoop(ctx, { systemPrompt, tools, maxTurns: 30 }, initialMessage);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await updateTask(ctx.taskId, { status: "blocked" });
