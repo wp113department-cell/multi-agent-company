@@ -330,3 +330,74 @@ pnpm db:migrate
 - Read this PROJECT.md
 - Run: `cd backend && source venv/bin/activate && pytest tests/ -v`
 - Start Day 2 from where Day 1 left off
+
+---
+
+## Python Backend Day 2 — 2026-07-02
+
+### What was built (Day 2)
+
+**Agents (all real — no stubs):**
+- `backend/app/agents/base.py` — `run_agent()`: Anthropic SDK tool-use loop, role loader, policy gate, heartbeat every 5 calls
+- `backend/app/agents/tools.py` — read-only tools (read_file, list_files, search_code) + coder tools (write_file, bash, submit_patch)
+- `backend/app/agents/pm.py` — PM Agent LangGraph node
+- `backend/app/agents/architect.py` — Architect Agent LangGraph node
+- `backend/app/agents/decomposer.py` — Decomposer Agent LangGraph node
+- `backend/app/agents/planner.py` — Planner Agent (plan validation: min 100 chars + sections, 2 retries)
+- `backend/app/agents/coder.py` — Coder Agent (write tools, self-correction loop, mypy+ruff check after each attempt)
+
+**LangGraph Pipeline:**
+- `backend/app/pipeline/state.py` — PipelineState TypedDict
+- `backend/app/pipeline/graph.py` — StateGraph (PM→Architect→Decomposer), MemorySaver checkpointing, `run_planning_pipeline()`
+
+**Repo Intelligence:**
+- `backend/app/repo_tools/scanner.py` — tree-sitter (Python + JS/TS), symbol extraction, import graph, content hash
+- `backend/app/repo_tools/embeddings.py` — Voyage AI embeddings + cosine semantic search (skips if no key)
+- `backend/app/repo_tools/context_builder.py` — `build_context()`: keyword + semantic + dependency chain
+
+**MCP Server:**
+- `backend/app/mcp/server.py` — stdio JSON-RPC 2.0, 4 tools (index_repository, search_symbols, build_context, query_dependencies)
+
+**FastAPI wiring:**
+- `backend/app/api/agents.py` — fire-and-forget background task launchers (planning pipeline, planner, coder)
+- `backend/app/api/tasks.py` — POST /run triggers pipeline, POST /approve triggers coder, GET /pipeline, GET /diff
+- `backend/app/api/repo.py` — POST/GET /reindex, GET /context
+
+### Test results — Day 2
+
+```
+pytest tests/ -v
+→ 63/63 passed (0 failures)
+
+mypy app/ --ignore-missing-imports
+→ Success: no issues found in 31 source files
+```
+
+| Test file | Tests |
+|---|---|
+| test_config.py | 3 |
+| test_context_builder.py | 5 |
+| test_mcp.py | 6 |
+| test_policy.py | 29 |
+| test_scanner.py | 9 |
+| test_status_transitions.py | 11 |
+
+### Pending (API key required)
+- Live agent runs (PM, Architect, Decomposer, Planner, Coder) — require ANTHROPIC_API_KEY
+- LangGraph pipeline end-to-end
+- Voyage AI semantic search — require VOYAGE_API_KEY
+- DB integration tests — require live Postgres
+
+### How to run once API key is available
+```bash
+cd backend
+cp ../.env.example .env  # fill in ANTHROPIC_API_KEY + DATABASE_URL
+.venv/bin/uvicorn app.main:app --reload --port 8000
+```
+
+### MCP server start command
+```bash
+cd backend
+DATABASE_URL=... ANTHROPIC_API_KEY=... TARGET_REPO_PATH=.. \
+.venv/bin/python -m app.mcp.server
+```

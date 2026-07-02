@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.tasks import router as tasks_router
 from app.api.repo import router as repo_router
+
 from app.config import get_settings
 
 
