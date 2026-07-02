@@ -2,7 +2,7 @@
 
 **This is a living document. Update it every session — it is the single source of truth for "what actually exists right now," separate from `PLAN.md` (what's intended) and `files/` (the original spec suite, which describes the full 7-stage vision, not the current build).**
 
-Last updated: 2026-07-01 (Phase 0–3 complete + all gaps filled — 35/35 turbo tasks pass, pending API keys for live E2E test)
+Last updated: 2026-07-02 (Phases 0–4 complete + full Phase 1–4 gap fix pass — 123/123 pytest pass, mypy --strict clean, 14 files changed, commit ed6863c)
 
 ---
 
