@@ -1,23 +1,70 @@
-# Dependencies
-node_modules/
+# ============================================================
+# Gridiron Developer Department — .gitignore
+# ============================================================
 
-# Build outputs
-dist/
-.next/
-build/
-coverage/
-
-# Environment
+# ------------------------------------------------------------
+# Environment & Secrets (NEVER commit these)
+# ------------------------------------------------------------
 .env
 .env.local
 .env.*.local
+.env.production
+.env.staging
+secrets/
 
-# Reference repos (cloned locally for research, not part of the codebase)
-repos/
+# ------------------------------------------------------------
+# Python
+# ------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+*.egg-info/
+.eggs/
 
-# OS
+# Python tool caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
+
+# ------------------------------------------------------------
+# Node / JavaScript / TypeScript
+# ------------------------------------------------------------
+node_modules/
+.next/
+.turbo/
+dist/
+build/
+coverage/
+
+# TypeScript incremental build info (generated, not source)
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# ------------------------------------------------------------
+# OS & Editor
+# ------------------------------------------------------------
 .DS_Store
 Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# Turbo
-.turbo/
+# ------------------------------------------------------------
+# Reference repos (cloned locally for architectural research)
+# ------------------------------------------------------------
+repos/
+
+# ------------------------------------------------------------
+# Runtime artifacts — created at runtime, never commit
+# ------------------------------------------------------------
+artifacts/
