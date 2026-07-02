@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8000)
     debug: bool = Field(default=False)
+    log_level: str = Field(default="INFO", description="Logging level: DEBUG, INFO, WARNING, ERROR")
 
 
 _settings: Settings | None = None

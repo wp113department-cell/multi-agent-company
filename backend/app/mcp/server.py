@@ -60,6 +60,31 @@ _TOOLS = [
             "required": ["file_path"],
         },
     },
+    {
+        "name": "semantic_search",
+        "description": "Search for files most relevant to a query using keyword scoring (falls back gracefully when Voyage embeddings are not pre-built).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Natural-language search query"},
+                "repo_path": {"type": "string"},
+                "top_k": {"type": "integer", "default": 20},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "get_file_summary",
+        "description": "Return the list of symbols (functions, classes, variables) defined in a file.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Relative file path within the repo"},
+                "repo_path": {"type": "string"},
+            },
+            "required": ["file_path"],
+        },
+    },
 ]
 
 
@@ -125,6 +150,44 @@ def _handle(method: str, params: dict[str, Any]) -> Any:
             edges = build_call_graph(idx)
             deps = edges.get(file_path, [])
             return {"content": [{"type": "text", "text": json.dumps({"file": file_path, "dependencies": deps})}]}
+
+        if tool_name == "semantic_search":
+            import re
+            query = tool_params.get("query", "")
+            top_k = int(tool_params.get("top_k", 20))
+            idx = index_repository(repo)
+            query_tokens = [w.lower() for w in re.split(r"\W+", query) if len(w) > 2]
+            scores: dict[str, float] = {}
+            for rel_path, fi in idx.files.items():
+                symbol_names = [s.name for s in fi.symbols]
+                combined = rel_path.lower() + " " + " ".join(s.lower() for s in symbol_names)
+                scores[rel_path] = sum(1.0 for tok in query_tokens if tok in combined)
+            sorted_files = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+            results = [{"file": p, "score": s} for p, s in sorted_files if s > 0][:top_k]
+            return {"content": [{"type": "text", "text": json.dumps({"results": results, "query": query})}]}
+
+        if tool_name == "get_file_summary":
+            file_path = tool_params.get("file_path", "")
+            idx = index_repository(repo)
+            file_info = idx.files.get(file_path)
+            if file_info is None:
+                return {"content": [{"type": "text", "text": json.dumps({"error": f"File not found: {file_path}"})}]}
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps({
+                            "file": file_path,
+                            "language": file_info.language,
+                            "symbols": [
+                                {"name": s.name, "kind": s.kind, "line": s.line_start}
+                                for s in file_info.symbols
+                            ],
+                            "imports": file_info.imports,
+                        }),
+                    }
+                ]
+            }
 
         return {"error": {"code": -32601, "message": f"Unknown tool: {tool_name}"}}
 

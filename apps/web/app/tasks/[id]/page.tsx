@@ -8,6 +8,7 @@ import { PipelineView } from "../../../components/PipelineView";
 import { StatusBadge } from "../../../components/StatusBadge";
 import {
   approvePipeline,
+  fetchArtifacts,
   fetchPipelineState,
   fetchTask,
   rejectPipeline,
@@ -30,6 +31,13 @@ export default function TaskDetailPage() {
     queryKey: ["pipeline", params.id],
     queryFn: () => fetchPipelineState(params.id),
     refetchInterval: 4000,
+    enabled: !!task,
+  });
+
+  const { data: artifacts } = useQuery({
+    queryKey: ["artifacts", params.id],
+    queryFn: () => fetchArtifacts(params.id),
+    refetchInterval: 5000,
     enabled: !!task,
   });
 
@@ -254,6 +262,36 @@ export default function TaskDetailPage() {
         <div className="rounded-lg border border-slate-200 bg-white p-5">
           <h2 className="mb-2 text-sm font-semibold text-slate-700">Summary</h2>
           <p className="text-sm text-slate-700">{task.finalSummary}</p>
+        </div>
+      )}
+
+      {/* Pipeline Artifacts */}
+      {artifacts && artifacts.length > 0 && (
+        <div className="rounded-lg border border-slate-200 bg-white p-5">
+          <h2 className="mb-3 text-sm font-semibold text-slate-700">Pipeline Artifacts</h2>
+          <div className="space-y-2">
+            {artifacts.map((a) => (
+              <div key={a.artifactId} className="flex items-center justify-between rounded border border-slate-100 bg-slate-50 px-3 py-2">
+                <div>
+                  <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700 mr-2">
+                    {a.artifactType}
+                  </span>
+                  <span className="text-xs text-slate-500">by {a.createdByAgent}</span>
+                  <span className="ml-2 text-xs text-slate-400">
+                    {new Date(a.createdAt).toLocaleString()}
+                  </span>
+                </div>
+                <a
+                  href={`/api/artifacts/${a.artifactId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-100"
+                >
+                  View
+                </a>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

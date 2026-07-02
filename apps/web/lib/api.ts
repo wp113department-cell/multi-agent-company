@@ -48,6 +48,16 @@ export interface PipelineStateClient {
   approved: boolean;
 }
 
+export interface ArtifactRecord {
+  artifactId: string;
+  taskId: string;
+  artifactType: string;
+  version: number;
+  storagePath: string;
+  createdByAgent: string;
+  createdAt: string;
+}
+
 // ---------------------------------------------------------------------------
 // Task CRUD
 // ---------------------------------------------------------------------------
@@ -124,4 +134,14 @@ export async function approvePipeline(taskId: string): Promise<{ approved: boole
 export async function rejectPipeline(taskId: string): Promise<{ rejected: boolean }> {
   const res = await fetch(`/api/tasks/${taskId}/pipeline/reject`, { method: "POST" });
   return handleResponse(res);
+}
+
+// ---------------------------------------------------------------------------
+// Artifacts (Phase 4)
+// ---------------------------------------------------------------------------
+
+export async function fetchArtifacts(taskId: string): Promise<ArtifactRecord[]> {
+  const res = await fetch(`/api/tasks/${taskId}/artifacts`, { cache: "no-store" });
+  if (!res.ok) return [];
+  return handleResponse<ArtifactRecord[]>(res);
 }

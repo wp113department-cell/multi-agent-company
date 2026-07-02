@@ -37,14 +37,16 @@ def run_coder(
     repo_path: str | None = None,
     on_heartbeat: Any = None,
     on_tool_call: Any = None,
-) -> tuple[list[str], str | None]:
+) -> tuple[list[str], str | None, int, int]:
     """
     Run coder agent with self-correction loop.
-    Returns (files_changed, error). error is None on success.
+    Returns (files_changed, error, tokens_in, tokens_out). error is None on success.
     """
     settings = get_settings()
     repo = repo_path or settings.target_repo_path
     max_retries = settings.max_retries
+    total_in = 0
+    total_out = 0
 
     for attempt in range(max_retries):
         handlers = make_coder_handlers(worktree_path, repo)
@@ -77,10 +79,12 @@ def run_coder(
                 on_heartbeat=on_heartbeat,
                 on_tool_call=on_tool_call,
             )
+            total_in += tokens_in
+            total_out += tokens_out
         except Exception as e:
             logger.exception("Coder agent failed on attempt %d", attempt + 1)
             if attempt == max_retries - 1:
-                return [], f"Coder agent error: {e}"
+                return [], f"Coder agent error: {e}", total_in, total_out
             continue
 
         patch_result = handlers.get("_patch_result", {})
@@ -97,14 +101,14 @@ def run_coder(
                 "Coder done — attempt %d, %d files changed, tokens_in=%d tokens_out=%d",
                 attempt + 1,
                 len(files_changed),
-                tokens_in,
-                tokens_out,
+                total_in,
+                total_out,
             )
-            return files_changed, None
+            return files_changed, None, total_in, total_out
 
         logger.warning("Checks failed on attempt %d: %s", attempt + 1, check_error[:200])
         if attempt == max_retries - 1:
-            return [], f"Checks still failing after {max_retries} attempts:\n{check_error}"
+            return [], f"Checks still failing after {max_retries} attempts:\n{check_error}", total_in, total_out
 
         # Feed error back for next attempt
         messages.append({
@@ -112,4 +116,4 @@ def run_coder(
             "content": f"Self-correction attempt {attempt + 1}: checks failed.\n{check_error}",
         })
 
-    return [], f"Coder blocked after {max_retries} attempts"
+    return [], f"Coder blocked after {max_retries} attempts", total_in, total_out

@@ -46,7 +46,7 @@ def run_planner(
     repo_path: str | None = None,
     on_heartbeat: Any = None,
     on_tool_call: Any = None,
-) -> tuple[str, str | None]:
+) -> tuple[str, str | None, int, int]:
     """
     Run planner agent. Returns (plan_text, error).
     plan_text is None if blocked; error is None on success.
@@ -55,6 +55,8 @@ def run_planner(
     repo = repo_path or settings.target_repo_path
     handlers = make_read_only_handlers(repo)
     plan_result: dict[str, str] = {}
+    total_in = 0
+    total_out = 0
 
     def submit_plan(inp: dict[str, Any]) -> str:
         plan_result["plan"] = inp.get("plan", "")
@@ -89,23 +91,25 @@ def run_planner(
                 on_heartbeat=on_heartbeat,
                 on_tool_call=on_tool_call,
             )
+            total_in += tokens_in
+            total_out += tokens_out
         except Exception as e:
             logger.exception("Planner agent failed on attempt %d", attempt + 1)
             if attempt == max_attempts - 1:
-                return "", f"Planner agent error: {e}"
+                return "", f"Planner agent error: {e}", total_in, total_out
             continue
 
         plan = plan_result.get("plan", "")
         error = _validate_plan(plan)
         if error is None:
-            logger.info("Planner done — plan validated, tokens_in=%d tokens_out=%d", tokens_in, tokens_out)
-            return plan, None
+            logger.info("Planner done — plan validated, tokens_in=%d tokens_out=%d", total_in, total_out)
+            return plan, None, total_in, total_out
 
         logger.warning("Plan validation failed (attempt %d): %s", attempt + 1, error)
         if attempt == max_attempts - 1:
-            return "", f"Plan validation failed after {max_attempts} attempts: {error}"
+            return "", f"Plan validation failed after {max_attempts} attempts: {error}", total_in, total_out
 
         # Feed back validation failure for retry
         messages.append({"role": "assistant", "content": f"Plan rejected: {error}. Please revise."})
 
-    return "", "Planner blocked"
+    return "", "Planner blocked", total_in, total_out

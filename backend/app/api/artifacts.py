@@ -1,23 +1,28 @@
 """Artifact API — GET /api/tasks/:id/artifacts, GET /api/artifacts/:id"""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import get_db
 from app.artifacts.store import get_artifact, list_artifacts
 
 router = APIRouter(prefix="/api", tags=["artifacts"])
 
 
 @router.get("/tasks/{task_id}/artifacts")
-async def list_task_artifacts(task_id: int) -> list[dict[str, object]]:
-    """List all artifacts for a task (newest first). Requires DB; returns [] without it."""
-    records = await list_artifacts(str(task_id), db=None)
+async def list_task_artifacts(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, object]]:
+    """List all artifacts for a task (newest first)."""
+    records = await list_artifacts(str(task_id), db=db)
     return [
         {
             "artifactId": r.artifact_id,
             "taskId": r.task_id,
-            "type": r.artifact_type,
+            "artifactType": r.artifact_type,
             "version": r.version,
             "createdByAgent": r.created_by_agent,
             "createdAt": r.created_at.isoformat() if r.created_at else None,

@@ -1,6 +1,7 @@
 """Manager Agent — orchestrates subtask dispatch through Dev → QA → Review pipeline."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -72,9 +73,10 @@ async def run_manager(
 
             full_plan = subtask_plan + retry_context
 
-            # Dispatch to appropriate developer agent
+            # Dispatch to appropriate developer agent (run in thread — blocking calls)
             if subtask_type == "frontend":
-                files_changed, dev_error = run_frontend_dev(
+                files_changed, dev_error = await asyncio.to_thread(
+                    run_frontend_dev,
                     task_id=task_id,
                     subtask_id=subtask_id,
                     plan=full_plan,
@@ -82,7 +84,8 @@ async def run_manager(
                     repo_path=repo,
                 )
             else:
-                files_changed, dev_error = run_backend_dev(
+                files_changed, dev_error = await asyncio.to_thread(
+                    run_backend_dev,
                     task_id=task_id,
                     subtask_id=subtask_id,
                     plan=full_plan,
@@ -97,8 +100,9 @@ async def run_manager(
                     break
                 continue
 
-            # QA phase
-            qa_result = run_qa(
+            # QA phase (run in thread — blocking call)
+            qa_result = await asyncio.to_thread(
+                run_qa,
                 task_id=task_id,
                 subtask_id=subtask_id,
                 files_changed=files_changed,
@@ -126,9 +130,10 @@ async def run_manager(
                 emitted_by="qa",
             ))
 
-            # Review phase
+            # Review phase (run in thread — blocking call)
             diff = get_diff(task_id, repo)
-            review_result = run_reviewer(
+            review_result = await asyncio.to_thread(
+                run_reviewer,
                 task_id=task_id,
                 subtask_id=subtask_id,
                 diff=diff,

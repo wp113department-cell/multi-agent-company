@@ -61,13 +61,25 @@ const stageLabel: Record<string, string> = {
   architect_agent: "Architect Agent running…",
   task_decomposer: "Task Decomposer running…",
   awaiting_approval: "Awaiting human approval",
-  approved: "Approved — coding agent running",
+  approved: "Approved",
+  done: "Planning complete",
   rejected: "Plan rejected",
   error: "Pipeline error",
+  blocked: "Pipeline blocked",
+  // Coding pipeline stages (Phase 4)
+  dev_running: "Dev → QA → Review pipeline running…",
+  qa_running: "QA agent running…",
+  review_running: "Reviewer agent running…",
+  dev_complete: "Coding pipeline complete — diff ready",
 };
 
+const PLANNING_STAGES = ["pm_agent", "architect_agent", "task_decomposer"];
+const CODING_STAGES = ["dev_running", "qa_running", "review_running"];
+
 export function PipelineView({ pipeline }: Props) {
-  const isRunning = ["pm_agent", "architect_agent", "task_decomposer"].includes(pipeline.stage);
+  const isPlanningRunning = PLANNING_STAGES.includes(pipeline.stage);
+  const isCodingRunning = CODING_STAGES.includes(pipeline.stage);
+  const isCodingDone = pipeline.stage === "dev_complete";
 
   return (
     <div className="space-y-4">
@@ -77,18 +89,22 @@ export function PipelineView({ pipeline }: Props) {
           className={`rounded-full px-3 py-1 text-xs font-semibold ${
             pipeline.stage === "awaiting_approval"
               ? "bg-amber-100 text-amber-800"
-              : pipeline.stage === "approved"
+              : pipeline.stage === "dev_complete"
               ? "bg-green-100 text-green-800"
-              : pipeline.stage === "rejected"
+              : pipeline.stage === "done"
+              ? "bg-green-100 text-green-800"
+              : pipeline.stage === "rejected" || pipeline.stage === "blocked"
               ? "bg-red-100 text-red-800"
               : pipeline.stage === "error"
               ? "bg-red-100 text-red-800"
+              : isCodingRunning
+              ? "bg-teal-100 text-teal-800"
               : "bg-blue-100 text-blue-800"
           }`}
         >
           {stageLabel[pipeline.stage] ?? pipeline.stage}
         </div>
-        {isRunning && (
+        {(isPlanningRunning || isCodingRunning) && (
           <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
         )}
       </div>
@@ -105,15 +121,17 @@ export function PipelineView({ pipeline }: Props) {
           <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
             <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700">PM Agent</span>
             Product Brief
-            <span className={`ml-auto text-xs font-normal ${complexityColor(pipeline.pmBrief.estimatedComplexity)}`}>
-              Complexity: {pipeline.pmBrief.estimatedComplexity}
-            </span>
+            {pipeline.pmBrief.estimatedComplexity && (
+              <span className={`ml-auto text-xs font-normal ${complexityColor(pipeline.pmBrief.estimatedComplexity)}`}>
+                Complexity: {pipeline.pmBrief.estimatedComplexity}
+              </span>
+            )}
           </h3>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Section title="Goals" items={pipeline.pmBrief.goals} />
-            <Section title="Acceptance Criteria" items={pipeline.pmBrief.acceptanceCriteria} />
-            <Section title="Constraints" items={pipeline.pmBrief.constraints} />
-            <Section title="Risk Areas" items={pipeline.pmBrief.riskAreas} />
+            {pipeline.pmBrief.goals?.length > 0 && <Section title="Goals" items={pipeline.pmBrief.goals} />}
+            {pipeline.pmBrief.acceptanceCriteria?.length > 0 && <Section title="Acceptance Criteria" items={pipeline.pmBrief.acceptanceCriteria} />}
+            {pipeline.pmBrief.constraints?.length > 0 && <Section title="Constraints" items={pipeline.pmBrief.constraints} />}
+            {pipeline.pmBrief.riskAreas?.length > 0 && <Section title="Risk Areas" items={pipeline.pmBrief.riskAreas} />}
           </div>
         </div>
       )}
@@ -129,22 +147,26 @@ export function PipelineView({ pipeline }: Props) {
             {pipeline.architectPlan.technicalApproach}
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <p className="mb-1 text-xs font-semibold text-slate-500 uppercase tracking-wide">Impacted Files</p>
-              <ul className="space-y-0.5">
-                {pipeline.architectPlan.impactedFiles.map((f) => (
-                  <li key={f} className="font-mono text-xs text-slate-700">{f}</li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <p className="mb-1 text-xs font-semibold text-slate-500 uppercase tracking-wide">Risks</p>
-              <ul className="space-y-1">
-                {pipeline.architectPlan.risks.map((r, i) => (
-                  <li key={i} className="text-xs text-slate-700">• {r}</li>
-                ))}
-              </ul>
-            </div>
+            {pipeline.architectPlan.impactedFiles?.length > 0 && (
+              <div>
+                <p className="mb-1 text-xs font-semibold text-slate-500 uppercase tracking-wide">Impacted Files</p>
+                <ul className="space-y-0.5">
+                  {pipeline.architectPlan.impactedFiles.map((f) => (
+                    <li key={f} className="font-mono text-xs text-slate-700">{f}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {pipeline.architectPlan.risks?.length > 0 && (
+              <div>
+                <p className="mb-1 text-xs font-semibold text-slate-500 uppercase tracking-wide">Risks</p>
+                <ul className="space-y-1">
+                  {pipeline.architectPlan.risks.map((r, i) => (
+                    <li key={i} className="text-xs text-slate-700">• {r}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
           {pipeline.architectPlan.implementationNotes && (
             <div className="mt-3">
@@ -172,7 +194,7 @@ export function PipelineView({ pipeline }: Props) {
                   <span className="text-sm font-medium text-slate-800">{st.title}</span>
                 </div>
                 <p className="mb-2 text-xs text-slate-600">{st.description}</p>
-                {st.filesToEdit.length > 0 && (
+                {st.filesToEdit?.length > 0 && (
                   <div className="font-mono text-xs text-slate-500">
                     {st.filesToEdit.map((f) => (
                       <span key={f} className="mr-2 inline-block">{f}</span>
@@ -182,6 +204,58 @@ export function PipelineView({ pipeline }: Props) {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Dev → QA → Review pipeline (Phase 4) */}
+      {(isCodingRunning || isCodingDone) && (
+        <div className="rounded-lg border border-teal-200 bg-teal-50 p-4">
+          <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-teal-800">
+            <span className="rounded bg-teal-100 px-2 py-0.5 text-xs text-teal-700">Coding Pipeline</span>
+            Dev → QA → Review
+            {isCodingRunning && (
+              <span className="ml-2 inline-block h-2 w-2 animate-pulse rounded-full bg-teal-500" />
+            )}
+            {isCodingDone && (
+              <span className="ml-auto rounded bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
+                Complete
+              </span>
+            )}
+          </h3>
+          <div className="flex items-center gap-2">
+            {[
+              { label: "Dev Agent", stage: "dev_running", icon: "💻" },
+              { label: "QA Agent", stage: "qa_running", icon: "🧪" },
+              { label: "Reviewer", stage: "review_running", icon: "🔍" },
+            ].map(({ label, stage, icon }, idx) => {
+              const isActive = pipeline.stage === stage;
+              const isPast = isCodingDone ||
+                (stage === "dev_running" && ["qa_running", "review_running"].includes(pipeline.stage)) ||
+                (stage === "qa_running" && pipeline.stage === "review_running");
+              return (
+                <div key={stage} className="flex items-center gap-2">
+                  {idx > 0 && <span className="text-teal-300">→</span>}
+                  <div
+                    className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                      isActive
+                        ? "border-teal-400 bg-teal-100 text-teal-800"
+                        : isPast
+                        ? "border-green-300 bg-green-50 text-green-700"
+                        : "border-slate-200 bg-white text-slate-500"
+                    }`}
+                  >
+                    <span className="mr-1">{icon}</span>
+                    {label}
+                    {isActive && <span className="ml-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-teal-500 align-middle" />}
+                    {isPast && <span className="ml-1 text-green-600">✓</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {isCodingDone && (
+            <p className="mt-3 text-xs text-teal-700">All subtasks passed QA and review — diff is ready for human approval.</p>
+          )}
         </div>
       )}
     </div>

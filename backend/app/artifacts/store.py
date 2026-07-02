@@ -30,6 +30,7 @@ ARTIFACT_TYPES = frozenset({
     "review_findings",
     "pm_brief",
     "architect_plan",
+    "subtasks",
 })
 
 

@@ -1,8 +1,15 @@
-from contextlib import asynccontextmanager
-from collections.abc import AsyncGenerator
+from __future__ import annotations
 
-from fastapi import FastAPI
+import asyncio
+import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.tasks import router as tasks_router
 from app.api.repo import router as repo_router
@@ -10,12 +17,36 @@ from app.api.artifacts import router as artifacts_router
 
 from app.config import get_settings
 
+logger = logging.getLogger(__name__)
+
+
+async def _weekly_reindex_loop(repo_path: str) -> None:
+    """Reindex the target repo every 7 days so context stays fresh."""
+    from app.repo_tools.scanner import index_repository
+    from app.repo_tools.context_builder import invalidate_context_cache
+
+    _SEVEN_DAYS = 7 * 24 * 60 * 60
+    while True:
+        await asyncio.sleep(_SEVEN_DAYS)
+        try:
+            index_repository(repo_path)
+            invalidate_context_cache(repo_path)
+            logger.info("Weekly auto-reindex complete for %s", repo_path)
+        except Exception as exc:
+            logger.warning("Weekly reindex failed: %s", exc)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    # Validate config at startup — crashes loud if env vars missing
-    get_settings()
+    settings = get_settings()
+    logging.basicConfig(level=settings.log_level.upper())
+    reindex_task = asyncio.create_task(_weekly_reindex_loop(settings.target_repo_path))
     yield
+    reindex_task.cancel()
+    try:
+        await reindex_task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(
@@ -35,6 +66,22 @@ app.add_middleware(
 app.include_router(tasks_router)
 app.include_router(repo_router)
 app.include_router(artifacts_router)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"code": str(exc.status_code), "message": str(exc.detail)}},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={"error": {"code": "422", "message": str(exc)}},
+    )
 
 
 @app.get("/health")
