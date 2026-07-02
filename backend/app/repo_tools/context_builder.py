@@ -1,14 +1,35 @@
 """Context builder — combines keyword scoring + semantic search to find relevant files."""
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from app.config import get_settings
 from app.repo_tools.scanner import RepoIndex, build_call_graph
 from app.repo_tools.embeddings import semantic_search
+
+# In-memory per-task context cache: {cache_key: ContextResult}
+# Cache key = SHA-256(task_description + repo_path).
+# Avoids re-running keyword scoring + semantic search on the same task description.
+_context_cache: dict[str, "ContextResult"] = {}
+
+
+def _cache_key(task_description: str, repo_path: str) -> str:
+    raw = f"{task_description}|{repo_path}"
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def invalidate_context_cache(repo_path: str | None = None) -> None:
+    """Clear cached context — call after a re-index completes."""
+    global _context_cache
+    if repo_path is None:
+        _context_cache.clear()
+    else:
+        keys_to_drop = [k for k, v in _context_cache.items() if repo_path in str(k)]
+        for k in keys_to_drop:
+            del _context_cache[k]
 
 
 @dataclass
@@ -32,13 +53,23 @@ def build_context(
     index: RepoIndex,
     embeddings: list[dict[str, object]] | None = None,
     top_k: int = 15,
+    use_cache: bool = True,
 ) -> ContextResult:
     """
     Build context for a task by combining:
     1. Keyword scoring (query tokens vs file paths + symbol names)
     2. Semantic search (Voyage AI, if embeddings available)
     3. Dependency chain (files imported by top-scoring files)
+
+    Results are cached in-memory by (task_description, repo_path) so repeated
+    calls for the same task don't re-run scoring. Pass use_cache=False to force
+    a fresh computation (e.g. after a re-index).
     """
+    if use_cache:
+        ck = _cache_key(task_description, index.repo_path)
+        if ck in _context_cache:
+            return _context_cache[ck]
+
     settings = get_settings()
     query_tokens = [w.lower() for w in re.split(r"\W+", task_description) if len(w) > 2]
 
@@ -83,7 +114,7 @@ def build_context(
         f"{len(related_symbols)} related symbols for task: {task_description[:80]}"
     )
 
-    return ContextResult(
+    ctx = ContextResult(
         relevant_files=relevant_files,
         dependency_chain=dependency_chain,
         related_symbols=related_symbols,
@@ -91,3 +122,8 @@ def build_context(
         semantic_matches=semantic_matches,
         summary=summary,
     )
+
+    if use_cache:
+        _context_cache[ck] = ctx
+
+    return ctx

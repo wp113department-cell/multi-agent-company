@@ -43,12 +43,28 @@ def get_diff(task_id: int | str, repo_path: str | None = None) -> str:
         return ""
 
 
+def preserve_worktree(task_id: int | str) -> None:
+    """
+    Mark the worktree as intentionally preserved — do nothing to the directory.
+    Called when a task enters blocked or ready_for_review so the worktree is
+    kept for human inspection until the task is completed or torn down explicitly.
+    """
+    wt_path = worktree_path(task_id)
+    if wt_path.exists():
+        # Touch a sentinel file so external tooling can detect preserved worktrees
+        (wt_path / ".gridiron-preserved").touch()
+
+
 def remove_worktree(task_id: int | str, repo_path: str | None = None) -> None:
     settings = get_settings()
     base_repo = repo_path or settings.target_repo_path
     wt_path = worktree_path(task_id)
 
     if wt_path.exists():
+        # Remove sentinel if present
+        sentinel = wt_path / ".gridiron-preserved"
+        if sentinel.exists():
+            sentinel.unlink()
         try:
             _run(["git", "worktree", "remove", "--force", str(wt_path)], cwd=base_repo)
         except RuntimeError:
