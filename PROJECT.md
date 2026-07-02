@@ -478,3 +478,140 @@ mypy app/ --strict
 **Pre-conditions before Phase 4 makes sense:**
 - ANTHROPIC_API_KEY purchased — every Phase 4 feature requires real Claude calls
 - DATABASE_URL live Postgres — event bus, artifact store, manager state all DB-backed
+
+---
+
+## Phase 4 — Specialist Agents + QA Loop + Event Bus + Artifact Store (2026-07-02)
+
+**Session goal:** Build everything in MASTER_PROMPT_PACK Prompt 4 that can be built without API keys.
+Same pattern as Phase 3: live agent tests deferred to `tests/pending/`.
+
+### What was built
+
+**Research (Step 0):**
+- `docs/research/roo-notes.md` — roo-code mode separation patterns, structural tool enforcement model
+- `docs/research/autogen-notes.md` — message-passing decoupling, topic routing, stateless agents
+
+**Role files (5 new):**
+- `backend/roles/backend_dev.md` — Read+Write(worktree)+Bash(typecheck/lint), submit_patch
+- `backend/roles/frontend_dev.md` — same scope, Next.js/TypeScript focus, tsc check
+- `backend/roles/qa.md` — Read+Bash(tests only), NO write, submit_qa_result schema
+- `backend/roles/reviewer.md` — Read ONLY, structured ReviewFinding schema, no bash
+- `backend/roles/manager.md` — routing/tracking only, no code writes, dispatches subtasks
+
+**Tool scoping (doc-07 matrix — structurally enforced):**
+- `QA_TOOLS` in `tools.py` — READ_ONLY_TOOLS + bash(allowlist) + submit_qa_result — NO write_file
+- `REVIEWER_TOOLS` — READ_ONLY_TOOLS + submit_review — NO bash, NO write_file
+- `_is_qa_command_allowed()` — prefix allowlist: pytest/mypy/ruff/tsc/npm test/git diff only
+- `make_qa_handlers()` — bash enforces QA allowlist before policy engine
+- `make_reviewer_handlers()` — no bash or write handlers at all (structural, not prompt)
+
+**Specialist agents:**
+- `backend/app/agents/backend_dev.py` — `run_backend_dev()`, CODER_TOOLS, mypy+ruff self-correction
+- `backend/app/agents/frontend_dev.py` — `run_frontend_dev()`, CODER_TOOLS, tsc self-correction
+- `backend/app/agents/qa.py` — `run_qa()` → `QAResult` dataclass, QA_TOOLS (no write)
+- `backend/app/agents/reviewer.py` — `run_reviewer()` → `ReviewResult` + `ReviewFinding`, REVIEWER_TOOLS (read only)
+- `backend/app/agents/manager.py` — `run_manager()`, Dev→QA→Review loop, retry cap, task.blocked on exhaustion
+
+**Event Bus (`backend/app/event_bus/`):**
+- `models.py` — `GridironEvent` Pydantic model (frozen, UUID event_id), 8 factory functions for core event types
+- `bus.py` — `publish_event()`, `subscribe()`, `unsubscribe()`, `get_unprocessed_events()`
+- Retry: 3× with exponential backoff per handler failure
+- Dead-letter: `_write_failed_event()` after retries exhausted
+- In-memory subscriber registry (works without DB; DB persistence optional via `db=` param)
+- Replay: `get_unprocessed_events(task_id, since, db)` queries events > last_processed_at
+- Ordering: sequential publish per task guarantees per-task event order
+
+**Artifact Store (`backend/app/artifacts/`):**
+- `store.py` — `save_artifact()`, `save_artifact_async()`, `get_artifact()`, `list_artifacts()`
+- Local disk: `{WORKTREES_DIR}/../artifacts/{artifact_id}` — no hardcoded paths
+- `ArtifactRecord` dataclass returned on save
+- `save_artifact_async()` also writes DB row to artifacts table
+
+**Dispatcher (`backend/app/pipeline/dispatcher.py`):**
+- Routing table: backend→backend_dev, frontend→frontend_dev, test→qa, docs→backend_dev
+- `get_agent_for_type()` — pure deterministic function (no LLM for routing)
+- `dispatch_subtask()` — routes to correct agent, returns `{files_changed, error, agent}`
+
+**DB models (3 new ORM classes):**
+- `Event` — persisted event bus events (UUID PK, JSONB payload)
+- `FailedEvent` — dead-letter log (BigInteger PK, references event_id)
+- `Artifact` — versioned pipeline outputs (UUID PK, task_id, type, storage_path)
+
+**Migration 002:**
+- `backend/migrations/versions/002_phase4_tables.py` — events, failed_events, artifacts tables + indexes
+
+**Artifacts API:**
+- `backend/app/api/artifacts.py` — `GET /api/tasks/:id/artifacts`, `GET /api/artifacts/:id`
+- Registered in `backend/app/main.py`
+
+**Tests (new — all passing):**
+- `tests/test_event_bus.py` — 15 tests: roundtrip, ordering, retry, failed handler isolation, sync handlers
+- `tests/test_artifacts.py` — 8 tests: save/get/roundtrip, dict content, multiple artifacts
+- `tests/test_dispatcher.py` — 9 tests: routing table, dispatch to backend/frontend/qa agents
+- `tests/test_tool_scoping.py` — 28 tests: QA has no write, Reviewer has no bash/write, allowlist (9+8)
+
+**Pending tests (9 new, all skipped):**
+- `tests/pending/test_specialist_agents.py` — backend dev, QA, reviewer, full pipeline, retry loops, manager
+
+**Bug fix:** `context_builder.py` — removed unused `get_settings()` call that was causing 5 test failures
+
+### Test results — Phase 4
+
+```
+pytest tests/ -v
+→ 123/123 passed, 47 skipped (all pending skip cleanly)
+
+mypy app/ --strict
+→ Success: no issues found in 43 source files
+```
+
+### Files created/changed this session
+
+**New files:**
+- `docs/research/roo-notes.md`
+- `docs/research/autogen-notes.md`
+- `backend/roles/backend_dev.md`
+- `backend/roles/frontend_dev.md`
+- `backend/roles/qa.md`
+- `backend/roles/reviewer.md`
+- `backend/roles/manager.md`
+- `backend/app/agents/backend_dev.py`
+- `backend/app/agents/frontend_dev.py`
+- `backend/app/agents/qa.py`
+- `backend/app/agents/reviewer.py`
+- `backend/app/agents/manager.py`
+- `backend/app/event_bus/__init__.py`
+- `backend/app/event_bus/models.py`
+- `backend/app/event_bus/bus.py`
+- `backend/app/artifacts/__init__.py`
+- `backend/app/artifacts/store.py`
+- `backend/app/pipeline/dispatcher.py`
+- `backend/app/api/artifacts.py`
+- `backend/migrations/versions/002_phase4_tables.py`
+- `backend/tests/test_event_bus.py`
+- `backend/tests/test_artifacts.py`
+- `backend/tests/test_dispatcher.py`
+- `backend/tests/test_tool_scoping.py`
+- `backend/tests/pending/test_specialist_agents.py`
+- `docs/reports/PHASE_4_TEST_REPORT.md`
+
+**Modified files:**
+- `backend/app/agents/tools.py` — added QA_TOOLS, REVIEWER_TOOLS, make_qa_handlers(), make_reviewer_handlers()
+- `backend/app/db/models.py` — added Event, FailedEvent, Artifact ORM classes
+- `backend/app/main.py` — registered artifacts router
+- `backend/app/repo_tools/context_builder.py` — removed unused get_settings() call (bug fix)
+
+### What's next (Phase 5)
+
+Per MASTER_PROMPT_PACK Prompt 5:
+- Manager Agent upgrade to LangGraph supervisor (epic-level orchestration)
+- Epics: `epics` table + epic_id FK on dev_tasks
+- Cost Controller: estimate tokens/dollars before execution, cost approval threshold
+- Policy Engine v2: `policies` table, glob-pattern approval rules, policy_approvals audit log
+- RBAC: viewer vs approver roles, all approve/reject endpoints enforce approver role at API layer
+- DevOps Agent (read-only health checks)
+- Epic Approval UI (Stage 5 dashboard)
+
+**Pre-conditions for Phase 5:**
+- Same as Phase 4: ANTHROPIC_API_KEY + live Postgres needed for pending tests
