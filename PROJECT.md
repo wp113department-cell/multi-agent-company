@@ -401,3 +401,80 @@ cd backend
 DATABASE_URL=... ANTHROPIC_API_KEY=... TARGET_REPO_PATH=.. \
 .venv/bin/python -m app.mcp.server
 ```
+
+---
+
+## Phase 0-3 Gap-Close Session — 2026-07-02 (evening)
+
+**Session goal:** Systematic gap analysis of MASTER_PROMPT_PACK Prompts 1-3 vs what was actually built, and close every gap.
+
+### Gaps identified and closed
+
+| Gap | Fix |
+|---|---|
+| Frontend broken — `/api/*` hit archived Next.js routes (in `TX/`) | `apps/web/next.config.mjs` rewrites `/api/*` → `http://localhost:8000` (FastAPI). All frontend HTTP calls now reach the Python backend. |
+| URL mismatches — `approvePipeline`, `rejectPipeline`, `triggerPipeline` called wrong routes | `apps/web/lib/api.ts` fully rewritten — correct routes, camelCase types, proper return types |
+| FastAPI responses were snake_case — frontend expected camelCase | `backend/app/api/tasks.py` now returns `filesTouched`, `createdAt`, `logId`, etc. |
+| `GET /api/tasks/:id` didn't include logs | Task detail response now includes full `logs[]` array |
+| Missing `/pipeline/approve` and `/pipeline/reject` routes | Added both routes to FastAPI, wired to LangGraph resume |
+| `.env.example` missing | Created `backend/.env.example` with all 16 env vars documented |
+| LangGraph interrupt() not implemented | `human_review_node` added after Decomposer — calls `interrupt()`, pauses at `stage='awaiting_approval'`. `resume_pipeline(task_id, approved)` resumes from MemorySaver checkpoint |
+| `launch_planning_pipeline` always transitioned to `ready_for_review` | Now detects `stage='awaiting_approval'` and holds task in `planning` until human approves |
+| `resume_planning_pipeline(task_id, approved)` didn't exist | Added to `agents.py` — resumes LangGraph, then launches coder on approval or marks rejected |
+| Incremental re-index missing — full scan every time | `scanner.py` accepts `known_hashes: dict[str,str]` — skips re-parsing files whose SHA-256 hasn't changed. `merge_indexes()` helper added |
+| Context cache missing | In-memory cache in `context_builder.py` keyed by SHA-256(task_description + repo_path). `invalidate_context_cache()` called after re-index |
+| `preserve_worktree()` missing | Added to `worktree.py` — touches `.gridiron-preserved` sentinel. Called on blocked + ready_for_review. `remove_worktree()` cleans sentinel on teardown |
+| POST /run ignored request body — mode override not possible | `RunRequest` body added; `mode` field overrides `PIPELINE_MODE` env for a single run |
+| Pending tests for API-key-required flows | `backend/tests/pending/` — 38 tests across 8 files, all skip cleanly without keys |
+
+### Files changed this session
+
+**Frontend:**
+- `apps/web/next.config.mjs` — added rewrites() proxy to FastAPI
+- `apps/web/lib/api.ts` — full rewrite with correct routes + TypeScript types
+- `apps/web/.env.local` — NEXT_PUBLIC_API_URL=http://localhost:8000 (gitignored)
+
+**Backend:**
+- `backend/.env.example` — all 16 env vars documented (NEW)
+- `backend/app/api/tasks.py` — camelCase responses, logs in detail, /pipeline/approve + /pipeline/reject, RunRequest body
+- `backend/app/api/agents.py` — awaiting_approval handling, resume_planning_pipeline(), preserve_worktree() calls
+- `backend/app/api/repo.py` — incremental known_hashes tracking, invalidate_context_cache() after reindex
+- `backend/app/pipeline/graph.py` — human_review_node with interrupt(), resume_pipeline(), interrupt_before= compilation
+- `backend/app/repo_tools/scanner.py` — known_hashes param, merge_indexes() helper
+- `backend/app/repo_tools/context_builder.py` — in-memory cache + invalidate function
+- `backend/app/repo_tools/worktree.py` — preserve_worktree() + sentinel cleanup in remove_worktree()
+- `backend/tests/pending/` — 8 test files, 38 pending tests (all skipped without RUN_PENDING_TESTS=1)
+
+### Test results — 2026-07-02 evening
+
+```
+pytest tests/ -v
+→ 63/63 passed, 38 skipped (pending tests skip cleanly)
+
+mypy app/ --strict
+→ Success: no issues found in 31 source files
+```
+
+### Commit
+`99cb7d4` — feat: close all Phase 0-3 gaps (see git log for full details)
+
+---
+
+## Phase 4 — Ready to start next session
+
+**What Phase 4 adds (per MASTER_PROMPT_PACK Prompt 4 — not yet started):**
+- Event Bus: Postgres LISTEN/NOTIFY for real-time pipeline events
+- Specialist agents: Backend Agent, Frontend Agent, QA Agent, Review Agent (each with own role file)
+- Manager Agent: orchestrates multi-agent work on decomposed subtasks
+- Artifact Store: persist diffs, test outputs, agent reports per task
+- Parallel subtask execution: multiple agents running simultaneously on different subtasks
+
+**How to start Phase 4:**
+1. Read this file
+2. Run: `cd backend && DATABASE_URL=... ANTHROPIC_API_KEY=sk-ant-dummy TARGET_REPO_PATH=. .venv/bin/pytest tests/ -v` → confirm 63/63 green
+3. Buy Anthropic API key → run `RUN_PENDING_TESTS=1 ANTHROPIC_API_KEY=real-key ... pytest tests/pending/ -v` first to validate live agents
+4. Then start Phase 4 build
+
+**Pre-conditions before Phase 4 makes sense:**
+- ANTHROPIC_API_KEY purchased — every Phase 4 feature requires real Claude calls
+- DATABASE_URL live Postgres — event bus, artifact store, manager state all DB-backed
