@@ -1,5 +1,5 @@
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +13,9 @@ from app.db.repository import (
     list_subtasks,
     list_tasks,
     transition_task,
+    get_or_create_pipeline_state,
 )
+from app.config import get_settings
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -31,10 +33,6 @@ class LogRequest(BaseModel):
     category: str
     message: str
     extra_data: dict[str, Any] | None = None
-
-
-class ApproveRequest(BaseModel):
-    pass
 
 
 class RejectRequest(BaseModel):
@@ -69,10 +67,7 @@ async def list_all(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     tasks, next_cursor = await list_tasks(db, status=status, cursor=cursor, limit=limit)
-    return {
-        "tasks": [_task_to_dict(t) for t in tasks],
-        "nextCursor": next_cursor,
-    }
+    return {"tasks": [_task_to_dict(t) for t in tasks], "nextCursor": next_cursor}
 
 
 @router.get("/{task_id}")
@@ -84,9 +79,7 @@ async def get_one(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str,
 
 
 @router.patch("/{task_id}")
-async def patch_status(
-    task_id: int, body: TransitionRequest, db: AsyncSession = Depends(get_db)
-) -> dict[str, Any]:
+async def patch_status(task_id: int, body: TransitionRequest, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     try:
         task = await transition_task(db, task_id, body.status)
     except TransitionError as e:
@@ -126,22 +119,64 @@ async def get_logs(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str
     }
 
 
+@router.post("/{task_id}/run")
+async def run_task(
+    task_id: int,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Trigger the planning pipeline for a pending/blocked/rejected task."""
+    from app.api.agents import launch_planning_pipeline, launch_planner
+
+    task = await get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status not in ("pending", "rejected", "blocked"):
+        raise HTTPException(status_code=400, detail=f"Cannot start planning from status {task.status!r}")
+
+    await transition_task(db, task_id, "planning")
+    await append_log(db, task_id, "pipeline", "Planning triggered")
+
+    settings = get_settings()
+    if settings.pipeline_mode == "full":
+        background_tasks.add_task(
+            launch_planning_pipeline, task_id, str(task.title), str(task.description)
+        )
+    else:
+        background_tasks.add_task(
+            launch_planner, task_id, str(task.title), str(task.description)
+        )
+
+    return {"triggered": True, "mode": settings.pipeline_mode}
+
+
 @router.post("/{task_id}/approve")
-async def approve_task(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def approve_task(
+    task_id: int,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Approve plan — start coding agent."""
+    from app.api.agents import launch_coder
+
     task = await get_task(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.status != "ready_for_review":
         raise HTTPException(status_code=400, detail=f"Task must be ready_for_review, got {task.status!r}")
+
+    plan = str(task.plan or "")
     task = await transition_task(db, task_id, "coding")
-    await append_log(db, task_id, "approval", "Task approved — coding agent will start")
-    # Fire-and-forget: coding agent launch triggered here
-    # (wired up in Day 2 when coder agent is built)
+    await append_log(db, task_id, "approval", "Plan approved — coding agent starting")
+
+    background_tasks.add_task(launch_coder, task_id, plan)
     return {"approved": True, "task": _task_to_dict(task)}
 
 
 @router.post("/{task_id}/reject")
-async def reject_task(task_id: int, body: RejectRequest, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def reject_task(
+    task_id: int, body: RejectRequest, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     task = await get_task(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -170,15 +205,23 @@ async def get_subtasks(task_id: int, db: AsyncSession = Depends(get_db)) -> dict
     }
 
 
-@router.post("/{task_id}/run")
-async def run_task(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    """Trigger planning pipeline for a pending task."""
+@router.get("/{task_id}/pipeline")
+async def get_pipeline(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Return pipeline state for a task."""
+    ps = await get_or_create_pipeline_state(db, task_id)
+    return {
+        "task_id": task_id,
+        "stage": ps.stage,
+        "pm_brief": ps.pm_brief,
+        "architect_plan": ps.architect_plan,
+        "subtasks": ps.subtasks_json,
+        "approved": ps.approved,
+    }
+
+
+@router.get("/{task_id}/diff")
+async def get_diff(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     task = await get_task(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.status not in ("pending", "rejected", "blocked"):
-        raise HTTPException(status_code=400, detail=f"Cannot start planning from status {task.status!r}")
-    await transition_task(db, task_id, "planning")
-    await append_log(db, task_id, "pipeline", "Planning pipeline triggered")
-    # Fire-and-forget pipeline launch will be wired in Day 2
-    return {"triggered": True}
+    return {"diff": task.diff, "files_touched": task.files_touched}
