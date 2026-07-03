@@ -386,3 +386,159 @@ def make_devops_handlers(repo_path: str) -> dict[str, Any]:
     handlers["submit_health_report"] = submit_health_report
     handlers["_health_result"] = health_result  # caller reads this after run
     return handlers
+
+
+# ---- Phase 6 — Research Agent tools ----
+
+_WEB_SEARCH_TOOL = {
+    "name": "web_search",
+    "description": (
+        "Search the web for technical information. "
+        "Returns 'web_search_unavailable' if no MCP web-search server is configured."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Search query"},
+        },
+        "required": ["query"],
+    },
+}
+
+_SUBMIT_RESEARCH_TOOL = {
+    "name": "submit_research",
+    "description": "Submit the final research report with findings, library recommendations, approach, and risks.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "findings": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Key findings from the research",
+            },
+            "relevantLibraries": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "version": {"type": "string"},
+                        "rationale": {"type": "string"},
+                    },
+                    "required": ["name", "rationale"],
+                },
+            },
+            "recommendedApproach": {"type": "string"},
+            "risks": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+        "required": ["findings", "relevantLibraries", "recommendedApproach", "risks"],
+    },
+}
+
+# Research agent: read_only + web_search (placeholder) + submit_research. NO write, NO bash.
+RESEARCH_TOOLS = READ_ONLY_TOOLS + [_WEB_SEARCH_TOOL, _SUBMIT_RESEARCH_TOOL]
+
+
+def make_research_handlers(repo_path: str) -> dict[str, Any]:
+    """Research agent: read-only + web_search placeholder + submit_research. No write, no bash."""
+    handlers = make_read_only_handlers(repo_path)
+    research_result: dict[str, Any] = {}
+
+    def web_search(inp: dict[str, Any]) -> str:
+        # Placeholder — returns an informative message when no MCP is wired.
+        # When a real web-search MCP is configured, replace this handler.
+        query = inp.get("query", "")
+        return (
+            f"web_search_unavailable: No web-search MCP is configured in this environment. "
+            f"Query was: {query!r}. "
+            "Use read_file and list_files to explore the codebase instead."
+        )
+
+    def submit_research(inp: dict[str, Any]) -> str:
+        research_result.update(inp)
+        return "Research report submitted"
+
+    handlers["web_search"] = web_search
+    handlers["submit_research"] = submit_research
+    handlers["_research_result"] = research_result  # caller reads this after run
+    return handlers
+
+
+# ---- Phase 6 — Docs Agent tools ----
+
+_SUBMIT_DOCS_TOOL = {
+    "name": "submit_docs",
+    "description": "Submit the list of documentation files written or updated.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "files_written": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Paths of markdown files created or updated",
+            },
+            "summary": {"type": "string", "description": "Brief summary of documentation changes"},
+        },
+        "required": ["files_written", "summary"],
+    },
+}
+
+
+def make_docs_handlers(worktree_path: str, repo_path: str) -> dict[str, Any]:
+    """Docs agent: read-only + write_file (scoped to *.md and docs/**) + submit_docs."""
+    from app.policy.engine import check_path_in_worktree
+
+    handlers = make_read_only_handlers(repo_path)
+    wt = Path(worktree_path)
+    docs_result: dict[str, Any] = {}
+
+    def write_file(inp: dict[str, Any]) -> str:
+        rel_path = str(inp["path"])
+        # Docs agent: only .md files or docs/** allowed
+        is_md = rel_path.endswith(".md")
+        is_docs = rel_path.startswith("docs/")
+        if not (is_md or is_docs):
+            return (
+                f"[POLICY DENIED] Docs agent may only write .md files or paths under docs/. "
+                f"Got: {rel_path!r}"
+            )
+        policy = check_path_in_worktree(rel_path, worktree_path)
+        if not policy.allowed:
+            return f"[POLICY DENIED] {policy.reason}"
+        try:
+            target = wt / rel_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(inp["content"], encoding="utf-8")
+            return f"Written: {rel_path}"
+        except Exception as e:
+            return f"[ERROR] Cannot write {rel_path}: {e}"
+
+    def submit_docs(inp: dict[str, Any]) -> str:
+        docs_result.update(inp)
+        return "Docs report submitted"
+
+    handlers["write_file"] = write_file
+    handlers["submit_docs"] = submit_docs
+    handlers["_docs_result"] = docs_result
+    return handlers
+
+
+# Docs agent tool list: read tools + write_file + submit_docs. NO bash.
+DOCS_TOOLS = READ_ONLY_TOOLS + [
+    {
+        "name": "write_file",
+        "description": "Write content to a markdown file (*.md) or a path under docs/ only. No other file types.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path relative to the worktree root (must be *.md or docs/**)"},
+                "content": {"type": "string", "description": "Full file content to write"},
+            },
+            "required": ["path", "content"],
+        },
+    },
+    _SUBMIT_DOCS_TOOL,
+]

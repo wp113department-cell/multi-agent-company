@@ -339,11 +339,13 @@ async def run_epic_manager(
     await db.commit()
 
     # Run the planning pipeline (LangGraph PM→Arch→Decomp — already async)
+    # Pass db so planning pipeline can pre-fetch memory context for Architect Agent
     pipeline_result = await run_planning_pipeline(
         task_id=task_id,
         title=goal[:500],
         description=goal,
         repo_path=repo,
+        db=db,
     )
 
     subtasks: list[dict[str, Any]] = pipeline_result.get("subtasks") or []
@@ -419,6 +421,8 @@ async def run_epic_manager(
     for raw in results:
         all_findings.extend(raw.get("review_findings", []))
 
+    from app.memory.store import embed_task_outcome
+
     if final_status == "halted":
         halt_reason = f"{blocked_count} subtasks exhausted all retries"
         await db.execute(
@@ -433,6 +437,16 @@ async def run_epic_manager(
             payload={"blocked_count": blocked_count, "halt_reason": halt_reason},
             emitted_by="manager",
         ))
+        # Store outcome in engineering memory
+        await embed_task_outcome(
+            task_id=str(task_id),
+            description=goal,
+            summary=halt_reason,
+            outcome="blocked",
+            files_changed=list(set(all_files)),
+            db=db,
+            epic_id=epic_id,
+        )
         return EpicApprovalPackage(
             epic_id=epic_id,
             status="halted",
@@ -457,6 +471,18 @@ async def run_epic_manager(
         },
         emitted_by="manager",
     ))
+
+    # Store outcome in engineering memory
+    summary = "; ".join(all_qa[:3]) or f"Epic completed with {len(subtasks)} subtasks"
+    await embed_task_outcome(
+        task_id=str(task_id),
+        description=goal,
+        summary=summary,
+        outcome="completed",
+        files_changed=list(set(all_files)),
+        db=db,
+        epic_id=epic_id,
+    )
 
     return EpicApprovalPackage(
         epic_id=epic_id,

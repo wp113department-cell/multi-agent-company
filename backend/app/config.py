@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     # Phase 5 — RBAC
     rbac_enabled: bool = Field(default=True, description="Enforce viewer/approver RBAC on approve/reject endpoints")
 
+    # Phase 6 — Research Agent
+    research_enabled: bool = Field(default=True, description="Enable Research Agent as an optional first step before planning")
+
+    # Phase 6 — Engineering Memory (pgvector)
+    memory_enabled: bool = Field(default=True, description="Enable pgvector engineering memory (requires pgvector extension)")
+    memory_top_k: int = Field(default=3, description="Number of similar past tasks to inject into Architect context")
+
     # Server
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8000)
