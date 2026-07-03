@@ -159,6 +159,49 @@ _SUBMIT_REVIEW_TOOL = {
 # Reviewer has read tools ONLY + submit_review. NO bash, NO write, NO edit.
 REVIEWER_TOOLS = READ_ONLY_TOOLS + [_SUBMIT_REVIEW_TOOL]
 
+_DEVOPS_BASH_TOOL = {
+    "name": "bash",
+    "description": (
+        "Run read-only health-check commands only. Allowed prefixes come from config DEVOPS_BASH_ALLOWLIST. "
+        "No write, no deploy, no remote push, no credential access."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "command": {"type": "string", "description": "Read-only health check command"},
+        },
+        "required": ["command"],
+    },
+}
+
+_SUBMIT_HEALTH_REPORT_TOOL = {
+    "name": "submit_health_report",
+    "description": "Submit the structured system health report.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["healthy", "degraded", "unhealthy"]},
+            "checks": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "status": {"type": "string", "enum": ["ok", "warn", "fail"]},
+                        "detail": {"type": "string"},
+                    },
+                    "required": ["name", "status", "detail"],
+                },
+            },
+            "summary": {"type": "string"},
+        },
+        "required": ["status", "checks", "summary"],
+    },
+}
+
+# DevOps: read tools + allowlisted bash + submit_health_report. NO write_file.
+DEVOPS_TOOLS = READ_ONLY_TOOLS + [_DEVOPS_BASH_TOOL, _SUBMIT_HEALTH_REPORT_TOOL]
+
 # Allowed QA bash commands (prefix checks)
 _QA_ALLOWED_PREFIXES = (
     "pytest",
@@ -302,4 +345,44 @@ def make_reviewer_handlers(repo_path: str) -> dict[str, Any]:
 
     handlers["submit_review"] = submit_review
     handlers["_review_result"] = review_result  # caller reads this after run
+    return handlers
+
+
+def make_devops_handlers(repo_path: str) -> dict[str, Any]:
+    """DevOps agent: read-only + allowlisted bash (health checks only) + submit_health_report. No write."""
+    from app.config import get_settings
+
+    handlers = make_read_only_handlers(repo_path)
+    health_result: dict[str, Any] = {}
+
+    def _is_devops_command_allowed(cmd: str) -> bool:
+        settings = get_settings()
+        allowed_prefixes = tuple(p.strip() for p in settings.devops_bash_allowlist.split(",") if p.strip())
+        stripped = cmd.strip()
+        return any(stripped.startswith(prefix) for prefix in allowed_prefixes)
+
+    def bash(inp: dict[str, Any]) -> str:
+        cmd = inp["command"]
+        if not _is_devops_command_allowed(cmd):
+            return f"[POLICY DENIED] DevOps agent may only run read-only health-check commands. Got: {cmd!r}"
+        # also run v1 policy check
+        policy = check_command(cmd)
+        if not policy.allowed:
+            return f"[POLICY DENIED] {policy.reason}"
+        try:
+            result = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=30
+            )
+            out = (result.stdout + result.stderr)[:4000]
+            return out if out else "(no output)"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] Command timed out after 30s"
+
+    def submit_health_report(inp: dict[str, Any]) -> str:
+        health_result.update(inp)
+        return "Health report submitted"
+
+    handlers["bash"] = bash
+    handlers["submit_health_report"] = submit_health_report
+    handlers["_health_result"] = health_result  # caller reads this after run
     return handlers

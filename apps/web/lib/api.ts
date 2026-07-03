@@ -145,3 +145,88 @@ export async function fetchArtifacts(taskId: string): Promise<ArtifactRecord[]> 
   if (!res.ok) return [];
   return handleResponse<ArtifactRecord[]>(res);
 }
+
+// ---------------------------------------------------------------------------
+// Epics (Phase 5)
+// ---------------------------------------------------------------------------
+
+export interface EpicTask {
+  taskId: number;
+  title: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface Epic {
+  epicId: string;
+  title: string;
+  description: string;
+  status: string;
+  costEstimate: number | null;
+  costActual: number | null;
+  haltReason: string | null;
+  createdAt: string;
+  updatedAt?: string;
+  tasks?: EpicTask[];
+}
+
+export async function fetchEpics(): Promise<Epic[]> {
+  const res = await fetch("/api/epics", { cache: "no-store" });
+  if (!res.ok) return [];
+  return handleResponse<Epic[]>(res);
+}
+
+export async function fetchEpic(epicId: string): Promise<Epic> {
+  const res = await fetch(`/api/epics/${epicId}`, { cache: "no-store" });
+  return handleResponse<Epic>(res);
+}
+
+export async function createEpic(input: {
+  title: string;
+  description: string;
+  complexityMultiplier?: number;
+}): Promise<{ epicId: string; status: string; costEstimate: number; requiresCostApproval: boolean }> {
+  const res = await fetch("/api/epics", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: input.title,
+      description: input.description,
+      complexity_multiplier: input.complexityMultiplier ?? 1.0,
+    }),
+  });
+  return handleResponse(res);
+}
+
+export async function approveEpic(
+  epicId: string,
+  userId: string,
+): Promise<{ epicId: string; status: string }> {
+  const res = await fetch(`/api/epics/${epicId}/approve`, {
+    method: "POST",
+    headers: { "X-User-Id": userId },
+  });
+  return handleResponse(res);
+}
+
+export async function rejectEpic(
+  epicId: string,
+  userId: string,
+): Promise<{ epicId: string; status: string }> {
+  const res = await fetch(`/api/epics/${epicId}/reject`, {
+    method: "POST",
+    headers: { "X-User-Id": userId },
+  });
+  return handleResponse(res);
+}
+
+export async function approveCost(
+  epicId: string,
+  userId: string,
+): Promise<{ epicId: string; status: string }> {
+  const res = await fetch(`/api/epics/${epicId}/approve-cost`, {
+    method: "POST",
+    headers: { "X-User-Id": userId },
+  });
+  return handleResponse(res);
+}

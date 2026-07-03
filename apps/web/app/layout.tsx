@@ -17,7 +17,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="/tasks" className="text-lg font-semibold tracking-tight">
                 Mission Control
               </a>
-              <span className="text-xs text-slate-400">Stage 0+1+2-lite — see PROJECT.md</span>
+              <nav className="flex items-center gap-4">
+                <a href="/tasks" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Tasks</a>
+                <a href="/epics" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Epics</a>
+                <span className="text-xs text-slate-400">Phase 5</span>
+              </nav>
             </header>
             {children}
           </div>

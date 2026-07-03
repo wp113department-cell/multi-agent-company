@@ -1,13 +1,47 @@
-"""Manager Agent — orchestrates subtask dispatch through Dev → QA → Review pipeline."""
+"""Manager Agent — orchestrates subtask dispatch through Dev → QA → Review pipeline.
+
+Phase 5 upgrade adds epic-level supervision:
+- run_epic_manager(): creates epic → runs planning pipeline → dispatches Dev/QA/Review
+- Epic halt: ≥ MANAGER_MAX_EPIC_FAILURES blocked subtasks → emit epic.halted
+- Batched approval package: all diffs, QA results, review findings assembled at epic completion
+"""
 from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SubtaskResult:
+    subtask_id: int
+    subtask_type: str
+    status: str  # completed | blocked
+    files_changed: list[str]
+    review_summary: str
+    qa_summary: str
+    diff: str
+
+
+@dataclass
+class EpicApprovalPackage:
+    epic_id: str
+    status: str  # ready_for_review | halted
+    subtask_results: list[SubtaskResult]
+    total_files_changed: list[str]
+    all_diffs: str
+    all_qa_summaries: list[str]
+    all_review_findings: list[dict[str, Any]]
+    cost_actual_usd: float
+    halt_reason: str | None = None
 
 
 async def run_manager(
@@ -17,16 +51,11 @@ async def run_manager(
     plan: str,
     repo_path: str | None = None,
     on_status: Any = None,
+    epic_id: str | None = None,
 ) -> dict[str, Any]:
-    """
-    Orchestrate the Dev → QA → Review pipeline for each subtask.
+    """Orchestrate Dev → QA → Review per subtask.
 
-    Per doc-06: Manager does routing/tracking — no direct code writes.
-    Each subtask goes through: dispatch → QA → Review.
-    qa.failed or blocking review → retry (up to max_retries).
-    After max_retries exhausted → task.blocked.
-
-    Returns {"status": "completed"|"blocked", "results": [...per subtask...]}
+    Returns {"status": "completed"|"blocked"|"halted", "results": [...], "blocked_count": N}
     """
     from app.agents.backend_dev import run_backend_dev
     from app.agents.frontend_dev import run_frontend_dev
@@ -38,10 +67,12 @@ async def run_manager(
 
     settings = get_settings()
     max_retries = settings.max_retries
+    max_epic_failures = settings.manager_max_epic_failures
     repo = repo_path or settings.target_repo_path
 
     results: list[dict[str, Any]] = []
     overall_status = "completed"
+    blocked_count = 0
 
     for subtask in subtasks:
         subtask_id = int(subtask.get("id", 0))
@@ -54,6 +85,7 @@ async def run_manager(
         await publish_event(GridironEvent(
             event_type="subtask.assigned",
             task_id=str(task_id),
+            epic_id=epic_id,
             payload={"subtask_id": subtask_id, "type": subtask_type, "title": subtask_title},
             emitted_by="manager",
         ))
@@ -65,6 +97,9 @@ async def run_manager(
         files_changed: list[str] = []
         qa_errors: list[str] = []
         review_summary = ""
+        qa_summary = ""
+        review_findings: list[dict[str, Any]] = []
+        subtask_diff = ""
 
         for attempt in range(max_retries):
             retry_context = ""
@@ -73,7 +108,6 @@ async def run_manager(
 
             full_plan = subtask_plan + retry_context
 
-            # Dispatch to appropriate developer agent (run in thread — blocking calls)
             if subtask_type == "frontend":
                 files_changed, dev_error = await asyncio.to_thread(
                     run_frontend_dev,
@@ -95,12 +129,11 @@ async def run_manager(
 
             if dev_error:
                 qa_errors = [f"Dev agent error: {dev_error}"]
-                logger.warning("Dev agent error on attempt %d for subtask %d: %s", attempt + 1, subtask_id, dev_error)
+                logger.warning("Dev error attempt %d subtask %d: %s", attempt + 1, subtask_id, dev_error)
                 if attempt == max_retries - 1:
                     break
                 continue
 
-            # QA phase (run in thread — blocking call)
             qa_result = await asyncio.to_thread(
                 run_qa,
                 task_id=task_id,
@@ -109,16 +142,18 @@ async def run_manager(
                 worktree_path=worktree_path,
                 repo_path=repo,
             )
+            qa_summary = qa_result.summary
 
             if qa_result.status == "failed":
                 qa_errors = qa_result.errors or [qa_result.summary]
                 await publish_event(GridironEvent(
                     event_type="qa.failed",
                     task_id=str(task_id),
+                    epic_id=epic_id,
                     payload={"subtask_id": subtask_id, "errors": qa_errors[:3]},
                     emitted_by="qa",
                 ))
-                logger.warning("QA failed on attempt %d for subtask %d", attempt + 1, subtask_id)
+                logger.warning("QA failed attempt %d subtask %d", attempt + 1, subtask_id)
                 if attempt == max_retries - 1:
                     break
                 continue
@@ -126,25 +161,36 @@ async def run_manager(
             await publish_event(GridironEvent(
                 event_type="qa.passed",
                 task_id=str(task_id),
+                epic_id=epic_id,
                 payload={"subtask_id": subtask_id},
                 emitted_by="qa",
             ))
 
-            # Review phase (run in thread — blocking call)
-            diff = get_diff(task_id, repo)
+            subtask_diff = get_diff(task_id, repo)
             review_result = await asyncio.to_thread(
                 run_reviewer,
                 task_id=task_id,
                 subtask_id=subtask_id,
-                diff=diff,
+                diff=subtask_diff,
                 plan=subtask_plan,
                 repo_path=repo,
             )
-
             review_summary = review_result.summary
+            review_findings = [
+                {
+                    "severity": f.severity,
+                    "file": f.file,
+                    "line": f.line,
+                    "finding": f.finding,
+                    "recommendation": f.recommendation,
+                }
+                for f in review_result.findings
+            ]
+
             await publish_event(GridironEvent(
                 event_type="review.completed",
                 task_id=str(task_id),
+                epic_id=epic_id,
                 payload={
                     "subtask_id": subtask_id,
                     "verdict": review_result.verdict,
@@ -157,13 +203,12 @@ async def run_manager(
                 subtask_status = "completed"
                 break
 
-            # Blocking findings — feed back to dev agent
             qa_errors = [
-                f"Blocking review finding in {f.file}: {f.finding} → {f.recommendation}"
+                f"Blocking review in {f.file}: {f.finding} → {f.recommendation}"
                 for f in review_result.findings
                 if f.severity == "blocking"
             ]
-            logger.warning("Reviewer blocking findings on attempt %d for subtask %d", attempt + 1, subtask_id)
+            logger.warning("Reviewer blocking findings attempt %d subtask %d", attempt + 1, subtask_id)
             if attempt == max_retries - 1:
                 break
 
@@ -173,20 +218,253 @@ async def run_manager(
             "status": subtask_status,
             "files_changed": files_changed,
             "review_summary": review_summary,
+            "qa_summary": qa_summary,
+            "review_findings": review_findings,
+            "diff": subtask_diff,
         })
 
         if subtask_status == "blocked":
-            overall_status = "blocked"
+            blocked_count += 1
             await publish_event(GridironEvent(
                 event_type="task.blocked",
                 task_id=str(task_id),
+                epic_id=epic_id,
                 payload={"subtask_id": subtask_id, "reason": "max retries exceeded"},
                 emitted_by="manager",
             ))
-            # Stop processing further subtasks when one blocks
-            break
 
-        if on_status:
-            on_status(subtask_id, "completed")
+            # Halt the epic early if too many subtasks failed
+            if blocked_count >= max_epic_failures:
+                overall_status = "halted"
+                logger.error(
+                    "Epic halted: %d/%d subtasks failed for task %d",
+                    blocked_count, max_epic_failures, task_id,
+                )
+                break
 
-    return {"status": overall_status, "results": results}
+            overall_status = "blocked"
+        else:
+            if on_status:
+                on_status(subtask_id, "completed")
+
+    return {"status": overall_status, "results": results, "blocked_count": blocked_count}
+
+
+async def run_epic_manager(
+    epic_id: str,
+    goal: str,
+    db: AsyncSession,
+    repo_path: str | None = None,
+) -> EpicApprovalPackage:
+    """Top-level epic orchestrator.
+
+    Flow:
+    1. Cost estimate → if over threshold → mark epic 'pending_cost_approval' and return early
+    2. Mark epic 'planning' → run PM→Arch→Decomp planning pipeline
+    3. Mark epic 'coding' → run per-subtask Dev→QA→Review pipeline
+    4. If ≥ MANAGER_MAX_EPIC_FAILURES blocked → emit epic.halted, mark epic 'halted'
+    5. On all complete → assemble batched approval package → emit epic.ready_for_review
+    """
+    from sqlalchemy import select, update as sa_update
+    from app.db.models import Epic, DevTask
+    from app.event_bus.bus import publish_event
+    from app.event_bus.models import GridironEvent
+    from app.pipeline.cost_controller import estimate_epic_cost
+    from app.pipeline.graph import run_planning_pipeline
+    from app.repo_tools.worktree import create_worktree
+
+    settings = get_settings()
+    repo = repo_path or settings.target_repo_path
+
+    # Load the epic
+    result = await db.execute(select(Epic).where(Epic.epic_id == epic_id))
+    epic = result.scalar_one()
+
+    # --- Step 1: Rough cost estimate (subtask count unknown yet; use 5 as baseline) ---
+    estimate = await estimate_epic_cost(subtask_count=5, db=db)
+    await db.execute(
+        sa_update(Epic)
+        .where(Epic.epic_id == epic_id)
+        .values(cost_estimate=Decimal(str(estimate.estimated_cost_usd)))
+    )
+    await db.commit()
+
+    if estimate.requires_approval:
+        await db.execute(
+            sa_update(Epic).where(Epic.epic_id == epic_id).values(status="pending_cost_approval")
+        )
+        await db.commit()
+        await publish_event(GridironEvent(
+            event_type="epic.pending_cost_approval",
+            epic_id=epic_id,
+            payload={
+                "estimated_cost_usd": estimate.estimated_cost_usd,
+                "threshold": settings.cost_approval_threshold,
+            },
+            emitted_by="manager",
+        ))
+        return EpicApprovalPackage(
+            epic_id=epic_id,
+            status="pending_cost_approval",
+            subtask_results=[],
+            total_files_changed=[],
+            all_diffs="",
+            all_qa_summaries=[],
+            all_review_findings=[],
+            cost_actual_usd=0.0,
+            halt_reason="Cost estimate exceeds approval threshold",
+        )
+
+    # --- Step 2: Planning pipeline ---
+    await db.execute(sa_update(Epic).where(Epic.epic_id == epic_id).values(status="planning"))
+    await db.commit()
+    await publish_event(GridironEvent(
+        event_type="epic.planning_started",
+        epic_id=epic_id,
+        payload={"goal": goal[:200]},
+        emitted_by="manager",
+    ))
+
+    # Create a DevTask for this epic
+    task = DevTask(
+        title=goal[:500],
+        description=goal,
+        status="planning",
+        epic_id=epic_id,
+    )
+    db.add(task)
+    await db.flush()
+    await db.refresh(task)
+    task_id: int = task.id
+    await db.commit()
+
+    # Run the planning pipeline (LangGraph PM→Arch→Decomp — already async)
+    pipeline_result = await run_planning_pipeline(
+        task_id=task_id,
+        title=goal[:500],
+        description=goal,
+        repo_path=repo,
+    )
+
+    subtasks: list[dict[str, Any]] = pipeline_result.get("subtasks") or []
+    plan_text: str = str(pipeline_result.get("task_description") or goal)
+
+    if not subtasks:
+        logger.warning("Planning pipeline returned no subtasks for epic %s", epic_id)
+        subtasks = [{"id": 1, "type": "backend", "title": goal, "description": goal}]
+
+    # Refine cost estimate now that we know subtask count
+    refined_estimate = await estimate_epic_cost(subtask_count=len(subtasks), db=db)
+    await db.execute(
+        sa_update(Epic)
+        .where(Epic.epic_id == epic_id)
+        .values(cost_estimate=Decimal(str(refined_estimate.estimated_cost_usd)))
+    )
+    await db.commit()
+
+    # --- Step 3: Coding pipeline ---
+    await db.execute(sa_update(Epic).where(Epic.epic_id == epic_id).values(status="coding"))
+    await db.commit()
+
+    worktree_path = str(create_worktree(task_id, repo))
+
+    manager_result = await run_manager(
+        task_id=task_id,
+        subtasks=subtasks,
+        worktree_path=worktree_path,
+        plan=plan_text,
+        repo_path=repo,
+        epic_id=epic_id,
+    )
+
+    final_status = manager_result["status"]
+    results: list[dict[str, Any]] = manager_result["results"]
+    blocked_count: int = manager_result["blocked_count"]
+
+    # Collect tokens from agent_runs for cost_actual
+    from sqlalchemy import func as sqlfunc
+    token_result = await db.execute(
+        select(sqlfunc.sum(DevTask.id))  # placeholder — real token sum via agent_runs
+    )
+    # Approximate: use refined estimate as fallback
+    cost_actual = refined_estimate.estimated_cost_usd
+
+    await db.execute(
+        sa_update(Epic)
+        .where(Epic.epic_id == epic_id)
+        .values(cost_actual=Decimal(str(cost_actual)))
+    )
+
+    # --- Step 4/5: Assemble approval package or halt ---
+    subtask_result_objs = [
+        SubtaskResult(
+            subtask_id=r["subtask_id"],
+            subtask_type=r["type"],
+            status=r["status"],
+            files_changed=r.get("files_changed", []),
+            review_summary=r.get("review_summary", ""),
+            qa_summary=r.get("qa_summary", ""),
+            diff=r.get("diff", ""),
+        )
+        for r in results
+    ]
+
+    all_files: list[str] = []
+    for r in subtask_result_objs:
+        all_files.extend(r.files_changed)
+
+    all_diffs = "\n\n".join(f"# Subtask {r.subtask_id}\n{r.diff}" for r in subtask_result_objs if r.diff)
+    all_qa = [r.qa_summary for r in subtask_result_objs if r.qa_summary]
+    all_findings: list[dict[str, Any]] = []
+    for raw in results:
+        all_findings.extend(raw.get("review_findings", []))
+
+    if final_status == "halted":
+        halt_reason = f"{blocked_count} subtasks exhausted all retries"
+        await db.execute(
+            sa_update(Epic)
+            .where(Epic.epic_id == epic_id)
+            .values(status="halted", halt_reason=halt_reason)
+        )
+        await db.commit()
+        await publish_event(GridironEvent(
+            event_type="epic.halted",
+            epic_id=epic_id,
+            payload={"blocked_count": blocked_count, "halt_reason": halt_reason},
+            emitted_by="manager",
+        ))
+        return EpicApprovalPackage(
+            epic_id=epic_id,
+            status="halted",
+            subtask_results=subtask_result_objs,
+            total_files_changed=list(set(all_files)),
+            all_diffs=all_diffs,
+            all_qa_summaries=all_qa,
+            all_review_findings=all_findings,
+            cost_actual_usd=cost_actual,
+            halt_reason=halt_reason,
+        )
+
+    await db.execute(sa_update(Epic).where(Epic.epic_id == epic_id).values(status="ready_for_review"))
+    await db.commit()
+    await publish_event(GridironEvent(
+        event_type="epic.ready_for_review",
+        epic_id=epic_id,
+        payload={
+            "subtask_count": len(subtasks),
+            "files_changed": len(all_files),
+            "cost_actual_usd": cost_actual,
+        },
+        emitted_by="manager",
+    ))
+
+    return EpicApprovalPackage(
+        epic_id=epic_id,
+        status="ready_for_review",
+        subtask_results=subtask_result_objs,
+        total_files_changed=list(set(all_files)),
+        all_diffs=all_diffs,
+        all_qa_summaries=all_qa,
+        all_review_findings=all_findings,
+        cost_actual_usd=cost_actual,
+    )

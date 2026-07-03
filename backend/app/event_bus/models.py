@@ -42,6 +42,13 @@ CORE_EVENT_TYPES = frozenset({
     "review.completed",
     "epic.completed",
     "task.blocked",
+    # Phase 5 epic lifecycle events
+    "epic.pending_cost_approval",
+    "epic.planning_started",
+    "epic.ready_for_review",
+    "epic.halted",
+    "epic.approved",
+    "epic.rejected",
 })
 
 

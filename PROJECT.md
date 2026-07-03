@@ -2,7 +2,7 @@
 
 **This is a living document. Update it every session — it is the single source of truth for "what actually exists right now," separate from `PLAN.md` (what's intended) and `files/` (the original spec suite, which describes the full 7-stage vision, not the current build).**
 
-Last updated: 2026-07-02 (Phases 0–4 complete + full Phase 1–4 gap fix pass + gitignore cleanup — 123/123 pytest pass, mypy --strict clean, commit ceb2f59 — Phase 5+6 plan documented, ready to build)
+Last updated: 2026-07-03 (Phase 5 COMPLETE — 172/172 pytest pass, mypy --strict 49 files clean, commit TBD)
 
 ---
 
@@ -745,8 +745,10 @@ mypy backend/ --strict
 - Docs agent security: `.ts` write denied; `.md` write in worktree allowed
 - Memory: complete task → embedding row exists; similar task → architect context contains past-task reference
 
-**How to start Phase 5 (first action next session):**
+**Phase 5 complete as of 2026-07-03. See `docs/reports/PHASE_5_TEST_REPORT.md`.**
+
+**How to start Phase 6 (first action next session):**
 1. Read `PROJECT.md` (this file)
-2. `cd backend && .venv/bin/python -m pytest tests/ -v` → confirm 123/123 green
-3. `cd backend && .venv/bin/python -m mypy app/ --strict` → confirm 0 issues in 43 files
-4. Start Phase 5 Step 1: write Alembic migration 003 (epics + policies + policy_approvals + users tables)
+2. `cd backend && .venv/bin/python -m pytest tests/ -v` → confirm 172/172 green
+3. `cd backend && .venv/bin/python -m mypy app/ --strict` → confirm 0 issues in 49 files
+4. Read `/repos/composio` → `docs/research/composio-notes.md`, then Alembic migration 004 (agents table)

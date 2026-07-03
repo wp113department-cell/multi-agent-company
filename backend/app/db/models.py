@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import BigInteger, Boolean, Float, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -40,6 +40,7 @@ class DevTask(Base):
     plan: Mapped[str | None] = mapped_column(Text, nullable=True)
     diff: Mapped[str | None] = mapped_column(Text, nullable=True)
     files_touched: Mapped[Any] = mapped_column(ARRAY(Text), nullable=True)
+    epic_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("epics.epic_id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
@@ -49,6 +50,7 @@ class DevTask(Base):
     pipeline_state: Mapped[PipelineState | None] = relationship(
         back_populates="task", uselist=False, cascade="all, delete-orphan"
     )
+    epic: Mapped["Epic | None"] = relationship("Epic", back_populates="tasks", foreign_keys=[epic_id])
 
 
 class TaskLog(Base):
@@ -193,4 +195,64 @@ class Artifact(Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
     storage_path: Mapped[str] = mapped_column(Text)
     created_by_agent: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+# ---- Phase 5 tables ----
+
+class Epic(Base):
+    """High-level goals that span multiple dev_tasks."""
+    __tablename__ = "epics"
+
+    epic_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    title: Mapped[str] = mapped_column(String(500))
+    description: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(50), default="pending")
+    cost_estimate: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
+    cost_actual: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
+    halt_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+    tasks: Mapped[list["DevTask"]] = relationship("DevTask", back_populates="epic")
+
+
+class Policy(Base):
+    """Glob-pattern approval rules (Policy Engine v2)."""
+    __tablename__ = "policies"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200))
+    trigger_pattern: Mapped[str] = mapped_column(String(500))
+    required_approval_role: Mapped[str] = mapped_column(String(100))
+    blocking: Mapped[bool] = mapped_column(Boolean, default=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+    approvals: Mapped[list["PolicyApproval"]] = relationship(back_populates="policy", cascade="all, delete-orphan")
+
+
+class PolicyApproval(Base):
+    """Audit log: who approved which policy gate, when."""
+    __tablename__ = "policy_approvals"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    policy_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("policies.id", ondelete="CASCADE"))
+    task_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    epic_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    file_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    approver_role: Mapped[str] = mapped_column(String(100))
+    decision: Mapped[str] = mapped_column(String(50))  # approved | rejected
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+    policy: Mapped[Policy] = relationship(back_populates="approvals")
+
+
+class UserRole(Base):
+    """Per-user role: viewer (default) or approver."""
+    __tablename__ = "user_roles"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(200), unique=True)
+    role: Mapped[str] = mapped_column(String(50), default="viewer")
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
