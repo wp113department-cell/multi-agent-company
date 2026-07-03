@@ -61,13 +61,16 @@ def architect_node(state: PipelineState) -> PipelineState:
     handlers["submit_architect_plan"] = submit_architect_plan
 
     pm_brief = json.dumps(state.get("pm_brief", {}), indent=2)
+    memory_context = state.get("memory_context", "")
+    memory_block = f"\n\n{memory_context}" if memory_context else ""
 
     messages = [
         {
             "role": "user",
             "content": (
                 f"Task: {state['task_title']}\n\n"
-                f"PM Brief:\n{pm_brief}\n\n"
+                f"PM Brief:\n{pm_brief}"
+                f"{memory_block}\n\n"
                 "Use read_file and list_files to explore the codebase, then submit your technical plan "
                 "using the submit_architect_plan tool."
             ),

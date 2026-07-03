@@ -19,6 +19,9 @@ class PipelineState(TypedDict, total=False):
     # Decomposer output
     subtasks: list[dict[str, Any]]
 
+    # Engineering memory context (pre-fetched before pipeline runs)
+    memory_context: str
+
     # Control flow
     stage: str        # pm | architect | decomposer | done | blocked
     error: str

@@ -752,3 +752,130 @@ mypy backend/ --strict
 2. `cd backend && .venv/bin/python -m pytest tests/ -v` → confirm 172/172 green
 3. `cd backend && .venv/bin/python -m mypy app/ --strict` → confirm 0 issues in 49 files
 4. Read `/repos/composio` → `docs/research/composio-notes.md`, then Alembic migration 004 (agents table)
+
+---
+
+## Phase 6 — Agent Registry + Research Agent + Docs Agent + Engineering Memory v1 (2026-07-03)
+
+**Phase 6 COMPLETE.** Baseline coming in was 172/172 pass, mypy clean 49 files.
+
+### What was built
+
+**Research (Step 0):**
+- `/repos/composio` not present in environment — documented architectural patterns from spec + public docs
+- `docs/research/composio-notes.md` — capability-tag dispatch, metrics tracking, tool manifest patterns
+- `pgvector==0.4.2` installed, added to `requirements.txt`
+
+**Alembic Migration 004 (`backend/migrations/versions/004_phase6_tables.py`):**
+- `agents` table — UUID PK, name (unique), capability_tags ARRAY TEXT, tool_list JSONB, prompt_ref, version, success_rate, avg_retries, last_computed_at, created_at
+- `memory_embeddings` table — id, task_id, epic_id, outcome, description, summary, files_changed ARRAY TEXT, embedding vector(1536), created_at
+- `CREATE EXTENSION IF NOT EXISTS vector` (pgvector)
+- HNSW index for cosine ANN search on embeddings
+- Seeded 10 canonical agent rows
+
+**ORM Models (`backend/app/db/models.py`):**
+- `Agent` — maps `agents` table; capability_tags = ARRAY(Text), tool_list = JSONB
+- `MemoryEmbedding` — maps `memory_embeddings`; embedding = Vector(1536)
+- Added `from pgvector.sqlalchemy import Vector`
+
+**Config (`backend/app/config.py`) — 3 new vars:**
+- `RESEARCH_ENABLED` (default True)
+- `MEMORY_ENABLED` (default True)
+- `MEMORY_TOP_K` (default 3)
+
+**Agent Registry API (`backend/app/api/registry.py`):**
+- `GET /api/agents?tag=...` — list with optional tag filter
+- `GET /api/agents/{name}` — single agent
+- `GET /api/agents/{name}/metrics` — live success_rate computed from agent_runs, persisted snapshot
+- `POST /api/agents` — register/upsert agent
+
+**Dispatcher Refactor (`backend/app/pipeline/dispatcher.py`):**
+- `pick_agent_by_tag(tag, db)` — queries `agents` table by `tag = ANY(capability_tags)`, highest success_rate first
+- `dispatch_subtask()` accepts optional `db`; tries registry lookup, falls back to `_FALLBACK_ROUTING`
+- Proof: new agent inserted with correct tag is auto-dispatched, zero code change
+
+**Research Agent:**
+- `backend/roles/research.md` — read_file, list_files, web_search; NO write, NO bash, NO patch
+- `backend/app/agents/research.py` — `run_research()` → `(ResearchReport | None, error, tokens_in, tokens_out)`
+- `ResearchReport`: findings, relevant_libraries, recommended_approach, risks, raw_text
+- `_WEB_SEARCH_TOOL` placeholder — returns "web_search_unavailable" when no MCP wired
+- `RESEARCH_TOOLS = READ_ONLY_TOOLS + [web_search, submit_research]`
+- `make_research_handlers()` in tools.py
+
+**Documentation Agent:**
+- `backend/roles/docs.md` — write_file scoped to *.md + docs/**; NO bash, NO patch
+- `backend/app/agents/docs.py` — `run_docs(epic_title, ..., worktree_path)` → `(DocsReport | None, error, tokens_in, tokens_out)`
+- `DocsReport`: files_written, summary, raw_text
+- `DOCS_TOOLS = READ_ONLY_TOOLS + [write_file (md-scoped), submit_docs]`
+- `make_docs_handlers()` — write_file enforces `.md`/`docs/**` gate + v1 policy
+
+**Engineering Memory v1 (`backend/app/memory/store.py`):**
+- `_embed(text)` — Voyage AI voyage-code-2, zero-vector fallback when no API key
+- `embed_task_outcome(task_id, description, summary, outcome, files_changed, db, epic_id)` — async
+- `query_similar_tasks(description, db, top_k)` — pgvector `<=>` cosine distance, returns [] when disabled/no API key
+- `format_memory_context(similar_tasks)` — markdown block for agent prompt injection
+- `backend/app/api/memory.py` — `GET /api/memory/patterns`, `GET /api/memory/search?q=...`
+
+**Memory Integration:**
+- `PipelineState` — added `memory_context: str` field
+- `run_planning_pipeline()` — accepts `db` param, pre-fetches similar tasks, injects into initial state
+- `architect_node` — reads `memory_context` from state, appends to user message
+- `run_epic_manager()` — passes `db` to planning pipeline; on epic complete/halted → `embed_task_outcome()`
+- `ContextResult` — added `memory_context: str = ""` field; `build_context()` accepts it as param
+
+**Wiring:**
+- `main.py` — registered `registry_router` and `memory_router`
+- `.env.example` — added RESEARCH_ENABLED, MEMORY_ENABLED, MEMORY_TOP_K
+
+### New test files
+
+| Test file | Tests | Description |
+|---|---|---|
+| `tests/test_agent_registry.py` | 9 | Metrics math, tag dispatch, fallback routing, ORM fields |
+| `tests/test_docs_agent.py` | 8 | .ts/.py/.json write denied, .md write allowed, submit_docs stored |
+| `tests/test_memory.py` | 13 | Outcome text, zero vector, embed insert, disabled no-op, DB error rollback, similarity query, format context |
+| `tests/pending/test_research_agent.py` | 3 | Real API run, disabled flag, tool list (skip without API keys) |
+
+### Test results — Phase 6
+
+```
+pytest tests/ -v
+→ 205/205 passed, 54 skipped (all pending skip cleanly)
+1 warning: AsyncMock.add() coroutine (test artifact only; store.py correct)
+
+mypy app/ --strict
+→ Success: no issues found in 55 source files
+```
+
+### Files created this session
+
+**New:**
+- `docs/research/composio-notes.md`
+- `backend/migrations/versions/004_phase6_tables.py`
+- `backend/roles/research.md`
+- `backend/roles/docs.md`
+- `backend/app/agents/research.py`
+- `backend/app/agents/docs.py`
+- `backend/app/memory/__init__.py`
+- `backend/app/memory/store.py`
+- `backend/app/api/registry.py`
+- `backend/app/api/memory.py`
+- `backend/tests/test_agent_registry.py`
+- `backend/tests/test_docs_agent.py`
+- `backend/tests/test_memory.py`
+- `backend/tests/pending/test_research_agent.py`
+- `docs/reports/PHASE_6_TEST_REPORT.md`
+
+**Modified:**
+- `backend/requirements.txt` — added pgvector==0.4.2
+- `backend/app/config.py` — 3 new Phase 6 vars
+- `backend/app/db/models.py` — Agent, MemoryEmbedding ORM classes + Vector import
+- `backend/app/agents/tools.py` — RESEARCH_TOOLS, DOCS_TOOLS, make_research_handlers(), make_docs_handlers()
+- `backend/app/agents/architect.py` — memory_context injected into user message
+- `backend/app/agents/manager.py` — db passed to planning pipeline, embed_task_outcome() calls
+- `backend/app/pipeline/state.py` — memory_context field
+- `backend/app/pipeline/graph.py` — db param, memory pre-fetch in run_planning_pipeline()
+- `backend/app/pipeline/dispatcher.py` — pick_agent_by_tag(), registry-first dispatch
+- `backend/app/repo_tools/context_builder.py` — memory_context field + param
+- `backend/app/main.py` — registry_router, memory_router
+- `backend/.env.example` — Phase 6 vars

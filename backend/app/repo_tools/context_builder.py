@@ -39,6 +39,7 @@ class ContextResult:
     call_graph_edges: dict[str, list[str]]
     semantic_matches: list[str]
     summary: str
+    memory_context: str = ""  # pre-fetched engineering memory (similar past tasks)
 
 
 def _keyword_score(file_path: str, symbols: list[str], query_tokens: list[str]) -> float:
@@ -53,6 +54,7 @@ def build_context(
     embeddings: list[dict[str, object]] | None = None,
     top_k: int = 15,
     use_cache: bool = True,
+    memory_context: str = "",
 ) -> ContextResult:
     """
     Build context for a task by combining:
@@ -119,6 +121,7 @@ def build_context(
         call_graph_edges={k: v for k, v in call_graph.items() if k in relevant_files},
         semantic_matches=semantic_matches,
         summary=summary,
+        memory_context=memory_context,
     )
 
     if use_cache:

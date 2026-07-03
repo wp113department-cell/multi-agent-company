@@ -4,6 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import BigInteger, Boolean, Float, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -255,4 +256,37 @@ class UserRole(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String(200), unique=True)
     role: Mapped[str] = mapped_column(String(50), default="viewer")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+# ---- Phase 6 tables ----
+
+class Agent(Base):
+    """Registry of all available agents with capability tags and performance metrics."""
+    __tablename__ = "agents"
+
+    agent_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    capability_tags: Mapped[Any] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    tool_list: Mapped[Any] = mapped_column(JSONB, nullable=False, default=list)
+    prompt_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[str] = mapped_column(String(50), default="1.0")
+    success_rate: Mapped[float] = mapped_column(Float, default=1.0)
+    avg_retries: Mapped[float] = mapped_column(Float, default=0.0)
+    last_computed_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class MemoryEmbedding(Base):
+    """pgvector store: task outcome embeddings for engineering memory."""
+    __tablename__ = "memory_embeddings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(100), index=True)
+    epic_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    outcome: Mapped[str] = mapped_column(String(50))  # completed | blocked
+    description: Mapped[str] = mapped_column(Text)
+    summary: Mapped[str] = mapped_column(Text)
+    files_changed: Mapped[Any] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    embedding: Mapped[Any] = mapped_column(Vector(1536), nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())

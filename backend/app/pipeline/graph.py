@@ -99,12 +99,26 @@ async def run_planning_pipeline(
     title: str,
     description: str,
     repo_path: str,
+    db: Any = None,
 ) -> PipelineState:
     """
     Run PM → Architect → Decomposer.
     Stops at human_review checkpoint (stage='awaiting_approval').
     Call resume_pipeline() to continue.
+
+    If db is provided, pre-fetches similar past tasks from engineering memory and
+    injects the context into the initial state for the Architect Agent to use.
     """
+    from app.memory.store import query_similar_tasks, format_memory_context
+
+    memory_context = ""
+    if db is not None:
+        try:
+            similar = await query_similar_tasks(description, db=db)
+            memory_context = format_memory_context(similar)
+        except Exception as exc:
+            logger.warning("Memory query failed before planning: %s", exc)
+
     graph = get_graph()
     config = {"configurable": {"thread_id": f"task-{task_id}"}}
 
@@ -114,6 +128,7 @@ async def run_planning_pipeline(
         "task_description": description,
         "repo_path": repo_path,
         "stage": "pm",
+        "memory_context": memory_context,
     }
 
     result: PipelineState = await graph.ainvoke(initial_state, config=config)
