@@ -14,18 +14,26 @@ def _run(args: list[str], cwd: str) -> str:
     return result.stdout.strip()
 
 
-def worktree_path(task_id: int | str) -> Path:
+def worktree_path(task_id: int | str, epic_id: str | None = None) -> Path:
     settings = get_settings()
-    return Path(settings.worktrees_dir) / f"task-{task_id}"
+    base = Path(settings.worktrees_dir)
+    if epic_id:
+        # Per-epic namespace avoids cross-epic path collisions under concurrency
+        return base / f"epic-{epic_id}" / f"task-{task_id}"
+    return base / f"task-{task_id}"
 
 
-def create_worktree(task_id: int | str, repo_path: str | None = None) -> Path:
+def create_worktree(
+    task_id: int | str,
+    repo_path: str | None = None,
+    epic_id: str | None = None,
+) -> Path:
     settings = get_settings()
     base_repo = repo_path or settings.target_repo_path
-    wt_path = worktree_path(task_id)
+    wt_path = worktree_path(task_id, epic_id=epic_id)
     branch = f"agent/task-{task_id}"
 
-    os.makedirs(settings.worktrees_dir, exist_ok=True)
+    os.makedirs(wt_path.parent, exist_ok=True)
     if wt_path.exists():
         return wt_path
 
@@ -55,10 +63,14 @@ def preserve_worktree(task_id: int | str) -> None:
         (wt_path / ".gridiron-preserved").touch()
 
 
-def remove_worktree(task_id: int | str, repo_path: str | None = None) -> None:
+def remove_worktree(
+    task_id: int | str,
+    repo_path: str | None = None,
+    epic_id: str | None = None,
+) -> None:
     settings = get_settings()
     base_repo = repo_path or settings.target_repo_path
-    wt_path = worktree_path(task_id)
+    wt_path = worktree_path(task_id, epic_id=epic_id)
 
     if wt_path.exists():
         # Remove sentinel if present

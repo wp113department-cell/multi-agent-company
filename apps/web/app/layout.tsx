@@ -20,7 +20,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <nav className="flex items-center gap-4">
                 <a href="/tasks" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Tasks</a>
                 <a href="/epics" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Epics</a>
-                <span className="text-xs text-slate-400">Phase 5</span>
+                <a href="/goals" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Goals</a>
+                <a href="/metrics" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Metrics</a>
               </nav>
             </header>
             {children}

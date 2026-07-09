@@ -67,7 +67,7 @@ def run_frontend_dev(
             )
 
         try:
-            _, tokens_in, tokens_out = run_agent(
+            _, tokens_in, tokens_out, *_ = run_agent(
                 role_name="frontend_dev",
                 model=settings.model_coder,
                 messages=messages,

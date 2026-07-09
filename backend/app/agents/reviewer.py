@@ -72,7 +72,7 @@ def run_reviewer(
     ]
 
     try:
-        _, tokens_in, tokens_out = run_agent(
+        _, tokens_in, tokens_out, *_ = run_agent(
             role_name="reviewer",
             model=settings.model_coder,
             messages=messages,

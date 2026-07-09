@@ -77,6 +77,8 @@ class AgentRun(Base):
     model_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     tokens_in: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tokens_out: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cache_read_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cache_creation_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cost_estimate: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -275,6 +277,19 @@ class Agent(Base):
     avg_retries: Mapped[float] = mapped_column(Float, default=0.0)
     last_computed_at: Mapped[datetime] = mapped_column(server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class Goal(Base):
+    """Plain-language goal from a stakeholder — maps to one or more epics."""
+    __tablename__ = "goals"
+
+    goal_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    text: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(50), default="pending")
+    epic_ids: Mapped[Any] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
 
 class MemoryEmbedding(Base):

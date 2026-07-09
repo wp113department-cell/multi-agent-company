@@ -230,3 +230,85 @@ export async function approveCost(
   });
   return handleResponse(res);
 }
+
+// ---------------------------------------------------------------------------
+// Goals (Phase 7) — plain-language goals → epics via Executive Agent
+// ---------------------------------------------------------------------------
+
+export interface Goal {
+  goalId: string;
+  text: string;
+  status: string;
+  epicIds: string[];
+  summary: string | null;
+}
+
+export async function fetchGoals(): Promise<Goal[]> {
+  const res = await fetch("/api/goals", { cache: "no-store" });
+  if (!res.ok) return [];
+  return handleResponse<Goal[]>(res);
+}
+
+export async function fetchGoal(goalId: string): Promise<Goal> {
+  const res = await fetch(`/api/goals/${goalId}`, { cache: "no-store" });
+  return handleResponse<Goal>(res);
+}
+
+export async function createGoal(text: string): Promise<Goal> {
+  const res = await fetch("/api/goals", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  return handleResponse<Goal>(res);
+}
+
+// ---------------------------------------------------------------------------
+// Metrics (Phase 7) — productivity dashboard
+// ---------------------------------------------------------------------------
+
+export interface AgentTypeSummary {
+  agentType: string;
+  runCount: number;
+  totalTokensIn: number;
+  totalTokensOut: number;
+  totalCacheReadTokens: number;
+  totalCacheCreationTokens: number;
+  cacheHitRate: number;
+}
+
+export interface SystemMetrics {
+  totalEpics: number;
+  epicsByStatus: Record<string, number>;
+  totalAgentRuns: number;
+  totalTokensIn: number;
+  totalTokensOut: number;
+  totalCacheReadTokens: number;
+  totalCacheCreationTokens: number;
+  cacheHitRate: number;
+  agentTypeBreakdown: AgentTypeSummary[];
+}
+
+export interface EpicCostSummary {
+  epicId: string;
+  title: string;
+  status: string;
+  tokensIn: number;
+  tokensOut: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  cacheHitRate: number;
+  costEstimate: number | null;
+  costActual: number | null;
+}
+
+export async function fetchSystemMetrics(): Promise<SystemMetrics> {
+  const res = await fetch("/api/metrics", { cache: "no-store" });
+  return handleResponse<SystemMetrics>(res);
+}
+
+export async function fetchEpicCosts(): Promise<EpicCostSummary[]> {
+  const res = await fetch("/api/metrics/epics", { cache: "no-store" });
+  if (!res.ok) return [];
+  return handleResponse<EpicCostSummary[]>(res);
+}

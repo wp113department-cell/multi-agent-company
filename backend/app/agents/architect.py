@@ -78,7 +78,7 @@ def architect_node(state: PipelineState) -> PipelineState:
     ]
 
     try:
-        _, tokens_in, tokens_out = run_agent(
+        _, tokens_in, tokens_out, *_ = run_agent(
             role_name="architect",
             model=settings.model_planner,
             messages=messages,
