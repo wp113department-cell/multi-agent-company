@@ -112,8 +112,17 @@ export default function TaskDetailPage() {
           <h1 className="text-lg font-semibold">{task.title}</h1>
           <StatusBadge status={task.status} />
         </div>
-        <p className="mb-3 text-sm text-slate-500">
-          {task.project ?? "no project"} · {task.priority} priority · {task.assignedAgent ?? "unassigned"}
+        <p className="mb-3 text-sm text-slate-500 flex items-center gap-2 flex-wrap">
+          <span>{task.priority} priority</span>
+          {task.repoName ? (
+            <span className="inline-flex items-center gap-1 rounded bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-xs font-medium text-indigo-700">
+              <span>📁</span> {task.repoName}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
+              Default repo
+            </span>
+          )}
         </p>
         {task.description && <p className="mb-4 text-sm text-slate-700">{task.description}</p>}
 

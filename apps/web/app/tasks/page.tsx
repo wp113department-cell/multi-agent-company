@@ -55,9 +55,9 @@ export default function TaskListPage() {
         )}
         <ul className="divide-y divide-slate-100">
           {tasks?.map((task) => (
-            <li key={task.taskId}>
+            <li key={task.id}>
               <Link
-                href={`/tasks/${task.taskId}`}
+                href={`/tasks/${task.id}`}
                 className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-slate-50"
               >
                 <div className="min-w-0">

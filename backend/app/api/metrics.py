@@ -9,7 +9,8 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+from pydantic.alias_generators import to_camel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +21,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
 
 
-class AgentTypeSummary(BaseModel):
+class _CamelModel(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+class AgentTypeSummary(_CamelModel):
     agent_type: str
     run_count: int
     total_tokens_in: int
@@ -30,7 +35,7 @@ class AgentTypeSummary(BaseModel):
     cache_hit_rate: float
 
 
-class SystemMetrics(BaseModel):
+class SystemMetrics(_CamelModel):
     total_epics: int
     epics_by_status: dict[str, int]
     total_agent_runs: int
@@ -42,7 +47,7 @@ class SystemMetrics(BaseModel):
     agent_type_breakdown: list[AgentTypeSummary]
 
 
-class EpicCostSummary(BaseModel):
+class EpicCostSummary(_CamelModel):
     epic_id: str
     title: str
     status: str
@@ -55,7 +60,7 @@ class EpicCostSummary(BaseModel):
     cost_actual: float | None
 
 
-@router.get("", response_model=SystemMetrics)
+@router.get("", response_model=SystemMetrics, response_model_by_alias=True)
 async def get_system_metrics(db: AsyncSession = Depends(get_db)) -> Any:
     # Epic status counts
     epic_result = await db.execute(
@@ -118,7 +123,7 @@ async def get_system_metrics(db: AsyncSession = Depends(get_db)) -> Any:
     )
 
 
-@router.get("/epics", response_model=list[EpicCostSummary])
+@router.get("/epics", response_model=list[EpicCostSummary], response_model_by_alias=True)
 async def get_epic_cost_breakdown(db: AsyncSession = Depends(get_db)) -> Any:
     epics_result = await db.execute(select(Epic).order_by(Epic.created_at.desc()))
     epics = epics_result.scalars().all()

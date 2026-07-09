@@ -42,6 +42,7 @@ class DevTask(Base):
     diff: Mapped[str | None] = mapped_column(Text, nullable=True)
     files_touched: Mapped[Any] = mapped_column(ARRAY(Text), nullable=True)
     epic_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("epics.epic_id", ondelete="SET NULL"), nullable=True)
+    repo_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("repos.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
@@ -52,6 +53,7 @@ class DevTask(Base):
         back_populates="task", uselist=False, cascade="all, delete-orphan"
     )
     epic: Mapped["Epic | None"] = relationship("Epic", back_populates="tasks", foreign_keys=[epic_id])
+    repo: Mapped["Repo | None"] = relationship("Repo", foreign_keys=[repo_id])
 
 
 class TaskLog(Base):
@@ -290,6 +292,21 @@ class Goal(Base):
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+
+class Repo(Base):
+    """GitHub repos that have been cloned for agents to work on."""
+    __tablename__ = "repos"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    github_url: Mapped[str] = mapped_column(Text, unique=True)
+    name: Mapped[str] = mapped_column(String(200))
+    local_path: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(50), default="cloning")  # cloning | ready | error
+    error_msg: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    cloned_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
 class MemoryEmbedding(Base):

@@ -23,8 +23,9 @@ class Settings(BaseSettings):
     voyage_dimensions: int = Field(default=1536, description="Embedding vector dimensions")
 
     # Repo
-    target_repo_path: str = Field(default=".", description="Path to the codebase the agent operates on")
+    target_repo_path: str = Field(default=".", description="Path to the codebase the agent operates on (fallback when no repo is activated via UI)")
     worktrees_dir: str = Field(default="/tmp/gridiron-worktrees", description="Where git worktrees are created")
+    repos_dir: str = Field(default="/tmp/gridiron-repos", description="Where cloned GitHub repos are stored")
 
     # Pipeline behaviour
     pipeline_mode: str = Field(default="full", description="simple=skip planning, full=PM→Architect→Decomposer")

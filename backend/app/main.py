@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.tasks import router as tasks_router
-from app.api.repo import router as repo_router
+from app.api.repo import router as repo_router, init_active_repo, get_active_repo_path
 from app.api.artifacts import router as artifacts_router
 from app.api.epics import router as epics_router
 from app.api.registry import router as registry_router
@@ -45,7 +45,8 @@ async def _weekly_reindex_loop(repo_path: str) -> None:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = get_settings()
     logging.basicConfig(level=settings.log_level.upper())
-    reindex_task = asyncio.create_task(_weekly_reindex_loop(settings.target_repo_path))
+    await init_active_repo()
+    reindex_task = asyncio.create_task(_weekly_reindex_loop(get_active_repo_path()))
     yield
     reindex_task.cancel()
     try:

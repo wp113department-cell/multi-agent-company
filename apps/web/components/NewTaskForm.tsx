@@ -1,20 +1,30 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { createTask } from "../lib/api";
+import { createTask, listRepos } from "../lib/api";
 
 export function NewTaskForm() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<"low" | "medium" | "high">("medium");
+  const [repoId, setRepoId] = useState<number | null>(null);
   const queryClient = useQueryClient();
 
+  const { data: repoData } = useQuery({
+    queryKey: ["repos"],
+    queryFn: listRepos,
+    staleTime: 30000,
+  });
+
+  const readyRepos = repoData?.repos.filter((r) => r.status === "ready") ?? [];
+
   const mutation = useMutation({
-    mutationFn: () => createTask({ title, description, priority }),
+    mutationFn: () => createTask({ title, description, repoId }),
     onSuccess: () => {
       setTitle("");
       setDescription("");
+      setRepoId(null);
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
     },
   });
@@ -42,9 +52,9 @@ export function NewTaskForm() {
         value={description}
         onChange={(e) => setDescription(e.target.value)}
       />
-      <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2 flex-wrap">
         <select
-          className="rounded border border-slate-300 px-2 py-1 text-sm"
+          className="rounded border border-slate-300 px-2 py-1.5 text-sm"
           value={priority}
           onChange={(e) => setPriority(e.target.value as typeof priority)}
         >
@@ -52,10 +62,25 @@ export function NewTaskForm() {
           <option value="medium">medium</option>
           <option value="high">high</option>
         </select>
+
+        {/* Repo selector */}
+        <select
+          className="rounded border border-slate-300 px-2 py-1.5 text-sm flex-1 min-w-0"
+          value={repoId ?? ""}
+          onChange={(e) => setRepoId(e.target.value ? Number(e.target.value) : null)}
+        >
+          <option value="">Default repo</option>
+          {readyRepos.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.name} {r.isActive ? "(active)" : ""}
+            </option>
+          ))}
+        </select>
+
         <button
           type="submit"
           disabled={mutation.isPending}
-          className="rounded bg-slate-900 px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          className="rounded bg-slate-900 px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50 whitespace-nowrap"
         >
           {mutation.isPending ? "Submitting…" : "Submit task"}
         </button>

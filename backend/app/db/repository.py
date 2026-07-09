@@ -15,8 +15,8 @@ class TransitionError(ValueError):
     pass
 
 
-async def create_task(db: AsyncSession, title: str, description: str) -> DevTask:
-    task = DevTask(title=title, description=description, status="pending")
+async def create_task(db: AsyncSession, title: str, description: str, repo_id: int | None = None) -> DevTask:
+    task = DevTask(title=title, description=description, status="pending", repo_id=repo_id)
     db.add(task)
     await db.commit()
     await db.refresh(task)

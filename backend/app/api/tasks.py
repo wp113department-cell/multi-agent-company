@@ -23,6 +23,7 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 class CreateTaskRequest(BaseModel):
     title: str
     description: str
+    repo_id: int | None = None
 
 
 class TransitionRequest(BaseModel):
@@ -55,6 +56,7 @@ def _log_to_dict(log: Any) -> dict[str, Any]:
 
 
 def _task_to_dict(task: Any, logs: list[Any] | None = None) -> dict[str, Any]:
+    repo = getattr(task, "repo", None)
     return {
         "id": task.id,
         "title": task.title,
@@ -67,6 +69,8 @@ def _task_to_dict(task: Any, logs: list[Any] | None = None) -> dict[str, Any]:
         "priority": "medium",
         "assignedAgent": None,
         "finalSummary": None,
+        "repoId": task.repo_id,
+        "repoName": repo.name if repo else None,
         "createdAt": task.created_at.isoformat() if task.created_at else None,
         "updatedAt": task.updated_at.isoformat() if task.updated_at else None,
         "logs": [_log_to_dict(l) for l in (logs or [])],
@@ -75,7 +79,7 @@ def _task_to_dict(task: Any, logs: list[Any] | None = None) -> dict[str, Any]:
 
 @router.post("", status_code=201)
 async def create(body: CreateTaskRequest, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    task = await create_task(db, body.title, body.description)
+    task = await create_task(db, body.title, body.description, repo_id=body.repo_id)
     return _task_to_dict(task)
 
 
@@ -135,6 +139,8 @@ async def run_task(
 ) -> dict[str, Any]:
     """Trigger planning pipeline or simple planner for a pending/blocked/rejected task."""
     from app.api.agents import launch_planning_pipeline, launch_planner
+    from app.db.models import Repo
+    from sqlalchemy import select
 
     task = await get_task(db, task_id)
     if not task:
@@ -144,20 +150,27 @@ async def run_task(
             status_code=400, detail=f"Cannot start planning from status {task.status!r}"
         )
 
+    # Resolve which repo path agents should use for this task
+    repo_path: str | None = None
+    if task.repo_id:
+        result = await db.execute(select(Repo).where(Repo.id == task.repo_id))
+        repo_obj = result.scalar_one_or_none()
+        if repo_obj and repo_obj.status == "ready":
+            repo_path = repo_obj.local_path
+
     await transition_task(db, task_id, "planning")
     await append_log(db, task_id, "pipeline", "Planning triggered")
 
     settings = get_settings()
-    # Request body can override the env-level PIPELINE_MODE for this single run
     mode = body.mode or settings.pipeline_mode
 
     if mode == "full":
         background_tasks.add_task(
-            launch_planning_pipeline, task_id, str(task.title), str(task.description)
+            launch_planning_pipeline, task_id, str(task.title), str(task.description), repo_path
         )
     else:
         background_tasks.add_task(
-            launch_planner, task_id, str(task.title), str(task.description)
+            launch_planner, task_id, str(task.title), str(task.description), repo_path
         )
 
     return {"triggered": True, "mode": mode}
@@ -209,6 +222,8 @@ async def pipeline_approve(
 ) -> dict[str, Any]:
     """Resume the LangGraph pipeline with approval → launch coder."""
     from app.api.agents import resume_planning_pipeline
+    from app.db.models import Repo
+    from sqlalchemy import select
 
     task = await get_task(db, task_id)
     if not task:
@@ -221,8 +236,15 @@ async def pipeline_approve(
             detail=f"Pipeline is not awaiting approval (stage={ps.stage!r})",
         )
 
+    repo_path: str | None = None
+    if task.repo_id:
+        result = await db.execute(select(Repo).where(Repo.id == task.repo_id))
+        repo_obj = result.scalar_one_or_none()
+        if repo_obj and repo_obj.status == "ready":
+            repo_path = repo_obj.local_path
+
     await append_log(db, task_id, "approval", "Plan approved — resuming pipeline")
-    background_tasks.add_task(resume_planning_pipeline, task_id, True)
+    background_tasks.add_task(resume_planning_pipeline, task_id, True, repo_path)
     return {"approved": True}
 
 

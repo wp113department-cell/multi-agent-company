@@ -35,7 +35,7 @@ def _estimate_cost(tokens_in: int, tokens_out: int) -> float:
 
 # ---- Planning pipeline (PM → Architect → Decomposer, with interrupt) ----
 
-async def launch_planning_pipeline(task_id: int, title: str, description: str) -> None:
+async def launch_planning_pipeline(task_id: int, title: str, description: str, repo_path: str | None = None) -> None:
     """
     Fire-and-forget: run PM→Architect→Decomposer and pause at human_review.
     Sets pipeline_state.stage = 'awaiting_approval' — does NOT transition the
@@ -52,11 +52,12 @@ async def launch_planning_pipeline(task_id: int, title: str, description: str) -
             await update_pipeline_state(db, task_id, "pm")
             await append_log(db, task_id, "pipeline", "Planning pipeline started (PM → Architect → Decomposer)")
 
+            from app.api.repo import get_active_repo_path
             result = await run_planning_pipeline(
                 task_id=task_id,
                 title=title,
                 description=description,
-                repo_path=settings.target_repo_path,
+                repo_path=repo_path or get_active_repo_path(),
             )
 
             stage = result.get("stage", "blocked")
@@ -131,7 +132,7 @@ async def launch_planning_pipeline(task_id: int, title: str, description: str) -
                 await append_log(db2, task_id, "pipeline_error", str(e))
 
 
-async def resume_planning_pipeline(task_id: int, approved: bool) -> None:
+async def resume_planning_pipeline(task_id: int, approved: bool, repo_path: str | None = None) -> None:
     """
     Resume the LangGraph from its interrupt checkpoint.
     approved=True  → launch manager with subtasks (full Dev→QA→Review pipeline).
@@ -153,7 +154,7 @@ async def resume_planning_pipeline(task_id: int, approved: bool) -> None:
                 plan = _build_plan_summary(result)
                 subtasks = result.get("subtasks", [])
                 # Launch multi-agent manager pipeline instead of single coder
-                asyncio.create_task(launch_manager(task_id, subtasks, plan))
+                asyncio.create_task(launch_manager(task_id, subtasks, plan, repo_path))
             else:
                 await update_pipeline_state(db, task_id, "rejected")
                 await transition_task(db, task_id, "rejected")
@@ -190,6 +191,7 @@ async def launch_manager(
     task_id: int,
     subtasks: list[dict[str, Any]],
     plan: str,
+    repo_path: str | None = None,
 ) -> None:
     """
     Fire-and-forget: dispatch each subtask through Dev → QA → Review.
@@ -215,12 +217,14 @@ async def launch_manager(
                     append_log(db, task_id, "pipeline", f"Subtask {subtask_id}: {status}")
                 )
 
+            from app.api.repo import get_active_repo_path
+            effective_repo = repo_path or get_active_repo_path()
             result = await run_manager(
                 task_id=task_id,
                 subtasks=subtasks,
                 worktree_path=wt_path,
                 plan=plan,
-                repo_path=settings.target_repo_path,
+                repo_path=effective_repo,
                 on_status=on_status,
             )
 
@@ -239,7 +243,7 @@ async def launch_manager(
                     )
 
             if overall_status == "completed":
-                diff = get_diff(task_id, settings.target_repo_path)
+                diff = get_diff(task_id, effective_repo)
                 all_files: list[str] = []
                 for r in results:
                     all_files.extend(r.get("files_changed", []))
@@ -270,7 +274,7 @@ async def launch_manager(
 
 # ---- Planner Agent (simple mode: single plan, no LangGraph) ----
 
-async def launch_planner(task_id: int, title: str, description: str) -> None:
+async def launch_planner(task_id: int, title: str, description: str, repo_path: str | None = None) -> None:
     from app.agents.planner import run_planner
 
     settings = get_settings()
@@ -289,12 +293,13 @@ async def launch_planner(task_id: int, title: str, description: str) -> None:
             )
 
         try:
+            from app.api.repo import get_active_repo_path
             plan, error, tokens_in, tokens_out = await asyncio.to_thread(
                 run_planner,
                 task_id=task_id,
                 title=title,
                 description=description,
-                repo_path=settings.target_repo_path,
+                repo_path=repo_path or get_active_repo_path(),
                 on_heartbeat=heartbeat,
                 on_tool_call=on_tool,
             )
@@ -328,7 +333,7 @@ async def launch_planner(task_id: int, title: str, description: str) -> None:
 
 # ---- Coder Agent (simple mode: single coder after planner) ----
 
-async def launch_coder(task_id: int, plan: str) -> None:
+async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) -> None:
     from app.agents.coder import run_coder
     from app.artifacts.store import save_artifact_async
 
@@ -348,12 +353,13 @@ async def launch_coder(task_id: int, plan: str) -> None:
             def heartbeat() -> None:
                 asyncio.create_task(heartbeat_agent_run(db, run_id))
 
+            from app.api.repo import get_active_repo_path
             files_changed, error, tokens_in, tokens_out = await asyncio.to_thread(
                 run_coder,
                 task_id=task_id,
                 plan=plan,
                 worktree_path=wt_path,
-                repo_path=settings.target_repo_path,
+                repo_path=repo_path or get_active_repo_path(),
                 on_heartbeat=heartbeat,
             )
 

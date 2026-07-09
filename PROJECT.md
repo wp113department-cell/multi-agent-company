@@ -2,7 +2,7 @@
 
 **This is a living document. Update it every session — it is the single source of truth for "what actually exists right now," separate from `PLAN.md` (what's intended) and `files/` (the original spec suite, which describes the full 7-stage vision, not the current build).**
 
-Last updated: 2026-07-03 (Phase 5 COMPLETE — 172/172 pytest pass, mypy --strict 49 files clean, commit TBD)
+Last updated: 2026-07-09 (UI/Repo session — 247/247 pytest pass, mypy 62 files clean, migrations 001–007 applied)
 
 ---
 
@@ -1079,3 +1079,47 @@ TARGET_REPO_PATH=/home/pc-117/Documents/CRR2906 \
 ```
 
 **Current state: All Phases 0–7 complete and fully validated with Groq. 247 unit tests + 33 LLM pending tests all green.**
+
+---
+
+## UI/Repo Management Session — 2026-07-09
+
+### Bugs fixed
+- `/api/tasks/undefined` 422 loop — `tasks/page.tsx` was using `task.taskId` (undefined on `DevTask`); fixed to `task.id`
+- Metrics page `TypeError` — API returned snake_case, frontend expected camelCase; fixed with `alias_generator=to_camel` in metrics models
+- `PORT=8000` leaking from backend `.env` into Next.js; fixed in `run.sh` with explicit `PORT=3000 npm run dev`
+- `cloned_at` timezone mismatch — datetime.now(timezone.utc) is offset-aware but column is `TIMESTAMP WITHOUT TIME ZONE`; fixed with `.replace(tzinfo=None)`
+
+### Features built
+1. **`run.sh`** — one-command startup (Postgres + FastAPI:8000 + Next.js:3000)
+2. **`/repo` page** — GitHub URL input, clone & auto-activate, repo list with status indicators
+3. **Per-task repo selection** — repo dropdown in `NewTaskForm`, repo badge on task detail, agents use task's repo path
+
+### Files created/changed
+- `backend/migrations/versions/006_add_repos.py` — repos table
+- `backend/migrations/versions/007_task_repo.py` — repo_id FK on dev_tasks
+- `backend/app/db/models.py` — Repo model, DevTask.repo_id
+- `backend/app/db/repository.py` — create_task(repo_id)
+- `backend/app/api/repo.py` — full rewrite with clone/list/activate + get_active_repo_path()
+- `backend/app/api/tasks.py` — repo_id in request/response, repo path threading
+- `backend/app/api/agents.py` — all launch functions accept repo_path param
+- `backend/app/api/metrics.py` — camelCase alias generator fix
+- `backend/app/config.py` — REPOS_DIR setting
+- `backend/app/main.py` — init_active_repo() at startup
+- `apps/web/app/repo/page.tsx` — new page (NEW)
+- `apps/web/app/layout.tsx` — Repository nav link
+- `apps/web/app/tasks/page.tsx` — fix task.id (was task.taskId)
+- `apps/web/app/tasks/[id]/page.tsx` — repo badge
+- `apps/web/components/NewTaskForm.tsx` — repo selector dropdown
+- `apps/web/lib/api.ts` — DevTask.repoId/repoName, RepoRecord type, repo API functions
+
+### Test results
+- `pytest tests/ --ignore=tests/pending` → 247/247 ✅
+- `mypy app/ --strict --ignore-missing-imports` → 62 files clean ✅
+- Alembic: migrations 001–007 all applied ✅
+
+### Known next enhancements (Bhaskar's direction)
+- Task list filter by repo
+- Show repo file tree / stats after cloning
+- Anthropic API key input via UI
+- Git worktree branch visibility per task

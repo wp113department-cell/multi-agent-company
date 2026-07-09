@@ -34,6 +34,8 @@ export interface DevTask {
   priority: string;
   assignedAgent: string | null;
   finalSummary: string | null;
+  repoId: number | null;
+  repoName: string | null;
   createdAt: string;
   updatedAt: string;
   logs: TaskLog[];
@@ -74,11 +76,11 @@ export async function fetchTask(taskId: string): Promise<DevTask> {
   return handleResponse<DevTask>(res);
 }
 
-export async function createTask(input: { title: string; description: string }): Promise<DevTask> {
+export async function createTask(input: { title: string; description: string; repoId?: number | null }): Promise<DevTask> {
   const res = await fetch(`/api/tasks`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
+    body: JSON.stringify({ title: input.title, description: input.description, repo_id: input.repoId ?? null }),
   });
   return handleResponse<DevTask>(res);
 }
@@ -261,6 +263,41 @@ export async function createGoal(text: string): Promise<Goal> {
     body: JSON.stringify({ text }),
   });
   return handleResponse<Goal>(res);
+}
+
+// ---------------------------------------------------------------------------
+// Repository management
+// ---------------------------------------------------------------------------
+
+export interface RepoRecord {
+  id: number;
+  githubUrl: string;
+  name: string;
+  localPath: string;
+  status: string; // cloning | ready | error
+  errorMsg: string | null;
+  isActive: boolean;
+  clonedAt: string | null;
+  createdAt: string;
+}
+
+export async function listRepos(): Promise<{ repos: RepoRecord[]; activeRepoPath: string }> {
+  const res = await fetch("/api/repo", { cache: "no-store" });
+  return handleResponse(res);
+}
+
+export async function cloneRepo(githubUrl: string): Promise<RepoRecord> {
+  const res = await fetch("/api/repo/clone", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ github_url: githubUrl }),
+  });
+  return handleResponse<RepoRecord>(res);
+}
+
+export async function activateRepo(repoId: number): Promise<RepoRecord> {
+  const res = await fetch(`/api/repo/${repoId}/activate`, { method: "POST" });
+  return handleResponse<RepoRecord>(res);
 }
 
 // ---------------------------------------------------------------------------
