@@ -57,6 +57,17 @@ class Settings(BaseSettings):
     memory_enabled: bool = Field(default=True, description="Enable pgvector engineering memory (requires pgvector extension)")
     memory_top_k: int = Field(default=3, description="Number of similar past tasks to inject into Architect context")
 
+    # Phase 7 — Concurrency
+    max_concurrent_epics: int = Field(default=10, description="Max number of epics running simultaneously")
+    max_concurrent_agent_runs: int = Field(default=20, description="Max total agent runs running at once across all epics")
+    max_concurrent_subtasks_per_epic: int = Field(default=5, description="Max subtasks running simultaneously within a single epic")
+
+    # Phase 7 — Executive Agent
+    executive_max_epics_per_goal: int = Field(default=5, description="Max epics the Executive Agent may create from a single goal")
+
+    # Phase 7 — Queue adapter backend (asyncio | bullmq)
+    queue_backend: str = Field(default="asyncio", description="Task queue backend: asyncio (in-process) or bullmq (Redis)")
+
     # Server
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8000)

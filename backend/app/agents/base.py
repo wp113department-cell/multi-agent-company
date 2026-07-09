@@ -53,20 +53,24 @@ def run_agent(
     max_turns: int = 20,
     on_heartbeat: Any = None,
     on_tool_call: Any = None,
-) -> tuple[str, int, int]:
+) -> tuple[str, int, int, int, int]:
     """
     Run an agent loop until end_turn or tool_use exhausted.
 
-    Returns (final_text, tokens_in, tokens_out).
+    Returns (final_text, tokens_in, tokens_out, cache_read_tokens, cache_creation_tokens).
     on_heartbeat() called every 5 tool calls.
     on_tool_call(name, input, result) called after each tool execution.
+
+    Prompt caching: system prompt is tagged with cache_control=ephemeral on every call.
+    Cache savings accumulate in cache_read_tokens across the conversation turns.
     """
-    settings = get_settings()
     client = _make_client()
     system_prompt = load_role(role_name)
 
     total_in = 0
     total_out = 0
+    total_cache_read = 0
+    total_cache_creation = 0
     tool_call_count = 0
     final_text = ""
 
@@ -99,6 +103,8 @@ def run_agent(
 
         total_in += response.usage.input_tokens
         total_out += response.usage.output_tokens
+        total_cache_read += response.usage.cache_read_input_tokens or 0
+        total_cache_creation += response.usage.cache_creation_input_tokens or 0
 
         # Collect text and tool_use blocks
         tool_uses = []
@@ -147,4 +153,4 @@ def run_agent(
 
         current_messages.append({"role": "user", "content": tool_results})
 
-    return final_text, total_in, total_out
+    return final_text, total_in, total_out, total_cache_read, total_cache_creation

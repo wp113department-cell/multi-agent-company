@@ -48,7 +48,7 @@ def run_docs(
         qa_summaries=qa_summaries,
     )
 
-    final_text, tokens_in, tokens_out = run_agent(
+    final_text, tokens_in, tokens_out, *_ = run_agent(
         role_name="docs",
         model=settings.model_router,
         messages=[{"role": "user", "content": context}],

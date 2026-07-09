@@ -37,7 +37,7 @@ def run_research(
     handlers = make_research_handlers(effective_repo)
     research_result = handlers["_research_result"]
 
-    final_text, tokens_in, tokens_out = run_agent(
+    final_text, tokens_in, tokens_out, *_ = run_agent(
         role_name="research",
         model=settings.model_router,
         messages=[{"role": "user", "content": task_description}],

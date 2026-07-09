@@ -17,6 +17,8 @@ from app.api.artifacts import router as artifacts_router
 from app.api.epics import router as epics_router
 from app.api.registry import router as registry_router
 from app.api.memory import router as memory_router
+from app.api.goals import router as goals_router
+from app.api.metrics import router as metrics_router
 
 from app.config import get_settings
 
@@ -72,6 +74,8 @@ app.include_router(artifacts_router)
 app.include_router(epics_router)
 app.include_router(registry_router)
 app.include_router(memory_router)
+app.include_router(goals_router)
+app.include_router(metrics_router)
 
 
 @app.exception_handler(StarletteHTTPException)

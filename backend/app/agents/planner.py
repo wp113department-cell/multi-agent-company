@@ -81,7 +81,7 @@ def run_planner(
     for attempt in range(max_attempts):
         plan_result.clear()
         try:
-            _, tokens_in, tokens_out = run_agent(
+            _, tokens_in, tokens_out, *_ = run_agent(
                 role_name="planner",
                 model=settings.model_coder,
                 messages=messages,

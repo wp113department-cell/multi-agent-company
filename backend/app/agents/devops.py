@@ -29,7 +29,7 @@ def run_devops(
     handlers = make_devops_handlers(effective_repo)
     health_result = handlers["_health_result"]
 
-    final_text, tokens_in, tokens_out = run_agent(
+    final_text, tokens_in, tokens_out, *_ = run_agent(
         role_name="devops",
         model=settings.model_router,
         messages=[{"role": "user", "content": task_description}],

@@ -879,3 +879,111 @@ mypy app/ --strict
 - `backend/app/repo_tools/context_builder.py` — memory_context field + param
 - `backend/app/main.py` — registry_router, memory_router
 - `backend/.env.example` — Phase 6 vars
+
+---
+
+## Phase 7 — Executive Agent + Goals + Concurrency + Queue + Metrics Dashboard (2026-07-09)
+
+**COMPLETE.** Baseline coming in was 205/205 pass, mypy clean 55 files. Phase 7 is the FINAL phase.
+
+### What was built
+
+**Alembic Migration 005 (`backend/migrations/versions/005_phase7_tables.py`):**
+- `goals` table — goal_id UUID PK, text, status VARCHAR(50), epic_ids ARRAY TEXT, summary, created_at/updated_at
+- `ix_goals_status` index
+- `cache_read_tokens` INT nullable added to `agent_runs`
+- `cache_creation_tokens` INT nullable added to `agent_runs`
+
+**ORM Models (`backend/app/db/models.py`):**
+- `Goal` — maps `goals` table
+- `AgentRun.cache_read_tokens`, `AgentRun.cache_creation_tokens` — new nullable columns
+
+**Config (`backend/app/config.py`) — 5 new vars:**
+- `MAX_CONCURRENT_EPICS` (default 10)
+- `MAX_CONCURRENT_AGENT_RUNS` (default 20)
+- `MAX_CONCURRENT_SUBTASKS_PER_EPIC` (default 5)
+- `EXECUTIVE_MAX_EPICS_PER_GOAL` (default 5)
+- `QUEUE_BACKEND` (default "asyncio")
+
+**base.py cache token tracking:**
+- `run_agent()` now returns 5-tuple: `(final_text, tokens_in, tokens_out, cache_read_tokens, cache_creation_tokens)`
+- Reads `response.usage.cache_read_input_tokens` and `response.usage.cache_creation_input_tokens` from Anthropic SDK
+- All 12 callers updated to `tokens_out, *_ = run_agent(...)` (no behaviour change — new values available)
+
+**Executive Agent:**
+- `backend/roles/executive.md` — no tools, plain JSON-only output, business-language summary, max {max_epics} epics
+- `backend/app/agents/executive.py` — `run_executive(goal_text, db)` → creates Goal + Epic rows, returns `(goal_id, epic_ids, error)`
+
+**Goals API (`backend/app/api/goals.py`):**
+- `POST /api/goals` — calls Executive Agent, creates Goal + Epics, returns GoalResponse
+- `GET /api/goals` — list all goals, newest first
+- `GET /api/goals/{goal_id}` — single goal
+
+**Concurrency (`backend/app/pipeline/concurrency.py`):**
+- `epic_slot()` — asyncio.Semaphore(MAX_CONCURRENT_EPICS)
+- `agent_run_slot()` — asyncio.Semaphore(MAX_CONCURRENT_AGENT_RUNS)
+- `subtask_slot(epic_id)` — per-epic asyncio.Semaphore(MAX_CONCURRENT_SUBTASKS_PER_EPIC)
+- `reset_for_testing()` — replaces module-level semaphores for test isolation
+
+**Queue Adapter (`backend/app/pipeline/queue_adapter.py`):**
+- Abstract `QueueAdapter` base with `enqueue()`, `get_status()`, `shutdown()`
+- `AsyncioQueueAdapter` — in-process asyncio.Queue with configurable worker count
+- `BullMQQueueAdapter` — stub (raises NotImplementedError, documents Redis upgrade path)
+- `get_queue_adapter()` — reads `QUEUE_BACKEND` config; `queue()` singleton accessor
+
+**File Conflict Guard (`backend/app/pipeline/conflict_guard.py`):**
+- `check_file_conflicts(candidate_files, current_epic_id, db)` — queries pipeline_state.architect_plan.impacted_files for all running epics, returns overlap description if found
+
+**Worktree namespacing (`backend/app/repo_tools/worktree.py`):**
+- `worktree_path(task_id, epic_id=None)` — epic-namespaced path `WORKTREES_DIR/epic-{epic_id}/task-{task_id}` prevents cross-epic collisions under concurrency
+- `create_worktree()` and `remove_worktree()` accept optional `epic_id` param
+
+**Metrics API (`backend/app/api/metrics.py`):**
+- `GET /api/metrics` — system aggregate: total epics, epics by status, agent runs, tokens, cache hit rate, per-agent-type breakdown
+- `GET /api/metrics/epics` — per-epic cost + cache breakdown
+
+**Frontend:**
+- `apps/web/app/goals/page.tsx` — Goals list + new goal submission form
+- `apps/web/app/goals/[id]/page.tsx` — Goal detail: Executive Summary + epic links
+- `apps/web/app/metrics/page.tsx` — Productivity dashboard: stat cards, status breakdown, agent table, epic cost table
+- `apps/web/app/layout.tsx` — added Goals + Metrics nav links
+- `apps/web/lib/api.ts` — Goal, SystemMetrics, EpicCostSummary types + 5 new API functions
+
+**Wiring:**
+- `backend/app/main.py` — registered `goals_router`, `metrics_router`
+- `backend/.env.example` — Phase 7 vars documented
+
+### New test files
+
+| Test file | Tests | Description |
+|---|---|---|
+| `tests/test_executive.py` | 9 | JSON parse, goal creation, epic cap, error paths |
+| `tests/test_goals_api.py` | 10 | POST (success, empty, error, not-found), GET list, GET by ID |
+| `tests/test_concurrency.py` | 9 | Semaphore cap enforcement, per-epic isolation, worktree namespacing |
+| `tests/test_queue_adapter.py` | 12 | Job status, failure handling, drain, BullMQ stub, adapter factory |
+
+### Test results — Phase 7
+
+```
+pytest tests/ -v
+→ 245 passed, 54 skipped, 2 warnings in 6.06s
+
+mypy app/ --strict
+→ Success: no issues found in 61 source files
+
+TypeScript (apps/web)
+→ 0 errors in Phase 7 files (goals/metrics pages + api.ts additions)
+   4 pre-existing errors in legacy files unchanged
+```
+
+### Current state — 2026-07-09
+
+- Branch: `main`
+- All Phases 0–7 complete
+- 245/245 pytest pass, 54 skipped, 0 failures
+- mypy --strict 0 issues in 61 files
+- Python backend: 61 source files, FastAPI + LangGraph + SQLAlchemy + Alembic
+- Frontend: Next.js TypeScript, 6 pages (tasks, epics, goals, metrics + detail views)
+- Migrations 000–005 (5 Alembic versions)
+
+**The Gridiron Developer Department is feature-complete through Phase 7.**
