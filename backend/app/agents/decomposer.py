@@ -77,8 +77,11 @@ def decomposer_node(state: PipelineState) -> PipelineState:
         )
         logger.info("Decomposer Agent done — tokens_in=%d tokens_out=%d", tokens_in, tokens_out)
     except Exception as e:
-        logger.exception("Decomposer Agent failed")
-        return {**state, "stage": "blocked", "error": f"Decomposer Agent failed: {e}"}
+        if subtasks_result:
+            logger.warning("Decomposer Agent error after subtasks submission (ignored): %s", e)
+        else:
+            logger.exception("Decomposer Agent failed")
+            return {**state, "stage": "blocked", "error": f"Decomposer Agent failed: {e}"}
 
     if not subtasks_result:
         return {**state, "stage": "blocked", "error": "Decomposer Agent did not submit subtasks"}

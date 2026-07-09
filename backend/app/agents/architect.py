@@ -88,8 +88,12 @@ def architect_node(state: PipelineState) -> PipelineState:
         )
         logger.info("Architect Agent done — tokens_in=%d tokens_out=%d", tokens_in, tokens_out)
     except Exception as e:
-        logger.exception("Architect Agent failed")
-        return {**state, "stage": "blocked", "error": f"Architect Agent failed: {e}"}
+        if plan_result:
+            # Plan was submitted before the error (e.g. rate limit on follow-up turn) — treat as success.
+            logger.warning("Architect Agent error after plan submission (ignored): %s", e)
+        else:
+            logger.exception("Architect Agent failed")
+            return {**state, "stage": "blocked", "error": f"Architect Agent failed: {e}"}
 
     if not plan_result:
         return {**state, "stage": "blocked", "error": "Architect Agent did not submit a plan"}

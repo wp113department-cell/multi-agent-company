@@ -153,6 +153,7 @@ class TestGetGoal:
         with TestClient(app) as client:
             resp = client.get("/api/goals/g-abc")
 
+
         assert resp.status_code == 200
         assert resp.json()["goal_id"] == "g-abc"
 

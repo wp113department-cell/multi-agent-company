@@ -1,5 +1,6 @@
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Any
 
 
 class Settings(BaseSettings):
@@ -8,8 +9,8 @@ class Settings(BaseSettings):
     # Database
     database_url: str = Field(..., description="PostgreSQL DSN, e.g. postgresql+asyncpg://user:pass@host/db")
 
-    # Anthropic
-    anthropic_api_key: str = Field(..., description="Anthropic API key")
+    # Anthropic (required unless USE_GROQ=true)
+    anthropic_api_key: str = Field(default="", description="Anthropic API key (required when USE_GROQ=false)")
 
     # Model tiers
     model_planner: str = Field(default="claude-haiku-4-5-20251001", description="Model for PM/Architect/Decomposer")
@@ -67,6 +68,27 @@ class Settings(BaseSettings):
 
     # Phase 7 — Queue adapter backend (asyncio | bullmq)
     queue_backend: str = Field(default="asyncio", description="Task queue backend: asyncio (in-process) or bullmq (Redis)")
+
+    # Groq (optional — enables Groq as LLM backend when ANTHROPIC_API_KEY is unavailable)
+    groq_api_key: str = Field(default="", description="Groq API key (gsk_...). When set and USE_GROQ=true, all agent calls use Groq instead of Anthropic.")
+    use_groq: bool = Field(default=False, description="Route all agent calls to Groq instead of Anthropic. Useful when ANTHROPIC_API_KEY is unavailable.")
+    # Groq model tiers — map to Groq model IDs
+    groq_model_planner: str = Field(default="qwen/qwen3-32b", description="Groq model for PM/Architect/Decomposer (Haiku equivalent)")
+    groq_model_coder: str = Field(default="qwen/qwen3-32b", description="Groq model for Coder/QA/Review agents (Sonnet equivalent)")
+    groq_model_router: str = Field(default="llama-3.1-8b-instant", description="Groq model for triage/summary/heartbeat (Haiku equivalent)")
+
+    @model_validator(mode="after")
+    def _require_llm_key(self) -> "Settings":
+        if not self.use_groq and not self.anthropic_api_key:
+            raise ValueError(
+                "ANTHROPIC_API_KEY is required when USE_GROQ is not enabled. "
+                "Set ANTHROPIC_API_KEY or set USE_GROQ=true with GROQ_API_KEY."
+            )
+        if self.use_groq and not self.groq_api_key:
+            raise ValueError(
+                "GROQ_API_KEY is required when USE_GROQ=true."
+            )
+        return self
 
     # Server
     host: str = Field(default="0.0.0.0")

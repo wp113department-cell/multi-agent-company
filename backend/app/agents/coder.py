@@ -18,10 +18,12 @@ def _run_checks(worktree_path: str) -> str | None:
     Run typecheck/lint/test in the worktree.
     Returns error output if any check fails, else None.
     """
+    import sys
+    python = sys.executable
     checks = [
         # Python: mypy + ruff
-        ["python", "-m", "mypy", ".", "--ignore-missing-imports", "--no-error-summary"],
-        ["python", "-m", "ruff", "check", "."],
+        [python, "-m", "mypy", ".", "--ignore-missing-imports", "--no-error-summary"],
+        [python, "-m", "ruff", "check", "."],
     ]
     for cmd in checks:
         result = subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True, timeout=60)
@@ -82,10 +84,15 @@ def run_coder(
             total_in += tokens_in
             total_out += tokens_out
         except Exception as e:
-            logger.exception("Coder agent failed on attempt %d", attempt + 1)
-            if attempt == max_retries - 1:
-                return [], f"Coder agent error: {e}", total_in, total_out
-            continue
+            patch_result_check = handlers.get("_patch_result", {})
+            if patch_result_check.get("files_changed"):
+                # Patch submitted before the error (e.g. rate limit on follow-up turn) — treat as success.
+                logger.warning("Coder error after patch submission (ignored): %s", e)
+            else:
+                logger.exception("Coder agent failed on attempt %d", attempt + 1)
+                if attempt == max_retries - 1:
+                    return [], f"Coder agent error: {e}", total_in, total_out
+                continue
 
         patch_result = handlers.get("_patch_result", {})
         files_changed: list[str] = patch_result.get("files_changed", [])

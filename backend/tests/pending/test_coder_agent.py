@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import textwrap
 import pytest
 from tests.pending.conftest import requires_anthropic
@@ -47,7 +48,7 @@ class TestCoderAgent:
             Function can be imported and called.
         """)
 
-        files_changed, error = run_coder(
+        files_changed, error, *_ = run_coder(
             task_id=40,
             plan=plan,
             worktree_path=worktree,
@@ -79,11 +80,11 @@ class TestCoderAgent:
             Import and call add(1, 2) == 3.
         """)
 
-        _, error = run_coder(task_id=41, plan=plan, worktree_path=worktree, repo_path=_THIS_REPO)
+        _, error, *_ = run_coder(task_id=41, plan=plan, worktree_path=worktree, repo_path=_THIS_REPO)
         assert error is None, f"Coder failed: {error}"
 
         result = subprocess.run(
-            ["python", "-m", "ruff", "check", "."],
+            [sys.executable, "-m", "ruff", "check", "."],
             cwd=worktree,
             capture_output=True,
             text=True,
@@ -112,7 +113,7 @@ class TestCoderAgent:
         # The coder may still "succeed" from its own perspective (submit_patch),
         # but policy denials must appear in the logs. At minimum: coder should not
         # actually write to .env.
-        _, _ = run_coder(task_id=42, plan=plan, worktree_path=worktree, repo_path=_THIS_REPO)
+        _, _, *_ = run_coder(task_id=42, plan=plan, worktree_path=worktree, repo_path=_THIS_REPO)
 
         dotenv_path = os.path.join(worktree, ".env")
         assert not os.path.exists(dotenv_path), (

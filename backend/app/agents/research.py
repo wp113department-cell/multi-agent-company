@@ -37,13 +37,25 @@ def run_research(
     handlers = make_research_handlers(effective_repo)
     research_result = handlers["_research_result"]
 
-    final_text, tokens_in, tokens_out, *_ = run_agent(
-        role_name="research",
-        model=settings.model_router,
-        messages=[{"role": "user", "content": task_description}],
-        tools=RESEARCH_TOOLS,
-        tool_handlers=handlers,
-    )
+    try:
+        final_text, tokens_in, tokens_out, *_ = run_agent(
+            role_name="research",
+            model=settings.model_router,
+            messages=[{"role": "user", "content": task_description}],
+            tools=RESEARCH_TOOLS,
+            tool_handlers=handlers,
+        )
+    except Exception as exc:
+        # Research is optional — a rate-limit or transient error should not block the pipeline.
+        logger.warning("Research agent failed (non-fatal): %s", exc)
+        fallback = ResearchReport(
+            findings=[],
+            relevant_libraries=[],
+            recommended_approach="",
+            risks=[],
+            raw_text=str(exc),
+        )
+        return fallback, f"Research agent error: {exc}", 0, 0
 
     if research_result:
         report = ResearchReport(

@@ -1,7 +1,9 @@
 """Standard tool definitions and handlers for agent use."""
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -208,6 +210,9 @@ _QA_ALLOWED_PREFIXES = (
     "python -m pytest",
     "python -m mypy",
     "python -m ruff",
+    "python3 -m pytest",
+    "python3 -m mypy",
+    "python3 -m ruff",
     "npx tsc",
     "npm test",
     "npm run",
@@ -308,6 +313,11 @@ def make_qa_handlers(worktree_path: str, repo_path: str) -> dict[str, Any]:
     handlers = make_read_only_handlers(repo_path)
     qa_result: dict[str, Any] = {}
 
+    # Prepend venv bin dir so `python`, `pytest`, `mypy`, `ruff` resolve correctly.
+    _venv_bin = str(Path(sys.executable).parent)
+    _env_with_venv = os.environ.copy()
+    _env_with_venv["PATH"] = _venv_bin + ":" + _env_with_venv.get("PATH", "")
+
     def bash(inp: dict[str, Any]) -> str:
         cmd = inp["command"]
         if not _is_qa_command_allowed(cmd):
@@ -317,7 +327,8 @@ def make_qa_handlers(worktree_path: str, repo_path: str) -> dict[str, Any]:
             return f"[POLICY DENIED] {policy.reason}"
         try:
             result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, cwd=worktree_path, timeout=120
+                cmd, shell=True, capture_output=True, text=True,
+                cwd=worktree_path, env=_env_with_venv, timeout=120,
             )
             out = (result.stdout + result.stderr)[:6000]
             return out if out else "(no output)"
@@ -438,8 +449,9 @@ _SUBMIT_RESEARCH_TOOL = {
     },
 }
 
-# Research agent: read_only + web_search (placeholder) + submit_research. NO write, NO bash.
-RESEARCH_TOOLS = READ_ONLY_TOOLS + [_WEB_SEARCH_TOOL, _SUBMIT_RESEARCH_TOOL]
+# Research agent: minimal read tools + submit_research only (no AST tools, no web_search placeholder).
+# Kept small to stay within free-tier TPM limits — the agent can read files and search code.
+RESEARCH_TOOLS = [READ_ONLY_TOOLS[0], READ_ONLY_TOOLS[1], READ_ONLY_TOOLS[2], _SUBMIT_RESEARCH_TOOL]
 
 
 def make_research_handlers(repo_path: str) -> dict[str, Any]:

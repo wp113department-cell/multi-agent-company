@@ -90,122 +90,25 @@ def upgrade() -> None:
 
 
 def _seed_agents(op: Any) -> None:
-    agents_table = sa.table(
-        "agents",
-        sa.column("agent_id", sa.Text()),
-        sa.column("name", sa.Text()),
-        sa.column("capability_tags", postgresql.ARRAY(sa.Text())),
-        sa.column("tool_list", postgresql.JSONB()),
-        sa.column("prompt_ref", sa.Text()),
-        sa.column("version", sa.Text()),
-        sa.column("success_rate", sa.Float()),
-        sa.column("avg_retries", sa.Float()),
-    )
-
+    # Use raw SQL with explicit ::uuid cast — asyncpg requires UUID columns
+    # receive actual UUIDs, not strings, when using parameterised inserts.
     rows = [
-        {
-            "agent_id": "00000000-0000-0000-0000-000000000001",
-            "name": "planner",
-            "capability_tags": ["plan", "decompose", "read_only"],
-            "tool_list": ["read_file", "list_files", "submit_plan"],
-            "prompt_ref": "roles/planner.md",
-            "version": "1.0",
-            "success_rate": 1.0,
-            "avg_retries": 0.0,
-        },
-        {
-            "agent_id": "00000000-0000-0000-0000-000000000002",
-            "name": "pm",
-            "capability_tags": ["plan", "manage", "read_only"],
-            "tool_list": ["read_file", "list_files", "submit_plan"],
-            "prompt_ref": "roles/pm.md",
-            "version": "1.0",
-            "success_rate": 1.0,
-            "avg_retries": 0.0,
-        },
-        {
-            "agent_id": "00000000-0000-0000-0000-000000000003",
-            "name": "architect",
-            "capability_tags": ["design", "architecture", "read_only"],
-            "tool_list": ["read_file", "list_files", "submit_plan"],
-            "prompt_ref": "roles/architect.md",
-            "version": "1.0",
-            "success_rate": 1.0,
-            "avg_retries": 0.0,
-        },
-        {
-            "agent_id": "00000000-0000-0000-0000-000000000004",
-            "name": "decomposer",
-            "capability_tags": ["decompose", "plan", "read_only"],
-            "tool_list": ["read_file", "list_files", "submit_subtasks"],
-            "prompt_ref": "roles/decomposer.md",
-            "version": "1.0",
-            "success_rate": 1.0,
-            "avg_retries": 0.0,
-        },
-        {
-            "agent_id": "00000000-0000-0000-0000-000000000005",
-            "name": "backend_dev",
-            "capability_tags": ["code", "backend", "python", "sql", "git"],
-            "tool_list": ["read_file", "write_file", "list_files", "run_bash", "submit_patch"],
-            "prompt_ref": "roles/coder.md",
-            "version": "1.0",
-            "success_rate": 1.0,
-            "avg_retries": 0.0,
-        },
-        {
-            "agent_id": "00000000-0000-0000-0000-000000000006",
-            "name": "frontend_dev",
-            "capability_tags": ["code", "frontend", "typescript", "react", "git"],
-            "tool_list": ["read_file", "write_file", "list_files", "run_bash", "submit_patch"],
-            "prompt_ref": "roles/coder.md",
-            "version": "1.0",
-            "success_rate": 1.0,
-            "avg_retries": 0.0,
-        },
-        {
-            "agent_id": "00000000-0000-0000-0000-000000000007",
-            "name": "qa",
-            "capability_tags": ["test", "quality", "read_only"],
-            "tool_list": ["read_file", "list_files", "run_bash", "submit_qa_result"],
-            "prompt_ref": "roles/qa.md",
-            "version": "1.0",
-            "success_rate": 1.0,
-            "avg_retries": 0.0,
-        },
-        {
-            "agent_id": "00000000-0000-0000-0000-000000000008",
-            "name": "reviewer",
-            "capability_tags": ["review", "code_review", "read_only"],
-            "tool_list": ["read_file", "list_files", "submit_review"],
-            "prompt_ref": "roles/reviewer.md",
-            "version": "1.0",
-            "success_rate": 1.0,
-            "avg_retries": 0.0,
-        },
-        {
-            "agent_id": "00000000-0000-0000-0000-000000000009",
-            "name": "devops",
-            "capability_tags": ["devops", "monitoring", "read_only", "git"],
-            "tool_list": ["read_file", "list_files", "run_bash", "submit_health_report"],
-            "prompt_ref": "roles/devops.md",
-            "version": "1.0",
-            "success_rate": 1.0,
-            "avg_retries": 0.0,
-        },
-        {
-            "agent_id": "00000000-0000-0000-0000-000000000010",
-            "name": "manager",
-            "capability_tags": ["manage", "orchestrate", "plan"],
-            "tool_list": ["read_file", "list_files"],
-            "prompt_ref": "roles/manager.md",
-            "version": "1.0",
-            "success_rate": 1.0,
-            "avg_retries": 0.0,
-        },
+        ("00000000-0000-0000-0000-000000000001", "planner",      '{"plan","decompose","read_only"}',              '["read_file","list_files","submit_plan"]',          "roles/planner.md"),
+        ("00000000-0000-0000-0000-000000000002", "pm",           '{"plan","manage","read_only"}',                 '["read_file","list_files","submit_plan"]',          "roles/pm.md"),
+        ("00000000-0000-0000-0000-000000000003", "architect",    '{"design","architecture","read_only"}',         '["read_file","list_files","submit_plan"]',          "roles/architect.md"),
+        ("00000000-0000-0000-0000-000000000004", "decomposer",   '{"decompose","plan","read_only"}',              '["read_file","list_files","submit_subtasks"]',      "roles/decomposer.md"),
+        ("00000000-0000-0000-0000-000000000005", "backend_dev",  '{"code","backend","python","sql","git"}',       '["read_file","write_file","list_files","run_bash","submit_patch"]', "roles/coder.md"),
+        ("00000000-0000-0000-0000-000000000006", "frontend_dev", '{"code","frontend","typescript","react","git"}','["read_file","write_file","list_files","run_bash","submit_patch"]', "roles/coder.md"),
+        ("00000000-0000-0000-0000-000000000007", "qa",           '{"test","quality","read_only"}',                '["read_file","list_files","run_bash","submit_qa_result"]',          "roles/qa.md"),
+        ("00000000-0000-0000-0000-000000000008", "reviewer",     '{"review","code_review","read_only"}',          '["read_file","list_files","submit_review"]',                        "roles/reviewer.md"),
+        ("00000000-0000-0000-0000-000000000009", "devops",       '{"devops","monitoring","read_only","git"}',     '["read_file","list_files","run_bash","submit_health_report"]',      "roles/devops.md"),
+        ("00000000-0000-0000-0000-000000000010", "manager",      '{"manage","orchestrate","plan"}',               '["read_file","list_files"]',                                        "roles/manager.md"),
     ]
-
-    op.bulk_insert(agents_table, rows)
+    for agent_id, name, tags, tools, prompt_ref in rows:
+        op.execute(
+            f"INSERT INTO agents (agent_id, name, capability_tags, tool_list, prompt_ref, version, success_rate, avg_retries) "  # noqa: E501
+            f"VALUES ('{agent_id}'::uuid, '{name}', '{tags}'::text[], '{tools}'::jsonb, '{prompt_ref}', '1.0', 1.0, 0.0)"
+        )
 
 
 def downgrade() -> None:

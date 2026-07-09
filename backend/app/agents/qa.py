@@ -61,7 +61,7 @@ def run_qa(
     try:
         _, tokens_in, tokens_out, *_ = run_agent(
             role_name="qa",
-            model=settings.model_router,
+            model=settings.model_coder,
             messages=messages,
             tools=QA_TOOLS,
             tool_handlers=handlers,

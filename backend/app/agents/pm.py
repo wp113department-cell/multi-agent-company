@@ -62,8 +62,11 @@ def pm_node(state: PipelineState) -> PipelineState:
         )
         logger.info("PM Agent done — tokens_in=%d tokens_out=%d", tokens_in, tokens_out)
     except Exception as e:
-        logger.exception("PM Agent failed")
-        return {**state, "stage": "blocked", "error": f"PM Agent failed: {e}"}
+        if brief_result:
+            logger.warning("PM Agent error after brief submission (ignored): %s", e)
+        else:
+            logger.exception("PM Agent failed")
+            return {**state, "stage": "blocked", "error": f"PM Agent failed: {e}"}
 
     if not brief_result:
         return {**state, "stage": "blocked", "error": "PM Agent did not submit a brief"}

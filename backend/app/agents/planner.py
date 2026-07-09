@@ -94,10 +94,14 @@ def run_planner(
             total_in += tokens_in
             total_out += tokens_out
         except Exception as e:
-            logger.exception("Planner agent failed on attempt %d", attempt + 1)
-            if attempt == max_attempts - 1:
-                return "", f"Planner agent error: {e}", total_in, total_out
-            continue
+            if plan_result.get("plan"):
+                # Plan submitted before the error (e.g. rate limit on follow-up turn) — treat as success.
+                logger.warning("Planner error after plan submission (ignored): %s", e)
+            else:
+                logger.exception("Planner agent failed on attempt %d", attempt + 1)
+                if attempt == max_attempts - 1:
+                    return "", f"Planner agent error: {e}", total_in, total_out
+                continue
 
         plan = plan_result.get("plan", "")
         error = _validate_plan(plan)

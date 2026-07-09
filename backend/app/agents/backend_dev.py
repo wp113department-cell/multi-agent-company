@@ -15,9 +15,11 @@ logger = logging.getLogger(__name__)
 
 def _run_backend_checks(worktree_path: str) -> str | None:
     """Run mypy + ruff in the backend directory. Returns error output or None on success."""
+    import sys
+    python = sys.executable
     checks = [
-        ["python", "-m", "mypy", ".", "--ignore-missing-imports", "--no-error-summary"],
-        ["python", "-m", "ruff", "check", "."],
+        [python, "-m", "mypy", ".", "--ignore-missing-imports", "--no-error-summary"],
+        [python, "-m", "ruff", "check", "."],
     ]
     for cmd in checks:
         result = subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True, timeout=60)

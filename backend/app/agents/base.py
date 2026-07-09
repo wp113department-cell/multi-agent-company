@@ -1,9 +1,7 @@
 """Shared agent runner — every LangGraph agent node calls run_agent()."""
 from __future__ import annotations
 
-import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
@@ -61,9 +59,45 @@ def run_agent(
     on_heartbeat() called every 5 tool calls.
     on_tool_call(name, input, result) called after each tool execution.
 
-    Prompt caching: system prompt is tagged with cache_control=ephemeral on every call.
-    Cache savings accumulate in cache_read_tokens across the conversation turns.
+    Backend is selected by USE_GROQ setting:
+      False (default) → Anthropic SDK (prompt caching enabled)
+      True            → Groq (OpenAI-compatible, no prompt caching)
     """
+    settings = get_settings()
+    if settings.use_groq:
+        return _run_via_groq(
+            role_name=role_name,
+            model=model,
+            messages=messages,
+            tools=tools,
+            tool_handlers=tool_handlers,
+            max_turns=max_turns,
+            on_heartbeat=on_heartbeat,
+            on_tool_call=on_tool_call,
+        )
+    return _run_via_anthropic(
+        role_name=role_name,
+        model=model,
+        messages=messages,
+        tools=tools,
+        tool_handlers=tool_handlers,
+        max_turns=max_turns,
+        on_heartbeat=on_heartbeat,
+        on_tool_call=on_tool_call,
+    )
+
+
+def _run_via_anthropic(
+    *,
+    role_name: str,
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    tool_handlers: dict[str, Any],
+    max_turns: int,
+    on_heartbeat: Any,
+    on_tool_call: Any,
+) -> tuple[str, int, int, int, int]:
     client = _make_client()
     system_prompt = load_role(role_name)
 
@@ -74,7 +108,6 @@ def run_agent(
     tool_call_count = 0
     final_text = ""
 
-    # Build anthropic tool specs from our dict format
     anthropic_tools: list[anthropic.types.ToolParam] = [
         anthropic.types.ToolParam(
             name=t["name"],
@@ -106,7 +139,6 @@ def run_agent(
         total_cache_read += response.usage.cache_read_input_tokens or 0
         total_cache_creation += response.usage.cache_creation_input_tokens or 0
 
-        # Collect text and tool_use blocks
         tool_uses = []
         for block in response.content:
             if block.type == "text":
@@ -114,14 +146,13 @@ def run_agent(
             elif block.type == "tool_use":
                 tool_uses.append(block)
 
-        # Append assistant message
         current_messages.append({"role": "assistant", "content": response.content})
 
         if response.stop_reason == "end_turn" or not tool_uses:
             break
 
-        # Process tool calls
         tool_results = []
+        _submitted = False
         for tu in tool_uses:
             tool_call_count += 1
             if tool_call_count % 5 == 0 and on_heartbeat:
@@ -141,6 +172,8 @@ def run_agent(
                     except Exception as e:
                         result_content = f"[ERROR] {tu.name} failed: {e}"
                         logger.exception("Tool %s raised", tu.name)
+                if tu.name.startswith("submit_"):
+                    _submitted = True
 
             if on_tool_call:
                 on_tool_call(tu.name, dict(tu.input), result_content)
@@ -152,5 +185,93 @@ def run_agent(
             })
 
         current_messages.append({"role": "user", "content": tool_results})
+        if _submitted:
+            break
 
     return final_text, total_in, total_out, total_cache_read, total_cache_creation
+
+
+def _run_via_groq(
+    *,
+    role_name: str,
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    tool_handlers: dict[str, Any],
+    max_turns: int,
+    on_heartbeat: Any,
+    on_tool_call: Any,
+) -> tuple[str, int, int, int, int]:
+    from app.agents.groq_adapter import run_groq
+
+    system_prompt = load_role(role_name)
+
+    total_in = 0
+    total_out = 0
+    tool_call_count = 0
+    final_text = ""
+
+    current_messages = list(messages)
+
+    for _ in range(max_turns):
+        response = run_groq(
+            system_prompt=system_prompt,
+            model=model,
+            messages=current_messages,
+            tools=tools,
+            max_tokens=4096,
+        )
+
+        total_in += response.usage.input_tokens
+        total_out += response.usage.output_tokens
+
+        tool_uses = []
+        for block in response.content:
+            if block.type == "text":
+                final_text = block.text
+            elif block.type == "tool_use":
+                tool_uses.append(block)
+
+        current_messages.append({"role": "assistant", "content": response.content})
+
+        if response.stop_reason == "end_turn" or not tool_uses:
+            break
+
+        tool_results = []
+        _submitted = False
+        for tu in tool_uses:
+            tool_call_count += 1
+            if tool_call_count % 5 == 0 and on_heartbeat:
+                on_heartbeat()
+
+            denial = _enforce_policy(tu.name, dict(tu.input))
+            if denial:
+                result_content = f"[POLICY DENIED] {denial}"
+                logger.warning("Policy denied tool %s: %s", tu.name, denial)
+            else:
+                handler = tool_handlers.get(tu.name)
+                if handler is None:
+                    result_content = f"[ERROR] Unknown tool: {tu.name}"
+                else:
+                    try:
+                        result_content = handler(dict(tu.input))
+                    except Exception as e:
+                        result_content = f"[ERROR] {tu.name} failed: {e}"
+                        logger.exception("Tool %s raised", tu.name)
+                if tu.name.startswith("submit_"):
+                    _submitted = True
+
+            if on_tool_call:
+                on_tool_call(tu.name, dict(tu.input), result_content)
+
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": tu.id,
+                "content": str(result_content),
+            })
+
+        current_messages.append({"role": "user", "content": tool_results})
+        if _submitted:
+            break
+
+    return final_text, total_in, total_out, 0, 0

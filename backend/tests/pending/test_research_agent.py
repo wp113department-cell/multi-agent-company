@@ -29,12 +29,15 @@ async def test_research_agent_returns_report() -> None:
 @pytest.mark.asyncio
 async def test_research_agent_respects_research_enabled_false() -> None:
     """Research agent is a no-op when RESEARCH_ENABLED=false."""
-    from unittest.mock import patch
+    from unittest.mock import MagicMock, patch
+    from app.agents.research import run_research
 
-    with patch("app.config.get_settings") as ms:
-        ms.return_value.__class__ = type("Settings", (), {"research_enabled": False, "target_repo_path": "."})
+    fake_settings = MagicMock()
+    fake_settings.research_enabled = False
+    fake_settings.target_repo_path = "."
 
-        from app.agents.research import run_research
+    # Patch where get_settings is looked up inside research.py (not in app.config)
+    with patch("app.agents.research.get_settings", return_value=fake_settings):
         report, error, tokens_in, tokens_out = run_research("some task")
 
     assert report is None
