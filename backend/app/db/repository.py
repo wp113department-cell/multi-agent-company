@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db.models import AgentRun, DevTask, PipelineState, Subtask, TaskLog, can_transition
 
@@ -19,12 +20,17 @@ async def create_task(db: AsyncSession, title: str, description: str, repo_id: i
     task = DevTask(title=title, description=description, status="pending", repo_id=repo_id)
     db.add(task)
     await db.commit()
-    await db.refresh(task)
-    return task
+    created = await get_task(db, task.id)
+    assert created is not None
+    return created
 
 
 async def get_task(db: AsyncSession, task_id: int) -> DevTask | None:
-    result = await db.execute(select(DevTask).where(DevTask.id == task_id))
+    result = await db.execute(
+        select(DevTask)
+        .options(selectinload(DevTask.repo))
+        .where(DevTask.id == task_id)
+    )
     return result.scalar_one_or_none()
 
 
@@ -34,7 +40,7 @@ async def list_tasks(
     cursor: int | None = None,
     limit: int = 20,
 ) -> tuple[list[DevTask], int | None]:
-    q = select(DevTask).order_by(DevTask.id.desc())
+    q = select(DevTask).options(selectinload(DevTask.repo)).order_by(DevTask.id.desc())
     if status:
         q = q.where(DevTask.status == status)
     if cursor is not None:
@@ -57,8 +63,10 @@ async def transition_task(db: AsyncSession, task_id: int, new_status: str) -> De
         raise TransitionError(f"Cannot transition task {task_id} from {task.status!r} to {new_status!r}")
     task.status = new_status
     await db.commit()
-    await db.refresh(task)
-    return task
+    # Re-fetch via get_task so the repo relationship is eagerly loaded (avoids MissingGreenlet)
+    refreshed = await get_task(db, task_id)
+    assert refreshed is not None
+    return refreshed
 
 
 async def update_task_plan(db: AsyncSession, task_id: int, plan: str) -> None:
