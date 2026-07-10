@@ -231,7 +231,7 @@ export default function TaskDetailPage() {
       {pipeline && (
         <div className="rounded-lg border border-slate-200 bg-white p-5">
           <h2 className="mb-4 text-sm font-semibold text-slate-700">Planning Pipeline</h2>
-          <PipelineView pipeline={pipeline as Parameters<typeof PipelineView>[0]["pipeline"]} />
+          <PipelineView pipeline={pipeline as unknown as Parameters<typeof PipelineView>[0]["pipeline"]} />
         </div>
       )}
 

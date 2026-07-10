@@ -212,6 +212,7 @@ def _run_via_groq(
     final_text = ""
 
     current_messages = list(messages)
+    _nudge_count = 0
 
     for _ in range(max_turns):
         response = run_groq(
@@ -234,8 +235,23 @@ def _run_via_groq(
 
         current_messages.append({"role": "assistant", "content": response.content})
 
-        if response.stop_reason == "end_turn" or not tool_uses:
-            break
+        if not tool_uses:
+            # Model returned no tool calls — nudge it up to 2 times before giving up.
+            if _nudge_count >= 2:
+                logger.warning("Model skipped tools %d times — giving up", _nudge_count)
+                break
+            _nudge_count += 1
+            logger.warning(
+                "Groq returned no tool calls (stop=%s, nudge %d/2) — retrying",
+                response.stop_reason, _nudge_count,
+            )
+            current_messages.append({
+                "role": "user",
+                "content": "You must call one of the provided tools to complete this task. Do not respond with text — call the appropriate tool now.",
+            })
+            continue
+
+        _nudge_count = 0  # reset on successful tool call
 
         tool_results = []
         _submitted = False

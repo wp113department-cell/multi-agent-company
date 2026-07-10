@@ -200,7 +200,14 @@ def run_groq(
     client = groq_module.Groq(api_key=settings.groq_api_key)
     groq_model = _anthropic_model_to_groq(model, settings)
     groq_tools = _to_groq_tools(tools) if tools else []
-    groq_messages = _build_groq_messages(system_prompt, messages)
+
+    # qwen3 models default to thinking mode — prepend /no_think to disable it.
+    # Without this the model reasons internally then returns stop without calling tools.
+    effective_system = system_prompt
+    if "qwen3" in groq_model.lower():
+        effective_system = "/no_think\n" + system_prompt
+
+    groq_messages = _build_groq_messages(effective_system, messages)
 
     kwargs: dict[str, Any] = {
         "model": groq_model,

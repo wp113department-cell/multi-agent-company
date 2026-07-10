@@ -250,7 +250,13 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
         search_root = base / directory if directory else base
         if not search_root.exists():
             return f"[ERROR] Directory not found: {directory}"
-        str_paths: list[str] = [str(p.relative_to(base)) for p in search_root.glob(pattern) if p.is_file()]
+        str_paths: list[str] = []
+        for p in search_root.glob(pattern):
+            if p.is_file():
+                try:
+                    str_paths.append(str(p.relative_to(base)))
+                except ValueError:
+                    pass  # skip symlinks or paths that escape the repo root
         return "\n".join(sorted(str_paths)[:200])
 
     def search_code(inp: dict[str, Any]) -> str:

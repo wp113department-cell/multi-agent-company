@@ -1,20 +1,38 @@
 "use client";
 
+// Backend stores snake_case keys directly from agent tool calls.
+// These interfaces match what the API actually returns.
 interface PmBrief {
   goals: string[];
   constraints: string[];
-  acceptanceCriteria: string[];
-  riskAreas: string[];
-  estimatedComplexity: "low" | "medium" | "high";
+  acceptance_criteria: string[];
+  out_of_scope: string[];
+  // optional legacy fields
+  acceptanceCriteria?: string[];
+  riskAreas?: string[];
+  estimatedComplexity?: "low" | "medium" | "high";
+}
+
+interface ArchitectRisk {
+  severity: string;
+  description: string;
+}
+
+interface ArchitectFile {
+  path: string;
+  reason: string;
 }
 
 interface ArchitectPlan {
-  technicalApproach: string;
-  impactedSystems: string[];
-  impactedFiles: string[];
-  risks: string[];
-  testingStrategy: string;
-  implementationNotes: string;
+  // snake_case from backend
+  technical_approach?: string;
+  impacted_files?: (ArchitectFile | string)[];
+  risks?: (ArchitectRisk | string)[];
+  risk_level?: string;
+  // camelCase legacy (kept for forward compat)
+  technicalApproach?: string;
+  impactedFiles?: string[];
+  implementationNotes?: string;
 }
 
 interface SubTask {
@@ -27,14 +45,13 @@ interface SubTask {
 }
 
 interface PipelineState {
-  id: string;
-  taskId: string;
+  taskId: number;
   stage: string;
   pmBrief: PmBrief | null;
   architectPlan: ArchitectPlan | null;
   subtasks: SubTask[] | null;
-  error: string | null;
-  updatedAt: string;
+  approved: boolean;
+  error?: string | null;
 }
 
 interface Props {
@@ -129,9 +146,12 @@ export function PipelineView({ pipeline }: Props) {
           </h3>
           <div className="grid gap-3 sm:grid-cols-2">
             {pipeline.pmBrief.goals?.length > 0 && <Section title="Goals" items={pipeline.pmBrief.goals} />}
-            {pipeline.pmBrief.acceptanceCriteria?.length > 0 && <Section title="Acceptance Criteria" items={pipeline.pmBrief.acceptanceCriteria} />}
+            {(pipeline.pmBrief.acceptance_criteria ?? pipeline.pmBrief.acceptanceCriteria ?? []).length > 0 && (
+              <Section title="Acceptance Criteria" items={pipeline.pmBrief.acceptance_criteria ?? pipeline.pmBrief.acceptanceCriteria ?? []} />
+            )}
             {pipeline.pmBrief.constraints?.length > 0 && <Section title="Constraints" items={pipeline.pmBrief.constraints} />}
-            {pipeline.pmBrief.riskAreas?.length > 0 && <Section title="Risk Areas" items={pipeline.pmBrief.riskAreas} />}
+            {pipeline.pmBrief.out_of_scope?.length > 0 && <Section title="Out of Scope" items={pipeline.pmBrief.out_of_scope} />}
+            {(pipeline.pmBrief.riskAreas ?? []).length > 0 && <Section title="Risk Areas" items={pipeline.pmBrief.riskAreas!} />}
           </div>
         </div>
       )}
@@ -144,26 +164,41 @@ export function PipelineView({ pipeline }: Props) {
             Technical Plan
           </h3>
           <p className="mb-3 text-sm text-slate-700 leading-relaxed">
-            {pipeline.architectPlan.technicalApproach}
+            {pipeline.architectPlan.technical_approach ?? pipeline.architectPlan.technicalApproach}
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
-            {pipeline.architectPlan.impactedFiles?.length > 0 && (
+            {(pipeline.architectPlan.impacted_files ?? pipeline.architectPlan.impactedFiles ?? []).length > 0 && (
               <div>
                 <p className="mb-1 text-xs font-semibold text-slate-500 uppercase tracking-wide">Impacted Files</p>
                 <ul className="space-y-0.5">
-                  {pipeline.architectPlan.impactedFiles.map((f) => (
-                    <li key={f} className="font-mono text-xs text-slate-700">{f}</li>
-                  ))}
+                  {(pipeline.architectPlan.impacted_files ?? pipeline.architectPlan.impactedFiles ?? []).map((f, i) => {
+                    const label = typeof f === "string" ? f : f.path;
+                    const note = typeof f === "object" ? f.reason : undefined;
+                    return (
+                      <li key={i} className="font-mono text-xs text-slate-700">
+                        {label}
+                        {note && <span className="ml-1 font-sans text-slate-400">({note})</span>}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             )}
-            {pipeline.architectPlan.risks?.length > 0 && (
+            {(pipeline.architectPlan.risks ?? []).length > 0 && (
               <div>
                 <p className="mb-1 text-xs font-semibold text-slate-500 uppercase tracking-wide">Risks</p>
                 <ul className="space-y-1">
-                  {pipeline.architectPlan.risks.map((r, i) => (
-                    <li key={i} className="text-xs text-slate-700">• {r}</li>
-                  ))}
+                  {(pipeline.architectPlan.risks ?? []).map((r, i) => {
+                    const text = typeof r === "string" ? r : r.description;
+                    const sev = typeof r === "object" ? r.severity : undefined;
+                    const sevColor = sev === "high" ? "text-red-500" : sev === "medium" ? "text-amber-500" : "text-slate-400";
+                    return (
+                      <li key={i} className="text-xs text-slate-700 flex gap-1">
+                        {sev && <span className={`font-semibold uppercase ${sevColor}`}>[{sev}]</span>}
+                        <span>• {text}</span>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             )}
