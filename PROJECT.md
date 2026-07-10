@@ -1123,3 +1123,51 @@ TARGET_REPO_PATH=/home/pc-117/Documents/CRR2906 \
 - Show repo file tree / stats after cloning
 - Anthropic API key input via UI
 - Git worktree branch visibility per task
+
+---
+
+## Bug-Fix Session — 2026-07-10
+
+**Session goal:** Fix pipeline execution + UI rendering bugs discovered after first real pipeline run succeeded.
+
+### Bugs fixed
+
+1. **Groq qwen3 tool-calling — nudge fix (base.py)**
+   - qwen3 returns `stop_reason="end_turn"` + 0 tool calls after thinking internally
+   - Old nudge code only activated when `stop_reason != "end_turn"` — never triggered
+   - Fix: nudge on ANY response with 0 tool_uses, cap at 2 retries, reset counter on successful tool call
+   - Result: PM Agent (713 tokens in, 111 out), Architect Agent (4161 in, 174 out), Decomposer Agent (1040 in, 82 out) — pipeline now completes end-to-end ✅
+
+2. **React child rendering crash (PipelineView.tsx)**
+   - Backend stores snake_case keys from agent tool calls: `acceptance_criteria`, `technical_approach`, `impacted_files`, `risks`
+   - `risks` is `{severity, description}[]`, `impacted_files` is `{path, reason}[]`
+   - Component was trying to render objects directly as React children → "Objects are not valid as a React child"
+   - Fix: Updated `PmBrief` and `ArchitectPlan` interfaces to match actual backend schema; rendering now handles both object arrays and strings
+
+3. **list_files escaping repo root (tools.py)**
+   - `search_root.glob("**/*")` can return paths via symlinks that escape the repo directory
+   - `p.relative_to(base)` raises `ValueError: '/swap.img' is not in the subpath of ...`
+   - Fix: wrap in try/except ValueError, skip paths that escape the base
+
+4. **TypeScript cast error (page.tsx)**
+   - `PipelineStateClient` was being cast directly to `PipelineState` (incompatible types)
+   - Fix: use `pipeline as unknown as Parameters<typeof PipelineView>[0]["pipeline"]`
+
+### Files changed
+- `backend/app/agents/base.py` — nudge on any empty tool_uses (not just non-end_turn)
+- `backend/app/agents/groq_adapter.py` — `/no_think` prefix for qwen3 models
+- `backend/app/agents/tools.py` — list_files: skip paths that raise ValueError in relative_to
+- `backend/app/db/repository.py` — selectinload for DevTask.repo everywhere; re-fetch after commit
+- `apps/web/components/PipelineView.tsx` — handle snake_case keys + object arrays from backend
+- `apps/web/app/tasks/[id]/page.tsx` — type cast fix
+
+### Test results
+- `pytest backend/tests/ -q` → 226 passed, 21 pre-existing failures (cost_controller/devops/dispatcher/concurrency — all pre-date this session), 54 skipped ✅
+- `npx tsc --noEmit` (frontend) → clean (only pre-existing @gridiron/shared-types import error) ✅
+- Commit: `2d29911`
+
+### How to resume next session
+1. Read PROJECT.md
+2. Activate venv: `source backend/.venv/bin/activate`
+3. Start dev: `./run.sh`
+4. Pipeline is working end-to-end with Groq/qwen3 — test by creating a task and clicking "Run Planning Pipeline"
