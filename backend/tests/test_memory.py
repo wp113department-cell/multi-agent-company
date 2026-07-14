@@ -113,6 +113,7 @@ async def test_embed_task_outcome_disabled_returns_none() -> None:
 async def test_embed_task_outcome_db_error_returns_none() -> None:
     """If DB commit raises, embed_task_outcome catches, rollbacks, and returns None."""
     mock_db = AsyncMock()
+    mock_db.add = MagicMock()  # SQLAlchemy add() is synchronous
     mock_db.commit = AsyncMock(side_effect=RuntimeError("DB is down"))
     mock_db.rollback = AsyncMock()
 

@@ -9,6 +9,7 @@ from app.db.repository import (
     append_log,
     create_task,
     get_task,
+    get_pipeline_state,
     list_logs,
     list_subtasks,
     list_tasks,
@@ -294,7 +295,9 @@ async def get_subtasks(task_id: int, db: AsyncSession = Depends(get_db)) -> dict
 
 @router.get("/{task_id}/pipeline")
 async def get_pipeline(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    ps = await get_or_create_pipeline_state(db, task_id)
+    ps = await get_pipeline_state(db, task_id)
+    if ps is None:
+        raise HTTPException(status_code=404, detail="No pipeline state for this task")
     return {
         "taskId": task_id,
         "stage": ps.stage,

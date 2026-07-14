@@ -3,8 +3,19 @@
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error((body as { error?: { message?: string } })?.error?.message ?? `Request failed: ${res.status}`);
+    const body = await res.json().catch(() => ({})) as Record<string, unknown>;
+    // FastAPI returns { detail: "..." } or { detail: [{ msg: "..." }] } for validation errors
+    const detail = body?.detail;
+    let msg: string;
+    if (typeof detail === "string") {
+      msg = detail;
+    } else if (Array.isArray(detail) && detail.length > 0) {
+      const first = detail[0] as Record<string, unknown>;
+      msg = (first?.msg as string) ?? JSON.stringify(detail[0]);
+    } else {
+      msg = (body?.error as { message?: string })?.message ?? `Request failed: ${res.status}`;
+    }
+    throw new Error(msg);
   }
   return res.json() as Promise<T>;
 }

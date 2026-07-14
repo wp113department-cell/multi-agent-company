@@ -36,12 +36,16 @@ interface ArchitectPlan {
 }
 
 interface SubTask {
-  id: string;
+  id?: string | number;
   type: string;
   title: string;
   description: string;
-  filesToEdit: string[];
-  dependsOn: string[];
+  // backend returns snake_case from decomposer tool output
+  files_to_edit?: string[];
+  depends_on?: (string | number)[];
+  // camelCase alias (legacy)
+  filesToEdit?: string[];
+  dependsOn?: (string | number)[];
 }
 
 interface PipelineState {
@@ -74,9 +78,10 @@ const subtaskTypeColor = (t: string) => {
 };
 
 const stageLabel: Record<string, string> = {
-  pm_agent: "PM Agent running…",
-  architect_agent: "Architect Agent running…",
-  task_decomposer: "Task Decomposer running…",
+  // Planning pipeline stages (actual backend stage names)
+  pm: "PM Agent running…",
+  architect: "Architect Agent running…",
+  decomposer: "Task Decomposer running…",
   awaiting_approval: "Awaiting human approval",
   approved: "Approved",
   done: "Planning complete",
@@ -90,7 +95,7 @@ const stageLabel: Record<string, string> = {
   dev_complete: "Coding pipeline complete — diff ready",
 };
 
-const PLANNING_STAGES = ["pm_agent", "architect_agent", "task_decomposer"];
+const PLANNING_STAGES = ["pm", "architect", "decomposer"];
 const CODING_STAGES = ["dev_running", "qa_running", "review_running"];
 
 export function PipelineView({ pipeline }: Props) {
@@ -220,24 +225,27 @@ export function PipelineView({ pipeline }: Props) {
             Subtasks ({pipeline.subtasks.length})
           </h3>
           <div className="space-y-3">
-            {pipeline.subtasks.map((st) => (
-              <div key={st.id} className="rounded border border-slate-200 bg-white p-3">
-                <div className="mb-1 flex items-center gap-2">
-                  <span className={`rounded px-2 py-0.5 text-xs font-semibold ${subtaskTypeColor(st.type)}`}>
-                    {st.type}
-                  </span>
-                  <span className="text-sm font-medium text-slate-800">{st.title}</span>
-                </div>
-                <p className="mb-2 text-xs text-slate-600">{st.description}</p>
-                {st.filesToEdit?.length > 0 && (
-                  <div className="font-mono text-xs text-slate-500">
-                    {st.filesToEdit.map((f) => (
-                      <span key={f} className="mr-2 inline-block">{f}</span>
-                    ))}
+            {pipeline.subtasks.map((st, idx) => {
+              const files = st.files_to_edit ?? st.filesToEdit ?? [];
+              return (
+                <div key={st.id ?? idx} className="rounded border border-slate-200 bg-white p-3">
+                  <div className="mb-1 flex items-center gap-2">
+                    <span className={`rounded px-2 py-0.5 text-xs font-semibold ${subtaskTypeColor(st.type)}`}>
+                      {st.type}
+                    </span>
+                    <span className="text-sm font-medium text-slate-800">{st.title}</span>
                   </div>
-                )}
-              </div>
-            ))}
+                  <p className="mb-2 text-xs text-slate-600">{st.description}</p>
+                  {files.length > 0 && (
+                    <div className="font-mono text-xs text-slate-500">
+                      {files.map((f) => (
+                        <span key={f} className="mr-2 inline-block">{f}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

@@ -96,7 +96,7 @@ export default function TaskDetailPage() {
   const isPlanReview = task.status === "ready_for_review" && !!task.plan && !task.diff;
   const isDiffReview = task.status === "ready_for_review" && !!task.diff;
   const canRun = ["pending", "rejected"].includes(task.status);
-  const isPipelineRunning = pipeline && ["pm_agent", "architect_agent", "task_decomposer"].includes(pipeline.stage);
+  const isPipelineRunning = task.status === "planning" && (!pipeline || pipeline.stage === "pm");
   const isPipelineAwaitingApproval = pipeline?.stage === "awaiting_approval";
   const canRunPipeline = canRun && !isPipelineRunning && !isPipelineAwaitingApproval;
 
