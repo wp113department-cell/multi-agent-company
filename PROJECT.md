@@ -1313,3 +1313,120 @@ All phases (0–7) implemented. All known gaps resolved.
 The only optional future enhancements:
 - Show repo file tree / stats after cloning
 - Git branch management per task (which worktree branch holds the diff)
+
+---
+
+## Session 2026-07-14 — Comprehensive Tool Suite + Streaming Chat Agent (commit 50b8b14)
+
+### Session goal
+Build a complete conversational interface comparable to Claude Code/Cursor, with a 36-tool agent that can read, write, search, debug, run tests, manage git, and stream responses to the UI in real time.
+
+### What was built
+
+**tools.py — massively expanded (16 READ_ONLY_TOOLS, 36 CHAT_TOOLS):**
+
+READ_ONLY_TOOLS additions (available to all planning pipeline agents):
+- `read_files` — read up to 20 files at once (efficient context building)
+- `file_exists` — check if file/directory exists before reading
+- `file_info` — size, line count, last modified, file type
+- `find_references` — grep codebase for all usages of a symbol (word boundary match)
+- `find_todos` — find TODO/FIXME/HACK/XXX comments, filterable by kind
+- `search_imports` — find all import statements for a module across the codebase
+- `git_status` — current working tree state (staged/modified/untracked)
+- `git_show` — show full details of any commit (diff + metadata)
+- `git_blame` — line-by-line blame with date and commit hash
+- `analyze_file` — structural summary of a file: imports, class/function definitions with line numbers
+
+CHAT_TOOLS additions (full git suite + destructive ops with confirmation):
+- `edit_file`, `write_file`, `append_file`, `rename_file`, `copy_file`, `delete_file` — full file manipulation
+- `git_commit` — stage and commit (supports `--all` or specific file lists)
+- `git_branch` — list/create/delete branches
+- `git_checkout` — switch branch or restore file
+- `git_stash` — push/pop/list/drop stash
+- `git_pull` — pull from remote (with --rebase option)
+- `git_fetch` — fetch refs without merging
+- `git_restore` — discard working tree changes (staged or unstaged)
+- `git_push` — push to remote (ALWAYS requires user confirmation)
+- `run_tests` — run pytest/npm test/tsc and return output
+- `run_linter` — run ruff/mypy/tsc/black with optional --fix
+- `bash` (full access, dangerous cmds require user confirmation)
+
+**backend/app/agents/chat_agent.py — ChatAgent:**
+- Async streaming agent using `AsyncAnthropic.messages.stream()`
+- Full agentic loop: LLM → tool execution → LLM → … until `stop_reason == end_turn`
+- MAX_ITERATIONS=30 safety cap
+- Dangerous commands (rm -rf, git push, etc.) pause the loop and await user confirmation via `asyncio.Event`
+- Long-running tools (git fetch/pull/push, bash) run in thread pool via `asyncio.to_thread()`
+- All 36 CHAT_TOOLS implemented as async-aware handlers in `_execute_tool()`
+
+**backend/app/models/chat.py — ChatSession:**
+- In-memory session store (dict keyed by UUID)
+- `asyncio.Queue` for SSE event delivery
+- `request_confirmation(action_id, description, details)` — async, pauses agent until user responds
+- `resolve_confirmation(action_id, approved)` — called by confirm endpoint, sets asyncio.Event
+
+**backend/app/api/chat.py — SSE streaming API:**
+- `POST /api/chat/sessions` — create session with repo_path
+- `POST /api/chat/sessions/{id}/messages` — send message, returns SSE stream
+- `POST /api/chat/sessions/{id}/confirm` — approve/deny a paused dangerous operation
+- `GET /api/chat/sessions/{id}/history` — text-only history for display
+- `DELETE /api/chat/sessions/{id}` — clean up
+- SSE event types: `thinking`, `text_delta`, `tool_call`, `tool_result`, `confirmation_required`, `done`, `error`
+
+**backend/roles/chat.md — master chat agent role:**
+- Identity, full tech stack knowledge
+- Anti-hallucination rules: verify before naming, check imports, read before edit
+- Ordered process for questions, bug fixes, implementation, exploration
+- Tool usage guidelines per tool
+- Code quality standards
+
+**apps/web/app/chat/page.tsx — full streaming chat UI:**
+- Session management: repo selector (from existing repos) or custom path input
+- Real-time streaming text display with `fetch()` + `ReadableStream` reader
+- Markdown rendering: code blocks (syntax highlighted) + inline code
+- Tool call blocks: collapsible, showing input + output, color-coded by tool category
+- Confirmation dialogs: amber warning box with Approve/Deny buttons, agent pauses until answered
+- Quick-start hint chips (common commands)
+- Typing indicator (bouncing dots while streaming)
+- Keyboard: Enter to send, Shift+Enter for newline
+
+**apps/web/lib/api.ts — new functions:**
+- `createChatSession(repoPath)` → `{ session_id }`
+- `confirmChatAction(sessionId, actionId, approved)` → resolves pending dangerous op
+- `deleteChatSession(sessionId)` → cleanup
+
+**apps/web/app/layout.tsx:** Chat nav link added (highlighted in blue as primary feature)
+
+### Test results (2026-07-14 chat session)
+```
+pytest backend/tests/ -q --ignore=backend/tests/pending
+→ 247 passed, 0 failures ✅
+
+mypy backend/app/ --ignore-missing-imports
+→ 0 issues (chat_agent.py + api/chat.py + models/chat.py all clean) ✅
+
+npx tsc --noEmit (apps/web)
+→ 0 errors ✅
+
+Commit: 50b8b14
+```
+
+### Tool count comparison
+| Layer | Before | After |
+|---|---|---|
+| READ_ONLY_TOOLS | 6 | 16 |
+| CODER_TOOLS | 11 | 11 (unchanged) |
+| CHAT_TOOLS | — | 36 (new) |
+
+### How to use the Chat Agent
+1. `./run.sh` to start server + frontend
+2. Navigate to `/chat` (blue "Chat" link in nav)
+3. Select repo or enter path → Start Session
+4. Ask anything: "show me the project structure", "find all TODO comments", "fix the failing test in test_memory.py", "commit all changes with message 'feat: add login'"
+5. Watch the agent stream its response, show each tool call with input/output, and ask for confirmation before dangerous operations
+
+### Known limitations / future work
+- SSE sessions are in-memory — do not survive server restart (persistent session store with Redis or DB would fix this)
+- No file upload / image understanding (read_image not yet implemented)
+- Browser tools (Playwright/screenshot) not yet implemented
+- No conversation export/import
