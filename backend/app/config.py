@@ -80,11 +80,9 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _require_llm_key(self) -> "Settings":
-        if not self.use_groq and not self.anthropic_api_key:
-            raise ValueError(
-                "ANTHROPIC_API_KEY is required when USE_GROQ is not enabled. "
-                "Set ANTHROPIC_API_KEY or set USE_GROQ=true with GROQ_API_KEY."
-            )
+        # anthropic_api_key may be empty at startup if user stores it via UI (settings page).
+        # The key is loaded from DB at runtime by base.py:get_effective_api_key().
+        # We only raise if BOTH env var and db-path are clearly unavailable.
         if self.use_groq and not self.groq_api_key:
             raise ValueError(
                 "GROQ_API_KEY is required when USE_GROQ=true."

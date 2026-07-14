@@ -75,8 +75,11 @@ export interface ArtifactRecord {
 // Task CRUD
 // ---------------------------------------------------------------------------
 
-export async function fetchTasks(status?: string): Promise<DevTask[]> {
-  const qs = status && status !== "all" ? `?status=${encodeURIComponent(status)}` : "";
+export async function fetchTasks(status?: string, repoId?: number | null): Promise<DevTask[]> {
+  const params = new URLSearchParams();
+  if (status && status !== "all") params.set("status", status);
+  if (repoId != null) params.set("repo_id", String(repoId));
+  const qs = params.toString() ? `?${params.toString()}` : "";
   const res = await fetch(`/api/tasks${qs}`, { cache: "no-store" });
   const data = await handleResponse<{ tasks: DevTask[] }>(res);
   return data.tasks;
@@ -359,4 +362,36 @@ export async function fetchEpicCosts(): Promise<EpicCostSummary[]> {
   const res = await fetch("/api/metrics/epics", { cache: "no-store" });
   if (!res.ok) return [];
   return handleResponse<EpicCostSummary[]>(res);
+}
+
+// ---------------------------------------------------------------------------
+// Settings (API key management)
+// ---------------------------------------------------------------------------
+
+export interface AppSettings {
+  anthropicKeySet: boolean;
+  anthropicKeyMasked: string;
+  anthropicKeySource: "database" | "env" | "none";
+  usingGroq: boolean;
+  modelPlanner: string;
+  modelCoder: string;
+}
+
+export async function fetchAppSettings(): Promise<AppSettings> {
+  const res = await fetch("/api/settings", { cache: "no-store" });
+  return handleResponse<AppSettings>(res);
+}
+
+export async function saveApiKey(apiKey: string): Promise<{ saved: boolean }> {
+  const res = await fetch("/api/settings/api-key", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ api_key: apiKey }),
+  });
+  return handleResponse(res);
+}
+
+export async function deleteApiKey(): Promise<{ deleted: boolean }> {
+  const res = await fetch("/api/settings/api-key", { method: "DELETE" });
+  return handleResponse(res);
 }

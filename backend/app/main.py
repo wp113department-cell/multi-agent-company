@@ -19,6 +19,7 @@ from app.api.registry import router as registry_router
 from app.api.memory import router as memory_router
 from app.api.goals import router as goals_router
 from app.api.metrics import router as metrics_router
+from app.api.settings import router as settings_router
 
 from app.config import get_settings
 
@@ -43,9 +44,25 @@ async def _weekly_reindex_loop(repo_path: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    from app.pipeline.graph import init_checkpointer, close_checkpointer
+    from app.db.session import get_session_factory
+    from app.db.repository import get_setting
+    from app.agents.base import set_api_key_override
+
     settings = get_settings()
     logging.basicConfig(level=settings.log_level.upper())
     await init_active_repo()
+    await init_checkpointer(settings.database_url)
+
+    # Load DB-stored API key override (if user saved one via UI)
+    try:
+        factory = get_session_factory()
+        async with factory() as db:
+            db_key = await get_setting(db, "anthropic_api_key")
+            if db_key:
+                set_api_key_override(db_key)
+    except Exception as exc:
+        logger.warning("Could not load API key from DB at startup: %s", exc)
     reindex_task = asyncio.create_task(_weekly_reindex_loop(get_active_repo_path()))
     yield
     reindex_task.cancel()
@@ -53,6 +70,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await reindex_task
     except asyncio.CancelledError:
         pass
+    await close_checkpointer()
 
 
 app = FastAPI(
@@ -77,6 +95,7 @@ app.include_router(registry_router)
 app.include_router(memory_router)
 app.include_router(goals_router)
 app.include_router(metrics_router)
+app.include_router(settings_router)
 
 
 @app.exception_handler(StarletteHTTPException)

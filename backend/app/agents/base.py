@@ -14,6 +14,22 @@ logger = logging.getLogger(__name__)
 
 _ROLES_DIR = Path(__file__).parent.parent.parent / "roles"
 
+# Runtime API key override — set by load_api_key_override() at startup.
+# DB-stored key takes precedence over the env var.
+_api_key_override: str = ""
+
+
+def set_api_key_override(key: str) -> None:
+    """Called at startup (and after UI key save) to override the env-var API key."""
+    global _api_key_override
+    _api_key_override = key.strip()
+    logger.info("Anthropic API key override loaded from DB")
+
+
+def get_effective_api_key() -> str:
+    """Return DB-stored key if set, else fall back to env var."""
+    return _api_key_override or get_settings().anthropic_api_key
+
 
 def load_role(name: str) -> str:
     path = _ROLES_DIR / f"{name}.md"
@@ -23,7 +39,7 @@ def load_role(name: str) -> str:
 
 
 def _make_client() -> anthropic.Anthropic:
-    return anthropic.Anthropic(api_key=get_settings().anthropic_api_key)
+    return anthropic.Anthropic(api_key=get_effective_api_key())
 
 
 def _enforce_policy(tool_name: str, tool_input: dict[str, Any]) -> str | None:

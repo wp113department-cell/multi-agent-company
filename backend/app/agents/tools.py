@@ -596,8 +596,9 @@ def make_devops_handlers(repo_path: str) -> dict[str, Any]:
 _WEB_SEARCH_TOOL = {
     "name": "web_search",
     "description": (
-        "Search the web for technical information. "
-        "Returns 'web_search_unavailable' if no MCP web-search server is configured."
+        "Search the web for technical information using DuckDuckGo. "
+        "Returns titles, URLs, and snippets for up to 5 results. "
+        "Use for finding library documentation, versions, and best practices."
     ),
     "input_schema": {
         "type": "object",
@@ -652,14 +653,23 @@ def make_research_handlers(repo_path: str) -> dict[str, Any]:
     research_result: dict[str, Any] = {}
 
     def web_search(inp: dict[str, Any]) -> str:
-        # Placeholder — returns an informative message when no MCP is wired.
-        # When a real web-search MCP is configured, replace this handler.
-        query = inp.get("query", "")
-        return (
-            f"web_search_unavailable: No web-search MCP is configured in this environment. "
-            f"Query was: {query!r}. "
-            "Use read_file and list_files to explore the codebase instead."
-        )
+        query = str(inp.get("query", "")).strip()
+        if not query:
+            return "[ERROR] query is required"
+        try:
+            from duckduckgo_search import DDGS
+            results = list(DDGS().text(query, max_results=5))
+            if not results:
+                return f"(no results found for: {query!r})"
+            lines = []
+            for r in results:
+                title = r.get("title", "")
+                href = r.get("href", "")
+                body = r.get("body", "")[:300]
+                lines.append(f"## {title}\n{href}\n{body}")
+            return "\n\n".join(lines)[:6000]
+        except Exception as exc:
+            return f"[ERROR] web_search failed: {exc}"
 
     def submit_research(inp: dict[str, Any]) -> str:
         research_result.update(inp)

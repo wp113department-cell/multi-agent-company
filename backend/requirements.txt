@@ -15,3 +15,6 @@ tree-sitter-python==0.25.0
 tree-sitter-javascript==0.25.0
 pgvector==0.4.2
 groq==1.5.0
+langgraph-checkpoint-postgres==3.1.0
+psycopg[binary]==3.3.4
+duckduckgo-search==8.1.1

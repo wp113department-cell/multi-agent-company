@@ -9,7 +9,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.models import AgentRun, DevTask, PipelineState, Subtask, TaskLog, can_transition
+from app.db.models import AgentRun, DevTask, PipelineState, Subtask, SystemSetting, TaskLog, can_transition
 
 
 class TransitionError(ValueError):
@@ -37,12 +37,15 @@ async def get_task(db: AsyncSession, task_id: int) -> DevTask | None:
 async def list_tasks(
     db: AsyncSession,
     status: str | None = None,
+    repo_id: int | None = None,
     cursor: int | None = None,
     limit: int = 20,
 ) -> tuple[list[DevTask], int | None]:
     q = select(DevTask).options(selectinload(DevTask.repo)).order_by(DevTask.id.desc())
     if status:
         q = q.where(DevTask.status == status)
+    if repo_id is not None:
+        q = q.where(DevTask.repo_id == repo_id)
     if cursor is not None:
         q = q.where(DevTask.id < cursor)
     q = q.limit(limit + 1)
@@ -197,3 +200,21 @@ async def update_pipeline_state(
     await db.commit()
     await db.refresh(state)
     return state
+
+
+# ---- System settings ----
+
+async def get_setting(db: AsyncSession, key: str) -> str | None:
+    result = await db.execute(select(SystemSetting).where(SystemSetting.key == key))
+    row = result.scalar_one_or_none()
+    return row.value if row else None
+
+
+async def set_setting(db: AsyncSession, key: str, value: str) -> None:
+    existing = await db.execute(select(SystemSetting).where(SystemSetting.key == key))
+    row = existing.scalar_one_or_none()
+    if row:
+        row.value = value
+    else:
+        db.add(SystemSetting(key=key, value=value))
+    await db.commit()

@@ -87,11 +87,12 @@ async def create(body: CreateTaskRequest, db: AsyncSession = Depends(get_db)) ->
 @router.get("")
 async def list_all(
     status: str | None = Query(None),
+    repo_id: int | None = Query(None),
     cursor: int | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    tasks, next_cursor = await list_tasks(db, status=status, cursor=cursor, limit=limit)
+    tasks, next_cursor = await list_tasks(db, status=status, repo_id=repo_id, cursor=cursor, limit=limit)
     return {"tasks": [_task_to_dict(t) for t in tasks], "nextCursor": next_cursor}
 
 

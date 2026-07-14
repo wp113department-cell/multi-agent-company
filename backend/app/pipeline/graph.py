@@ -15,9 +15,48 @@ from app.pipeline.state import PipelineState
 
 logger = logging.getLogger(__name__)
 
-# MemorySaver: state persists in-process (survives between requests, lost on restart).
-# Swap to AsyncPostgresSaver when libpq is available.
-_checkpointer = MemorySaver()
+# Module-level checkpointer — replaced with AsyncPostgresSaver at startup via init_checkpointer().
+# Falls back to MemorySaver if Postgres init fails (e.g. in tests).
+_checkpointer: Any = MemorySaver()
+_compiled_graph: Any = None
+_pg_cm: Any = None  # holds the AsyncPostgresSaver context manager open for the app lifetime
+
+
+async def init_checkpointer(database_url: str) -> None:
+    """
+    Initialize the LangGraph PostgreSQL checkpointer so pipeline state
+    survives server restarts. Called once from FastAPI lifespan startup.
+
+    database_url: the asyncpg DSN from config (postgresql+asyncpg://...).
+    Automatically converted to psycopg3 format (postgresql://...).
+    """
+    global _checkpointer, _compiled_graph, _pg_cm
+    try:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+        # psycopg3 expects plain postgresql:// (no +asyncpg driver prefix)
+        psycopg_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
+        # Enter the context manager and hold the connection open for the app lifetime
+        cm = AsyncPostgresSaver.from_conn_string(psycopg_url)
+        saver = await cm.__aenter__()
+        await saver.setup()  # creates langgraph checkpoint tables if missing
+        _pg_cm = cm
+        _checkpointer = saver
+        _compiled_graph = None  # force rebuild with new checkpointer
+        logger.info("LangGraph PostgreSQL checkpointer initialized — pipeline state is now persistent")
+    except Exception as exc:
+        logger.warning("PostgreSQL checkpointer init failed, falling back to MemorySaver: %s", exc)
+
+
+async def close_checkpointer() -> None:
+    """Close the PostgreSQL checkpointer connection. Called at FastAPI shutdown."""
+    global _pg_cm
+    if _pg_cm is not None:
+        try:
+            await _pg_cm.__aexit__(None, None, None)
+        except Exception as exc:
+            logger.warning("Error closing checkpointer: %s", exc)
+        _pg_cm = None
 
 
 def _route_after_pm(state: PipelineState) -> str:
@@ -82,9 +121,6 @@ def build_graph() -> Any:
     graph.add_edge("human_review", END)
 
     return graph.compile(checkpointer=_checkpointer, interrupt_before=["human_review"])
-
-
-_compiled_graph: Any = None
 
 
 def get_graph() -> Any:
