@@ -1838,6 +1838,414 @@ _SECRETS_SCAN_TOOL = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# DAY 1 TOOL SPECS — Batches 10-16
+# ---------------------------------------------------------------------------
+
+# Batch 10 — AST Engine
+_PARSE_AST_TOOL = {
+    "name": "parse_ast",
+    "description": (
+        "Parse a Python (.py) file using the AST module and return a JSON structure "
+        "with all functions (name, line, args, decorators), classes (name, line, bases, methods), "
+        "and imports. Far more accurate than grep for code analysis."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File path relative to repo root (must be .py)"},
+        },
+        "required": ["path"],
+    },
+}
+
+_IMPORT_GRAPH_TOOL = {
+    "name": "import_graph",
+    "description": "Show every module imported by a Python file, and which symbols are imported from each.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Path to the .py file (relative to repo root)"},
+        },
+        "required": ["path"],
+    },
+}
+
+_CALL_GRAPH_TOOL = {
+    "name": "call_graph",
+    "description": (
+        "Show what functions each function calls inside a Python file. "
+        "Optionally limit to a single function by name."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Path to the .py file"},
+            "function_name": {"type": "string", "description": "Name of function to inspect (empty = all functions)"},
+        },
+        "required": ["path"],
+    },
+}
+
+_DEAD_CODE_DETECT_TOOL = {
+    "name": "dead_code_detect",
+    "description": (
+        "Heuristically detect public Python functions defined in a directory that are never called "
+        "anywhere in that directory. Results are indicative — external callers are not visible."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "directory": {"type": "string", "description": "Directory to scan (relative to repo root, default: repo root)"},
+        },
+        "required": [],
+    },
+}
+
+_CIRCULAR_DEP_DETECT_TOOL = {
+    "name": "circular_dep_detect",
+    "description": "Detect circular local import chains in a Python package directory.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "directory": {"type": "string", "description": "Directory to scan (default: repo root)"},
+        },
+        "required": [],
+    },
+}
+
+_RENAME_SYMBOL_TOOL = {
+    "name": "rename_symbol",
+    "description": (
+        "Word-boundary rename a symbol (function, class, variable) across all matching files. "
+        "Uses Python regex to avoid false positives. Shows each file changed and replacement count. "
+        "Always read the file first to confirm the symbol before renaming."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "old_name": {"type": "string", "description": "Current symbol name (must be a valid identifier)"},
+            "new_name": {"type": "string", "description": "New symbol name (must be a valid identifier)"},
+            "directory": {"type": "string", "description": "Root directory to rename within (default: repo root)"},
+            "file_pattern": {"type": "string", "description": "Glob pattern for files (default: *.py)"},
+        },
+        "required": ["old_name", "new_name"],
+    },
+}
+
+# Batch 11 — Git extras
+_GIT_REBASE_TOOL = {
+    "name": "git_rebase",
+    "description": "Rebase current branch onto another branch or commit. Interactive rebase is not supported (no TTY).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "onto": {"type": "string", "description": "Branch or commit to rebase onto (e.g. 'main', 'HEAD~3')"},
+        },
+        "required": ["onto"],
+    },
+}
+
+_GIT_CHERRY_PICK_TOOL = {
+    "name": "git_cherry_pick",
+    "description": "Apply a specific commit from another branch onto the current branch.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "commit_hash": {"type": "string", "description": "SHA or ref of the commit to cherry-pick"},
+            "no_commit": {"type": "boolean", "description": "Stage changes without committing (default: false)"},
+        },
+        "required": ["commit_hash"],
+    },
+}
+
+# Batch 12 — Terminal extras
+_READ_OUTPUT_TOOL = {
+    "name": "read_output",
+    "description": "Read the latest stdout/stderr from a background process started with run_background.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "pid": {"type": "integer", "description": "Process ID returned by run_background"},
+            "lines": {"type": "integer", "description": "Max lines to return (default: 50)"},
+        },
+        "required": ["pid"],
+    },
+}
+
+_RUN_NODE_TOOL = {
+    "name": "run_node",
+    "description": "Execute a Node.js code snippet and return its output. Node.js must be installed.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "code": {"type": "string", "description": "JavaScript code to execute via `node -e`"},
+            "timeout": {"type": "integer", "description": "Timeout in seconds (default: 30)"},
+        },
+        "required": ["code"],
+    },
+}
+
+_RUN_SCRIPT_TOOL = {
+    "name": "run_script",
+    "description": "Execute a script file (.py, .sh, .js). Auto-detects interpreter from extension.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Path to the script file (relative to repo root)"},
+            "interpreter": {"type": "string", "description": "Interpreter to use: 'auto', 'python3', 'bash', 'node' (default: auto)"},
+        },
+        "required": ["path"],
+    },
+}
+
+_DOCKER_BUILD_TOOL = {
+    "name": "docker_build",
+    "description": "Build a Docker image from a Dockerfile. Runs `docker build -t <tag> <context>`.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "tag": {"type": "string", "description": "Image tag, e.g. 'myapp:latest'"},
+            "context": {"type": "string", "description": "Build context directory (default: repo root)"},
+            "dockerfile": {"type": "string", "description": "Path to Dockerfile (optional, uses Docker default)"},
+        },
+        "required": ["tag"],
+    },
+}
+
+_DOCKER_RESTART_TOOL = {
+    "name": "docker_restart",
+    "description": "Restart a running Docker container by name or ID.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "container": {"type": "string", "description": "Container name or ID"},
+        },
+        "required": ["container"],
+    },
+}
+
+# Batch 13 — Smart search
+_FIND_ROUTE_TOOL = {
+    "name": "find_route",
+    "description": (
+        "Find API route definitions (FastAPI @router.get/post/put/delete, Flask @app.route) in the codebase. "
+        "Filter by HTTP method and/or path pattern."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "method": {"type": "string", "description": "HTTP method to filter: GET, POST, PUT, DELETE, PATCH (empty = all)"},
+            "path_pattern": {"type": "string", "description": "URL path string to search for (e.g. '/users', '/api')"},
+        },
+        "required": [],
+    },
+}
+
+_FIND_API_TOOL = {
+    "name": "find_api",
+    "description": "Find API endpoint function definitions by name or keyword in the codebase.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Function or endpoint name to search for (empty = all route handlers)"},
+        },
+        "required": [],
+    },
+}
+
+_FIND_SQL_TOOL = {
+    "name": "find_sql",
+    "description": "Find SQL queries and database operations in the codebase (SELECT, INSERT, SQLAlchemy text(), etc).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "keyword": {"type": "string", "description": "SQL keyword to search for, e.g. 'SELECT', 'INSERT', 'UPDATE' (empty = all SQL)"},
+        },
+        "required": [],
+    },
+}
+
+_FIND_TEST_TOOL = {
+    "name": "find_test",
+    "description": "Find test functions that test a specific function or feature by name.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "function_name": {"type": "string", "description": "Name of the function or feature to find tests for"},
+        },
+        "required": ["function_name"],
+    },
+}
+
+_FIND_CONFIG_TOOL = {
+    "name": "find_config",
+    "description": "Search for a configuration key across all config files (.env.example, config.py, settings files, YAML).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "key": {"type": "string", "description": "Config key to find (e.g. 'DATABASE_URL', 'API_KEY', 'debug')"},
+        },
+        "required": ["key"],
+    },
+}
+
+# Batch 14 — Monitoring
+_CPU_USAGE_TOOL = {
+    "name": "cpu_usage",
+    "description": "Get current CPU usage percentage from /proc/stat or the `top` command.",
+    "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+    },
+}
+
+_MEMORY_USAGE_TOOL = {
+    "name": "memory_usage",
+    "description": "Get current RAM usage from /proc/meminfo or the `free` command.",
+    "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+    },
+}
+
+_DISK_USAGE_TOOL = {
+    "name": "disk_usage",
+    "description": "Get disk usage (total, used, free) for a path using shutil.disk_usage (stdlib).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Path to check (default: repo root)"},
+        },
+        "required": [],
+    },
+}
+
+_HEALTH_CHECK_TOOL = {
+    "name": "health_check",
+    "description": "Check if backend services are up: backend HTTP health endpoint and database connectivity.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "service": {"type": "string", "description": "Service to check: 'all', 'backend', 'db' (default: all)"},
+        },
+        "required": [],
+    },
+}
+
+_TASK_PROGRESS_TOOL = {
+    "name": "task_progress",
+    "description": "Query recent task status from the dev_tasks database table. Optionally filter by task ID.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "task_id": {"type": "integer", "description": "Specific task ID (optional; default: last 10 tasks)"},
+            "limit": {"type": "integer", "description": "Max tasks to return (default: 10)"},
+        },
+        "required": [],
+    },
+}
+
+# Batch 15 — Editing extras
+_REPLACE_CLASS_TOOL = {
+    "name": "replace_class",
+    "description": (
+        "Replace an entire class block in a Python file by class name. "
+        "Finds the class by its `class <name>` line and replaces everything up to the next "
+        "top-level definition. Always read the file first."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File path (relative to repo root)"},
+            "class_name": {"type": "string", "description": "Name of the class to replace"},
+            "new_code": {"type": "string", "description": "Complete new class code (including the class definition line)"},
+        },
+        "required": ["path", "class_name", "new_code"],
+    },
+}
+
+_UNDO_CHANGES_TOOL = {
+    "name": "undo_changes",
+    "description": (
+        "Restore a file to its last committed state using `git checkout -- <path>`. "
+        "This DISCARDS all uncommitted changes to that file. Requires confirmation."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File path to restore (relative to repo root)"},
+        },
+        "required": ["path"],
+    },
+}
+
+_GENERATE_PATCH_TOOL = {
+    "name": "generate_patch",
+    "description": (
+        "Generate a unified diff patch from two text contents using Python's difflib. "
+        "Useful for previewing changes before applying them. Does NOT modify any files."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "content_a": {"type": "string", "description": "Original file content (the 'before' version)"},
+            "content_b": {"type": "string", "description": "New file content (the 'after' version)"},
+            "filename": {"type": "string", "description": "Filename shown in the patch header (default: 'file')"},
+        },
+        "required": ["content_a", "content_b"],
+    },
+}
+
+# Batch 16 — DB extras
+_EXPLAIN_QUERY_TOOL = {
+    "name": "explain_query",
+    "description": (
+        "Run EXPLAIN ANALYZE on a SQL query against the configured DATABASE_URL. "
+        "Shows query plan and execution times. Read-only (EXPLAIN does not modify data)."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "SQL SELECT query to analyse (no trailing semicolon needed)"},
+        },
+        "required": ["query"],
+    },
+}
+
+_RUN_MIGRATION_TOOL = {
+    "name": "run_migration",
+    "description": (
+        "Run Alembic database migrations. Defaults to `alembic upgrade head`. "
+        "WARNING: This modifies the database schema. Requires user confirmation."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "direction": {"type": "string", "description": "'upgrade' or 'downgrade' (default: upgrade)"},
+            "revision": {"type": "string", "description": "Target revision (default: head for upgrade, -1 for downgrade)"},
+        },
+        "required": [],
+    },
+}
+
+_SEED_DATABASE_TOOL = {
+    "name": "seed_database",
+    "description": (
+        "Run a database seed script to populate initial/test data. "
+        "Looks for backend/scripts/seed.py by default. Requires user confirmation."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "script": {"type": "string", "description": "Path to seed script (relative to repo root, default: backend/scripts/seed.py)"},
+        },
+        "required": [],
+    },
+}
+
 CHAT_TOOLS = READ_ONLY_TOOLS + [
     {
         "name": "edit_file",
@@ -1938,6 +2346,42 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _DOCKER_COMPOSE_TOOL,
     # Batch 9 — Security
     _SECRETS_SCAN_TOOL,
+    # Batch 10 — AST Engine
+    _PARSE_AST_TOOL,
+    _IMPORT_GRAPH_TOOL,
+    _CALL_GRAPH_TOOL,
+    _DEAD_CODE_DETECT_TOOL,
+    _CIRCULAR_DEP_DETECT_TOOL,
+    _RENAME_SYMBOL_TOOL,
+    # Batch 11 — Git extras
+    _GIT_REBASE_TOOL,
+    _GIT_CHERRY_PICK_TOOL,
+    # Batch 12 — Terminal extras
+    _READ_OUTPUT_TOOL,
+    _RUN_NODE_TOOL,
+    _RUN_SCRIPT_TOOL,
+    _DOCKER_BUILD_TOOL,
+    _DOCKER_RESTART_TOOL,
+    # Batch 13 — Smart search
+    _FIND_ROUTE_TOOL,
+    _FIND_API_TOOL,
+    _FIND_SQL_TOOL,
+    _FIND_TEST_TOOL,
+    _FIND_CONFIG_TOOL,
+    # Batch 14 — Monitoring
+    _CPU_USAGE_TOOL,
+    _MEMORY_USAGE_TOOL,
+    _DISK_USAGE_TOOL,
+    _HEALTH_CHECK_TOOL,
+    _TASK_PROGRESS_TOOL,
+    # Batch 15 — Editing extras
+    _REPLACE_CLASS_TOOL,
+    _UNDO_CHANGES_TOOL,
+    _GENERATE_PATCH_TOOL,
+    # Batch 16 — DB extras
+    _EXPLAIN_QUERY_TOOL,
+    _RUN_MIGRATION_TOOL,
+    _SEED_DATABASE_TOOL,
 ]
 
 # Commands that require user confirmation before running
@@ -3278,4 +3722,510 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # Batch 9
     handlers["secrets_scan"] = secrets_scan
     handlers["_chat_result"] = chat_result
+
+    # =========================================================================
+    # BATCH 10 — AST Engine (parse_ast, import_graph, call_graph, dead_code_detect,
+    #             circular_dep_detect, rename_symbol)
+    # =========================================================================
+
+    def parse_ast_h(inp: dict[str, Any]) -> str:
+        from app.repo_tools.ast_engine import parse_file_ast
+        return parse_file_ast(str(root / str(inp["path"])))
+
+    def import_graph_h(inp: dict[str, Any]) -> str:
+        from app.repo_tools.ast_engine import build_import_graph
+        return build_import_graph(str(root / str(inp["path"])))
+
+    def call_graph_h(inp: dict[str, Any]) -> str:
+        from app.repo_tools.ast_engine import build_call_graph
+        return build_call_graph(str(root / str(inp["path"])), str(inp.get("function_name", "")))
+
+    def dead_code_detect_h(inp: dict[str, Any]) -> str:
+        from app.repo_tools.ast_engine import detect_dead_code
+        dcd_d = str(inp.get("directory", ""))
+        return detect_dead_code(str(root / dcd_d) if dcd_d else repo_path)
+
+    def circular_dep_detect_h(inp: dict[str, Any]) -> str:
+        from app.repo_tools.ast_engine import detect_circular_imports
+        cdd_d = str(inp.get("directory", ""))
+        return detect_circular_imports(str(root / cdd_d) if cdd_d else repo_path)
+
+    def rename_symbol_h(inp: dict[str, Any]) -> str:
+        from app.repo_tools.ast_engine import rename_symbol as _rsym
+        rs_d = str(inp.get("directory", ""))
+        return _rsym(
+            str(inp["old_name"]),
+            str(inp["new_name"]),
+            str(root / rs_d) if rs_d else repo_path,
+            str(inp.get("file_pattern", "*.py")),
+        )
+
+    handlers["parse_ast"] = parse_ast_h
+    handlers["import_graph"] = import_graph_h
+    handlers["call_graph"] = call_graph_h
+    handlers["dead_code_detect"] = dead_code_detect_h
+    handlers["circular_dep_detect"] = circular_dep_detect_h
+    handlers["rename_symbol"] = rename_symbol_h
+
+    # =========================================================================
+    # BATCH 11 — Git extras (git_rebase, git_cherry_pick)
+    # =========================================================================
+
+    def git_rebase_h(inp: dict[str, Any]) -> str:
+        grb_onto = str(inp["onto"])
+        if bool(inp.get("interactive", False)):
+            return "[BLOCKED] Interactive rebase requires a TTY. Run 'git rebase -i' manually in a terminal."
+        try:
+            r = subprocess.run(
+                ["git", "rebase", grb_onto], cwd=repo_path, capture_output=True, text=True, timeout=60,
+            )
+            return (r.stdout + r.stderr).strip() or "(no output)"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] git rebase timed out"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def git_cherry_pick_h(inp: dict[str, Any]) -> str:
+        gcp_hash = str(inp["commit_hash"])
+        gcp_cmd = ["git", "cherry-pick"]
+        if bool(inp.get("no_commit", False)):
+            gcp_cmd.append("--no-commit")
+        gcp_cmd.append(gcp_hash)
+        try:
+            r = subprocess.run(gcp_cmd, cwd=repo_path, capture_output=True, text=True, timeout=30)
+            return (r.stdout + r.stderr).strip() or "(no output)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    handlers["git_rebase"] = git_rebase_h
+    handlers["git_cherry_pick"] = git_cherry_pick_h
+
+    # =========================================================================
+    # BATCH 12 — Terminal extras (read_output, run_node, run_script, docker_build, docker_restart)
+    # =========================================================================
+
+    def read_output_h(inp: dict[str, Any]) -> str:
+        import fcntl as _fcntl
+        import os as _os
+        ro_pid = int(inp["pid"])
+        ro_max = int(inp.get("lines", 50))
+        proc = _BACKGROUND_PROCESSES.get(ro_pid)
+        if proc is None:
+            return f"[ERROR] No tracked background process with PID {ro_pid}"
+        if proc.poll() is not None:
+            return f"Process {ro_pid} has exited (code {proc.returncode})"
+        out_lines: list[str] = []
+        for stream in [proc.stdout, proc.stderr]:
+            if stream is None:
+                continue
+            fd = stream.fileno()
+            fl = _fcntl.fcntl(fd, _fcntl.F_GETFL)
+            _fcntl.fcntl(fd, _fcntl.F_SETFL, fl | _os.O_NONBLOCK)
+            try:
+                chunk = stream.read(8192)
+                if chunk:
+                    out_lines.extend(chunk.splitlines())
+            except (IOError, BlockingIOError, TypeError):
+                pass
+        return "\n".join(out_lines[-ro_max:]) if out_lines else f"(no output yet from PID {ro_pid})"
+
+    def run_node_h(inp: dict[str, Any]) -> str:
+        import shlex as _shlex
+        rnd_code = str(inp["code"])
+        rnd_timeout = int(inp.get("timeout", 30))
+        node_chk = subprocess.run(["which", "node"], capture_output=True, text=True)
+        if node_chk.returncode != 0:
+            node_chk2 = subprocess.run(["which", "nodejs"], capture_output=True, text=True)
+            if node_chk2.returncode != 0:
+                return "[ERROR] Node.js not found. Install Node.js first (e.g. nvm install --lts)."
+        try:
+            r = subprocess.run(
+                f"node -e {_shlex.quote(rnd_code)} 2>&1",
+                shell=True, cwd=repo_path, capture_output=True, text=True, timeout=rnd_timeout,
+            )
+            return (r.stdout + r.stderr).strip() or "(no output)"
+        except subprocess.TimeoutExpired:
+            return f"[ERROR] node timed out after {rnd_timeout}s"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def run_script_h(inp: dict[str, Any]) -> str:
+        rscr_rel = str(inp["path"])
+        rscr_interp = str(inp.get("interpreter", "auto"))
+        rscr_fp = root / rscr_rel
+        if not rscr_fp.exists():
+            return f"[ERROR] Script not found: {rscr_rel}"
+        if rscr_interp == "auto":
+            ext = rscr_fp.suffix
+            rscr_interp = (
+                "python3" if ext == ".py"
+                else "node" if ext in (".js", ".mjs", ".cjs")
+                else "bash"
+            )
+        try:
+            r = subprocess.run(
+                [rscr_interp, str(rscr_fp)], cwd=repo_path, capture_output=True, text=True, timeout=120,
+            )
+            result = (r.stdout + r.stderr).strip()
+            if r.returncode != 0:
+                result += f"\n[exit {r.returncode}]"
+            return result or "(no output)"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] Script timed out after 120s"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def docker_build_h(inp: dict[str, Any]) -> str:
+        dbld_tag = str(inp["tag"])
+        dbld_context = str(inp.get("context", "."))
+        dbld_df = inp.get("dockerfile")
+        dbld_ctx_path = str(root / dbld_context) if dbld_context != "." else repo_path
+        dbld_cmd = ["docker", "build", "-t", dbld_tag]
+        if dbld_df:
+            dbld_cmd += ["-f", str(root / str(dbld_df))]
+        dbld_cmd.append(dbld_ctx_path)
+        try:
+            r = subprocess.run(dbld_cmd, cwd=repo_path, capture_output=True, text=True, timeout=600)
+            result = (r.stdout + r.stderr).strip()
+            if r.returncode != 0:
+                result += f"\n[exit {r.returncode}]"
+            return result or "(no output)"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] docker build timed out after 600s"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def docker_restart_h(inp: dict[str, Any]) -> str:
+        drst_name = str(inp["container"])
+        try:
+            r = subprocess.run(
+                ["docker", "restart", drst_name], cwd=repo_path, capture_output=True, text=True, timeout=60,
+            )
+            return (r.stdout + r.stderr).strip() or f"Restarted {drst_name}"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    handlers["read_output"] = read_output_h
+    handlers["run_node"] = run_node_h
+    handlers["run_script"] = run_script_h
+    handlers["docker_build"] = docker_build_h
+    handlers["docker_restart"] = docker_restart_h
+
+    # =========================================================================
+    # BATCH 13 — Smart search (find_route, find_api, find_sql, find_test, find_config)
+    # =========================================================================
+
+    def find_route_h(inp: dict[str, Any]) -> str:
+        frt_method = str(inp.get("method", "")).upper()
+        frt_path_pat = str(inp.get("path_pattern", ""))
+        if frt_method:
+            pat = rf"@(router|app)\.{frt_method.lower()}\("
+        else:
+            pat = r"@(router|app)\.(get|post|put|delete|patch|head|options)\("
+        exclude = ["--exclude-dir=node_modules", "--exclude-dir=.venv", "--exclude-dir=__pycache__"]
+        try:
+            r = subprocess.run(
+                ["grep", "-rn", "-E", pat, repo_path, "--include=*.py", "--include=*.ts"] + exclude,
+                capture_output=True, text=True, timeout=15,
+            )
+            lines = r.stdout
+            if frt_path_pat:
+                lines = "\n".join(ln for ln in lines.splitlines() if frt_path_pat in ln)
+            return lines[:5000] if lines.strip() else f"No routes found" + (f" for {frt_method}" if frt_method else "")
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def find_api_h(inp: dict[str, Any]) -> str:
+        fapi_name = str(inp.get("name", ""))
+        if fapi_name:
+            pat = fapi_name
+        else:
+            pat = r"@(router|app)\.(get|post|put|delete|patch)\("
+        exclude = ["--exclude-dir=node_modules", "--exclude-dir=.venv", "--exclude-dir=__pycache__"]
+        try:
+            r = subprocess.run(
+                ["grep", "-rn", "-E", pat, repo_path, "--include=*.py", "--include=*.ts"] + exclude,
+                capture_output=True, text=True, timeout=15,
+            )
+            return r.stdout[:5000] if r.stdout.strip() else f"No API definitions found" + (f" matching '{fapi_name}'" if fapi_name else "")
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def find_sql_h(inp: dict[str, Any]) -> str:
+        fsql_kw = str(inp.get("keyword", "")).upper()
+        # Use -i for case-insensitive, -w for whole-word; avoid (?i) inline flag (not ERE)
+        if fsql_kw:
+            fsql_pat = fsql_kw
+            fsql_flags = ["-rn", "-i", "-w"]
+        else:
+            fsql_pat = r"SELECT|INSERT|UPDATE|DELETE|CREATE TABLE|ALTER TABLE"
+            fsql_flags = ["-rn", "-i", "-E"]
+        exclude = ["--exclude-dir=node_modules", "--exclude-dir=.venv", "--exclude-dir=__pycache__"]
+        try:
+            r = subprocess.run(
+                ["grep"] + fsql_flags + [fsql_pat, repo_path, "--include=*.py", "--include=*.sql", "--include=*.ts"] + exclude,
+                capture_output=True, text=True, timeout=15,
+            )
+            return r.stdout[:5000] if r.stdout.strip() else "No SQL statements found in codebase"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def find_test_h(inp: dict[str, Any]) -> str:
+        ftest_fn = str(inp["function_name"])
+        patterns = [f"def test_{ftest_fn}", f"def test.*{ftest_fn}", f'test.*["\'].*{ftest_fn}']
+        exclude = ["--exclude-dir=node_modules", "--exclude-dir=.venv", "--exclude-dir=__pycache__"]
+        ftest_out: list[str] = []
+        for pt in patterns:
+            try:
+                r = subprocess.run(
+                    ["grep", "-rn", "-E", pt, repo_path, "--include=*.py", "--include=*.ts"] + exclude,
+                    capture_output=True, text=True, timeout=15,
+                )
+                if r.stdout.strip():
+                    ftest_out.append(r.stdout[:2000])
+            except Exception:
+                pass
+        return "\n".join(ftest_out)[:5000] if ftest_out else f"No tests found for '{ftest_fn}'"
+
+    def find_config_h(inp: dict[str, Any]) -> str:
+        fcfg_key = str(inp["key"])
+        patterns_to_try = [fcfg_key, fcfg_key.upper(), fcfg_key.lower()]
+        include_globs = [
+            "--include=*.env*", "--include=.env*", "--include=*.yaml", "--include=*.yml",
+            "--include=*.toml", "--include=*.cfg", "--include=*.ini",
+            "--include=config.py", "--include=settings.py",
+        ]
+        exclude = ["--exclude-dir=node_modules", "--exclude-dir=.venv", "--exclude-dir=__pycache__"]
+        fcfg_out: list[str] = []
+        seen: set[str] = set()
+        for pt in patterns_to_try:
+            try:
+                r = subprocess.run(
+                    ["grep", "-rn", pt, repo_path] + include_globs + exclude,
+                    capture_output=True, text=True, timeout=15,
+                )
+                for ln in r.stdout.splitlines():
+                    if ln not in seen:
+                        seen.add(ln)
+                        fcfg_out.append(ln)
+            except Exception:
+                pass
+        return "\n".join(fcfg_out)[:5000] if fcfg_out else f"'{fcfg_key}' not found in config files"
+
+    handlers["find_route"] = find_route_h
+    handlers["find_api"] = find_api_h
+    handlers["find_sql"] = find_sql_h
+    handlers["find_test"] = find_test_h
+    handlers["find_config"] = find_config_h
+
+    # =========================================================================
+    # BATCH 14 — Monitoring (cpu_usage, memory_usage, disk_usage, health_check, task_progress)
+    # =========================================================================
+
+    def cpu_usage_h(inp: dict[str, Any]) -> str:
+        try:
+            proc_stat = Path("/proc/stat")
+            if proc_stat.exists():
+                lines = proc_stat.read_text().splitlines()
+                cpu_line = lines[0] if lines else ""
+                fields = cpu_line.split()
+                if len(fields) >= 5:
+                    total = sum(int(f) for f in fields[1:])
+                    idle = int(fields[4])
+                    used_pct = round((total - idle) / total * 100, 1) if total else 0
+                    return f"CPU: {used_pct}% used  (raw: {cpu_line})"
+            r = subprocess.run(["top", "-bn1"], capture_output=True, text=True, timeout=5)
+            for ln in r.stdout.splitlines():
+                if "Cpu" in ln or "cpu" in ln:
+                    return f"CPU: {ln.strip()}"
+            return "(could not read CPU usage)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def memory_usage_h(inp: dict[str, Any]) -> str:
+        try:
+            mem_info = Path("/proc/meminfo")
+            if mem_info.exists():
+                rows = mem_info.read_text().splitlines()[:8]
+                return "\n".join(rows)
+            r = subprocess.run(["free", "-h"], capture_output=True, text=True, timeout=5)
+            return r.stdout.strip() or "(no memory info)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def disk_usage_h(inp: dict[str, Any]) -> str:
+        import shutil as _shu
+        dsk_path = str(inp.get("path", "")) or repo_path
+        try:
+            u = _shu.disk_usage(dsk_path)
+            gb = 1024 ** 3
+            pct = round(u.used / u.total * 100, 1) if u.total else 0
+            return (
+                f"Disk usage for {dsk_path}:\n"
+                f"  Total: {u.total / gb:.1f} GB\n"
+                f"  Used:  {u.used / gb:.1f} GB  ({pct}%)\n"
+                f"  Free:  {u.free / gb:.1f} GB"
+            )
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def health_check_h(inp: dict[str, Any]) -> str:
+        hc_svc = str(inp.get("service", "all"))
+        settings = get_settings()
+        hc_results: list[str] = []
+        if hc_svc in ("all", "backend"):
+            hc_port = getattr(settings, "port", 8000)
+            try:
+                r = subprocess.run(
+                    ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+                     f"http://localhost:{hc_port}/health"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                code = r.stdout.strip()
+                hc_results.append(f"Backend (:{hc_port}/health): {'✅ UP' if code == '200' else f'⚠️ HTTP {code}'}")
+            except Exception:
+                hc_port2 = getattr(settings, "port", 8000)
+                hc_results.append(f"Backend (:{hc_port2}/health): ❌ unreachable")
+        if hc_svc in ("all", "db"):
+            db_url = getattr(settings, "database_url", "")
+            if db_url:
+                try:
+                    r = subprocess.run(["pg_isready", "-d", db_url], capture_output=True, text=True, timeout=5)
+                    hc_results.append(f"Database: {'✅ UP' if r.returncode == 0 else '❌ DOWN'}")
+                except Exception:
+                    hc_results.append("Database: ❓ pg_isready not available")
+            else:
+                hc_results.append("Database: (DATABASE_URL not configured)")
+        return "\n".join(hc_results) if hc_results else "No services checked"
+
+    def task_progress_h(inp: dict[str, Any]) -> str:
+        tprog_task_id = inp.get("task_id")
+        tprog_limit = int(inp.get("limit", 10))
+        settings = get_settings()
+        tp_db = getattr(settings, "database_url", "")
+        if not tp_db:
+            return "[ERROR] DATABASE_URL not set"
+        if tprog_task_id is not None:
+            sql = f"SELECT id, status, created_at, updated_at FROM dev_tasks WHERE id = {int(tprog_task_id)} LIMIT 1;"
+        else:
+            sql = f"SELECT id, status, created_at, updated_at FROM dev_tasks ORDER BY created_at DESC LIMIT {tprog_limit};"
+        try:
+            r = subprocess.run(
+                ["psql", tp_db, "-c", sql, "--no-psqlrc"],
+                capture_output=True, text=True, timeout=10,
+            )
+            return (r.stdout + r.stderr).strip() or "(no results)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    handlers["cpu_usage"] = cpu_usage_h
+    handlers["memory_usage"] = memory_usage_h
+    handlers["disk_usage"] = disk_usage_h
+    handlers["health_check"] = health_check_h
+    handlers["task_progress"] = task_progress_h
+
+    # =========================================================================
+    # BATCH 15 — Editing extras (replace_class, undo_changes, generate_patch)
+    # =========================================================================
+
+    def replace_class_h(inp: dict[str, Any]) -> str:
+        rcl_rel = str(inp["path"])
+        rcl_name = str(inp["class_name"])
+        rcl_new = str(inp["new_code"])
+        if _is_protected_path(rcl_rel):
+            return f"[POLICY DENIED] Protected path: {rcl_rel}"
+        rcl_fp = root / rcl_rel
+        if not rcl_fp.exists():
+            return f"[ERROR] File not found: {rcl_rel}"
+        try:
+            rcl_lines = rcl_fp.read_text(encoding="utf-8").splitlines(keepends=True)
+        except Exception as e:
+            return f"[ERROR] {e}"
+        rcl_start: int | None = None
+        rcl_base_ind = 0
+        for rcl_i, rcl_ln in enumerate(rcl_lines):
+            s = rcl_ln.strip()
+            if (s.startswith(f"class {rcl_name}(")
+                    or s.startswith(f"class {rcl_name}:")
+                    or s == f"class {rcl_name}"):
+                rcl_start = rcl_i
+                rcl_base_ind = len(rcl_ln) - len(rcl_ln.lstrip())
+                break
+        if rcl_start is None:
+            return f"[ERROR] Class '{rcl_name}' not found in {rcl_rel}"
+        rcl_end = len(rcl_lines)
+        for rcl_j in range(rcl_start + 1, len(rcl_lines)):
+            rcl_jl = rcl_lines[rcl_j]
+            if rcl_jl.strip() == "":
+                continue
+            rcl_ji = len(rcl_jl) - len(rcl_jl.lstrip())
+            if rcl_ji <= rcl_base_ind and rcl_jl.strip() and not rcl_jl.strip().startswith(("@", "#")):
+                rcl_end = rcl_j
+                break
+        before = "".join(rcl_lines[:rcl_start])
+        after = "".join(rcl_lines[rcl_end:])
+        new_final = rcl_new if rcl_new.endswith("\n") else rcl_new + "\n"
+        rcl_fp.write_text(before + new_final + after, encoding="utf-8")
+        return f"Replaced class '{rcl_name}' in {rcl_rel} (was lines {rcl_start + 1}–{rcl_end})"
+
+    def undo_changes_h(inp: dict[str, Any]) -> str:
+        undo_rel = str(inp["path"])
+        if _is_protected_path(undo_rel):
+            return f"[POLICY DENIED] Protected path: {undo_rel}"
+        # In sync context (no session), block — async path handles confirmation
+        if session is None:
+            return "[BLOCKED] undo_changes requires interactive session for safety confirmation"
+        return "[REQUIRES_CONFIRMATION] undo_changes must be confirmed in the UI before executing"
+
+    def generate_patch_h(inp: dict[str, Any]) -> str:
+        import difflib
+        gp_a = str(inp.get("content_a", ""))
+        gp_b = str(inp.get("content_b", ""))
+        gp_fn = str(inp.get("filename", "file"))
+        diff = list(difflib.unified_diff(
+            gp_a.splitlines(keepends=True),
+            gp_b.splitlines(keepends=True),
+            fromfile=f"a/{gp_fn}",
+            tofile=f"b/{gp_fn}",
+        ))
+        return "".join(diff) if diff else "(no differences)"
+
+    handlers["replace_class"] = replace_class_h
+    handlers["undo_changes"] = undo_changes_h
+    handlers["generate_patch"] = generate_patch_h
+
+    # =========================================================================
+    # BATCH 16 — DB extras (explain_query, run_migration, seed_database)
+    # =========================================================================
+
+    def explain_query_h(inp: dict[str, Any]) -> str:
+        expq_sql = str(inp["query"]).strip().rstrip(";")
+        settings = get_settings()
+        expq_db = getattr(settings, "database_url", "")
+        if not expq_db:
+            return "[ERROR] DATABASE_URL not set"
+        full_sql = f"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {expq_sql};"
+        try:
+            r = subprocess.run(
+                ["psql", expq_db, "-c", full_sql, "--no-psqlrc"],
+                capture_output=True, text=True, timeout=30,
+            )
+            return (r.stdout + r.stderr).strip() or "(no output)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def run_migration_h(inp: dict[str, Any]) -> str:
+        if session is None:
+            return "[BLOCKED] run_migration requires interactive session for safety confirmation"
+        return "[REQUIRES_CONFIRMATION] Database migrations modify the schema. Confirm in the UI."
+
+    def seed_database_h(inp: dict[str, Any]) -> str:
+        if session is None:
+            return "[BLOCKED] seed_database requires interactive session for safety confirmation"
+        return "[REQUIRES_CONFIRMATION] Seeding the database modifies data. Confirm in the UI."
+
+    handlers["explain_query"] = explain_query_h
+    handlers["run_migration"] = run_migration_h
+    handlers["seed_database"] = seed_database_h
+
     return handlers

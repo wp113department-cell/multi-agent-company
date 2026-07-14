@@ -20,6 +20,7 @@ from app.agents.base import get_effective_api_key
 from app.agents.tools import CHAT_TOOLS, _is_dangerous_command, _is_protected_path
 from app.config import get_settings
 from app.models.chat import ChatSession
+from app.repo_tools import ast_engine as _ast_engine
 
 logger = logging.getLogger(__name__)
 
@@ -1150,6 +1151,413 @@ class ChatAgent:
                 if result and result != "(no output)":
                     ss_findings.append(result)
             return "⚠️  Potential secrets found:\n\n" + "\n\n".join(ss_findings)[:5000] if ss_findings else "✅ No hardcoded secrets detected."
+
+        # ========== BATCH 10 — AST Engine ==========
+
+        if tool_name == "parse_ast":
+            pa_rel = str(inp["path"])
+            pa_fp = root / pa_rel
+            if not pa_fp.exists():
+                return f"[ERROR] File not found: {pa_rel}"
+            return await asyncio.to_thread(_ast_engine.parse_file_ast, str(pa_fp))
+
+        if tool_name == "import_graph":
+            ig_rel = str(inp["path"])
+            ig_fp = root / ig_rel
+            if not ig_fp.exists():
+                return f"[ERROR] File not found: {ig_rel}"
+            return await asyncio.to_thread(_ast_engine.build_import_graph, str(ig_fp))
+
+        if tool_name == "call_graph":
+            cg_rel = str(inp["path"])
+            cg_fn = str(inp.get("function_name", ""))
+            cg_fp = root / cg_rel
+            if not cg_fp.exists():
+                return f"[ERROR] File not found: {cg_rel}"
+            return await asyncio.to_thread(_ast_engine.build_call_graph, str(cg_fp), cg_fn)
+
+        if tool_name == "dead_code_detect":
+            dcd_d = str(inp.get("directory", ""))
+            dcd_target = str(root / dcd_d) if dcd_d else repo
+            return await asyncio.to_thread(_ast_engine.detect_dead_code, dcd_target)
+
+        if tool_name == "circular_dep_detect":
+            cdd_d = str(inp.get("directory", ""))
+            cdd_target = str(root / cdd_d) if cdd_d else repo
+            return await asyncio.to_thread(_ast_engine.detect_circular_imports, cdd_target)
+
+        if tool_name == "rename_symbol":
+            rsym_old = str(inp["old_name"])
+            rsym_new = str(inp["new_name"])
+            rsym_d = str(inp.get("directory", ""))
+            rsym_pat = str(inp.get("file_pattern", "*.py"))
+            rsym_target = str(root / rsym_d) if rsym_d else repo
+            if rsym_old == rsym_new:
+                return "[ERROR] old_name and new_name are the same"
+            return await asyncio.to_thread(_ast_engine.rename_symbol, rsym_old, rsym_new, rsym_target, rsym_pat)
+
+        # ========== BATCH 11 — Git extras ==========
+
+        if tool_name == "git_rebase":
+            grb_onto = str(inp["onto"])
+            if bool(inp.get("interactive", False)):
+                return "[BLOCKED] Interactive rebase requires a TTY. Run 'git rebase -i' manually in a terminal."
+            return await asyncio.to_thread(
+                _git, ["rebase", grb_onto], repo, 60
+            )
+
+        if tool_name == "git_cherry_pick":
+            gcp_hash = str(inp["commit_hash"])
+            gcp_args = ["cherry-pick"]
+            if bool(inp.get("no_commit", False)):
+                gcp_args.append("--no-commit")
+            gcp_args.append(gcp_hash)
+            return await asyncio.to_thread(_git, gcp_args, repo, 30)
+
+        # ========== BATCH 12 — Terminal extras ==========
+
+        if tool_name == "read_output":
+            from app.agents.tools import _BACKGROUND_PROCESSES
+            import fcntl as _fcntl2
+            import os as _os2
+            ro_pid = int(inp["pid"])
+            ro_max_lines = int(inp.get("lines", 50))
+            ro_proc = _BACKGROUND_PROCESSES.get(ro_pid)
+            if ro_proc is None:
+                return f"[ERROR] No tracked background process with PID {ro_pid}"
+            if ro_proc.poll() is not None:
+                return f"Process {ro_pid} has exited (code {ro_proc.returncode})"
+            ro_lines: list[str] = []
+            for ro_stream in [ro_proc.stdout, ro_proc.stderr]:
+                if ro_stream is None:
+                    continue
+                ro_fd = ro_stream.fileno()
+                ro_fl = _fcntl2.fcntl(ro_fd, _fcntl2.F_GETFL)
+                _fcntl2.fcntl(ro_fd, _fcntl2.F_SETFL, ro_fl | _os2.O_NONBLOCK)
+                try:
+                    ro_chunk = ro_stream.read(8192)
+                    if ro_chunk:
+                        ro_lines.extend(ro_chunk.splitlines())
+                except (IOError, BlockingIOError, TypeError):
+                    pass
+            return "\n".join(ro_lines[-ro_max_lines:]) if ro_lines else f"(no output yet from PID {ro_pid})"
+
+        if tool_name == "run_node":
+            import shlex as _shlex2
+            rnd_code = str(inp["code"])
+            rnd_timeout = int(inp.get("timeout", 30))
+            rnd_node_chk = await asyncio.to_thread(
+                lambda: subprocess.run(["which", "node"], capture_output=True, text=True, timeout=5)
+            )
+            if rnd_node_chk.returncode != 0:
+                rnd_node_chk2 = await asyncio.to_thread(
+                    lambda: subprocess.run(["which", "nodejs"], capture_output=True, text=True, timeout=5)
+                )
+                if rnd_node_chk2.returncode != 0:
+                    return "[ERROR] Node.js not found. Install via nvm or your package manager."
+            rnd_cmd = f"node -e {_shlex2.quote(rnd_code)} 2>&1"
+            return await asyncio.to_thread(_run_subprocess, rnd_cmd, repo, rnd_timeout)
+
+        if tool_name == "run_script":
+            rscr_rel = str(inp["path"])
+            rscr_fp = root / rscr_rel
+            if not rscr_fp.exists():
+                return f"[ERROR] Script not found: {rscr_rel}"
+            rscr_interp = str(inp.get("interpreter", "auto"))
+            if rscr_interp == "auto":
+                rscr_interp = (
+                    "python3" if rscr_fp.suffix == ".py"
+                    else "node" if rscr_fp.suffix in (".js", ".mjs", ".cjs")
+                    else "bash"
+                )
+            rscr_cmd = f"{rscr_interp} {str(rscr_fp)} 2>&1"
+            return await asyncio.to_thread(_run_subprocess, rscr_cmd, repo, 120)
+
+        if tool_name == "docker_build":
+            dbld_tag = str(inp["tag"])
+            dbld_context = str(inp.get("context", "."))
+            dbld_df = inp.get("dockerfile")
+            dbld_ctx_path = str(root / dbld_context) if dbld_context != "." else repo
+            dbld_cmd_parts = ["docker", "build", "-t", dbld_tag]
+            if dbld_df:
+                dbld_cmd_parts += ["-f", str(root / str(dbld_df))]
+            dbld_cmd_parts.append(dbld_ctx_path)
+            import shlex as _shlex3
+            dbld_cmd_str = " ".join(_shlex3.quote(c) for c in dbld_cmd_parts) + " 2>&1"
+            return await asyncio.to_thread(_run_subprocess, dbld_cmd_str, repo, 600)
+
+        if tool_name == "docker_restart":
+            drst_name = str(inp["container"])
+            drst_cmd = f"docker restart {drst_name} 2>&1"
+            return await asyncio.to_thread(_run_subprocess, drst_cmd, repo, 60)
+
+        # ========== BATCH 13 — Smart search ==========
+
+        if tool_name == "find_route":
+            frt_method = str(inp.get("method", "")).upper()
+            frt_path_pat = str(inp.get("path_pattern", ""))
+            frt_pat = (
+                rf"@(router|app)\.{frt_method.lower()}\(" if frt_method
+                else r"@(router|app)\.(get|post|put|delete|patch|head|options)\("
+            )
+            frt_cmd = (
+                f"grep -rn -E {__import__('shlex').quote(frt_pat)} {repo} "
+                "--include=*.py --include=*.ts "
+                "--exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=__pycache__ 2>/dev/null || true"
+            )
+            frt_result = await asyncio.to_thread(_run_subprocess, frt_cmd, repo, 15)
+            if frt_path_pat:
+                frt_result = "\n".join(ln for ln in frt_result.splitlines() if frt_path_pat in ln)
+            return frt_result[:5000] if frt_result.strip() else (
+                "No routes found" + (f" for {frt_method}" if frt_method else "")
+            )
+
+        if tool_name == "find_api":
+            fapi_name = str(inp.get("name", ""))
+            fapi_pat = (
+                fapi_name if fapi_name
+                else r"@(router|app)\.(get|post|put|delete|patch)\("
+            )
+            fapi_cmd = (
+                f"grep -rn -E {__import__('shlex').quote(fapi_pat)} {repo} "
+                "--include=*.py --include=*.ts "
+                "--exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=__pycache__ 2>/dev/null || true"
+            )
+            fapi_result = await asyncio.to_thread(_run_subprocess, fapi_cmd, repo, 15)
+            return fapi_result[:5000] if fapi_result.strip() else (
+                "No API definitions found" + (f" matching '{fapi_name}'" if fapi_name else "")
+            )
+
+        if tool_name == "find_sql":
+            import shlex as _shlex4
+            fsql_kw = str(inp.get("keyword", "")).upper()
+            if fsql_kw:
+                # -i case-insensitive, -w whole-word; avoid (?i) inline flag
+                fsql_cmd = (
+                    f"grep -rn -i -w {_shlex4.quote(fsql_kw)} {repo} "
+                    "--include=*.py --include=*.sql --include=*.ts "
+                    "--exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=__pycache__ 2>/dev/null || true"
+                )
+            else:
+                fsql_cmd = (
+                    f"grep -rn -i -E 'SELECT|INSERT|UPDATE|DELETE|CREATE TABLE|ALTER TABLE' {repo} "
+                    "--include=*.py --include=*.sql --include=*.ts "
+                    "--exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=__pycache__ 2>/dev/null || true"
+                )
+            fsql_result = await asyncio.to_thread(_run_subprocess, fsql_cmd, repo, 15)
+            return fsql_result[:5000] if fsql_result.strip() else "No SQL statements found"
+
+        if tool_name == "find_test":
+            ftest_fn = str(inp["function_name"])
+            ftest_pat = rf"def test_{ftest_fn}|def test.*{ftest_fn}"
+            ftest_cmd = (
+                f"grep -rn -E {__import__('shlex').quote(ftest_pat)} {repo} "
+                "--include=*.py --include=*.test.ts --include=*.spec.ts "
+                "--exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=__pycache__ 2>/dev/null || true"
+            )
+            ftest_result = await asyncio.to_thread(_run_subprocess, ftest_cmd, repo, 15)
+            return ftest_result[:5000] if ftest_result.strip() else f"No tests found for '{ftest_fn}'"
+
+        if tool_name == "find_config":
+            fcfg_key = str(inp["key"])
+            fcfg_pat = fcfg_key.upper()
+            fcfg_cmd = (
+                f"grep -rn {__import__('shlex').quote(fcfg_pat)} {repo} "
+                "--include=*.env* --include=.env* --include=*.yaml --include=*.yml "
+                "--include=*.toml --include=config.py --include=settings.py "
+                "--exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=__pycache__ 2>/dev/null || true"
+            )
+            fcfg_result = await asyncio.to_thread(_run_subprocess, fcfg_cmd, repo, 15)
+            if not fcfg_result.strip():
+                # Try lowercase too
+                fcfg_cmd2 = (
+                    f"grep -rn {__import__('shlex').quote(fcfg_key.lower())} {repo} "
+                    "--include=*.yaml --include=*.yml --include=*.toml "
+                    "--exclude-dir=node_modules --exclude-dir=.venv 2>/dev/null || true"
+                )
+                fcfg_result = await asyncio.to_thread(_run_subprocess, fcfg_cmd2, repo, 15)
+            return fcfg_result[:5000] if fcfg_result.strip() else f"'{fcfg_key}' not found in config files"
+
+        # ========== BATCH 14 — Monitoring ==========
+
+        if tool_name == "cpu_usage":
+            cpu_cmd = "cat /proc/stat 2>/dev/null | head -1 || top -bn1 2>/dev/null | grep -i cpu | head -3"
+            cpu_raw = await asyncio.to_thread(_run_subprocess, cpu_cmd, repo, 5)
+            # Parse /proc/stat if available
+            if cpu_raw.startswith("cpu "):
+                cpu_fields = cpu_raw.split()
+                if len(cpu_fields) >= 5:
+                    cpu_total = sum(int(f) for f in cpu_fields[1:] if f.isdigit())
+                    cpu_idle = int(cpu_fields[4])
+                    cpu_pct = round((cpu_total - cpu_idle) / cpu_total * 100, 1) if cpu_total else 0
+                    return f"CPU: {cpu_pct}% used"
+            return f"CPU: {cpu_raw[:300]}"
+
+        if tool_name == "memory_usage":
+            memus_cmd = "cat /proc/meminfo 2>/dev/null | head -8 || free -h 2>/dev/null"
+            return await asyncio.to_thread(_run_subprocess, memus_cmd, repo, 5)
+
+        if tool_name == "disk_usage":
+            import shutil as _shu2
+            disk_path = str(inp.get("path", "")) or repo
+            try:
+                dsk_u = _shu2.disk_usage(disk_path)
+                dsk_gb = 1024 ** 3
+                dsk_pct = round(dsk_u.used / dsk_u.total * 100, 1) if dsk_u.total else 0
+                return (
+                    f"Disk usage for {disk_path}:\n"
+                    f"  Total: {dsk_u.total / dsk_gb:.1f} GB\n"
+                    f"  Used:  {dsk_u.used / dsk_gb:.1f} GB  ({dsk_pct}%)\n"
+                    f"  Free:  {dsk_u.free / dsk_gb:.1f} GB"
+                )
+            except Exception as dsk_e:
+                return f"[ERROR] {dsk_e}"
+
+        if tool_name == "health_check":
+            from app.config import get_settings as _gs2
+            hc_svc = str(inp.get("service", "all"))
+            hc_settings = _gs2()
+            hc_port = getattr(hc_settings, "port", 8000)
+            hc_res: list[str] = []
+            if hc_svc in ("all", "backend"):
+                hc_curl = f"curl -s -o /dev/null -w '%{{http_code}}' http://localhost:{hc_port}/health 2>/dev/null || echo 000"
+                hc_code = (await asyncio.to_thread(_run_subprocess, hc_curl, repo, 5)).strip()
+                hc_res.append(f"Backend (:{hc_port}/health): {'✅ UP' if hc_code == '200' else f'⚠️ HTTP {hc_code}'}")
+            if hc_svc in ("all", "db"):
+                hc_db_url = getattr(hc_settings, "database_url", "")
+                if hc_db_url:
+                    hc_pg = await asyncio.to_thread(_run_subprocess, f"pg_isready -d '{hc_db_url}' 2>&1", repo, 5)
+                    hc_res.append(f"Database: {'✅ UP' if 'accepting' in hc_pg else f'❌ {hc_pg[:80]}'}")
+                else:
+                    hc_res.append("Database: (DATABASE_URL not configured)")
+            return "\n".join(hc_res) if hc_res else "No services checked"
+
+        if tool_name == "task_progress":
+            from app.config import get_settings as _gs3
+            tprog_tid = inp.get("task_id")
+            tprog_lim = int(inp.get("limit", 10))
+            tp_db_url = getattr(_gs3(), "database_url", "")
+            if not tp_db_url:
+                return "[ERROR] DATABASE_URL not set"
+            if tprog_tid is not None:
+                tprog_sql = f"SELECT id, status, created_at, updated_at FROM dev_tasks WHERE id = {int(tprog_tid)} LIMIT 1;"
+            else:
+                tprog_sql = f"SELECT id, status, created_at, updated_at FROM dev_tasks ORDER BY created_at DESC LIMIT {tprog_lim};"
+            tprog_cmd = f"psql '{tp_db_url}' -c {__import__('shlex').quote(tprog_sql)} --no-psqlrc 2>&1"
+            return await asyncio.to_thread(_run_subprocess, tprog_cmd, repo, 10)
+
+        # ========== BATCH 15 — Editing extras ==========
+
+        if tool_name == "replace_class":
+            rcl_rel = str(inp["path"])
+            rcl_name = str(inp["class_name"])
+            rcl_new = str(inp["new_code"])
+            if _is_protected_path(rcl_rel):
+                return f"[POLICY DENIED] Protected path: {rcl_rel}"
+            rcl_fp = root / rcl_rel
+            if not rcl_fp.exists():
+                return f"[ERROR] File not found: {rcl_rel}"
+            rcl_lines = rcl_fp.read_text(encoding="utf-8").splitlines(keepends=True)
+            rcl_start: int | None = None
+            rcl_base_i = 0
+            for rcl_idx, rcl_ln in enumerate(rcl_lines):
+                rcl_s = rcl_ln.strip()
+                if (rcl_s.startswith(f"class {rcl_name}(")
+                        or rcl_s.startswith(f"class {rcl_name}:")
+                        or rcl_s == f"class {rcl_name}"):
+                    rcl_start = rcl_idx
+                    rcl_base_i = len(rcl_ln) - len(rcl_ln.lstrip())
+                    break
+            if rcl_start is None:
+                return f"[ERROR] Class '{rcl_name}' not found in {rcl_rel}"
+            rcl_end_i = len(rcl_lines)
+            for rcl_j2 in range(rcl_start + 1, len(rcl_lines)):
+                rcl_jl2 = rcl_lines[rcl_j2]
+                if rcl_jl2.strip() == "":
+                    continue
+                rcl_ji2 = len(rcl_jl2) - len(rcl_jl2.lstrip())
+                if rcl_ji2 <= rcl_base_i and rcl_jl2.strip() and not rcl_jl2.strip().startswith(("@", "#")):
+                    rcl_end_i = rcl_j2
+                    break
+            rcl_before = "".join(rcl_lines[:rcl_start])
+            rcl_after = "".join(rcl_lines[rcl_end_i:])
+            rcl_new_final = rcl_new if rcl_new.endswith("\n") else rcl_new + "\n"
+            rcl_fp.write_text(rcl_before + rcl_new_final + rcl_after, encoding="utf-8")
+            return f"Replaced class '{rcl_name}' in {rcl_rel} (was lines {rcl_start + 1}–{rcl_end_i})"
+
+        if tool_name == "undo_changes":
+            undo_rel = str(inp["path"])
+            if _is_protected_path(undo_rel):
+                return f"[POLICY DENIED] Protected path: {undo_rel}"
+            undo_fp = root / undo_rel
+            if not undo_fp.exists():
+                return f"[ERROR] File not found: {undo_rel}"
+            confirmed_undo = await self.session.request_confirmation(
+                action_id=str(uuid.uuid4()),
+                description=f"git checkout -- {undo_rel}",
+                details="DISCARDS all uncommitted changes to this file — irreversible",
+            )
+            if not confirmed_undo:
+                return f"[CANCELLED] undo_changes for {undo_rel} cancelled by user"
+            return await asyncio.to_thread(_git, ["checkout", "--", undo_rel], repo, 15)
+
+        if tool_name == "generate_patch":
+            import difflib as _dl
+            gpatch_a = str(inp.get("content_a", ""))
+            gpatch_b = str(inp.get("content_b", ""))
+            gpatch_fn = str(inp.get("filename", "file"))
+            gpatch_diff = list(_dl.unified_diff(
+                gpatch_a.splitlines(keepends=True),
+                gpatch_b.splitlines(keepends=True),
+                fromfile=f"a/{gpatch_fn}",
+                tofile=f"b/{gpatch_fn}",
+            ))
+            return "".join(gpatch_diff) if gpatch_diff else "(no differences)"
+
+        # ========== BATCH 16 — DB extras ==========
+
+        if tool_name == "explain_query":
+            expq_sql = str(inp["query"]).strip().rstrip(";")
+            from app.config import get_settings as _gs4
+            expq_db = getattr(_gs4(), "database_url", "")
+            if not expq_db:
+                return "[ERROR] DATABASE_URL not set"
+            expq_full = f"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {expq_sql};"
+            expq_cmd = f"psql '{expq_db}' -c {__import__('shlex').quote(expq_full)} --no-psqlrc 2>&1"
+            return await asyncio.to_thread(_run_subprocess, expq_cmd, repo, 30)
+
+        if tool_name == "run_migration":
+            rmig_dir = str(inp.get("direction", "upgrade"))
+            rmig_rev = str(inp.get("revision", "head" if rmig_dir == "upgrade" else "-1"))
+            rmig_confirmed = await self.session.request_confirmation(
+                action_id=str(uuid.uuid4()),
+                description=f"alembic {rmig_dir} {rmig_rev}",
+                details="Modifies the database schema — review migration file before confirming",
+            )
+            if not rmig_confirmed:
+                return "[CANCELLED] run_migration cancelled by user"
+            rmig_backend = str(root / "backend") if (root / "backend").exists() else repo
+            activate = f"source {rmig_backend}/.venv/bin/activate 2>/dev/null || true"
+            rmig_cmd = f"{activate} && cd {rmig_backend} && alembic {rmig_dir} {rmig_rev} 2>&1"
+            return await asyncio.to_thread(_run_subprocess, rmig_cmd, rmig_backend, 120)
+
+        if tool_name == "seed_database":
+            seeddb_script = str(inp.get("script", ""))
+            if not seeddb_script:
+                seeddb_script = "backend/scripts/seed.py"
+            seeddb_fp = root / seeddb_script
+            if not seeddb_fp.exists():
+                return f"[ERROR] Seed script not found: {seeddb_script}"
+            seeddb_confirmed = await self.session.request_confirmation(
+                action_id=str(uuid.uuid4()),
+                description=f"Run seed script: {seeddb_script}",
+                details="Modifies database data — will insert/update rows",
+            )
+            if not seeddb_confirmed:
+                return "[CANCELLED] seed_database cancelled by user"
+            activate = f"source {repo}/.venv/bin/activate 2>/dev/null || true"
+            seeddb_cmd = f"{activate} && python3 {str(seeddb_fp)} 2>&1"
+            return await asyncio.to_thread(_run_subprocess, seeddb_cmd, repo, 120)
 
         return f"[ERROR] Unknown tool: {tool_name}"
 
