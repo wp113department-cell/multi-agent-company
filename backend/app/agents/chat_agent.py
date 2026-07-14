@@ -543,6 +543,614 @@ class ChatAgent:
         if tool_name == "submit_result":
             return f"Task complete: {inp.get('status', 'done')}\n{inp.get('summary', '')}"
 
+        # ========== BATCH 1 — File / Editing extras ==========
+
+        if tool_name == "find_file":
+            name = str(inp["name"])
+            ff_dir = str(inp.get("directory", ""))
+            ff_root = root / ff_dir if ff_dir else root
+            try:
+                r = await asyncio.to_thread(
+                    subprocess.run,
+                    ["find", str(ff_root), "-name", name,
+                     "-not", "-path", "*/node_modules/*",
+                     "-not", "-path", "*/__pycache__/*",
+                     "-not", "-path", "*/.git/*",
+                     "-not", "-path", "*/.venv/*"],
+                    capture_output=True, text=True, timeout=15,
+                )
+                found = [l for l in r.stdout.splitlines() if l.strip()]
+                if not found:
+                    return f"(no files matching '{name}')"
+                ff_rel_paths: list[str] = []
+                for ff_path in found[:100]:
+                    try:
+                        ff_rel_paths.append(str(Path(ff_path).relative_to(root)))
+                    except ValueError:
+                        ff_rel_paths.append(ff_path)
+                return "\n".join(ff_rel_paths)
+            except Exception as e:
+                return f"[ERROR] {e}"
+
+        if tool_name == "format_file":
+            rel = str(inp["path"])
+            formatter = str(inp.get("formatter", "auto"))
+            fmt_target = root / rel
+            if not fmt_target.exists():
+                return f"[ERROR] File not found: {rel}"
+            if formatter == "auto":
+                formatter = "ruff" if fmt_target.suffix == ".py" else "prettier"
+            activate = f"source {repo}/.venv/bin/activate 2>/dev/null || true"
+            if formatter in ("ruff", "black"):
+                cmd_s = f"{activate} && python -m {formatter} format {str(fmt_target)} 2>&1"
+            else:
+                cmd_s = f"cd {repo} && npx prettier --write {str(fmt_target)} 2>&1"
+            return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 30)
+
+        if tool_name == "organize_imports":
+            rel = str(inp["path"])
+            oi_target = root / rel
+            if not oi_target.exists():
+                return f"[ERROR] File not found: {rel}"
+            activate = f"source {repo}/.venv/bin/activate 2>/dev/null || true"
+            cmd_s = f"{activate} && python -m ruff check --select I --fix {str(oi_target)} 2>&1"
+            return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 30)
+
+        if tool_name == "insert_at_line":
+            rel = str(inp["path"])
+            line_num = int(inp["line"])
+            content = str(inp["content"])
+            if _is_protected_path(rel):
+                return f"[POLICY DENIED] Cannot write to protected path: {rel}"
+            ial_target = root / rel
+            if not ial_target.exists():
+                return f"[ERROR] File not found: {rel}"
+            try:
+                file_lines = ial_target.read_text(encoding="utf-8").splitlines(keepends=True)
+                insert_at = max(0, line_num - 1) if line_num > 0 else len(file_lines)
+                insert_at = min(insert_at, len(file_lines))
+                ins_content = content if content.endswith("\n") else content + "\n"
+                file_lines.insert(insert_at, ins_content)
+                ial_target.write_text("".join(file_lines), encoding="utf-8")
+                return f"Inserted at line {line_num} in {rel}"
+            except Exception as e:
+                return f"[ERROR] {e}"
+
+        if tool_name == "replace_function":
+            rel = str(inp["path"])
+            rf_name = str(inp["function_name"])
+            new_code = str(inp["new_code"])
+            if _is_protected_path(rel):
+                return f"[POLICY DENIED] Cannot write to protected path: {rel}"
+            rf_target = root / rel
+            if not rf_target.exists():
+                return f"[ERROR] File not found: {rel}"
+            try:
+                rf_lines = rf_target.read_text(encoding="utf-8").splitlines(keepends=True)
+                rf_start: int | None = None
+                rf_indent = 0
+                for rf_i, rf_line in enumerate(rf_lines):
+                    s = rf_line.strip()
+                    if s.startswith(f"def {rf_name}(") or s.startswith(f"async def {rf_name}("):
+                        rf_start = rf_i
+                        rf_indent = len(rf_line) - len(rf_line.lstrip())
+                        break
+                if rf_start is None:
+                    return f"[ERROR] Function '{rf_name}' not found in {rel}"
+                rf_end = len(rf_lines)
+                for rf_j in range(rf_start + 1, len(rf_lines)):
+                    rf_jl = rf_lines[rf_j]
+                    if rf_jl.strip() == "":
+                        continue
+                    rf_jind = len(rf_jl) - len(rf_jl.lstrip())
+                    if rf_jind <= rf_indent and rf_jl.strip() and not rf_jl.strip().startswith(("#", "@")):
+                        rf_end = rf_j
+                        break
+                rf_new = new_code if new_code.endswith("\n") else new_code + "\n"
+                rf_target.write_text("".join(rf_lines[:rf_start] + [rf_new] + rf_lines[rf_end:]), encoding="utf-8")
+                return f"Replaced '{rf_name}' in {rel} (lines {rf_start + 1}-{rf_end})"
+            except Exception as e:
+                return f"[ERROR] {e}"
+
+        if tool_name == "delete_lines":
+            rel = str(inp["path"])
+            dl_start = int(inp["start_line"])
+            dl_end = int(inp["end_line"])
+            if _is_protected_path(rel):
+                return f"[POLICY DENIED] Cannot write to protected path: {rel}"
+            dl_target = root / rel
+            if not dl_target.exists():
+                return f"[ERROR] File not found: {rel}"
+            if dl_start < 1 or dl_end < dl_start:
+                return f"[ERROR] Invalid range: {dl_start}-{dl_end}"
+            try:
+                dl_lines = dl_target.read_text(encoding="utf-8").splitlines(keepends=True)
+                total = len(dl_lines)
+                if dl_start > total:
+                    return f"[ERROR] File only has {total} lines"
+                dl_s = dl_start - 1
+                dl_e = min(dl_end, total)
+                deleted = dl_e - dl_s
+                dl_target.write_text("".join(dl_lines[:dl_s] + dl_lines[dl_e:]), encoding="utf-8")
+                return f"Deleted {deleted} lines ({dl_start}-{dl_end}) from {rel}"
+            except Exception as e:
+                return f"[ERROR] {e}"
+
+        if tool_name == "apply_patch":
+            import os as _os
+            import tempfile as _tempfile
+            patch_content = str(inp["patch"])
+            strip = int(inp.get("strip", 1))
+            try:
+                with _tempfile.NamedTemporaryFile(mode="w", suffix=".patch", delete=False) as pf:
+                    pf.write(patch_content)
+                    pf_name = pf.name
+            except Exception as e:
+                return f"[ERROR] Cannot write patch file: {e}"
+            try:
+                r = await asyncio.to_thread(
+                    subprocess.run,
+                    ["patch", f"-p{strip}", "--input", pf_name],
+                    cwd=repo, capture_output=True, text=True, timeout=30,
+                )
+                return (r.stdout + r.stderr).strip() or "Patch applied"
+            except FileNotFoundError:
+                return "[ERROR] 'patch' command not found"
+            except Exception as e:
+                return f"[ERROR] {e}"
+            finally:
+                try:
+                    _os.unlink(pf_name)
+                except Exception:
+                    pass
+
+        if tool_name == "compare_files":
+            rel_a = str(inp["path_a"])
+            rel_b = str(inp["path_b"])
+            context = int(inp.get("context", 3))
+            cf_a = root / rel_a
+            cf_b = root / rel_b
+            if not cf_a.exists():
+                return f"[ERROR] File not found: {rel_a}"
+            if not cf_b.exists():
+                return f"[ERROR] File not found: {rel_b}"
+            r = subprocess.run(["diff", f"-U{context}", str(cf_a), str(cf_b)], capture_output=True, text=True)
+            return r.stdout[:8000] or "Files are identical"
+
+        # ========== BATCH 2 — Terminal extras ==========
+
+        if tool_name == "run_background":
+            from app.agents.tools import _BACKGROUND_PROCESSES
+            rb_command = str(inp["command"])
+            rb_cwd = str(inp.get("cwd") or repo)
+            try:
+                proc = subprocess.Popen(
+                    rb_command, shell=True, cwd=rb_cwd,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                )
+                _BACKGROUND_PROCESSES[proc.pid] = proc
+                return f"Started background process PID {proc.pid}: {rb_command[:80]}"
+            except Exception as e:
+                return f"[ERROR] {e}"
+
+        if tool_name == "kill_process":
+            import os as _os
+            import signal as _signal
+            kp_pid = int(inp["pid"])
+            kp_sig_name = str(inp.get("signal", "TERM"))
+            sig_map = {"TERM": _signal.SIGTERM, "KILL": _signal.SIGKILL, "INT": _signal.SIGINT}
+            kp_sig = sig_map.get(kp_sig_name, _signal.SIGTERM)
+            try:
+                _os.kill(kp_pid, kp_sig)
+                return f"Sent {kp_sig_name} to PID {kp_pid}"
+            except ProcessLookupError:
+                return f"[ERROR] No process with PID {kp_pid}"
+            except Exception as e:
+                return f"[ERROR] {e}"
+
+        if tool_name == "run_python_snippet":
+            import shlex as _shlex
+            code = str(inp["code"])
+            ps_timeout = int(inp.get("timeout", 30))
+            activate = f"source {repo}/.venv/bin/activate 2>/dev/null || true"
+            cmd_s = f"{activate} && python3 -c {_shlex.quote(code)} 2>&1"
+            return await asyncio.to_thread(_run_subprocess, cmd_s, repo, ps_timeout)
+
+        if tool_name == "run_make":
+            make_target = str(inp.get("target", ""))
+            make_dir_rel = str(inp.get("directory", ""))
+            make_dir = (root / make_dir_rel) if make_dir_rel else root
+            if not (make_dir / "Makefile").exists() and not (make_dir / "makefile").exists():
+                return f"[ERROR] No Makefile found in {make_dir}"
+            if not make_target:
+                r = subprocess.run(["make", "-pRrq"], cwd=str(make_dir), capture_output=True, text=True, timeout=10)
+                tgts: list[str] = []
+                for mk_line in r.stdout.splitlines():
+                    if mk_line and not mk_line.startswith(("\t", "#", " ")) and ":" in mk_line:
+                        tgt = mk_line.split(":")[0].strip()
+                        if tgt and not tgt.startswith(".") and " " not in tgt:
+                            tgts.append(tgt)
+                return "Targets:\n" + "\n".join(sorted(set(tgts[:30]))) if tgts else "Makefile found but targets not parseable"
+            cmd_s = f"make {make_target}"
+            return await asyncio.to_thread(_run_subprocess, cmd_s, str(make_dir), 120)
+
+        if tool_name == "fetch_url":
+            fu_url = str(inp["url"])
+            fu_timeout = int(inp.get("timeout", 15))
+            cmd_s = f"curl -s -L --max-time {fu_timeout} --user-agent 'Gridiron-Agent/1.0' {fu_url} 2>&1"
+            return await asyncio.to_thread(_run_subprocess, cmd_s, repo, fu_timeout + 5)
+
+        # ========== BATCH 3 — Git extras ==========
+
+        if tool_name == "git_merge":
+            gm_branch = str(inp["branch"])
+            gm_no_ff = bool(inp.get("no_ff", False))
+            gm_squash = bool(inp.get("squash", False))
+            gm_msg = str(inp.get("message", ""))
+            gm_args = ["merge"] + (["--no-ff"] if gm_no_ff else []) + (["--squash"] if gm_squash else [])
+            if gm_msg:
+                gm_args += ["-m", gm_msg]
+            gm_args.append(gm_branch)
+            return _git(gm_args, repo)
+
+        if tool_name == "git_reset":
+            gr_ref = str(inp.get("ref", "HEAD"))
+            gr_mode = str(inp.get("mode", "mixed"))
+            if gr_mode == "hard":
+                approved = await self.session.request_confirmation(
+                    action_id=str(uuid.uuid4()),
+                    description="git reset --hard — discards ALL uncommitted changes",
+                    details=f"git reset --hard {gr_ref}",
+                )
+                if not approved:
+                    return "[DENIED] User declined git reset --hard."
+            return _git(["reset", f"--{gr_mode}", gr_ref], repo)
+
+        if tool_name == "git_worktree":
+            gw_action = str(inp.get("action", "list"))
+            gw_wt_path = str(inp.get("path", ""))
+            gw_branch = str(inp.get("branch", ""))
+            if gw_action == "list":
+                return _git(["worktree", "list"], repo)
+            elif gw_action == "add":
+                if not gw_wt_path or not gw_branch:
+                    return "[ERROR] path and branch required for add"
+                return await asyncio.to_thread(_git, ["worktree", "add", gw_wt_path, gw_branch], repo, 30)
+            elif gw_action == "remove":
+                if not gw_wt_path:
+                    return "[ERROR] path required for remove"
+                return _git(["worktree", "remove", gw_wt_path], repo)
+            return f"[ERROR] Unknown action: {gw_action}"
+
+        if tool_name == "create_pr":
+            pr_title = str(inp["title"])
+            pr_body = str(inp.get("body", ""))
+            pr_base = str(inp.get("base", "main"))
+            pr_draft = bool(inp.get("draft", False))
+            pr_cmd_parts = ["gh", "pr", "create", "--title", pr_title, "--base", pr_base]
+            if pr_body:
+                pr_cmd_parts += ["--body", pr_body]
+            if pr_draft:
+                pr_cmd_parts.append("--draft")
+            cmd_s = " ".join(__import__("shlex").quote(c) for c in pr_cmd_parts)
+            return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 30)
+
+        if tool_name == "generate_commit_msg":
+            gcm_staged = bool(inp.get("staged_only", True))
+            gcm_diff_args = ["diff", "--cached"] if gcm_staged else ["diff"]
+            gcm_stat = _git(gcm_diff_args + ["--stat"], repo)
+            gcm_diff = _git(gcm_diff_args, repo)[:3000]
+            if not gcm_stat.strip():
+                return "[ERROR] No staged changes. Stage files first."
+            return (
+                f"=== Changed files ===\n{gcm_stat}\n\n"
+                f"=== Diff (truncated) ===\n{gcm_diff}\n\n"
+                "Write a conventional commit message:\n"
+                "Format: <type>(<scope>): <description>\n"
+                "Types: feat, fix, docs, refactor, test, chore, style, perf"
+            )
+
+        # ========== BATCH 4 — Testing extras ==========
+
+        if tool_name == "run_single_test":
+            rst_kw = str(inp["keyword"])
+            rst_file = str(inp.get("file", ""))
+            rst_verbose = bool(inp.get("verbose", True))
+            rst_vflag = "-v" if rst_verbose else "-q"
+            activate = f"source {repo}/.venv/bin/activate 2>/dev/null || true"
+            rst_path = rst_file if rst_file else "backend/tests/"
+            cmd_s = f"{activate} && python -m pytest {rst_path} -k '{rst_kw}' {rst_vflag} --tb=short 2>&1 | head -100"
+            return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 120)
+
+        if tool_name == "coverage_report":
+            cov_path = str(inp.get("path", "backend/tests/"))
+            cov_source = str(inp.get("source", "backend/app/"))
+            cov_min = inp.get("min_coverage")
+            activate = f"source {repo}/.venv/bin/activate 2>/dev/null || true"
+            cov_min_flag = f"--cov-fail-under={cov_min}" if cov_min else ""
+            cmd_s = (
+                f"{activate} && python -m pytest {cov_path} "
+                f"--cov={cov_source} --cov-report=term-missing {cov_min_flag} "
+                f"--tb=no -q 2>&1 | tail -50"
+            )
+            return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 180)
+
+        if tool_name == "type_check":
+            tc_path = str(inp.get("path", ""))
+            tc_strict = bool(inp.get("strict", False))
+            tc_lang = str(inp.get("language", "both"))
+            activate = f"source {repo}/.venv/bin/activate 2>/dev/null || true"
+            tc_results: list[str] = []
+            if tc_lang in ("python", "both"):
+                py_path = tc_path or "backend/"
+                sf = "--strict" if tc_strict else "--ignore-missing-imports"
+                tc_results.append(await asyncio.to_thread(
+                    _run_subprocess,
+                    f"{activate} && python -m mypy {py_path} {sf} 2>&1 | head -60",
+                    repo, 90,
+                ))
+            if tc_lang in ("typescript", "both"):
+                web = str(root.parent / "apps" / "web")
+                tc_results.append(await asyncio.to_thread(
+                    _run_subprocess,
+                    f"cd {web} && npx tsc --noEmit 2>&1 | head -60",
+                    repo, 90,
+                ))
+            return "\n\n".join(tc_results) or "[ERROR] No language selected"
+
+        # ========== BATCH 5 — Code Intelligence ==========
+
+        if tool_name == "list_functions":
+            rel = str(inp["path"])
+            lf_fp = root / rel
+            if not lf_fp.exists():
+                return f"[ERROR] File not found: {rel}"
+            lf_lines = lf_fp.read_text(encoding="utf-8", errors="replace").splitlines()
+            lf_results: list[str] = []
+            for lf_i, lf_line in enumerate(lf_lines, 1):
+                s = lf_line.strip()
+                if s.startswith(("def ", "async def ")):
+                    lf_results.append(f"  L{lf_i}: {s.split(':')[0] if ':' in s else s}")
+                elif s.startswith(("export function ", "export async function ", "function ")) and "(" in s:
+                    lf_results.append(f"  L{lf_i}: {s[:120]}")
+                elif s.startswith(("export const ", "const ")) and ("=>" in s or "= (" in s or "= async" in s):
+                    lf_results.append(f"  L{lf_i}: {s[:120]}")
+            return f"Functions in {rel} ({len(lf_results)}):\n" + "\n".join(lf_results) if lf_results else f"(no functions in {rel})"
+
+        if tool_name == "list_classes":
+            rel = str(inp["path"])
+            lc_fp = root / rel
+            if not lc_fp.exists():
+                return f"[ERROR] File not found: {rel}"
+            lc_lines = lc_fp.read_text(encoding="utf-8", errors="replace").splitlines()
+            lc_results: list[str] = []
+            lc_current: str | None = None
+            lc_base_indent = 0
+            for lc_i, lc_line in enumerate(lc_lines, 1):
+                s = lc_line.strip()
+                curr_indent = len(lc_line) - len(lc_line.lstrip())
+                if s.startswith(("class ", "export class ", "export default class ")):
+                    lc_current = s.split("(")[0].split("{")[0].rstrip()
+                    lc_base_indent = curr_indent
+                    lc_results.append(f"\nL{lc_i}: {lc_current}")
+                elif lc_current and curr_indent > lc_base_indent:
+                    if s.startswith(("def ", "async def ")):
+                        lc_results.append(f"    L{lc_i}: {s.split(':')[0]}")
+                    elif s.startswith(("public ", "private ", "protected ", "async ", "static ")) and "(" in s:
+                        lc_results.append(f"    L{lc_i}: {s[:120]}")
+                elif lc_current and lc_line.strip() and curr_indent <= lc_base_indent and not s.startswith(("@", "#", "/")):
+                    lc_current = None
+            return f"Classes in {rel}:\n" + "\n".join(lc_results) if lc_results else f"(no classes in {rel})"
+
+        if tool_name == "find_function_body":
+            rel = str(inp["path"])
+            ffb_name = str(inp["function_name"])
+            ffb_fp = root / rel
+            if not ffb_fp.exists():
+                return f"[ERROR] File not found: {rel}"
+            ffb_lines = ffb_fp.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+            ffb_start: int | None = None
+            ffb_base = 0
+            for ffb_i, ffb_line in enumerate(ffb_lines):
+                s = ffb_line.strip()
+                if s.startswith(f"def {ffb_name}(") or s.startswith(f"async def {ffb_name}("):
+                    ffb_start = ffb_i
+                    ffb_base = len(ffb_line) - len(ffb_line.lstrip())
+                    break
+            if ffb_start is None:
+                return f"[ERROR] Function '{ffb_name}' not found in {rel}"
+            ffb_end = len(ffb_lines)
+            for ffb_j in range(ffb_start + 1, len(ffb_lines)):
+                ffb_jl = ffb_lines[ffb_j]
+                if ffb_jl.strip() == "":
+                    continue
+                ffb_jind = len(ffb_jl) - len(ffb_jl.lstrip())
+                if ffb_jind <= ffb_base and ffb_jl.strip() and not ffb_jl.strip().startswith(("@", "#")):
+                    ffb_end = ffb_j
+                    break
+            body = "".join(ffb_lines[ffb_start:ffb_end])
+            return f"=== {ffb_name} (lines {ffb_start + 1}-{ffb_end}) ===\n{body}"
+
+        # ========== BATCH 6 — Debug tools ==========
+
+        if tool_name == "read_logs":
+            rl_path = str(inp.get("path", ""))
+            rl_lines = int(inp.get("lines", 50))
+            rl_level = str(inp.get("level", "all"))
+            out = ""
+            if rl_path and ("/" in rl_path or rl_path.endswith(".log")):
+                log_file = root / rl_path if not Path(rl_path).is_absolute() else Path(rl_path)
+                if log_file.exists():
+                    r = subprocess.run(["tail", f"-{rl_lines}", str(log_file)], capture_output=True, text=True)
+                    out = r.stdout
+                else:
+                    return f"[ERROR] Log file not found: {rl_path}"
+            elif rl_path:
+                r = subprocess.run(["journalctl", "-u", rl_path, f"-n{rl_lines}", "--no-pager"],
+                                    capture_output=True, text=True, timeout=10)
+                out = r.stdout or r.stderr
+            else:
+                log_dirs = [root / "logs", root / "backend" / "logs", Path("/tmp")]
+                found_logs: list[Path] = []
+                for ld in log_dirs:
+                    if ld.exists():
+                        found_logs.extend(ld.glob("*.log"))
+                if not found_logs:
+                    return "(no log files found — specify path or service name)"
+                newest = max(found_logs, key=lambda p: p.stat().st_mtime)
+                r = subprocess.run(["tail", f"-{rl_lines}", str(newest)], capture_output=True, text=True)
+                out = f"From {newest}:\n" + r.stdout
+            if rl_level != "all":
+                out = "\n".join(line for line in out.splitlines() if rl_level.upper() in line.upper())
+            return out[:5000] or "(no log entries)"
+
+        if tool_name == "analyze_error":
+            ae_error = str(inp["error"])
+            ae_lines = ae_error.strip().splitlines()
+            exception_line = ""
+            for ae_line in reversed(ae_lines):
+                if any(x in ae_line for x in ("Error:", "Exception:", "Warning:", "Traceback")):
+                    exception_line = ae_line
+                    break
+            ae_frames: list[str] = []
+            ae_i = 0
+            while ae_i < len(ae_lines):
+                ae_line = ae_lines[ae_i]
+                if ae_line.strip().startswith("File ") and "line " in ae_line:
+                    if not any(x in ae_line for x in ("site-packages", ".venv", "lib/python")):
+                        code_line = ae_lines[ae_i + 1].strip() if ae_i + 1 < len(ae_lines) else ""
+                        ae_frames.append(f"  {ae_line.strip()}\n    → {code_line}")
+                    ae_i += 2
+                else:
+                    ae_i += 1
+            ae_result = ["=== Error Analysis ==="]
+            if exception_line:
+                ae_result.append(f"Exception: {exception_line.strip()}")
+            if ae_frames:
+                ae_result.append(f"\nRelevant frames ({len(ae_frames)}):")
+                ae_result.extend(ae_frames[-5:])
+            ae_low = ae_error.lower()
+            suggestions: list[str] = []
+            if "modulenotfounderror" in ae_low or "importerror" in ae_low:
+                suggestions.append("→ Missing dependency — run: pip install -r requirements.txt")
+            elif "attributeerror" in ae_low:
+                suggestions.append("→ Object doesn't have this attribute — check spelling and type")
+            elif "typeerror" in ae_low:
+                suggestions.append("→ Wrong argument type/count — check function signature")
+            elif "keyerror" in ae_low:
+                suggestions.append("→ Key not found — use .get() or check key exists")
+            elif "filenotfounderror" in ae_low:
+                suggestions.append("→ Path doesn't exist — verify path and working directory")
+            elif "connectionrefusederror" in ae_low or "connection refused" in ae_low:
+                suggestions.append("→ Service not running — check if DB/Redis/backend is started")
+            elif "syntaxerror" in ae_low:
+                suggestions.append("→ Python syntax error — check brackets, colons, indentation")
+            if suggestions:
+                ae_result.append("\nSuggestions:")
+                ae_result.extend(suggestions)
+            return "\n".join(ae_result)
+
+        # ========== BATCH 7 — Database tools ==========
+
+        if tool_name == "run_sql":
+            from app.config import get_settings as _get_settings
+            rs_query = str(inp["query"])
+            rs_params: list[str] = list(inp.get("params") or [])
+            for rs_i, rs_p in enumerate(rs_params, 1):
+                rs_query = rs_query.replace(f"${rs_i}", f"'{rs_p}'")
+            rs_db_url = str(getattr(_get_settings(), "database_url", ""))
+            if not rs_db_url:
+                return "[ERROR] DATABASE_URL not configured"
+            return await asyncio.to_thread(
+                _run_subprocess,
+                f"psql '{rs_db_url}' -c {__import__('shlex').quote(rs_query)} --no-password 2>&1",
+                repo, 30,
+            )
+
+        if tool_name == "inspect_schema":
+            from app.config import get_settings as _get_settings
+            is_table = str(inp.get("table", ""))
+            is_db_url = str(getattr(_get_settings(), "database_url", ""))
+            if not is_db_url:
+                return "[ERROR] DATABASE_URL not configured"
+            if is_table:
+                is_q = (
+                    "SELECT column_name, data_type, is_nullable, column_default "
+                    "FROM information_schema.columns "
+                    f"WHERE table_name = '{is_table}' ORDER BY ordinal_position"
+                )
+            else:
+                is_q = (
+                    "SELECT table_name FROM information_schema.tables "
+                    "WHERE table_schema = 'public' ORDER BY table_name"
+                )
+            return await asyncio.to_thread(
+                _run_subprocess,
+                f"psql '{is_db_url}' -c {__import__('shlex').quote(is_q)} --no-password 2>&1",
+                repo, 10,
+            )
+
+        # ========== BATCH 8 — Docker tools ==========
+
+        if tool_name == "docker_ps":
+            show_all = bool(inp.get("all", False))
+            cmd_s = "docker ps --format 'table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}'" + (" -a" if show_all else "")
+            return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 10)
+
+        if tool_name == "docker_logs":
+            dl_container = str(inp["container"])
+            dock_lines = int(inp.get("lines", 50))
+            return await asyncio.to_thread(
+                _run_subprocess, f"docker logs --tail {dock_lines} {dl_container} 2>&1", repo, 15
+            )
+
+        if tool_name == "docker_exec":
+            import shlex as _shlex
+            de_container = str(inp["container"])
+            de_command = str(inp["command"])
+            return await asyncio.to_thread(
+                _run_subprocess,
+                f"docker exec {de_container} sh -c {_shlex.quote(de_command)} 2>&1",
+                repo, 30,
+            )
+
+        if tool_name == "docker_compose":
+            dc_action = str(inp["action"])
+            dc_services = " ".join(str(s) for s in (inp.get("services") or []))
+            dc_detach = bool(inp.get("detach", True))
+            if dc_action == "up":
+                dc_cmd = f"docker compose up {'-d' if dc_detach else ''} {dc_services}"
+            elif dc_action in ("down", "restart", "build", "ps", "pull"):
+                dc_cmd = f"docker compose {dc_action} {dc_services}"
+            elif dc_action == "logs":
+                dc_cmd = f"docker compose logs --tail=50 {dc_services}"
+            else:
+                return f"[ERROR] Unknown action: {dc_action}"
+            return await asyncio.to_thread(_run_subprocess, dc_cmd.strip(), repo, 120)
+
+        # ========== BATCH 9 — Security ==========
+
+        if tool_name == "secrets_scan":
+            ss_dir = str(inp.get("directory", ""))
+            ss_root = str(root / ss_dir) if ss_dir else repo
+            ss_patterns = [
+                r"(?i)(password|passwd|pwd)\s*[=:]\s*['\"][^'\"]{4,}['\"]",
+                r"(?i)(api[_-]?key|apikey)\s*[=:]\s*['\"][^'\"]{8,}['\"]",
+                r"(?i)(secret[_-]?key|secretkey)\s*[=:]\s*['\"][^'\"]{8,}['\"]",
+                r"(sk-[a-zA-Z0-9]{20,})",
+                r"(AKIA[0-9A-Z]{16})",
+                r"(ghp_[a-zA-Z0-9]{36})",
+            ]
+            ss_exclude = ["--exclude-dir=node_modules", "--exclude-dir=.git", "--exclude-dir=.venv",
+                          "--exclude-dir=__pycache__", "--exclude=*.env", "--exclude=.env*", "--exclude=*.example"]
+            ss_findings: list[str] = []
+            for ss_pat in ss_patterns:
+                cmd_s = f"grep -rn -E {__import__('shlex').quote(ss_pat)} {ss_root} {' '.join(ss_exclude)} 2>/dev/null || true"
+                result = await asyncio.to_thread(_run_subprocess, cmd_s, repo, 15)
+                if result and result != "(no output)":
+                    ss_findings.append(result)
+            return "⚠️  Potential secrets found:\n\n" + "\n\n".join(ss_findings)[:5000] if ss_findings else "✅ No hardcoded secrets detected."
+
         return f"[ERROR] Unknown tool: {tool_name}"
 
     # ------------------------------------------------------------------

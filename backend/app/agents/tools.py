@@ -1325,6 +1325,519 @@ _RUN_LINTER_TOOL = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# MODULE-LEVEL BACKGROUND PROCESS REGISTRY (used by run_background/kill_process)
+# ---------------------------------------------------------------------------
+
+_BACKGROUND_PROCESSES: dict[int, "subprocess.Popen[str]"] = {}
+
+# ---------------------------------------------------------------------------
+# NEW TOOL SPECS — Batch 1: File / Editing extras
+# ---------------------------------------------------------------------------
+
+_FIND_FILE_TOOL = {
+    "name": "find_file",
+    "description": "Find files by name or glob pattern across the repository. Faster than list_files when you know the filename.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Filename or pattern to find (e.g. 'config.py', '*.json', 'test_*.py')"},
+            "directory": {"type": "string", "description": "Directory to search (default: repo root)"},
+        },
+        "required": ["name"],
+    },
+}
+
+_FORMAT_FILE_TOOL = {
+    "name": "format_file",
+    "description": "Auto-format a source file using the appropriate formatter (black/ruff for Python, prettier for TS/JS).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File path relative to repo root"},
+            "formatter": {
+                "type": "string",
+                "enum": ["auto", "black", "ruff", "prettier"],
+                "description": "Formatter to use (default: auto — detects by extension)",
+            },
+        },
+        "required": ["path"],
+    },
+}
+
+_ORGANIZE_IMPORTS_TOOL = {
+    "name": "organize_imports",
+    "description": "Sort and organize import statements in a Python file using ruff (isort-compatible). Also removes unused imports.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Python file path relative to repo root"},
+        },
+        "required": ["path"],
+    },
+}
+
+_INSERT_AT_LINE_TOOL = {
+    "name": "insert_at_line",
+    "description": "Insert content at a specific line number in a file. Existing content shifts down.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File path relative to repo root"},
+            "line": {"type": "integer", "description": "1-indexed line to insert before. Use 0 to prepend."},
+            "content": {"type": "string", "description": "Content to insert"},
+        },
+        "required": ["path", "line", "content"],
+    },
+}
+
+_REPLACE_FUNCTION_TOOL = {
+    "name": "replace_function",
+    "description": "Replace an entire function/method definition in a Python file. Finds by name and replaces the full block.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Python file path relative to repo root"},
+            "function_name": {"type": "string", "description": "Name of the function or method to replace"},
+            "new_code": {"type": "string", "description": "Complete new function code (def line + body, properly indented)"},
+        },
+        "required": ["path", "function_name", "new_code"],
+    },
+}
+
+_DELETE_LINES_TOOL = {
+    "name": "delete_lines",
+    "description": "Delete a range of lines from a file (1-indexed, inclusive). Prefer edit_file for targeted changes.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File path relative to repo root"},
+            "start_line": {"type": "integer", "description": "First line to delete (1-indexed, inclusive)"},
+            "end_line": {"type": "integer", "description": "Last line to delete (1-indexed, inclusive)"},
+        },
+        "required": ["path", "start_line", "end_line"],
+    },
+}
+
+_APPLY_PATCH_TOOL_DEF = {
+    "name": "apply_patch",
+    "description": "Apply a unified diff patch (git diff format) to files in the repository.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "patch": {"type": "string", "description": "Unified diff string (output of git diff or diff -u)"},
+            "strip": {"type": "integer", "description": "Strip N leading path components (like patch -pN, default: 1)"},
+        },
+        "required": ["patch"],
+    },
+}
+
+_COMPARE_FILES_TOOL = {
+    "name": "compare_files",
+    "description": "Show a unified diff between two files. Useful for comparing versions.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path_a": {"type": "string", "description": "First file path relative to repo root"},
+            "path_b": {"type": "string", "description": "Second file path relative to repo root"},
+            "context": {"type": "integer", "description": "Lines of context around changes (default: 3)"},
+        },
+        "required": ["path_a", "path_b"],
+    },
+}
+
+# ---------------------------------------------------------------------------
+# NEW TOOL SPECS — Batch 2: Terminal extras
+# ---------------------------------------------------------------------------
+
+_RUN_BACKGROUND_TOOL_DEF = {
+    "name": "run_background",
+    "description": "Start a shell command in the background. Returns immediately with a PID. Use kill_process to stop it.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "command": {"type": "string", "description": "Shell command to run in background"},
+            "cwd": {"type": "string", "description": "Working directory (default: repo root)"},
+        },
+        "required": ["command"],
+    },
+}
+
+_KILL_PROCESS_TOOL = {
+    "name": "kill_process",
+    "description": "Kill a background process by PID. Use after run_background.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "pid": {"type": "integer", "description": "Process ID to kill"},
+            "signal": {
+                "type": "string",
+                "enum": ["TERM", "KILL", "INT"],
+                "description": "Signal to send (default: TERM)",
+            },
+        },
+        "required": ["pid"],
+    },
+}
+
+_RUN_PYTHON_SNIPPET_TOOL = {
+    "name": "run_python_snippet",
+    "description": "Run an inline Python code snippet and return stdout/stderr. Runs in the repo's virtualenv if available.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "code": {"type": "string", "description": "Python code to execute"},
+            "timeout": {"type": "integer", "description": "Timeout in seconds (default: 30)"},
+        },
+        "required": ["code"],
+    },
+}
+
+_RUN_MAKE_TOOL = {
+    "name": "run_make",
+    "description": "Run a Makefile target. Lists available targets if no target specified.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": "Make target to run (e.g. 'test', 'build', 'lint'). Leave empty to list."},
+            "directory": {"type": "string", "description": "Directory containing Makefile (default: repo root)"},
+        },
+        "required": [],
+    },
+}
+
+_FETCH_URL_TOOL = {
+    "name": "fetch_url",
+    "description": "Fetch content from a URL (HTTP GET). Useful for reading documentation or checking API endpoints.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "URL to fetch"},
+            "timeout": {"type": "integer", "description": "Timeout in seconds (default: 15)"},
+        },
+        "required": ["url"],
+    },
+}
+
+# ---------------------------------------------------------------------------
+# NEW TOOL SPECS — Batch 3: Git extras
+# ---------------------------------------------------------------------------
+
+_GIT_MERGE_TOOL = {
+    "name": "git_merge",
+    "description": "Merge a branch into the current branch.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "branch": {"type": "string", "description": "Branch name to merge into current branch"},
+            "no_ff": {"type": "boolean", "description": "Create a merge commit even for fast-forwards (default: false)"},
+            "squash": {"type": "boolean", "description": "Squash all commits into one (default: false)"},
+            "message": {"type": "string", "description": "Commit message for the merge (optional)"},
+        },
+        "required": ["branch"],
+    },
+}
+
+_GIT_RESET_TOOL = {
+    "name": "git_reset",
+    "description": "Reset HEAD. --soft keeps staged, --mixed keeps working tree, --hard discards all (requires confirmation).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "ref": {"type": "string", "description": "Ref to reset to (e.g. 'HEAD~1', commit hash). Default: HEAD"},
+            "mode": {
+                "type": "string",
+                "enum": ["soft", "mixed", "hard"],
+                "description": "Reset mode (default: mixed)",
+            },
+        },
+        "required": [],
+    },
+}
+
+_GIT_WORKTREE_TOOL = {
+    "name": "git_worktree",
+    "description": "Manage git worktrees — isolated checkouts for parallel work.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["list", "add", "remove"],
+                "description": "Action to perform (default: list)",
+            },
+            "path": {"type": "string", "description": "Path for the new worktree (required for add)"},
+            "branch": {"type": "string", "description": "Branch for the new worktree (required for add)"},
+        },
+        "required": [],
+    },
+}
+
+_CREATE_PR_TOOL = {
+    "name": "create_pr",
+    "description": "Create a GitHub Pull Request using the gh CLI. Requires gh to be authenticated.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "PR title"},
+            "body": {"type": "string", "description": "PR description/body"},
+            "base": {"type": "string", "description": "Base branch to merge into (default: main)"},
+            "draft": {"type": "boolean", "description": "Create as draft PR (default: false)"},
+        },
+        "required": ["title"],
+    },
+}
+
+_GENERATE_COMMIT_MSG_TOOL = {
+    "name": "generate_commit_msg",
+    "description": "Show current staged diff summary to help you write a conventional commit message.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "staged_only": {"type": "boolean", "description": "Use only staged changes (default: true)"},
+        },
+        "required": [],
+    },
+}
+
+# ---------------------------------------------------------------------------
+# NEW TOOL SPECS — Batch 4: Testing extras
+# ---------------------------------------------------------------------------
+
+_RUN_SINGLE_TEST_TOOL = {
+    "name": "run_single_test",
+    "description": "Run a single test by name/keyword. Much faster than running the full suite.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "keyword": {"type": "string", "description": "Test name or keyword to match (-k flag for pytest)"},
+            "file": {"type": "string", "description": "Specific test file to run (optional)"},
+            "verbose": {"type": "boolean", "description": "Show verbose output (default: true)"},
+        },
+        "required": ["keyword"],
+    },
+}
+
+_COVERAGE_REPORT_TOOL = {
+    "name": "coverage_report",
+    "description": "Run pytest with coverage and return a summary showing which lines are uncovered.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Path to run tests on (default: backend/tests/)"},
+            "source": {"type": "string", "description": "Source directory to measure coverage for (default: backend/app/)"},
+            "min_coverage": {"type": "integer", "description": "Fail if coverage is below this percentage (optional)"},
+        },
+        "required": [],
+    },
+}
+
+_TYPE_CHECK_TOOL = {
+    "name": "type_check",
+    "description": "Run static type checking (mypy for Python, tsc for TypeScript). Returns type errors.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Path to check (default: backend/ for Python, apps/web/ for TS)"},
+            "strict": {"type": "boolean", "description": "Use --strict mode for mypy (default: false)"},
+            "language": {
+                "type": "string",
+                "enum": ["python", "typescript", "both"],
+                "description": "Which language to check (default: both)",
+            },
+        },
+        "required": [],
+    },
+}
+
+# ---------------------------------------------------------------------------
+# NEW TOOL SPECS — Batch 5: Code Intelligence
+# ---------------------------------------------------------------------------
+
+_LIST_FUNCTIONS_TOOL = {
+    "name": "list_functions",
+    "description": "List all function and method definitions in a file with their line numbers and signatures.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File path relative to repo root (.py, .ts, .tsx supported)"},
+        },
+        "required": ["path"],
+    },
+}
+
+_LIST_CLASSES_TOOL = {
+    "name": "list_classes",
+    "description": "List all class definitions in a file with their methods and line numbers.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File path relative to repo root (.py, .ts, .tsx supported)"},
+        },
+        "required": ["path"],
+    },
+}
+
+_FIND_FUNCTION_BODY_TOOL = {
+    "name": "find_function_body",
+    "description": "Extract the complete source code of a named function or method, including its body.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File path relative to repo root"},
+            "function_name": {"type": "string", "description": "Name of the function or method to extract"},
+        },
+        "required": ["path", "function_name"],
+    },
+}
+
+# ---------------------------------------------------------------------------
+# NEW TOOL SPECS — Batch 6: Debug tools
+# ---------------------------------------------------------------------------
+
+_READ_LOGS_TOOL = {
+    "name": "read_logs",
+    "description": "Read log files from common locations. Specify path for a log file or service name for journalctl.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Log file path, or service name (e.g. 'uvicorn', 'postgresql')"},
+            "lines": {"type": "integer", "description": "Number of recent lines to return (default: 50)"},
+            "level": {
+                "type": "string",
+                "enum": ["all", "ERROR", "WARNING", "INFO"],
+                "description": "Filter by log level (default: all)",
+            },
+        },
+        "required": [],
+    },
+}
+
+_ANALYZE_ERROR_TOOL = {
+    "name": "analyze_error",
+    "description": "Parse and analyze a Python traceback or error message. Returns structured breakdown with suggestions.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "error": {"type": "string", "description": "Error message or full traceback to analyze"},
+        },
+        "required": ["error"],
+    },
+}
+
+# ---------------------------------------------------------------------------
+# NEW TOOL SPECS — Batch 7: Database tools
+# ---------------------------------------------------------------------------
+
+_RUN_SQL_TOOL = {
+    "name": "run_sql",
+    "description": "Execute a SQL query against the project's PostgreSQL database via psql.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "SQL query to execute"},
+            "params": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Query parameters (positional, replaces $1, $2, ...)",
+            },
+        },
+        "required": ["query"],
+    },
+}
+
+_INSPECT_SCHEMA_TOOL = {
+    "name": "inspect_schema",
+    "description": "Show the PostgreSQL database schema: tables, columns, types, and constraints.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "table": {"type": "string", "description": "Specific table name to inspect (default: list all tables)"},
+        },
+        "required": [],
+    },
+}
+
+# ---------------------------------------------------------------------------
+# NEW TOOL SPECS — Batch 8: Docker tools
+# ---------------------------------------------------------------------------
+
+_DOCKER_PS_TOOL = {
+    "name": "docker_ps",
+    "description": "List running Docker containers. Shows ID, image, status, and ports.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "all": {"type": "boolean", "description": "Show all containers including stopped ones (default: false)"},
+        },
+        "required": [],
+    },
+}
+
+_DOCKER_LOGS_TOOL = {
+    "name": "docker_logs",
+    "description": "Get recent logs from a Docker container by name or ID.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "container": {"type": "string", "description": "Container name or ID"},
+            "lines": {"type": "integer", "description": "Number of recent log lines (default: 50)"},
+        },
+        "required": ["container"],
+    },
+}
+
+_DOCKER_EXEC_TOOL = {
+    "name": "docker_exec",
+    "description": "Run a command inside a running Docker container.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "container": {"type": "string", "description": "Container name or ID"},
+            "command": {"type": "string", "description": "Command to run inside the container"},
+        },
+        "required": ["container", "command"],
+    },
+}
+
+_DOCKER_COMPOSE_TOOL = {
+    "name": "docker_compose",
+    "description": "Run docker compose commands (up, down, restart, build, ps, logs, pull).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["up", "down", "restart", "build", "ps", "logs", "pull"],
+                "description": "Action to perform",
+            },
+            "services": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Specific services to target (default: all)",
+            },
+            "detach": {"type": "boolean", "description": "Run in background for 'up' (default: true)"},
+        },
+        "required": ["action"],
+    },
+}
+
+# ---------------------------------------------------------------------------
+# NEW TOOL SPECS — Batch 9: Security
+# ---------------------------------------------------------------------------
+
+_SECRETS_SCAN_TOOL = {
+    "name": "secrets_scan",
+    "description": "Scan the repository for hardcoded secrets, API keys, passwords, and tokens.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "directory": {"type": "string", "description": "Directory to scan (default: entire repo)"},
+        },
+        "required": [],
+    },
+}
+
 CHAT_TOOLS = READ_ONLY_TOOLS + [
     {
         "name": "edit_file",
@@ -1383,6 +1896,48 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _RUN_TESTS_TOOL,
     _RUN_LINTER_TOOL,
     _SUBMIT_RESULT_TOOL,
+    # Batch 1 — File/Editing extras
+    _FIND_FILE_TOOL,
+    _FORMAT_FILE_TOOL,
+    _ORGANIZE_IMPORTS_TOOL,
+    _INSERT_AT_LINE_TOOL,
+    _REPLACE_FUNCTION_TOOL,
+    _DELETE_LINES_TOOL,
+    _APPLY_PATCH_TOOL_DEF,
+    _COMPARE_FILES_TOOL,
+    # Batch 2 — Terminal extras
+    _RUN_BACKGROUND_TOOL_DEF,
+    _KILL_PROCESS_TOOL,
+    _RUN_PYTHON_SNIPPET_TOOL,
+    _RUN_MAKE_TOOL,
+    _FETCH_URL_TOOL,
+    # Batch 3 — Git extras
+    _GIT_MERGE_TOOL,
+    _GIT_RESET_TOOL,
+    _GIT_WORKTREE_TOOL,
+    _CREATE_PR_TOOL,
+    _GENERATE_COMMIT_MSG_TOOL,
+    # Batch 4 — Testing extras
+    _RUN_SINGLE_TEST_TOOL,
+    _COVERAGE_REPORT_TOOL,
+    _TYPE_CHECK_TOOL,
+    # Batch 5 — Code Intelligence
+    _LIST_FUNCTIONS_TOOL,
+    _LIST_CLASSES_TOOL,
+    _FIND_FUNCTION_BODY_TOOL,
+    # Batch 6 — Debug
+    _READ_LOGS_TOOL,
+    _ANALYZE_ERROR_TOOL,
+    # Batch 7 — Database
+    _RUN_SQL_TOOL,
+    _INSPECT_SCHEMA_TOOL,
+    # Batch 8 — Docker
+    _DOCKER_PS_TOOL,
+    _DOCKER_LOGS_TOOL,
+    _DOCKER_EXEC_TOOL,
+    _DOCKER_COMPOSE_TOOL,
+    # Batch 9 — Security
+    _SECRETS_SCAN_TOOL,
 ]
 
 # Commands that require user confirmation before running
@@ -1892,6 +2447,774 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
         return "\n\n".join(results) if results else f"[ERROR] Unknown linter: {tool}"
 
+    # =========================================================================
+    # BATCH 1 — File / Editing extras
+    # =========================================================================
+
+    def find_file(inp: dict[str, Any]) -> str:
+        name = str(inp["name"])
+        ff_dir = str(inp.get("directory", ""))
+        ff_root = root / ff_dir if ff_dir else root
+        try:
+            r = subprocess.run(
+                ["find", str(ff_root), "-name", name,
+                 "-not", "-path", "*/node_modules/*",
+                 "-not", "-path", "*/__pycache__/*",
+                 "-not", "-path", "*/.git/*",
+                 "-not", "-path", "*/.venv/*"],
+                capture_output=True, text=True, timeout=15,
+            )
+            found = [l for l in r.stdout.splitlines() if l.strip()]
+            if not found:
+                return f"(no files matching '{name}')"
+            rel_paths = []
+            for p in found[:100]:
+                try:
+                    rel_paths.append(str(Path(p).relative_to(root)))
+                except ValueError:
+                    rel_paths.append(p)
+            return "\n".join(rel_paths)
+        except subprocess.TimeoutExpired:
+            return "[ERROR] find timed out"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def format_file(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        formatter = str(inp.get("formatter", "auto"))
+        fmt_target = root / rel
+        if not fmt_target.exists():
+            return f"[ERROR] File not found: {rel}"
+        if formatter == "auto":
+            formatter = "ruff" if fmt_target.suffix == ".py" else "prettier"
+        activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
+        if formatter in ("ruff", "black"):
+            cmd = f"{activate} && python -m {formatter} format {str(fmt_target)} 2>&1"
+        elif formatter == "prettier":
+            cmd = f"cd {repo_path} && npx prettier --write {str(fmt_target)} 2>&1"
+        else:
+            return f"[ERROR] Unknown formatter: {formatter}"
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=30)
+        return (r.stdout + r.stderr).strip() or f"Formatted {rel}"
+
+    def organize_imports(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        oi_target = root / rel
+        if not oi_target.exists():
+            return f"[ERROR] File not found: {rel}"
+        activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
+        cmd = f"{activate} && python -m ruff check --select I --fix {str(oi_target)} 2>&1"
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=30)
+        return (r.stdout + r.stderr).strip() or f"Imports organized in {rel}"
+
+    def insert_at_line(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        line_num = int(inp["line"])
+        content = str(inp["content"])
+        if _is_protected_path(rel):
+            return f"[POLICY DENIED] Cannot write to protected path: {rel}"
+        ial_target = root / rel
+        if not ial_target.exists():
+            return f"[ERROR] File not found: {rel}"
+        try:
+            file_lines = ial_target.read_text(encoding="utf-8").splitlines(keepends=True)
+            insert_at = max(0, line_num - 1) if line_num > 0 else len(file_lines)
+            insert_at = min(insert_at, len(file_lines))
+            ins_content = content if content.endswith("\n") else content + "\n"
+            file_lines.insert(insert_at, ins_content)
+            ial_target.write_text("".join(file_lines), encoding="utf-8")
+            return f"Inserted at line {line_num} in {rel}"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def replace_function(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        func_name = str(inp["function_name"])
+        new_code = str(inp["new_code"])
+        if _is_protected_path(rel):
+            return f"[POLICY DENIED] Cannot write to protected path: {rel}"
+        rf_target = root / rel
+        if not rf_target.exists():
+            return f"[ERROR] File not found: {rel}"
+        try:
+            rf_lines = rf_target.read_text(encoding="utf-8").splitlines(keepends=True)
+            rf_start = None
+            rf_indent = 0
+            for rf_i, rf_line in enumerate(rf_lines):
+                rf_stripped = rf_line.strip()
+                if rf_stripped.startswith(f"def {func_name}(") or rf_stripped.startswith(f"async def {func_name}("):
+                    rf_start = rf_i
+                    rf_indent = len(rf_line) - len(rf_line.lstrip())
+                    break
+            if rf_start is None:
+                return f"[ERROR] Function '{func_name}' not found in {rel}"
+            rf_end = len(rf_lines)
+            for rf_j in range(rf_start + 1, len(rf_lines)):
+                rf_jline = rf_lines[rf_j]
+                if rf_jline.strip() == "":
+                    continue
+                rf_jind = len(rf_jline) - len(rf_jline.lstrip())
+                if rf_jind <= rf_indent and rf_jline.strip() and not rf_jline.strip().startswith(("#", "@")):
+                    rf_end = rf_j
+                    break
+            rf_new = new_code if new_code.endswith("\n") else new_code + "\n"
+            rf_result = rf_lines[:rf_start] + [rf_new] + rf_lines[rf_end:]
+            rf_target.write_text("".join(rf_result), encoding="utf-8")
+            return f"Replaced '{func_name}' in {rel} (lines {rf_start + 1}-{rf_end})"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def delete_lines(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        dl_start = int(inp["start_line"])
+        dl_end = int(inp["end_line"])
+        if _is_protected_path(rel):
+            return f"[POLICY DENIED] Cannot write to protected path: {rel}"
+        dl_target = root / rel
+        if not dl_target.exists():
+            return f"[ERROR] File not found: {rel}"
+        if dl_start < 1 or dl_end < dl_start:
+            return f"[ERROR] Invalid line range: {dl_start}-{dl_end}"
+        try:
+            dl_lines = dl_target.read_text(encoding="utf-8").splitlines(keepends=True)
+            total = len(dl_lines)
+            if dl_start > total:
+                return f"[ERROR] File only has {total} lines"
+            dl_s = dl_start - 1
+            dl_e = min(dl_end, total)
+            deleted = dl_e - dl_s
+            dl_target.write_text("".join(dl_lines[:dl_s] + dl_lines[dl_e:]), encoding="utf-8")
+            return f"Deleted {deleted} lines ({dl_start}-{dl_end}) from {rel}"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def apply_patch(inp: dict[str, Any]) -> str:
+        import os as _os
+        import tempfile as _tempfile
+        patch_content = str(inp["patch"])
+        strip = int(inp.get("strip", 1))
+        try:
+            with _tempfile.NamedTemporaryFile(mode="w", suffix=".patch", delete=False) as pf:
+                pf.write(patch_content)
+                pf_name = pf.name
+        except Exception as e:
+            return f"[ERROR] Cannot write patch file: {e}"
+        try:
+            r = subprocess.run(
+                ["patch", f"-p{strip}", "--input", pf_name],
+                cwd=repo_path, capture_output=True, text=True, timeout=30,
+            )
+            return (r.stdout + r.stderr).strip() or "Patch applied"
+        except FileNotFoundError:
+            return "[ERROR] 'patch' command not found"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] patch timed out"
+        except Exception as e:
+            return f"[ERROR] {e}"
+        finally:
+            try:
+                _os.unlink(pf_name)
+            except Exception:
+                pass
+
+    def compare_files(inp: dict[str, Any]) -> str:
+        rel_a = str(inp["path_a"])
+        rel_b = str(inp["path_b"])
+        context = int(inp.get("context", 3))
+        cf_a = root / rel_a
+        cf_b = root / rel_b
+        if not cf_a.exists():
+            return f"[ERROR] File not found: {rel_a}"
+        if not cf_b.exists():
+            return f"[ERROR] File not found: {rel_b}"
+        r = subprocess.run(
+            ["diff", f"-U{context}", str(cf_a), str(cf_b)],
+            capture_output=True, text=True,
+        )
+        return r.stdout[:8000] or "Files are identical"
+
+    # =========================================================================
+    # BATCH 2 — Terminal extras
+    # =========================================================================
+
+    def run_background(inp: dict[str, Any]) -> str:
+        rb_command = str(inp["command"])
+        rb_cwd = str(inp.get("cwd") or repo_path)
+        try:
+            proc = subprocess.Popen(
+                rb_command, shell=True, cwd=rb_cwd,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+            _BACKGROUND_PROCESSES[proc.pid] = proc
+            return f"Started background process PID {proc.pid}: {rb_command[:80]}"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def kill_process(inp: dict[str, Any]) -> str:
+        import os as _os
+        import signal as _signal
+        kp_pid = int(inp["pid"])
+        kp_sig_name = str(inp.get("signal", "TERM"))
+        sig_map = {"TERM": _signal.SIGTERM, "KILL": _signal.SIGKILL, "INT": _signal.SIGINT}
+        kp_sig = sig_map.get(kp_sig_name, _signal.SIGTERM)
+        _BACKGROUND_PROCESSES.pop(kp_pid, None)
+        try:
+            _os.kill(kp_pid, kp_sig)
+            return f"Sent {kp_sig_name} to PID {kp_pid}"
+        except ProcessLookupError:
+            return f"[ERROR] No process with PID {kp_pid}"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def run_python_snippet(inp: dict[str, Any]) -> str:
+        import shlex as _shlex
+        code = str(inp["code"])
+        ps_timeout = int(inp.get("timeout", 30))
+        activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
+        cmd = f"{activate} && python3 -c {_shlex.quote(code)} 2>&1"
+        try:
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=ps_timeout)
+            return (r.stdout + r.stderr)[:5000] or "(no output)"
+        except subprocess.TimeoutExpired:
+            return f"[ERROR] Python snippet timed out after {ps_timeout}s"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def run_make(inp: dict[str, Any]) -> str:
+        make_target = str(inp.get("target", ""))
+        make_dir_rel = str(inp.get("directory", ""))
+        make_dir = (root / make_dir_rel) if make_dir_rel else root
+        makefile_exists = (make_dir / "Makefile").exists() or (make_dir / "makefile").exists()
+        if not makefile_exists:
+            return f"[ERROR] No Makefile found in {make_dir}"
+        if not make_target:
+            r = subprocess.run(["make", "-pRrq"], cwd=str(make_dir), capture_output=True, text=True, timeout=10)
+            tgts: list[str] = []
+            for mk_line in r.stdout.splitlines():
+                if mk_line and not mk_line.startswith(("\t", "#", " ")) and ":" in mk_line:
+                    tgt = mk_line.split(":")[0].strip()
+                    if tgt and not tgt.startswith(".") and " " not in tgt:
+                        tgts.append(tgt)
+            return "Targets:\n" + "\n".join(sorted(set(tgts[:30]))) if tgts else "Makefile found but targets not parseable"
+        try:
+            r = subprocess.run(["make", make_target], cwd=str(make_dir), capture_output=True, text=True, timeout=120)
+            return (r.stdout + r.stderr)[:5000] or f"make {make_target} complete"
+        except subprocess.TimeoutExpired:
+            return f"[ERROR] make {make_target} timed out"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def fetch_url(inp: dict[str, Any]) -> str:
+        fu_url = str(inp["url"])
+        fu_timeout = int(inp.get("timeout", 15))
+        try:
+            r = subprocess.run(
+                ["curl", "-s", "-L", "--max-time", str(fu_timeout),
+                 "--user-agent", "Gridiron-Agent/1.0", fu_url],
+                capture_output=True, text=True, timeout=fu_timeout + 5,
+            )
+            return r.stdout[:10000] or r.stderr or "[empty response]"
+        except subprocess.TimeoutExpired:
+            return f"[ERROR] Request timed out after {fu_timeout}s"
+        except FileNotFoundError:
+            return "[ERROR] curl not found"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    # =========================================================================
+    # BATCH 3 — Git extras
+    # =========================================================================
+
+    def git_merge(inp: dict[str, Any]) -> str:
+        gm_branch = str(inp["branch"])
+        gm_no_ff = bool(inp.get("no_ff", False))
+        gm_squash = bool(inp.get("squash", False))
+        gm_msg = str(inp.get("message", ""))
+        gm_cmd = ["git", "merge"]
+        if gm_no_ff:
+            gm_cmd.append("--no-ff")
+        if gm_squash:
+            gm_cmd.append("--squash")
+        if gm_msg:
+            gm_cmd += ["-m", gm_msg]
+        gm_cmd.append(gm_branch)
+        try:
+            r = subprocess.run(gm_cmd, cwd=repo_path, capture_output=True, text=True, timeout=30)
+            return (r.stdout + r.stderr).strip() or f"Merged {gm_branch}"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def git_reset(inp: dict[str, Any]) -> str:
+        gr_ref = str(inp.get("ref", "HEAD"))
+        gr_mode = str(inp.get("mode", "mixed"))
+        if gr_mode == "hard":
+            return (
+                "[BLOCKED] git reset --hard is destructive and requires confirmation. "
+                "Use the bash tool if you're sure, or use mode=soft/mixed."
+            )
+        gr_cmd = ["git", "reset", f"--{gr_mode}", gr_ref]
+        try:
+            r = subprocess.run(gr_cmd, cwd=repo_path, capture_output=True, text=True, timeout=10)
+            return (r.stdout + r.stderr).strip() or f"Reset {gr_mode} to {gr_ref}"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def git_worktree(inp: dict[str, Any]) -> str:
+        gw_action = str(inp.get("action", "list"))
+        gw_path = str(inp.get("path", ""))
+        gw_branch = str(inp.get("branch", ""))
+        try:
+            if gw_action == "list":
+                r = subprocess.run(["git", "worktree", "list"], cwd=repo_path, capture_output=True, text=True)
+                return r.stdout or "(no worktrees)"
+            elif gw_action == "add":
+                if not gw_path or not gw_branch:
+                    return "[ERROR] path and branch required for add"
+                r = subprocess.run(
+                    ["git", "worktree", "add", gw_path, gw_branch],
+                    cwd=repo_path, capture_output=True, text=True, timeout=30,
+                )
+                return (r.stdout + r.stderr).strip() or f"Created worktree at {gw_path}"
+            elif gw_action == "remove":
+                if not gw_path:
+                    return "[ERROR] path required for remove"
+                r = subprocess.run(
+                    ["git", "worktree", "remove", gw_path],
+                    cwd=repo_path, capture_output=True, text=True,
+                )
+                return (r.stdout + r.stderr).strip() or f"Removed worktree at {gw_path}"
+            return f"[ERROR] Unknown action: {gw_action}"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def create_pr(inp: dict[str, Any]) -> str:
+        pr_title = str(inp["title"])
+        pr_body = str(inp.get("body", ""))
+        pr_base = str(inp.get("base", "main"))
+        pr_draft = bool(inp.get("draft", False))
+        pr_cmd = ["gh", "pr", "create", "--title", pr_title, "--base", pr_base]
+        if pr_body:
+            pr_cmd += ["--body", pr_body]
+        if pr_draft:
+            pr_cmd.append("--draft")
+        try:
+            r = subprocess.run(pr_cmd, cwd=repo_path, capture_output=True, text=True, timeout=30)
+            return (r.stdout + r.stderr).strip() or "PR created"
+        except FileNotFoundError:
+            return "[ERROR] gh CLI not found — install with: sudo apt install gh"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def generate_commit_msg(inp: dict[str, Any]) -> str:
+        gcm_staged = bool(inp.get("staged_only", True))
+        diff_args = ["diff", "--cached"] if gcm_staged else ["diff"]
+        stat_args = diff_args + ["--stat"]
+        r_stat = subprocess.run(["git"] + stat_args, cwd=repo_path, capture_output=True, text=True)
+        r_diff = subprocess.run(["git"] + diff_args, cwd=repo_path, capture_output=True, text=True)
+        stat = r_stat.stdout.strip()
+        diff = r_diff.stdout[:3000]
+        if not stat:
+            return "[ERROR] No staged changes. Stage files with git_commit or git add first."
+        return (
+            f"=== Changed files ===\n{stat}\n\n"
+            f"=== Diff (truncated to 3000 chars) ===\n{diff}\n\n"
+            "Analyze the diff above and write a conventional commit message:\n"
+            "Format: <type>(<scope>): <description>\n"
+            "Types: feat, fix, docs, refactor, test, chore, style, perf"
+        )
+
+    # =========================================================================
+    # BATCH 4 — Testing extras
+    # =========================================================================
+
+    def run_single_test(inp: dict[str, Any]) -> str:
+        rst_kw = str(inp["keyword"])
+        rst_file = str(inp.get("file", ""))
+        rst_verbose = bool(inp.get("verbose", True))
+        rst_vflag = "-v" if rst_verbose else "-q"
+        activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
+        rst_path = rst_file if rst_file else "backend/tests/"
+        cmd = f"{activate} && python -m pytest {rst_path} -k '{rst_kw}' {rst_vflag} --tb=short 2>&1 | head -100"
+        try:
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=120)
+            return (r.stdout + r.stderr)[:5000] or "(no output)"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] Tests timed out after 2 minutes"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def coverage_report(inp: dict[str, Any]) -> str:
+        cov_path = str(inp.get("path", "backend/tests/"))
+        cov_source = str(inp.get("source", "backend/app/"))
+        cov_min = inp.get("min_coverage")
+        activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
+        min_flag = f"--cov-fail-under={cov_min}" if cov_min else ""
+        cmd = (
+            f"{activate} && python -m pytest {cov_path} "
+            f"--cov={cov_source} --cov-report=term-missing {min_flag} "
+            f"--tb=no -q 2>&1 | tail -50"
+        )
+        try:
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=180)
+            return (r.stdout + r.stderr)[:5000] or "(no output)"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] Coverage run timed out"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def type_check(inp: dict[str, Any]) -> str:
+        tc_path = str(inp.get("path", ""))
+        tc_strict = bool(inp.get("strict", False))
+        tc_lang = str(inp.get("language", "both"))
+        activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
+        tc_results: list[str] = []
+        if tc_lang in ("python", "both"):
+            py_path = tc_path or "backend/"
+            strict_flag = "--strict" if tc_strict else "--ignore-missing-imports"
+            cmd = f"{activate} && python -m mypy {py_path} {strict_flag} 2>&1 | head -60"
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=90)
+            tc_results.append(f"=== mypy ===\n{(r.stdout + r.stderr)[:3000] or 'clean'}")
+        if tc_lang in ("typescript", "both"):
+            web = str(root.parent / "apps" / "web")
+            cmd = f"cd {web} && npx tsc --noEmit 2>&1 | head -60"
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=90)
+            tc_results.append(f"=== tsc ===\n{(r.stdout + r.stderr)[:3000] or 'clean'}")
+        return "\n\n".join(tc_results) if tc_results else "[ERROR] No language selected"
+
+    # =========================================================================
+    # BATCH 5 — Code Intelligence
+    # =========================================================================
+
+    def list_functions(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        lf_fp = root / rel
+        if not lf_fp.exists():
+            return f"[ERROR] File not found: {rel}"
+        content = lf_fp.read_text(encoding="utf-8", errors="replace")
+        lf_lines = content.splitlines()
+        lf_results: list[str] = []
+        for lf_i, lf_line in enumerate(lf_lines, 1):
+            s = lf_line.strip()
+            if s.startswith(("def ", "async def ")):
+                sig = s.split(":")[0] if ":" in s else s
+                lf_results.append(f"  L{lf_i}: {sig}")
+            elif s.startswith(("export function ", "export async function ", "function ")) and "(" in s:
+                lf_results.append(f"  L{lf_i}: {s[:120]}")
+            elif s.startswith(("export const ", "const ")) and ("=>" in s or "= (" in s or "= async" in s):
+                lf_results.append(f"  L{lf_i}: {s[:120]}")
+        if not lf_results:
+            return f"(no function definitions found in {rel})"
+        return f"Functions in {rel} ({len(lf_results)}):\n" + "\n".join(lf_results)
+
+    def list_classes(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        lc_fp = root / rel
+        if not lc_fp.exists():
+            return f"[ERROR] File not found: {rel}"
+        content = lc_fp.read_text(encoding="utf-8", errors="replace")
+        lc_lines = content.splitlines()
+        lc_results: list[str] = []
+        lc_current: str | None = None
+        lc_base_indent = 0
+        for lc_i, lc_line in enumerate(lc_lines, 1):
+            s = lc_line.strip()
+            curr_indent = len(lc_line) - len(lc_line.lstrip())
+            if s.startswith(("class ", "export class ", "export default class ")):
+                lc_current = s.split("(")[0].split("{")[0].rstrip()
+                lc_base_indent = curr_indent
+                lc_results.append(f"\nL{lc_i}: {lc_current}")
+            elif lc_current and curr_indent > lc_base_indent:
+                if s.startswith(("def ", "async def ")):
+                    lc_results.append(f"    L{lc_i}: {s.split(':')[0]}")
+                elif s.startswith(("public ", "private ", "protected ", "async ", "static ")) and "(" in s:
+                    lc_results.append(f"    L{lc_i}: {s[:120]}")
+            elif lc_current and lc_line.strip() and curr_indent <= lc_base_indent and not s.startswith(("@", "#", "/")):
+                lc_current = None
+        if not lc_results:
+            return f"(no class definitions found in {rel})"
+        return f"Classes in {rel}:\n" + "\n".join(lc_results)
+
+    def find_function_body(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        ffb_name = str(inp["function_name"])
+        ffb_fp = root / rel
+        if not ffb_fp.exists():
+            return f"[ERROR] File not found: {rel}"
+        ffb_lines = ffb_fp.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+        ffb_start: int | None = None
+        ffb_base = 0
+        for ffb_i, ffb_line in enumerate(ffb_lines):
+            s = ffb_line.strip()
+            if s.startswith(f"def {ffb_name}(") or s.startswith(f"async def {ffb_name}("):
+                ffb_start = ffb_i
+                ffb_base = len(ffb_line) - len(ffb_line.lstrip())
+                break
+        if ffb_start is None:
+            return f"[ERROR] Function '{ffb_name}' not found in {rel}"
+        ffb_end = len(ffb_lines)
+        for ffb_j in range(ffb_start + 1, len(ffb_lines)):
+            ffb_jline = ffb_lines[ffb_j]
+            if ffb_jline.strip() == "":
+                continue
+            ffb_jind = len(ffb_jline) - len(ffb_jline.lstrip())
+            if ffb_jind <= ffb_base and ffb_jline.strip() and not ffb_jline.strip().startswith(("@", "#")):
+                ffb_end = ffb_j
+                break
+        body = "".join(ffb_lines[ffb_start:ffb_end])
+        return f"=== {ffb_name} (lines {ffb_start + 1}-{ffb_end}) ===\n{body}"
+
+    # =========================================================================
+    # BATCH 6 — Debug tools
+    # =========================================================================
+
+    def read_logs(inp: dict[str, Any]) -> str:
+        rl_path = str(inp.get("path", ""))
+        rl_lines = int(inp.get("lines", 50))
+        rl_level = str(inp.get("level", "all"))
+        out = ""
+        if rl_path and ("/" in rl_path or rl_path.endswith(".log")):
+            log_file = root / rl_path if not Path(rl_path).is_absolute() else Path(rl_path)
+            if log_file.exists():
+                r = subprocess.run(["tail", f"-{rl_lines}", str(log_file)], capture_output=True, text=True)
+                out = r.stdout
+            else:
+                return f"[ERROR] Log file not found: {rl_path}"
+        elif rl_path:
+            r = subprocess.run(
+                ["journalctl", "-u", rl_path, f"-n{rl_lines}", "--no-pager"],
+                capture_output=True, text=True, timeout=10,
+            )
+            out = r.stdout or r.stderr
+        else:
+            log_dirs = [root / "logs", root / "backend" / "logs", Path("/tmp")]
+            found: list[Path] = []
+            for ld in log_dirs:
+                if ld.exists():
+                    found.extend(ld.glob("*.log"))
+            if not found:
+                return "(no log files found — specify a path or service name)"
+            newest = max(found, key=lambda p: p.stat().st_mtime)
+            r = subprocess.run(["tail", f"-{rl_lines}", str(newest)], capture_output=True, text=True)
+            out = f"From {newest}:\n" + r.stdout
+        if rl_level != "all":
+            filtered = [line for line in out.splitlines() if rl_level.upper() in line.upper()]
+            out = "\n".join(filtered)
+        return out[:5000] or "(no log entries)"
+
+    def analyze_error(inp: dict[str, Any]) -> str:
+        ae_error = str(inp["error"])
+        ae_lines = ae_error.strip().splitlines()
+        exception_line = ""
+        for ae_line in reversed(ae_lines):
+            if any(x in ae_line for x in ("Error:", "Exception:", "Warning:", "Traceback")):
+                exception_line = ae_line
+                break
+        frames: list[str] = []
+        ae_i = 0
+        while ae_i < len(ae_lines):
+            ae_line = ae_lines[ae_i]
+            if ae_line.strip().startswith("File ") and "line " in ae_line:
+                if not any(x in ae_line for x in ("site-packages", ".venv", "lib/python")):
+                    code_line = ae_lines[ae_i + 1].strip() if ae_i + 1 < len(ae_lines) else ""
+                    frames.append(f"  {ae_line.strip()}\n    → {code_line}")
+                ae_i += 2
+            else:
+                ae_i += 1
+        ae_result = ["=== Error Analysis ==="]
+        if exception_line:
+            ae_result.append(f"Exception: {exception_line.strip()}")
+        if frames:
+            ae_result.append(f"\nRelevant frames ({len(frames)}):")
+            ae_result.extend(frames[-5:])
+        ae_low = ae_error.lower()
+        suggestions: list[str] = []
+        if "modulenotfounderror" in ae_low or "importerror" in ae_low:
+            suggestions.append("→ Missing dependency — run: pip install -r requirements.txt")
+        elif "attributeerror" in ae_low:
+            suggestions.append("→ Object doesn't have this attribute — check spelling and type")
+        elif "typeerror" in ae_low:
+            suggestions.append("→ Wrong argument type/count — check function signature")
+        elif "keyerror" in ae_low:
+            suggestions.append("→ Dictionary key not found — use .get() or check key exists")
+        elif "filenotfounderror" in ae_low:
+            suggestions.append("→ Path doesn't exist — verify path and working directory")
+        elif "connectionrefusederror" in ae_low or "connection refused" in ae_low:
+            suggestions.append("→ Service not running — check if DB/Redis/backend is started")
+        elif "syntaxerror" in ae_low:
+            suggestions.append("→ Python syntax error — check brackets, colons, indentation")
+        elif "valueerror" in ae_low:
+            suggestions.append("→ Invalid value — validate input before passing it")
+        if suggestions:
+            ae_result.append("\nSuggestions:")
+            ae_result.extend(suggestions)
+        return "\n".join(ae_result)
+
+    # =========================================================================
+    # BATCH 7 — Database tools
+    # =========================================================================
+
+    def run_sql(inp: dict[str, Any]) -> str:
+        rs_query = str(inp["query"])
+        rs_params: list[str] = list(inp.get("params") or [])
+        for rs_i, rs_p in enumerate(rs_params, 1):
+            rs_query = rs_query.replace(f"${rs_i}", f"'{rs_p}'")
+        rs_settings = get_settings()
+        rs_db_url = getattr(rs_settings, "database_url", None)
+        if not rs_db_url:
+            return "[ERROR] DATABASE_URL not configured in settings"
+        try:
+            r = subprocess.run(
+                ["psql", str(rs_db_url), "-c", rs_query, "--no-password"],
+                capture_output=True, text=True, timeout=30,
+            )
+            return (r.stdout + r.stderr)[:5000] or "(no output)"
+        except FileNotFoundError:
+            return "[ERROR] psql not found — install postgresql-client"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] Query timed out after 30s"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def inspect_schema(inp: dict[str, Any]) -> str:
+        is_table = str(inp.get("table", ""))
+        is_settings = get_settings()
+        is_db_url = getattr(is_settings, "database_url", None)
+        if not is_db_url:
+            return "[ERROR] DATABASE_URL not configured"
+        if is_table:
+            is_query = (
+                "SELECT column_name, data_type, is_nullable, column_default "
+                "FROM information_schema.columns "
+                f"WHERE table_name = '{is_table}' ORDER BY ordinal_position"
+            )
+        else:
+            is_query = (
+                "SELECT table_name, pg_size_pretty(pg_total_relation_size(table_name::regclass)) AS size "
+                "FROM information_schema.tables "
+                "WHERE table_schema = 'public' ORDER BY table_name"
+            )
+        try:
+            r = subprocess.run(
+                ["psql", str(is_db_url), "-c", is_query, "--no-password"],
+                capture_output=True, text=True, timeout=10,
+            )
+            return (r.stdout + r.stderr)[:5000] or "(empty schema)"
+        except FileNotFoundError:
+            return "[ERROR] psql not found"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    # =========================================================================
+    # BATCH 8 — Docker tools
+    # =========================================================================
+
+    def docker_ps(inp: dict[str, Any]) -> str:
+        show_all = bool(inp.get("all", False))
+        docker_cmd = [
+            "docker", "ps",
+            "--format", "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}",
+        ]
+        if show_all:
+            docker_cmd.append("-a")
+        try:
+            r = subprocess.run(docker_cmd, capture_output=True, text=True, timeout=10)
+            return (r.stdout + r.stderr)[:3000] or "(no containers)"
+        except FileNotFoundError:
+            return "[ERROR] docker not found"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def docker_logs(inp: dict[str, Any]) -> str:
+        dl_container = str(inp["container"])
+        dl_lines = int(inp.get("lines", 50))
+        try:
+            r = subprocess.run(
+                ["docker", "logs", "--tail", str(dl_lines), dl_container],
+                capture_output=True, text=True, timeout=15,
+            )
+            return (r.stdout + r.stderr)[:5000] or "(no logs)"
+        except FileNotFoundError:
+            return "[ERROR] docker not found"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def docker_exec(inp: dict[str, Any]) -> str:
+        de_container = str(inp["container"])
+        de_command = str(inp["command"])
+        try:
+            r = subprocess.run(
+                ["docker", "exec", de_container, "sh", "-c", de_command],
+                capture_output=True, text=True, timeout=30,
+            )
+            return (r.stdout + r.stderr)[:5000] or "(no output)"
+        except FileNotFoundError:
+            return "[ERROR] docker not found"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] Command timed out"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def docker_compose(inp: dict[str, Any]) -> str:
+        dc_action = str(inp["action"])
+        dc_services: list[str] = list(inp.get("services") or [])
+        dc_detach = bool(inp.get("detach", True))
+        dc_cmd = ["docker", "compose"]
+        if dc_action == "up":
+            dc_cmd.append("up")
+            if dc_detach:
+                dc_cmd.append("-d")
+        elif dc_action in ("down", "restart", "build", "ps", "pull"):
+            dc_cmd.append(dc_action)
+        elif dc_action == "logs":
+            dc_cmd += ["logs", "--tail=50"]
+        else:
+            return f"[ERROR] Unknown action: {dc_action}"
+        dc_cmd.extend(dc_services)
+        try:
+            r = subprocess.run(dc_cmd, cwd=repo_path, capture_output=True, text=True, timeout=120)
+            return (r.stdout + r.stderr)[:5000] or f"docker compose {dc_action} complete"
+        except FileNotFoundError:
+            return "[ERROR] docker not found"
+        except subprocess.TimeoutExpired:
+            return f"[ERROR] docker compose {dc_action} timed out"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    # =========================================================================
+    # BATCH 9 — Security tools
+    # =========================================================================
+
+    def secrets_scan(inp: dict[str, Any]) -> str:
+        ss_dir = str(inp.get("directory", ""))
+        ss_root = (root / ss_dir) if ss_dir else root
+        ss_patterns = [
+            r"(?i)(password|passwd|pwd)\s*[=:]\s*['\"][^'\"]{4,}['\"]",
+            r"(?i)(api[_-]?key|apikey|api[_-]?secret)\s*[=:]\s*['\"][^'\"]{8,}['\"]",
+            r"(?i)(secret[_-]?key|secretkey)\s*[=:]\s*['\"][^'\"]{8,}['\"]",
+            r"(?i)(access[_-]?token|auth[_-]?token)\s*[=:]\s*['\"][^'\"]{8,}['\"]",
+            r"(sk-[a-zA-Z0-9]{20,})",
+            r"(AKIA[0-9A-Z]{16})",
+            r"(ghp_[a-zA-Z0-9]{36})",
+        ]
+        ss_exclude = ["node_modules", ".git", ".venv", "venv", "__pycache__", "dist", "build", ".next"]
+        ss_findings: list[str] = []
+        for ss_pat in ss_patterns:
+            ss_cmd = ["grep", "-rn", "-E", ss_pat, str(ss_root)]
+            for ex in ss_exclude:
+                ss_cmd += ["--exclude-dir", ex]
+            ss_cmd += ["--exclude", "*.env", "--exclude", ".env*", "--exclude", "*.example"]
+            try:
+                r = subprocess.run(ss_cmd, capture_output=True, text=True, timeout=15)
+                if r.stdout.strip():
+                    ss_findings.append(r.stdout.strip())
+            except subprocess.TimeoutExpired:
+                pass
+            except Exception:
+                pass
+        if not ss_findings:
+            return "✅ No hardcoded secrets detected."
+        return "⚠️  Potential secrets found:\n\n" + "\n\n".join(ss_findings)[:5000]
+
     handlers["edit_file"] = edit_file
     handlers["write_file"] = write_file
     handlers["git_diff"] = git_diff
@@ -1912,5 +3235,47 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["run_tests"] = run_tests
     handlers["run_linter"] = run_linter
     handlers["submit_result"] = submit_result
+    # Batch 1
+    handlers["find_file"] = find_file
+    handlers["format_file"] = format_file
+    handlers["organize_imports"] = organize_imports
+    handlers["insert_at_line"] = insert_at_line
+    handlers["replace_function"] = replace_function
+    handlers["delete_lines"] = delete_lines
+    handlers["apply_patch"] = apply_patch
+    handlers["compare_files"] = compare_files
+    # Batch 2
+    handlers["run_background"] = run_background
+    handlers["kill_process"] = kill_process
+    handlers["run_python_snippet"] = run_python_snippet
+    handlers["run_make"] = run_make
+    handlers["fetch_url"] = fetch_url
+    # Batch 3
+    handlers["git_merge"] = git_merge
+    handlers["git_reset"] = git_reset
+    handlers["git_worktree"] = git_worktree
+    handlers["create_pr"] = create_pr
+    handlers["generate_commit_msg"] = generate_commit_msg
+    # Batch 4
+    handlers["run_single_test"] = run_single_test
+    handlers["coverage_report"] = coverage_report
+    handlers["type_check"] = type_check
+    # Batch 5
+    handlers["list_functions"] = list_functions
+    handlers["list_classes"] = list_classes
+    handlers["find_function_body"] = find_function_body
+    # Batch 6
+    handlers["read_logs"] = read_logs
+    handlers["analyze_error"] = analyze_error
+    # Batch 7
+    handlers["run_sql"] = run_sql
+    handlers["inspect_schema"] = inspect_schema
+    # Batch 8
+    handlers["docker_ps"] = docker_ps
+    handlers["docker_logs"] = docker_logs
+    handlers["docker_exec"] = docker_exec
+    handlers["docker_compose"] = docker_compose
+    # Batch 9
+    handlers["secrets_scan"] = secrets_scan
     handlers["_chat_result"] = chat_result
     return handlers
