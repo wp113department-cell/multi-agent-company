@@ -1171,3 +1171,65 @@ TARGET_REPO_PATH=/home/pc-117/Documents/CRR2906 \
 2. Activate venv: `source backend/.venv/bin/activate`
 3. Start dev: `./run.sh`
 4. Pipeline is working end-to-end with Groq/qwen3 — test by creating a task and clicking "Run Planning Pipeline"
+
+---
+
+## Comprehensive Bug-Fix Audit — 2026-07-14
+
+### Session goal
+Full codebase audit per user request: find every bug, infinite loop, error, warning, and spec gap. Fix all.
+
+### Bugs found and fixed (commit d5f47c2)
+
+**CRITICAL — Backend: human review was silently skipped (agents.py)**
+- Root cause: `launch_planning_pipeline` checked `if stage == "awaiting_approval":` after `graph.ainvoke()` returns. But LangGraph's `interrupt()` inside `human_review_node` causes `ainvoke` to return with `stage="done"` (what decomposer_node set) — the "awaiting_approval" value is set INSIDE the node before `interrupt()` fires, but it's never returned. The dead code branch was never reached; pipeline fell through to the "done" handler and moved task to `ready_for_review` without any human review — users saw the plan but had no approve/reject buttons.
+- Fix: Removed the separate `stage == "awaiting_approval"` branch. Any non-blocked result from `ainvoke` is now treated as "awaiting approval" (LangGraph paused at interrupt checkpoint). Task stays in "planning", pipeline DB stage set to "awaiting_approval".
+
+**CRITICAL — Backend: GET /api/tasks/{id}/pipeline auto-created pipeline state (tasks.py + repository.py)**
+- Root cause: Endpoint called `get_or_create_pipeline_state` which created a new DB row for every new task. Result: pipeline section always showed on task detail page (even for tasks that hadn't been pipelined), with confusing empty "PM Agent running…" indicator.
+- Fix: Added `get_pipeline_state()` (returns None if not found), endpoint now returns 404 when no pipeline exists. Frontend already handles 404 → null correctly.
+
+**UI — Frontend: stage label names wrong (PipelineView.tsx)**
+- Root cause: `stageLabel` dict and `PLANNING_STAGES` array used `"pm_agent"`, `"architect_agent"`, `"task_decomposer"` but backend emits `"pm"`, `"architect"`, `"decomposer"`. Running pipeline never showed the correct label.
+- Fix: Updated all stage name strings to match backend.
+
+**UI — Frontend: isPipelineRunning never true (tasks/[id]/page.tsx)**
+- Root cause: Checked `["pm_agent", "architect_agent", "task_decomposer"].includes(pipeline.stage)` — same wrong names. Pipeline "running" indicator never showed.
+- Fix: `task.status === "planning" && (!pipeline || pipeline.stage === "pm")`.
+
+**UI — Frontend: SubTask used undefined id + camelCase fields (PipelineView.tsx)**
+- Root cause: Backend `subtasks_json` contains raw decomposer output with `files_to_edit` (snake_case) and no `id` field. Frontend interface expected `filesToEdit` (camelCase) and used `key={st.id}` (undefined → React key warning).
+- Fix: Interface accepts both `files_to_edit`/`filesToEdit`; key uses `st.id ?? idx`.
+
+**UX — Frontend: API error messages always generic (api.ts)**
+- Root cause: `handleResponse` expected `{ error: { message } }` but FastAPI returns `{ detail: "..." }`. All API errors showed "Request failed: 400" instead of the real message.
+- Fix: Handle FastAPI's `{ detail: "string" }` and `{ detail: [{ msg: "..." }] }` (validation errors).
+
+**Prior session (2026-07-10 context compaction) — already committed:**
+- `conftest.py` created: fixed 21 test failures (ANTHROPIC_API_KEY missing in test env)
+- `pytest.ini`: suppressed httpx/starlette third-party warning
+- `test_memory.py`: `mock_db.add = MagicMock()` (add() is sync, not async)
+- `StatusBadge.tsx`: removed archived `@gridiron/shared-types` import, inlined type
+
+### Test results (2026-07-14)
+- `pytest backend/tests/ -q` → **247 passed, 54 skipped, 0 failures, 0 warnings** ✅
+- `mypy app/ --strict` → **62 files, 0 issues** ✅
+- `npx tsc --noEmit` (frontend) → **0 errors** ✅
+- Commit: `d5f47c2`
+
+### Current state — what works
+- Submit task → `/tasks` page updates (4s poll)
+- Click "Run Planning Pipeline" → PM Agent → Architect Agent → Decomposer → pipeline pauses at human review
+- Task detail shows PM brief, architect plan, subtasks in PipelineView
+- "Approve Plan & Start Coding" resumes LangGraph → coding pipeline starts
+- Repo page: clone repos, activate, per-task repo selection
+- Epics page: create epic, approve/reject cost, approve/reject epic
+- Goals page: submit plain-language goal → executive agent creates epics
+- Metrics page: token usage, cache hit rate, per-epic cost
+- All API errors now show real FastAPI messages (not generic "Request failed: 4xx")
+
+### How to resume next session
+1. Read PROJECT.md
+2. `source backend/.venv/bin/activate`
+3. `./run.sh`
+4. End-to-end flow: create task → Run Planning Pipeline → approve plan → coding runs
