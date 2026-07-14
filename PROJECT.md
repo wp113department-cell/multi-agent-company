@@ -1270,8 +1270,46 @@ Roles rewritten: pm, architect, decomposer, planner, coder, backend_dev, fronten
 - `mypy app/agents/tools.py app/agents/pm.py app/agents/architect.py app/api/agents.py --strict` → **0 issues** ✅
 - Commit: `466c42f`
 
-### What's next
-- Task filtering by repo on `/tasks` page
+---
+
+## Session 2026-07-14 — Project Completion (commit 5ef6ee7)
+
+All 4 remaining gaps resolved. Project is now production-ready.
+
+### FEATURE 1 — PostgreSQL Checkpointer (pipeline state survives restarts)
+- `langgraph-checkpoint-postgres==3.1.0` + `psycopg[binary]==3.3.4` installed
+- `graph.py`: `init_checkpointer()` opens psycopg3 connection, enters `AsyncPostgresSaver` context, calls `setup()` to create LangGraph checkpoint tables on first run
+- `graph.py`: `close_checkpointer()` releases connection at shutdown
+- `main.py`: wires both into lifespan startup/shutdown
+- Pipeline "Approve Plan" now works correctly after server restart
+
+### FEATURE 2 — Settings UI (API key via browser)
+- `SystemSetting` model + migration `008` — key/value table in DB
+- `backend/app/api/settings.py` — `GET /api/settings`, `POST /api/settings/api-key`, `DELETE /api/settings/api-key`
+- `base.py` — `get_effective_api_key()` returns DB key first, env var second
+- DB key loaded at startup + applied immediately when saved via UI
+- `config.py` validator relaxed — `ANTHROPIC_API_KEY` env var no longer required if key stored in DB
+- `apps/web/app/settings/page.tsx` — Settings page with masked key display, save/remove buttons, model config read-only view
+- "Settings" nav link added to layout
+
+### FEATURE 3 — Task filtering by repo
+- `repository.py list_tasks()` + `GET /api/tasks` accept `?repo_id=N`
+- `/tasks` page shows repo filter pill-buttons (shown only when repos exist)
+- Task list rows show repo name badge inline
+
+### FEATURE 4 — Real web_search (DuckDuckGo, no API key needed)
+- `duckduckgo-search==8.1.1` installed
+- Research Agent `web_search` handler now calls `DDGS().text()` — returns real results (title, URL, snippet)
+
+### Test results (2026-07-14 completion)
+- `pytest backend/tests/ -q` → **247 passed, 54 skipped, 0 failures** ✅
+- `mypy app/ --strict` → **63 files, 0 issues** ✅
+- `npx tsc --noEmit` → **0 errors** ✅
+- Migration 008 applied to DB ✅
+- Commit: `5ef6ee7`
+
+### Project status: COMPLETE
+All phases (0–7) implemented. All known gaps resolved.
+The only optional future enhancements:
 - Show repo file tree / stats after cloning
-- Git branch management per task (show which worktree branch has the code)
-- Anthropic API key input via UI (so user doesn't have to edit `.env`)
+- Git branch management per task (which worktree branch holds the diff)
