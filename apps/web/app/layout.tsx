@@ -18,6 +18,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 Mission Control
               </a>
               <nav className="flex items-center gap-4">
+                <a href="/chat" className="text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400">Chat</a>
                 <a href="/repo" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Repository</a>
                 <a href="/tasks" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Tasks</a>
                 <a href="/epics" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Epics</a>

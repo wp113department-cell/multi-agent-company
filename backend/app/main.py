@@ -20,6 +20,7 @@ from app.api.memory import router as memory_router
 from app.api.goals import router as goals_router
 from app.api.metrics import router as metrics_router
 from app.api.settings import router as settings_router
+from app.api.chat import router as chat_router
 
 from app.config import get_settings
 
@@ -96,6 +97,7 @@ app.include_router(memory_router)
 app.include_router(goals_router)
 app.include_router(metrics_router)
 app.include_router(settings_router)
+app.include_router(chat_router)
 
 
 @app.exception_handler(StarletteHTTPException)

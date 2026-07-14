@@ -395,3 +395,33 @@ export async function deleteApiKey(): Promise<{ deleted: boolean }> {
   const res = await fetch("/api/settings/api-key", { method: "DELETE" });
   return handleResponse(res);
 }
+
+// ---------------------------------------------------------------------------
+// Chat (streaming conversational interface)
+// ---------------------------------------------------------------------------
+
+export async function createChatSession(repoPath: string): Promise<{ session_id: string }> {
+  const res = await fetch("/api/chat/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ repo_path: repoPath }),
+  });
+  return handleResponse(res);
+}
+
+export async function confirmChatAction(
+  sessionId: string,
+  actionId: string,
+  approved: boolean,
+): Promise<{ status: string }> {
+  const res = await fetch(`/api/chat/sessions/${sessionId}/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action_id: actionId, approved }),
+  });
+  return handleResponse(res);
+}
+
+export async function deleteChatSession(sessionId: string): Promise<void> {
+  await fetch(`/api/chat/sessions/${sessionId}`, { method: "DELETE" });
+}
