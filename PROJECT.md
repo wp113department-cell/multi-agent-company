@@ -1430,3 +1430,38 @@ Commit: 50b8b14
 - No file upload / image understanding (read_image not yet implemented)
 - Browser tools (Playwright/screenshot) not yet implemented
 - No conversation export/import
+
+---
+
+## Session: 2026-07-14 — Day 1 Tool Completion (commit 624e76c)
+
+### What was built
+**29 new production-ready tools added (CHAT_TOOLS: 69 → 98)**
+
+| Batch | Tools |
+|---|---|
+| 10 — AST Engine | parse_ast, import_graph, call_graph, dead_code_detect, circular_dep_detect, rename_symbol |
+| 11 — Git extras | git_rebase, git_cherry_pick |
+| 12 — Terminal extras | read_output, run_node, run_script, docker_build, docker_restart |
+| 13 — Smart search | find_route, find_api, find_sql, find_test, find_config |
+| 14 — Monitoring | cpu_usage, memory_usage, disk_usage, health_check, task_progress |
+| 15 — Editing extras | replace_class, undo_changes (with confirm), generate_patch |
+| 16 — DB extras | explain_query, run_migration (with confirm), seed_database (with confirm) |
+
+### New files
+- `backend/app/repo_tools/ast_engine.py` — Real Python AST engine (stdlib only, 6 functions)
+- `backend/tests/test_day1_tools.py` — 134 tests covering all new tools
+
+### Test results
+- `pytest backend/tests/ -q` → **512 passed, 54 skipped** (was 378)
+- `mypy --ignore-missing-imports` → **0 errors** on all modified files
+
+### Architecture decisions
+- All destructive ops (undo_changes, run_migration, seed_database) require `request_confirmation()` before executing — zero silent data loss
+- find_sql uses `grep -i -w` (not `(?i)` inline flags which are PCRE-only, not GNU ERE)
+- AST engine uses stdlib `ast` module only — zero new dependencies
+- Each tool: sync handler in tools.py (for pipeline agents) + async dispatch in chat_agent.py (for chat agent)
+
+### Next session: Day 2 — Agent Expansion
+- Build 11 new agents (bug_fix, security_reviewer, architecture_reviewer, sql_agent, docker_agent, cicd_agent, refactor_agent, readme_agent, api_docs_agent, dependency_agent, monitoring_agent)
+- Target: ~530+ tests
