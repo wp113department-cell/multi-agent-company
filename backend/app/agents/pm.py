@@ -40,12 +40,16 @@ def pm_node(state: PipelineState) -> PipelineState:
 
     handlers["submit_brief"] = submit_brief
 
+    memory_context = state.get("memory_context", "")
+    memory_block = f"\n\n{memory_context}" if memory_context else ""
+
     messages = [
         {
             "role": "user",
             "content": (
                 f"Task title: {state['task_title']}\n\n"
-                f"Task description:\n{state['task_description']}\n\n"
+                f"Task description:\n{state['task_description']}"
+                f"{memory_block}\n\n"
                 "Produce the PM brief using the submit_brief tool."
             ),
         }

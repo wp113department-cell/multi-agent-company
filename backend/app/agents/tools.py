@@ -16,7 +16,7 @@ from app.policy.engine import check_command, check_path_in_worktree
 READ_ONLY_TOOLS = [
     {
         "name": "read_file",
-        "description": "Read the contents of a file at the given path.",
+        "description": "Read the full contents of a file. Always read a file before editing it.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -27,46 +27,125 @@ READ_ONLY_TOOLS = [
     },
     {
         "name": "list_files",
-        "description": "List files in a directory. Returns file paths relative to repo root.",
+        "description": "List files in a directory. Returns file paths relative to repo root. Use pattern='**/*.py' to filter by type.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "directory": {"type": "string", "description": "Directory path (default: repo root)"},
-                "pattern": {"type": "string", "description": "Glob pattern filter (e.g. '**/*.py')"},
+                "pattern": {"type": "string", "description": "Glob pattern filter (e.g. '**/*.py', '**/*.ts')"},
             },
             "required": [],
         },
     },
     {
         "name": "search_code",
-        "description": "Search for a pattern across the repository using grep.",
+        "description": "Search for a string or regex pattern across the repository. Returns file:line:match results. Use this to find where something is defined or used.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "pattern": {"type": "string", "description": "Regex or string to search for"},
-                "file_pattern": {"type": "string", "description": "File glob to restrict search (e.g. '*.py')"},
+                "pattern": {"type": "string", "description": "Regex or literal string to search for"},
+                "file_pattern": {"type": "string", "description": "Limit search to files matching this glob (e.g. '*.py', '*.ts')"},
             },
             "required": ["pattern"],
+        },
+    },
+    {
+        "name": "search_symbols",
+        "description": "Search for function, class, or interface definitions by name. Faster than search_code for finding where something is defined. Use this before referencing any function or class to confirm it exists.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Symbol name or partial name to search for (e.g. 'get_task', 'DevTask', 'fetchTasks')"},
+                "kind": {
+                    "type": "string",
+                    "enum": ["function", "class", "all"],
+                    "description": "Symbol type to search for (default: all)",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "get_file_tree",
+        "description": "Get a tree view of the project structure. Use this first to understand what exists before exploring individual files.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "directory": {"type": "string", "description": "Starting directory (default: repo root)"},
+                "max_depth": {"type": "integer", "description": "Max depth to show, 1-4 (default: 3)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "git_log",
+        "description": "Show recent git commits with messages. Use this to understand recent changes, active areas, and what was recently modified.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "count": {"type": "integer", "description": "Number of commits to show (default: 10, max: 30)"},
+                "file": {"type": "string", "description": "Optional: show only commits that touched this file"},
+            },
+            "required": [],
         },
     },
 ]
 
 CODER_TOOLS = READ_ONLY_TOOLS + [
     {
+        "name": "edit_file",
+        "description": (
+            "Make a targeted edit to a file by replacing an exact string. "
+            "PREFER this over write_file for modifying existing files — it is safer because "
+            "it only changes the specified region and fails if the text is not found. "
+            "old_string must be unique in the file. Read the file first if unsure."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path relative to the worktree root"},
+                "old_string": {
+                    "type": "string",
+                    "description": "Exact text to find and replace. Must appear exactly once in the file.",
+                },
+                "new_string": {
+                    "type": "string",
+                    "description": "Replacement text. Can be empty string to delete old_string.",
+                },
+            },
+            "required": ["path", "old_string", "new_string"],
+        },
+    },
+    {
         "name": "write_file",
-        "description": "Write content to a file (creates or overwrites). Only allowed inside the worktree.",
+        "description": (
+            "Write full content to a file (creates or completely overwrites). "
+            "Use edit_file instead when modifying an existing file. "
+            "Only use write_file for NEW files or when you need to fully replace a file."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "File path relative to worktree root"},
-                "content": {"type": "string", "description": "Full file content to write"},
+                "content": {"type": "string", "description": "Complete file content to write"},
             },
             "required": ["path", "content"],
         },
     },
     {
+        "name": "git_diff",
+        "description": "Show the current diff of changes in the worktree. Use this to review your own changes before submitting.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file": {"type": "string", "description": "Optional: show diff for a specific file only"},
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "bash",
-        "description": "Run a shell command (allowlisted safe commands only).",
+        "description": "Run a shell command (allowlisted safe commands only). Use for running tests, typecheck, and lint.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -77,7 +156,7 @@ CODER_TOOLS = READ_ONLY_TOOLS + [
     },
     {
         "name": "submit_patch",
-        "description": "Signal that implementation is complete. Provide the list of files changed.",
+        "description": "Signal that implementation is complete. Call this ONLY after all tests pass.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -86,7 +165,7 @@ CODER_TOOLS = READ_ONLY_TOOLS + [
                     "items": {"type": "string"},
                     "description": "List of file paths that were created or modified",
                 },
-                "summary": {"type": "string", "description": "One-paragraph summary of what was implemented"},
+                "summary": {"type": "string", "description": "One-paragraph summary of what was implemented and verified"},
             },
             "required": ["files_changed", "summary"],
         },
@@ -270,7 +349,77 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
         except subprocess.TimeoutExpired:
             return "[ERROR] Search timed out"
 
-    return {"read_file": read_file, "list_files": list_files, "search_code": search_code}
+    def search_symbols(inp: dict[str, Any]) -> str:
+        name = str(inp["name"])
+        kind = inp.get("kind", "all")
+        patterns: list[str] = []
+        if kind in ("function", "all"):
+            patterns += [f"def {name}", f"async def {name}", f"function {name}", f"const {name} ="]
+        if kind in ("class", "all"):
+            patterns += [f"class {name}", f"interface {name}", f"type {name} ="]
+        results: list[str] = []
+        for pat in patterns:
+            try:
+                result = subprocess.run(
+                    ["grep", "-rn", "--include=*.py", "--include=*.ts", "--include=*.tsx", pat, str(base)],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if result.stdout:
+                    results.append(result.stdout[:2000])
+            except subprocess.TimeoutExpired:
+                pass
+        combined = "\n".join(results)[:6000]
+        return combined if combined.strip() else f"(no symbol '{name}' found)"
+
+    def get_file_tree(inp: dict[str, Any]) -> str:
+        directory = str(inp.get("directory", ""))
+        max_depth = min(int(inp.get("max_depth", 3)), 4)
+        start = base / directory if directory else base
+        if not start.exists():
+            return f"[ERROR] Directory not found: {directory}"
+        _SKIP = {"__pycache__", "node_modules", ".next", ".venv", "venv", ".git", "dist", "build", ".mypy_cache"}
+        lines: list[str] = [directory or "."]
+
+        def _tree(path: Path, depth: int, prefix: str) -> None:
+            if depth > max_depth:
+                return
+            try:
+                items = sorted(path.iterdir(), key=lambda p: (p.is_file(), p.name))
+            except PermissionError:
+                return
+            items = [i for i in items if i.name not in _SKIP and not i.name.startswith(".")]
+            for idx, item in enumerate(items):
+                connector = "└── " if idx == len(items) - 1 else "├── "
+                lines.append(f"{prefix}{connector}{item.name}")
+                if item.is_dir() and depth < max_depth:
+                    ext = "    " if idx == len(items) - 1 else "│   "
+                    _tree(item, depth + 1, prefix + ext)
+
+        _tree(start, 1, "")
+        return "\n".join(lines[:300])
+
+    def git_log(inp: dict[str, Any]) -> str:
+        count = min(int(inp.get("count", 10)), 30)
+        file_filter = str(inp.get("file", ""))
+        cmd = ["git", "log", f"--oneline", f"-{count}", "--no-merges"]
+        if file_filter:
+            cmd.extend(["--", file_filter])
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(base), timeout=15)
+            if result.returncode != 0:
+                return f"[ERROR] git log failed: {result.stderr[:300]}"
+            return result.stdout[:4000] if result.stdout else "(no commits found)"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] git log timed out"
+
+    return {
+        "read_file": read_file,
+        "list_files": list_files,
+        "search_code": search_code,
+        "search_symbols": search_symbols,
+        "get_file_tree": get_file_tree,
+        "git_log": git_log,
+    }
 
 
 def make_coder_handlers(worktree_path: str, repo_path: str) -> dict[str, Any]:
@@ -302,11 +451,48 @@ def make_coder_handlers(worktree_path: str, repo_path: str) -> dict[str, Any]:
         except subprocess.TimeoutExpired:
             return "[ERROR] Command timed out after 60s"
 
+    def edit_file(inp: dict[str, Any]) -> str:
+        rel_path = str(inp["path"])
+        old_string = str(inp["old_string"])
+        new_string = str(inp["new_string"])
+        policy = check_path_in_worktree(rel_path, worktree_path)
+        if not policy.allowed:
+            return f"[POLICY DENIED] {policy.reason}"
+        target = wt / rel_path
+        if not target.exists():
+            return f"[ERROR] File not found: {rel_path}. Use write_file to create a new file."
+        try:
+            content = target.read_text(encoding="utf-8")
+        except Exception as e:
+            return f"[ERROR] Cannot read {rel_path}: {e}"
+        if old_string not in content:
+            return f"[ERROR] old_string not found in {rel_path}. The exact text was not present."
+        count = content.count(old_string)
+        if count > 1:
+            return f"[ERROR] old_string appears {count} times in {rel_path}. Provide more context to make it unique."
+        target.write_text(content.replace(old_string, new_string, 1), encoding="utf-8")
+        return f"Edited {rel_path}"
+
+    def git_diff(inp: dict[str, Any]) -> str:
+        file_filter = str(inp.get("file", ""))
+        cmd = ["git", "diff", "--no-color"]
+        if file_filter:
+            cmd += ["--", file_filter]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, cwd=worktree_path, timeout=15)
+            if result.returncode != 0:
+                return f"[ERROR] git diff: {result.stderr[:300]}"
+            return result.stdout[:8000] if result.stdout else "(no changes yet)"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] git diff timed out"
+
     def submit_patch(inp: dict[str, Any]) -> str:
         patch_result["files_changed"] = inp.get("files_changed", [])
         patch_result["summary"] = inp.get("summary", "")
         return "Patch submitted"
 
+    handlers["edit_file"] = edit_file
+    handlers["git_diff"] = git_diff
     handlers["write_file"] = write_file
     handlers["bash"] = bash
     handlers["submit_patch"] = submit_patch

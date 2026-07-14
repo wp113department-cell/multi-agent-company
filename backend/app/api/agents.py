@@ -58,6 +58,7 @@ async def launch_planning_pipeline(task_id: int, title: str, description: str, r
                 title=title,
                 description=description,
                 repo_path=repo_path or get_active_repo_path(),
+                db=db,
             )
 
             stage = result.get("stage", "blocked")
