@@ -1233,3 +1233,45 @@ Full codebase audit per user request: find every bug, infinite loop, error, warn
 2. `source backend/.venv/bin/activate`
 3. `./run.sh`
 4. End-to-end flow: create task → Run Planning Pipeline → approve plan → coding runs
+
+---
+
+## Session 2026-07-14 — Agent Enhancement (commit 466c42f)
+
+### What was done
+
+**1. tools.py — New tools with full handlers**
+- `READ_ONLY_TOOLS` expanded: added `search_symbols` (grep for def/class/interface by name), `get_file_tree` (directory tree with depth limit, skips node_modules/venv/etc.), `git_log` (recent commits, optional file filter)
+- `CODER_TOOLS` expanded: added `edit_file` (targeted string replacement, fails if old_string not found or not unique — safer than write_file for modifications), `git_diff` (worktree diff before submit)
+- All 5 new tools have full Python handler implementations: `make_read_only_handlers` returns 6 handlers, `make_coder_handlers` returns 11 handlers
+- `search_symbols` greps Python + TypeScript simultaneously for function, class, interface, const definitions
+
+**2. Memory now wired end-to-end**
+- `pm.py`: injects `memory_context` from state into PM agent user message (was missing)
+- `agents.py`: passes `db=db` to `run_planning_pipeline()` so the memory query actually runs (was `db=None`)
+- `architect.py`: already had memory_context injection (from earlier session)
+- Result: engineering memory from past tasks now flows PM → Architect → Decomposer
+
+**3. All 14 role prompts rewritten to production quality**
+
+Each role now has:
+- **Identity + project tech stack** (FastAPI, SQLAlchemy 2.0 async, Next.js 14, Pydantic v2, Alembic) baked in
+- **Anti-hallucination rules**: verify-before-name, search_symbols before importing, never name unread files, state unknowns explicitly
+- **Exploration process**: ordered steps (get_file_tree → search_symbols → read_file → search_code) before taking any action
+- **Tool usage guidance**: when to use edit_file vs write_file, when to use search_symbols vs search_code
+- **Quality checklist**: pre-submission gate that the agent must pass
+- **Cross-agent communication**: feedback loop structure documented (QA → Manager → Reviewer → Developer with exact error handoff)
+- **Memory context instructions**: how to use `<memory_context>` block if provided
+
+Roles rewritten: pm, architect, decomposer, planner, coder, backend_dev, frontend_dev, qa, reviewer, manager, devops, research, docs, executive
+
+### Test results (2026-07-14 agent enhancement)
+- `pytest backend/tests/ -q` → **247 passed, 54 skipped, 0 failures** ✅
+- `mypy app/agents/tools.py app/agents/pm.py app/agents/architect.py app/api/agents.py --strict` → **0 issues** ✅
+- Commit: `466c42f`
+
+### What's next
+- Task filtering by repo on `/tasks` page
+- Show repo file tree / stats after cloning
+- Git branch management per task (show which worktree branch has the code)
+- Anthropic API key input via UI (so user doesn't have to edit `.env`)
