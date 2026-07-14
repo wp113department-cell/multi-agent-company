@@ -1,4 +1,13 @@
-import type { TaskStatus } from "@gridiron/shared-types";
+type TaskStatus =
+  | "pending"
+  | "planning"
+  | "ready_for_review"
+  | "coding"
+  | "testing"
+  | "blocked"
+  | "completed"
+  | "failed"
+  | "rejected";
 
 // Consistent color coding across every page per 15_Mission_Control_Dashboard_Specification.md
 // ("amber for blocked/in-review, green for completed, red for failed").
@@ -14,10 +23,11 @@ const STYLES: Record<TaskStatus, string> = {
   rejected: "bg-red-100 text-red-700",
 };
 
-export function StatusBadge({ status }: { status: TaskStatus }) {
+export function StatusBadge({ status }: { status: string }) {
+  const style = STYLES[status as TaskStatus] ?? "bg-slate-100 text-slate-600";
   return (
     <span
-      className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${STYLES[status]}`}
+      className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${style}`}
     >
       {status.replace(/_/g, " ")}
     </span>

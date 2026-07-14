@@ -168,9 +168,14 @@ async def list_subtasks(db: AsyncSession, task_id: int) -> list[Subtask]:
     return list(result.scalars())
 
 
-async def get_or_create_pipeline_state(db: AsyncSession, task_id: int) -> PipelineState:
+async def get_pipeline_state(db: AsyncSession, task_id: int) -> PipelineState | None:
+    """Return the pipeline state row if it exists, or None."""
     result = await db.execute(select(PipelineState).where(PipelineState.task_id == task_id))
-    state = result.scalar_one_or_none()
+    return result.scalar_one_or_none()
+
+
+async def get_or_create_pipeline_state(db: AsyncSession, task_id: int) -> PipelineState:
+    state = await get_pipeline_state(db, task_id)
     if state is None:
         state = PipelineState(task_id=task_id, stage="pm")
         db.add(state)

@@ -69,49 +69,24 @@ async def launch_planning_pipeline(task_id: int, title: str, description: str, r
                 await append_log(db, task_id, "pipeline_error", error or "Pipeline blocked")
                 return
 
-            if stage == "awaiting_approval":
-                pm_brief = result.get("pm_brief", {})
-                architect_plan = result.get("architect_plan", {})
-                subtasks = result.get("subtasks", [])
-
-                await update_pipeline_state(
-                    db, task_id, "awaiting_approval",
-                    pm_brief=pm_brief,
-                    architect_plan=architect_plan,
-                    subtasks_json=subtasks,
-                )
-                if subtasks:
-                    await save_subtasks(db, task_id, subtasks)
-
-                # Save planning artifacts to disk + DB
-                if pm_brief:
-                    await save_artifact_async(task_id, "pm_brief", pm_brief, "pm_agent", db=db)
-                if architect_plan:
-                    await save_artifact_async(task_id, "architect_plan", architect_plan, "architect_agent", db=db)
-                if subtasks:
-                    await save_artifact_async(task_id, "subtasks", {"subtasks": subtasks}, "decomposer_agent", db=db)
-
-                await append_log(
-                    db, task_id, "pipeline",
-                    f"Planning complete — awaiting human approval. "
-                    f"{len(subtasks)} subtasks, "
-                    f"risk_level={architect_plan.get('risk_level', 'unknown')}",
-                )
-                return
-
-            # stage == "done" (no interrupt — shouldn't normally happen)
-            pm_brief = result.get("pm_brief", {})
-            architect_plan = result.get("architect_plan", {})
-            subtasks = result.get("subtasks", [])
+            # LangGraph's interrupt() inside human_review_node causes ainvoke() to return
+            # with stage="done" (what decomposer set) — the "awaiting_approval" value set
+            # inside the node is never returned because the node is paused at interrupt().
+            # ANY non-blocked result here means the graph is waiting at the human_review
+            # checkpoint; we always need to ask for human approval.
+            pm_brief = result.get("pm_brief", {}) or {}
+            architect_plan = result.get("architect_plan", {}) or {}
+            subtasks = result.get("subtasks", []) or []
 
             await update_pipeline_state(
-                db, task_id, "done",
+                db, task_id, "awaiting_approval",
                 pm_brief=pm_brief,
                 architect_plan=architect_plan,
                 subtasks_json=subtasks,
             )
             if subtasks:
                 await save_subtasks(db, task_id, subtasks)
+
             if pm_brief:
                 await save_artifact_async(task_id, "pm_brief", pm_brief, "pm_agent", db=db)
             if architect_plan:
@@ -119,10 +94,10 @@ async def launch_planning_pipeline(task_id: int, title: str, description: str, r
             if subtasks:
                 await save_artifact_async(task_id, "subtasks", {"subtasks": subtasks}, "decomposer_agent", db=db)
 
-            await transition_task(db, task_id, "ready_for_review")
             await append_log(
                 db, task_id, "pipeline",
-                f"Pipeline complete — {len(subtasks)} subtasks, "
+                f"Planning complete — awaiting human approval. "
+                f"{len(subtasks)} subtasks, "
                 f"risk_level={architect_plan.get('risk_level', 'unknown')}",
             )
 
