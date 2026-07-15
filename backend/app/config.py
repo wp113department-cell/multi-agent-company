@@ -119,6 +119,12 @@ class Settings(BaseSettings):
     port: int = Field(default=8000)
     debug: bool = Field(default=False)
     log_level: str = Field(default="INFO", description="Logging level: DEBUG, INFO, WARNING, ERROR")
+    cors_origins: str = Field(
+        default="http://localhost:3000",
+        description="Comma-separated list of allowed CORS origins. E.g. https://app.gridiron.example.com,http://localhost:3000",
+    )
+    event_bus_max_retries: int = Field(default=3, description="Max handler retry attempts in the in-process event bus before writing to failed_events.")
+    groq_max_retries: int = Field(default=5, description="Max Groq API call retries on transient errors.")
 
 
 _settings: Settings | None = None

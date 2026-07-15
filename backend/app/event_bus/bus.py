@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 # event_type → list of async handler functions
 _subscribers: dict[str, list[Callable[[GridironEvent], Awaitable[None] | None]]] = defaultdict(list)
 
-_MAX_RETRIES = 3
+def _max_retries() -> int:
+    from app.config import get_settings
+    return get_settings().event_bus_max_retries
 
 
 def subscribe(
@@ -51,7 +53,8 @@ async def _dispatch_to_handler(
     handler: Callable[[GridironEvent], Awaitable[None] | None],
 ) -> bool:
     """Dispatch event to one handler. Returns True on success."""
-    for attempt in range(_MAX_RETRIES):
+    max_r = _max_retries()
+    for attempt in range(max_r):
         try:
             result = handler(event)
             if asyncio.iscoroutine(result):
@@ -60,9 +63,9 @@ async def _dispatch_to_handler(
         except Exception as e:
             logger.warning(
                 "Handler %s failed for event %s (attempt %d/%d): %s",
-                handler.__name__, event.event_type, attempt + 1, _MAX_RETRIES, e,
+                handler.__name__, event.event_type, attempt + 1, max_r, e,
             )
-            if attempt < _MAX_RETRIES - 1:
+            if attempt < max_r - 1:
                 await asyncio.sleep(0.5 * (2 ** attempt))
     return False
 

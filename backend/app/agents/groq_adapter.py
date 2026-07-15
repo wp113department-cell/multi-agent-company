@@ -218,7 +218,8 @@ def run_groq(
         kwargs["tools"] = groq_tools
         kwargs["tool_choice"] = "auto"
 
-    max_retries = 5
+    from app.config import get_settings
+    max_retries = get_settings().groq_max_retries
     for attempt in range(max_retries):
         try:
             response = client.chat.completions.create(**kwargs)
