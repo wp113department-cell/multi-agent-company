@@ -2246,47 +2246,1137 @@ _SEED_DATABASE_TOOL = {
     },
 }
 
+
+# ===========================================================================
+# Day 2 Agents — shared tool spec constants, tool lists, handler factories
+# ===========================================================================
+
+_EDIT_FILE_TOOL_SPEC = {
+    "name": "edit_file",
+    "description": (
+        "Make a targeted edit to a file by replacing an exact string. "
+        "old_string must appear exactly once in the file. "
+        "Always read the file first with read_file."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "old_string": {"type": "string", "description": "Exact text to replace (must be unique in file)"},
+            "new_string": {"type": "string", "description": "Replacement text"},
+        },
+        "required": ["path", "old_string", "new_string"],
+    },
+}
+
+_WRITE_FILE_TOOL_SPEC = {
+    "name": "write_file",
+    "description": "Write full content to a file (creates or overwrites). Prefer edit_file for modifications.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "content": {"type": "string"},
+        },
+        "required": ["path", "content"],
+    },
+}
+
+_GIT_DIFF_TOOL_SPEC = {
+    "name": "git_diff",
+    "description": "Show current unstaged and staged diff. Optionally limit to one file.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "file": {"type": "string", "description": "Limit to this file (optional)"},
+        },
+        "required": [],
+    },
+}
+
+# --- Day 2 submit tool specs ---
+
+_SUBMIT_BUG_FIX_TOOL = {
+    "name": "submit_bug_fix",
+    "description": "Submit the bug fix: root cause analysis and files modified.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "root_cause": {"type": "string"},
+            "fix_summary": {"type": "string"},
+            "files_changed": {"type": "array", "items": {"type": "string"}},
+            "tests_passed": {"type": "boolean"},
+        },
+        "required": ["root_cause", "fix_summary", "files_changed"],
+    },
+}
+
+_SUBMIT_SECURITY_REPORT_TOOL = {
+    "name": "submit_security_report",
+    "description": "Submit security review findings.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "none"]},
+            "findings": {"type": "array", "items": {"type": "string"}},
+            "recommendations": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["severity", "findings", "recommendations"],
+    },
+}
+
+_SUBMIT_ARCH_REVIEW_TOOL = {
+    "name": "submit_arch_review",
+    "description": "Submit architecture review result.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "verdict": {"type": "string", "enum": ["approved", "changes_needed", "rejected"]},
+            "issues": {"type": "array", "items": {"type": "string"}},
+            "recommendations": {"type": "array", "items": {"type": "string"}},
+            "summary": {"type": "string"},
+        },
+        "required": ["verdict", "issues", "recommendations", "summary"],
+    },
+}
+
+_SUBMIT_SQL_REPORT_TOOL = {
+    "name": "submit_sql_report",
+    "description": "Submit SQL agent output: query results or migration summary.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string"},
+            "result": {"type": "string"},
+            "files_written": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["action", "result"],
+    },
+}
+
+_SUBMIT_DOCKER_REPORT_TOOL = {
+    "name": "submit_docker_report",
+    "description": "Submit Docker agent result.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string"},
+            "outcome": {"type": "string"},
+            "files_written": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["action", "outcome"],
+    },
+}
+
+_SUBMIT_CICD_REPORT_TOOL = {
+    "name": "submit_cicd_report",
+    "description": "Submit CI/CD agent analysis or workflow changes.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "analysis": {"type": "string"},
+            "files_written": {"type": "array", "items": {"type": "string"}},
+            "recommendations": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["analysis"],
+    },
+}
+
+_SUBMIT_REFACTOR_REPORT_TOOL = {
+    "name": "submit_refactor_report",
+    "description": "Submit refactoring agent result.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "files_changed": {"type": "array", "items": {"type": "string"}},
+            "breaking_changes": {"type": "boolean"},
+        },
+        "required": ["summary", "files_changed"],
+    },
+}
+
+_SUBMIT_DEPENDENCY_REPORT_TOOL = {
+    "name": "submit_dependency_report",
+    "description": "Submit dependency upgrade analysis.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "outdated": {"type": "array", "items": {"type": "string"}},
+            "upgraded": {"type": "array", "items": {"type": "string"}},
+            "issues": {"type": "array", "items": {"type": "string"}},
+            "files_changed": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["outdated", "upgraded"],
+    },
+}
+
+_SUBMIT_MONITORING_REPORT_TOOL = {
+    "name": "submit_monitoring_report",
+    "description": "Submit system monitoring report.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["healthy", "warning", "critical"]},
+            "metrics": {"type": "object"},
+            "issues": {"type": "array", "items": {"type": "string"}},
+            "recommendations": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["status", "metrics"],
+    },
+}
+
+_CICD_BASH_TOOL_SPEC = {
+    "name": "bash",
+    "description": "Run shell command. CI/CD agent limited to: git log/diff/status/show, cat, grep, echo, ls.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"command": {"type": "string"}},
+        "required": ["command"],
+    },
+}
+
+_REFACTOR_BASH_TOOL_SPEC = {
+    "name": "bash",
+    "description": "Run shell command. Refactor agent limited to: python -m pytest, mypy, ruff, black, isort.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"command": {"type": "string"}},
+        "required": ["command"],
+    },
+}
+
+_DEPENDENCY_BASH_TOOL_SPEC = {
+    "name": "bash",
+    "description": "Run dependency commands: pip index versions, pip show/list, npm audit/outdated/list.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"command": {"type": "string"}},
+        "required": ["command"],
+    },
+}
+
+# --- Day 2 Tool Lists ---
+
+BUG_FIX_TOOLS = READ_ONLY_TOOLS + [
+    _PARSE_AST_TOOL,
+    _CALL_GRAPH_TOOL,
+    _FIND_FUNCTION_BODY_TOOL,
+    _ANALYZE_ERROR_TOOL,
+    _READ_LOGS_TOOL,
+    _EDIT_FILE_TOOL_SPEC,
+    _WRITE_FILE_TOOL_SPEC,
+    _GIT_DIFF_TOOL_SPEC,
+    _SUBMIT_BUG_FIX_TOOL,
+]
+
+SECURITY_REVIEWER_TOOLS = READ_ONLY_TOOLS + [
+    _SECRETS_SCAN_TOOL,
+    _FIND_SQL_TOOL,
+    _FIND_CONFIG_TOOL,
+    _FIND_API_TOOL,
+    _FIND_ROUTE_TOOL,
+    _SUBMIT_SECURITY_REPORT_TOOL,
+]
+
+ARCH_REVIEWER_TOOLS = READ_ONLY_TOOLS + [
+    _IMPORT_GRAPH_TOOL,
+    _CIRCULAR_DEP_DETECT_TOOL,
+    _DEAD_CODE_DETECT_TOOL,
+    _PARSE_AST_TOOL,
+    _LIST_FUNCTIONS_TOOL,
+    _LIST_CLASSES_TOOL,
+    _CALL_GRAPH_TOOL,
+    _SUBMIT_ARCH_REVIEW_TOOL,
+]
+
+SQL_AGENT_TOOLS = READ_ONLY_TOOLS + [
+    _RUN_SQL_TOOL,
+    _INSPECT_SCHEMA_TOOL,
+    _FIND_SQL_TOOL,
+    _EXPLAIN_QUERY_TOOL,
+    _EDIT_FILE_TOOL_SPEC,
+    _WRITE_FILE_TOOL_SPEC,
+    _SUBMIT_SQL_REPORT_TOOL,
+]
+
+DOCKER_AGENT_TOOLS = READ_ONLY_TOOLS + [
+    _DOCKER_PS_TOOL,
+    _DOCKER_LOGS_TOOL,
+    _DOCKER_EXEC_TOOL,
+    _DOCKER_COMPOSE_TOOL,
+    _DOCKER_BUILD_TOOL,
+    _DOCKER_RESTART_TOOL,
+    _WRITE_FILE_TOOL_SPEC,
+    _SUBMIT_DOCKER_REPORT_TOOL,
+]
+
+CICD_AGENT_TOOLS = READ_ONLY_TOOLS + [
+    _CICD_BASH_TOOL_SPEC,
+    _EDIT_FILE_TOOL_SPEC,
+    _WRITE_FILE_TOOL_SPEC,
+    _SUBMIT_CICD_REPORT_TOOL,
+]
+
+REFACTOR_AGENT_TOOLS = READ_ONLY_TOOLS + [
+    _LIST_FUNCTIONS_TOOL,
+    _LIST_CLASSES_TOOL,
+    _FIND_FUNCTION_BODY_TOOL,
+    _PARSE_AST_TOOL,
+    _CALL_GRAPH_TOOL,
+    _IMPORT_GRAPH_TOOL,
+    _RENAME_SYMBOL_TOOL,
+    _REPLACE_FUNCTION_TOOL,
+    _EDIT_FILE_TOOL_SPEC,
+    _WRITE_FILE_TOOL_SPEC,
+    _GIT_DIFF_TOOL_SPEC,
+    _REFACTOR_BASH_TOOL_SPEC,
+    _SUBMIT_REFACTOR_REPORT_TOOL,
+]
+
+README_AGENT_TOOLS = READ_ONLY_TOOLS + [
+    _PARSE_AST_TOOL,
+    _LIST_FUNCTIONS_TOOL,
+    _LIST_CLASSES_TOOL,
+    _WRITE_FILE_TOOL_SPEC,
+    _SUBMIT_DOCS_TOOL,
+]
+
+API_DOCS_AGENT_TOOLS = READ_ONLY_TOOLS + [
+    _FIND_ROUTE_TOOL,
+    _FIND_API_TOOL,
+    _PARSE_AST_TOOL,
+    _LIST_FUNCTIONS_TOOL,
+    _WRITE_FILE_TOOL_SPEC,
+    _SUBMIT_DOCS_TOOL,
+]
+
+DEPENDENCY_AGENT_TOOLS = READ_ONLY_TOOLS + [
+    _DEPENDENCY_BASH_TOOL_SPEC,
+    _EDIT_FILE_TOOL_SPEC,
+    _SUBMIT_DEPENDENCY_REPORT_TOOL,
+]
+
+MONITORING_AGENT_TOOLS = READ_ONLY_TOOLS + [
+    _CPU_USAGE_TOOL,
+    _MEMORY_USAGE_TOOL,
+    _DISK_USAGE_TOOL,
+    _HEALTH_CHECK_TOOL,
+    _TASK_PROGRESS_TOOL,
+    _READ_LOGS_TOOL,
+    _SUBMIT_MONITORING_REPORT_TOOL,
+]
+
+
+# --- Day 2 shared sub-factories (reduce duplication) ---
+
+def _make_edit_file_handler(root: Path) -> Any:
+    def edit_file_h(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        if _is_protected_path(rel):
+            return f"[POLICY DENIED] Cannot write to protected path: {rel}"
+        target = root / rel
+        if not target.exists():
+            return f"[ERROR] File not found: {rel}"
+        text = target.read_text(encoding="utf-8")
+        old_s, new_s = inp["old_string"], inp["new_string"]
+        count = text.count(old_s)
+        if count == 0:
+            return f"[ERROR] old_string not found in {rel}"
+        if count > 1:
+            return f"[ERROR] old_string appears {count} times — must be unique"
+        target.write_text(text.replace(old_s, new_s, 1), encoding="utf-8")
+        return f"Edited {rel}"
+    return edit_file_h
+
+
+def _make_write_file_handler(root: Path) -> Any:
+    def write_file_h(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        if _is_protected_path(rel):
+            return f"[POLICY DENIED] Cannot write to protected path: {rel}"
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(inp["content"], encoding="utf-8")
+        return f"Written {rel}"
+    return write_file_h
+
+
+def _make_git_diff_handler(repo_path: str) -> Any:
+    def git_diff_h(inp: dict[str, Any]) -> str:
+        r = subprocess.run(
+            ["git", "diff", "--no-color"] + ([inp["file"]] if inp.get("file") else []),
+            cwd=repo_path, capture_output=True, text=True,
+        )
+        return r.stdout[:8000] or "No changes."
+    return git_diff_h
+
+
+# --- Day 2 Handler Factories ---
+
+def make_bug_fix_handlers(repo_path: str) -> dict[str, Any]:
+    """Bug Fix agent: read-only + AST analysis + direct file writes + submit_bug_fix."""
+    from app.repo_tools import ast_engine as _ast
+    handlers = make_read_only_handlers(repo_path)
+    root = Path(repo_path)
+    bug_fix_result: dict[str, Any] = {}
+
+    def bf_parse_ast(inp: dict[str, Any]) -> str:
+        return _ast.parse_file_ast(str(root / inp["path"]))
+
+    def bf_call_graph(inp: dict[str, Any]) -> str:
+        return _ast.build_call_graph(str(root / inp["path"]), inp.get("function_name", ""))
+
+    def bf_find_function_body(inp: dict[str, Any]) -> str:
+        name = str(inp["name"])
+        r = subprocess.run(["grep", "-rn", f"def {name}", str(root)],
+                           capture_output=True, text=True, timeout=10)
+        return r.stdout[:4000] if r.stdout else f"(function '{name}' not found)"
+
+    def bf_analyze_error(inp: dict[str, Any]) -> str:
+        tb = str(inp.get("traceback", ""))
+        lines = [l for l in tb.splitlines() if "File" in l or "Error" in l or "Exception" in l]
+        return "\n".join(lines[:40]) or "(no error markers found)"
+
+    def bf_read_logs(inp: dict[str, Any]) -> str:
+        log_path = str(inp.get("path", "backend/logs/app.log"))
+        n = int(inp.get("lines", 100))
+        try:
+            p = root / log_path
+            if not p.exists():
+                return f"[ERROR] Log not found: {log_path}"
+            return "\n".join(p.read_text(encoding="utf-8", errors="replace").splitlines()[-n:])
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def bf_submit(inp: dict[str, Any]) -> str:
+        bug_fix_result.update(inp)
+        return "Bug fix submitted"
+
+    handlers["parse_ast"] = bf_parse_ast
+    handlers["call_graph"] = bf_call_graph
+    handlers["find_function_body"] = bf_find_function_body
+    handlers["analyze_error"] = bf_analyze_error
+    handlers["read_logs"] = bf_read_logs
+    handlers["edit_file"] = _make_edit_file_handler(root)
+    handlers["write_file"] = _make_write_file_handler(root)
+    handlers["git_diff"] = _make_git_diff_handler(repo_path)
+    handlers["submit_bug_fix"] = bf_submit
+    handlers["_bug_fix_result"] = bug_fix_result
+    return handlers
+
+
+def make_security_reviewer_handlers(repo_path: str) -> dict[str, Any]:
+    """Security reviewer: read-only + specialized search + submit_security_report. No writes."""
+    import re as _re
+    handlers = make_read_only_handlers(repo_path)
+    root = Path(repo_path)
+    security_result: dict[str, Any] = {}
+
+    _SEC_PATTERNS = [
+        r"(api_key|apikey|secret|password|token|passwd|private_key)\s*=\s*['\"][^'\"]{8,}['\"]",
+        r"(AKIA|AGPA|AROA|AIPA|ANPA|ANVA|ASIA)[0-9A-Z]{16}",
+        r"-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----",
+        r"ghp_[0-9A-Za-z]{36}",
+        r"sk-[0-9A-Za-z]{48}",
+    ]
+    _SEC_SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "node_modules", ".next"}
+    _SEC_SKIP_EXTS = {".pyc", ".png", ".jpg", ".gif", ".ico", ".woff", ".woff2", ".zip"}
+
+    def sec_secrets_scan(inp: dict[str, Any]) -> str:
+        directory = str(inp.get("directory", ""))
+        scan_root = root / directory if directory else root
+        hits: list[str] = []
+        for fp in scan_root.rglob("*"):
+            if fp.is_dir() or any(p in _SEC_SKIP_DIRS for p in fp.parts):
+                continue
+            if fp.suffix in _SEC_SKIP_EXTS:
+                continue
+            try:
+                text = fp.read_text(encoding="utf-8", errors="replace")
+            except (OSError, PermissionError):
+                continue
+            for pat in _SEC_PATTERNS:
+                for m in _re.finditer(pat, text, _re.IGNORECASE):
+                    rel = str(fp.relative_to(root))
+                    line_no = text[:m.start()].count("\n") + 1
+                    hits.append(f"  {rel}:{line_no}  {m.group()[:80]}")
+        if not hits:
+            return "✅ No obvious secrets detected."
+        return f"⚠️  {len(hits)} potential secret(s):\n" + "\n".join(hits[:50])
+
+    def sec_find_sql(inp: dict[str, Any]) -> str:
+        keyword = str(inp.get("keyword", ""))
+        fp = str(inp.get("file_pattern", "*.py"))
+        if keyword:
+            r = subprocess.run(
+                ["grep", "-rn", "-i", "-w", keyword, "--include", fp, str(root)],
+                capture_output=True, text=True, timeout=15,
+            )
+        else:
+            r = subprocess.run(
+                ["grep", "-rn", "-i", "-E", "SELECT|INSERT|UPDATE|DELETE|CREATE TABLE|DROP TABLE",
+                 "--include", fp, str(root)],
+                capture_output=True, text=True, timeout=15,
+            )
+        return r.stdout[:6000] if r.stdout else "(no SQL found)"
+
+    def sec_find_config(inp: dict[str, Any]) -> str:
+        fp = str(inp.get("file_pattern", "*.py"))
+        r = subprocess.run(
+            ["grep", "-rn", "-i", "-E",
+             r"(host|port|database|db_url|dsn|connection_string)\s*=",
+             "--include", fp, str(root)],
+            capture_output=True, text=True, timeout=15,
+        )
+        return r.stdout[:6000] if r.stdout else "(no config patterns found)"
+
+    def sec_find_api(inp: dict[str, Any]) -> str:
+        name = str(inp.get("name", ""))
+        if name:
+            r = subprocess.run(["grep", "-rn", name, "--include=*.py", str(root)],
+                               capture_output=True, text=True, timeout=10)
+        else:
+            r = subprocess.run(
+                ["grep", "-rn", "-E", r"@(app|router)\.(get|post|put|delete|patch)",
+                 "--include=*.py", str(root)],
+                capture_output=True, text=True, timeout=10,
+            )
+        return r.stdout[:6000] if r.stdout else "(no API handlers found)"
+
+    def sec_find_route(inp: dict[str, Any]) -> str:
+        path_pat = str(inp.get("path", ""))
+        r = subprocess.run(
+            ["grep", "-rn", path_pat or "/api/", "--include=*.py", str(root)],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.stdout[:6000] if r.stdout else "(no routes found)"
+
+    def sec_submit(inp: dict[str, Any]) -> str:
+        security_result.update(inp)
+        return "Security report submitted"
+
+    handlers["secrets_scan"] = sec_secrets_scan
+    handlers["find_sql"] = sec_find_sql
+    handlers["find_config"] = sec_find_config
+    handlers["find_api"] = sec_find_api
+    handlers["find_route"] = sec_find_route
+    handlers["submit_security_report"] = sec_submit
+    handlers["_security_result"] = security_result
+    return handlers
+
+
+def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
+    """Architecture reviewer: read-only + AST analysis + submit_arch_review."""
+    from app.repo_tools import ast_engine as _ast
+    handlers = make_read_only_handlers(repo_path)
+    root = Path(repo_path)
+    arch_result: dict[str, Any] = {}
+
+    def ar_import_graph(inp: dict[str, Any]) -> str:
+        return _ast.build_import_graph(str(root / inp["path"]))
+
+    def ar_circular_dep(inp: dict[str, Any]) -> str:
+        directory = str(inp.get("directory", ""))
+        return _ast.detect_circular_imports(str(root / directory) if directory else str(root))
+
+    def ar_dead_code(inp: dict[str, Any]) -> str:
+        directory = str(inp.get("directory", ""))
+        return _ast.detect_dead_code(str(root / directory) if directory else str(root))
+
+    def ar_parse_ast(inp: dict[str, Any]) -> str:
+        return _ast.parse_file_ast(str(root / inp["path"]))
+
+    def ar_list_functions(inp: dict[str, Any]) -> str:
+        fp = str(inp.get("file", ""))
+        r = subprocess.run(
+            ["grep", "-rn", "-E", "^(async )?def ", "--include=*.py",
+             str(root / fp) if fp else str(root)],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.stdout[:6000] if r.stdout else "(no functions)"
+
+    def ar_list_classes(inp: dict[str, Any]) -> str:
+        fp = str(inp.get("file", ""))
+        r = subprocess.run(
+            ["grep", "-rn", "-E", "^class ", "--include=*.py",
+             str(root / fp) if fp else str(root)],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.stdout[:6000] if r.stdout else "(no classes)"
+
+    def ar_call_graph(inp: dict[str, Any]) -> str:
+        return _ast.build_call_graph(str(root / inp["path"]), inp.get("function_name", ""))
+
+    def ar_submit(inp: dict[str, Any]) -> str:
+        arch_result.update(inp)
+        return "Architecture review submitted"
+
+    handlers["import_graph"] = ar_import_graph
+    handlers["circular_dep_detect"] = ar_circular_dep
+    handlers["dead_code_detect"] = ar_dead_code
+    handlers["parse_ast"] = ar_parse_ast
+    handlers["list_functions"] = ar_list_functions
+    handlers["list_classes"] = ar_list_classes
+    handlers["call_graph"] = ar_call_graph
+    handlers["submit_arch_review"] = ar_submit
+    handlers["_arch_result"] = arch_result
+    return handlers
+
+
+def make_sql_agent_handlers(repo_path: str) -> dict[str, Any]:
+    """SQL agent: read-only + SQL execution + schema inspection + write migrations."""
+    handlers = make_read_only_handlers(repo_path)
+    root = Path(repo_path)
+    sql_result: dict[str, Any] = {}
+
+    def sq_run_sql(inp: dict[str, Any]) -> str:
+        sq_query = str(inp["query"])
+        sq_settings = get_settings()
+        sq_db_url = getattr(sq_settings, "database_url", None)
+        if not sq_db_url:
+            return "[ERROR] DATABASE_URL not configured"
+        try:
+            r = subprocess.run(
+                ["psql", str(sq_db_url), "-c", sq_query, "--no-password"],
+                capture_output=True, text=True, timeout=30,
+            )
+            return (r.stdout + r.stderr)[:5000] or "(no output)"
+        except FileNotFoundError:
+            return "[ERROR] psql not found — install postgresql-client"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] Query timed out"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def sq_inspect_schema(inp: dict[str, Any]) -> str:
+        is_table = str(inp.get("table", ""))
+        is_settings = get_settings()
+        is_db_url = getattr(is_settings, "database_url", None)
+        if not is_db_url:
+            return "[ERROR] DATABASE_URL not configured"
+        if is_table:
+            is_query = (
+                "SELECT column_name, data_type, is_nullable "
+                "FROM information_schema.columns "
+                f"WHERE table_name = '{is_table}' ORDER BY ordinal_position"
+            )
+        else:
+            is_query = (
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema='public' ORDER BY table_name"
+            )
+        try:
+            r = subprocess.run(
+                ["psql", str(is_db_url), "-c", is_query, "--no-password"],
+                capture_output=True, text=True, timeout=10,
+            )
+            return (r.stdout + r.stderr)[:5000] or "(empty)"
+        except FileNotFoundError:
+            return "[ERROR] psql not found"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def sq_find_sql(inp: dict[str, Any]) -> str:
+        keyword = str(inp.get("keyword", ""))
+        fp = str(inp.get("file_pattern", "*.py"))
+        if keyword:
+            r = subprocess.run(
+                ["grep", "-rn", "-i", "-w", keyword, "--include", fp, str(root)],
+                capture_output=True, text=True, timeout=15,
+            )
+        else:
+            r = subprocess.run(
+                ["grep", "-rn", "-i", "-E", "SELECT|INSERT|UPDATE|DELETE|CREATE TABLE",
+                 "--include", fp, str(root)],
+                capture_output=True, text=True, timeout=15,
+            )
+        return r.stdout[:6000] if r.stdout else "(no SQL found)"
+
+    def sq_explain_query(inp: dict[str, Any]) -> str:
+        eq_query = str(inp.get("query", ""))
+        eq_settings = get_settings()
+        eq_db_url = getattr(eq_settings, "database_url", None)
+        if not eq_db_url:
+            return "[ERROR] DATABASE_URL not configured"
+        try:
+            r = subprocess.run(
+                ["psql", str(eq_db_url), "-c", f"EXPLAIN ANALYZE {eq_query}", "--no-password"],
+                capture_output=True, text=True, timeout=30,
+            )
+            return (r.stdout + r.stderr)[:5000] or "(no plan)"
+        except FileNotFoundError:
+            return "[ERROR] psql not found"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def sq_submit(inp: dict[str, Any]) -> str:
+        sql_result.update(inp)
+        return "SQL report submitted"
+
+    handlers["run_sql"] = sq_run_sql
+    handlers["inspect_schema"] = sq_inspect_schema
+    handlers["find_sql"] = sq_find_sql
+    handlers["explain_query"] = sq_explain_query
+    handlers["edit_file"] = _make_edit_file_handler(root)
+    handlers["write_file"] = _make_write_file_handler(root)
+    handlers["submit_sql_report"] = sq_submit
+    handlers["_sql_result"] = sql_result
+    return handlers
+
+
+def make_docker_agent_handlers(repo_path: str) -> dict[str, Any]:
+    """Docker agent: read-only + docker CLI inspection + limited docker actions + write_file."""
+    handlers = make_read_only_handlers(repo_path)
+    root = Path(repo_path)
+    docker_result: dict[str, Any] = {}
+
+    def dk_docker_ps(inp: dict[str, Any]) -> str:
+        r = subprocess.run(
+            ["docker", "ps", "--format", "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Names}}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.stdout or r.stderr or "(no containers)"
+
+    def dk_docker_logs(inp: dict[str, Any]) -> str:
+        dl_container = str(inp["container"])
+        dl_n = int(inp.get("lines", 50))
+        r = subprocess.run(
+            ["docker", "logs", "--tail", str(dl_n), dl_container],
+            capture_output=True, text=True, timeout=15,
+        )
+        return (r.stdout + r.stderr)[:6000] or "(no logs)"
+
+    def dk_docker_exec(inp: dict[str, Any]) -> str:
+        de_container = str(inp["container"])
+        de_cmd = str(inp["command"])
+        if any(d in de_cmd for d in ["rm ", "kill", "stop", "restart", "drop", "delete", "truncate"]):
+            return f"[POLICY DENIED] Docker exec not allowed: {de_cmd!r}"
+        r = subprocess.run(
+            ["docker", "exec", de_container] + de_cmd.split(),
+            capture_output=True, text=True, timeout=30,
+        )
+        return (r.stdout + r.stderr)[:4000] or "(no output)"
+
+    def dk_docker_compose(inp: dict[str, Any]) -> str:
+        dc_action = str(inp.get("action", "ps"))
+        dc_allowed = {"ps", "logs", "config", "images"}
+        if dc_action not in dc_allowed:
+            return f"[POLICY DENIED] Only allowed: {sorted(dc_allowed)}. Got: {dc_action!r}"
+        r = subprocess.run(
+            ["docker", "compose", dc_action],
+            cwd=repo_path, capture_output=True, text=True, timeout=30,
+        )
+        return (r.stdout + r.stderr)[:6000] or "(no output)"
+
+    def dk_docker_build(inp: dict[str, Any]) -> str:
+        db_tag = str(inp.get("tag", "app:dev"))
+        db_file = str(inp.get("dockerfile", "Dockerfile"))
+        db_ctx = str(inp.get("context", "."))
+        r = subprocess.run(
+            ["docker", "build", "-t", db_tag, "-f", db_file, db_ctx],
+            cwd=repo_path, capture_output=True, text=True, timeout=300,
+        )
+        out = (r.stdout + r.stderr)[:8000]
+        return f"Build {'succeeded' if r.returncode == 0 else 'FAILED'}:\n{out}"
+
+    def dk_docker_restart(inp: dict[str, Any]) -> str:
+        dr_container = str(inp["container"])
+        r = subprocess.run(["docker", "restart", dr_container],
+                           capture_output=True, text=True, timeout=30)
+        return (r.stdout + r.stderr).strip() or f"Restarted {dr_container}"
+
+    def dk_submit(inp: dict[str, Any]) -> str:
+        docker_result.update(inp)
+        return "Docker report submitted"
+
+    handlers["docker_ps"] = dk_docker_ps
+    handlers["docker_logs"] = dk_docker_logs
+    handlers["docker_exec"] = dk_docker_exec
+    handlers["docker_compose"] = dk_docker_compose
+    handlers["docker_build"] = dk_docker_build
+    handlers["docker_restart"] = dk_docker_restart
+    handlers["write_file"] = _make_write_file_handler(root)
+    handlers["submit_docker_report"] = dk_submit
+    handlers["_docker_result"] = docker_result
+    return handlers
+
+
+def make_cicd_agent_handlers(repo_path: str) -> dict[str, Any]:
+    """CI/CD agent: read-only + limited bash (git/grep only) + file writes + submit."""
+    handlers = make_read_only_handlers(repo_path)
+    root = Path(repo_path)
+    cicd_result: dict[str, Any] = {}
+
+    _CICD_ALLOWED = ("git log", "git diff", "git status", "git show", "cat ", "grep ", "echo ", "ls ")
+
+    def ci_bash(inp: dict[str, Any]) -> str:
+        cmd = inp["command"].strip()
+        if not any(cmd.startswith(p) for p in _CICD_ALLOWED):
+            return f"[POLICY DENIED] CI/CD agent only allows git/cat/grep/ls. Got: {cmd!r}"
+        r = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=30,
+        )
+        return (r.stdout + r.stderr)[:4000] or "(no output)"
+
+    def ci_submit(inp: dict[str, Any]) -> str:
+        cicd_result.update(inp)
+        return "CI/CD report submitted"
+
+    handlers["bash"] = ci_bash
+    handlers["edit_file"] = _make_edit_file_handler(root)
+    handlers["write_file"] = _make_write_file_handler(root)
+    handlers["submit_cicd_report"] = ci_submit
+    handlers["_cicd_result"] = cicd_result
+    return handlers
+
+
+def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
+    """Refactor agent: read-only + AST + write + rename + limited bash (test/lint only)."""
+    from app.repo_tools import ast_engine as _ast
+    import re as _re
+    handlers = make_read_only_handlers(repo_path)
+    root = Path(repo_path)
+    refactor_result: dict[str, Any] = {}
+
+    _RF_ALLOWED = ("python -m pytest", "mypy", "ruff", "black", "isort")
+
+    def rf_list_functions(inp: dict[str, Any]) -> str:
+        fp = str(inp.get("file", ""))
+        r = subprocess.run(
+            ["grep", "-rn", "-E", "^(async )?def ", "--include=*.py",
+             str(root / fp) if fp else str(root)],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.stdout[:6000] if r.stdout else "(no functions)"
+
+    def rf_list_classes(inp: dict[str, Any]) -> str:
+        fp = str(inp.get("file", ""))
+        r = subprocess.run(
+            ["grep", "-rn", "-E", "^class ", "--include=*.py",
+             str(root / fp) if fp else str(root)],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.stdout[:6000] if r.stdout else "(no classes)"
+
+    def rf_find_function_body(inp: dict[str, Any]) -> str:
+        name = str(inp["name"])
+        r = subprocess.run(["grep", "-rn", f"def {name}", str(root)],
+                           capture_output=True, text=True, timeout=10)
+        return r.stdout[:4000] if r.stdout else f"(function '{name}' not found)"
+
+    def rf_parse_ast(inp: dict[str, Any]) -> str:
+        return _ast.parse_file_ast(str(root / inp["path"]))
+
+    def rf_call_graph(inp: dict[str, Any]) -> str:
+        return _ast.build_call_graph(str(root / inp["path"]), inp.get("function_name", ""))
+
+    def rf_import_graph(inp: dict[str, Any]) -> str:
+        return _ast.build_import_graph(str(root / inp["path"]))
+
+    def rf_rename_symbol(inp: dict[str, Any]) -> str:
+        directory = str(inp.get("directory", ""))
+        return _ast.rename_symbol(
+            inp["old_name"], inp["new_name"],
+            str(root / directory) if directory else str(root),
+            str(inp.get("file_pattern", "*.py")),
+        )
+
+    def rf_replace_function(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        if _is_protected_path(rel):
+            return f"[POLICY DENIED] Cannot write to protected path: {rel}"
+        target = root / rel
+        if not target.exists():
+            return f"[ERROR] File not found: {rel}"
+        name = str(inp["function_name"])
+        new_body = str(inp["new_body"])
+        text = target.read_text(encoding="utf-8")
+        pat = _re.compile(
+            r"(?m)^((?:async )?def " + _re.escape(name) + r"\b.*?)(?=\n(?:async )?def |\Z)",
+            _re.DOTALL,
+        )
+        m = pat.search(text)
+        if not m:
+            return f"[ERROR] Function '{name}' not found in {rel}"
+        target.write_text(text[:m.start()] + new_body + text[m.end():], encoding="utf-8")
+        return f"Replaced function '{name}' in {rel}"
+
+    def rf_bash(inp: dict[str, Any]) -> str:
+        cmd = inp["command"].strip()
+        if not any(cmd.startswith(p) for p in _RF_ALLOWED):
+            return f"[POLICY DENIED] Refactor agent only allows test/lint. Got: {cmd!r}"
+        r = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=60,
+        )
+        return (r.stdout + r.stderr)[:6000] or "(no output)"
+
+    def rf_submit(inp: dict[str, Any]) -> str:
+        refactor_result.update(inp)
+        return "Refactor report submitted"
+
+    handlers["list_functions"] = rf_list_functions
+    handlers["list_classes"] = rf_list_classes
+    handlers["find_function_body"] = rf_find_function_body
+    handlers["parse_ast"] = rf_parse_ast
+    handlers["call_graph"] = rf_call_graph
+    handlers["import_graph"] = rf_import_graph
+    handlers["rename_symbol"] = rf_rename_symbol
+    handlers["replace_function"] = rf_replace_function
+    handlers["edit_file"] = _make_edit_file_handler(root)
+    handlers["write_file"] = _make_write_file_handler(root)
+    handlers["git_diff"] = _make_git_diff_handler(repo_path)
+    handlers["bash"] = rf_bash
+    handlers["submit_refactor_report"] = rf_submit
+    handlers["_refactor_result"] = refactor_result
+    return handlers
+
+
+def make_readme_agent_handlers(repo_path: str) -> dict[str, Any]:
+    """README agent: read-only + AST + write_file (*.md only) + submit_docs."""
+    from app.repo_tools import ast_engine as _ast
+    handlers = make_read_only_handlers(repo_path)
+    root = Path(repo_path)
+    docs_result: dict[str, Any] = {}
+
+    def rm_parse_ast(inp: dict[str, Any]) -> str:
+        return _ast.parse_file_ast(str(root / inp["path"]))
+
+    def rm_list_functions(inp: dict[str, Any]) -> str:
+        fp = str(inp.get("file", ""))
+        r = subprocess.run(
+            ["grep", "-rn", "-E", "^(async )?def ", "--include=*.py",
+             str(root / fp) if fp else str(root)],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.stdout[:6000] if r.stdout else "(no functions)"
+
+    def rm_list_classes(inp: dict[str, Any]) -> str:
+        fp = str(inp.get("file", ""))
+        r = subprocess.run(
+            ["grep", "-rn", "-E", "^class ", "--include=*.py",
+             str(root / fp) if fp else str(root)],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.stdout[:6000] if r.stdout else "(no classes)"
+
+    def rm_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        if not (rel.endswith(".md") or rel.startswith("docs/")):
+            return f"[POLICY DENIED] README agent may only write .md files. Got: {rel!r}"
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(inp["content"], encoding="utf-8")
+        return f"Written {rel}"
+
+    def rm_submit(inp: dict[str, Any]) -> str:
+        docs_result.update(inp)
+        return "Docs submitted"
+
+    handlers["parse_ast"] = rm_parse_ast
+    handlers["list_functions"] = rm_list_functions
+    handlers["list_classes"] = rm_list_classes
+    handlers["write_file"] = rm_write_file
+    handlers["submit_docs"] = rm_submit
+    handlers["_docs_result"] = docs_result
+    return handlers
+
+
+def make_api_docs_agent_handlers(repo_path: str) -> dict[str, Any]:
+    """API Docs agent: read-only + route/API finders + AST + write_file (*.md) + submit_docs."""
+    from app.repo_tools import ast_engine as _ast
+    handlers = make_read_only_handlers(repo_path)
+    root = Path(repo_path)
+    docs_result: dict[str, Any] = {}
+
+    def ad_find_route(inp: dict[str, Any]) -> str:
+        path_pat = str(inp.get("path", ""))
+        r = subprocess.run(
+            ["grep", "-rn", path_pat or "/api/", "--include=*.py", str(root)],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.stdout[:6000] if r.stdout else "(no routes)"
+
+    def ad_find_api(inp: dict[str, Any]) -> str:
+        name = str(inp.get("name", ""))
+        if name:
+            r = subprocess.run(["grep", "-rn", name, "--include=*.py", str(root)],
+                               capture_output=True, text=True, timeout=10)
+        else:
+            r = subprocess.run(
+                ["grep", "-rn", "-E", r"@(app|router)\.(get|post|put|delete|patch)",
+                 "--include=*.py", str(root)],
+                capture_output=True, text=True, timeout=10,
+            )
+        return r.stdout[:6000] if r.stdout else "(no API handlers)"
+
+    def ad_parse_ast(inp: dict[str, Any]) -> str:
+        return _ast.parse_file_ast(str(root / inp["path"]))
+
+    def ad_list_functions(inp: dict[str, Any]) -> str:
+        fp = str(inp.get("file", ""))
+        r = subprocess.run(
+            ["grep", "-rn", "-E", "^(async )?def ", "--include=*.py",
+             str(root / fp) if fp else str(root)],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.stdout[:6000] if r.stdout else "(no functions)"
+
+    def ad_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        if not (rel.endswith(".md") or rel.startswith("docs/")):
+            return f"[POLICY DENIED] API docs agent may only write .md files. Got: {rel!r}"
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(inp["content"], encoding="utf-8")
+        return f"Written {rel}"
+
+    def ad_submit(inp: dict[str, Any]) -> str:
+        docs_result.update(inp)
+        return "API docs submitted"
+
+    handlers["find_route"] = ad_find_route
+    handlers["find_api"] = ad_find_api
+    handlers["parse_ast"] = ad_parse_ast
+    handlers["list_functions"] = ad_list_functions
+    handlers["write_file"] = ad_write_file
+    handlers["submit_docs"] = ad_submit
+    handlers["_docs_result"] = docs_result
+    return handlers
+
+
+def make_dependency_agent_handlers(repo_path: str) -> dict[str, Any]:
+    """Dependency agent: read-only + bash (pip/npm audit only) + edit requirements + submit."""
+    handlers = make_read_only_handlers(repo_path)
+    root = Path(repo_path)
+    dep_result: dict[str, Any] = {}
+
+    _DEP_ALLOWED = (
+        "pip index versions", "pip show", "pip list", "npm audit",
+        "npm outdated", "npm list", "safety check", "pip-audit",
+    )
+    _DEP_EDITABLE = {"requirements.txt", "requirements-dev.txt", "package.json", "pyproject.toml"}
+
+    def dep_bash(inp: dict[str, Any]) -> str:
+        cmd = inp["command"].strip()
+        if not any(cmd.startswith(p) for p in _DEP_ALLOWED):
+            return f"[POLICY DENIED] Dependency agent only allows audit commands. Got: {cmd!r}"
+        r = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=60,
+        )
+        return (r.stdout + r.stderr)[:6000] or "(no output)"
+
+    def dep_edit_file(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        if Path(rel).name not in _DEP_EDITABLE:
+            return f"[POLICY DENIED] Dependency agent may only edit requirements/package files. Got: {rel!r}"
+        if _is_protected_path(rel):
+            return f"[POLICY DENIED] Cannot write to protected path: {rel}"
+        target = root / rel
+        if not target.exists():
+            return f"[ERROR] File not found: {rel}"
+        text = target.read_text(encoding="utf-8")
+        old_s, new_s = inp["old_string"], inp["new_string"]
+        count = text.count(old_s)
+        if count == 0:
+            return f"[ERROR] old_string not found in {rel}"
+        if count > 1:
+            return f"[ERROR] old_string appears {count} times — must be unique"
+        target.write_text(text.replace(old_s, new_s, 1), encoding="utf-8")
+        return f"Edited {rel}"
+
+    def dep_submit(inp: dict[str, Any]) -> str:
+        dep_result.update(inp)
+        return "Dependency report submitted"
+
+    handlers["bash"] = dep_bash
+    handlers["edit_file"] = dep_edit_file
+    handlers["submit_dependency_report"] = dep_submit
+    handlers["_dependency_result"] = dep_result
+    return handlers
+
+
+def make_monitoring_agent_handlers(repo_path: str) -> dict[str, Any]:
+    """Monitoring agent: read-only + system metrics + submit_monitoring_report. No writes."""
+    handlers = make_read_only_handlers(repo_path)
+    root = Path(repo_path)
+    monitoring_result: dict[str, Any] = {}
+
+    def mon_cpu_usage(inp: dict[str, Any]) -> str:
+        r = subprocess.run(["top", "-bn1"], capture_output=True, text=True, timeout=10)
+        for line in r.stdout.splitlines():
+            if "%Cpu" in line or "Cpu(s)" in line:
+                return line.strip()
+        return r.stdout[:500] or "[ERROR] Could not read CPU"
+
+    def mon_memory_usage(inp: dict[str, Any]) -> str:
+        r = subprocess.run(["free", "-h"], capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() or "[ERROR] Could not read memory"
+
+    def mon_disk_usage(inp: dict[str, Any]) -> str:
+        du_path = str(inp.get("path", "/"))
+        r = subprocess.run(["df", "-h", du_path], capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() or "[ERROR] Could not read disk"
+
+    def mon_health_check(inp: dict[str, Any]) -> str:
+        hc_url = str(inp.get("url", "http://localhost:8000/health"))
+        r = subprocess.run(
+            ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code} %{time_total}s", hc_url],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.stdout.strip() or r.stderr.strip() or "[ERROR] curl failed"
+
+    def mon_task_progress(inp: dict[str, Any]) -> str:
+        tp_task_id = inp.get("task_id")
+        tp_settings = get_settings()
+        tp_db_url = getattr(tp_settings, "database_url", None)
+        if not tp_db_url:
+            return "[ERROR] DATABASE_URL not configured"
+        if tp_task_id:
+            query = f"SELECT id, title, status, updated_at FROM dev_tasks WHERE id={int(tp_task_id)}"
+        else:
+            query = "SELECT id, title, status, updated_at FROM dev_tasks ORDER BY updated_at DESC LIMIT 10"
+        try:
+            r = subprocess.run(
+                ["psql", str(tp_db_url), "-c", query, "--no-password"],
+                capture_output=True, text=True, timeout=10,
+            )
+            return (r.stdout + r.stderr)[:4000] or "(no tasks)"
+        except FileNotFoundError:
+            return "[ERROR] psql not found"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def mon_read_logs(inp: dict[str, Any]) -> str:
+        rl_path = str(inp.get("path", "backend/logs/app.log"))
+        rl_n = int(inp.get("lines", 100))
+        try:
+            p = root / rl_path
+            if not p.exists():
+                return f"[ERROR] Log not found: {rl_path}"
+            return "\n".join(p.read_text(encoding="utf-8", errors="replace").splitlines()[-rl_n:])
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def mon_submit(inp: dict[str, Any]) -> str:
+        monitoring_result.update(inp)
+        return "Monitoring report submitted"
+
+    handlers["cpu_usage"] = mon_cpu_usage
+    handlers["memory_usage"] = mon_memory_usage
+    handlers["disk_usage"] = mon_disk_usage
+    handlers["health_check"] = mon_health_check
+    handlers["task_progress"] = mon_task_progress
+    handlers["read_logs"] = mon_read_logs
+    handlers["submit_monitoring_report"] = mon_submit
+    handlers["_monitoring_result"] = monitoring_result
+    return handlers
+
+
 CHAT_TOOLS = READ_ONLY_TOOLS + [
-    {
-        "name": "edit_file",
-        "description": (
-            "Make a targeted edit to a file by replacing an exact string. "
-            "old_string must appear exactly once in the file. "
-            "Always read the file first with read_file."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "old_string": {"type": "string", "description": "Exact text to replace (must be unique in file)"},
-                "new_string": {"type": "string", "description": "Replacement text"},
-            },
-            "required": ["path", "old_string", "new_string"],
-        },
-    },
-    {
-        "name": "write_file",
-        "description": "Write full content to a file (creates or overwrites). Prefer edit_file for modifications.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "content": {"type": "string"},
-            },
-            "required": ["path", "content"],
-        },
-    },
-    {
-        "name": "git_diff",
-        "description": "Show current unstaged and staged diff. Optionally limit to one file.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "file": {"type": "string", "description": "Limit to this file (optional)"},
-            },
-            "required": [],
-        },
-    },
+    _EDIT_FILE_TOOL_SPEC,
+    _WRITE_FILE_TOOL_SPEC,
+    _GIT_DIFF_TOOL_SPEC,
     _CHAT_BASH_TOOL,
     _APPEND_FILE_TOOL,
     _RENAME_FILE_TOOL,
