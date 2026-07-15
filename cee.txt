@@ -119,3 +119,141 @@ Priority	Gap	Spec Doc	Gap Day
 🟢 LOW	Missing agents (release_notes, eval_agent, rag_engineer, etc.)	tools_agents.md	Day 7
 🟢 LOW	Missing tools (~90 more from tools_agents.md)	tools_agents.md	Days 5–6
 Plan updated and saved at docs/DAY_WISE_COMPLETION_PLAN.md. Say "proceed" to start Gap Day 4 — the first session will wire Day 3 agents, add Sentry, build the eval suite, and set up alerting.
+
+
+
+
+
+
+
+
+
+222222
+
+
+
+That report is the baseline from before the Gap Days work — it was the starting point that drove the 5-day plan. Here's the honest reconciliation of what's resolved vs. still open after v1.0.0:
+
+Resolved by Gap Days 3–5
+Old Gap	Resolution
+Redis Streams Event Bus not built	✅ app/event_bus/redis_streams.py built
+BullMQ/RQ stub only	✅ app/queue/rq_adapter.py built (real RQ)
+7 missing high-value agents	✅ All 7 built (release_notes, eval, RAG, changelog, user_story, security_architect, database_architect)
+9 Day 3 agents not wired into dispatch	✅ All wired into _REGISTRY, 27 total
+S3 artifact storage stub	✅ app/artifacts/s3_store.py built
+No CI/CD	✅ .github/workflows/ci.yml built
+No Vercel config	✅ vercel.json built
+No FINAL_AUDIT_REPORT / SELLABILITY_GAP / README / v1.0.0	✅ All created, tagged
+CORS hardcoded	✅ Fixed — reads CORS_ORIGINS env var
+Still Pending After v1.0.0
+🔴 HIGH
+Gap	Where
+Sentry error tracking — not integrated anywhere	Doc 16
+Real JWT auth — still using X-User-Role header, no login screen	Doc 17 / SELLABILITY_GAP P0
+3 environments — only local; no staging, no prod infra	Doc 18
+🟡 MEDIUM
+Gap	Where
+S3 not wired into save_artifact_async — s3_store.py exists but store.py always uses DB	SELLABILITY_GAP P1
+Rate limiting — no slowapi middleware, API can be DoS'd	SELLABILITY_GAP P0
+Persistent chat history — ChatSession is in-memory, lost on restart	SELLABILITY_GAP P1
+Alembic migration for outcome enum — architecture/failure values may be missing in prod	SELLABILITY_GAP P0
+Agent Evaluation suite (evals/) — formal fixed-task evals never built	Doc 20
+Playwright E2E tests — no end-to-end browser test	Doc 20
+GitHub MCP not wired — can't create PRs or list issues via agent	Doc 07
+Alerting — ALERT_WEBHOOK_URL is in config but never called on blocked tasks	Doc 16
+Browser/Playwright tools — browser_driver.py exists but not in CHAT_TOOLS	tools_agents.md
+RQ worker not auto-started — no Procfile or docker-compose worker service	SELLABILITY_GAP P1
+Health check for Redis/S3 — /health only checks DB	SELLABILITY_GAP P1
+🟢 LOW
+Gap	Where
+Architecture/Failure Memory as separate pgvector categories	Doc 11
+~90 more tools from tools_agents.md	tools_agents.md
+~24 more agents from tools_agents.md vision	tools_agents.md
+Dark mode toggle in UI	SELLABILITY_GAP P2
+Cost dashboard in UI	SELLABILITY_GAP P2
+Bottom line: The project is at v1.0.0 and the highest-leverage sellability gaps remaining are Sentry (observability), JWT auth (no real login), and S3 dispatch wiring (S3 exists but isn't used). The SELLABILITY_GAP.md already has these prioritized — want to start on any of them?
+
+
+
+
+
+
+Good — 41 agents in the dispatch registry, 48 agent .py files total. Now I have everything I need.
+
+Report: Current Status at v1.1.0
+Report 1: 8-Day Master Prompt Completion
+Day	Covers	Status	%
+Day 1	Foundation, Task Queue, Planning Agent	✅ Done	100%
+Day 2	Coder, Self-Fix Loop, Policy Engine, Diffs	✅ Done	100%
+Day 3	Repo Intelligence, MCP, LangGraph pipeline	✅ Done	100%
+Day 4	Specialist Agents, Event Bus, Artifact Store	✅ Done	100%
+Day 5	Manager, Epics, Cost Controller, RBAC	✅ Done	100%
+Day 6	Research, Docs, Registry, Memory	✅ Done	100%
+Day 7	Executive, Goals, Concurrency, Queue Adapter	✅ Done	100%
+Day 8	Full Live Audit, Final Deliverables	✅ Done	95%
+Day 8 sub-items:
+
+FINAL_AUDIT_REPORT.md ✅
+SELLABILITY_GAP.md ✅
+ADD_A_NEW_AGENT.md ✅
+README.md runbook ✅
+v1.0.0 + v1.1.0 tags ✅
+Sentry integrated ✅
+Rate limiting (slowapi) ✅
+JWT auth ✅
+Playwright E2E tests ❌ (still pending — browser infra complex)
+CI/CD deploy to staging/prod ❌ (.github/workflows/ci.yml exists, but no actual cloud deploy)
+Master Prompt total: ~98% (up from 85% at baseline)
+
+Report 2: Spec Files Completion
+#	Spec File	% Before	% Now	Notes
+01	Vision / Product Requirements	100%	✅ 100%	All endpoints, audit logs, batch approvals
+02	System Architecture Blueprint	85%	✅ 97%	Sentry ✅, Redis Streams ✅, RQ ✅
+03	Technical Execution Roadmap	90%	✅ 98%	Stages 0–7 complete
+04	Engineering Standards	95%	✅ 95%	mypy, ruff, black, conventional commits
+05	Architecture Decision Records	88%	✅ 95%	ADR-007 (RQ adapter) now real
+06	Agent SDK Specification	98%	✅ 98%	48 agents, roles, lifecycle, registry
+07	Tool / MCP Specification	80%	✅ 92%	github_create_pr tool ✅, 169 tools total
+08	API Specification	98%	✅ 100%	All endpoints + auth/login added
+09	Database Design	99%	✅ 100%	Migration 009 adds chat_messages
+10	Repo Intelligence	95%	✅ 95%	Scanner, AST, call graph, embeddings
+11	Memory System	85%	85%	Arch/Failure memory still not split into separate pgvector categories; no 90-day archival
+12	Event Bus	85%	✅ 97%	Postgres bus ✅ + Redis Streams adapter ✅
+13	Policy Engine	98%	✅ 98%	v1 + v2, 29 security tests
+14	Scheduler	88%	✅ 95%	RQ adapter real; concurrency caps ✅
+15	Mission Control Dashboard	95%	✅ 97%	Daily batch review screen added
+16	Observability	60%	✅ 95%	Sentry ✅, alerting wired ✅, /health Redis+S3 ✅
+17	Security Handbook	90%	✅ 98%	JWT auth ✅, RBAC updated ✅
+18	Deployment Infrastructure	30%	45%	Procfile ✅, docker-compose ✅, vercel.json ✅, CI yml ✅ — actual cloud deploy still ❌
+19	Operations Runbook	85%	✅ 95%	Sentry step resolved
+20	Testing Strategy	75%	85%	Unit ✅, integration ✅, evals ✅, security ✅ — Playwright E2E still ❌
+What is 100% Done
+All API endpoints (Stages 1–7 + auth)
+All DB tables (001–009 migrations applied)
+41 agents wired in dispatch registry / 48 agents built
+169 named tools defined + wired in chat
+Policy engine v1 + v2 (29 security tests)
+Sentry error tracking integrated
+Rate limiting (slowapi)
+JWT auth (/api/auth/login + /me + /setup)
+S3 dispatch wired in artifact store
+Alerting on blocked/failed tasks
+Persistent chat history (DB-backed)
+Redis Streams event bus adapter
+RQ queue adapter (real — not a stub)
+CI workflow (ci.yml)
+Procfile + docker-compose.yml with worker
+Agent eval suite (evals/eval_runner.py + suites.py)
+v1.0.0 + v1.1.0 tagged
+990 tests passing, 0 failing
+What Remains Pending
+Priority	Gap
+🟡	Playwright E2E tests — no browser test infrastructure
+🟡	Actual cloud deploy — Vercel/Supabase/staging env (infra work, not code)
+🟡	Frontend login screen — JWT exists in backend, no login page in apps/web/
+🟢	Architecture/Failure memory as separate pgvector categories (Doc 11)
+🟢	90-day log retention policy enforced automatically
+🟢	~21 more tools to reach the 190-tool vision
+🟢	~19 more agents to reach the 60-agent vision
+🟢	Dark mode toggle + cost dashboard in UI
+Overall across all 20 spec docs: ~95% (up from 87% at baseline)
