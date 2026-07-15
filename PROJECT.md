@@ -1697,3 +1697,91 @@ Each tool has: tool spec dict + handler in make_chat_handlers() + tests.
 Per `docs/DAY_WISE_COMPLETION_PLAN.md`:
 - 7 new agents: release_notes_agent, evaluation_agent, rag_engineer_agent, changelog_agent, user_story_generator, security_architect, database_architect
 - Each: LangGraph StateGraph + VerificationConfig + role file + handler factory + dispatch wiring + tests
+
+---
+
+## 2026-07-15 — Gap Days 3 & 4: New Agents + Infrastructure Adapters
+
+Last updated: 2026-07-15
+
+### Gap Day 3 — 7 New Production Agents
+
+All agents follow the same contract: LangGraph StateGraph + VerificationConfig + role file + handler factory + dispatch registry entry + AgentResult.
+
+| Agent | Module | Submit Tool | Verification |
+|-------|--------|-------------|-------------|
+| Release Notes | `app/agents/release_notes_agent.py` | `submit_release_notes` | `git_log_read` |
+| Evaluation | `app/agents/evaluation_agent.py` | `submit_eval_result` | `eval_run` |
+| RAG Engineer | `app/agents/rag_engineer_agent.py` | `submit_rag_design` | `codebase_read` |
+| Changelog | `app/agents/changelog_agent.py` | `submit_changelog` | `git_log_read` |
+| User Story Generator | `app/agents/user_story_generator.py` | `submit_user_stories` | `codebase_read` |
+| Security Architect | `app/agents/security_architect.py` | `submit_threat_model` | `codebase_read` (read-only, no write_file) |
+| Database Architect | `app/agents/database_architect.py` | `submit_db_design` | `schema_read` |
+
+Role files created in `backend/roles/` for all 7.
+
+Specialized agents registry now has **27 agents** (11 Day2 + 9 Day3 + 7 Gap).
+
+### Gap Day 4 — Infrastructure Adapters + CI/CD
+
+**RQ Queue Adapter** (`backend/app/queue/rq_adapter.py`):
+- Two queues: gridiron-high, gridiron-default
+- `enqueue()`, `enqueue_agent()`, `queue_sizes()`, `ping()`
+- Lazy Redis init, singleton pattern, reset for tests
+
+**Redis Streams Event Bus** (`backend/app/event_bus/redis_streams.py`):
+- `publish_to_stream()`, `read_pending()`, `acknowledge()`, `stream_length()`
+- Silent no-op when `REDIS_STREAMS_ENABLED=false` (default)
+- Consumer group auto-created on first publish
+
+**S3 Artifact Storage** (`backend/app/artifacts/s3_store.py`):
+- gzip-compressed JSON to S3 via boto3
+- Key format: `{prefix}/{task_id}/{type}/{id}.json.gz`
+- Falls back to IAM role when AWS keys empty
+
+**GitHub Actions CI** (`.github/workflows/ci.yml`):
+- Jobs: backend (pytest + mypy + ruff + black), frontend (tsc + build), security (pip-audit)
+- pgvector PostgreSQL service container on backend job
+
+**Vercel config** (`vercel.json`): nextjs framework, security headers, API proxy rewrite
+
+**New dependencies**: `rq==2.10.0`, `redis==8.0.1`, `boto3==1.43.48`
+
+**New config fields**: `redis_url`, `redis_streams_enabled`, `redis_consumer_group`, `artifact_backend`, `s3_bucket`, `s3_region`, `s3_key_prefix`, `aws_access_key_id`, `aws_secret_access_key` — all documented in `.env.example`
+
+### Files Created — Gap Days 3 & 4
+- `backend/app/agents/release_notes_agent.py`
+- `backend/app/agents/evaluation_agent.py`
+- `backend/app/agents/rag_engineer_agent.py`
+- `backend/app/agents/changelog_agent.py`
+- `backend/app/agents/user_story_generator.py`
+- `backend/app/agents/security_architect.py`
+- `backend/app/agents/database_architect.py`
+- `backend/roles/{release_notes_agent,evaluation_agent,rag_engineer_agent,changelog_agent,user_story_generator,security_architect,database_architect}.md`
+- `backend/app/queue/__init__.py` + `backend/app/queue/rq_adapter.py`
+- `backend/app/event_bus/redis_streams.py`
+- `backend/app/artifacts/s3_store.py`
+- `.github/workflows/ci.yml`
+- `vercel.json`
+- `backend/tests/test_gap_agents.py` (103 tests)
+- `backend/tests/test_gap_day4.py` (56 tests)
+- `docs/reports/GAP_DAYS3_4_TEST_REPORT.md`
+
+### Files Modified — Gap Days 3 & 4
+- `backend/app/api/specialized_agents.py` — 7 new registry entries (27 total)
+- `backend/app/config.py` — 10 new config fields
+- `backend/requirements.txt` — added rq, redis, boto3
+- `backend/.env.example` — all new vars documented
+
+### Test Results — 2026-07-15 (Gap Days 3 & 4)
+```
+pytest backend/tests/ -q
+→ 934 passed, 55 skipped, 4 deselected, 3 warnings in 34.00s
+```
+
+### Next: Gap Day 5
+- Full hardcoding/hallucination/infinite-loop audit
+- Live attack tests (write .env, escape worktree, rm -rf)
+- `docs/SELLABILITY_GAP.md`, `docs/ADD_A_NEW_AGENT.md`, `docs/reports/FINAL_AUDIT_REPORT.md`
+- `README.md` production runbook
+- `git tag v1.0.0`
