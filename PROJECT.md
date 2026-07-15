@@ -1465,3 +1465,56 @@ Commit: 50b8b14
 ### Next session: Day 2 — Agent Expansion
 - Build 11 new agents (bug_fix, security_reviewer, architecture_reviewer, sql_agent, docker_agent, cicd_agent, refactor_agent, readme_agent, api_docs_agent, dependency_agent, monitoring_agent)
 - Target: ~530+ tests
+
+## Day 2 — 11 New Agents (2026-07-15)
+
+**Commit:** baced25  
+**Status:** ✅ COMPLETE
+
+### What was built
+
+11 new production-ready specialized pipeline agents added as new integrated features (not separate builds):
+
+| Agent | File | Role | Tools Scope | Model |
+|-------|------|------|-------------|-------|
+| Bug Fix | `bug_fix.py` | Reads errors, finds root cause, patches code | READ_ONLY + AST + edit/write | Sonnet |
+| Security Reviewer | `security_reviewer.py` | OWASP, secrets scan, injection detection | READ_ONLY only (no writes) | Sonnet |
+| Architecture Reviewer | `architecture_reviewer.py` | Import graphs, circular deps, dead code | READ_ONLY only | Sonnet |
+| SQL Agent | `sql_agent.py` | Run queries, inspect schema, write migrations | READ_ONLY + run_sql + edit/write | Sonnet |
+| Docker Agent | `docker_agent.py` | Container inspection, logs, builds | READ_ONLY + docker CLI | Sonnet |
+| CI/CD Agent | `cicd_agent.py` | GitHub Actions analysis, workflow authoring | READ_ONLY + bash(git only) + edit/write | Sonnet |
+| Refactor Agent | `refactor_agent.py` | Extract/rename/replace with AST | READ_ONLY + AST + bash(test/lint) | Sonnet |
+| README Agent | `readme_agent.py` | Reads codebase → writes .md docs | READ_ONLY + write_file(.md only) | Haiku |
+| API Docs Agent | `api_docs_agent.py` | Reads FastAPI routes → API reference | READ_ONLY + find_route/api + write_file(.md) | Haiku |
+| Dependency Agent | `dependency_agent.py` | pip/npm audit, patch-level upgrades | READ_ONLY + bash(pip/npm) + edit_file(requirements only) | Sonnet |
+| Monitoring Agent | `monitoring_agent.py` | CPU/memory/disk/health/logs | READ_ONLY only (no writes) | Haiku |
+
+### Files created
+- 11 agent files: `backend/app/agents/{bug_fix,security_reviewer,architecture_reviewer,sql_agent,docker_agent,cicd_agent,refactor_agent,readme_agent,api_docs_agent,dependency_agent,monitoring_agent}.py`
+- 11 role files: `backend/roles/{bug_fix,security_reviewer,...,monitoring_agent}.md`
+- 1 test file: `backend/tests/test_day2_agents.py` (76 tests)
+- 1 report: `docs/reports/PHASE_DAY2_TEST_REPORT.md`
+
+### Tools.py additions
+- 3 shared tool spec constants (`_EDIT_FILE_TOOL_SPEC`, `_WRITE_FILE_TOOL_SPEC`, `_GIT_DIFF_TOOL_SPEC`) + updated CHAT_TOOLS to use them
+- 9 submit tool specs, 3 restricted bash tool specs, 11 tool lists, 3 shared sub-factories, 11 handler factories
+- Each handler factory enforces agent-specific policy (bash allowlists, write path restrictions, read-only enforcement)
+
+### Test results — 2026-07-15
+- `pytest backend/tests/ -q` → **588 passed, 54 skipped** (was 512)
+- `mypy --strict` on all 13 new files → **0 errors**
+- Day 2 test suite: 76/76 passed
+
+### Current totals
+- **Agents:** 26 total (15 pre-existing + 11 new Day 2)
+- **CHAT_TOOLS:** 98 tools
+- **Tests:** 588 passing
+- **Role files:** 26 in backend/roles/
+
+### Next session: Day 3
+Per `docs/BUILD_PLAN_COMPLETION.md`:
+- Browser/Playwright tools (7)
+- Memory layer (6)
+- Planning + docs tools (4)
+- MCP integrations: github_create_issue, github_list_prs, linear_create_issue, slack_send_message
+- 10 more agents: performance_reviewer, style_reviewer, sprint_planner, business_analyst, migration_agent, schema_agent, ai_engineer, cleanup_agent, tech_debt_agent, + 1 more
