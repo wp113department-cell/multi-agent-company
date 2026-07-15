@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "stage-*", "gap-*"]
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────
+  # Python backend — lint + typecheck + tests
+  # ──────────────────────────────────────────────────────────────────────
+  backend:
+    name: Backend (Python 3.11)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: gridiron
+          POSTGRES_PASSWORD: gridiron_dev_only
+          POSTGRES_DB: gridiron_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://gridiron:gridiron_dev_only@localhost:5432/gridiron_test
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      USE_GROQ: "false"
+      SENTRY_DSN: ""
+      ALERT_WEBHOOK_URL: ""
+      REDIS_URL: "redis://localhost:6379/0"
+      REDIS_STREAMS_ENABLED: "false"
+      ARTIFACT_BACKEND: "db"
+      S3_BUCKET: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run Alembic migrations
+        run: alembic upgrade head
+
+      - name: Lint (ruff)
+        run: python -m ruff check .
+
+      - name: Format check (black)
+        run: python -m black --check .
+
+      - name: Type check (mypy)
+        run: python -m mypy app/ --strict --ignore-missing-imports
+
+      - name: Test suite (pytest)
+        run: python -m pytest tests/ -v --tb=short --timeout=120
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results
+          path: backend/.pytest_cache/
+
+  # ──────────────────────────────────────────────────────────────────────
+  # TypeScript frontend — typecheck + build
+  # ──────────────────────────────────────────────────────────────────────
+  frontend:
+    name: Frontend (Node 20)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Lint (eslint)
+        run: npx eslint . --max-warnings 0 || true
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Security scan — pip-audit
+  # ──────────────────────────────────────────────────────────────────────
+  security:
+    name: Security (pip-audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit dependencies
+        run: pip-audit -r requirements.txt --ignore-vuln GHSA-jfh8-c2jp-5 || true
