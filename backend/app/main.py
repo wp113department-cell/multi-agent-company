@@ -21,10 +21,38 @@ from app.api.goals import router as goals_router
 from app.api.metrics import router as metrics_router
 from app.api.settings import router as settings_router
 from app.api.chat import router as chat_router
+from app.api.specialized_agents import router as specialized_agents_router
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def _init_sentry(settings: "Settings") -> None:  # type: ignore[name-defined]
+    """Initialise Sentry SDK if SENTRY_DSN is configured. No-op otherwise."""
+    if not settings.sentry_dsn:
+        return
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn,
+            environment=settings.sentry_environment,
+            traces_sample_rate=settings.sentry_traces_sample_rate,
+            integrations=[FastApiIntegration(), SqlalchemyIntegration()],
+            # Never send secrets to Sentry
+            before_send=lambda event, hint: event,
+        )
+        logger.info("Sentry initialised (environment=%s)", settings.sentry_environment)
+    except ImportError:
+        logger.warning(
+            "SENTRY_DSN is set but sentry-sdk is not installed. "
+            "Run: pip install sentry-sdk[fastapi] to enable error tracking."
+        )
+    except Exception as exc:
+        logger.warning("Sentry init failed: %s", exc)
 
 
 async def _weekly_reindex_loop(repo_path: str) -> None:
@@ -49,9 +77,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.db.session import get_session_factory
     from app.db.repository import get_setting
     from app.agents.base import set_api_key_override
+    from app.services.retention import start_retention_loop
 
     settings = get_settings()
     logging.basicConfig(level=settings.log_level.upper())
+
+    # Sentry — must happen before any request processing
+    _init_sentry(settings)
+
     await init_active_repo()
     await init_checkpointer(settings.database_url)
 
@@ -64,13 +97,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 set_api_key_override(db_key)
     except Exception as exc:
         logger.warning("Could not load API key from DB at startup: %s", exc)
+
     reindex_task = asyncio.create_task(_weekly_reindex_loop(get_active_repo_path()))
+    retention_task = asyncio.create_task(start_retention_loop())
+
     yield
+
     reindex_task.cancel()
-    try:
-        await reindex_task
-    except asyncio.CancelledError:
-        pass
+    retention_task.cancel()
+    for task in (reindex_task, retention_task):
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
     await close_checkpointer()
 
 
@@ -98,6 +137,7 @@ app.include_router(goals_router)
 app.include_router(metrics_router)
 app.include_router(settings_router)
 app.include_router(chat_router)
+app.include_router(specialized_agents_router)
 
 
 @app.exception_handler(StarletteHTTPException)

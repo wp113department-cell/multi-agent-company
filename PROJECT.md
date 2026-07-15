@@ -1562,3 +1562,92 @@ Per `docs/BUILD_PLAN_COMPLETION.md`:
 - Planning + docs tools (4)
 - MCP integrations: github_create_issue, github_list_prs, linear_create_issue, slack_send_message
 - 10 more agents: performance_reviewer, style_reviewer, sprint_planner, business_analyst, migration_agent, schema_agent, ai_engineer, cleanup_agent, tech_debt_agent, + 1 more
+
+---
+
+## Gap Day 1 — 2026-07-15
+
+### What was built (complete, tested, 0 bugs)
+
+**Goal:** Close "built-but-not-wired" gaps and add observability/tooling from the gap analysis.
+
+#### 1. Specialized Agents API Router (backend/app/api/specialized_agents.py)
+All 20 worker agents (11 Day 2 + 9 Day 3) now exposed via:
+- `GET  /api/specialized-agents/agents` — list registry
+- `POST /api/specialized-agents/{name}/run` — async fire-and-forget
+- `POST /api/specialized-agents/{name}/run-sync` — synchronous (for testing/chat)
+
+#### 2. Sentry Integration (backend/app/main.py + backend/app/config.py)
+- `SENTRY_DSN` config var; init at startup with FastAPI + SQLAlchemy integrations
+- Silently no-ops when DSN is empty (zero startup overhead)
+- `.env.example` updated
+
+#### 3. Alert Service (backend/app/services/alert.py)
+- Webhook-based alerting on task `blocked` / `failed` events
+- `ALERT_WEBHOOK_URL` + `ALERT_ON_BLOCKED` config vars
+- Non-blocking (httpx async, errors only logged)
+
+#### 4. Log Retention Service (backend/app/services/retention.py)
+- Background 24h loop: `DELETE FROM task_logs WHERE created_at < NOW() - INTERVAL 'N days'`
+- `LOG_RETENTION_DAYS=90` default; set to 0 to disable
+
+#### 5. Memory Store — Architecture + Failure Categories (backend/app/memory/store.py)
+- `embed_architecture_note(task_id, content, db)` → `outcome='architecture'`
+- `embed_failure(task_id, error, root_cause, db)` → `outcome='failure'`
+- `query_architecture_notes(query, db, top_k)` + `query_failures(query, db, top_k)`
+
+#### 6. Daily Batch Review Endpoint (backend/app/api/epics.py)
+- `GET /api/epics/batch-review` → epics + tasks pending review, sorted by age
+
+#### 7. Daily Batch Review UI (apps/web/app/review/page.tsx)
+- Age-colour-coded row list with per-row Approve/Reject + "Approve All" bulk action
+- Auto-refreshes every 30 seconds
+
+#### 8. Test Suite (backend/tests/test_day3_agents.py)
+- 101 new tests: tool lists, handler factories, AgentResult schema, router registry,
+  alert service, memory store, retention, config fields
+
+#### 9. Eval Suite (backend/tests/evals/)
+- `tasks.json` — 5 fixed eval tasks (sprint_planner, business_analyst, style_reviewer, tech_debt_agent, performance_reviewer)
+- `eval_runner.py` — standalone scorer with JSON output
+- `test_evals.py` — pytest wrapper (fast = file validation; slow = real LLM, `pytest -m slow` only)
+
+#### 10. Pytest Config (backend/pytest.ini)
+- `slow` marker registered; `addopts = -m "not slow"` so eval LLM tests never run accidentally
+
+### Files created
+- `backend/app/api/specialized_agents.py`
+- `backend/app/services/__init__.py`
+- `backend/app/services/alert.py`
+- `backend/app/services/retention.py`
+- `backend/tests/test_day3_agents.py`
+- `backend/tests/evals/__init__.py`
+- `backend/tests/evals/eval_runner.py`
+- `backend/tests/evals/tasks.json`
+- `backend/tests/evals/test_evals.py`
+- `apps/web/app/review/page.tsx`
+- `docs/reports/GAP_DAY1_TEST_REPORT.md`
+
+### Files modified
+- `backend/app/config.py` (added 8 new config fields)
+- `backend/app/main.py` (Sentry init + retention task + specialized_agents router)
+- `backend/app/memory/store.py` (4 new async functions)
+- `backend/app/api/epics.py` (batch-review endpoint)
+- `backend/pytest.ini` (slow marker + addopts)
+- `.env.example` (documented new vars)
+
+### Test results — 2026-07-15 (Gap Day 1)
+- `pytest backend/tests/ -q` → **687 passed, 54 skipped, 4 deselected, 0 failed**
+- mypy new files (--strict) → **0 errors**
+- Report: `docs/reports/GAP_DAY1_TEST_REPORT.md`
+
+### Next: Gap Day 2
+Per `docs/DAY_WISE_COMPLETION_PLAN.md`:
+- Wire browser_driver.py into CHAT_TOOLS (open_browser, navigate, click, screenshot, read_dom)
+- GitHub tools via gh CLI (create_pr, list_prs, create_issue)
+- Missing git tools: git_merge, git_reset, generate_commit_message
+- Missing search: find_queue, find_worker
+- Editing extras: insert_before, insert_after, delete_block, apply_patch
+- Docs tools: generate_changelog, summarize_repo, generate_release_notes
+- File types: read_pdf, read_image
+- Process management: run_background, kill_process

@@ -173,3 +173,181 @@ def format_memory_context(similar_tasks: list[dict[str, Any]]) -> str:
         lines.append(f"**Similarity:** {t['similarity']:.3f}\n")
 
     return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Architecture Notes — store architectural decisions for context injection
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def embed_architecture_note(
+    task_id: str,
+    content: str,
+    db: AsyncSession,
+    epic_id: str | None = None,
+) -> MemoryEmbedding | None:
+    """Store an architecture decision / note in memory as source_type='architecture'.
+
+    Uses the `outcome` field to tag the record type.
+    Returns the persisted row, or None on failure.
+    """
+    settings = get_settings()
+    if not settings.memory_enabled:
+        return None
+
+    vector = await _embed(content)
+
+    try:
+        row = MemoryEmbedding(
+            task_id=task_id,
+            epic_id=epic_id,
+            outcome="architecture",
+            description=content[:500],
+            summary=content[:300],
+            files_changed=[],
+            embedding=vector,
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+        logger.info("Memory: stored architecture note for task %s", task_id)
+        return row
+    except Exception as exc:
+        logger.warning("Memory: failed to store architecture note for task %s: %s", task_id, exc)
+        await db.rollback()
+        return None
+
+
+async def query_architecture_notes(
+    query: str,
+    db: AsyncSession,
+    top_k: int = 3,
+) -> list[dict[str, Any]]:
+    """Find the most similar architecture notes to the given query text."""
+    settings = get_settings()
+    if not settings.memory_enabled:
+        return []
+
+    vector = await _embed(query)
+    if vector == _ZERO_VECTOR_1536:
+        return []
+
+    try:
+        sql = text("""
+            SELECT
+                task_id,
+                epic_id,
+                outcome,
+                description,
+                summary,
+                files_changed,
+                1 - (embedding <=> CAST(:vec AS vector)) AS similarity
+            FROM memory_embeddings
+            WHERE outcome = 'architecture'
+              AND embedding IS NOT NULL
+            ORDER BY embedding <=> CAST(:vec AS vector)
+            LIMIT :k
+        """)
+        vec_str = "[" + ",".join(str(v) for v in vector) + "]"
+        result = await db.execute(sql, {"vec": vec_str, "k": top_k})
+        rows = result.fetchall()
+        return [
+            {
+                "task_id": row.task_id,
+                "epic_id": row.epic_id,
+                "content": row.description,
+                "similarity": float(row.similarity),
+            }
+            for row in rows
+        ]
+    except Exception as exc:
+        logger.warning("Memory: architecture query failed: %s", exc)
+        return []
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Failure Records — capture failure modes for future context injection
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def embed_failure(
+    task_id: str,
+    error_description: str,
+    root_cause: str,
+    db: AsyncSession,
+    epic_id: str | None = None,
+) -> MemoryEmbedding | None:
+    """Store a failure record so future agents can learn from past blocked tasks.
+
+    Uses outcome='failure' to tag the record type.
+    """
+    settings = get_settings()
+    if not settings.memory_enabled:
+        return None
+
+    content = f"Error: {error_description}\nRoot cause: {root_cause}"
+    vector = await _embed(content)
+
+    try:
+        row = MemoryEmbedding(
+            task_id=task_id,
+            epic_id=epic_id,
+            outcome="failure",
+            description=error_description[:500],
+            summary=root_cause[:300],
+            files_changed=[],
+            embedding=vector,
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+        logger.info("Memory: stored failure record for task %s", task_id)
+        return row
+    except Exception as exc:
+        logger.warning("Memory: failed to store failure for task %s: %s", task_id, exc)
+        await db.rollback()
+        return None
+
+
+async def query_failures(
+    description: str,
+    db: AsyncSession,
+    top_k: int = 3,
+) -> list[dict[str, Any]]:
+    """Find similar past failures to the given task description."""
+    settings = get_settings()
+    if not settings.memory_enabled:
+        return []
+
+    vector = await _embed(description)
+    if vector == _ZERO_VECTOR_1536:
+        return []
+
+    try:
+        sql = text("""
+            SELECT
+                task_id,
+                epic_id,
+                description,
+                summary,
+                1 - (embedding <=> CAST(:vec AS vector)) AS similarity
+            FROM memory_embeddings
+            WHERE outcome = 'failure'
+              AND embedding IS NOT NULL
+            ORDER BY embedding <=> CAST(:vec AS vector)
+            LIMIT :k
+        """)
+        vec_str = "[" + ",".join(str(v) for v in vector) + "]"
+        result = await db.execute(sql, {"vec": vec_str, "k": top_k})
+        rows = result.fetchall()
+        return [
+            {
+                "task_id": row.task_id,
+                "epic_id": row.epic_id,
+                "error": row.description,
+                "root_cause": row.summary,
+                "similarity": float(row.similarity),
+            }
+            for row in rows
+        ]
+    except Exception as exc:
+        logger.warning("Memory: failure query failed: %s", exc)
+        return []

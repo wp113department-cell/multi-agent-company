@@ -1,0 +1,63 @@
+[
+  {
+    "id": "eval_001",
+    "agent": "sprint_planner",
+    "task_id": 9001,
+    "description": "Plan a 2-week sprint to add user authentication to a FastAPI app. Include login, logout, JWT tokens, and password reset endpoints.",
+    "expected_fields": ["goal", "stories", "total_points", "risks"],
+    "expected_story_count_min": 3,
+    "expected_story_count_max": 10,
+    "quality_checks": [
+      "stories must have titles",
+      "each story should have acceptance criteria",
+      "risks should be non-empty"
+    ]
+  },
+  {
+    "id": "eval_002",
+    "agent": "business_analyst",
+    "task_id": 9002,
+    "description": "Analyze the business requirements for a task management system. We need to track tasks, assign them to agents, and monitor completion rates. What are the core functional requirements?",
+    "expected_fields": ["summary", "requirements", "acceptance_criteria"],
+    "quality_checks": [
+      "summary should be non-empty",
+      "requirements should be a list",
+      "acceptance_criteria should be present"
+    ]
+  },
+  {
+    "id": "eval_003",
+    "agent": "style_reviewer",
+    "task_id": 9003,
+    "description": "Review the Python coding style of the backend codebase. Check for PEP 8 compliance, naming conventions, docstring quality, and type hint usage.",
+    "expected_fields": ["summary", "issues", "severity", "recommendations"],
+    "quality_checks": [
+      "summary should be non-empty",
+      "recommendations should be actionable"
+    ]
+  },
+  {
+    "id": "eval_004",
+    "agent": "tech_debt_agent",
+    "task_id": 9004,
+    "description": "Identify technical debt in the backend codebase. Look for dead code, overly complex functions, missing tests, and outdated patterns.",
+    "expected_fields": ["summary", "debt_items", "priority", "estimated_effort"],
+    "quality_checks": [
+      "debt_items should be a list",
+      "priority should indicate urgency",
+      "summary should describe findings"
+    ]
+  },
+  {
+    "id": "eval_005",
+    "agent": "performance_reviewer",
+    "task_id": 9005,
+    "description": "Review the database query performance in the backend. Check for N+1 queries, missing indexes, and inefficient SQL patterns.",
+    "expected_fields": ["summary", "findings", "severity", "recommendations"],
+    "quality_checks": [
+      "findings should describe actual issues found",
+      "recommendations should be specific and actionable",
+      "severity should categorize issues"
+    ]
+  }
+]

@@ -70,6 +70,18 @@ class Settings(BaseSettings):
     # Phase 7 — Queue adapter backend (asyncio | bullmq)
     queue_backend: str = Field(default="asyncio", description="Task queue backend: asyncio (in-process) or bullmq (Redis)")
 
+    # Observability — Sentry (optional; leave empty to disable)
+    sentry_dsn: str = Field(default="", description="Sentry DSN for error tracking. Leave empty to disable Sentry.")
+    sentry_environment: str = Field(default="production", description="Sentry environment tag (production | staging | development)")
+    sentry_traces_sample_rate: float = Field(default=0.1, description="Fraction of transactions sent to Sentry (0.0–1.0)")
+
+    # Alerting — webhook fired when a task transitions to 'blocked' or 'failed'
+    alert_webhook_url: str = Field(default="", description="HTTP(S) webhook URL for task blocked/failed alerts. Leave empty to disable.")
+    alert_on_blocked: bool = Field(default=True, description="Send alert webhook when task status becomes 'blocked'")
+
+    # Log retention — automatic cleanup of old task logs
+    log_retention_days: int = Field(default=90, description="Days to keep task_logs rows before automated cleanup. Set to 0 to disable cleanup.")
+
     # Groq (optional — enables Groq as LLM backend when ANTHROPIC_API_KEY is unavailable)
     groq_api_key: str = Field(default="", description="Groq API key (gsk_...). When set and USE_GROQ=true, all agent calls use Groq instead of Anthropic.")
     use_groq: bool = Field(default=False, description="Route all agent calls to Groq instead of Anthropic. Useful when ANTHROPIC_API_KEY is unavailable.")

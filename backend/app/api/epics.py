@@ -267,6 +267,62 @@ async def record_policy_approval(
     }
 
 
+@router.get("/batch-review", summary="List epics and tasks awaiting review in bulk")
+async def batch_review(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Return all epics + tasks that are ready for human review, grouped for batch approval.
+
+    Returns epics in 'ready_for_review', 'pending_cost_approval', and tasks in
+    'ready_for_review' or 'awaiting_approval' — ordered by age (oldest first).
+    """
+    from sqlalchemy import or_
+
+    epic_result = await db.execute(
+        select(Epic)
+        .where(Epic.status.in_(["ready_for_review", "pending_cost_approval"]))
+        .order_by(Epic.created_at.asc())
+    )
+    epics = list(epic_result.scalars().all())
+
+    task_result = await db.execute(
+        select(DevTask)
+        .where(DevTask.status.in_(["ready_for_review", "awaiting_approval"]))
+        .order_by(DevTask.created_at.asc())
+    )
+    tasks = list(task_result.scalars().all())
+
+    return {
+        "epics": [
+            {
+                "epicId": e.epic_id,
+                "title": e.title,
+                "status": e.status,
+                "costEstimate": float(e.cost_estimate) if e.cost_estimate else None,
+                "haltReason": e.halt_reason,
+                "age": (
+                    __import__("datetime").datetime.utcnow() - e.created_at
+                ).total_seconds() / 3600,
+                "createdAt": e.created_at.isoformat(),
+            }
+            for e in epics
+        ],
+        "tasks": [
+            {
+                "taskId": t.id,
+                "title": t.title,
+                "description": t.description[:300] if t.description else "",
+                "status": t.status,
+                "epicId": t.epic_id,
+                "age": (
+                    __import__("datetime").datetime.utcnow() - t.created_at
+                ).total_seconds() / 3600,
+                "createdAt": t.created_at.isoformat(),
+            }
+            for t in tasks
+        ],
+        "totalPendingReview": len(epics) + len(tasks),
+    }
+
+
 # ---- Background task ----
 
 async def _launch_epic_manager(epic_id: str, goal: str) -> None:
