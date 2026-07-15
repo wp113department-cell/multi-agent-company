@@ -1,62 +1,76 @@
-"""Security Reviewer Agent — OWASP scan, secrets detection, injection analysis."""
+"""Security Reviewer Agent — LangGraph StateGraph, read-only, verification contract."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any
 
-from app.agents.base import run_agent
+from app.agents.agent_result import AgentResult
+from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import SECURITY_REVIEWER_TOOLS, make_security_reviewer_handlers
 from app.config import get_settings
 
-
-@dataclass
-class SecurityResult:
-    severity: str = "none"
-    findings: list[str] = field(default_factory=list)
-    recommendations: list[str] = field(default_factory=list)
-    tokens_in: int = 0
-    tokens_out: int = 0
+_VERIFICATION_CFG = VerificationConfig(
+    set_by={
+        "secrets_scan": "scan_ran",
+        "search_code": "search_ran",
+        "find_sql": "sql_checked",
+        "find_api": "api_checked",
+        "find_route": "routes_checked",
+        "find_config": "config_checked",
+    },
+    reset_by=(),
+    reset_keys=(),
+    enforce_in_result={"scan_ran": "scan_ran"},
+    initial={
+        "scan_ran": False, "search_ran": False, "sql_checked": False,
+        "api_checked": False, "routes_checked": False, "config_checked": False,
+    },
+)
 
 
 def run_security_review(
     task_id: int,
-    focus: str = "",
+    focus: str = "full audit",
     repo_path: str | None = None,
     on_heartbeat: Any = None,
     on_tool_call: Any = None,
-) -> SecurityResult:
+) -> AgentResult:
     settings = get_settings()
     repo = repo_path or str(settings.target_repo_path)
     handlers = make_security_reviewer_handlers(repo)
 
-    prompt = (
-        f"Task #{task_id} — Security Review\n\n"
-        "Perform a thorough security review of the codebase. "
-        "Cover: secrets/credentials, SQL injection, authentication gaps, "
-        "unsafe subprocess usage, path traversal, and CORS configuration.\n"
+    message = (
+        f"Task #{task_id} — Security Review\n\nFocus: {focus}\n\n"
+        "Process (read-only — never edit files):\n"
+        "1. Run secrets_scan to find hardcoded credentials.\n"
+        "2. Use find_sql to locate raw SQL — check for unparameterised queries.\n"
+        "3. Use find_route / find_api to enumerate endpoints and check auth decorators.\n"
+        "4. Use find_config to check for insecure defaults.\n"
+        "5. Use read_file / search_code to inspect suspicious code in context.\n"
+        "6. Call submit_security_report with findings (each must cite file:line read this run), "
+        "severity, scope_covered, scope_not_covered.\n"
+        "RULE: Never claim a vulnerability without reading the actual code line."
     )
-    if focus:
-        prompt += f"\nFocus area: {focus}\n"
-    prompt += "\nWhen done, call submit_security_report with all findings."
 
-    messages = [{"role": "user", "content": prompt}]
-
-    _, tokens_in, tokens_out, *_ = run_agent(
+    final_state = run_agent_graph(
         role_name="security_reviewer",
         model=settings.model_coder,
-        messages=messages,
         tools=SECURITY_REVIEWER_TOOLS,
         tool_handlers=handlers,
+        verification_cfg=_VERIFICATION_CFG,
+        initial_message=message,
         max_turns=20,
-        on_heartbeat=on_heartbeat,
-        on_tool_call=on_tool_call,
     )
 
-    raw = handlers.get("_security_result", {})
-    return SecurityResult(
-        severity=str(raw.get("severity", "none")),
-        findings=list(raw.get("findings", [])),
-        recommendations=list(raw.get("recommendations", [])),
-        tokens_in=tokens_in,
-        tokens_out=tokens_out,
+    raw = final_state["result"]
+    findings = list(raw.get("findings", []))
+    return AgentResult(
+        summary=str(raw.get("summary", f"{len(findings)} security findings")),
+        findings=findings,
+        files_touched=[],
+        verified=bool(final_state["verification"].get("scan_ran", False)),
+        requires_human_approval=False,
+        tokens_in=final_state["tokens_in"],
+        tokens_out=final_state["tokens_out"],
+        status="completed" if final_state["submitted"] else "blocked",
+        raw=raw,
     )

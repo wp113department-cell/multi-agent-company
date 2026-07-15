@@ -37,17 +37,18 @@ from app.agents.tools import (
 # ---------------------------------------------------------------------------
 # Agent module imports (confirms no syntax/import errors)
 # ---------------------------------------------------------------------------
-from app.agents.bug_fix import BugFixResult, run_bug_fix  # noqa: F401
-from app.agents.security_reviewer import SecurityResult, run_security_review  # noqa: F401
-from app.agents.architecture_reviewer import ArchReviewResult, run_arch_review  # noqa: F401
-from app.agents.sql_agent import SqlResult, run_sql_agent  # noqa: F401
-from app.agents.docker_agent import DockerResult, run_docker_agent  # noqa: F401
-from app.agents.cicd_agent import CicdResult, run_cicd_agent  # noqa: F401
-from app.agents.refactor_agent import RefactorResult, run_refactor_agent  # noqa: F401
-from app.agents.readme_agent import ReadmeResult, run_readme_agent  # noqa: F401
-from app.agents.api_docs_agent import ApiDocsResult, run_api_docs_agent  # noqa: F401
-from app.agents.dependency_agent import DependencyResult, run_dependency_agent  # noqa: F401
-from app.agents.monitoring_agent import MonitoringResult, run_monitoring_agent  # noqa: F401
+from app.agents.agent_result import AgentResult
+from app.agents.bug_fix import run_bug_fix  # noqa: F401
+from app.agents.security_reviewer import run_security_review  # noqa: F401
+from app.agents.architecture_reviewer import run_arch_review  # noqa: F401
+from app.agents.sql_agent import run_sql_agent  # noqa: F401
+from app.agents.docker_agent import run_docker_agent  # noqa: F401
+from app.agents.cicd_agent import run_cicd_agent  # noqa: F401
+from app.agents.refactor_agent import run_refactor_agent  # noqa: F401
+from app.agents.readme_agent import run_readme_agent  # noqa: F401
+from app.agents.api_docs_agent import run_api_docs_agent  # noqa: F401
+from app.agents.dependency_agent import run_dependency_agent  # noqa: F401
+from app.agents.monitoring_agent import run_monitoring_agent  # noqa: F401
 
 
 def _tool_names(tool_list: list[dict[str, Any]]) -> set[str]:
@@ -470,32 +471,37 @@ class TestDockerAgentHandlers:
 
 
 # ===========================================================================
-# Agent dataclass defaults
+# AgentResult dataclass defaults
 # ===========================================================================
 
-class TestAgentDataclasses:
-    def test_bug_fix_result_defaults(self) -> None:
-        r = BugFixResult()
-        assert r.root_cause == ""
-        assert r.files_changed == []
-        assert r.tests_passed is False
-
-    def test_security_result_defaults(self) -> None:
-        r = SecurityResult()
-        assert r.severity == "none"
+class TestAgentResult:
+    def test_defaults(self) -> None:
+        r = AgentResult(summary="test")
+        assert r.summary == "test"
         assert r.findings == []
+        assert r.files_touched == []
+        assert r.verified is False
+        assert r.requires_human_approval is False
+        assert r.tokens_in == 0
+        assert r.tokens_out == 0
+        assert r.status == "completed"
+        assert r.raw == {}
 
-    def test_arch_review_result_defaults(self) -> None:
-        r = ArchReviewResult()
-        assert r.verdict == "approved"
-        assert r.issues == []
+    def test_custom_values(self) -> None:
+        r = AgentResult(
+            summary="done",
+            findings=[{"key": "val"}],
+            files_touched=["a.py", "b.py"],
+            verified=True,
+            requires_human_approval=True,
+            status="blocked",
+        )
+        assert r.verified is True
+        assert r.requires_human_approval is True
+        assert len(r.files_touched) == 2
+        assert r.status == "blocked"
 
-    def test_monitoring_result_defaults(self) -> None:
-        r = MonitoringResult()
-        assert r.status == "healthy"
-        assert r.metrics == {}
-
-    def test_dependency_result_defaults(self) -> None:
-        r = DependencyResult()
-        assert r.outdated == []
-        assert r.upgraded == []
+    def test_status_values(self) -> None:
+        for status in ("completed", "blocked", "needs_approval"):
+            r = AgentResult(summary="s", status=status)
+            assert r.status == status

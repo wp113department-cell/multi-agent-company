@@ -3373,6 +3373,1120 @@ def make_monitoring_agent_handlers(repo_path: str) -> dict[str, Any]:
     return handlers
 
 
+# ===========================================================================
+# Day 3 — Browser, Memory, Planning, MCP tool specs + Agent tool lists + Factories
+# ===========================================================================
+
+# --- Day 3A: Browser tool specs ---
+
+_BROWSER_OPEN_TOOL: dict[str, Any] = {
+    "name": "browser_open",
+    "description": "Open a URL in a headless browser. Returns page title, URL, and status.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"url": {"type": "string", "description": "URL to open"}},
+        "required": ["url"],
+    },
+}
+
+_BROWSER_NAVIGATE_TOOL: dict[str, Any] = {
+    "name": "browser_navigate",
+    "description": "Navigate the current browser page to a new URL.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"url": {"type": "string"}},
+        "required": ["url"],
+    },
+}
+
+_BROWSER_SCREENSHOT_TOOL: dict[str, Any] = {
+    "name": "browser_screenshot",
+    "description": "Take a screenshot of the current page. Saves to /tmp and returns the file path.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"path": {"type": "string", "description": "Optional output path. Auto-generated if omitted."}},
+        "required": [],
+    },
+}
+
+_BROWSER_READ_DOM_TOOL: dict[str, Any] = {
+    "name": "browser_read_dom",
+    "description": "Read the visible text content of the current page, or a specific selector.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"selector": {"type": "string", "description": "CSS selector (optional). If omitted, reads entire body."}},
+        "required": [],
+    },
+}
+
+_BROWSER_CLICK_TOOL: dict[str, Any] = {
+    "name": "browser_click",
+    "description": "Click an element by CSS selector.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"selector": {"type": "string", "description": "CSS selector of element to click"}},
+        "required": ["selector"],
+    },
+}
+
+_BROWSER_TYPE_TOOL: dict[str, Any] = {
+    "name": "browser_type",
+    "description": "Type text into an input field identified by a CSS selector.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "selector": {"type": "string"},
+            "text": {"type": "string"},
+        },
+        "required": ["selector", "text"],
+    },
+}
+
+_BROWSER_CLOSE_TOOL: dict[str, Any] = {
+    "name": "browser_close",
+    "description": "Close the browser session and release resources.",
+    "input_schema": {"type": "object", "properties": {}, "required": []},
+}
+
+# --- Day 3B: Memory tool specs ---
+
+_MEMORY_READ_TOOL: dict[str, Any] = {
+    "name": "memory_read",
+    "description": "Read a value from the per-repo memory store by key.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"key": {"type": "string", "description": "Key to read from memory"}},
+        "required": ["key"],
+    },
+}
+
+_MEMORY_WRITE_TOOL: dict[str, Any] = {
+    "name": "memory_write",
+    "description": "Write a value to the per-repo memory store under a key.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "key": {"type": "string"},
+            "value": {"type": "string"},
+        },
+        "required": ["key", "value"],
+    },
+}
+
+_DECISION_LOG_APPEND_TOOL: dict[str, Any] = {
+    "name": "decision_log_append",
+    "description": "Append a design decision with rationale to the project decision log.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "decision": {"type": "string", "description": "The decision made"},
+            "reason": {"type": "string", "description": "Why this decision was made"},
+            "alternatives": {"type": "string", "description": "What alternatives were considered (optional)"},
+        },
+        "required": ["decision", "reason"],
+    },
+}
+
+_TASK_HISTORY_QUERY_TOOL: dict[str, Any] = {
+    "name": "task_history_query",
+    "description": "Query recent task history from the task_logs table.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "limit": {"type": "integer", "description": "Max records to return (default 20)"},
+            "status": {"type": "string", "description": "Filter by status: completed, failed, blocked (optional)"},
+        },
+        "required": [],
+    },
+}
+
+_KNOWN_ISSUES_READ_TOOL: dict[str, Any] = {
+    "name": "known_issues_read",
+    "description": "Read the project's known issues file.",
+    "input_schema": {"type": "object", "properties": {}, "required": []},
+}
+
+_KNOWN_ISSUES_WRITE_TOOL: dict[str, Any] = {
+    "name": "known_issues_write",
+    "description": "Append a new known issue to the project known issues file.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "issue": {"type": "string", "description": "Description of the issue"},
+            "severity": {"type": "string", "description": "critical / high / medium / low"},
+        },
+        "required": ["issue", "severity"],
+    },
+}
+
+# --- Day 3C: Planning + docs tool specs ---
+
+_ESTIMATE_COMPLEXITY_TOOL: dict[str, Any] = {
+    "name": "estimate_complexity",
+    "description": "Estimate task complexity as XS/S/M/L/XL based on heuristics (description token count, file scope).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "description": {"type": "string", "description": "Task or feature description to estimate"},
+            "context_paths": {"type": "array", "items": {"type": "string"}, "description": "Optional list of files/dirs likely involved"},
+        },
+        "required": ["description"],
+    },
+}
+
+_SUMMARIZE_FOLDER_TOOL: dict[str, Any] = {
+    "name": "summarize_folder",
+    "description": "Return a concise summary of every .py/.ts file in a folder (up to 20 files).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Relative folder path to summarize"},
+            "extensions": {"type": "array", "items": {"type": "string"}, "description": "File extensions to include (default: .py, .ts, .tsx)"},
+        },
+        "required": ["path"],
+    },
+}
+
+_GENERATE_API_DOCS_TEXT_TOOL: dict[str, Any] = {
+    "name": "generate_api_docs_text",
+    "description": "Parse a FastAPI route file and return a structured markdown template of all endpoints.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"route_path": {"type": "string", "description": "Relative path to the FastAPI router file"}},
+        "required": ["route_path"],
+    },
+}
+
+_MERMAID_FROM_SCHEMA_TOOL: dict[str, Any] = {
+    "name": "mermaid_from_schema",
+    "description": "Convert a database schema inspection into a Mermaid ER diagram string.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"table": {"type": "string", "description": "Table name to focus on (optional — uses all tables if omitted)"}},
+        "required": [],
+    },
+}
+
+# --- Day 3G: MCP / External integration tool specs ---
+
+_GITHUB_CREATE_ISSUE_TOOL: dict[str, Any] = {
+    "name": "github_create_issue",
+    "description": "Create a GitHub issue using the gh CLI. Requires gh to be authenticated.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "body": {"type": "string"},
+            "labels": {"type": "array", "items": {"type": "string"}, "description": "Optional label names"},
+        },
+        "required": ["title", "body"],
+    },
+}
+
+_GITHUB_LIST_PRS_TOOL: dict[str, Any] = {
+    "name": "github_list_prs",
+    "description": "List GitHub pull requests using the gh CLI.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"state": {"type": "string", "description": "open / closed / merged (default: open)"}},
+        "required": [],
+    },
+}
+
+_GITHUB_COMMENT_TOOL: dict[str, Any] = {
+    "name": "github_comment",
+    "description": "Post a comment on a GitHub issue or pull request.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "number": {"type": "integer", "description": "Issue or PR number"},
+            "body": {"type": "string", "description": "Comment text"},
+            "kind": {"type": "string", "description": "issue or pr (default: issue)"},
+        },
+        "required": ["number", "body"],
+    },
+}
+
+_LINEAR_CREATE_ISSUE_TOOL: dict[str, Any] = {
+    "name": "linear_create_issue",
+    "description": "Create a Linear issue via the Linear API. Requires LINEAR_API_KEY env var.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "description": {"type": "string"},
+            "team_key": {"type": "string", "description": "Linear team key (e.g. ENG)"},
+        },
+        "required": ["title", "description", "team_key"],
+    },
+}
+
+_SLACK_SEND_MESSAGE_TOOL: dict[str, Any] = {
+    "name": "slack_send_message",
+    "description": "Send a Slack message via webhook. Requires SLACK_WEBHOOK_URL env var.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "channel": {"type": "string", "description": "Channel name (informational only — webhook targets one channel)"},
+            "text": {"type": "string", "description": "Message text"},
+        },
+        "required": ["text"],
+    },
+}
+
+# --- Day 3 Agent submit tool specs ---
+
+_SUBMIT_PERF_REVIEW_TOOL: dict[str, Any] = {
+    "name": "submit_perf_review",
+    "description": "Submit performance review findings.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "findings": {"type": "array", "items": {"type": "object"}},
+            "severity": {"type": "string"},
+            "recommendations": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["summary"],
+    },
+}
+
+_SUBMIT_STYLE_REVIEW_TOOL: dict[str, Any] = {
+    "name": "submit_style_review",
+    "description": "Submit style/lint review findings.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "violations": {"type": "array", "items": {"type": "object"}},
+            "auto_fixable": {"type": "boolean"},
+        },
+        "required": ["summary"],
+    },
+}
+
+_SUBMIT_SPRINT_PLAN_TOOL: dict[str, Any] = {
+    "name": "submit_sprint_plan",
+    "description": "Submit a sprint plan with stories and estimates.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "goal": {"type": "string"},
+            "stories": {"type": "array", "items": {"type": "object"}},
+            "total_points": {"type": "integer"},
+            "risks": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["goal", "stories"],
+    },
+}
+
+_SUBMIT_BA_RESULT_TOOL: dict[str, Any] = {
+    "name": "submit_ba_result",
+    "description": "Submit business analysis: user stories, acceptance criteria, edge cases.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "user_stories": {"type": "array", "items": {"type": "string"}},
+            "acceptance_criteria": {"type": "array", "items": {"type": "string"}},
+            "edge_cases": {"type": "array", "items": {"type": "string"}},
+            "summary": {"type": "string"},
+        },
+        "required": ["user_stories", "summary"],
+    },
+}
+
+_SUBMIT_MIGRATION_TOOL: dict[str, Any] = {
+    "name": "submit_migration",
+    "description": "Submit the generated migration file path and validation results.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "migration_file": {"type": "string"},
+            "is_reversible": {"type": "boolean"},
+            "summary": {"type": "string"},
+            "warnings": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["summary"],
+    },
+}
+
+_SUBMIT_SCHEMA_TOOL: dict[str, Any] = {
+    "name": "submit_schema",
+    "description": "Submit a schema design or review result.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "tables": {"type": "array", "items": {"type": "object"}},
+            "normalization_issues": {"type": "array", "items": {"type": "string"}},
+            "files_written": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["summary"],
+    },
+}
+
+_SUBMIT_AI_RESULT_TOOL: dict[str, Any] = {
+    "name": "submit_ai_result",
+    "description": "Submit AI/ML engineering task results.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "files_created": {"type": "array", "items": {"type": "string"}},
+            "eval_results": {"type": "object"},
+            "next_steps": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["summary"],
+    },
+}
+
+_SUBMIT_CLEANUP_TOOL: dict[str, Any] = {
+    "name": "submit_cleanup",
+    "description": "Submit cleanup results: dead code removed, files deleted, imports organized.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "dead_code_removed": {"type": "array", "items": {"type": "string"}},
+            "files_deleted": {"type": "array", "items": {"type": "string"}},
+            "imports_cleaned": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["summary"],
+    },
+}
+
+_SUBMIT_TECH_DEBT_TOOL: dict[str, Any] = {
+    "name": "submit_tech_debt",
+    "description": "Submit technical debt analysis findings.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "debt_items": {"type": "array", "items": {"type": "object"}},
+            "priority_fixes": {"type": "array", "items": {"type": "string"}},
+            "effort_estimate": {"type": "string"},
+        },
+        "required": ["summary"],
+    },
+}
+
+# --- Day 3 agent-specific bash specs (restricted allowlists) ---
+
+_MIGRATION_BASH_TOOL_SPEC: dict[str, Any] = {
+    "name": "bash",
+    "description": "Run migration-related commands: alembic upgrade/downgrade, alembic revision, git diff.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"command": {"type": "string"}},
+        "required": ["command"],
+    },
+}
+
+_AI_ENGINEER_BASH_TOOL_SPEC: dict[str, Any] = {
+    "name": "bash",
+    "description": "Run AI/ML commands: python script execution, pip install packages, model evaluation scripts.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"command": {"type": "string"}},
+        "required": ["command"],
+    },
+}
+
+_CLEANUP_BASH_TOOL_SPEC: dict[str, Any] = {
+    "name": "bash",
+    "description": "Run cleanup commands: find dead code, check imports, ruff/isort checks.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"command": {"type": "string"}},
+        "required": ["command"],
+    },
+}
+
+# --- Day 3 Agent Tool Lists ---
+
+PERFORMANCE_REVIEWER_TOOLS: list[dict[str, Any]] = READ_ONLY_TOOLS + [
+    _FIND_SQL_TOOL,
+    _RUN_SQL_TOOL,
+    _EXPLAIN_QUERY_TOOL,
+    _LIST_FUNCTIONS_TOOL,
+    _SUBMIT_PERF_REVIEW_TOOL,
+]
+
+STYLE_REVIEWER_TOOLS: list[dict[str, Any]] = READ_ONLY_TOOLS + [
+    _RUN_LINTER_TOOL,
+    _LIST_FUNCTIONS_TOOL,
+    _LIST_CLASSES_TOOL,
+    _SUBMIT_STYLE_REVIEW_TOOL,
+]
+
+SPRINT_PLANNER_TOOLS: list[dict[str, Any]] = READ_ONLY_TOOLS + [
+    _ESTIMATE_COMPLEXITY_TOOL,
+    _SUBMIT_SPRINT_PLAN_TOOL,
+]
+
+BUSINESS_ANALYST_TOOLS: list[dict[str, Any]] = READ_ONLY_TOOLS + [
+    _SUBMIT_BA_RESULT_TOOL,
+]
+
+MIGRATION_AGENT_TOOLS: list[dict[str, Any]] = READ_ONLY_TOOLS + [
+    _RUN_SQL_TOOL,
+    _INSPECT_SCHEMA_TOOL,
+    _WRITE_FILE_TOOL_SPEC,
+    _MIGRATION_BASH_TOOL_SPEC,
+    _SUBMIT_MIGRATION_TOOL,
+]
+
+SCHEMA_AGENT_TOOLS: list[dict[str, Any]] = READ_ONLY_TOOLS + [
+    _RUN_SQL_TOOL,
+    _INSPECT_SCHEMA_TOOL,
+    _WRITE_FILE_TOOL_SPEC,
+    _SUBMIT_SCHEMA_TOOL,
+]
+
+AI_ENGINEER_TOOLS: list[dict[str, Any]] = READ_ONLY_TOOLS + [
+    _RUN_PYTHON_SNIPPET_TOOL,
+    _AI_ENGINEER_BASH_TOOL_SPEC,
+    _WRITE_FILE_TOOL_SPEC,
+    _FETCH_URL_TOOL,
+    _SUBMIT_AI_RESULT_TOOL,
+]
+
+CLEANUP_AGENT_TOOLS: list[dict[str, Any]] = READ_ONLY_TOOLS + [
+    _DEAD_CODE_DETECT_TOOL,
+    _ORGANIZE_IMPORTS_TOOL,
+    _DELETE_FILE_TOOL,
+    _EDIT_FILE_TOOL_SPEC,
+    _CLEANUP_BASH_TOOL_SPEC,
+    _SUBMIT_CLEANUP_TOOL,
+]
+
+TECH_DEBT_AGENT_TOOLS: list[dict[str, Any]] = READ_ONLY_TOOLS + [
+    _LIST_FUNCTIONS_TOOL,
+    _LIST_CLASSES_TOOL,
+    _RUN_LINTER_TOOL,
+    _COVERAGE_REPORT_TOOL,
+    _SUBMIT_TECH_DEBT_TOOL,
+]
+
+# --- Day 3 Handler Factories ---
+
+
+def make_performance_reviewer_handlers(repo_path: str) -> dict[str, Any]:
+    """Handler factory for Performance Reviewer agent."""
+    import re as _re
+    import subprocess as _sp
+    from app.config import get_settings as _gs
+
+    root = Path(repo_path)
+    handlers = make_read_only_handlers(repo_path)
+    perf_result: dict[str, Any] = {}
+
+    def pr_find_sql(inp: dict[str, Any]) -> str:
+        keyword = str(inp.get("keyword", "")).upper() or "SELECT"
+        results: list[str] = []
+        for fp in root.rglob("*.py"):
+            try:
+                text = fp.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            for i, line in enumerate(text.splitlines(), 1):
+                if keyword in line.upper():
+                    results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
+        return "\n".join(results[:50]) or f"(no matches for {keyword})"
+
+    def pr_run_sql(inp: dict[str, Any]) -> str:
+        sql = str(inp["query"]).strip()
+        settings = _gs()
+        db_url = getattr(settings, "database_url", "")
+        if not db_url:
+            return "[ERROR] DATABASE_URL not set"
+        # Block destructive ops
+        low = sql.lower()
+        if any(k in low for k in ("drop ", "delete ", "truncate ", "update ", "insert ")):
+            return "[POLICY DENIED] Performance reviewer is read-only — use SELECT / EXPLAIN only"
+        try:
+            r = _sp.run(["psql", db_url, "-c", sql, "--no-psqlrc"],
+                        capture_output=True, text=True, timeout=30)
+            return (r.stdout + r.stderr).strip() or "(no output)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def pr_explain_query(inp: dict[str, Any]) -> str:
+        sql = str(inp["query"]).strip().rstrip(";")
+        settings = _gs()
+        db_url = getattr(settings, "database_url", "")
+        if not db_url:
+            return "[ERROR] DATABASE_URL not set"
+        try:
+            r = _sp.run(
+                ["psql", db_url, "-c", f"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {sql};", "--no-psqlrc"],
+                capture_output=True, text=True, timeout=30,
+            )
+            return (r.stdout + r.stderr).strip() or "(no output)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def pr_list_functions(inp: dict[str, Any]) -> str:
+        pr_path = str(inp.get("path", "."))
+        pr_results: list[str] = []
+        for fp in (root / pr_path).rglob("*.py"):
+            try:
+                for i, line in enumerate(fp.read_text(encoding="utf-8").splitlines(), 1):
+                    if line.strip().startswith("def ") or line.strip().startswith("async def "):
+                        pr_results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
+            except Exception:
+                continue
+        return "\n".join(pr_results[:100]) or "(none found)"
+
+    def pr_submit(inp: dict[str, Any]) -> str:
+        perf_result.update(inp)
+        return "Performance review submitted"
+
+    handlers["find_sql"] = pr_find_sql
+    handlers["run_sql"] = pr_run_sql
+    handlers["explain_query"] = pr_explain_query
+    handlers["list_functions"] = pr_list_functions
+    handlers["submit_perf_review"] = pr_submit
+    handlers["_perf_result"] = perf_result
+    return handlers
+
+
+def make_style_reviewer_handlers(repo_path: str) -> dict[str, Any]:
+    """Handler factory for Style Reviewer agent."""
+    import subprocess as _sp
+
+    root = Path(repo_path)
+    handlers = make_read_only_handlers(repo_path)
+    style_result: dict[str, Any] = {}
+
+    def sr_run_linter(inp: dict[str, Any]) -> str:
+        sr_path = str(inp.get("path", "."))
+        try:
+            r = _sp.run(
+                ["python", "-m", "ruff", "check", sr_path, "--output-format=text"],
+                capture_output=True, text=True, cwd=str(root), timeout=60,
+            )
+            return (r.stdout + r.stderr).strip() or "(no linting issues)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def sr_list_functions(inp: dict[str, Any]) -> str:
+        sr_path = str(inp.get("path", "."))
+        results: list[str] = []
+        for fp in (root / sr_path).rglob("*.py"):
+            try:
+                for i, line in enumerate(fp.read_text(encoding="utf-8").splitlines(), 1):
+                    if line.strip().startswith("def ") or line.strip().startswith("async def "):
+                        results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
+            except Exception:
+                continue
+        return "\n".join(results[:100]) or "(none found)"
+
+    def sr_list_classes(inp: dict[str, Any]) -> str:
+        sr_path = str(inp.get("path", "."))
+        results: list[str] = []
+        for fp in (root / sr_path).rglob("*.py"):
+            try:
+                for i, line in enumerate(fp.read_text(encoding="utf-8").splitlines(), 1):
+                    if line.strip().startswith("class "):
+                        results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
+            except Exception:
+                continue
+        return "\n".join(results[:100]) or "(none found)"
+
+    def sr_find_todos(inp: dict[str, Any]) -> str:
+        results: list[str] = []
+        for fp in root.rglob("*.py"):
+            try:
+                for i, line in enumerate(fp.read_text(encoding="utf-8").splitlines(), 1):
+                    if "TODO" in line or "FIXME" in line or "HACK" in line:
+                        results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
+            except Exception:
+                continue
+        return "\n".join(results[:80]) or "(no TODOs found)"
+
+    def sr_submit(inp: dict[str, Any]) -> str:
+        style_result.update(inp)
+        return "Style review submitted"
+
+    handlers["run_linter"] = sr_run_linter
+    handlers["list_functions"] = sr_list_functions
+    handlers["list_classes"] = sr_list_classes
+    handlers["find_todos"] = sr_find_todos
+    handlers["submit_style_review"] = sr_submit
+    handlers["_style_result"] = style_result
+    return handlers
+
+
+def make_sprint_planner_handlers(repo_path: str) -> dict[str, Any]:
+    """Handler factory for Sprint Planner agent."""
+    root = Path(repo_path)
+    handlers = make_read_only_handlers(repo_path)
+    sprint_result: dict[str, Any] = {}
+
+    def sp_estimate_complexity(inp: dict[str, Any]) -> str:
+        description = str(inp.get("description", ""))
+        context_paths = list(inp.get("context_paths", []))
+        # Heuristic: word count of description + number of context files
+        word_count = len(description.split())
+        file_count = len(context_paths)
+        score = word_count + file_count * 10
+        if score < 30:
+            size = "XS"
+        elif score < 80:
+            size = "S"
+        elif score < 200:
+            size = "M"
+        elif score < 500:
+            size = "L"
+        else:
+            size = "XL"
+        return f"Estimated complexity: {size} (word_count={word_count}, context_files={file_count}, score={score})"
+
+    def sp_submit(inp: dict[str, Any]) -> str:
+        sprint_result.update(inp)
+        return "Sprint plan submitted"
+
+    handlers["estimate_complexity"] = sp_estimate_complexity
+    handlers["submit_sprint_plan"] = sp_submit
+    handlers["_sprint_result"] = sprint_result
+    return handlers
+
+
+def make_business_analyst_handlers(repo_path: str) -> dict[str, Any]:
+    """Handler factory for Business Analyst agent."""
+    handlers = make_read_only_handlers(repo_path)
+    ba_result: dict[str, Any] = {}
+
+    def ba_submit(inp: dict[str, Any]) -> str:
+        ba_result.update(inp)
+        return "Business analysis submitted"
+
+    handlers["submit_ba_result"] = ba_submit
+    handlers["_ba_result"] = ba_result
+    return handlers
+
+
+def make_migration_agent_handlers(repo_path: str) -> dict[str, Any]:
+    """Handler factory for Migration Agent."""
+    import subprocess as _sp
+    from app.config import get_settings as _gs
+
+    root = Path(repo_path)
+    handlers = make_read_only_handlers(repo_path)
+    migration_result: dict[str, Any] = {}
+
+    _MIGRATION_BASH_ALLOWLIST = (
+        "alembic upgrade",
+        "alembic downgrade",
+        "alembic revision",
+        "alembic history",
+        "alembic current",
+        "alembic heads",
+        "git diff",
+        "git status",
+        "git log",
+    )
+
+    def mg_run_sql(inp: dict[str, Any]) -> str:
+        sql = str(inp["query"]).strip()
+        settings = _gs()
+        db_url = getattr(settings, "database_url", "")
+        if not db_url:
+            return "[ERROR] DATABASE_URL not set"
+        low = sql.lower()
+        if any(k in low for k in ("drop table", "truncate", "delete from")):
+            return "[POLICY DENIED] Destructive SQL blocked in migration agent"
+        try:
+            r = _sp.run(["psql", db_url, "-c", sql, "--no-psqlrc"],
+                        capture_output=True, text=True, timeout=30)
+            return (r.stdout + r.stderr).strip() or "(no output)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def mg_inspect_schema(inp: dict[str, Any]) -> str:
+        settings = _gs()
+        db_url = getattr(settings, "database_url", "")
+        if not db_url:
+            return "[ERROR] DATABASE_URL not set"
+        tbl = inp.get("table")
+        sql = (f"\\d+ {tbl}" if tbl else "\\dt+")
+        try:
+            r = _sp.run(["psql", db_url, "-c", sql, "--no-psqlrc"],
+                        capture_output=True, text=True, timeout=20)
+            return (r.stdout + r.stderr).strip() or "(no output)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def mg_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        if _is_protected_path(rel):
+            return f"[POLICY DENIED] Protected path: {rel}"
+        # Migration agent may only write to migrations/ or backend/migrations/
+        if not (rel.startswith("migrations/") or rel.startswith("backend/migrations/") or rel.endswith(".py")):
+            return f"[POLICY DENIED] Migration agent may only write migration files: {rel}"
+        content = str(inp["content"])
+        try:
+            fp = root / rel
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            fp.write_text(content, encoding="utf-8")
+            return f"Written: {rel}"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def mg_bash(inp: dict[str, Any]) -> str:
+        cmd = str(inp["command"]).strip()
+        if not any(cmd.startswith(a) for a in _MIGRATION_BASH_ALLOWLIST):
+            return f"[POLICY DENIED] bash not allowed in migration agent for: {cmd}"
+        try:
+            r = _sp.run(cmd, shell=True, capture_output=True, text=True, cwd=str(root), timeout=60)
+            return (r.stdout + r.stderr).strip() or "(no output)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def mg_submit(inp: dict[str, Any]) -> str:
+        migration_result.update(inp)
+        return "Migration submitted"
+
+    handlers["run_sql"] = mg_run_sql
+    handlers["inspect_schema"] = mg_inspect_schema
+    handlers["write_file"] = mg_write_file
+    handlers["bash"] = mg_bash
+    handlers["submit_migration"] = mg_submit
+    handlers["_migration_result"] = migration_result
+    return handlers
+
+
+def make_schema_agent_handlers(repo_path: str) -> dict[str, Any]:
+    """Handler factory for Schema Agent."""
+    import subprocess as _sp
+    from app.config import get_settings as _gs
+
+    root = Path(repo_path)
+    handlers = make_read_only_handlers(repo_path)
+    schema_result: dict[str, Any] = {}
+
+    def sa_run_sql(inp: dict[str, Any]) -> str:
+        sql = str(inp["query"]).strip()
+        settings = _gs()
+        db_url = getattr(settings, "database_url", "")
+        if not db_url:
+            return "[ERROR] DATABASE_URL not set"
+        low = sql.lower()
+        if any(k in low for k in ("drop ", "delete ", "truncate ")):
+            return "[POLICY DENIED] Schema agent cannot run destructive SQL"
+        try:
+            r = _sp.run(["psql", db_url, "-c", sql, "--no-psqlrc"],
+                        capture_output=True, text=True, timeout=30)
+            return (r.stdout + r.stderr).strip() or "(no output)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def sa_inspect_schema(inp: dict[str, Any]) -> str:
+        settings = _gs()
+        db_url = getattr(settings, "database_url", "")
+        if not db_url:
+            return "[ERROR] DATABASE_URL not set"
+        tbl = inp.get("table")
+        sql = (f"\\d+ {tbl}" if tbl else "\\dt+")
+        try:
+            r = _sp.run(["psql", db_url, "-c", sql, "--no-psqlrc"],
+                        capture_output=True, text=True, timeout=20)
+            return (r.stdout + r.stderr).strip() or "(no output)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def sa_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        if _is_protected_path(rel):
+            return f"[POLICY DENIED] Protected path: {rel}"
+        content = str(inp["content"])
+        try:
+            fp = root / rel
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            fp.write_text(content, encoding="utf-8")
+            return f"Written: {rel}"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def sa_submit(inp: dict[str, Any]) -> str:
+        schema_result.update(inp)
+        return "Schema design submitted"
+
+    handlers["run_sql"] = sa_run_sql
+    handlers["inspect_schema"] = sa_inspect_schema
+    handlers["write_file"] = sa_write_file
+    handlers["submit_schema"] = sa_submit
+    handlers["_schema_result"] = schema_result
+    return handlers
+
+
+def make_ai_engineer_handlers(repo_path: str) -> dict[str, Any]:
+    """Handler factory for AI/ML Engineer agent."""
+    import subprocess as _sp
+    import textwrap as _tw
+
+    root = Path(repo_path)
+    handlers = make_read_only_handlers(repo_path)
+    ai_result: dict[str, Any] = {}
+
+    _AI_BASH_ALLOWLIST = (
+        "python ",
+        "python3 ",
+        "pip install ",
+        "pip show ",
+        "pip list",
+        "pytest ",
+        "python -m ",
+        "python3 -m ",
+        "echo ",
+        "cat ",
+        "ls ",
+    )
+
+    def ae_run_python_snippet(inp: dict[str, Any]) -> str:
+        code = str(inp["code"])
+        try:
+            r = _sp.run(
+                ["python", "-c", code],
+                capture_output=True, text=True, cwd=str(root), timeout=30,
+            )
+            return (r.stdout + r.stderr).strip() or "(no output)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def ae_bash(inp: dict[str, Any]) -> str:
+        cmd = str(inp["command"]).strip()
+        if not any(cmd.startswith(a) for a in _AI_BASH_ALLOWLIST):
+            return f"[POLICY DENIED] bash not allowed in ai_engineer for: {cmd}"
+        try:
+            r = _sp.run(cmd, shell=True, capture_output=True, text=True, cwd=str(root), timeout=120)
+            return (r.stdout + r.stderr).strip() or "(no output)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def ae_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        if _is_protected_path(rel):
+            return f"[POLICY DENIED] Protected path: {rel}"
+        content = str(inp["content"])
+        try:
+            fp = root / rel
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            fp.write_text(content, encoding="utf-8")
+            return f"Written: {rel}"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def ae_fetch_url(inp: dict[str, Any]) -> str:
+        import urllib.request as _ur
+        url = str(inp["url"])
+        try:
+            with _ur.urlopen(url, timeout=10) as resp:
+                body = resp.read(8192).decode("utf-8", errors="replace")
+            return body[:2000]
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def ae_submit(inp: dict[str, Any]) -> str:
+        ai_result.update(inp)
+        return "AI engineering result submitted"
+
+    handlers["run_python_snippet"] = ae_run_python_snippet
+    handlers["bash"] = ae_bash
+    handlers["write_file"] = ae_write_file
+    handlers["fetch_url"] = ae_fetch_url
+    handlers["submit_ai_result"] = ae_submit
+    handlers["_ai_result"] = ai_result
+    return handlers
+
+
+def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
+    """Handler factory for Cleanup Agent."""
+    import subprocess as _sp
+
+    root = Path(repo_path)
+    handlers = make_read_only_handlers(repo_path)
+    cleanup_result: dict[str, Any] = {}
+
+    _CLEANUP_BASH_ALLOWLIST = (
+        "python -m ruff",
+        "python -m isort",
+        "python -m black",
+        "find ",
+        "grep ",
+        "ls ",
+        "cat ",
+        "echo ",
+        "python -m mypy",
+    )
+
+    def cu_dead_code_detect(inp: dict[str, Any]) -> str:
+        cu_dir = str(inp.get("directory", "."))
+        try:
+            from app.repo_tools import ast_engine as _ae
+            return _ae.detect_dead_code(str(root / cu_dir))
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def cu_find_todos(inp: dict[str, Any]) -> str:
+        results: list[str] = []
+        for fp in root.rglob("*.py"):
+            try:
+                for i, line in enumerate(fp.read_text(encoding="utf-8").splitlines(), 1):
+                    if any(t in line for t in ("TODO", "FIXME", "HACK", "XXX")):
+                        results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
+            except Exception:
+                continue
+        return "\n".join(results[:80]) or "(none found)"
+
+    def cu_organize_imports(inp: dict[str, Any]) -> str:
+        cu_path = str(inp["path"])
+        if _is_protected_path(cu_path):
+            return f"[POLICY DENIED] Protected path: {cu_path}"
+        try:
+            r = _sp.run(
+                ["python", "-m", "isort", cu_path, "--diff"],
+                capture_output=True, text=True, cwd=str(root), timeout=30,
+            )
+            return (r.stdout + r.stderr).strip() or "(no changes needed)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def cu_delete_file(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        if _is_protected_path(rel):
+            return f"[POLICY DENIED] Protected path: {rel}"
+        fp = root / rel
+        if not fp.exists():
+            return f"[ERROR] File not found: {rel}"
+        try:
+            fp.unlink()
+            return f"Deleted: {rel}"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def cu_edit_file(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        if _is_protected_path(rel):
+            return f"[POLICY DENIED] Protected path: {rel}"
+        old_s = inp["old_string"]
+        new_s = inp["new_string"]
+        fp = root / rel
+        if not fp.exists():
+            return f"[ERROR] File not found: {rel}"
+        text = fp.read_text(encoding="utf-8")
+        count = text.count(old_s)
+        if count == 0:
+            return "[ERROR] old_string not found"
+        if count > 1:
+            return f"[ERROR] old_string appears {count} times — must be unique"
+        fp.write_text(text.replace(old_s, new_s, 1), encoding="utf-8")
+        return f"Edited: {rel}"
+
+    def cu_bash(inp: dict[str, Any]) -> str:
+        cmd = str(inp["command"]).strip()
+        if not any(cmd.startswith(a) for a in _CLEANUP_BASH_ALLOWLIST):
+            return f"[POLICY DENIED] bash not allowed in cleanup agent for: {cmd}"
+        try:
+            r = _sp.run(cmd, shell=True, capture_output=True, text=True, cwd=str(root), timeout=60)
+            return (r.stdout + r.stderr).strip() or "(no output)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def cu_submit(inp: dict[str, Any]) -> str:
+        cleanup_result.update(inp)
+        return "Cleanup submitted"
+
+    handlers["dead_code_detect"] = cu_dead_code_detect
+    handlers["find_todos"] = cu_find_todos
+    handlers["organize_imports"] = cu_organize_imports
+    handlers["delete_file"] = cu_delete_file
+    handlers["edit_file"] = cu_edit_file
+    handlers["bash"] = cu_bash
+    handlers["submit_cleanup"] = cu_submit
+    handlers["_cleanup_result"] = cleanup_result
+    return handlers
+
+
+def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
+    """Handler factory for Technical Debt Agent."""
+    import subprocess as _sp
+
+    root = Path(repo_path)
+    handlers = make_read_only_handlers(repo_path)
+    tech_debt_result: dict[str, Any] = {}
+
+    def td_list_functions(inp: dict[str, Any]) -> str:
+        td_path = str(inp.get("path", "."))
+        results: list[str] = []
+        for fp in (root / td_path).rglob("*.py"):
+            try:
+                for i, line in enumerate(fp.read_text(encoding="utf-8").splitlines(), 1):
+                    if line.strip().startswith("def ") or line.strip().startswith("async def "):
+                        results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
+            except Exception:
+                continue
+        return "\n".join(results[:100]) or "(none found)"
+
+    def td_list_classes(inp: dict[str, Any]) -> str:
+        td_path = str(inp.get("path", "."))
+        results: list[str] = []
+        for fp in (root / td_path).rglob("*.py"):
+            try:
+                for i, line in enumerate(fp.read_text(encoding="utf-8").splitlines(), 1):
+                    if line.strip().startswith("class "):
+                        results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
+            except Exception:
+                continue
+        return "\n".join(results[:100]) or "(none found)"
+
+    def td_find_todos(inp: dict[str, Any]) -> str:
+        results: list[str] = []
+        for fp in root.rglob("*.py"):
+            try:
+                for i, line in enumerate(fp.read_text(encoding="utf-8").splitlines(), 1):
+                    if any(t in line for t in ("TODO", "FIXME", "HACK", "XXX")):
+                        results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
+            except Exception:
+                continue
+        return "\n".join(results[:80]) or "(none found)"
+
+    def td_run_linter(inp: dict[str, Any]) -> str:
+        td_path = str(inp.get("path", "."))
+        try:
+            r = _sp.run(
+                ["python", "-m", "ruff", "check", td_path, "--output-format=text"],
+                capture_output=True, text=True, cwd=str(root), timeout=60,
+            )
+            return (r.stdout + r.stderr).strip() or "(no linting issues)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def td_coverage_report(inp: dict[str, Any]) -> str:
+        try:
+            r = _sp.run(
+                ["python", "-m", "pytest", "--co", "-q", "--no-header"],
+                capture_output=True, text=True, cwd=str(root), timeout=60,
+            )
+            return (r.stdout + r.stderr).strip() or "(no output)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def td_submit(inp: dict[str, Any]) -> str:
+        tech_debt_result.update(inp)
+        return "Tech debt analysis submitted"
+
+    handlers["list_functions"] = td_list_functions
+    handlers["list_classes"] = td_list_classes
+    handlers["find_todos"] = td_find_todos
+    handlers["run_linter"] = td_run_linter
+    handlers["coverage_report"] = td_coverage_report
+    handlers["submit_tech_debt"] = td_submit
+    handlers["_tech_debt_result"] = tech_debt_result
+    return handlers
+
+
 CHAT_TOOLS = READ_ONLY_TOOLS + [
     _EDIT_FILE_TOOL_SPEC,
     _WRITE_FILE_TOOL_SPEC,
@@ -3472,6 +4586,32 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _EXPLAIN_QUERY_TOOL,
     _RUN_MIGRATION_TOOL,
     _SEED_DATABASE_TOOL,
+    # Day 3A — Browser tools
+    _BROWSER_OPEN_TOOL,
+    _BROWSER_NAVIGATE_TOOL,
+    _BROWSER_SCREENSHOT_TOOL,
+    _BROWSER_READ_DOM_TOOL,
+    _BROWSER_CLICK_TOOL,
+    _BROWSER_TYPE_TOOL,
+    _BROWSER_CLOSE_TOOL,
+    # Day 3B — Memory tools
+    _MEMORY_READ_TOOL,
+    _MEMORY_WRITE_TOOL,
+    _DECISION_LOG_APPEND_TOOL,
+    _TASK_HISTORY_QUERY_TOOL,
+    _KNOWN_ISSUES_READ_TOOL,
+    _KNOWN_ISSUES_WRITE_TOOL,
+    # Day 3C — Planning + docs tools
+    _ESTIMATE_COMPLEXITY_TOOL,
+    _SUMMARIZE_FOLDER_TOOL,
+    _GENERATE_API_DOCS_TEXT_TOOL,
+    _MERMAID_FROM_SCHEMA_TOOL,
+    # Day 3G — MCP / External integrations
+    _GITHUB_CREATE_ISSUE_TOOL,
+    _GITHUB_LIST_PRS_TOOL,
+    _GITHUB_COMMENT_TOOL,
+    _LINEAR_CREATE_ISSUE_TOOL,
+    _SLACK_SEND_MESSAGE_TOOL,
 ]
 
 # Commands that require user confirmation before running
@@ -5317,5 +6457,404 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["explain_query"] = explain_query_h
     handlers["run_migration"] = run_migration_h
     handlers["seed_database"] = seed_database_h
+
+    # =========================================================================
+    # DAY 3A — Browser tools (Playwright)
+    # =========================================================================
+
+    def browser_open_h(inp: dict[str, Any]) -> str:
+        try:
+            from app.repo_tools import browser_driver as _bd
+            result = _bd.browser_open(str(inp["url"]))
+            return f"Opened: {result['url']} — title: {result['title']}"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def browser_navigate_h(inp: dict[str, Any]) -> str:
+        try:
+            from app.repo_tools import browser_driver as _bd
+            result = _bd.browser_navigate(str(inp["url"]))
+            return f"Navigated to: {result['url']} — title: {result['title']}"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def browser_screenshot_h(inp: dict[str, Any]) -> str:
+        try:
+            from app.repo_tools import browser_driver as _bd
+            path_out = _bd.browser_screenshot(inp.get("path"))
+            return f"Screenshot saved: {path_out}"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def browser_read_dom_h(inp: dict[str, Any]) -> str:
+        try:
+            from app.repo_tools import browser_driver as _bd
+            return _bd.browser_read_dom(inp.get("selector"))
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def browser_click_h(inp: dict[str, Any]) -> str:
+        try:
+            from app.repo_tools import browser_driver as _bd
+            return _bd.browser_click(str(inp["selector"]))
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def browser_type_h(inp: dict[str, Any]) -> str:
+        try:
+            from app.repo_tools import browser_driver as _bd
+            return _bd.browser_type(str(inp["selector"]), str(inp["text"]))
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def browser_close_h(inp: dict[str, Any]) -> str:
+        try:
+            from app.repo_tools import browser_driver as _bd
+            return _bd.browser_close()
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    handlers["browser_open"] = browser_open_h
+    handlers["browser_navigate"] = browser_navigate_h
+    handlers["browser_screenshot"] = browser_screenshot_h
+    handlers["browser_read_dom"] = browser_read_dom_h
+    handlers["browser_click"] = browser_click_h
+    handlers["browser_type"] = browser_type_h
+    handlers["browser_close"] = browser_close_h
+
+    # =========================================================================
+    # DAY 3B — Memory tools (flat JSON files per repo slug)
+    # =========================================================================
+
+    import json as _json_mem
+    import hashlib as _hlib
+    import fcntl as _fcntl
+
+    _mem_slug = _hlib.md5(repo_path.encode()).hexdigest()[:8]
+    _mem_dir = Path(__file__).parent.parent / "memory"
+    _mem_dir.mkdir(exist_ok=True)
+    _mem_store_path = _mem_dir / f"{_mem_slug}_store.json"
+    _mem_decisions_path = _mem_dir / f"{_mem_slug}_decisions.jsonl"
+    _mem_issues_path = _mem_dir / f"{_mem_slug}_known_issues.md"
+
+    def _read_mem_store() -> dict[str, str]:
+        if not _mem_store_path.exists():
+            return {}
+        try:
+            return dict(_json_mem.loads(_mem_store_path.read_text(encoding="utf-8")))
+        except Exception:
+            return {}
+
+    def _write_mem_store(store: dict[str, str]) -> None:
+        with open(_mem_store_path, "w", encoding="utf-8") as _fh:
+            _fcntl.flock(_fh, _fcntl.LOCK_EX)
+            _json_mem.dump(store, _fh, indent=2)
+            _fcntl.flock(_fh, _fcntl.LOCK_UN)
+
+    def memory_read_h(inp: dict[str, Any]) -> str:
+        key = str(inp["key"])
+        store = _read_mem_store()
+        val = store.get(key)
+        return val if val is not None else f"(key '{key}' not found in memory)"
+
+    def memory_write_h(inp: dict[str, Any]) -> str:
+        key = str(inp["key"])
+        value = str(inp["value"])
+        store = _read_mem_store()
+        store[key] = value
+        _write_mem_store(store)
+        return f"Memory written: {key}"
+
+    def decision_log_append_h(inp: dict[str, Any]) -> str:
+        import datetime as _dt
+        entry = {
+            "timestamp": _dt.datetime.utcnow().isoformat(),
+            "decision": str(inp["decision"]),
+            "reason": str(inp["reason"]),
+            "alternatives": str(inp.get("alternatives", "")),
+        }
+        try:
+            with open(_mem_decisions_path, "a", encoding="utf-8") as _fh:
+                _fcntl.flock(_fh, _fcntl.LOCK_EX)
+                _fh.write(_json_mem.dumps(entry) + "\n")
+                _fcntl.flock(_fh, _fcntl.LOCK_UN)
+            return f"Decision logged: {entry['decision'][:80]}"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def task_history_query_h(inp: dict[str, Any]) -> str:
+        import subprocess as _sp_mem
+        from app.config import get_settings as _gs_mem
+        settings = _gs_mem()
+        db_url = getattr(settings, "database_url", "")
+        if not db_url:
+            return "[ERROR] DATABASE_URL not set"
+        limit = int(inp.get("limit", 20))
+        status_filter = inp.get("status")
+        sql = "SELECT id, status, created_at FROM task_logs"
+        if status_filter:
+            sql += f" WHERE status = '{status_filter}'"
+        sql += f" ORDER BY created_at DESC LIMIT {limit};"
+        try:
+            r = _sp_mem.run(["psql", db_url, "-c", sql, "--no-psqlrc"],
+                            capture_output=True, text=True, timeout=15)
+            return (r.stdout + r.stderr).strip() or "(no output)"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def known_issues_read_h(inp: dict[str, Any]) -> str:
+        if not _mem_issues_path.exists():
+            return "(no known issues file yet)"
+        return _mem_issues_path.read_text(encoding="utf-8")
+
+    def known_issues_write_h(inp: dict[str, Any]) -> str:
+        import datetime as _dt
+        issue = str(inp["issue"])
+        severity = str(inp.get("severity", "medium")).upper()
+        line = f"\n## [{severity}] {_dt.datetime.utcnow().strftime('%Y-%m-%d')}\n{issue}\n"
+        try:
+            with open(_mem_issues_path, "a", encoding="utf-8") as _fh:
+                _fcntl.flock(_fh, _fcntl.LOCK_EX)
+                _fh.write(line)
+                _fcntl.flock(_fh, _fcntl.LOCK_UN)
+            return f"Known issue appended (severity: {severity})"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    handlers["memory_read"] = memory_read_h
+    handlers["memory_write"] = memory_write_h
+    handlers["decision_log_append"] = decision_log_append_h
+    handlers["task_history_query"] = task_history_query_h
+    handlers["known_issues_read"] = known_issues_read_h
+    handlers["known_issues_write"] = known_issues_write_h
+
+    # =========================================================================
+    # DAY 3C — Planning + docs tools
+    # =========================================================================
+
+    def estimate_complexity_h(inp: dict[str, Any]) -> str:
+        description = str(inp.get("description", ""))
+        context_paths = list(inp.get("context_paths", []))
+        word_count = len(description.split())
+        file_count = len(context_paths)
+        score = word_count + file_count * 10
+        if score < 30:
+            size = "XS"
+        elif score < 80:
+            size = "S"
+        elif score < 200:
+            size = "M"
+        elif score < 500:
+            size = "L"
+        else:
+            size = "XL"
+        return f"Estimated complexity: {size} (word_count={word_count}, context_files={file_count}, score={score})"
+
+    def summarize_folder_h(inp: dict[str, Any]) -> str:
+        sf_path = str(inp.get("path", "."))
+        exts = set(inp.get("extensions", [".py", ".ts", ".tsx"]))
+        results: list[str] = []
+        folder = root / sf_path
+        if not folder.exists():
+            return f"[ERROR] Path not found: {sf_path}"
+        count = 0
+        for fp in sorted(folder.rglob("*")):
+            if not fp.is_file():
+                continue
+            if fp.suffix not in exts:
+                continue
+            if count >= 20:
+                results.append("(truncated — 20 file limit)")
+                break
+            try:
+                text = fp.read_text(encoding="utf-8", errors="replace")
+                lines = text.splitlines()
+                n_lines = len(lines)
+                n_funcs = sum(1 for l in lines if l.strip().startswith("def ") or l.strip().startswith("async def "))
+                n_classes = sum(1 for l in lines if l.strip().startswith("class "))
+                rel = fp.relative_to(root)
+                results.append(f"**{rel}** — {n_lines} lines, {n_funcs} functions, {n_classes} classes")
+            except Exception as e:
+                results.append(f"[ERROR reading {fp.name}] {e}")
+            count += 1
+        return "\n".join(results) if results else "(no matching files)"
+
+    def generate_api_docs_text_h(inp: dict[str, Any]) -> str:
+        import re as _re_docs
+        route_path = str(inp["route_path"])
+        fp = root / route_path
+        if not fp.exists():
+            return f"[ERROR] File not found: {route_path}"
+        try:
+            text = fp.read_text(encoding="utf-8")
+        except Exception as e:
+            return f"[ERROR] {e}"
+        lines = text.splitlines()
+        endpoints: list[str] = []
+        for i, line in enumerate(lines):
+            m = _re_docs.match(r'\s*@\w+\.(get|post|put|patch|delete|options|head)\s*\("([^"]+)"', line)
+            if m:
+                method = m.group(1).upper()
+                path_val = m.group(2)
+                # Find the next def line
+                func_name = ""
+                for j in range(i + 1, min(i + 5, len(lines))):
+                    fm = _re_docs.match(r'\s*(?:async\s+)?def\s+(\w+)', lines[j])
+                    if fm:
+                        func_name = fm.group(1)
+                        break
+                endpoints.append(f"### {method} {path_val}\n**Function:** `{func_name}`\n\n**Description:** _TODO_\n\n**Request:** _TODO_\n\n**Response:** _TODO_\n")
+        if not endpoints:
+            return "(no FastAPI route decorators found)"
+        return "\n".join(endpoints)
+
+    def mermaid_from_schema_h(inp: dict[str, Any]) -> str:
+        import subprocess as _sp_merm
+        from app.config import get_settings as _gs_merm
+        settings = _gs_merm()
+        db_url = getattr(settings, "database_url", "")
+        if not db_url:
+            return "[ERROR] DATABASE_URL not set"
+        tbl = inp.get("table")
+        sql = (f"\\d {tbl}" if tbl else "\\dt+")
+        try:
+            r = _sp_merm.run(["psql", db_url, "-c", sql, "--no-psqlrc"],
+                             capture_output=True, text=True, timeout=15)
+            raw = (r.stdout + r.stderr).strip()
+        except Exception as e:
+            return f"[ERROR] {e}"
+        # Build a basic Mermaid erDiagram from psql table listing
+        lines = ["```mermaid", "erDiagram"]
+        for row in raw.splitlines():
+            parts = row.split("|")
+            if len(parts) >= 2:
+                tname = parts[1].strip()
+                if tname and not tname.startswith("-") and tname not in ("Name", "Schema"):
+                    lines.append(f"    {tname} {{")
+                    lines.append(f"        string id")
+                    lines.append(f"    }}")
+        lines.append("```")
+        return "\n".join(lines) if len(lines) > 3 else f"(raw schema)\n{raw}"
+
+    handlers["estimate_complexity"] = estimate_complexity_h
+    handlers["summarize_folder"] = summarize_folder_h
+    handlers["generate_api_docs_text"] = generate_api_docs_text_h
+    handlers["mermaid_from_schema"] = mermaid_from_schema_h
+
+    # =========================================================================
+    # DAY 3G — MCP / External integrations
+    # =========================================================================
+
+    import subprocess as _sp_mcp
+    import os as _os_mcp
+
+    def github_create_issue_h(inp: dict[str, Any]) -> str:
+        title = str(inp["title"])
+        body = str(inp["body"])
+        labels = list(inp.get("labels", []))
+        cmd = ["gh", "issue", "create", "--title", title, "--body", body]
+        for lbl in labels:
+            cmd += ["--label", lbl]
+        try:
+            r = _sp_mcp.run(cmd, capture_output=True, text=True, cwd=str(root), timeout=30)
+            return (r.stdout + r.stderr).strip() or "(no output)"
+        except FileNotFoundError:
+            return "[ERROR] gh CLI not found — install GitHub CLI"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def github_list_prs_h(inp: dict[str, Any]) -> str:
+        state = str(inp.get("state", "open"))
+        try:
+            r = _sp_mcp.run(
+                ["gh", "pr", "list", "--state", state, "--json", "number,title,state,author"],
+                capture_output=True, text=True, cwd=str(root), timeout=30,
+            )
+            return (r.stdout + r.stderr).strip() or "(no output)"
+        except FileNotFoundError:
+            return "[ERROR] gh CLI not found"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def github_comment_h(inp: dict[str, Any]) -> str:
+        number = int(inp["number"])
+        body = str(inp["body"])
+        kind = str(inp.get("kind", "issue"))
+        subcmd = "pr" if kind == "pr" else "issue"
+        try:
+            r = _sp_mcp.run(
+                ["gh", subcmd, "comment", str(number), "--body", body],
+                capture_output=True, text=True, cwd=str(root), timeout=30,
+            )
+            return (r.stdout + r.stderr).strip() or "Comment posted"
+        except FileNotFoundError:
+            return "[ERROR] gh CLI not found"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def linear_create_issue_h(inp: dict[str, Any]) -> str:
+        import urllib.request as _ur_li
+        import urllib.error as _ue_li
+        api_key = _os_mcp.environ.get("LINEAR_API_KEY", "")
+        if not api_key:
+            return "[ERROR] LINEAR_API_KEY not set"
+        title = str(inp["title"])
+        description = str(inp["description"])
+        team_key = str(inp["team_key"])
+        # First resolve team key → team ID
+        query = f'{{"query": "query {{ teams {{ nodes {{ id key }} }} }}"}}'
+        try:
+            req = _ur_li.Request(
+                "https://api.linear.app/graphql",
+                data=query.encode(),
+                headers={"Content-Type": "application/json", "Authorization": api_key},
+            )
+            with _ur_li.urlopen(req, timeout=10) as resp:
+                data = __import__("json").loads(resp.read())
+            teams = data.get("data", {}).get("teams", {}).get("nodes", [])
+            team_id = next((t["id"] for t in teams if t["key"] == team_key), None)
+            if not team_id:
+                return f"[ERROR] Team '{team_key}' not found in Linear"
+            mut = __import__("json").dumps({
+                "query": "mutation($title: String!, $desc: String!, $tid: String!) { issueCreate(input: {title: $title, description: $desc, teamId: $tid}) { issue { id identifier title } } }",
+                "variables": {"title": title, "desc": description, "tid": team_id},
+            })
+            req2 = _ur_li.Request(
+                "https://api.linear.app/graphql",
+                data=mut.encode(),
+                headers={"Content-Type": "application/json", "Authorization": api_key},
+            )
+            with _ur_li.urlopen(req2, timeout=10) as resp2:
+                data2 = __import__("json").loads(resp2.read())
+            issue = data2.get("data", {}).get("issueCreate", {}).get("issue", {})
+            return f"Linear issue created: {issue.get('identifier', '?')} — {issue.get('title', title)}"
+        except _ue_li.HTTPError as e:
+            return f"[ERROR] Linear API {e.code}: {e.read().decode()[:200]}"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    def slack_send_message_h(inp: dict[str, Any]) -> str:
+        import urllib.request as _ur_sl
+        import urllib.error as _ue_sl
+        webhook_url = _os_mcp.environ.get("SLACK_WEBHOOK_URL", "")
+        if not webhook_url:
+            return "[ERROR] SLACK_WEBHOOK_URL not set"
+        text = str(inp["text"])
+        payload = __import__("json").dumps({"text": text}).encode()
+        try:
+            req = _ur_sl.Request(webhook_url, data=payload, headers={"Content-Type": "application/json"})
+            with _ur_sl.urlopen(req, timeout=10) as resp:
+                body = resp.read().decode()
+            return f"Slack message sent: {body}"
+        except _ue_sl.HTTPError as e:
+            return f"[ERROR] Slack webhook {e.code}: {e.read().decode()[:200]}"
+        except Exception as e:
+            return f"[ERROR] {e}"
+
+    handlers["github_create_issue"] = github_create_issue_h
+    handlers["github_list_prs"] = github_list_prs_h
+    handlers["github_comment"] = github_comment_h
+    handlers["linear_create_issue"] = linear_create_issue_h
+    handlers["slack_send_message"] = slack_send_message_h
 
     return handlers
