@@ -1,7 +1,7 @@
 """Specialized-agent dispatch router.
 
 POST /api/specialized-agents/{agent_name}/run
-  → runs any of the 20 worker agents (Day 2 + Day 3) on a task in a background thread
+  → runs any of the 27 worker agents on a task in a background thread
   → saves AgentResult as an artifact and writes to task_logs
 
 Supported agent names:
@@ -10,6 +10,8 @@ Supported agent names:
           dependency_agent, monitoring_agent
   Day 3: performance_reviewer, style_reviewer, sprint_planner, business_analyst,
           migration_agent, schema_agent, ai_engineer, cleanup_agent, tech_debt_agent
+  Gap: release_notes_agent, evaluation_agent, rag_engineer_agent, changelog_agent,
+       user_story_generator, security_architect, database_architect
 """
 from __future__ import annotations
 
@@ -56,6 +58,14 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     "ai_engineer":          ("app.agents.ai_engineer",          "run_ai_engineer"),
     "cleanup_agent":        ("app.agents.cleanup_agent",        "run_cleanup_agent"),
     "tech_debt_agent":      ("app.agents.tech_debt_agent",      "run_tech_debt_agent"),
+    # Gap agents
+    "release_notes_agent":  ("app.agents.release_notes_agent",  "run_release_notes_agent"),
+    "evaluation_agent":     ("app.agents.evaluation_agent",     "run_evaluation_agent"),
+    "rag_engineer_agent":   ("app.agents.rag_engineer_agent",   "run_rag_engineer_agent"),
+    "changelog_agent":      ("app.agents.changelog_agent",      "run_changelog_agent"),
+    "user_story_generator": ("app.agents.user_story_generator", "run_user_story_generator"),
+    "security_architect":   ("app.agents.security_architect",   "run_security_architect"),
+    "database_architect":   ("app.agents.database_architect",   "run_database_architect"),
 }
 
 SUPPORTED_AGENTS = sorted(_REGISTRY.keys())

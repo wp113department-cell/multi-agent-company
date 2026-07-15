@@ -67,8 +67,21 @@ class Settings(BaseSettings):
     # Phase 7 — Executive Agent
     executive_max_epics_per_goal: int = Field(default=5, description="Max epics the Executive Agent may create from a single goal")
 
-    # Phase 7 — Queue adapter backend (asyncio | bullmq)
-    queue_backend: str = Field(default="asyncio", description="Task queue backend: asyncio (in-process) or bullmq (Redis)")
+    # Phase 7 — Queue adapter backend (asyncio | rq)
+    queue_backend: str = Field(default="asyncio", description="Task queue backend: asyncio (in-process) or rq (Redis Queue)")
+
+    # Redis — used by RQ queue adapter and Redis Streams event bus
+    redis_url: str = Field(default="redis://localhost:6379/0", description="Redis connection URL for RQ queue and Redis Streams event bus.")
+    redis_streams_enabled: bool = Field(default=False, description="Publish events to Redis Streams in addition to the in-process bus.")
+    redis_consumer_group: str = Field(default="gridiron-consumers", description="Redis Streams consumer group name.")
+
+    # S3 artifact storage (optional — falls back to DB when unset)
+    artifact_backend: str = Field(default="db", description="Artifact storage backend: 'db' (PostgreSQL) or 's3' (AWS S3).")
+    s3_bucket: str = Field(default="", description="S3 bucket name for artifact storage. Required when artifact_backend=s3.")
+    s3_region: str = Field(default="us-east-1", description="AWS region for the S3 bucket.")
+    s3_key_prefix: str = Field(default="gridiron/artifacts/", description="Key prefix for all S3 artifact objects.")
+    aws_access_key_id: str = Field(default="", description="AWS access key ID. Leave empty to use IAM role / environment credentials.")
+    aws_secret_access_key: str = Field(default="", description="AWS secret access key. Leave empty to use IAM role / environment credentials.")
 
     # Observability — Sentry (optional; leave empty to disable)
     sentry_dsn: str = Field(default="", description="Sentry DSN for error tracking. Leave empty to disable Sentry.")
