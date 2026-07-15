@@ -1,10 +1,21 @@
-"""In-memory chat session store — one session per browser tab."""
+"""Chat session model — in-memory state + optional DB persistence.
+
+Sessions are always held in-memory (for low-latency SSE streaming).
+When a DB session factory is available, messages are also written to the
+`chat_messages` table so history survives server restarts.
+
+DB persistence is opt-in per-call: pass `db_factory` to `create_session()`
+or call `load_history_from_db()` / `save_message_to_db()` explicitly.
+"""
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -57,3 +68,59 @@ def get_session(session_id: str) -> ChatSession | None:
 
 def delete_session(session_id: str) -> None:
     _sessions.pop(session_id, None)
+
+
+# ---------------------------------------------------------------------------
+# DB persistence helpers
+# ---------------------------------------------------------------------------
+
+async def save_message_to_db(
+    session_id: str,
+    repo_path: str,
+    role: str,
+    content: str,
+    db: Any,
+) -> None:
+    """Append one message to the chat_messages table. Never raises."""
+    try:
+        from sqlalchemy import text
+        await db.execute(
+            text(
+                "INSERT INTO chat_messages (session_id, repo_path, role, content) "
+                "VALUES (:sid, :repo, :role, :content)"
+            ),
+            {"sid": session_id, "repo": repo_path, "role": role, "content": content},
+        )
+        await db.commit()
+    except Exception as exc:
+        logger.warning("Failed to persist chat message for session %s: %s", session_id, exc)
+
+
+async def load_history_from_db(session_id: str, db: Any) -> list[dict[str, Any]]:
+    """Load message history for a session from the DB. Returns [] on error."""
+    try:
+        from sqlalchemy import text
+        rows = await db.execute(
+            text(
+                "SELECT role, content FROM chat_messages "
+                "WHERE session_id = :sid ORDER BY created_at ASC"
+            ),
+            {"sid": session_id},
+        )
+        return [{"role": str(r["role"]), "content": str(r["content"])} for r in rows.mappings().all()]
+    except Exception as exc:
+        logger.warning("Failed to load chat history for session %s: %s", session_id, exc)
+        return []
+
+
+async def get_or_restore_session(session_id: str, repo_path: str, db: Any) -> ChatSession:
+    """Return an in-memory session, restoring history from DB if the session was lost."""
+    session = get_session(session_id)
+    if session is None:
+        session = ChatSession(session_id=session_id, repo_path=repo_path)
+        _sessions[session_id] = session
+
+    if not session.history and db is not None:
+        session.history = await load_history_from_db(session_id, db)
+
+    return session

@@ -1,5 +1,7 @@
+version: "3.9"
+
 services:
-  postgres:
+  db:
     image: pgvector/pgvector:pg16
     container_name: gridiron-postgres
     restart: unless-stopped
@@ -11,6 +13,91 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gridiron -d gridiron_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: gridiron-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build:
+      context: ./backend
+    command: alembic upgrade head
+    environment:
+      DATABASE_URL: postgresql+asyncpg://gridiron:gridiron_dev_only@db:5432/gridiron_dev
+    depends_on:
+      db:
+        condition: service_healthy
+
+  backend:
+    build:
+      context: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://gridiron:gridiron_dev_only@db:5432/gridiron_dev
+      REDIS_URL: redis://redis:6379/0
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      QUEUE_BACKEND: ${QUEUE_BACKEND:-asyncio}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
+      JWT_AUTH_ENABLED: ${JWT_AUTH_ENABLED:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # RQ worker — enabled via: docker compose --profile rq up
+  worker:
+    build:
+      context: ./backend
+    command: rq worker gridiron-high gridiron-default --url ${REDIS_URL:-redis://redis:6379/0} --with-scheduler
+    environment:
+      DATABASE_URL: postgresql+asyncpg://gridiron:gridiron_dev_only@db:5432/gridiron_dev
+      REDIS_URL: redis://redis:6379/0
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - rq
+
+  # Frontend — enabled via: docker compose --profile frontend up
+  frontend:
+    build:
+      context: ./apps/web
+    command: npm run start
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    profiles:
+      - frontend
 
 volumes:
   pgdata:

@@ -6,11 +6,21 @@ import json
 import logging
 from typing import Any, AsyncGenerator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.chat import ChatSession, create_session, get_session, delete_session
+from app.db import get_db
+from app.models.chat import (
+    ChatSession,
+    create_session,
+    get_session,
+    delete_session,
+    get_or_restore_session,
+    load_history_from_db,
+    save_message_to_db,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +93,11 @@ async def create_chat_session(body: CreateSessionRequest) -> CreateSessionRespon
 
 
 @router.post("/sessions/{session_id}/messages")
-async def send_message(session_id: str, body: SendMessageRequest) -> StreamingResponse:
+async def send_message(
+    session_id: str,
+    body: SendMessageRequest,
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
     """
     Send a user message and stream the agent's response as SSE.
 
@@ -98,6 +112,7 @@ async def send_message(session_id: str, body: SendMessageRequest) -> StreamingRe
       - error                    : {"type": "error", "message": "..."}
     """
     from app.agents.chat_agent import ChatAgent  # local import to avoid circular
+    from app.db.session import get_session_factory
 
     session = _require_session(session_id)
     if session.active:
@@ -107,7 +122,8 @@ async def send_message(session_id: str, body: SendMessageRequest) -> StreamingRe
 
     # Launch agent in background — it pushes events to the queue
     agent = ChatAgent(session=session)
-    asyncio.create_task(_run_agent(agent, body.message, session))
+    factory = get_session_factory()
+    asyncio.create_task(_run_agent(agent, body.message, session, factory))
 
     return StreamingResponse(
         _event_stream(session),
@@ -120,14 +136,29 @@ async def send_message(session_id: str, body: SendMessageRequest) -> StreamingRe
     )
 
 
-async def _run_agent(agent: Any, message: str, session: ChatSession) -> None:
-    """Background task: run the agent and catch any unhandled exceptions."""
+async def _run_agent(agent: Any, message: str, session: ChatSession, db_factory: Any) -> None:
+    """Background task: run the agent, then persist user message + assistant reply to DB."""
+    history_len_before = len(session.history)
     try:
         await agent.run(message)
     except Exception as e:
         logger.exception("Unhandled error in chat agent")
         await session.push({"type": "error", "message": f"Internal error: {e}"})
         session.active = False
+        return
+
+    # Persist any new messages added during this turn
+    new_messages = session.history[history_len_before:]
+    if new_messages and db_factory is not None:
+        try:
+            async with db_factory() as db:
+                for msg in new_messages:
+                    role = str(msg.get("role", ""))
+                    content = msg.get("content", "")
+                    text = content if isinstance(content, str) else json.dumps(content)
+                    await save_message_to_db(session.session_id, session.repo_path, role, text, db)
+        except Exception as exc:
+            logger.warning("Chat history persistence failed for session %s: %s", session.session_id, exc)
 
 
 @router.post("/sessions/{session_id}/confirm")
@@ -142,12 +173,24 @@ async def confirm_action(session_id: str, body: ConfirmActionRequest) -> dict[st
 
 
 @router.get("/sessions/{session_id}/history")
-async def get_history(session_id: str) -> dict[str, object]:
-    """Return the conversation history for a session."""
-    session = _require_session(session_id)
+async def get_history(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Return the conversation history for a session.
+
+    Falls back to DB if the session was dropped from memory (e.g. server restart).
+    """
+    session = get_session(session_id)
+    if session is not None:
+        source_history = session.history
+    else:
+        # Session lost from memory — read from DB directly
+        source_history = await load_history_from_db(session_id, db)
+
     # Filter to only text content for the UI
     ui_history: list[dict[str, object]] = []
-    for msg in session.history:
+    for msg in source_history:
         role = msg.get("role", "")
         content = msg.get("content", "")
         if isinstance(content, str):
@@ -161,7 +204,7 @@ async def get_history(session_id: str) -> dict[str, object]:
             combined = "\n".join(text_parts)
             if combined.strip():
                 ui_history.append({"role": role, "content": combined})
-    return {"history": ui_history}
+    return {"history": ui_history, "session_id": session_id}
 
 
 @router.delete("/sessions/{session_id}")

@@ -105,8 +105,40 @@ async def save_artifact_async(
     created_by_agent: str,
     db: Any = None,
 ) -> ArtifactRecord:
-    """Async version of save_artifact — persists to disk then writes DB row."""
-    record = save_artifact(task_id, artifact_type, content, created_by_agent)
+    """Async version of save_artifact — persists to configured backend then writes DB row."""
+    settings = get_settings()
+
+    if settings.artifact_backend == "s3":
+        # S3 path: upload to S3, record the S3 key as storage_path
+        payload: dict[str, Any] = (
+            content if isinstance(content, dict) else {"content": content}
+        )
+        artifact_id = str(uuid.uuid4())
+        try:
+            import asyncio
+            from app.artifacts.s3_store import save_artifact_s3
+
+            s3_key = await asyncio.to_thread(
+                save_artifact_s3, int(task_id), artifact_type, artifact_id, payload
+            )
+            storage_path = f"s3://{settings.s3_bucket}/{s3_key}"
+        except Exception:
+            logger.exception("S3 upload failed for artifact %s — falling back to disk", artifact_id)
+            record = save_artifact(task_id, artifact_type, content, created_by_agent)
+            artifact_id = record.artifact_id
+            storage_path = record.storage_path
+
+        record = ArtifactRecord(
+            artifact_id=artifact_id,
+            task_id=str(task_id),
+            artifact_type=artifact_type,
+            version=1,
+            storage_path=storage_path,
+            created_by_agent=created_by_agent,
+            created_at=datetime.now(timezone.utc),
+        )
+    else:
+        record = save_artifact(task_id, artifact_type, content, created_by_agent)
 
     if db is not None:
         try:
