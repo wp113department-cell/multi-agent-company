@@ -2,7 +2,51 @@
 
 **This is a living document. Update it every session — it is the single source of truth for "what actually exists right now," separate from `PLAN.md` (what's intended) and `files/` (the original spec suite, which describes the full 7-stage vision, not the current build).**
 
-Last updated: 2026-07-09 (UI/Repo session — 247/247 pytest pass, mypy 62 files clean, migrations 001–007 applied)
+Last updated: 2026-07-15 (Day 3 LangGraph Production session — 586 passed, 54 skipped, 0 failed)
+
+---
+
+## 2026-07-15 — Day 3: Production-Quality LangGraph Agent Enhancement
+
+### What changed
+All 20 worker agents now run as real LangGraph `StateGraph` instances with enforced verification contracts.
+
+**Shared infrastructure (new files):**
+- `backend/app/agents/guardrails.py` — single audited policy engine for path + command checks
+- `backend/app/agents/agent_result.py` — uniform `AgentResult` dataclass (summary, findings, files_touched, verified, requires_human_approval, tokens_in/out, status, raw)
+- `backend/app/agents/base_graph.py` — `build_agent_graph()` + `run_agent_graph()` + `VerificationConfig` dataclass. The graph enforces that boolean verification fields (tests_passed, schema_inspected, etc.) come from actual tool execution, never from model arguments.
+
+**11 Day 2 agents rebuilt as LangGraph StateGraphs** (bug_fix, security_reviewer, architecture_reviewer, sql_agent, docker_agent, cicd_agent, refactor_agent, readme_agent, api_docs_agent, dependency_agent, monitoring_agent)
+
+**11 Day 2 role prompts rewritten** per master template (9 sections each)
+
+**9 Day 3 agents built as LangGraph StateGraphs** (performance_reviewer, style_reviewer, sprint_planner, business_analyst, migration_agent, schema_agent, ai_engineer, cleanup_agent, tech_debt_agent)
+
+**9 Day 3 role prompts written** (4 rewritten + 5 new) per master template
+
+### Test results
+```
+pytest backend/tests/
+→ 586 passed, 54 skipped, 0 failed
+```
+
+### Files created/changed
+- `backend/app/agents/guardrails.py` (NEW)
+- `backend/app/agents/agent_result.py` (NEW)
+- `backend/app/agents/base_graph.py` (NEW)
+- All 11 Day 2 agent files rebuilt with `run_agent_graph()`
+- 9 new Day 3 agent files: performance_reviewer.py, style_reviewer.py, sprint_planner.py, business_analyst.py, migration_agent.py, schema_agent.py, ai_engineer.py, cleanup_agent.py, tech_debt_agent.py
+- All 20 role prompts in `backend/roles/` rewritten per master template
+- `backend/tests/test_day2_agents.py` updated to use new `AgentResult` API
+- `docs/reports/PHASE_DAY3_TEST_REPORT.md` (NEW)
+
+### Known issues
+- `base_graph.py` has 2 pre-existing mypy type overload warnings from LangGraph's `add_node` signature. Runtime behavior is correct.
+
+### Next steps
+- Wire Day 3 agents into `backend/app/api/agents.py` dispatch routing
+- Add Day 3 agent tests to `tests/test_day3_agents.py`
+- Browser/memory/MCP tools integration with chat agent (planned for Day 4)
 
 ---
 

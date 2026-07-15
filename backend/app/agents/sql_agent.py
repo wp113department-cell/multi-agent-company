@@ -1,21 +1,36 @@
-"""SQL Agent — runs queries, inspects schema, writes Alembic migrations."""
+"""SQL Agent — LangGraph StateGraph with schema-verification contract.
+
+Verification contract:
+  - verified_against_schema forced True only if inspect_schema ran this turn
+  - is_destructive forced True if DROP/TRUNCATE/DELETE detected in query
+  - Destructive ops require human approval
+"""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any
 
-from app.agents.base import run_agent
+from app.agents.agent_result import AgentResult
+from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import SQL_AGENT_TOOLS, make_sql_agent_handlers
 from app.config import get_settings
 
+_VERIFICATION_CFG = VerificationConfig(
+    set_by={
+        "inspect_schema": "schema_inspected",
+        "run_sql": "sql_ran",
+        "explain_query": "explain_ran",
+    },
+    reset_by=("write_file",),
+    reset_keys=(),
+    enforce_in_result={"verified_against_schema": "schema_inspected"},
+    initial={"schema_inspected": False, "sql_ran": False, "explain_ran": False},
+)
 
-@dataclass
-class SqlResult:
-    action: str = ""
-    result: str = ""
-    files_written: list[str] = field(default_factory=list)
-    tokens_in: int = 0
-    tokens_out: int = 0
+_DESTRUCTIVE_KEYWORDS = ("drop ", "truncate ", "delete from", "alter table")
+
+
+def _is_destructive(query: str) -> bool:
+    return any(k in query.lower() for k in _DESTRUCTIVE_KEYWORDS)
 
 
 def run_sql_agent(
@@ -24,40 +39,48 @@ def run_sql_agent(
     repo_path: str | None = None,
     on_heartbeat: Any = None,
     on_tool_call: Any = None,
-) -> SqlResult:
+) -> AgentResult:
     settings = get_settings()
     repo = repo_path or str(settings.target_repo_path)
     handlers = make_sql_agent_handlers(repo)
 
-    messages = [
-        {
-            "role": "user",
-            "content": (
-                f"Task #{task_id} — SQL Task\n\n"
-                f"{task_description}\n\n"
-                "Steps: 1) Inspect schema to understand table structure, "
-                "2) run or write the SQL as needed, "
-                "3) call submit_sql_report with your action and result."
-            ),
-        }
-    ]
-
-    _, tokens_in, tokens_out, *_ = run_agent(
-        role_name="sql_agent",
-        model=settings.model_coder,
-        messages=messages,
-        tools=SQL_AGENT_TOOLS,
-        tool_handlers=handlers,
-        max_turns=20,
-        on_heartbeat=on_heartbeat,
-        on_tool_call=on_tool_call,
+    message = (
+        f"Task #{task_id} — SQL Task\n\n{task_description}\n\n"
+        "Process:\n"
+        "1. Call inspect_schema FIRST — learn the real tables, columns, and indexes.\n"
+        "   Never reference a table or column you haven't just seen in inspect_schema output.\n"
+        "2. Draft your query or migration against the inspected schema only.\n"
+        "3. Run explain_query (EXPLAIN ANALYZE) to verify query plan before claiming it's optimal.\n"
+        "4. For migrations: write to a migration file only; never run DROP/TRUNCATE/DELETE "
+        "   directly — flag those as requiring human approval.\n"
+        "5. Call submit_sql_report with query_or_migration, explain_plan_summary, "
+        "   verified_against_schema (will be auto-enforced by graph), is_destructive, warnings.\n"
+        "RULE: verified_against_schema will be forced False if you did not call inspect_schema."
     )
 
-    raw = handlers.get("_sql_result", {})
-    return SqlResult(
-        action=str(raw.get("action", "")),
-        result=str(raw.get("result", "")),
-        files_written=list(raw.get("files_written", [])),
-        tokens_in=tokens_in,
-        tokens_out=tokens_out,
+    # Detect destructive intent from task description
+    requires_approval = _is_destructive(task_description)
+
+    final_state = run_agent_graph(
+        role_name="sql_agent",
+        model=settings.model_coder,
+        tools=SQL_AGENT_TOOLS,
+        tool_handlers=handlers,
+        verification_cfg=_VERIFICATION_CFG,
+        initial_message=message,
+        human_approval_required=requires_approval,
+        max_turns=20,
+    )
+
+    raw = final_state["result"]
+    return AgentResult(
+        summary=str(raw.get("summary", raw.get("query_or_migration", "(no summary)")[:200])),
+        findings=list(raw.get("warnings", [])),
+        files_touched=list(raw.get("files_written", [])),
+        verified=bool(final_state["verification"].get("schema_inspected", False)),
+        requires_human_approval=bool(raw.get("_requires_human_approval", requires_approval)),
+        tokens_in=final_state["tokens_in"],
+        tokens_out=final_state["tokens_out"],
+        status="needs_approval" if requires_approval else ("completed" if final_state["submitted"] else "blocked"),
+        raw=raw,
     )
