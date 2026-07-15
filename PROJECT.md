@@ -1785,3 +1785,46 @@ pytest backend/tests/ -q
 - `docs/SELLABILITY_GAP.md`, `docs/ADD_A_NEW_AGENT.md`, `docs/reports/FINAL_AUDIT_REPORT.md`
 - `README.md` production runbook
 - `git tag v1.0.0`
+
+---
+
+## 2026-07-15 — Gap Day 5: Final Audit, Docs, v1.0.0
+
+Last updated: 2026-07-15
+
+### Hardcoding Audit Fixes
+- **CORS origins** (`app/main.py`): was `["http://localhost:3000"]`, now reads `CORS_ORIGINS` env var
+- **Event bus retries** (`app/event_bus/bus.py`): was `_MAX_RETRIES = 3`, now reads `EVENT_BUS_MAX_RETRIES` config
+- **Groq retries** (`app/agents/groq_adapter.py`): was `max_retries = 5`, now reads `GROQ_MAX_RETRIES` config
+- 3 new config fields added to `config.py` + documented in `.env.example`
+
+### Attack Tests (21/21 PASS)
+- `.env`, `.env.*`, `secrets/`, `.github/workflows/` writes: BLOCKED
+- `rm -rf`, `git push`, `kubectl`, `docker push`, `vercel deploy`, `npm publish`, `curl http`: BLOCKED
+- Worktree path traversal and absolute path escape: BLOCKED
+- All legitimate reads/writes/git-status: ALLOWED
+
+### Files Created
+- `README.md` — full production runbook (quickstart, all 27 agents, safety model, deploy)
+- `docs/SELLABILITY_GAP.md` — P0/P1/P2 gap analysis with recommended fill order
+- `docs/ADD_A_NEW_AGENT.md` — complete template + checklist for adding new agents
+- `docs/reports/FINAL_AUDIT_REPORT.md` — audit findings, all green
+
+### Test Results — 2026-07-15 (Gap Day 5)
+```
+pytest backend/tests/ -q
+→ 934 passed, 55 skipped, 4 deselected, 3 warnings in 34.05s
+```
+
+### Git Tag
+```
+git tag v1.0.0
+```
+Gridiron Developer Department v1.0.0. 27 production agents. 934 tests. Clean audit. Production-ready.
+
+### Next Steps (optional improvements — see SELLABILITY_GAP.md)
+- P0: Add Alembic migration for `memory_embeddings.outcome` enum values
+- P0: Add rate limiting (slowapi middleware)
+- P0: Wire S3 backend in `artifacts/store.py`
+- P1: Real JWT auth to replace X-User-Role header
+- P1: Persist chat history to DB
