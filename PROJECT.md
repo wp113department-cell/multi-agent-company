@@ -1651,3 +1651,49 @@ Per `docs/DAY_WISE_COMPLETION_PLAN.md`:
 - Docs tools: generate_changelog, summarize_repo, generate_release_notes
 - File types: read_pdf, read_image
 - Process management: run_background, kill_process
+
+---
+
+## Gap Day 2 — 2026-07-15
+
+### What was built (complete, tested, 0 bugs)
+
+**Goal:** Add 11 missing tools from tools_agents.md Layer 1 gap list, wire into CHAT_TOOLS + make_chat_handlers.
+
+#### New tools added to CHAT_TOOLS (131 total, was 120):
+
+| Category | Tools |
+|----------|-------|
+| Smart search | `find_queue`, `find_worker` |
+| Advanced editing | `insert_before`, `insert_after`, `delete_block` |
+| Documentation generation | `generate_changelog`, `summarize_repo`, `generate_release_notes` |
+| File types | `read_pdf` (pdfplumber), `read_image` (PIL + base64 thumbnail) |
+| GitHub | `github_create_pr` (gh CLI) |
+
+Each tool has: tool spec dict + handler in make_chat_handlers() + tests.
+
+#### Notable handler implementations:
+- `generate_changelog` — parses `git log` between refs, auto-sections into Added/Changed/Fixed/Other (Keep-a-Changelog format)
+- `summarize_repo` — walks 3-level directory tree, counts files by extension, appends README excerpt
+- `insert_before/after` — regex pattern matching, protected path guard, multi-line support
+- `delete_block` — start/end pattern delete with line count reporting
+- `read_pdf` — pdfplumber, page-by-page text extraction with page separators
+- `read_image` — PIL metadata + 256x256 thumbnail as base64 PNG
+
+#### pdfplumber installed:
+- `pdfplumber==0.11.10` added to `requirements.txt` and installed in venv
+
+### Files modified
+- `backend/app/agents/tools.py` — 11 new tool specs + 11 new handler functions + 11 entries in CHAT_TOOLS
+
+### Files created
+- `backend/tests/test_day2_tools.py` — 88 tests (87 passed + 1 skipped)
+
+### Test results — 2026-07-15 (Gap Day 2)
+- `pytest backend/tests/ -q` → **775 passed, 55 skipped, 0 failed**
+- CHAT_TOOLS count: 131 (was 120)
+
+### Next: Gap Day 3
+Per `docs/DAY_WISE_COMPLETION_PLAN.md`:
+- 7 new agents: release_notes_agent, evaluation_agent, rag_engineer_agent, changelog_agent, user_story_generator, security_architect, database_architect
+- Each: LangGraph StateGraph + VerificationConfig + role file + handler factory + dispatch wiring + tests

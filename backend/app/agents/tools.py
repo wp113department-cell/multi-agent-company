@@ -3567,6 +3567,156 @@ _MERMAID_FROM_SCHEMA_TOOL: dict[str, Any] = {
     },
 }
 
+# --- Day 2 Gap: Smart search tools ---
+
+_FIND_QUEUE_TOOL: dict[str, Any] = {
+    "name": "find_queue",
+    "description": "Search the codebase for Queue / task-queue patterns (asyncio.Queue, BullMQ, RQ, Celery). Returns file:line matches.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"repo_path": {"type": "string", "description": "Repo root to search (optional, defaults to current repo)"}},
+        "required": [],
+    },
+}
+
+_FIND_WORKER_TOOL: dict[str, Any] = {
+    "name": "find_worker",
+    "description": "Search the codebase for Worker / consumer patterns (Worker class, @worker, celery worker, RQ worker). Returns file:line matches.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"repo_path": {"type": "string", "description": "Repo root to search (optional)"}},
+        "required": [],
+    },
+}
+
+# --- Day 2 Gap: Advanced editing tools ---
+
+_INSERT_BEFORE_TOOL: dict[str, Any] = {
+    "name": "insert_before",
+    "description": "Insert lines of text immediately BEFORE the first line matching a pattern in a file.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File path relative to repo root"},
+            "pattern": {"type": "string", "description": "String or regex pattern to match"},
+            "content": {"type": "string", "description": "Text to insert (can be multi-line)"},
+        },
+        "required": ["path", "pattern", "content"],
+    },
+}
+
+_INSERT_AFTER_TOOL: dict[str, Any] = {
+    "name": "insert_after",
+    "description": "Insert lines of text immediately AFTER the first line matching a pattern in a file.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File path relative to repo root"},
+            "pattern": {"type": "string", "description": "String or regex pattern to match"},
+            "content": {"type": "string", "description": "Text to insert (can be multi-line)"},
+        },
+        "required": ["path", "pattern", "content"],
+    },
+}
+
+_DELETE_BLOCK_TOOL: dict[str, Any] = {
+    "name": "delete_block",
+    "description": "Delete all lines between (inclusive) start_pattern and end_pattern in a file.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File path relative to repo root"},
+            "start_pattern": {"type": "string", "description": "Pattern marking the start of the block to delete"},
+            "end_pattern": {"type": "string", "description": "Pattern marking the end of the block to delete"},
+        },
+        "required": ["path", "start_pattern", "end_pattern"],
+    },
+}
+
+# --- Day 2 Gap: Documentation generation tools ---
+
+_GENERATE_CHANGELOG_TOOL: dict[str, Any] = {
+    "name": "generate_changelog",
+    "description": "Generate a CHANGELOG.md entry from git log between two refs (Keep-a-Changelog format). Returns the changelog text.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "from_ref": {"type": "string", "description": "Starting git ref (tag or commit). Defaults to previous tag."},
+            "to_ref": {"type": "string", "description": "Ending git ref (default: HEAD)"},
+            "repo_path": {"type": "string", "description": "Repo root (optional)"},
+        },
+        "required": [],
+    },
+}
+
+_SUMMARIZE_REPO_TOOL: dict[str, Any] = {
+    "name": "summarize_repo",
+    "description": "Generate a high-level summary of the repository: file tree (top 3 levels), line counts, language breakdown, and README excerpt.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"repo_path": {"type": "string", "description": "Repo root (optional)"}},
+        "required": [],
+    },
+}
+
+_GENERATE_RELEASE_NOTES_TOOL: dict[str, Any] = {
+    "name": "generate_release_notes",
+    "description": "Generate a formatted release notes document from git history between two version tags.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "version": {"type": "string", "description": "New version number (e.g. v1.2.0)"},
+            "from_ref": {"type": "string", "description": "Previous version tag or commit"},
+            "repo_path": {"type": "string", "description": "Repo root (optional)"},
+        },
+        "required": ["version"],
+    },
+}
+
+# --- Day 2 Gap: File type tools ---
+
+_READ_PDF_TOOL: dict[str, Any] = {
+    "name": "read_pdf",
+    "description": "Extract text content from a PDF file using pdfplumber. Returns plain text, one paragraph per page.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Path to the PDF file"},
+            "max_pages": {"type": "integer", "description": "Maximum pages to extract (default: 20)"},
+        },
+        "required": ["path"],
+    },
+}
+
+_READ_IMAGE_TOOL: dict[str, Any] = {
+    "name": "read_image",
+    "description": "Read an image file and return basic metadata (format, size, mode) plus a base64-encoded thumbnail for vision inspection.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Path to the image file (PNG, JPG, GIF, BMP, WebP)"},
+        },
+        "required": ["path"],
+    },
+}
+
+# --- Day 2 Gap: GitHub PR tool ---
+
+_GITHUB_CREATE_PR_TOOL: dict[str, Any] = {
+    "name": "github_create_pr",
+    "description": "Create a GitHub pull request using the gh CLI. Requires gh to be authenticated.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "PR title"},
+            "body": {"type": "string", "description": "PR description / body"},
+            "base": {"type": "string", "description": "Target base branch (default: main)"},
+            "draft": {"type": "boolean", "description": "Create as draft PR (default: false)"},
+        },
+        "required": ["title", "body"],
+    },
+}
+
 # --- Day 3G: MCP / External integration tool specs ---
 
 _GITHUB_CREATE_ISSUE_TOOL: dict[str, Any] = {
@@ -4612,6 +4762,22 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _GITHUB_COMMENT_TOOL,
     _LINEAR_CREATE_ISSUE_TOOL,
     _SLACK_SEND_MESSAGE_TOOL,
+    # Day 2 Gap — Smart search
+    _FIND_QUEUE_TOOL,
+    _FIND_WORKER_TOOL,
+    # Day 2 Gap — Advanced editing
+    _INSERT_BEFORE_TOOL,
+    _INSERT_AFTER_TOOL,
+    _DELETE_BLOCK_TOOL,
+    # Day 2 Gap — Documentation generation
+    _GENERATE_CHANGELOG_TOOL,
+    _SUMMARIZE_REPO_TOOL,
+    _GENERATE_RELEASE_NOTES_TOOL,
+    # Day 2 Gap — File types
+    _READ_PDF_TOOL,
+    _READ_IMAGE_TOOL,
+    # Day 2 Gap — GitHub PR
+    _GITHUB_CREATE_PR_TOOL,
 ]
 
 # Commands that require user confirmation before running
@@ -6856,5 +7022,336 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["github_comment"] = github_comment_h
     handlers["linear_create_issue"] = linear_create_issue_h
     handlers["slack_send_message"] = slack_send_message_h
+
+    # ── Day 2 Gap handlers ─────────────────────────────────────────────────────
+
+    def find_queue_h(inp: dict[str, Any]) -> str:
+        _rp = str(inp.get("repo_path", repo_path))
+        patterns = [
+            r"asyncio\.Queue",
+            r"class.*Queue",
+            r"BullMQ\|rq\.Queue\|celery\|dramatiq\|huey",
+            r"Queue\(",
+        ]
+        import subprocess as _sq
+        results: list[str] = []
+        try:
+            pat = r"asyncio\.Queue|class.*Queue|rq\.Queue|Queue\(|BullMQ|celery|dramatiq"
+            out = subprocess.run(
+                ["grep", "-rn", "--include=*.py", "--include=*.ts", "--include=*.js", "-E", pat, _rp],
+                capture_output=True, text=True, timeout=15,
+            )
+            lines = out.stdout.strip().splitlines()
+            results = [l for l in lines if ".venv/" not in l and "node_modules/" not in l][:30]
+        except Exception as e:
+            return f"[ERROR] find_queue: {e}"
+        if not results:
+            return "No queue patterns found."
+        return "\n".join(results)
+
+    def find_worker_h(inp: dict[str, Any]) -> str:
+        _rp = str(inp.get("repo_path", repo_path))
+        try:
+            pat = r"class.*Worker|@worker|celery\.task|\.delay\(|rq.*worker|dramatiq\.actor|Consumer"
+            out = subprocess.run(
+                ["grep", "-rn", "--include=*.py", "--include=*.ts", "--include=*.js", "-E", pat, _rp],
+                capture_output=True, text=True, timeout=15,
+            )
+            lines = out.stdout.strip().splitlines()
+            results = [l for l in lines if ".venv/" not in l and "node_modules/" not in l][:30]
+        except Exception as e:
+            return f"[ERROR] find_worker: {e}"
+        if not results:
+            return "No worker patterns found."
+        return "\n".join(results)
+
+    def insert_before_h(inp: dict[str, Any]) -> str:
+        path = str(inp["path"])
+        pattern = str(inp["pattern"])
+        content = str(inp["content"])
+        fpath = root / path
+        if _is_protected_path(path):
+            return f"[BLOCKED] {path} is a protected path"
+        try:
+            import re as _re_ib
+            lines = fpath.read_text(encoding="utf-8").splitlines(keepends=True)
+            new_lines: list[str] = []
+            inserted = False
+            for line in lines:
+                if not inserted and _re_ib.search(pattern, line):
+                    new_lines.append(content if content.endswith("\n") else content + "\n")
+                    inserted = True
+                new_lines.append(line)
+            if not inserted:
+                return f"[WARN] Pattern '{pattern}' not found in {path}"
+            fpath.write_text("".join(new_lines), encoding="utf-8")
+            return f"Inserted {len(content.splitlines())} line(s) before pattern '{pattern}' in {path}"
+        except Exception as e:
+            return f"[ERROR] insert_before: {e}"
+
+    def insert_after_h(inp: dict[str, Any]) -> str:
+        path = str(inp["path"])
+        pattern = str(inp["pattern"])
+        content = str(inp["content"])
+        fpath = root / path
+        if _is_protected_path(path):
+            return f"[BLOCKED] {path} is a protected path"
+        try:
+            import re as _re_ia
+            lines = fpath.read_text(encoding="utf-8").splitlines(keepends=True)
+            new_lines: list[str] = []
+            inserted = False
+            for line in lines:
+                new_lines.append(line)
+                if not inserted and _re_ia.search(pattern, line):
+                    new_lines.append(content if content.endswith("\n") else content + "\n")
+                    inserted = True
+            if not inserted:
+                return f"[WARN] Pattern '{pattern}' not found in {path}"
+            fpath.write_text("".join(new_lines), encoding="utf-8")
+            return f"Inserted {len(content.splitlines())} line(s) after pattern '{pattern}' in {path}"
+        except Exception as e:
+            return f"[ERROR] insert_after: {e}"
+
+    def delete_block_h(inp: dict[str, Any]) -> str:
+        path = str(inp["path"])
+        start_pat = str(inp["start_pattern"])
+        end_pat = str(inp["end_pattern"])
+        fpath = root / path
+        if _is_protected_path(path):
+            return f"[BLOCKED] {path} is a protected path"
+        try:
+            import re as _re_db
+            lines = fpath.read_text(encoding="utf-8").splitlines(keepends=True)
+            new_lines: list[str] = []
+            in_block = False
+            deleted = 0
+            for line in lines:
+                if not in_block and _re_db.search(start_pat, line):
+                    in_block = True
+                    deleted += 1
+                    continue
+                if in_block:
+                    deleted += 1
+                    if _re_db.search(end_pat, line):
+                        in_block = False
+                    continue
+                new_lines.append(line)
+            if deleted == 0:
+                return f"[WARN] Block pattern not found in {path}"
+            fpath.write_text("".join(new_lines), encoding="utf-8")
+            return f"Deleted {deleted} lines between '{start_pat}' and '{end_pat}' in {path}"
+        except Exception as e:
+            return f"[ERROR] delete_block: {e}"
+
+    def generate_changelog_h(inp: dict[str, Any]) -> str:
+        _rp = str(inp.get("repo_path", repo_path))
+        from_ref = str(inp.get("from_ref", ""))
+        to_ref = str(inp.get("to_ref", "HEAD"))
+        try:
+            if not from_ref:
+                tags = subprocess.run(
+                    ["git", "-C", _rp, "tag", "--sort=-version:refname"],
+                    capture_output=True, text=True,
+                )
+                tag_list = [t for t in tags.stdout.strip().splitlines() if t]
+                from_ref = tag_list[1] if len(tag_list) >= 2 else tag_list[0] if tag_list else ""
+            ref_range = f"{from_ref}..{to_ref}" if from_ref else to_ref
+            log = subprocess.run(
+                ["git", "-C", _rp, "log", ref_range, "--pretty=format:%s (%an)", "--no-merges"],
+                capture_output=True, text=True, timeout=10,
+            )
+            commits = log.stdout.strip().splitlines()
+            if not commits:
+                return f"No commits found between {from_ref or 'start'} and {to_ref}"
+            sections: dict[str, list[str]] = {"Added": [], "Changed": [], "Fixed": [], "Other": []}
+            for c in commits:
+                cl = c.lower()
+                if cl.startswith(("feat:", "add ", "new ")):
+                    sections["Added"].append(f"- {c}")
+                elif cl.startswith(("fix:", "bug ", "patch ")):
+                    sections["Fixed"].append(f"- {c}")
+                elif cl.startswith(("refactor:", "chore:", "update ", "change ")):
+                    sections["Changed"].append(f"- {c}")
+                else:
+                    sections["Other"].append(f"- {c}")
+            import datetime as _dt
+            lines_out = [
+                f"## [Unreleased] — {_dt.date.today().isoformat()}",
+                f"Changes from {from_ref or 'start'} to {to_ref}",
+                "",
+            ]
+            for sec, items in sections.items():
+                if items:
+                    lines_out.append(f"### {sec}")
+                    lines_out.extend(items)
+                    lines_out.append("")
+            return "\n".join(lines_out)
+        except Exception as e:
+            return f"[ERROR] generate_changelog: {e}"
+
+    def summarize_repo_h(inp: dict[str, Any]) -> str:
+        _rp = str(inp.get("repo_path", repo_path))
+        try:
+            import os as _os_sr
+            # File tree (3 levels)
+            tree_lines: list[str] = []
+            for dirpath, dirnames, filenames in _os_sr.walk(_rp):
+                dirnames[:] = [d for d in sorted(dirnames) if d not in (".git", ".venv", "node_modules", "__pycache__")]
+                depth = dirpath.replace(_rp, "").count(_os_sr.sep)
+                if depth > 2:
+                    continue
+                indent = "  " * depth
+                tree_lines.append(f"{indent}{_os_sr.path.basename(dirpath)}/")
+                if depth < 2:
+                    for f in sorted(filenames)[:10]:
+                        tree_lines.append(f"{indent}  {f}")
+
+            # Line counts by extension
+            ext_counts: dict[str, int] = {}
+            total_files = 0
+            for dirpath, dirnames, filenames in _os_sr.walk(_rp):
+                dirnames[:] = [d for d in dirnames if d not in (".git", ".venv", "node_modules", "__pycache__")]
+                for fname in filenames:
+                    ext = _os_sr.path.splitext(fname)[1] or "other"
+                    ext_counts[ext] = ext_counts.get(ext, 0) + 1
+                    total_files += 1
+
+            top_exts = sorted(ext_counts.items(), key=lambda x: -x[1])[:8]
+
+            # README excerpt
+            readme_excerpt = ""
+            for rname in ("README.md", "readme.md", "README.rst"):
+                rpath = _os_sr.path.join(_rp, rname)
+                if _os_sr.path.exists(rpath):
+                    with open(rpath, encoding="utf-8", errors="ignore") as rf:
+                        readme_excerpt = rf.read(800)
+                    break
+
+            summary = [
+                f"## Repository Summary: {_os_sr.path.basename(_rp)}",
+                f"Total files: {total_files}",
+                "",
+                "### Top file types",
+            ]
+            for ext, count in top_exts:
+                summary.append(f"  {ext:10} {count}")
+            summary += ["", "### Directory tree (3 levels)"] + tree_lines[:50]
+            if readme_excerpt:
+                summary += ["", "### README (first 800 chars)", readme_excerpt]
+            return "\n".join(summary)
+        except Exception as e:
+            return f"[ERROR] summarize_repo: {e}"
+
+    def generate_release_notes_h(inp: dict[str, Any]) -> str:
+        version = str(inp["version"])
+        _rp = str(inp.get("repo_path", repo_path))
+        from_ref = str(inp.get("from_ref", ""))
+        try:
+            if not from_ref:
+                tags = subprocess.run(
+                    ["git", "-C", _rp, "tag", "--sort=-version:refname"],
+                    capture_output=True, text=True,
+                )
+                tag_list = [t for t in tags.stdout.strip().splitlines() if t]
+                from_ref = tag_list[0] if tag_list else ""
+            ref_range = f"{from_ref}..HEAD" if from_ref else "HEAD"
+            log = subprocess.run(
+                ["git", "-C", _rp, "log", ref_range, "--pretty=format:* %s", "--no-merges"],
+                capture_output=True, text=True, timeout=10,
+            )
+            commits = log.stdout.strip()
+            import datetime as _dt_rn
+            notes = [
+                f"# Release Notes — {version}",
+                f"Released: {_dt_rn.date.today().isoformat()}",
+                "",
+                "## What's Changed",
+                "",
+                commits or "No commits found.",
+                "",
+                f"**Full Changelog:** {from_ref}...{version}" if from_ref else "",
+            ]
+            return "\n".join(notes)
+        except Exception as e:
+            return f"[ERROR] generate_release_notes: {e}"
+
+    def read_pdf_h(inp: dict[str, Any]) -> str:
+        path = str(inp["path"])
+        max_pages = int(inp.get("max_pages", 20))
+        fpath = Path(path) if Path(path).is_absolute() else root / path
+        try:
+            import pdfplumber as _pp
+            pages_text: list[str] = []
+            with _pp.open(str(fpath)) as pdf:
+                for i, page in enumerate(pdf.pages[:max_pages]):
+                    text = page.extract_text() or ""
+                    if text.strip():
+                        pages_text.append(f"--- Page {i + 1} ---\n{text.strip()}")
+            if not pages_text:
+                return f"[WARN] No text extracted from {fpath} (may be image-only PDF)"
+            return "\n\n".join(pages_text)
+        except ImportError:
+            return "[ERROR] pdfplumber not installed. Run: pip install pdfplumber==0.11.10"
+        except Exception as e:
+            return f"[ERROR] read_pdf: {e}"
+
+    def read_image_h(inp: dict[str, Any]) -> str:
+        path = str(inp["path"])
+        fpath = Path(path) if Path(path).is_absolute() else root / path
+        try:
+            from PIL import Image as _PilImg
+            import base64 as _b64
+            import io as _io_img
+            img = _PilImg.open(str(fpath))
+            meta = {
+                "format": img.format,
+                "mode": img.mode,
+                "size": f"{img.width}x{img.height}",
+                "path": str(fpath),
+            }
+            # Generate a small thumbnail as base64 for inspection
+            thumb = img.copy()
+            thumb.thumbnail((256, 256))
+            buf = _io_img.BytesIO()
+            thumb.save(buf, format="PNG")
+            b64_thumb = _b64.b64encode(buf.getvalue()).decode()
+            return (
+                f"Image: {meta['path']}\n"
+                f"Format: {meta['format']} | Mode: {meta['mode']} | Size: {meta['size']}\n"
+                f"Thumbnail (base64 PNG, 256x256): {b64_thumb[:200]}…"
+            )
+        except Exception as e:
+            return f"[ERROR] read_image: {e}"
+
+    def github_create_pr_h(inp: dict[str, Any]) -> str:
+        title = str(inp["title"])
+        body = str(inp["body"])
+        base = str(inp.get("base", "main"))
+        draft = bool(inp.get("draft", False))
+        try:
+            cmd = ["gh", "pr", "create", "--title", title, "--body", body, "--base", base]
+            if draft:
+                cmd.append("--draft")
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=repo_path)
+            if out.returncode != 0:
+                return f"[ERROR] gh pr create failed: {out.stderr[:400]}"
+            return f"PR created: {out.stdout.strip()}"
+        except FileNotFoundError:
+            return "[ERROR] gh CLI not found. Install: https://cli.github.com/"
+        except Exception as e:
+            return f"[ERROR] github_create_pr: {e}"
+
+    handlers["find_queue"] = find_queue_h
+    handlers["find_worker"] = find_worker_h
+    handlers["insert_before"] = insert_before_h
+    handlers["insert_after"] = insert_after_h
+    handlers["delete_block"] = delete_block_h
+    handlers["generate_changelog"] = generate_changelog_h
+    handlers["summarize_repo"] = summarize_repo_h
+    handlers["generate_release_notes"] = generate_release_notes_h
+    handlers["read_pdf"] = read_pdf_h
+    handlers["read_image"] = read_image_h
+    handlers["github_create_pr"] = github_create_pr_h
 
     return handlers
