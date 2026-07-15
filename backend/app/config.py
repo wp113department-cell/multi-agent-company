@@ -126,6 +126,18 @@ class Settings(BaseSettings):
     event_bus_max_retries: int = Field(default=3, description="Max handler retry attempts in the in-process event bus before writing to failed_events.")
     groq_max_retries: int = Field(default=5, description="Max Groq API call retries on transient errors.")
 
+    # Rate limiting (slowapi)
+    rate_limit_enabled: bool = Field(default=True, description="Enable API rate limiting via slowapi.")
+    rate_limit_default: str = Field(default="200/minute", description="Default rate limit for all endpoints (slowapi format: N/second|minute|hour).")
+    rate_limit_tasks: str = Field(default="60/minute", description="Rate limit for task creation and pipeline trigger endpoints.")
+    rate_limit_agents: str = Field(default="30/minute", description="Rate limit for specialized agent dispatch endpoints.")
+
+    # JWT auth
+    jwt_secret_key: str = Field(default="", description="Secret key for signing JWTs. REQUIRED in production. Generate with: openssl rand -hex 32")
+    jwt_algorithm: str = Field(default="HS256", description="JWT signing algorithm.")
+    jwt_access_token_expire_minutes: int = Field(default=1440, description="JWT access token lifetime in minutes (default: 24 hours).")
+    jwt_auth_enabled: bool = Field(default=False, description="Enable JWT authentication. When false, X-User-Role header is still accepted (backward compat).")
+
 
 _settings: Settings | None = None
 

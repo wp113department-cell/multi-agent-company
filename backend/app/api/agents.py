@@ -21,6 +21,7 @@ from app.db.repository import (
 )
 from app.db.session import get_session_factory
 from app.repo_tools.worktree import create_worktree, get_diff, preserve_worktree
+from app.services.alert import send_task_alert
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ async def launch_planning_pipeline(task_id: int, title: str, description: str, r
                 await update_pipeline_state(db, task_id, "blocked")
                 await transition_task(db, task_id, "blocked")
                 await append_log(db, task_id, "pipeline_error", error or "Pipeline blocked")
+                await send_task_alert(task_id, "blocked", error or "Pipeline blocked")
                 return
 
             # LangGraph's interrupt() inside human_review_node causes ainvoke() to return
@@ -106,6 +108,7 @@ async def launch_planning_pipeline(task_id: int, title: str, description: str, r
             logger.exception("Planning pipeline failed for task %d", task_id)
             async with factory() as db2:
                 await append_log(db2, task_id, "pipeline_error", str(e))
+            await send_task_alert(task_id, "failed", f"Planning pipeline exception: {e}")
 
 
 async def resume_planning_pipeline(task_id: int, approved: bool, repo_path: str | None = None) -> None:
@@ -240,12 +243,14 @@ async def launch_manager(
                 await update_pipeline_state(db, task_id, "blocked")
                 await transition_task(db, task_id, "blocked")
                 await append_log(db, task_id, "pipeline_error", "Manager blocked — max retries exceeded on a subtask")
+                await send_task_alert(task_id, "blocked", "Manager blocked — max retries exceeded on a subtask")
 
         except Exception as e:
             logger.exception("Manager pipeline failed for task %d", task_id)
             async with factory() as db2:
                 await update_pipeline_state(db2, task_id, "blocked")
                 await append_log(db2, task_id, "pipeline_error", f"Manager failed: {e}")
+            await send_task_alert(task_id, "failed", f"Manager pipeline exception: {e}")
 
 
 # ---- Planner Agent (simple mode: single plan, no LangGraph) ----

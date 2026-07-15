@@ -9,11 +9,16 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.tasks import router as tasks_router
 from app.api.repo import router as repo_router, init_active_repo, get_active_repo_path
 from app.api.artifacts import router as artifacts_router
+from app.api.auth import router as auth_router
 from app.api.epics import router as epics_router
 from app.api.registry import router as registry_router
 from app.api.memory import router as memory_router
@@ -26,6 +31,9 @@ from app.api.specialized_agents import router as specialized_agents_router
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Rate limiter — keyed by remote IP; enabled only when RATE_LIMIT_ENABLED=true
+limiter = Limiter(key_func=get_remote_address, enabled=get_settings().rate_limit_enabled)
 
 
 def _init_sentry(settings: "Settings") -> None:  # type: ignore[name-defined]
@@ -119,6 +127,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Wire rate limiter state and middleware before other middleware
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+app.add_middleware(SlowAPIMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in get_settings().cors_origins.split(",") if o.strip()],
@@ -130,6 +143,7 @@ app.add_middleware(
 app.include_router(tasks_router)
 app.include_router(repo_router)
 app.include_router(artifacts_router)
+app.include_router(auth_router)
 app.include_router(epics_router)
 app.include_router(registry_router)
 app.include_router(memory_router)
@@ -157,5 +171,45 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> dict[str, object]:
+    """Liveness + readiness probe: checks DB, Redis (if enabled), S3 (if enabled)."""
+    import asyncio
+    checks: dict[str, str] = {}
+
+    # DB check
+    try:
+        from app.db.session import get_session_factory
+        from sqlalchemy import text
+        factory = get_session_factory()
+        async with factory() as db:
+            await db.execute(text("SELECT 1"))
+        checks["db"] = "ok"
+    except Exception as exc:
+        checks["db"] = f"error: {exc}"
+
+    # Redis check (optional — only when redis_streams_enabled or queue_backend=rq)
+    settings = get_settings()
+    if settings.redis_streams_enabled or settings.queue_backend == "rq":
+        try:
+            import redis.asyncio as aioredis
+            r = aioredis.from_url(settings.redis_url, socket_connect_timeout=2)
+            await r.ping()
+            await r.aclose()
+            checks["redis"] = "ok"
+        except Exception as exc:
+            checks["redis"] = f"error: {exc}"
+
+    # S3 check (optional — only when artifact_backend=s3)
+    if settings.artifact_backend == "s3":
+        try:
+            from app.artifacts.s3_store import _get_s3
+            s3 = await asyncio.to_thread(_get_s3)
+            await asyncio.to_thread(
+                s3.head_bucket, Bucket=settings.s3_bucket
+            )
+            checks["s3"] = "ok"
+        except Exception as exc:
+            checks["s3"] = f"error: {exc}"
+
+    overall = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
+    return {"status": overall, "checks": checks}

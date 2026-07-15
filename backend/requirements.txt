@@ -23,3 +23,7 @@ pdfplumber==0.11.10
 rq==2.10.0
 redis==8.0.1
 boto3==1.43.48
+sentry-sdk[fastapi]==2.65.0
+slowapi==0.1.10
+python-jose[cryptography]==3.5.0
+bcrypt==5.0.0
