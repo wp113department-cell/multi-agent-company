@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import get_settings
-from app.policy.engine import check_command, check_path_in_worktree
+from app.policy.engine import check_allowlisted_command, check_command, check_path, check_path_in_worktree
 
 
 # --- Tool specs (Anthropic input_schema format) ---
@@ -425,11 +425,6 @@ _QA_ALLOWED_PREFIXES = (
 )
 
 
-def _is_qa_command_allowed(cmd: str) -> bool:
-    stripped = cmd.strip()
-    return any(stripped.startswith(p) for p in _QA_ALLOWED_PREFIXES)
-
-
 # --- Tool handlers ---
 
 def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
@@ -812,9 +807,7 @@ def make_qa_handlers(worktree_path: str, repo_path: str) -> dict[str, Any]:
 
     def bash(inp: dict[str, Any]) -> str:
         cmd = inp["command"]
-        if not _is_qa_command_allowed(cmd):
-            return f"[POLICY DENIED] QA agent may only run test/build commands. Got: {cmd!r}"
-        policy = check_command(cmd)
+        policy = check_allowlisted_command(cmd, _QA_ALLOWED_PREFIXES)
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
         try:
@@ -858,18 +851,10 @@ def make_devops_handlers(repo_path: str) -> dict[str, Any]:
     handlers = make_read_only_handlers(repo_path)
     health_result: dict[str, Any] = {}
 
-    def _is_devops_command_allowed(cmd: str) -> bool:
-        settings = get_settings()
-        allowed_prefixes = tuple(p.strip() for p in settings.devops_bash_allowlist.split(",") if p.strip())
-        stripped = cmd.strip()
-        return any(stripped.startswith(prefix) for prefix in allowed_prefixes)
-
     def bash(inp: dict[str, Any]) -> str:
         cmd = inp["command"]
-        if not _is_devops_command_allowed(cmd):
-            return f"[POLICY DENIED] DevOps agent may only run read-only health-check commands. Got: {cmd!r}"
-        # also run v1 policy check
-        policy = check_command(cmd)
+        devops_prefixes = get_settings().devops_bash_allowlist_tuple
+        policy = check_allowlisted_command(cmd, devops_prefixes)
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
         try:
@@ -3011,9 +2996,10 @@ def make_cicd_agent_handlers(repo_path: str) -> dict[str, Any]:
     _CICD_ALLOWED = ("git log", "git diff", "git status", "git show", "cat ", "grep ", "echo ", "ls ")
 
     def ci_bash(inp: dict[str, Any]) -> str:
-        cmd = inp["command"].strip()
-        if not any(cmd.startswith(p) for p in _CICD_ALLOWED):
-            return f"[POLICY DENIED] CI/CD agent only allows git/cat/grep/ls. Got: {cmd!r}"
+        cmd = inp["command"]
+        policy = check_allowlisted_command(cmd, _CICD_ALLOWED)
+        if not policy.allowed:
+            return f"[POLICY DENIED] {policy.reason}"
         r = subprocess.run(
             cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=30,
         )
@@ -3103,9 +3089,10 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
         return f"Replaced function '{name}' in {rel}"
 
     def rf_bash(inp: dict[str, Any]) -> str:
-        cmd = inp["command"].strip()
-        if not any(cmd.startswith(p) for p in _RF_ALLOWED):
-            return f"[POLICY DENIED] Refactor agent only allows test/lint. Got: {cmd!r}"
+        cmd = inp["command"]
+        policy = check_allowlisted_command(cmd, _RF_ALLOWED)
+        if not policy.allowed:
+            return f"[POLICY DENIED] {policy.reason}"
         r = subprocess.run(
             cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=60,
         )
@@ -3258,9 +3245,10 @@ def make_dependency_agent_handlers(repo_path: str) -> dict[str, Any]:
     _DEP_EDITABLE = {"requirements.txt", "requirements-dev.txt", "package.json", "pyproject.toml"}
 
     def dep_bash(inp: dict[str, Any]) -> str:
-        cmd = inp["command"].strip()
-        if not any(cmd.startswith(p) for p in _DEP_ALLOWED):
-            return f"[POLICY DENIED] Dependency agent only allows audit commands. Got: {cmd!r}"
+        cmd = inp["command"]
+        policy = check_allowlisted_command(cmd, _DEP_ALLOWED)
+        if not policy.allowed:
+            return f"[POLICY DENIED] {policy.reason}"
         r = subprocess.run(
             cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=60,
         )
@@ -4285,9 +4273,10 @@ def make_migration_agent_handlers(repo_path: str) -> dict[str, Any]:
             return f"[ERROR] {e}"
 
     def mg_bash(inp: dict[str, Any]) -> str:
-        cmd = str(inp["command"]).strip()
-        if not any(cmd.startswith(a) for a in _MIGRATION_BASH_ALLOWLIST):
-            return f"[POLICY DENIED] bash not allowed in migration agent for: {cmd}"
+        cmd = str(inp["command"])
+        policy = check_allowlisted_command(cmd, _MIGRATION_BASH_ALLOWLIST)
+        if not policy.allowed:
+            return f"[POLICY DENIED] {policy.reason}"
         try:
             r = _sp.run(cmd, shell=True, capture_output=True, text=True, cwd=str(root), timeout=60)
             return (r.stdout + r.stderr).strip() or "(no output)"
@@ -4406,9 +4395,10 @@ def make_ai_engineer_handlers(repo_path: str) -> dict[str, Any]:
             return f"[ERROR] {e}"
 
     def ae_bash(inp: dict[str, Any]) -> str:
-        cmd = str(inp["command"]).strip()
-        if not any(cmd.startswith(a) for a in _AI_BASH_ALLOWLIST):
-            return f"[POLICY DENIED] bash not allowed in ai_engineer for: {cmd}"
+        cmd = str(inp["command"])
+        policy = check_allowlisted_command(cmd, _AI_BASH_ALLOWLIST)
+        if not policy.allowed:
+            return f"[POLICY DENIED] {policy.reason}"
         try:
             r = _sp.run(cmd, shell=True, capture_output=True, text=True, cwd=str(root), timeout=120)
             return (r.stdout + r.stderr).strip() or "(no output)"
@@ -4535,9 +4525,10 @@ def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
         return f"Edited: {rel}"
 
     def cu_bash(inp: dict[str, Any]) -> str:
-        cmd = str(inp["command"]).strip()
-        if not any(cmd.startswith(a) for a in _CLEANUP_BASH_ALLOWLIST):
-            return f"[POLICY DENIED] bash not allowed in cleanup agent for: {cmd}"
+        cmd = str(inp["command"])
+        policy = check_allowlisted_command(cmd, _CLEANUP_BASH_ALLOWLIST)
+        if not policy.allowed:
+            return f"[POLICY DENIED] {policy.reason}"
         try:
             r = _sp.run(cmd, shell=True, capture_output=True, text=True, cwd=str(root), timeout=60)
             return (r.stdout + r.stderr).strip() or "(no output)"
@@ -5242,12 +5233,13 @@ _PROTECTED_PATHS = {".env", "secrets/", ".github/workflows/", ".git/"}
 
 
 def _is_dangerous_command(command: str) -> bool:
-    low = command.lower()
-    return any(p.lower() in low for p in _DANGEROUS_PATTERNS)
+    """Delegates to the centralized policy engine denylist."""
+    return not check_command(command, strict=False).allowed
 
 
 def _is_protected_path(path: str) -> bool:
-    return any(path.startswith(p) or path == p.rstrip("/") for p in _PROTECTED_PATHS)
+    """Delegates to the centralized policy engine path rules."""
+    return not check_path(path).allowed
 
 
 def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
@@ -7061,10 +7053,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # DAY 3A — Browser tools (Playwright)
     # =========================================================================
 
+    def _browser_sid() -> str:
+        return getattr(session, "session_id", None) or "__default__"
+
     def browser_open_h(inp: dict[str, Any]) -> str:
         try:
             from app.repo_tools import browser_driver as _bd
-            result = _bd.browser_open(str(inp["url"]))
+            result = _bd.browser_open(str(inp["url"]), session_id=_browser_sid())
+            if result.get("status") == "blocked":
+                return f"[BLOCKED] {result.get('error', 'URL blocked by SSRF guard')}"
             return f"Opened: {result['url']} — title: {result['title']}"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -7072,7 +7069,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def browser_navigate_h(inp: dict[str, Any]) -> str:
         try:
             from app.repo_tools import browser_driver as _bd
-            result = _bd.browser_navigate(str(inp["url"]))
+            result = _bd.browser_navigate(str(inp["url"]), session_id=_browser_sid())
+            if "error" in result:
+                return f"[BLOCKED] {result['error']}"
             return f"Navigated to: {result['url']} — title: {result['title']}"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -7080,7 +7079,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def browser_screenshot_h(inp: dict[str, Any]) -> str:
         try:
             from app.repo_tools import browser_driver as _bd
-            path_out = _bd.browser_screenshot(inp.get("path"))
+            path_out = _bd.browser_screenshot(inp.get("path"), session_id=_browser_sid())
             return f"Screenshot saved: {path_out}"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -7088,28 +7087,28 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def browser_read_dom_h(inp: dict[str, Any]) -> str:
         try:
             from app.repo_tools import browser_driver as _bd
-            return _bd.browser_read_dom(inp.get("selector"))
+            return _bd.browser_read_dom(inp.get("selector"), session_id=_browser_sid())
         except Exception as e:
             return f"[ERROR] {e}"
 
     def browser_click_h(inp: dict[str, Any]) -> str:
         try:
             from app.repo_tools import browser_driver as _bd
-            return _bd.browser_click(str(inp["selector"]))
+            return _bd.browser_click(str(inp["selector"]), session_id=_browser_sid())
         except Exception as e:
             return f"[ERROR] {e}"
 
     def browser_type_h(inp: dict[str, Any]) -> str:
         try:
             from app.repo_tools import browser_driver as _bd
-            return _bd.browser_type(str(inp["selector"]), str(inp["text"]))
+            return _bd.browser_type(str(inp["selector"]), str(inp["text"]), session_id=_browser_sid())
         except Exception as e:
             return f"[ERROR] {e}"
 
     def browser_close_h(inp: dict[str, Any]) -> str:
         try:
             from app.repo_tools import browser_driver as _bd
-            return _bd.browser_close()
+            return _bd.browser_close(session_id=_browser_sid())
         except Exception as e:
             return f"[ERROR] {e}"
 
