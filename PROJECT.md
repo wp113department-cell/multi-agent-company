@@ -2,7 +2,7 @@
 
 **This is a living document. Update it every session — it is the single source of truth for "what actually exists right now," separate from `PLAN.md` (what's intended) and `files/` (the original spec suite, which describes the full 7-stage vision, not the current build).**
 
-Last updated: 2026-07-16 (Session 2 complete — backend_dev, frontend_dev, coder migrated)
+Last updated: 2026-07-16 (Session 3 complete — reviewer, qa, devops migrated)
 
 ---
 
@@ -104,10 +104,21 @@ Migrated `backend_dev`, `frontend_dev`, `coder` from `run_agent()` → `run_agen
 **Test results:** 1375 passed, 0 failed (+62 new: test_session2_migration.py)
 **Commit:** 289f1c5
 
+### Session 3 — COMPLETE (2026-07-16)
+Migrated `reviewer`, `qa`, `devops` from `run_agent()` → `run_agent_graph()`.
+
+**Key decisions:**
+- qa AGENT_CONTRACT: updated from old dict format (`{"task_id": "int"}`) to standard list format (`["task_id", ...]`); legacy capabilities (`qa_verification`, `test_execution`, `typecheck`, `lint`) preserved as superset — needed because built-in `capability_registry.py` entries get overwritten by `_register()` and existing tests query those legacy capability names
+- devops `final_text` fallback: `_last_assistant_text(final_state["messages"])` extracts last assistant text response; `run_agent_graph` doesn't return `final_text` directly like `run_agent` did
+- reviewer returns `ReviewResult(verdict="changes_required")` on exception — never raises, stays safe for pipeline use
+- Rule: when migrating an agent whose name appears in `capability_registry.py` built-in registrations, the `_register()` capabilities must be a superset of the built-in ones
+
+**Test results:** 1448 passed, 0 failed (+73 new: test_session3_migration.py)
+**Commit:** 17bd4d6
+
 ### Next Steps (in order)
-1. Session 3: Migrate `reviewer`, `qa`, `devops`
-2. Session 4: Migrate `pm`, `research`, `executive`, `docs`
-3. Sessions 5–20: Add AGENT_CONTRACT + fleet registry to 52 base_graph agents (3/session)
+1. Session 4: Migrate `pm`, `research`, `executive`, `docs`
+2. Sessions 5–20: Add AGENT_CONTRACT + fleet registry to 52 base_graph agents (3/session)
 
 ---
 
