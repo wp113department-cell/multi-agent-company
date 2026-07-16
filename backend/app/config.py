@@ -1,3 +1,5 @@
+from functools import cached_property
+
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Any
@@ -105,14 +107,55 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _require_llm_key(self) -> "Settings":
-        # anthropic_api_key may be empty at startup if user stores it via UI (settings page).
-        # The key is loaded from DB at runtime by base.py:get_effective_api_key().
-        # We only raise if BOTH env var and db-path are clearly unavailable.
         if self.use_groq and not self.groq_api_key:
-            raise ValueError(
-                "GROQ_API_KEY is required when USE_GROQ=true."
-            )
+            raise ValueError("GROQ_API_KEY is required when USE_GROQ=true.")
         return self
+
+    @model_validator(mode="after")
+    def _require_jwt_secret_when_enabled(self) -> "Settings":
+        if self.jwt_auth_enabled:
+            if not self.jwt_secret_key:
+                raise ValueError(
+                    "JWT_SECRET_KEY is required when JWT_AUTH_ENABLED=true. "
+                    "Generate one with: openssl rand -hex 32"
+                )
+            if len(self.jwt_secret_key) < 32:
+                raise ValueError(
+                    "JWT_SECRET_KEY must be at least 32 characters when JWT_AUTH_ENABLED=true "
+                    "(short/guessable secrets allow token forgery). "
+                    "Generate one with: openssl rand -hex 32"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _require_s3_bucket_when_s3_backend(self) -> "Settings":
+        if self.artifact_backend == "s3" and not self.s3_bucket:
+            raise ValueError("S3_BUCKET is required when ARTIFACT_BACKEND=s3.")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_enum_fields(self) -> "Settings":
+        if self.pipeline_mode not in ("simple", "full"):
+            raise ValueError(f"PIPELINE_MODE must be 'simple' or 'full', got {self.pipeline_mode!r}")
+        if self.artifact_backend not in ("db", "s3"):
+            raise ValueError(f"ARTIFACT_BACKEND must be 'db' or 's3', got {self.artifact_backend!r}")
+        if self.queue_backend not in ("asyncio", "rq"):
+            raise ValueError(f"QUEUE_BACKEND must be 'asyncio' or 'rq', got {self.queue_backend!r}")
+        return self
+
+    @cached_property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @cached_property
+    def devops_bash_allowlist_tuple(self) -> tuple[str, ...]:
+        return tuple(p.strip() for p in self.devops_bash_allowlist.split(",") if p.strip())
+
+    @property
+    def is_llm_key_configured(self) -> bool:
+        if self.use_groq:
+            return bool(self.groq_api_key)
+        return bool(self.anthropic_api_key)
 
     # Server
     host: str = Field(default="0.0.0.0")
@@ -147,3 +190,10 @@ def get_settings() -> Settings:
     if _settings is None:
         _settings = Settings()  # type: ignore[call-arg]
     return _settings
+
+
+def reset_settings_cache() -> None:
+    """Test-only helper — clears the cached singleton so tests can re-instantiate
+    Settings with different env vars without restarting the process."""
+    global _settings
+    _settings = None

@@ -104,7 +104,12 @@ def test_reviewer_tools_structurally_has_no_submit_patch() -> None:
 
 # ---- QA bash allowlist tests ----
 
-from app.agents.tools import _is_qa_command_allowed
+from app.agents.tools import _QA_ALLOWED_PREFIXES
+from app.policy.engine import check_allowlisted_command
+
+
+def _is_qa_command_allowed(cmd: str) -> bool:
+    return check_allowlisted_command(cmd, _QA_ALLOWED_PREFIXES).allowed
 
 
 @pytest.mark.parametrize("cmd", [
