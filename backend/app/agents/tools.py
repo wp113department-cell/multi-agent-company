@@ -2556,7 +2556,7 @@ MONITORING_AGENT_TOOLS = READ_ONLY_TOOLS + [
 def _make_edit_file_handler(root: Path) -> Any:
     def edit_file_h(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
-        if _is_protected_path(rel):
+        if _is_protected_path(rel, str(root)):
             return f"[POLICY DENIED] Cannot write to protected path: {rel}"
         target = root / rel
         if not target.exists():
@@ -2576,7 +2576,7 @@ def _make_edit_file_handler(root: Path) -> Any:
 def _make_write_file_handler(root: Path) -> Any:
     def write_file_h(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
-        if _is_protected_path(rel):
+        if _is_protected_path(rel, str(root)):
             return f"[POLICY DENIED] Cannot write to protected path: {rel}"
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -3068,7 +3068,7 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
 
     def rf_replace_function(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
-        if _is_protected_path(rel):
+        if _is_protected_path(rel, repo_path):
             return f"[POLICY DENIED] Cannot write to protected path: {rel}"
         target = root / rel
         if not target.exists():
@@ -3256,7 +3256,7 @@ def make_dependency_agent_handlers(repo_path: str) -> dict[str, Any]:
         rel = str(inp["path"])
         if Path(rel).name not in _DEP_EDITABLE:
             return f"[POLICY DENIED] Dependency agent may only edit requirements/package files. Got: {rel!r}"
-        if _is_protected_path(rel):
+        if _is_protected_path(rel, repo_path):
             return f"[POLICY DENIED] Cannot write to protected path: {rel}"
         target = root / rel
         if not target.exists():
@@ -4256,7 +4256,7 @@ def make_migration_agent_handlers(repo_path: str) -> dict[str, Any]:
 
     def mg_write_file(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
-        if _is_protected_path(rel):
+        if _is_protected_path(rel, repo_path):
             return f"[POLICY DENIED] Protected path: {rel}"
         # Migration agent may only write to migrations/ or backend/migrations/
         if not (rel.startswith("migrations/") or rel.startswith("backend/migrations/") or rel.endswith(".py")):
@@ -4335,7 +4335,7 @@ def make_schema_agent_handlers(repo_path: str) -> dict[str, Any]:
 
     def sa_write_file(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
-        if _is_protected_path(rel):
+        if _is_protected_path(rel, repo_path):
             return f"[POLICY DENIED] Protected path: {rel}"
         content = str(inp["content"])
         try:
@@ -4405,7 +4405,7 @@ def make_ai_engineer_handlers(repo_path: str) -> dict[str, Any]:
 
     def ae_write_file(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
-        if _is_protected_path(rel):
+        if _is_protected_path(rel, repo_path):
             return f"[POLICY DENIED] Protected path: {rel}"
         content = str(inp["content"])
         try:
@@ -4480,7 +4480,7 @@ def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
 
     def cu_organize_imports(inp: dict[str, Any]) -> str:
         cu_path = str(inp["path"])
-        if _is_protected_path(cu_path):
+        if _is_protected_path(cu_path, repo_path):
             return f"[POLICY DENIED] Protected path: {cu_path}"
         try:
             r = _sp.run(
@@ -4493,7 +4493,7 @@ def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
 
     def cu_delete_file(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
-        if _is_protected_path(rel):
+        if _is_protected_path(rel, repo_path):
             return f"[POLICY DENIED] Protected path: {rel}"
         fp = root / rel
         if not fp.exists():
@@ -4506,7 +4506,7 @@ def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
 
     def cu_edit_file(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
-        if _is_protected_path(rel):
+        if _is_protected_path(rel, repo_path):
             return f"[POLICY DENIED] Protected path: {rel}"
         old_s = inp["old_string"]
         new_s = inp["new_string"]
@@ -5207,8 +5207,15 @@ def _is_dangerous_command(command: str) -> bool:
     return not check_command(command, strict=False).allowed
 
 
-def _is_protected_path(path: str) -> bool:
-    """Delegates to the centralized policy engine path rules."""
+def _is_protected_path(path: str, worktree_path: str = "") -> bool:
+    """Denylist + optional worktree containment check.
+
+    Pass worktree_path (= repo_path in most handlers) to also block path
+    traversal escapes like ../../../../tmp/pwned.txt.  Without worktree_path
+    only the deny-list (.env, secrets, *.pem, etc.) is enforced.
+    """
+    if worktree_path:
+        return not check_path_in_worktree(path, worktree_path).allowed
     return not check_path(path).allowed
 
 
@@ -5227,6 +5234,8 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # ---- edit_file ----
     def edit_file(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
+        if _is_protected_path(rel, repo_path):
+            return f"[POLICY DENIED] Cannot edit protected path: {rel}"
         old_s = inp["old_string"]
         new_s = inp["new_string"]
         target = root / rel
@@ -5250,7 +5259,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # ---- write_file ----
     def write_file(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
-        if _is_protected_path(rel):
+        if _is_protected_path(rel, repo_path):
             return f"[POLICY DENIED] Cannot write to protected path: {rel}"
         target = root / rel
         try:
@@ -5344,7 +5353,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # ---- delete_file ----
     def delete_file(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
-        if _is_protected_path(rel):
+        if _is_protected_path(rel, repo_path):
             return f"[POLICY DENIED] Cannot delete protected path: {rel}"
         target = root / rel
         if not target.exists():
@@ -5454,7 +5463,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # ---- append_file ----
     def append_file(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
-        if _is_protected_path(rel):
+        if _is_protected_path(rel, repo_path):
             return f"[POLICY DENIED] Cannot write to protected path: {rel}"
         target = root / rel
         try:
@@ -5469,7 +5478,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def rename_file(inp: dict[str, Any]) -> str:
         from_rel = str(inp["from_path"])
         to_rel = str(inp["to_path"])
-        if _is_protected_path(from_rel) or _is_protected_path(to_rel):
+        if _is_protected_path(from_rel, repo_path) or _is_protected_path(to_rel, repo_path):
             return f"[POLICY DENIED] Protected path involved."
         src = root / from_rel
         dst = root / to_rel
@@ -5487,7 +5496,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         import shutil
         from_rel = str(inp["from_path"])
         to_rel = str(inp["to_path"])
-        if _is_protected_path(to_rel):
+        if _is_protected_path(to_rel, repo_path):
             return f"[POLICY DENIED] Protected destination: {to_rel}"
         src = root / from_rel
         dst = root / to_rel
@@ -5749,7 +5758,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         rel = str(inp["path"])
         line_num = int(inp["line"])
         content = str(inp["content"])
-        if _is_protected_path(rel):
+        if _is_protected_path(rel, repo_path):
             return f"[POLICY DENIED] Cannot write to protected path: {rel}"
         ial_target = root / rel
         if not ial_target.exists():
@@ -5769,7 +5778,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         rel = str(inp["path"])
         func_name = str(inp["function_name"])
         new_code = str(inp["new_code"])
-        if _is_protected_path(rel):
+        if _is_protected_path(rel, repo_path):
             return f"[POLICY DENIED] Cannot write to protected path: {rel}"
         rf_target = root / rel
         if not rf_target.exists():
@@ -5806,7 +5815,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         rel = str(inp["path"])
         dl_start = int(inp["start_line"])
         dl_end = int(inp["end_line"])
-        if _is_protected_path(rel):
+        if _is_protected_path(rel, repo_path):
             return f"[POLICY DENIED] Cannot write to protected path: {rel}"
         dl_target = root / rel
         if not dl_target.exists():
@@ -6926,7 +6935,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         rcl_rel = str(inp["path"])
         rcl_name = str(inp["class_name"])
         rcl_new = str(inp["new_code"])
-        if _is_protected_path(rcl_rel):
+        if _is_protected_path(rcl_rel, repo_path):
             return f"[POLICY DENIED] Protected path: {rcl_rel}"
         rcl_fp = root / rcl_rel
         if not rcl_fp.exists():
@@ -6963,13 +6972,63 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         return f"Replaced class '{rcl_name}' in {rcl_rel} (was lines {rcl_start + 1}–{rcl_end})"
 
     def undo_changes_h(inp: dict[str, Any]) -> str:
+        import asyncio
+        import uuid as _uuid
+
         undo_rel = str(inp["path"])
-        if _is_protected_path(undo_rel):
+        if _is_protected_path(undo_rel, repo_path):
             return f"[POLICY DENIED] Protected path: {undo_rel}"
-        # In sync context (no session), block — async path handles confirmation
         if session is None:
             return "[BLOCKED] undo_changes requires interactive session for safety confirmation"
-        return "[REQUIRES_CONFIRMATION] undo_changes must be confirmed in the UI before executing"
+
+        settings = get_settings()
+        if settings.sentry_environment == "production":
+            return (
+                "[BLOCKED] undo_changes is disabled in the production environment. "
+                "Run migrations in a non-production environment only."
+            )
+
+        cmd_preview = f"git checkout -- {undo_rel}"
+        action_id = str(_uuid.uuid4())
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures as _cf
+                fut = asyncio.run_coroutine_threadsafe(
+                    session.request_confirmation(
+                        action_id=action_id,
+                        description="Discard all uncommitted changes to file",
+                        details=cmd_preview,
+                    ),
+                    loop,
+                )
+                approved = fut.result(timeout=300)
+            else:
+                approved = loop.run_until_complete(
+                    session.request_confirmation(
+                        action_id=action_id,
+                        description="Discard all uncommitted changes to file",
+                        details=cmd_preview,
+                    )
+                )
+        except Exception as exc:
+            return f"[ERROR] Confirmation failed: {exc}"
+
+        if not approved:
+            return f"[DENIED] User declined undo_changes for: {undo_rel!r}"
+
+        try:
+            r = subprocess.run(
+                ["git", "checkout", "--", undo_rel],
+                cwd=repo_path,
+                capture_output=True, text=True, timeout=30,
+            )
+            out = (r.stdout + r.stderr).strip()
+            if r.returncode != 0:
+                return f"[ERROR] git checkout failed: {out}"
+            return f"Restored {undo_rel} to last committed state"
+        except Exception as exc:
+            return f"[ERROR] {exc}"
 
     def generate_patch_h(inp: dict[str, Any]) -> str:
         import difflib
@@ -7009,14 +7068,128 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] {e}"
 
     def run_migration_h(inp: dict[str, Any]) -> str:
+        import asyncio
+        import uuid as _uuid
+
         if session is None:
             return "[BLOCKED] run_migration requires interactive session for safety confirmation"
-        return "[REQUIRES_CONFIRMATION] Database migrations modify the schema. Confirm in the UI."
+
+        settings = get_settings()
+        if settings.sentry_environment == "production":
+            return (
+                "[BLOCKED] run_migration is disabled in the production environment. "
+                "Run migrations in a non-production environment only."
+            )
+
+        direction = str(inp.get("direction", "upgrade")).strip()
+        revision = str(inp.get("revision", "head" if direction == "upgrade" else "-1")).strip()
+        if direction not in ("upgrade", "downgrade"):
+            return f"[ERROR] direction must be 'upgrade' or 'downgrade', got {direction!r}"
+
+        cmd_args = ["alembic", direction, revision]
+        cmd_preview = " ".join(cmd_args)
+        action_id = str(_uuid.uuid4())
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures as _cf
+                fut = asyncio.run_coroutine_threadsafe(
+                    session.request_confirmation(
+                        action_id=action_id,
+                        description=f"Run Alembic migration: {direction} to {revision}",
+                        details=cmd_preview,
+                    ),
+                    loop,
+                )
+                approved = fut.result(timeout=300)
+            else:
+                approved = loop.run_until_complete(
+                    session.request_confirmation(
+                        action_id=action_id,
+                        description=f"Run Alembic migration: {direction} to {revision}",
+                        details=cmd_preview,
+                    )
+                )
+        except Exception as exc:
+            return f"[ERROR] Confirmation failed: {exc}"
+
+        if not approved:
+            return f"[DENIED] User declined run_migration ({cmd_preview})"
+
+        try:
+            r = subprocess.run(
+                cmd_args,
+                cwd=repo_path,
+                capture_output=True, text=True, timeout=120,
+            )
+            out = (r.stdout + r.stderr).strip()
+            if r.returncode != 0:
+                return f"[ERROR] alembic {direction} failed:\n{out}"
+            return f"Migration complete ({cmd_preview}):\n{out}"
+        except Exception as exc:
+            return f"[ERROR] {exc}"
 
     def seed_database_h(inp: dict[str, Any]) -> str:
+        import asyncio
+        import uuid as _uuid
+
         if session is None:
             return "[BLOCKED] seed_database requires interactive session for safety confirmation"
-        return "[REQUIRES_CONFIRMATION] Seeding the database modifies data. Confirm in the UI."
+
+        settings = get_settings()
+        if settings.sentry_environment == "production":
+            return (
+                "[BLOCKED] seed_database is disabled in the production environment. "
+                "Seeding must only be run in development or staging."
+            )
+
+        script = str(inp.get("script", "backend/scripts/seed.py")).strip()
+        if not (root / script).exists() and not (Path(repo_path) / script).exists():
+            return f"[ERROR] Seed script not found: {script}"
+
+        cmd_preview = f"python {script}"
+        action_id = str(_uuid.uuid4())
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures as _cf
+                fut = asyncio.run_coroutine_threadsafe(
+                    session.request_confirmation(
+                        action_id=action_id,
+                        description=f"Run database seed script: {script}",
+                        details=cmd_preview,
+                    ),
+                    loop,
+                )
+                approved = fut.result(timeout=300)
+            else:
+                approved = loop.run_until_complete(
+                    session.request_confirmation(
+                        action_id=action_id,
+                        description=f"Run database seed script: {script}",
+                        details=cmd_preview,
+                    )
+                )
+        except Exception as exc:
+            return f"[ERROR] Confirmation failed: {exc}"
+
+        if not approved:
+            return f"[DENIED] User declined seed_database ({script})"
+
+        try:
+            r = subprocess.run(
+                ["python", script],
+                cwd=repo_path,
+                capture_output=True, text=True, timeout=120,
+            )
+            out = (r.stdout + r.stderr).strip()
+            if r.returncode != 0:
+                return f"[ERROR] seed script failed:\n{out}"
+            return f"Seed complete ({script}):\n{out}"
+        except Exception as exc:
+            return f"[ERROR] {exc}"
 
     handlers["explain_query"] = explain_query_h
     handlers["run_migration"] = run_migration_h
@@ -7475,7 +7648,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         pattern = str(inp["pattern"])
         content = str(inp["content"])
         fpath = root / path
-        if _is_protected_path(path):
+        if _is_protected_path(path, repo_path):
             return f"[BLOCKED] {path} is a protected path"
         try:
             import re as _re_ib
@@ -7499,7 +7672,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         pattern = str(inp["pattern"])
         content = str(inp["content"])
         fpath = root / path
-        if _is_protected_path(path):
+        if _is_protected_path(path, repo_path):
             return f"[BLOCKED] {path} is a protected path"
         try:
             import re as _re_ia
@@ -7523,7 +7696,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         start_pat = str(inp["start_pattern"])
         end_pat = str(inp["end_pattern"])
         fpath = root / path
-        if _is_protected_path(path):
+        if _is_protected_path(path, repo_path):
             return f"[BLOCKED] {path} is a protected path"
         try:
             import re as _re_db
@@ -7916,7 +8089,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         import shutil as _shutil
         src = root / str(inp["source"])
         dst = root / str(inp["dest"])
-        if _is_protected_path(str(inp["dest"])):
+        if _is_protected_path(str(inp["dest"]), repo_path):
             return f"[POLICY DENIED] Cannot move to protected path: {inp['dest']}"
         try:
             dst.parent.mkdir(parents=True, exist_ok=True)
@@ -8170,7 +8343,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def create_directory_h(inp: dict[str, Any]) -> str:
         path = str(inp["path"])
-        if _is_protected_path(path):
+        if _is_protected_path(path, repo_path):
             return f"[POLICY DENIED] Cannot create directory in protected path: {path}"
         target = root / path
         try:
