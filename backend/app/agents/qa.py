@@ -1,6 +1,31 @@
 """QA Agent — runs tests and checks in a worktree. No write access."""
 from __future__ import annotations
 
+# ---------------------------------------------------------------------------
+# AGENT_CONTRACT — Fleet OS §5  (reference implementation #3 of 3)
+# ---------------------------------------------------------------------------
+AGENT_CONTRACT = {
+    "name": "qa",
+    "inputs": {
+        "task_id": "int",
+        "subtask_id": "int",
+        "files_changed": "list[str]",
+        "worktree_path": "str",
+        "repo_path": "str | None",
+    },
+    "outputs": {"QAResult": "status, tests_run, tests_passed, tests_failed, typecheck_clean, lint_clean, errors"},
+    "side_effects": ["executes pytest in worktree", "executes mypy", "executes ruff"],
+    "permissions": ["read_repo", "execute_tests"],
+    "allowed_tools": [
+        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
+        "git_log", "read_files", "file_exists", "file_info", "find_references",
+        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
+        "analyze_file", "bash", "submit_qa_result",
+    ],
+    "expected_verification": ["tests_passed via bash+pytest exit code"],
+    "risk_level": "low",
+}
+
 import logging
 from dataclasses import dataclass, field
 from typing import Any

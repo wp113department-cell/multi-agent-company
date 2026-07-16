@@ -1,6 +1,25 @@
 """PM Agent — LangGraph node: task description → goals, constraints, acceptance criteria."""
 from __future__ import annotations
 
+# ---------------------------------------------------------------------------
+# AGENT_CONTRACT — Fleet OS §5  (reference implementation #1 of 3)
+# ---------------------------------------------------------------------------
+AGENT_CONTRACT = {
+    "name": "pm",
+    "inputs": {"task_description": "str", "repo_path": "str | None"},
+    "outputs": {"pm_brief": "dict[goals, constraints, acceptance_criteria, out_of_scope]"},
+    "side_effects": [],
+    "permissions": ["read_repo"],
+    "allowed_tools": [
+        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
+        "git_log", "read_files", "file_exists", "file_info", "find_references",
+        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
+        "analyze_file", "submit_brief",
+    ],
+    "expected_verification": [],
+    "risk_level": "low",
+}
+
 import json
 import logging
 from typing import Any

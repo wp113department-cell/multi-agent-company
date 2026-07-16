@@ -7,6 +7,25 @@ Verification contract:
 """
 from __future__ import annotations
 
+# ---------------------------------------------------------------------------
+# AGENT_CONTRACT — Fleet OS §5  (reference implementation #2 of 3)
+# ---------------------------------------------------------------------------
+AGENT_CONTRACT = {
+    "name": "bug_fix",
+    "inputs": {"task_id": "int", "error_description": "str", "repo_path": "str | None"},
+    "outputs": {"AgentResult": "status, files_changed, diff, summary, tests_passed"},
+    "side_effects": ["writes files in repo (non-guarded paths)", "executes pytest"],
+    "permissions": ["read_repo", "write_repo", "execute_tests"],
+    "allowed_tools": [
+        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
+        "git_log", "read_files", "file_exists", "file_info", "find_references",
+        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
+        "analyze_file", "edit_file", "write_file", "git_diff", "bash", "submit_patch",
+    ],
+    "expected_verification": ["tests_passed via run_tests", "diff_checked via git_diff"],
+    "risk_level": "medium",
+}
+
 from typing import Any
 
 from app.agents.agent_result import AgentResult
