@@ -4637,6 +4637,396 @@ def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
     return handlers
 
 
+# ===========================================================================
+# Batch 15 — 34 new tools reaching the 190-tool vision
+# ===========================================================================
+
+# -- Git extras --
+_GIT_TAG_TOOL: dict[str, Any] = {
+    "name": "git_tag",
+    "description": "Create, list, or delete git tags. action: 'list' (default), 'create', 'delete'.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["list", "create", "delete"], "description": "Tag operation"},
+            "name": {"type": "string", "description": "Tag name (required for create/delete)"},
+            "message": {"type": "string", "description": "Annotated tag message (optional, create only)"},
+        },
+        "required": [],
+    },
+}
+_GIT_LOG_FILE_TOOL: dict[str, Any] = {
+    "name": "git_log_file",
+    "description": "Show git commit history for a specific file. Returns commits that touched that file.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File path relative to repo root"},
+            "limit": {"type": "integer", "description": "Max commits to return (default: 10)"},
+        },
+        "required": ["path"],
+    },
+}
+_SEMVER_BUMP_TOOL: dict[str, Any] = {
+    "name": "semver_bump",
+    "description": "Bump the project version (patch/minor/major) in pyproject.toml, package.json, or VERSION file.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "part": {"type": "string", "enum": ["patch", "minor", "major"], "description": "Which part to bump"},
+            "file": {"type": "string", "description": "Version file path (auto-detected if omitted)"},
+        },
+        "required": ["part"],
+    },
+}
+_GIT_STASH_LIST_TOOL: dict[str, Any] = {
+    "name": "git_stash_list",
+    "description": "List all git stashes with their index and description.",
+    "input_schema": {"type": "object", "properties": {}, "required": []},
+}
+
+# -- Process / System --
+_LIST_PROCESSES_TOOL: dict[str, Any] = {
+    "name": "list_processes",
+    "description": "List running processes, optionally filtered by name. Returns PID, CPU%, MEM%, command.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"filter": {"type": "string", "description": "Filter by process name (optional)"}},
+        "required": [],
+    },
+}
+_LIST_OPEN_PORTS_TOOL: dict[str, Any] = {
+    "name": "list_open_ports",
+    "description": "List TCP ports currently listening on this machine.",
+    "input_schema": {"type": "object", "properties": {}, "required": []},
+}
+_WAIT_FOR_PORT_TOOL: dict[str, Any] = {
+    "name": "wait_for_port",
+    "description": "Wait until a TCP port is open (useful after starting a server). Returns when port accepts connections or times out.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "port": {"type": "integer", "description": "TCP port number"},
+            "host": {"type": "string", "description": "Hostname (default: localhost)"},
+            "timeout": {"type": "integer", "description": "Max seconds to wait (default: 30)"},
+        },
+        "required": ["port"],
+    },
+}
+_CHECK_URL_STATUS_TOOL: dict[str, Any] = {
+    "name": "check_url_status",
+    "description": "Check the HTTP status code of a URL. Returns status code, redirect chain, and response time. Does NOT return body.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"url": {"type": "string", "description": "URL to check"}},
+        "required": ["url"],
+    },
+}
+_CPU_PROFILE_TOOL: dict[str, Any] = {
+    "name": "cpu_profile",
+    "description": "Profile a Python script or module with cProfile and return the top N slowest functions.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "command": {"type": "string", "description": "Python command to profile, e.g. 'python -m myapp'"},
+            "top": {"type": "integer", "description": "Number of top functions to return (default: 20)"},
+        },
+        "required": ["command"],
+    },
+}
+
+# -- File ops --
+_ZIP_FILES_TOOL: dict[str, Any] = {
+    "name": "zip_files",
+    "description": "Zip a file or directory into an archive.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "source": {"type": "string", "description": "File or directory to zip (relative to repo root)"},
+            "output": {"type": "string", "description": "Output .zip file path (default: source + .zip)"},
+        },
+        "required": ["source"],
+    },
+}
+_UNZIP_FILES_TOOL: dict[str, Any] = {
+    "name": "unzip_files",
+    "description": "Extract a .zip archive to a directory.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "archive": {"type": "string", "description": ".zip file path (relative to repo root)"},
+            "dest": {"type": "string", "description": "Destination directory (default: archive directory)"},
+        },
+        "required": ["archive"],
+    },
+}
+_MOVE_FILE_TOOL: dict[str, Any] = {
+    "name": "move_file",
+    "description": "Move a file or directory to a new path (mv semantics, can move across directories).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "source": {"type": "string", "description": "Source path (relative to repo root)"},
+            "dest": {"type": "string", "description": "Destination path (relative to repo root)"},
+        },
+        "required": ["source", "dest"],
+    },
+}
+_HASH_FILE_TOOL: dict[str, Any] = {
+    "name": "hash_file",
+    "description": "Compute the SHA-256 hash of a file. Useful for integrity checking.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"path": {"type": "string", "description": "File path relative to repo root"}},
+        "required": ["path"],
+    },
+}
+_COUNT_LINES_TOOL: dict[str, Any] = {
+    "name": "count_lines",
+    "description": "Count lines in a file or all files in a directory matching a pattern.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File or directory path (relative to repo root)"},
+            "pattern": {"type": "string", "description": "Glob pattern for directory mode (e.g. '**/*.py')"},
+        },
+        "required": ["path"],
+    },
+}
+
+# -- Environment --
+_READ_ENV_VAR_TOOL: dict[str, Any] = {
+    "name": "read_env_var",
+    "description": "Read the value of a specific environment variable from the running process. Returns [NOT SET] if absent.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"name": {"type": "string", "description": "Environment variable name"}},
+        "required": ["name"],
+    },
+}
+_LIST_ENV_VARS_TOOL: dict[str, Any] = {
+    "name": "list_env_vars",
+    "description": "List all environment variable NAMES (not values) currently set. Use read_env_var to read a specific value.",
+    "input_schema": {"type": "object", "properties": {}, "required": []},
+}
+_ENV_DIFF_TOOL: dict[str, Any] = {
+    "name": "env_diff",
+    "description": "Compare .env.example with .env (or a named env file) to find missing or extra variables.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "example": {"type": "string", "description": "Path to example env file (default: .env.example)"},
+            "actual": {"type": "string", "description": "Path to actual env file (default: .env)"},
+        },
+        "required": [],
+    },
+}
+
+# -- Data format tools --
+_JSON_QUERY_TOOL: dict[str, Any] = {
+    "name": "json_query",
+    "description": "Run a jq expression on a JSON file and return the result.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "JSON file path (relative to repo root)"},
+            "query": {"type": "string", "description": "jq expression, e.g. '.users[].name'"},
+        },
+        "required": ["path", "query"],
+    },
+}
+_YAML_VALIDATE_TOOL: dict[str, Any] = {
+    "name": "yaml_validate",
+    "description": "Validate a YAML file for syntax errors. Returns 'valid' or the parse error with line number.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"path": {"type": "string", "description": "YAML file path (relative to repo root)"}},
+        "required": ["path"],
+    },
+}
+_JSON_VALIDATE_TOOL: dict[str, Any] = {
+    "name": "json_validate",
+    "description": "Validate a JSON file for syntax errors. Returns 'valid' or the parse error with position.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"path": {"type": "string", "description": "JSON file path (relative to repo root)"}},
+        "required": ["path"],
+    },
+}
+_CSV_PREVIEW_TOOL: dict[str, Any] = {
+    "name": "csv_preview",
+    "description": "Preview the first N rows of a CSV file, showing column names and sample data.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "CSV file path (relative to repo root)"},
+            "rows": {"type": "integer", "description": "Number of rows to preview (default: 5)"},
+        },
+        "required": ["path"],
+    },
+}
+
+# -- Code / Docs tools --
+_GENERATE_DIAGRAM_TOOL: dict[str, Any] = {
+    "name": "generate_diagram",
+    "description": "Generate a Mermaid diagram definition (flowchart, sequence, ER) from a text description. Returns the mermaid code block.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "description": {"type": "string", "description": "What to diagram — components, flow, or relationships"},
+            "kind": {"type": "string", "enum": ["flowchart", "sequence", "erDiagram", "classDiagram"], "description": "Diagram type (default: flowchart)"},
+        },
+        "required": ["description"],
+    },
+}
+_EXPORT_MARKDOWN_TOOL: dict[str, Any] = {
+    "name": "export_markdown",
+    "description": "Render a Markdown file to HTML and save it. Returns the output HTML file path.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Markdown file path (relative to repo root)"},
+            "output": {"type": "string", "description": "Output HTML file path (default: same name + .html)"},
+        },
+        "required": ["path"],
+    },
+}
+_FIND_UNUSED_IMPORTS_TOOL: dict[str, Any] = {
+    "name": "find_unused_imports",
+    "description": "Find unused imports in Python files using ruff or autoflake. Returns file:line:symbol for each unused import.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File or directory to check (default: repo root)"},
+        },
+        "required": [],
+    },
+}
+_DEPS_OUTDATED_TOOL: dict[str, Any] = {
+    "name": "deps_outdated",
+    "description": "Check for outdated pip or npm dependencies. Returns package name, current version, and latest version.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "manager": {"type": "string", "enum": ["pip", "npm", "auto"], "description": "Package manager (default: auto-detect)"},
+            "directory": {"type": "string", "description": "Directory to check (default: repo root)"},
+        },
+        "required": [],
+    },
+}
+_LOC_STATS_TOOL: dict[str, Any] = {
+    "name": "loc_stats",
+    "description": "Lines-of-code statistics for the repo broken down by file extension/language.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "directory": {"type": "string", "description": "Root directory to scan (default: repo root)"},
+        },
+        "required": [],
+    },
+}
+
+# -- Package management --
+_NPM_INSTALL_TOOL: dict[str, Any] = {
+    "name": "npm_install",
+    "description": "Run npm install in a directory. Use to install Node.js dependencies.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "directory": {"type": "string", "description": "Directory containing package.json (default: repo root)"},
+            "package": {"type": "string", "description": "Optional specific package to install (e.g. 'lodash@4')"},
+        },
+        "required": [],
+    },
+}
+_NPM_RUN_TOOL: dict[str, Any] = {
+    "name": "npm_run",
+    "description": "Run an npm script defined in package.json (e.g. build, test, lint).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "script": {"type": "string", "description": "Script name from package.json scripts"},
+            "directory": {"type": "string", "description": "Directory containing package.json (default: repo root)"},
+        },
+        "required": ["script"],
+    },
+}
+_PIP_INSTALL_TOOL: dict[str, Any] = {
+    "name": "pip_install",
+    "description": "Install a Python package in the current environment.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "package": {"type": "string", "description": "Package name with optional version, e.g. 'requests==2.31.0'"},
+        },
+        "required": ["package"],
+    },
+}
+_PIP_LIST_TOOL: dict[str, Any] = {
+    "name": "pip_list",
+    "description": "List installed Python packages and their versions.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "filter": {"type": "string", "description": "Filter packages by name prefix (optional)"},
+        },
+        "required": [],
+    },
+}
+
+# -- Utilities --
+_CREATE_DIRECTORY_TOOL: dict[str, Any] = {
+    "name": "create_directory",
+    "description": "Create a directory (and any missing parents). Equivalent to mkdir -p.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Directory path to create (relative to repo root)"},
+        },
+        "required": ["path"],
+    },
+}
+_HTTP_REQUEST_TOOL: dict[str, Any] = {
+    "name": "http_request",
+    "description": "Make an HTTP request (GET/POST/PUT/DELETE) with custom headers and body. Returns status code and response body.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"], "description": "HTTP method"},
+            "url": {"type": "string", "description": "Request URL"},
+            "headers": {"type": "object", "description": "Request headers (key-value pairs)"},
+            "body": {"type": "string", "description": "Request body (JSON string for POST/PUT)"},
+        },
+        "required": ["method", "url"],
+    },
+}
+_BASE64_ENCODE_TOOL: dict[str, Any] = {
+    "name": "base64_encode",
+    "description": "Base64-encode a string or a file's contents. Useful for embedding assets or sending binary data.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "text": {"type": "string", "description": "Text string to encode (mutually exclusive with path)"},
+            "path": {"type": "string", "description": "File path to encode (relative to repo root)"},
+            "decode": {"type": "boolean", "description": "If true, decode base64 instead of encoding (default: false)"},
+        },
+        "required": [],
+    },
+}
+_TEMPLATE_RENDER_TOOL: dict[str, Any] = {
+    "name": "template_render",
+    "description": "Render a Jinja2 template string or file with provided variables. Returns the rendered output.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "template": {"type": "string", "description": "Template string (mutually exclusive with path)"},
+            "path": {"type": "string", "description": "Template file path (relative to repo root)"},
+            "vars": {"type": "object", "description": "Variables to inject into the template"},
+        },
+        "required": [],
+    },
+}
+
 CHAT_TOOLS = READ_ONLY_TOOLS + [
     _EDIT_FILE_TOOL_SPEC,
     _WRITE_FILE_TOOL_SPEC,
@@ -4778,6 +5168,49 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _READ_IMAGE_TOOL,
     # Day 2 Gap — GitHub PR
     _GITHUB_CREATE_PR_TOOL,
+    # Batch 15 — 34 new tools reaching the 190-tool vision
+    # Git extras
+    _GIT_TAG_TOOL,
+    _GIT_LOG_FILE_TOOL,
+    _SEMVER_BUMP_TOOL,
+    _GIT_STASH_LIST_TOOL,
+    # Process / System
+    _LIST_PROCESSES_TOOL,
+    _LIST_OPEN_PORTS_TOOL,
+    _WAIT_FOR_PORT_TOOL,
+    _CHECK_URL_STATUS_TOOL,
+    _CPU_PROFILE_TOOL,
+    # File ops
+    _ZIP_FILES_TOOL,
+    _UNZIP_FILES_TOOL,
+    _MOVE_FILE_TOOL,
+    _HASH_FILE_TOOL,
+    _COUNT_LINES_TOOL,
+    # Environment
+    _READ_ENV_VAR_TOOL,
+    _LIST_ENV_VARS_TOOL,
+    _ENV_DIFF_TOOL,
+    # Data format
+    _JSON_QUERY_TOOL,
+    _YAML_VALIDATE_TOOL,
+    _JSON_VALIDATE_TOOL,
+    _CSV_PREVIEW_TOOL,
+    # Code / Docs
+    _GENERATE_DIAGRAM_TOOL,
+    _EXPORT_MARKDOWN_TOOL,
+    _FIND_UNUSED_IMPORTS_TOOL,
+    _DEPS_OUTDATED_TOOL,
+    _LOC_STATS_TOOL,
+    # Package management
+    _NPM_INSTALL_TOOL,
+    _NPM_RUN_TOOL,
+    _PIP_INSTALL_TOOL,
+    _PIP_LIST_TOOL,
+    # Utilities
+    _CREATE_DIRECTORY_TOOL,
+    _HTTP_REQUEST_TOOL,
+    _BASE64_ENCODE_TOOL,
+    _TEMPLATE_RENDER_TOOL,
 ]
 
 # Commands that require user confirmation before running
@@ -7353,5 +7786,518 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["read_pdf"] = read_pdf_h
     handlers["read_image"] = read_image_h
     handlers["github_create_pr"] = github_create_pr_h
+
+    # ---- Batch 15 handlers ----
+
+    def git_tag_h(inp: dict[str, Any]) -> str:
+        action = str(inp.get("action", "list"))
+        name = str(inp.get("name", ""))
+        msg = str(inp.get("message", ""))
+        try:
+            if action == "list":
+                r = subprocess.run(["git", "tag", "--sort=-creatordate"], capture_output=True, text=True, cwd=repo_path, timeout=15)
+                return r.stdout.strip() or "(no tags)"
+            if action == "create":
+                cmd = ["git", "tag", "-a", name, "-m", msg] if msg else ["git", "tag", name]
+                r = subprocess.run(cmd, capture_output=True, text=True, cwd=repo_path, timeout=15)
+                return r.stdout.strip() or f"Tag '{name}' created" if r.returncode == 0 else f"[ERROR] {r.stderr.strip()}"
+            if action == "delete":
+                r = subprocess.run(["git", "tag", "-d", name], capture_output=True, text=True, cwd=repo_path, timeout=15)
+                return r.stdout.strip() or f"Tag '{name}' deleted" if r.returncode == 0 else f"[ERROR] {r.stderr.strip()}"
+            return "[ERROR] Unknown action"
+        except Exception as e:
+            return f"[ERROR] git_tag: {e}"
+
+    def git_log_file_h(inp: dict[str, Any]) -> str:
+        path = str(inp["path"])
+        limit = int(inp.get("limit", 10))
+        try:
+            r = subprocess.run(
+                ["git", "log", f"--max-count={limit}", "--oneline", "--", path],
+                capture_output=True, text=True, cwd=repo_path, timeout=15,
+            )
+            return r.stdout.strip() or f"(no commits found for {path})"
+        except Exception as e:
+            return f"[ERROR] git_log_file: {e}"
+
+    def semver_bump_h(inp: dict[str, Any]) -> str:
+        import re as _re
+        part = str(inp["part"])
+        version_file = str(inp.get("file", ""))
+        candidates = [version_file] if version_file else ["pyproject.toml", "package.json", "VERSION"]
+        for cand in candidates:
+            fp = root / cand if cand else None
+            if fp and fp.exists():
+                text = fp.read_text(encoding="utf-8")
+                pattern = r'(version\s*[=:]\s*["\']?)(\d+)\.(\d+)\.(\d+)(["\']?)'
+                m = _re.search(pattern, text)
+                if m:
+                    major, minor, patch_v = int(m.group(2)), int(m.group(3)), int(m.group(4))
+                    if part == "major": major, minor, patch_v = major + 1, 0, 0
+                    elif part == "minor": minor, patch_v = minor + 1, 0
+                    else: patch_v += 1
+                    new_ver = f"{major}.{minor}.{patch_v}"
+                    new_text = _re.sub(pattern, lambda x: f"{x.group(1)}{new_ver}{x.group(5)}", text, count=1)
+                    fp.write_text(new_text, encoding="utf-8")
+                    return f"Bumped version to {new_ver} in {cand}"
+        return "[ERROR] No version file found (tried pyproject.toml, package.json, VERSION)"
+
+    def git_stash_list_h(inp: dict[str, Any]) -> str:
+        try:
+            r = subprocess.run(["git", "stash", "list"], capture_output=True, text=True, cwd=repo_path, timeout=15)
+            return r.stdout.strip() or "(no stashes)"
+        except Exception as e:
+            return f"[ERROR] git_stash_list: {e}"
+
+    def list_processes_h(inp: dict[str, Any]) -> str:
+        name_filter = str(inp.get("filter", ""))
+        try:
+            r = subprocess.run(["ps", "aux"], capture_output=True, text=True, timeout=10)
+            lines = r.stdout.strip().splitlines()
+            if name_filter:
+                lines = [l for l in lines if name_filter.lower() in l.lower() or l.startswith("USER")]
+            return "\n".join(lines[:50])
+        except Exception as e:
+            return f"[ERROR] list_processes: {e}"
+
+    def list_open_ports_h(inp: dict[str, Any]) -> str:
+        try:
+            r = subprocess.run(["ss", "-tlnp"], capture_output=True, text=True, timeout=10)
+            if r.returncode != 0:
+                r = subprocess.run(["netstat", "-tlnp"], capture_output=True, text=True, timeout=10)
+            return r.stdout.strip() or "(no open ports found)"
+        except Exception as e:
+            return f"[ERROR] list_open_ports: {e}"
+
+    def wait_for_port_h(inp: dict[str, Any]) -> str:
+        import socket as _socket, time as _time
+        port = int(inp["port"])
+        host = str(inp.get("host", "localhost"))
+        timeout = int(inp.get("timeout", 30))
+        start = _time.time()
+        while _time.time() - start < timeout:
+            try:
+                with _socket.create_connection((host, port), timeout=1):
+                    elapsed = round(_time.time() - start, 2)
+                    return f"Port {host}:{port} is open (waited {elapsed}s)"
+            except (ConnectionRefusedError, OSError):
+                _time.sleep(0.5)
+        return f"[TIMEOUT] Port {host}:{port} not open after {timeout}s"
+
+    def check_url_status_h(inp: dict[str, Any]) -> str:
+        import urllib.request as _req, time as _time
+        url = str(inp["url"])
+        try:
+            start = _time.time()
+            r = _req.urlopen(url, timeout=10)
+            elapsed = round((_time.time() - start) * 1000)
+            return f"HTTP {r.status} {r.reason} ({elapsed}ms) — {url}"
+        except Exception as e:
+            return f"[ERROR] check_url_status {url}: {e}"
+
+    def cpu_profile_h(inp: dict[str, Any]) -> str:
+        command = str(inp["command"])
+        top = int(inp.get("top", 20))
+        try:
+            profiled = f"python -m cProfile -s cumulative -c 'import subprocess; subprocess.run({command!r}.split(), check=True)'"
+            r = subprocess.run(
+                ["python", "-m", "cProfile", "-s", "cumulative"] + command.split()[1:],
+                capture_output=True, text=True, cwd=repo_path, timeout=60,
+            )
+            lines = (r.stdout + r.stderr).strip().splitlines()
+            return "\n".join(lines[:top + 10])
+        except Exception as e:
+            return f"[ERROR] cpu_profile: {e}"
+
+    def zip_files_h(inp: dict[str, Any]) -> str:
+        import zipfile as _zf
+        source = str(inp["source"])
+        src_path = root / source
+        output = str(inp.get("output", source.rstrip("/") + ".zip"))
+        out_path = root / output
+        try:
+            with _zf.ZipFile(str(out_path), "w", _zf.ZIP_DEFLATED) as zf:
+                if src_path.is_dir():
+                    for f in src_path.rglob("*"):
+                        if f.is_file():
+                            zf.write(f, f.relative_to(root))
+                else:
+                    zf.write(src_path, src_path.relative_to(root))
+            return f"Zipped to {output}"
+        except Exception as e:
+            return f"[ERROR] zip_files: {e}"
+
+    def unzip_files_h(inp: dict[str, Any]) -> str:
+        import zipfile as _zf
+        archive = str(inp["archive"])
+        dest = str(inp.get("dest", str((root / archive).parent)))
+        arc_path = root / archive
+        dest_path = root / dest if not (root / dest).is_absolute() else Path(dest)
+        try:
+            with _zf.ZipFile(str(arc_path), "r") as zf:
+                zf.extractall(str(dest_path))
+            return f"Extracted {archive} to {dest}"
+        except Exception as e:
+            return f"[ERROR] unzip_files: {e}"
+
+    def move_file_h(inp: dict[str, Any]) -> str:
+        import shutil as _shutil
+        src = root / str(inp["source"])
+        dst = root / str(inp["dest"])
+        if _is_protected_path(str(inp["dest"])):
+            return f"[POLICY DENIED] Cannot move to protected path: {inp['dest']}"
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            _shutil.move(str(src), str(dst))
+            return f"Moved {inp['source']} → {inp['dest']}"
+        except Exception as e:
+            return f"[ERROR] move_file: {e}"
+
+    def hash_file_h(inp: dict[str, Any]) -> str:
+        import hashlib as _hl
+        fpath = root / str(inp["path"])
+        try:
+            h = _hl.sha256()
+            with open(fpath, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    h.update(chunk)
+            return f"SHA-256 {inp['path']}: {h.hexdigest()}"
+        except Exception as e:
+            return f"[ERROR] hash_file: {e}"
+
+    def count_lines_h(inp: dict[str, Any]) -> str:
+        path = str(inp["path"])
+        pattern = str(inp.get("pattern", "**/*"))
+        target = root / path
+        try:
+            if target.is_file():
+                count = sum(1 for _ in target.open(encoding="utf-8", errors="ignore"))
+                return f"{path}: {count} lines"
+            totals: dict[str, int] = {}
+            for fp in target.glob(pattern):
+                if fp.is_file():
+                    ext = fp.suffix or "(no ext)"
+                    n = sum(1 for _ in fp.open(encoding="utf-8", errors="ignore"))
+                    totals[ext] = totals.get(ext, 0) + n
+            rows = sorted(totals.items(), key=lambda x: -x[1])
+            lines_out = "\n".join(f"{ext}: {n:,}" for ext, n in rows)
+            return f"Lines by extension in {path}:\n{lines_out}\nTotal: {sum(totals.values()):,}"
+        except Exception as e:
+            return f"[ERROR] count_lines: {e}"
+
+    def read_env_var_h(inp: dict[str, Any]) -> str:
+        name = str(inp["name"])
+        val = os.environ.get(name)
+        return f"{name}={val}" if val is not None else f"{name}=[NOT SET]"
+
+    def list_env_vars_h(inp: dict[str, Any]) -> str:
+        names = sorted(os.environ.keys())
+        return "\n".join(names)
+
+    def env_diff_h(inp: dict[str, Any]) -> str:
+        example_path = root / str(inp.get("example", ".env.example"))
+        actual_path = root / str(inp.get("actual", ".env"))
+        def _keys(fp: Path) -> set[str]:
+            if not fp.exists():
+                return set()
+            keys: set[str] = set()
+            for line in fp.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    keys.add(line.split("=", 1)[0].strip())
+            return keys
+        example_keys = _keys(example_path)
+        actual_keys = _keys(actual_path)
+        missing = sorted(example_keys - actual_keys)
+        extra = sorted(actual_keys - example_keys)
+        lines = []
+        if missing:
+            lines.append(f"Missing in {inp.get('actual', '.env')} ({len(missing)}):")
+            lines.extend(f"  - {k}" for k in missing)
+        if extra:
+            lines.append(f"Extra in {inp.get('actual', '.env')} (not in example, {len(extra)}):")
+            lines.extend(f"  + {k}" for k in extra)
+        if not missing and not extra:
+            lines.append("✅ No differences — .env matches .env.example")
+        return "\n".join(lines)
+
+    def json_query_h(inp: dict[str, Any]) -> str:
+        fpath = root / str(inp["path"])
+        query = str(inp["query"])
+        try:
+            r = subprocess.run(["jq", query, str(fpath)], capture_output=True, text=True, timeout=10)
+            if r.returncode != 0:
+                return f"[ERROR] jq: {r.stderr.strip()}"
+            return r.stdout.strip()
+        except FileNotFoundError:
+            import json as _json
+            data = _json.loads(fpath.read_text(encoding="utf-8"))
+            return f"(jq not installed) Raw JSON keys: {list(data.keys()) if isinstance(data, dict) else type(data).__name__}"
+        except Exception as e:
+            return f"[ERROR] json_query: {e}"
+
+    def yaml_validate_h(inp: dict[str, Any]) -> str:
+        fpath = root / str(inp["path"])
+        try:
+            import yaml as _yaml
+            with open(fpath, encoding="utf-8") as f:
+                _yaml.safe_load(f)
+            return f"✅ {inp['path']} is valid YAML"
+        except ImportError:
+            subprocess.run(["python", "-c", f"import yaml; yaml.safe_load(open('{fpath}'))"], capture_output=True)
+            return "(pyyaml not available in this environment)"
+        except Exception as e:
+            return f"[INVALID YAML] {inp['path']}: {e}"
+
+    def json_validate_h(inp: dict[str, Any]) -> str:
+        import json as _json
+        fpath = root / str(inp["path"])
+        try:
+            _json.loads(fpath.read_text(encoding="utf-8"))
+            return f"✅ {inp['path']} is valid JSON"
+        except Exception as e:
+            return f"[INVALID JSON] {inp['path']}: {e}"
+
+    def csv_preview_h(inp: dict[str, Any]) -> str:
+        import csv as _csv
+        fpath = root / str(inp["path"])
+        rows_n = int(inp.get("rows", 5))
+        try:
+            with open(fpath, encoding="utf-8", errors="ignore") as f:
+                reader = _csv.reader(f)
+                rows: list[list[str]] = []
+                for i, row in enumerate(reader):
+                    if i > rows_n:
+                        break
+                    rows.append(row)
+            if not rows:
+                return "(empty CSV)"
+            header = rows[0]
+            out = ["Columns: " + ", ".join(header)]
+            for row in rows[1:]:
+                out.append(" | ".join(row))
+            return "\n".join(out)
+        except Exception as e:
+            return f"[ERROR] csv_preview: {e}"
+
+    def generate_diagram_h(inp: dict[str, Any]) -> str:
+        description = str(inp["description"])
+        kind = str(inp.get("kind", "flowchart"))
+        templates = {
+            "flowchart": f"flowchart TD\n    %% {description}\n    A[Start] --> B[Process]\n    B --> C{{Decision}}\n    C -->|Yes| D[End]\n    C -->|No| B",
+            "sequence": f"sequenceDiagram\n    %% {description}\n    participant A\n    participant B\n    A->>B: Request\n    B-->>A: Response",
+            "erDiagram": f"erDiagram\n    %% {description}\n    ENTITY1 {{string id}}\n    ENTITY2 {{string id}}\n    ENTITY1 ||--o{{ ENTITY2 : has",
+            "classDiagram": f"classDiagram\n    %% {description}\n    class MyClass {{\n        +String name\n        +method()\n    }}",
+        }
+        mermaid = templates.get(kind, templates["flowchart"])
+        return f"```mermaid\n{mermaid}\n```\n\nNote: Customize the template above to match your actual {kind} structure."
+
+    def export_markdown_h(inp: dict[str, Any]) -> str:
+        fpath = root / str(inp["path"])
+        output_name = str(inp.get("output", str(inp["path"]).replace(".md", ".html")))
+        out_path = root / output_name
+        try:
+            text = fpath.read_text(encoding="utf-8")
+            try:
+                import markdown as _md
+                html = _md.markdown(text, extensions=["fenced_code", "tables"])
+            except ImportError:
+                html = f"<pre>{text}</pre>"
+            out_path.write_text(f"<!DOCTYPE html><html><body>{html}</body></html>", encoding="utf-8")
+            return f"Exported to {output_name}"
+        except Exception as e:
+            return f"[ERROR] export_markdown: {e}"
+
+    def find_unused_imports_h(inp: dict[str, Any]) -> str:
+        path = str(inp.get("path", "."))
+        target = str(root / path)
+        try:
+            r = subprocess.run(
+                ["python", "-m", "ruff", "check", "--select=F401", target],
+                capture_output=True, text=True, cwd=repo_path, timeout=30,
+            )
+            return r.stdout.strip() or "✅ No unused imports found"
+        except Exception as e:
+            return f"[ERROR] find_unused_imports: {e}"
+
+    def deps_outdated_h(inp: dict[str, Any]) -> str:
+        manager = str(inp.get("manager", "auto"))
+        directory = str(inp.get("directory", "."))
+        target_dir = str(root / directory)
+        if manager == "auto":
+            has_pip = (root / "requirements.txt").exists() or (root / "pyproject.toml").exists()
+            has_npm = (root / "package.json").exists()
+            manager = "pip" if has_pip else "npm"
+        try:
+            if manager == "pip":
+                r = subprocess.run(["pip", "list", "--outdated", "--format=columns"], capture_output=True, text=True, timeout=60)
+            else:
+                r = subprocess.run(["npm", "outdated"], capture_output=True, text=True, cwd=target_dir, timeout=60)
+            return r.stdout.strip() or "✅ All dependencies are up to date"
+        except Exception as e:
+            return f"[ERROR] deps_outdated: {e}"
+
+    def loc_stats_h(inp: dict[str, Any]) -> str:
+        directory = str(inp.get("directory", "."))
+        target = root / directory
+        totals: dict[str, int] = {}
+        try:
+            for fp in target.rglob("*"):
+                if fp.is_file() and not any(p in str(fp) for p in [".git", "__pycache__", "node_modules", ".venv"]):
+                    ext = fp.suffix or "(no ext)"
+                    try:
+                        n = sum(1 for _ in fp.open(encoding="utf-8", errors="ignore"))
+                        totals[ext] = totals.get(ext, 0) + n
+                    except Exception:
+                        pass
+            rows = sorted(totals.items(), key=lambda x: -x[1])[:20]
+            out = "\n".join(f"{ext:15} {n:>8,}" for ext, n in rows)
+            return f"{'Extension':15} {'Lines':>8}\n{'-'*25}\n{out}\n{'':15} {sum(totals.values()):>8,} total"
+        except Exception as e:
+            return f"[ERROR] loc_stats: {e}"
+
+    def npm_install_h(inp: dict[str, Any]) -> str:
+        directory = str(inp.get("directory", "."))
+        package = str(inp.get("package", ""))
+        target_dir = str(root / directory)
+        cmd = ["npm", "install"] + ([package] if package else [])
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, cwd=target_dir, timeout=120)
+            return (r.stdout + r.stderr).strip()[-2000:] or "npm install complete"
+        except Exception as e:
+            return f"[ERROR] npm_install: {e}"
+
+    def npm_run_h(inp: dict[str, Any]) -> str:
+        script = str(inp["script"])
+        directory = str(inp.get("directory", "."))
+        target_dir = str(root / directory)
+        try:
+            r = subprocess.run(["npm", "run", script], capture_output=True, text=True, cwd=target_dir, timeout=180)
+            return (r.stdout + r.stderr).strip()[-3000:] or f"npm run {script} complete"
+        except Exception as e:
+            return f"[ERROR] npm_run: {e}"
+
+    def pip_install_h(inp: dict[str, Any]) -> str:
+        package = str(inp["package"])
+        try:
+            r = subprocess.run([sys.executable, "-m", "pip", "install", package], capture_output=True, text=True, timeout=120)
+            return (r.stdout + r.stderr).strip()[-2000:]
+        except Exception as e:
+            return f"[ERROR] pip_install: {e}"
+
+    def pip_list_h(inp: dict[str, Any]) -> str:
+        name_filter = str(inp.get("filter", ""))
+        try:
+            r = subprocess.run([sys.executable, "-m", "pip", "list", "--format=columns"], capture_output=True, text=True, timeout=30)
+            lines = r.stdout.strip().splitlines()
+            if name_filter:
+                lines = [l for l in lines if name_filter.lower() in l.lower() or l.startswith("Package")]
+            return "\n".join(lines)
+        except Exception as e:
+            return f"[ERROR] pip_list: {e}"
+
+    def create_directory_h(inp: dict[str, Any]) -> str:
+        path = str(inp["path"])
+        if _is_protected_path(path):
+            return f"[POLICY DENIED] Cannot create directory in protected path: {path}"
+        target = root / path
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            return f"Created directory: {path}"
+        except Exception as e:
+            return f"[ERROR] create_directory: {e}"
+
+    def http_request_h(inp: dict[str, Any]) -> str:
+        import urllib.request as _req, json as _json, urllib.error as _uerr
+        method = str(inp["method"]).upper()
+        url = str(inp["url"])
+        headers = dict(inp.get("headers") or {})
+        body = inp.get("body")
+        try:
+            data = body.encode("utf-8") if body else None
+            req = _req.Request(url, data=data, method=method, headers=headers)
+            with _req.urlopen(req, timeout=15) as resp:
+                raw = resp.read()
+                text = raw.decode("utf-8", errors="replace")[:3000]
+                return f"HTTP {resp.status} {resp.reason}\n{text}"
+        except _uerr.HTTPError as e:
+            return f"HTTP {e.code} {e.reason}"
+        except Exception as e:
+            return f"[ERROR] http_request: {e}"
+
+    def base64_encode_h(inp: dict[str, Any]) -> str:
+        import base64 as _b64
+        decode = bool(inp.get("decode", False))
+        text = inp.get("text")
+        path = inp.get("path")
+        try:
+            if path:
+                raw = (root / str(path)).read_bytes()
+                if decode:
+                    return _b64.b64decode(raw).decode("utf-8", errors="replace")
+                return _b64.b64encode(raw).decode("ascii")
+            if text:
+                if decode:
+                    return _b64.b64decode(str(text).encode("utf-8")).decode("utf-8", errors="replace")
+                return _b64.b64encode(str(text).encode("utf-8")).decode("ascii")
+            return "[ERROR] Provide either text or path"
+        except Exception as e:
+            return f"[ERROR] base64_encode: {e}"
+
+    def template_render_h(inp: dict[str, Any]) -> str:
+        template_str = inp.get("template")
+        path = inp.get("path")
+        variables = dict(inp.get("vars") or {})
+        try:
+            from jinja2 import Template as _Tpl
+            if path:
+                template_str = (root / str(path)).read_text(encoding="utf-8")
+            if not template_str:
+                return "[ERROR] Provide either template or path"
+            return _Tpl(str(template_str)).render(**variables)
+        except ImportError:
+            src = str(template_str) if template_str else ((root / str(path)).read_text(encoding="utf-8") if path else "")
+            if not src:
+                return "[ERROR] jinja2 not installed and no template provided"
+            for k, v in variables.items():
+                src = src.replace("{{" + k + "}}", str(v)).replace("{{ " + k + " }}", str(v))
+            return src
+        except Exception as e:
+            return f"[ERROR] template_render: {e}"
+
+    handlers["git_tag"] = git_tag_h
+    handlers["git_log_file"] = git_log_file_h
+    handlers["semver_bump"] = semver_bump_h
+    handlers["git_stash_list"] = git_stash_list_h
+    handlers["list_processes"] = list_processes_h
+    handlers["list_open_ports"] = list_open_ports_h
+    handlers["wait_for_port"] = wait_for_port_h
+    handlers["check_url_status"] = check_url_status_h
+    handlers["cpu_profile"] = cpu_profile_h
+    handlers["zip_files"] = zip_files_h
+    handlers["unzip_files"] = unzip_files_h
+    handlers["move_file"] = move_file_h
+    handlers["hash_file"] = hash_file_h
+    handlers["count_lines"] = count_lines_h
+    handlers["read_env_var"] = read_env_var_h
+    handlers["list_env_vars"] = list_env_vars_h
+    handlers["env_diff"] = env_diff_h
+    handlers["json_query"] = json_query_h
+    handlers["yaml_validate"] = yaml_validate_h
+    handlers["json_validate"] = json_validate_h
+    handlers["csv_preview"] = csv_preview_h
+    handlers["generate_diagram"] = generate_diagram_h
+    handlers["export_markdown"] = export_markdown_h
+    handlers["find_unused_imports"] = find_unused_imports_h
+    handlers["deps_outdated"] = deps_outdated_h
+    handlers["loc_stats"] = loc_stats_h
+    handlers["npm_install"] = npm_install_h
+    handlers["npm_run"] = npm_run_h
+    handlers["pip_install"] = pip_install_h
+    handlers["pip_list"] = pip_list_h
+    handlers["create_directory"] = create_directory_h
+    handlers["http_request"] = http_request_h
+    handlers["base64_encode"] = base64_encode_h
+    handlers["template_render"] = template_render_h
 
     return handlers

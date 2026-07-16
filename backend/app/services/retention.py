@@ -45,6 +45,11 @@ async def _run_cleanup() -> int:
         return count
 
 
+async def enforce_retention_policy() -> int:
+    """Public helper — run one cleanup cycle immediately. Returns deleted row count."""
+    return await _run_cleanup()
+
+
 async def start_retention_loop() -> None:
     """Background task: run log cleanup on startup and then every 24 hours."""
     settings = get_settings()
