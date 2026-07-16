@@ -14,30 +14,49 @@ from app.memory.store import query_similar_tasks
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
 
+_VALID_CATEGORIES = {"task", "architecture", "failure", "learning"}
+
+
 @router.get("/patterns")
 async def get_memory_patterns(
     db: AsyncSession = Depends(get_db),
+    category: str | None = Query(default=None, description="Filter by category: task | architecture | failure | learning"),
 ) -> dict[str, Any]:
-    """Aggregate view of engineering memory: outcome distribution and recent embeddings."""
-    result = await db.execute(
-        select(MemoryEmbedding.outcome, func.count(MemoryEmbedding.id).label("count"))
-        .group_by(MemoryEmbedding.outcome)
-    )
+    """Aggregate view of engineering memory: outcome distribution and recent embeddings.
+
+    Optional ?category= filter returns only memories of that category.
+    """
+    base_q = select(MemoryEmbedding)
+    count_q = select(func.count(MemoryEmbedding.id))
+    dist_q = select(MemoryEmbedding.outcome, func.count(MemoryEmbedding.id).label("count")).group_by(MemoryEmbedding.outcome)
+
+    if category and category in _VALID_CATEGORIES:
+        base_q = base_q.where(MemoryEmbedding.category == category)
+        count_q = count_q.where(MemoryEmbedding.category == category)
+        dist_q = dist_q.where(MemoryEmbedding.category == category)
+
+    result = await db.execute(dist_q)
     distribution = {row.outcome: row.count for row in result.fetchall()}
 
-    count_result = await db.execute(select(func.count(MemoryEmbedding.id)))
+    count_result = await db.execute(count_q)
     total = count_result.scalar_one_or_none() or 0
 
-    # Recent entries
     recent_result = await db.execute(
-        select(MemoryEmbedding)
-        .order_by(MemoryEmbedding.created_at.desc())
-        .limit(10)
+        base_q.order_by(MemoryEmbedding.created_at.desc()).limit(10)
     )
     recent = recent_result.scalars().all()
 
+    # Category distribution (all categories always shown)
+    cat_dist_result = await db.execute(
+        select(MemoryEmbedding.category, func.count(MemoryEmbedding.id).label("count"))
+        .group_by(MemoryEmbedding.category)
+    )
+    category_distribution = {row.category: row.count for row in cat_dist_result.fetchall()}
+
     return {
         "total": total,
+        "category": category,
+        "categoryDistribution": category_distribution,
         "outcomeDistribution": distribution,
         "recent": [
             {
@@ -45,6 +64,7 @@ async def get_memory_patterns(
                 "taskId": r.task_id,
                 "epicId": r.epic_id,
                 "outcome": r.outcome,
+                "category": getattr(r, "category", "task"),
                 "description": r.description[:200],
                 "summary": r.summary[:200],
                 "filesChanged": list(r.files_changed or [])[:10],

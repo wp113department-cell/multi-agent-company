@@ -325,7 +325,8 @@ class MemoryEmbedding(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     task_id: Mapped[str] = mapped_column(String(100), index=True)
     epic_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    outcome: Mapped[str] = mapped_column(String(50))  # completed | blocked
+    outcome: Mapped[str] = mapped_column(String(50))  # completed | blocked | architecture | failure
+    category: Mapped[str] = mapped_column(String(50), default="task")  # task | architecture | failure | learning
     description: Mapped[str] = mapped_column(Text)
     summary: Mapped[str] = mapped_column(Text)
     files_changed: Mapped[Any] = mapped_column(ARRAY(Text), nullable=False, default=list)
