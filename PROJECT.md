@@ -2,7 +2,7 @@
 
 **This is a living document. Update it every session — it is the single source of truth for "what actually exists right now," separate from `PLAN.md` (what's intended) and `files/` (the original spec suite, which describes the full 7-stage vision, not the current build).**
 
-Last updated: 2026-07-16 (Session 1 complete — architect, decomposer, planner migrated)
+Last updated: 2026-07-16 (Session 2 complete — backend_dev, frontend_dev, coder migrated)
 
 ---
 
@@ -90,11 +90,24 @@ Migrated `architect`, `decomposer`, `planner` from `run_agent()` → `run_agent_
 **Test results:** 1313 passed, 0 failed (+56 new: test_session1_migration.py)
 **Commit:** 7f9ea96
 
+### Session 2 — COMPLETE (2026-07-16)
+Migrated `backend_dev`, `frontend_dev`, `coder` from `run_agent()` → `run_agent_graph()` with AGENT_CONTRACT + fleet registry auto-registration.
+
+**Key decisions:**
+- Static-check retry loops (mypy/ruff for backend, tsc for frontend) kept outside the LLM graph — the post-graph check is what triggers retries
+- `VerificationConfig`: bash→checks_run, git_diff→diff_checked; resets checks_run on file edits
+- Check errors are fed into next-attempt `initial_message` with `[SELF-CORRECTION ATTEMPT N]` prefix
+- Capability tags: `backend_development/python_coding`, `frontend_development/typescript_coding`, `code_implementation/generic_coding`
+- Coder token accumulation (`total_in += final_state["tokens_in"]`) preserved across retries
+- Patch target for test mocks must be `app.agents.<module>.get_settings` (not `app.config.get_settings`) — get_settings is imported at module level as a direct reference
+
+**Test results:** 1375 passed, 0 failed (+62 new: test_session2_migration.py)
+**Commit:** 289f1c5
+
 ### Next Steps (in order)
-1. Session 2: Migrate `backend_dev`, `frontend_dev`, `coder`
-2. Session 3: Migrate `reviewer`, `qa`, `devops`
-3. Session 4: Migrate `pm`, `research`, `executive`, `docs`
-4. Sessions 5–20: Add AGENT_CONTRACT + fleet registry to 52 base_graph agents (3/session)
+1. Session 3: Migrate `reviewer`, `qa`, `devops`
+2. Session 4: Migrate `pm`, `research`, `executive`, `docs`
+3. Sessions 5–20: Add AGENT_CONTRACT + fleet registry to 52 base_graph agents (3/session)
 
 ---
 
