@@ -536,6 +536,7 @@ def _extract_and_store_lesson(
     final_state: AgentRunState,
     role_name: str,
     model_haiku: str,
+    trace_id: str = "",
 ) -> None:
     """Extract a reusable lesson from the completed run and store in LessonStore.
     Non-fatal — any failure is logged and swallowed.
@@ -574,7 +575,7 @@ def _extract_and_store_lesson(
             logger.info("lesson stored for %s (category=%s)", role_name, lesson.category)
             try:
                 from app.fleet.fleet_events import lesson_published, publish
-                publish(lesson_published(role_name, lesson.lesson, lesson.category))
+                publish(lesson_published(role_name, lesson.lesson, lesson.category, trace_id=trace_id))
             except Exception:
                 pass
     except Exception as exc:
@@ -628,10 +629,11 @@ def build_agent_graph(
     verification_cfg: VerificationConfig,
     human_approval_required: bool = False,
     max_turns: int = 20,
-    # Fleet OS Session 0 flags — all False by default, zero breaking changes
-    enable_planning: bool = False,
-    enable_memory: bool = False,
-    enable_reflection: bool = False,
+    # Fleet OS flags — enabled by default (Day 0, 2026-07-16)
+    # Pass False explicitly to opt an agent out of a specific node.
+    enable_planning: bool = True,
+    enable_memory: bool = True,
+    enable_reflection: bool = True,
     task_description: str = "",
     repo_path: str = "",
     model_haiku: str = "",
@@ -641,7 +643,7 @@ def build_agent_graph(
     """Build a production LangGraph StateGraph for a worker agent.
 
     The graph enforces the verification contract. All Fleet OS flags default to
-    False so every existing agent call continues working without changes.
+    True — every agent gets planning + memory + reflection unless it opts out.
     """
     haiku = model_haiku or model
     call_llm = _make_call_llm_node(role_name, model, tools, context_token_budget)
@@ -703,11 +705,11 @@ def run_agent_graph(
     initial_message: str,
     human_approval_required: bool = False,
     max_turns: int = 20,
-    # Fleet OS Session 0 flags — all False by default
-    enable_planning: bool = False,
-    enable_memory: bool = False,
-    enable_reflection: bool = False,
-    enable_lesson: bool = False,
+    # Fleet OS flags — enabled by default (Day 0, 2026-07-16)
+    enable_planning: bool = True,
+    enable_memory: bool = True,
+    enable_reflection: bool = True,
+    enable_lesson: bool = True,
     task_description: str = "",
     repo_path: str = "",
     model_haiku: str = "",
@@ -717,12 +719,26 @@ def run_agent_graph(
 ) -> AgentRunState:
     """Build + run the agent graph, return the final state.
 
-    All Fleet OS flags default to False — existing callers need zero changes.
-    New state fields are populated with safe defaults in initial_state.
+    All Fleet OS flags default to True. Callers can pass False to opt out.
+    Settings-based defaults for model_haiku and repo_path when not provided.
     """
     import uuid as _uuid
 
     tid = trace_id or _uuid.uuid4().hex[:12]
+
+    # Wire settings-based defaults when not explicitly provided (Day 0)
+    if not model_haiku:
+        try:
+            from app.config import get_settings as _gs
+            model_haiku = _gs().model_router
+        except Exception:
+            model_haiku = model
+    if not repo_path:
+        try:
+            from app.config import get_settings as _gs
+            repo_path = _gs().target_repo_path
+        except Exception:
+            repo_path = ""
 
     # Fleet OS metrics span (non-fatal if fleet not wired)
     _span: Any = None
@@ -732,6 +748,17 @@ def run_agent_graph(
         _span.__enter__()
     except Exception:
         _span = None
+
+    # Lifecycle: agent transitions to RUNNING + emits TaskStarted (Gap 7 / Gap 10)
+    try:
+        from app.fleet.agent_registry import get_agent_registry
+        from app.fleet.fleet_events import publish, task_started
+        _reg = get_agent_registry()
+        if _reg.get(role_name) is not None:
+            _reg.start_task(role_name, task_id=tid)
+        publish(task_started(task_id=tid, agent_name=role_name, trace_id=tid))
+    except Exception:
+        pass
 
     try:
         graph = build_agent_graph(
@@ -778,14 +805,37 @@ def run_agent_graph(
 
         # Post-graph lesson extraction (non-fatal, runs after graph completes)
         if enable_lesson and final_state.get("submitted"):
-            _extract_and_store_lesson(final_state, role_name, model_haiku or model)
+            _extract_and_store_lesson(final_state, role_name, model_haiku or model, trace_id=tid)
 
         if _span is not None:
             _span.__exit__(None, None, None)
 
+        # Lifecycle: SLEEP + events (Gap 7 / Gap 10) — runs after span closes, always
+        try:
+            from app.fleet.agent_registry import get_agent_registry
+            from app.fleet.fleet_events import publish, task_completed, health_updated
+            _reg = get_agent_registry()
+            if _reg.get(role_name) is not None:
+                _reg.complete_task(role_name)  # → AgentState.SLEEP
+            publish(task_completed(task_id=tid, agent_name=role_name, trace_id=tid))
+            publish(health_updated(role_name, health="healthy", state="sleep", trace_id=tid))
+        except Exception:
+            pass
+
         return final_state
 
     except Exception as exc:
+        # Lifecycle: agent transitions to ERROR on unhandled exception (Gap 7)
+        try:
+            from app.fleet.agent_registry import get_agent_registry
+            from app.fleet.fleet_events import publish, task_failed
+            _reg = get_agent_registry()
+            if _reg.get(role_name) is not None:
+                _reg.fail_task(role_name, reason=str(exc))
+            publish(task_failed(task_id=tid, agent_name=role_name, reason=str(exc)[:200], trace_id=tid))
+        except Exception:
+            pass
+
         if _span is not None:
             try:
                 _span.__exit__(type(exc), exc, exc.__traceback__)
