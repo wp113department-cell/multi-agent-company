@@ -1310,11 +1310,9 @@ _RUN_LINTER_TOOL = {
     },
 }
 
-# ---------------------------------------------------------------------------
-# MODULE-LEVEL BACKGROUND PROCESS REGISTRY (used by run_background/kill_process)
-# ---------------------------------------------------------------------------
-
-_BACKGROUND_PROCESSES: dict[int, "subprocess.Popen[str]"] = {}
+# _BACKGROUND_PROCESSES used to be a module-level dict (shared across all sessions).
+# It is now a per-session dict created inside make_chat_handlers() so that one session
+# cannot kill or read output from another session's background process.
 
 # ---------------------------------------------------------------------------
 # NEW TOOL SPECS — Batch 1: File / Editing extras
@@ -5204,34 +5202,6 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _TEMPLATE_RENDER_TOOL,
 ]
 
-# Commands that require user confirmation before running
-_DANGEROUS_PATTERNS = [
-    "rm -rf",
-    "rm -r",
-    "git push",
-    "git reset --hard",
-    "git clean -f",
-    "docker push",
-    "docker rm",
-    "kubectl delete",
-    "kubectl apply",
-    "systemctl",
-    "sudo",
-    "pip uninstall",
-    "npm uninstall",
-    "DROP TABLE",
-    "DELETE FROM",
-    "truncate",
-    "mkfs",
-    "dd if=",
-    "> /dev/",
-    "shutdown",
-    "reboot",
-]
-
-_PROTECTED_PATHS = {".env", "secrets/", ".github/workflows/", ".git/"}
-
-
 def _is_dangerous_command(command: str) -> bool:
     """Delegates to the centralized policy engine denylist."""
     return not check_command(command, strict=False).allowed
@@ -5250,6 +5220,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     """
     root = Path(repo_path)
     handlers = make_read_only_handlers(repo_path)
+    # Per-session background process registry — isolated so one session cannot
+    # kill or read output from a different session's background process.
+    _session_bg_procs: dict[int, "subprocess.Popen[str]"] = {}
 
     # ---- edit_file ----
     def edit_file(inp: dict[str, Any]) -> str:
@@ -5910,7 +5883,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 rb_command, shell=True, cwd=rb_cwd,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             )
-            _BACKGROUND_PROCESSES[proc.pid] = proc
+            _session_bg_procs[proc.pid] = proc
             return f"Started background process PID {proc.pid}: {rb_command[:80]}"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -5922,7 +5895,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         kp_sig_name = str(inp.get("signal", "TERM"))
         sig_map = {"TERM": _signal.SIGTERM, "KILL": _signal.SIGKILL, "INT": _signal.SIGINT}
         kp_sig = sig_map.get(kp_sig_name, _signal.SIGTERM)
-        _BACKGROUND_PROCESSES.pop(kp_pid, None)
+        _session_bg_procs.pop(kp_pid, None)
         try:
             _os.kill(kp_pid, kp_sig)
             return f"Sent {kp_sig_name} to PID {kp_pid}"
@@ -6630,7 +6603,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         import os as _os
         ro_pid = int(inp["pid"])
         ro_max = int(inp.get("lines", 50))
-        proc = _BACKGROUND_PROCESSES.get(ro_pid)
+        proc = _session_bg_procs.get(ro_pid)
         if proc is None:
             return f"[ERROR] No tracked background process with PID {ro_pid}"
         if proc.poll() is not None:
