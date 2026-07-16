@@ -34,9 +34,54 @@
 - Every "agent" is a real LangGraph node calling the Anthropic Python SDK — never a stub, never a mocked LLM response in production code paths (mocks allowed ONLY inside test files).
 - Every agent has: a real system prompt loaded from `backend/roles/<name>.md`, Zod-equivalent Pydantic output schema, real tools, and logs every action.
 
-## /repos REFERENCE RULE
-- The `/repos` folder contains 10 cloned open-source projects (openhands, aider, continue, opencode, cline, roo-code, swe-agent, autogen, langgraph, composio). They are ARCHITECTURAL REFERENCES ONLY.
-- You may READ them to understand patterns. You must NEVER copy, port, or paraphrase their source code into ours. All Gridiron code is original.
+## REPO-FIRST RULE (PERMANENT — SET 2026-07-16)
+**Before implementing ANY big or new feature:** Read the 10 reference repos first. Understand how they solve the same problem. Extract the pattern. Build a plan from what you found. THEN execute the plan in small tasks one by one. No exceptions.
+
+**Process for every significant new capability:**
+1. SEARCH `/repos` — find how existing open-source projects solved this problem
+2. READ the relevant files — understand the real mechanism, not just the name
+3. EXTRACT the pattern — what is the core idea, stripped of their framework?
+4. PLAN — write a step-by-step implementation plan using that idea, adapted to our Python/LangGraph/FastAPI stack
+5. EXECUTE — implement one small task at a time, test after each step
+6. Never skip step 1–4. "I know how to do this" is not a substitute for checking.
+
+## /repos REFERENCE RULE — ALL 10 REPOS WITH PATTERNS
+The `/repos` folder contains 10 cloned open-source projects. They are ARCHITECTURAL REFERENCES ONLY.
+You may READ them to understand patterns. You must NEVER copy, port, or paraphrase their source code. All Gridiron code is original.
+
+### What each repo teaches us — look here first by problem type
+
+| Repo | Path | Key Problem it Solves | What to Read |
+|---|---|---|---|
+| **aider** | `repos/aider/` | Repo-map generation, token-budget edit formats (diff/whole/udiff), auto-linting after edits, file watching | `aider/repomap.py` (symbol graph), `aider/coders/` (edit formats), `aider/linter.py`, `aider/repo.py` |
+| **autogen** | `repos/autogen/` | Multi-agent orchestration, MagenticOne task ledger (gather-facts → create-plan → stall detection), MemoryController (pre-inference hook + failure insight), agent runtime, cancellation tokens | `python/packages/autogen-core/src/autogen_core/_base_agent.py`, `autogen-magentic-one/`, `_cache_store.py` |
+| **cline** | `repos/cline/` | VS Code extension agent loop, tool approval flow, diff presentation, streaming to IDE, context window management | `apps/vscode/`, `sdk/` |
+| **composio** | `repos/composio/` | Universal tool integration across LLM providers (Anthropic, OpenAI, LangGraph, AutoGen, CrewAI), tool schema normalization | `python/providers/` (anthropic/, langgraph/, autogen/), `python/composio/` |
+| **continue** | `repos/continue/` | IDE context retrieval, context providers, autocomplete, MCP context, diff workflow | `core/context/providers/`, `core/context/retrieval/`, `core/autocomplete/`, `core/diff/` |
+| **langgraph** | `repos/langgraph/` | StateGraph checkpointing (save/restore), persistent memory store (cross-thread), RetryPolicy, Send() fan-out, interrupt() for human-in-loop, RemainingSteps budget | `libs/checkpoint/`, `libs/langgraph/`, `libs/prebuilt/`, `libs/sdk-py/` |
+| **opencode** | `repos/opencode/` | TUI coding agent, streaming output, tool execution in terminal, session/context management | `packages/core/`, `packages/app/`, `packages/cli/` |
+| **open-hands** | `repos/open-hands/` | Docker sandbox isolation, repo.md always-on context injection, progressive interview before planning, human confirmation before memory write, full stack agent (browser + terminal + editor) | `openhands/agenthub/`, `openhands/runtime/`, `openhands/memory/`, `openhands/controller/` |
+| **roo-code** | `repos/roo-code/` | VS Code agent checkpoint/rollback, auto-approval flow, context window condensation, context tracking, diff presentation | `src/core/checkpoints/`, `src/core/auto-approval/`, `src/core/condense/`, `src/core/context-management/` |
+| **swe-agent** | `repos/swe-agent/` | SWE-bench environment isolation, history processors (compressing agent trajectory), action sampler, reviewer agent (second LLM reviews agent output), problem statement templating | `sweagent/agent/history_processors.py`, `sweagent/agent/reviewer.py`, `sweagent/environment/swe_env.py` |
+
+### Problem → Repo lookup (use this to know WHERE to look)
+| If you need to implement... | Check this repo first |
+|---|---|
+| Repo context injection, symbol map, file tree for agents | **aider** (`repomap.py`) |
+| Multi-agent task planning, stall detection, fact-gathering | **autogen** (MagenticOne) |
+| Memory update before inference, lesson extraction on failure | **autogen** (MemoryController) |
+| StateGraph checkpoint → save → restore → rollback | **langgraph** (`libs/checkpoint/`) |
+| Cross-thread persistent memory, shared lessons across agents | **langgraph** (`libs/checkpoint/store/`) |
+| Tool integration for multiple LLM providers | **composio** (`python/providers/`) |
+| Context compression / condense when context window fills | **roo-code** (`src/core/condense/`) |
+| Auto-approval / human-in-loop flow | **roo-code** (`src/core/auto-approval/`) or **langgraph** (`interrupt()`) |
+| History compression for long agent trajectories | **swe-agent** (`history_processors.py`) |
+| Second-LLM review of agent output (reflect_on_tool_use) | **swe-agent** (`reviewer.py`) or **autogen** |
+| Sandbox / Docker isolation for code execution | **open-hands** (`runtime/`) |
+| Always-on repo context as system prompt prefix | **open-hands** (`agenthub/`) |
+| Streaming output from agents to frontend | **opencode** (`packages/app/`) or **cline** |
+| MCP context providers, retrieval pipeline | **continue** (`core/context/`) |
+| Diff format selection, edit format comparison | **aider** (`coders/`) |
 
 ## PYTHON PROJECT STRUCTURE
 ```
