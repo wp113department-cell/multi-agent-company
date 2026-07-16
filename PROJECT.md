@@ -129,7 +129,7 @@ Migrated `pm`, `research`, `executive`, `docs` from `run_agent()` → `run_agent
 - 77 new tests in test_session4_migration.py covering all 4 agents
 
 **Test results:** 1525 passed, 0 failed (+77 new: test_session4_migration.py)
-**Commit:** (pending)
+**Commit:** 498d88e
 
 ### Next Steps (in order)
 1. Sessions 5–20: Add AGENT_CONTRACT + fleet registry to 52 base_graph agents (3/session)
