@@ -16,12 +16,10 @@ import pytest
 
 from app.agents.tools import (
     CHAT_TOOLS,
-    _BACKGROUND_PROCESSES,
-    _is_dangerous_command,
-    _is_protected_path,
     make_chat_handlers,
     make_read_only_handlers,
 )
+from app.policy.engine import check_command, check_path
 
 
 # ---------------------------------------------------------------------------
