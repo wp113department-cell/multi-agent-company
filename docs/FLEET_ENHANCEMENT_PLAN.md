@@ -80,6 +80,32 @@ This document supersedes it with the following updates:
 
 ---
 
+## Testing Strategy — Groq (now) vs Anthropic (later)
+
+**While ANTHROPIC_API_KEY is unavailable, use the Groq shim for real-LLM tests.**
+
+| Category | How to test | File |
+|---|---|---|
+| Unit (no LLM) | Mock anthropic.Anthropic — fast, always run | `tests/test_day0_capabilities.py` |
+| Real LLM (Groq) | `groq_llm_patch` fixture — calls Groq API via shim | `tests/test_day0_groq_integration.py` |
+| Real LLM (Anthropic-only) | `@anthropic_only` skip marker — run after key obtained | same file, bottom section |
+
+**Run Groq tests:**
+```bash
+set -a && source .env && set +a   # loads GROQ_API_KEY + USE_GROQ=true
+pytest tests/test_day0_groq_integration.py -v
+```
+
+**To remove Groq shim (once Anthropic key arrives):**
+1. Set `ANTHROPIC_API_KEY=sk-ant-...` in `backend/.env`
+2. Delete `tests/groq_compat.py`
+3. Delete `tests/test_day0_groq_integration.py`
+4. All other tests already mock the LLM — nothing else changes.
+
+**For each new day's tests:** write one `test_dayN_groq_integration.py` with `[GROQ-OK]` tests using the `groq_llm_patch` fixture, plus `@anthropic_only` stubs for what Groq can't test. The stubs become real tests on Day 19 (cloud deploy with full Anthropic key).
+
+---
+
 ## Session Rules (apply every day, no exceptions)
 
 **Technical Debt Budget (§1):** Each session must allocate: 70% production improvements, 20% bug fixes, 10% refactoring. If a session is purely bug-fixing, reschedule the improvement work into the next session explicitly — never let a full session be only clean-up.
