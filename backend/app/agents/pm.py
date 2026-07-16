@@ -1,37 +1,55 @@
-"""PM Agent — LangGraph node: task description → goals, constraints, acceptance criteria."""
+"""PM Agent — LangGraph node: task description → goals, constraints, acceptance criteria.
+
+Session 4 migration (2026-07-16):
+- Replaced run_agent() with run_agent_graph().
+- Updated AGENT_CONTRACT to standard list format (was old dict format).
+- Added _register() at module level.
+- pm_node now uses final_state.get("result", {}) directly — no closure needed.
+- Capabilities include built-in legacy tags (planning, requirement_analysis, goal_extraction)
+  so capability_registry.py built-in entry is superseded cleanly.
+- External interface (pm_node signature) unchanged.
+
+Pattern from: swe-agent RetryAgent (preserve external interface, swap internal runner).
+"""
 from __future__ import annotations
 
-# ---------------------------------------------------------------------------
-# AGENT_CONTRACT — Fleet OS §5  (reference implementation #1 of 3)
-# ---------------------------------------------------------------------------
-AGENT_CONTRACT = {
-    "name": "pm",
-    "inputs": {"task_description": "str", "repo_path": "str | None"},
-    "outputs": {"pm_brief": "dict[goals, constraints, acceptance_criteria, out_of_scope]"},
-    "side_effects": [],
-    "permissions": ["read_repo"],
-    "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "submit_brief",
-    ],
-    "expected_verification": [],
-    "risk_level": "low",
-}
-
-import json
 import logging
 from typing import Any
 
-from app.agents.base import run_agent
+from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import READ_ONLY_TOOLS, make_read_only_handlers
 from app.config import get_settings
 from app.pipeline.state import PipelineState
 
 logger = logging.getLogger(__name__)
 
-_SUBMIT_TOOL = {
+# ---------------------------------------------------------------------------
+# AGENT_CONTRACT — Fleet OS capability declaration (standard list format)
+# ---------------------------------------------------------------------------
+
+AGENT_CONTRACT: dict[str, Any] = {
+    "name": "pm",
+    "description": "Translates a task description into goals, constraints, and acceptance criteria (PM brief).",
+    "allowed_tools": [
+        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
+        "git_log", "read_files", "file_exists", "file_info", "find_references",
+        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
+        "analyze_file", "submit_brief",
+    ],
+    "input_types": ["task_description", "repo_path"],
+    "output_types": ["pm_brief"],
+    "side_effects": [],
+    "permissions": ["read_repo"],
+    "risk_level": "low",
+    "expected_verification": {},
+    "dependencies": [],
+}
+
+# ---------------------------------------------------------------------------
+# Submit tool schema
+# ---------------------------------------------------------------------------
+
+_SUBMIT_TOOL: dict[str, Any] = {
     "name": "submit_brief",
     "description": "Submit the completed PM brief as structured JSON.",
     "input_schema": {
@@ -46,52 +64,87 @@ _SUBMIT_TOOL = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# Verification contract — read-only agent
+# ---------------------------------------------------------------------------
+
+_VERIFICATION_CFG = VerificationConfig(
+    set_by={},
+    reset_by=(),
+    reset_keys=(),
+    enforce_in_result={},
+    initial={},
+)
+
+# ---------------------------------------------------------------------------
+# Pipeline node — external interface unchanged
+# ---------------------------------------------------------------------------
 
 def pm_node(state: PipelineState) -> PipelineState:
     settings = get_settings()
-    brief_result: dict[str, Any] = {}
-
     handlers = make_read_only_handlers(state.get("repo_path", settings.target_repo_path))
-
-    def submit_brief(inp: dict[str, Any]) -> str:
-        brief_result.update(inp)
-        return "Brief submitted"
-
-    handlers["submit_brief"] = submit_brief
+    handlers["submit_brief"] = lambda inp: "Brief submitted"
 
     memory_context = state.get("memory_context", "")
     memory_block = f"\n\n{memory_context}" if memory_context else ""
 
-    messages = [
-        {
-            "role": "user",
-            "content": (
-                f"Task title: {state['task_title']}\n\n"
-                f"Task description:\n{state['task_description']}"
-                f"{memory_block}\n\n"
-                "Produce the PM brief using the submit_brief tool."
-            ),
-        }
-    ]
+    initial_message = (
+        f"Task title: {state['task_title']}\n\n"
+        f"Task description:\n{state['task_description']}"
+        f"{memory_block}\n\n"
+        "Produce the PM brief using the submit_brief tool."
+    )
 
     try:
-        _, tokens_in, tokens_out, *_ = run_agent(
+        final_state = run_agent_graph(
             role_name="pm",
             model=settings.model_planner,
-            messages=messages,
             tools=READ_ONLY_TOOLS + [_SUBMIT_TOOL],
             tool_handlers=handlers,
+            verification_cfg=_VERIFICATION_CFG,
+            initial_message=initial_message,
             max_turns=10,
         )
-        logger.info("PM Agent done — tokens_in=%d tokens_out=%d", tokens_in, tokens_out)
-    except Exception as e:
-        if brief_result:
-            logger.warning("PM Agent error after brief submission (ignored): %s", e)
-        else:
-            logger.exception("PM Agent failed")
-            return {**state, "stage": "blocked", "error": f"PM Agent failed: {e}"}
+        logger.info(
+            "PM Agent done — tokens_in=%d tokens_out=%d submitted=%s",
+            final_state.get("tokens_in", 0),
+            final_state.get("tokens_out", 0),
+            final_state.get("submitted", False),
+        )
+    except Exception as exc:
+        logger.exception("PM Agent failed")
+        return {**state, "stage": "blocked", "error": f"PM Agent failed: {exc}"}
 
-    if not brief_result:
+    brief_result = final_state.get("result", {})
+    if not brief_result or not final_state.get("submitted"):
         return {**state, "stage": "blocked", "error": "PM Agent did not submit a brief"}
 
     return {**state, "pm_brief": brief_result, "stage": "architect"}
+
+
+# ---------------------------------------------------------------------------
+# Capability registry registration
+# ---------------------------------------------------------------------------
+
+def _register() -> None:
+    try:
+        from app.fleet.capability_registry import AgentCapability, register
+        from app.fleet.agent_registry import get_agent_registry
+        register(AgentCapability(
+            name=AGENT_CONTRACT["name"],
+            description=AGENT_CONTRACT["description"],
+            tools=AGENT_CONTRACT["allowed_tools"],
+            input_types=AGENT_CONTRACT["input_types"],
+            output_types=AGENT_CONTRACT["output_types"],
+            # Include built-in legacy tags so capability_registry.py entry is superseded cleanly.
+            capabilities=["planning", "requirement_analysis", "goal_extraction",
+                           "product_management"],
+            risk_level=AGENT_CONTRACT["risk_level"],
+            dependencies=AGENT_CONTRACT["dependencies"],
+        ))
+        get_agent_registry().register("pm")
+    except Exception as exc:
+        logger.debug("Fleet registry not available: %s", exc)
+
+
+_register()

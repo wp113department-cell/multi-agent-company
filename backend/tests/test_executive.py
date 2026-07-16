@@ -3,11 +3,26 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.agents.executive import _parse_json, run_executive
+
+
+def _make_final_state(text: str, tokens_in: int = 100, tokens_out: int = 50) -> dict[str, Any]:
+    """Build a fake AgentRunState with the given assistant text in messages."""
+    return {
+        "messages": [{"role": "assistant", "content": text}],
+        "verification": {},
+        "result": {},
+        "turns": 1,
+        "submitted": False,
+        "requires_human_approval": False,
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
+    }
 
 
 class TestParseJson:
@@ -42,7 +57,7 @@ class TestRunExecutive:
     def _make_agent_response(self, epics: list[dict], summary: str) -> str:
         return json.dumps({"epics": epics, "summary": summary})
 
-    @patch("app.agents.executive.run_agent")
+    @patch("app.agents.executive.run_agent_graph")
     @patch("app.agents.executive.get_settings")
     async def test_creates_goal_and_epics(
         self, mock_settings: MagicMock, mock_run: MagicMock, mock_db: AsyncMock
@@ -51,13 +66,12 @@ class TestRunExecutive:
             model_router="claude-haiku-4-5-20251001",
             executive_max_epics_per_goal=5,
         )
-        mock_run.return_value = (
+        mock_run.return_value = _make_final_state(
             self._make_agent_response(
                 [{"title": "Epic A", "description": "desc A"},
                  {"title": "Epic B", "description": "desc B"}],
                 "Two things to build.",
-            ),
-            100, 50, 0, 0,
+            )
         )
 
         goal_id, epic_ids, error = await run_executive("Build a dashboard", mock_db)
@@ -67,7 +81,7 @@ class TestRunExecutive:
         assert len(epic_ids) == 2
         assert mock_db.flush.called
 
-    @patch("app.agents.executive.run_agent")
+    @patch("app.agents.executive.run_agent_graph")
     @patch("app.agents.executive.get_settings")
     async def test_caps_epics_at_max(
         self, mock_settings: MagicMock, mock_run: MagicMock, mock_db: AsyncMock
@@ -76,19 +90,18 @@ class TestRunExecutive:
             model_router="claude-haiku-4-5-20251001",
             executive_max_epics_per_goal=2,
         )
-        mock_run.return_value = (
+        mock_run.return_value = _make_final_state(
             self._make_agent_response(
                 [{"title": f"E{i}", "description": "d"} for i in range(5)],
                 "summary",
-            ),
-            100, 50, 0, 0,
+            )
         )
 
         _, epic_ids, error = await run_executive("Build lots", mock_db)
         assert error is None
         assert len(epic_ids) == 2
 
-    @patch("app.agents.executive.run_agent")
+    @patch("app.agents.executive.run_agent_graph")
     @patch("app.agents.executive.get_settings")
     async def test_agent_error_returns_error(
         self, mock_settings: MagicMock, mock_run: MagicMock, mock_db: AsyncMock
@@ -104,7 +117,7 @@ class TestRunExecutive:
         assert "API timeout" in error
         assert epic_ids == []
 
-    @patch("app.agents.executive.run_agent")
+    @patch("app.agents.executive.run_agent_graph")
     @patch("app.agents.executive.get_settings")
     async def test_empty_epics_returns_error(
         self, mock_settings: MagicMock, mock_run: MagicMock, mock_db: AsyncMock
@@ -113,13 +126,13 @@ class TestRunExecutive:
             model_router="claude-haiku-4-5-20251001",
             executive_max_epics_per_goal=5,
         )
-        mock_run.return_value = ('{"epics": [], "summary": "nothing"}', 10, 5, 0, 0)
+        mock_run.return_value = _make_final_state('{"epics": [], "summary": "nothing"}')
 
         _, epic_ids, error = await run_executive("vague thing", mock_db)
         assert error is not None
         assert "no epics" in error.lower()
 
-    @patch("app.agents.executive.run_agent")
+    @patch("app.agents.executive.run_agent_graph")
     @patch("app.agents.executive.get_settings")
     async def test_bad_json_returns_error(
         self, mock_settings: MagicMock, mock_run: MagicMock, mock_db: AsyncMock
@@ -128,7 +141,7 @@ class TestRunExecutive:
             model_router="claude-haiku-4-5-20251001",
             executive_max_epics_per_goal=5,
         )
-        mock_run.return_value = ("not json at all", 10, 5, 0, 0)
+        mock_run.return_value = _make_final_state("not json at all")
 
         _, epic_ids, error = await run_executive("something", mock_db)
         assert error is not None

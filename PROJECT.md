@@ -2,7 +2,7 @@
 
 **This is a living document. Update it every session — it is the single source of truth for "what actually exists right now," separate from `PLAN.md` (what's intended) and `files/` (the original spec suite, which describes the full 7-stage vision, not the current build).**
 
-Last updated: 2026-07-16 (Session 3 complete — reviewer, qa, devops migrated)
+Last updated: 2026-07-16 (Session 4 complete — pm, research, executive, docs migrated)
 
 ---
 
@@ -116,9 +116,23 @@ Migrated `reviewer`, `qa`, `devops` from `run_agent()` → `run_agent_graph()`.
 **Test results:** 1448 passed, 0 failed (+73 new: test_session3_migration.py)
 **Commit:** 17bd4d6
 
+### Session 4 — COMPLETE (2026-07-16)
+Migrated `pm`, `research`, `executive`, `docs` from `run_agent()` → `run_agent_graph()` with AGENT_CONTRACT + fleet registry auto-registration.
+
+**Key decisions:**
+- pm AGENT_CONTRACT: updated from old dict format to standard list format; capabilities include legacy built-in tags (`planning`, `requirement_analysis`, `goal_extraction`, `product_management`) — superset rule ensures fleet_manager still selects pm for `"planning"`
+- pm_node: uses `final_state.get("result", {})` directly; no closure needed since base_graph captures submit input in `result`
+- research: added new AGENT_CONTRACT (none existed before); `research_enabled` gate preserved; `_last_assistant_text()` for raw_text fallback
+- executive: async, no tools (`tools=[], tool_handlers={}`); `{max_epics}` role-placeholder unsubstituted by run_agent_graph — included constraint in `initial_message` instead; `_last_assistant_text()` for JSON parsing; `_load_role_with_max()` kept for backward compat but no longer called in hot path
+- docs: added new AGENT_CONTRACT (none existed before); `_build_docs_context()` helper unchanged; `_last_assistant_text()` for raw_text fallback; risk_level=medium (writes .md files to worktree)
+- test_executive.py updated: all `run_agent` patches → `run_agent_graph`; tuple return values → `AgentRunState` dicts; 9/9 tests passing
+- 77 new tests in test_session4_migration.py covering all 4 agents
+
+**Test results:** 1525 passed, 0 failed (+77 new: test_session4_migration.py)
+**Commit:** (pending)
+
 ### Next Steps (in order)
-1. Session 4: Migrate `pm`, `research`, `executive`, `docs`
-2. Sessions 5–20: Add AGENT_CONTRACT + fleet registry to 52 base_graph agents (3/session)
+1. Sessions 5–20: Add AGENT_CONTRACT + fleet registry to 52 base_graph agents (3/session)
 
 ---
 
