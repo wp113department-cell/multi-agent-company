@@ -2,7 +2,7 @@
 
 **This is a living document. Update it every session — it is the single source of truth for "what actually exists right now," separate from `PLAN.md` (what's intended) and `files/` (the original spec suite, which describes the full 7-stage vision, not the current build).**
 
-Last updated: 2026-07-16 (Fleet OS Day 0 + Repo-First Rule + 20-Capability Enhancement Plan)
+Last updated: 2026-07-16 (Session 1 complete — architect, decomposer, planner migrated)
 
 ---
 
@@ -76,12 +76,25 @@ All §20 exit criteria met including the final checkpoint→rollback cycle.
 
 **Tests:** 1257 passed, 0 failed (+70 new: 24 checkpoint + 46 scaffold)
 
+### Session 1 — COMPLETE (2026-07-16)
+Migrated `architect`, `decomposer`, `planner` from `run_agent()` → `run_agent_graph()` with AGENT_CONTRACT + fleet registry auto-registration.
+
+**Key decisions:**
+- Generic `"planning"` tag removed from architect/decomposer/planner to avoid collision with pm's exclusive `"planning"` selection
+- Architect: `["architecture_design", "technical_planning"]`
+- Decomposer: `["task_decomposition", "dependency_analysis"]`
+- Planner: `["implementation_planning", "codebase_analysis"]`
+- External interfaces (architect_node, decomposer_node, run_planner + on_heartbeat/on_tool_call) unchanged — API callers unaffected
+- Pattern: swe-agent RetryAgent (preserve external interface, swap internal runner)
+
+**Test results:** 1313 passed, 0 failed (+56 new: test_session1_migration.py)
+**Commit:** 7f9ea96
+
 ### Next Steps (in order)
-1. Session 1: Migrate `architect`, `decomposer`, `planner` → `run_agent_graph()` + AGENT_CONTRACT
-2. Session 2: Migrate `backend_dev`, `frontend_dev`, `coder`
-3. Session 3: Migrate `reviewer`, `qa`, `devops`
-4. Session 4: Migrate `pm`, `research`, `executive`, `docs`
-5. Sessions 5–20: Add AGENT_CONTRACT + fleet registry to 52 base_graph agents (3/session)
+1. Session 2: Migrate `backend_dev`, `frontend_dev`, `coder`
+2. Session 3: Migrate `reviewer`, `qa`, `devops`
+3. Session 4: Migrate `pm`, `research`, `executive`, `docs`
+4. Sessions 5–20: Add AGENT_CONTRACT + fleet registry to 52 base_graph agents (3/session)
 
 ---
 
