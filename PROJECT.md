@@ -2,7 +2,86 @@
 
 **This is a living document. Update it every session — it is the single source of truth for "what actually exists right now," separate from `PLAN.md` (what's intended) and `files/` (the original spec suite, which describes the full 7-stage vision, not the current build).**
 
-Last updated: 2026-07-15 (Day 3 LangGraph Production session — 586 passed, 54 skipped, 0 failed)
+Last updated: 2026-07-16 (Fleet OS Day 0 + Repo-First Rule + 20-Capability Enhancement Plan)
+
+---
+
+## 2026-07-16 — Repo-First Rule + Fleet OS Day 0 + Enhancement Plan
+
+### PERMANENT RULE ADDED
+**Repo-First Rule (set 2026-07-16):** Before any significant new feature, read relevant repos in `/repos/` first, extract the pattern, build a plan, then execute in small steps. Full rule + lookup table now in `CLAUDE.md`.
+
+### 10 Reference Repos — Summary and What Each Teaches
+
+| Repo | Key Capability | Primary Pattern to Steal |
+|---|---|---|
+| **aider** | Repo-map / symbol graph, diff edit formats, auto-lint | `repomap.py` — token-budgeted repo context; `coders/` — diff vs whole vs udiff |
+| **autogen** | MagenticOne task ledger, MemoryController, multi-agent runtime | Gather-facts → create-plan → stall detection; `Memory.update_context()` pre-inference hook; failure insight generation |
+| **cline** | VS Code agent loop, tool approval, streaming | Tool approval confirmation flow; streaming diff to IDE panel |
+| **composio** | Universal tool provider bridge (Anthropic, LangGraph, AutoGen, OpenAI) | Provider abstraction: normalize tool schemas across LLM APIs |
+| **continue** | IDE context retrieval, MCP context providers, autocomplete | `context/providers/` — pluggable context sources; `context/retrieval/` — RAG pipeline |
+| **langgraph** | StateGraph checkpoint/restore, persistent cross-thread store, RetryPolicy, interrupt() | `libs/checkpoint/` — save → restore cycle; `libs/checkpoint/store/` — cross-agent memory namespace |
+| **opencode** | TUI streaming agent, session management, terminal tool execution | Session-per-task isolation; real-time streaming to console/UI |
+| **open-hands** | Docker sandbox, always-on repo.md context, progressive interview, human-confirm before memory write | System-prompt repo context injection; `interrupt()` before long-term memory write |
+| **roo-code** | Checkpoint/rollback, auto-approval, context condensation | `src/core/checkpoints/` — save + restore; `src/core/condense/` — compress context when near limit |
+| **swe-agent** | History processors (compress trajectory), reviewer agent, action sampler, SWE-bench isolation | `history_processors.py` — compress long agent history; `reviewer.py` — second LLM reviews agent output |
+
+### Fleet OS Day 0 — COMPLETE (2026-07-16)
+7 infrastructure components built, 136 new tests, all passing:
+
+| Component | File | Status |
+|---|---|---|
+| Capability Registry | `backend/app/fleet/capability_registry.py` | ✅ 3 reference agents registered |
+| Agent Registry | `backend/app/fleet/agent_registry.py` | ✅ SLEEP/RUNNING states verified |
+| Fleet Manager | `backend/app/fleet/fleet_manager.py` | ✅ Scores by registry, not hardcoded names |
+| Audit Log | `backend/app/fleet/audit_log.py` | ✅ Ring buffer + real human-approval entries |
+| Metrics | `backend/app/fleet/metrics.py` | ✅ 7 measurable objectives computable |
+| Fleet Events | `backend/app/fleet/fleet_events.py` | ✅ 8 typed events; legacy CORE_EVENT_TYPES untouched (ADR-001) |
+| Tool Manifest | `backend/app/fleet/tool_manifest.py` | ✅ 175+ tools manifested |
+| ADR-001 | `backend/docs/adr/ADR-001-event-bus-compatibility-overlay.md` | ✅ Event bus overlay documented |
+| AGENT_CONTRACT | pm.py, bug_fix.py, qa.py | ✅ 3 reference implementations |
+
+**One remaining Day 0 item:** `fleet_checkpoint.py` — save → restore cycle (§20 exit criterion)
+
+### 20-Capability Enhancement Plan — PUBLISHED
+Artifact: https://claude.ai/code/artifact/5ddb5d59-05a1-49d9-98e6-6d6021345874
+
+Strategy:
+- Session 0: Enhance `base_graph.py` with 5 new nodes + 9 new state fields → 52 agents get all 20 capabilities automatically
+- Sessions 1–4: Migrate 13 old-style agents (3/session) to `run_agent_graph()` + AGENT_CONTRACT
+- Sessions 5–20: Add AGENT_CONTRACT + fleet registry to 52 base_graph agents (3/session)
+
+**Patterns sourced from:** AutoGen (planner_node/memory_hook/lesson_node), LangGraph (run_span/RetryPolicy/checkpoint), OpenHands (repo_context injection)
+
+### Day 0 — FULLY COMPLETE (2026-07-16)
+All §20 exit criteria met including the final checkpoint→rollback cycle.
+
+**fleet_checkpoint.py** — `backend/app/fleet/fleet_checkpoint.py`
+- `CheckpointStore`: thread-safe ring buffer (capacity 500), deep-copy on save+restore
+- `save_checkpoint / restore_checkpoint / rollback_to` module-level convenience functions
+- `test_day0_complete_checkpoint_rollback_cycle` proves full save→restore→rollback
+
+**base_graph.py Session 0 scaffold** — `backend/app/agents/base_graph.py`
+- `AgentRunState` expanded: 8 original + 9 new fields (plan, facts, n_stalls, retry_count, confidence, status, trace_id, memory_context, repo_context)
+- `LessonStore` + `get_lesson_store()` — in-process cross-agent lesson sharing (AutoGen pattern)
+- `planner_node` — gather-facts + create-plan (Haiku, AutoGen MagenticOne)
+- `memory_hook_node` — lesson injection + repo context (AutoGen MemoryController + OpenHands)
+- `reflection_node` — post-tool reflect_on_tool_use (AutoGen pattern)
+- `_extract_and_store_lesson()` — post-submit lesson extraction (run after graph.invoke)
+- Stall detection in router (`n_stalls` counter, AutoGen MagenticOne)
+- `run_span` integration — Fleet OS metrics wrapper (non-fatal)
+- Context trim (`_trim_messages`) — token budget enforcement (roo-code condense pattern)
+- All flags default `False` — **52 existing agents need zero changes**
+- `build_agent_graph` / `run_agent_graph` accept all new kwargs with backward-compat defaults
+
+**Tests:** 1257 passed, 0 failed (+70 new: 24 checkpoint + 46 scaffold)
+
+### Next Steps (in order)
+1. Session 1: Migrate `architect`, `decomposer`, `planner` → `run_agent_graph()` + AGENT_CONTRACT
+2. Session 2: Migrate `backend_dev`, `frontend_dev`, `coder`
+3. Session 3: Migrate `reviewer`, `qa`, `devops`
+4. Session 4: Migrate `pm`, `research`, `executive`, `docs`
+5. Sessions 5–20: Add AGENT_CONTRACT + fleet registry to 52 base_graph agents (3/session)
 
 ---
 
