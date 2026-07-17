@@ -6,13 +6,17 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+# Resolve paths relative to this file so tests pass regardless of cwd
+_BACKEND = Path(__file__).parent.parent   # .../backend/
+_ROOT = _BACKEND.parent                   # project root (one level above backend/)
+
 import pytest
 
 
 # ---- Tool count ----
 
 def test_total_tools_190() -> None:
-    src = Path("backend/app/agents/tools.py").read_text()
+    src = (Path(__file__).parent.parent / "app/agents/tools.py").read_text()
     names = set(re.findall(r'"name":\s*"([a-z][a-z0-9_]+)"', src))
     assert len(names) >= 190, f"Expected ≥190 tools, got {len(names)}"
 
@@ -73,24 +77,24 @@ def test_all_new_agent_role_files_exist() -> None:
         "code_quality_agent", "dependency_security_agent",
         "version_manager_agent", "devex_agent",
     ]
-    missing = [a for a in new_agents if not Path(f"backend/roles/{a}.md").exists()]
+    missing = [a for a in new_agents if not (_BACKEND / "roles" / f"{a}.md").exists()]
     assert not missing, f"Missing role files: {missing}"
 
 
 # ---- Memory category migration ----
 
 def test_migration_010_exists() -> None:
-    assert Path("backend/migrations/versions/010_memory_category_retention.py").exists()
+    assert (_BACKEND / "migrations/versions/010_memory_category_retention.py").exists()
 
 
 def test_migration_010_revision_chain() -> None:
-    src = Path("backend/migrations/versions/010_memory_category_retention.py").read_text()
+    src = (_BACKEND / "migrations/versions/010_memory_category_retention.py").read_text()
     assert 'revision: str = "010"' in src
     assert 'down_revision' in src and '"009"' in src
 
 
 def test_migration_010_adds_category_column() -> None:
-    src = Path("backend/migrations/versions/010_memory_category_retention.py").read_text()
+    src = (_BACKEND / "migrations/versions/010_memory_category_retention.py").read_text()
     assert "category" in src
     assert "add_column" in src
 
@@ -197,48 +201,48 @@ async def test_enforce_retention_executes_delete() -> None:
 # ---- Frontend files exist ----
 
 def test_login_page_exists() -> None:
-    assert Path("apps/web/app/login/page.tsx").exists()
+    assert (_ROOT / "apps/web/app/login/page.tsx").exists()
 
 
 def test_middleware_exists() -> None:
-    assert Path("apps/web/middleware.ts").exists()
+    assert (_ROOT / "apps/web/middleware.ts").exists()
 
 
 def test_navbar_component_exists() -> None:
-    assert Path("apps/web/components/NavBar.tsx").exists()
+    assert (_ROOT / "apps/web/components/NavBar.tsx").exists()
 
 
 def test_auth_lib_exists() -> None:
-    assert Path("apps/web/lib/auth.ts").exists()
+    assert (_ROOT / "apps/web/lib/auth.ts").exists()
 
 
 def test_cost_page_exists() -> None:
-    assert Path("apps/web/app/cost/page.tsx").exists()
+    assert (_ROOT / "apps/web/app/cost/page.tsx").exists()
 
 
 def test_navbar_has_dark_mode_toggle() -> None:
-    src = Path("apps/web/components/NavBar.tsx").read_text()
+    src = (_ROOT / "apps/web/components/NavBar.tsx").read_text()
     assert "ThemeToggle" in src
     assert "dark" in src.lower()
 
 
 def test_navbar_has_logout() -> None:
-    src = Path("apps/web/components/NavBar.tsx").read_text()
+    src = (_ROOT / "apps/web/components/NavBar.tsx").read_text()
     assert "logout" in src.lower() or "Sign out" in src
 
 
 def test_login_page_calls_auth_login() -> None:
-    src = Path("apps/web/app/login/page.tsx").read_text()
+    src = (_ROOT / "apps/web/app/login/page.tsx").read_text()
     assert "login" in src
     assert "/api/auth/login" in src or 'from "../../lib/auth"' in src
 
 
 def test_cost_page_calls_metrics_api() -> None:
-    src = Path("apps/web/app/cost/page.tsx").read_text()
+    src = (_ROOT / "apps/web/app/cost/page.tsx").read_text()
     assert "/api/metrics" in src
 
 
 def test_middleware_protects_routes() -> None:
-    src = Path("apps/web/middleware.ts").read_text()
+    src = (_ROOT / "apps/web/middleware.ts").read_text()
     assert "/login" in src
     assert "redirect" in src.lower()

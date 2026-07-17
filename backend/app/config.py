@@ -188,6 +188,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = Field(default="HS256", description="JWT signing algorithm.")
     jwt_access_token_expire_minutes: int = Field(default=1440, description="JWT access token lifetime in minutes (default: 24 hours).")
     jwt_auth_enabled: bool = Field(default=False, description="Enable JWT authentication. When false, X-User-Role header is still accepted (backward compat).")
+    default_admin_password: str = Field(default="gridiron123", description="Password auto-seeded for the 'admin' user on first startup. Change in production.")
 
 
 _settings: Settings | None = None
