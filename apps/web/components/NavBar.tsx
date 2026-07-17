@@ -61,6 +61,7 @@ export function NavBar() {
         <a href="/goals" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Goals</a>
         <a href="/metrics" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Metrics</a>
         <a href="/cost" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Cost</a>
+        <a href="/console" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Console</a>
         <a href="/settings" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Settings</a>
         <ThemeToggle />
         {authed && (

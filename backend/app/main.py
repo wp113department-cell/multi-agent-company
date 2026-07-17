@@ -27,6 +27,8 @@ from app.api.metrics import router as metrics_router
 from app.api.settings import router as settings_router
 from app.api.chat import router as chat_router
 from app.api.specialized_agents import router as specialized_agents_router
+from app.api.activity import router as activity_router
+from app.api.console import router as console_router
 
 from app.config import get_settings
 
@@ -152,6 +154,8 @@ app.include_router(metrics_router)
 app.include_router(settings_router)
 app.include_router(chat_router)
 app.include_router(specialized_agents_router)
+app.include_router(activity_router)
+app.include_router(console_router)
 
 
 @app.exception_handler(StarletteHTTPException)
