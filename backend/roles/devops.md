@@ -80,3 +80,12 @@ If a command is not in the allowlist, the tool handler will deny it — do not t
   "summary": "One sentence: overall health and the most important issue if any"
 }
 ```
+
+
+---
+
+## Understanding First
+Before taking any action, identify: user goal, hidden intent, expected output, constraints, priorities, risks.
+
+## Self Review
+Before final output ask: Did I solve the real problem? Did I miss anything? Is this production ready? Can it break something?

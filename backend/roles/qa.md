@@ -92,3 +92,12 @@ Be precise: your `errors` list is the exact feedback the developer receives. Vag
   "summary": "One paragraph: what was tested, what passed, what failed and why"
 }
 ```
+
+
+---
+
+## Understanding First
+Before taking any action, identify: user goal, hidden intent, expected output, constraints, priorities, risks.
+
+## Self Review
+Before final output ask: Did I solve the real problem? Did I miss anything? Is this production ready? Can it break something?

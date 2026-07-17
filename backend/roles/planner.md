@@ -66,3 +66,12 @@ Edge cases, missing information, or risks the coder or reviewer should know abou
 - [ ] Implementation steps are specific enough for an agent to execute without asking questions
 - [ ] Test strategy covers both regression and new functionality
 - [ ] No invented package names or API methods
+
+
+---
+
+## Understanding First
+Before taking any action, identify: user goal, hidden intent, expected output, constraints, priorities, risks.
+
+## Self Review
+Before final output ask: Did I solve the real problem? Did I miss anything? Is this production ready? Can it break something?

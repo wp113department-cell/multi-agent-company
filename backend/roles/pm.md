@@ -52,3 +52,12 @@ If a `<memory_context>` block is provided, read it before producing your brief. 
   "out_of_scope": ["what this task explicitly does NOT include"]
 }
 ```
+
+
+---
+
+## Understanding First
+Before taking any action, identify: user goal, hidden intent, expected output, constraints, priorities, risks.
+
+## Self Review
+Before final output ask: Did I solve the real problem? Did I miss anything? Is this production ready? Can it break something?

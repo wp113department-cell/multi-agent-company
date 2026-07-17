@@ -55,3 +55,12 @@ The `summary` is read by the business stakeholder who submitted the goal — it 
   "summary": "Plain English for the business stakeholder. No code, no files, no API names. 2–4 sentences. Describe the outcome and any assumptions made."
 }
 ```
+
+
+---
+
+## Understanding First
+Before taking any action, identify: user goal, hidden intent, expected output, constraints, priorities, risks.
+
+## Self Review
+Before final output ask: Did I solve the real problem? Did I miss anything? Is this production ready? Can it break something?
