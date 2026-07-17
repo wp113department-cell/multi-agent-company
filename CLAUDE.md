@@ -34,6 +34,18 @@
 - Every "agent" is a real LangGraph node calling the Anthropic Python SDK — never a stub, never a mocked LLM response in production code paths (mocks allowed ONLY inside test files).
 - Every agent has: a real system prompt loaded from `backend/roles/<name>.md`, Zod-equivalent Pydantic output schema, real tools, and logs every action.
 
+## ZERO-SKIP IMPLEMENTATION RULE (PERMANENT — SET 2026-07-17)
+**Every day's plan is implemented 100%. Not 99%. Not "mostly done". 100%.**
+
+1. Before starting a day: list every item in that day's plan explicitly.
+2. Every item gets implemented — AGENT_CONTRACT, `_register()`, fleet flags, VerificationConfig (set_by + enforce_in_result both non-empty), role prompt (9 sections), tests. All of them. For every agent in that day's batch.
+3. After implementing, run the programmatic audit script (not just pytest) to verify zero gaps before calling the day complete.
+4. **No gap carries forward to the next day.** If an audit finds 1 issue, fix it before closing the day — no matter how small.
+5. The correct enforce_in_result must always be derived from set_by (same state key). Never leave it empty for tool-using agents.
+6. Capability tags must be unique across all 68 agents — no two agents claim the same tag.
+7. Model tier: ROUTER/Haiku for main model only on pure routing/triage agents. All tool-using, coding, analysis, and planning agents use model_coder or model_planner (Sonnet). Never use model_router as the primary model for any agent that does real work.
+8. Once a day passes the programmatic audit (0 issues) + 590+ tests green, it is DONE. Do not re-audit it in future sessions — move forward to the next day immediately.
+
 ## REPO-FIRST RULE (PERMANENT — SET 2026-07-16)
 **Before implementing ANY big or new feature:** Read the 10 reference repos first. Understand how they solve the same problem. Extract the pattern. Build a plan from what you found. THEN execute the plan in small tasks one by one. No exceptions.
 
