@@ -122,6 +122,13 @@ def run_coder(
                 tool_handlers=handlers,
                 verification_cfg=_VERIFICATION_CFG,
                 initial_message=base_msg,
+                task_description=f"Code implementation — task {task_id}",
+                repo_path=repo,
+                model_haiku=settings.model_router,
+                enable_planning=True,
+                enable_memory=True,
+                enable_reflection=True,
+                enable_lesson=True,
                 max_turns=30,
             )
             total_in += final_state.get("tokens_in", 0)

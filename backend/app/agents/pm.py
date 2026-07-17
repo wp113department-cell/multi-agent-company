@@ -82,7 +82,8 @@ _VERIFICATION_CFG = VerificationConfig(
 
 def pm_node(state: PipelineState) -> PipelineState:
     settings = get_settings()
-    handlers = make_read_only_handlers(state.get("repo_path", settings.target_repo_path))
+    repo = state.get("repo_path", settings.target_repo_path)
+    handlers = make_read_only_handlers(repo)
     handlers["submit_brief"] = lambda inp: "Brief submitted"
 
     memory_context = state.get("memory_context", "")
@@ -103,6 +104,13 @@ def pm_node(state: PipelineState) -> PipelineState:
             tool_handlers=handlers,
             verification_cfg=_VERIFICATION_CFG,
             initial_message=initial_message,
+            task_description=state["task_description"],
+            repo_path=repo,
+            model_haiku=settings.model_router,
+            enable_planning=True,
+            enable_memory=True,
+            enable_reflection=True,
+            enable_lesson=True,
             max_turns=10,
         )
         logger.info(

@@ -114,6 +114,13 @@ def decomposer_node(state: PipelineState) -> PipelineState:
             tool_handlers=handlers,
             verification_cfg=_VERIFICATION_CFG,
             initial_message=initial_message,
+            task_description=state["task_title"],
+            repo_path=repo,
+            model_haiku=settings.model_router,
+            enable_planning=True,
+            enable_memory=True,
+            enable_reflection=True,
+            enable_lesson=True,
             human_approval_required=False,
             max_turns=10,
         )

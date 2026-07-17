@@ -108,6 +108,13 @@ def run_research(
             tool_handlers=handlers,
             verification_cfg=_VERIFICATION_CFG,
             initial_message=task_description,
+            task_description=task_description,
+            repo_path=effective_repo,
+            model_haiku=settings.model_router,
+            enable_planning=True,
+            enable_memory=True,
+            enable_reflection=True,
+            enable_lesson=True,
         )
     except Exception as exc:
         logger.warning("Research agent failed (non-fatal): %s", exc)

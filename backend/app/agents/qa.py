@@ -107,6 +107,13 @@ def run_qa(
             tool_handlers=handlers,
             verification_cfg=_VERIFICATION_CFG,
             initial_message=initial_message,
+            task_description=f"QA testing — subtask {subtask_id}",
+            repo_path=repo,
+            model_haiku=settings.model_router,
+            enable_planning=True,
+            enable_memory=True,
+            enable_reflection=True,
+            enable_lesson=True,
             max_turns=20,
         )
         logger.info(

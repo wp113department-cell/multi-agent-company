@@ -17,7 +17,9 @@ export function middleware(request: NextRequest) {
 
   // Check for JWT in Authorization header (API calls) or cookie
   const authHeader = request.headers.get("authorization");
-  const tokenCookie = request.cookies.get("gridiron_token")?.value;
+  const rawCookie = request.cookies.get("gridiron_token")?.value;
+  // Cookie is URI-encoded by the client (encodeURIComponent); decode before checking
+  const tokenCookie = rawCookie ? decodeURIComponent(rawCookie) : undefined;
 
   if (authHeader?.startsWith("Bearer ") || tokenCookie) {
     return NextResponse.next();

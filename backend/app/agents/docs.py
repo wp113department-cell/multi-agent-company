@@ -50,7 +50,7 @@ AGENT_CONTRACT: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 _VERIFICATION_CFG = VerificationConfig(
-    set_by={},
+    set_by={"write_file": "docs_written"},
     reset_by=(),
     reset_keys=(),
     enforce_in_result={},
@@ -152,6 +152,13 @@ def run_docs(
             tool_handlers=handlers,
             verification_cfg=_VERIFICATION_CFG,
             initial_message=context,
+            task_description=f"Documentation for: {epic_title}",
+            repo_path=effective_repo,
+            model_haiku=settings.model_router,
+            enable_planning=True,
+            enable_memory=True,
+            enable_reflection=True,
+            enable_lesson=True,
         )
     except Exception as exc:
         logger.exception("Docs agent failed")

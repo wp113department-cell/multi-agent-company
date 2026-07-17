@@ -48,7 +48,7 @@ AGENT_CONTRACT: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 _VERIFICATION_CFG = VerificationConfig(
-    set_by={},
+    set_by={"bash": "checks_run"},
     reset_by=(),
     reset_keys=(),
     enforce_in_result={},
@@ -105,6 +105,13 @@ def run_devops(
             tool_handlers=handlers,
             verification_cfg=_VERIFICATION_CFG,
             initial_message=task_description,
+            task_description=task_description,
+            repo_path=effective_repo,
+            model_haiku=settings.model_router,
+            enable_planning=True,
+            enable_memory=True,
+            enable_reflection=True,
+            enable_lesson=True,
         )
         logger.info(
             "DevOps done — in=%d out=%d submitted=%s",

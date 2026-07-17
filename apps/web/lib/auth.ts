@@ -1,6 +1,15 @@
 "use client";
 
 const TOKEN_KEY = "gridiron_token";
+const COOKIE_MAX_AGE = 60 * 60 * 24; // 24 hours (matches JWT_EXPIRE_MINUTES=1440)
+
+function setCookie(value: string): void {
+  document.cookie = `${TOKEN_KEY}=${encodeURIComponent(value)}; path=/; max-age=${COOKIE_MAX_AGE}; SameSite=Lax`;
+}
+
+function deleteCookie(): void {
+  document.cookie = `${TOKEN_KEY}=; path=/; max-age=0; SameSite=Lax`;
+}
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -9,10 +18,23 @@ export function getToken(): string | null {
 
 export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
+  setCookie(token); // middleware reads this on server-side navigation
 }
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+  deleteCookie();
+}
+
+/** Call once on app boot — syncs cookie from localStorage for already-logged-in users. */
+export function syncAuthCookie(): void {
+  if (typeof window === "undefined") return;
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (token) {
+    setCookie(token);
+  } else {
+    deleteCookie();
+  }
 }
 
 export function isAuthenticated(): boolean {

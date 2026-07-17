@@ -123,6 +123,13 @@ async def run_executive(
             tool_handlers={},
             verification_cfg=_VERIFICATION_CFG,
             initial_message=initial_message,
+            task_description=f"Goal breakdown: {goal_text[:80]}",
+            repo_path=settings.target_repo_path,
+            model_haiku=settings.model_router,
+            enable_planning=True,
+            enable_memory=True,
+            enable_reflection=True,
+            enable_lesson=True,
             max_turns=3,
         )
     except Exception as exc:

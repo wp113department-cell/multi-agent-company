@@ -112,8 +112,8 @@ export default function CostPage() {
   );
   const maxAgentCost = sortedAgents.length
     ? estimateCost(
-        sortedAgents[0].total_tokens_in,
-        sortedAgents[0].total_tokens_out
+        sortedAgents[0]!.total_tokens_in,
+        sortedAgents[0]!.total_tokens_out
       )
     : 1;
 

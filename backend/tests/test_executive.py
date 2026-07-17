@@ -65,6 +65,7 @@ class TestRunExecutive:
         mock_settings.return_value = SimpleNamespace(
             model_router="claude-haiku-4-5-20251001",
             executive_max_epics_per_goal=5,
+            target_repo_path="/tmp/test-repo",
         )
         mock_run.return_value = _make_final_state(
             self._make_agent_response(
@@ -89,6 +90,7 @@ class TestRunExecutive:
         mock_settings.return_value = SimpleNamespace(
             model_router="claude-haiku-4-5-20251001",
             executive_max_epics_per_goal=2,
+            target_repo_path="/tmp/test-repo",
         )
         mock_run.return_value = _make_final_state(
             self._make_agent_response(
@@ -109,6 +111,7 @@ class TestRunExecutive:
         mock_settings.return_value = SimpleNamespace(
             model_router="claude-haiku-4-5-20251001",
             executive_max_epics_per_goal=5,
+            target_repo_path="/tmp/test-repo",
         )
         mock_run.side_effect = RuntimeError("API timeout")
 
@@ -125,6 +128,7 @@ class TestRunExecutive:
         mock_settings.return_value = SimpleNamespace(
             model_router="claude-haiku-4-5-20251001",
             executive_max_epics_per_goal=5,
+            target_repo_path="/tmp/test-repo",
         )
         mock_run.return_value = _make_final_state('{"epics": [], "summary": "nothing"}')
 
@@ -140,6 +144,7 @@ class TestRunExecutive:
         mock_settings.return_value = SimpleNamespace(
             model_router="claude-haiku-4-5-20251001",
             executive_max_epics_per_goal=5,
+            target_repo_path="/tmp/test-repo",
         )
         mock_run.return_value = _make_final_state("not json at all")
 

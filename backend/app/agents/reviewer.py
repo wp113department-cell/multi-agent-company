@@ -47,7 +47,7 @@ AGENT_CONTRACT: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 _VERIFICATION_CFG = VerificationConfig(
-    set_by={},
+    set_by={"git_diff": "diff_reviewed"},
     reset_by=(),
     reset_keys=(),
     enforce_in_result={},
@@ -119,6 +119,13 @@ def run_reviewer(
             tool_handlers=handlers,
             verification_cfg=_VERIFICATION_CFG,
             initial_message=initial_message,
+            task_description=f"Code review — subtask {subtask_id}",
+            repo_path=repo,
+            model_haiku=settings.model_router,
+            enable_planning=True,
+            enable_memory=True,
+            enable_reflection=True,
+            enable_lesson=True,
             max_turns=15,
         )
         logger.info(
