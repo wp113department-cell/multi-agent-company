@@ -120,7 +120,7 @@ def _register() -> None:
             tools=AGENT_CONTRACT["allowed_tools"],
             input_types=AGENT_CONTRACT["input_types"],
             output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["bug_fix", "bug_fixing", "code_repair", "test_verification"],
+            capabilities=["bug_fix", "bug_fixing", "code_repair", "fix_regression_check"],
             requires_worktree=True,
             risk_level=AGENT_CONTRACT["risk_level"],
             dependencies=AGENT_CONTRACT["dependencies"],

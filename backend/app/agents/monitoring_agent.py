@@ -83,7 +83,7 @@ def run_monitoring_agent(
 
     final_state = run_agent_graph(
         role_name="monitoring_agent",
-        model=settings.model_router,
+        model=settings.model_coder,
         tools=MONITORING_AGENT_TOOLS,
         tool_handlers=handlers,
         verification_cfg=_VERIFICATION_CFG,

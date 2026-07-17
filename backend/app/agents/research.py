@@ -103,7 +103,7 @@ def run_research(
     try:
         final_state = run_agent_graph(
             role_name="research",
-            model=settings.model_router,
+            model=settings.model_planner,
             tools=RESEARCH_TOOLS,
             tool_handlers=handlers,
             verification_cfg=_VERIFICATION_CFG,

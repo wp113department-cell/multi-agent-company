@@ -100,7 +100,7 @@ def run_devops(
     try:
         final_state = run_agent_graph(
             role_name="devops",
-            model=settings.model_router,
+            model=settings.model_coder,
             tools=DEVOPS_TOOLS,
             tool_handlers=handlers,
             verification_cfg=_VERIFICATION_CFG,

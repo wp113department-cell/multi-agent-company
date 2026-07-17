@@ -183,7 +183,7 @@ def _register() -> None:
             tools=AGENT_CONTRACT["allowed_tools"],
             input_types=AGENT_CONTRACT["input_types"],
             output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["code_review", "diff_analysis", "security_review"],
+            capabilities=["code_review", "diff_analysis", "security_awareness_check"],
             risk_level=AGENT_CONTRACT["risk_level"],
             dependencies=AGENT_CONTRACT["dependencies"],
         ))

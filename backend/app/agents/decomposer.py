@@ -159,7 +159,7 @@ def _register() -> None:
             tools=AGENT_CONTRACT["allowed_tools"],
             input_types=AGENT_CONTRACT["input_types"],
             output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["task_decomposition", "dependency_analysis"],
+            capabilities=["task_decomposition", "subtask_dependency_mapping"],
             risk_level=AGENT_CONTRACT["risk_level"],
             dependencies=AGENT_CONTRACT["dependencies"],
         ))

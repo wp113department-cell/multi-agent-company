@@ -147,7 +147,7 @@ def run_docs(
     try:
         final_state = run_agent_graph(
             role_name="docs",
-            model=settings.model_router,
+            model=settings.model_coder,
             tools=DOCS_TOOLS,
             tool_handlers=handlers,
             verification_cfg=_VERIFICATION_CFG,

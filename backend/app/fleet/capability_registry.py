@@ -129,7 +129,7 @@ register(AgentCapability(
            "submit_patch"],
     input_types=["task_id", "error_description", "repo_path"],
     output_types=["AgentResult"],
-    capabilities=["bug_fix", "code_edit", "test_execution", "git_diff"],
+    capabilities=["bug_fix", "code_edit", "fix_regression_check", "git_diff"],
     limits={"max_turns": 20, "max_retries": 3},
     dependencies=["qa"],
     avg_runtime_s=45.0,

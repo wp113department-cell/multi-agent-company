@@ -118,7 +118,7 @@ async def run_executive(
     try:
         final_state = run_agent_graph(
             role_name="executive",
-            model=settings.model_router,
+            model=settings.model_planner,
             tools=[],
             tool_handlers={},
             verification_cfg=_VERIFICATION_CFG,

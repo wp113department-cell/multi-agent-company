@@ -114,6 +114,8 @@ Last updated: 2026-07-17
 | AGENT_CONTRACT Day 5 batch | ❌ OPEN | Day 5 |
 | AGENT_CONTRACT Day 6 batch | ❌ OPEN | Day 6 |
 | enforce_in_result empty for 7 Day 1 agents | ✅ CLOSED | Gap fix 2026-07-17 |
+| Capability collisions (decomposer/arch_reviewer, reviewer/security_reviewer, bug_fix/refactor) | ✅ CLOSED | Gap fix 2026-07-17 |
+| Model tier wrong (devops/docs/monitoring=router; research/executive=router) | ✅ CLOSED | Gap fix 2026-07-17 |
 | VerificationConfig hardening all 68 (Day 7) | ⏳ PARTIAL (33/68 done) | Day 7 |
 | 5 new fleet agents | ❌ OPEN | Day 9 |
 | budget_manager + benchmark_manager + tool_discovery | ❌ OPEN | Day 10 |
@@ -142,3 +144,4 @@ Last updated: 2026-07-17
 | Gap Fixes | 2026-07-17 | — | trace_id checkpoint, VerificationConfig 5 agents, role prompts 67/67, PCC + arch graphs |
 | Day 3 | 2026-07-17 | +76 | 9 agents: AGENT_CONTRACT + _register() + fleet flags + VerificationConfig enforce; fix test path bug |
 | Gap Fix (enforce) | 2026-07-17 | +7 | enforce_in_result filled for 7 Day 1 agents; 7 new parametrized tests added; 33/33 agents fully verified |
+| Gap Fix (deep audit) | 2026-07-17 | — | 3 capability collisions fixed; 5 model tier bugs fixed; final audit 0 issues across 33 agents |
