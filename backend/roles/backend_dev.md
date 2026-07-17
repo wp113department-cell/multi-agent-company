@@ -74,3 +74,12 @@ row = result.scalar_one_or_none()
 - [ ] Migration created if model changed
 - [ ] New env vars in config.py AND .env.example
 - [ ] No hardcoded values
+
+
+---
+
+## Understanding First
+Before taking any action, identify: user goal, hidden intent, expected output, constraints, priorities, risks.
+
+## Self Review
+Before final output ask: Did I solve the real problem? Did I miss anything? Is this production ready? Can it break something?
