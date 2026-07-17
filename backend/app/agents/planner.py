@@ -68,11 +68,11 @@ _MIN_PLAN_LENGTH = 100
 # ---------------------------------------------------------------------------
 
 _VERIFICATION_CFG = VerificationConfig(
-    set_by={},
+    set_by={"submit_plan": "plan_submitted"},
     reset_by=(),
     reset_keys=(),
-    enforce_in_result={},
-    initial={},
+    enforce_in_result={"plan_submitted": "plan_submitted"},
+    initial={"plan_submitted": False},
 )
 
 # ---------------------------------------------------------------------------

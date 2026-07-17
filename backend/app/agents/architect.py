@@ -89,11 +89,11 @@ _SUBMIT_TOOL: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 _VERIFICATION_CFG = VerificationConfig(
-    set_by={},
+    set_by={"submit_architect_plan": "plan_submitted"},
     reset_by=(),
     reset_keys=(),
-    enforce_in_result={},
-    initial={},
+    enforce_in_result={"plan_submitted": "plan_submitted"},
+    initial={"plan_submitted": False},
 )
 
 # ---------------------------------------------------------------------------
