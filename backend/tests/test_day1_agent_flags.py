@@ -293,3 +293,34 @@ class TestDocsFlags:
         import app.agents.docs as mod
         importlib.reload(mod)
         assert mod._VERIFICATION_CFG.set_by == {"write_file": "docs_written"}
+
+
+# ===========================================================================
+# VerificationConfig enforce_in_result — must be non-empty for tool-using agents
+# ===========================================================================
+
+_TOOL_AGENTS = [
+    ("app.agents.backend_dev", "checks_run"),
+    ("app.agents.frontend_dev", "checks_run"),
+    ("app.agents.coder", "checks_run"),
+    ("app.agents.reviewer", "diff_reviewed"),
+    ("app.agents.qa", "tests_run"),
+    ("app.agents.devops", "checks_run"),
+    ("app.agents.docs", "docs_written"),
+]
+
+
+class TestDay1VerificationEnforce:
+    """enforce_in_result must be non-empty so the graph actually checks the result."""
+
+    @pytest.mark.parametrize("module_path,expected_key", _TOOL_AGENTS)
+    def test_enforce_in_result_non_empty(self, module_path: str, expected_key: str) -> None:
+        mod = importlib.import_module(module_path)
+        cfg = mod._VERIFICATION_CFG
+        assert len(cfg.enforce_in_result) > 0, (
+            f"{module_path}: enforce_in_result is empty — "
+            "agent can submit without verification being checked"
+        )
+        assert expected_key in cfg.enforce_in_result, (
+            f"{module_path}: expected key {expected_key!r} not in enforce_in_result={cfg.enforce_in_result}"
+        )

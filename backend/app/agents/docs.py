@@ -53,7 +53,7 @@ _VERIFICATION_CFG = VerificationConfig(
     set_by={"write_file": "docs_written"},
     reset_by=(),
     reset_keys=(),
-    enforce_in_result={},
+    enforce_in_result={"docs_written": "docs_written"},
     initial={},
 )
 
