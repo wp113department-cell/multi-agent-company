@@ -108,19 +108,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning("Could not load API key from DB at startup: %s", exc)
 
-    # Auto-seed default admin user if JWT is configured but no users exist yet
+    # Ensure admin user always exists with the correct password on every startup
     if settings.jwt_secret_key:
         try:
             import json
             from sqlalchemy import text
-            from app.auth.jwt import hash_password
+            from app.auth.jwt import hash_password, verify_password
             factory = get_session_factory()
             async with factory() as db:
                 row = await db.execute(
                     text("SELECT value FROM system_settings WHERE key = 'auth_users'")
                 )
                 existing: list[dict[str, str]] = json.loads(row.scalar_one_or_none() or "[]")
-                if not existing:
+                admin_user = next((u for u in existing if u.get("username") == "admin"), None)
+                # Re-seed if admin is missing OR if their password no longer matches
+                if admin_user is None or not verify_password(
+                    settings.default_admin_password, admin_user.get("hashed_password", "")
+                ):
+                    non_admin = [u for u in existing if u.get("username") != "admin"]
                     admin = {
                         "username": "admin",
                         "hashed_password": hash_password(settings.default_admin_password),
@@ -131,12 +136,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                             "INSERT INTO system_settings (key, value) VALUES ('auth_users', :v) "
                             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
                         ),
-                        {"v": json.dumps([admin])},
+                        {"v": json.dumps([admin] + non_admin)},
                     )
                     await db.commit()
-                    logger.info("Auto-seeded admin user (username=admin)")
+                    logger.info("Admin user synced (username=admin)")
         except Exception as exc:
-            logger.warning("Could not auto-seed admin user: %s", exc)
+            logger.warning("Could not sync admin user: %s", exc)
 
     reindex_task = asyncio.create_task(_weekly_reindex_loop(get_active_repo_path()))
     retention_task = asyncio.create_task(start_retention_loop())
