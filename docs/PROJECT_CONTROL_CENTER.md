@@ -31,15 +31,15 @@ Last updated: 2026-07-17
 | api_docs_agent | ✅ | ✅ | ✅ | ✅ `find_route→routes_found` | ✅ | ✅ PRODUCTION |
 | dependency_agent | ✅ | ✅ | ✅ | ✅ `read_file→manifest_read` | ✅ | ✅ PRODUCTION |
 | monitoring_agent | ✅ | ✅ | ✅ | ✅ `cpu_usage→metrics_collected` | ✅ | ✅ PRODUCTION |
-| performance_reviewer | — | ❌ | ✅ | ❌ | — | ⏳ Day 3 |
-| style_reviewer | — | ❌ | ✅ | ❌ | — | ⏳ Day 3 |
-| sprint_planner | — | ❌ | ✅ | ❌ | — | ⏳ Day 3 |
-| business_analyst | — | ❌ | ✅ | ❌ | — | ⏳ Day 3 |
-| migration_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 3 |
-| schema_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 3 |
-| ai_engineer | — | ❌ | ✅ | ❌ | — | ⏳ Day 3 |
-| cleanup_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 3 |
-| tech_debt_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 3 |
+| performance_reviewer | ✅ | ✅ | ✅ | ✅ `explain_query→query_explained` | ✅ | ✅ PRODUCTION |
+| style_reviewer | ✅ | ✅ | ✅ | ✅ `run_linter→lint_ran` | ✅ | ✅ PRODUCTION |
+| sprint_planner | ✅ | ✅ | ✅ | ✅ `estimate_complexity→complexity_estimated` | ✅ | ✅ PRODUCTION |
+| business_analyst | ✅ | ✅ | ✅ | ✅ `read_file→requirements_read` | ✅ | ✅ PRODUCTION |
+| migration_agent | ✅ | ✅ | ✅ | ✅ `inspect_schema→schema_inspected` | ✅ | ✅ PRODUCTION |
+| schema_agent | ✅ | ✅ | ✅ | ✅ `inspect_schema→schema_inspected` | ✅ | ✅ PRODUCTION |
+| ai_engineer | ✅ | ✅ | ✅ | ✅ `run_python_snippet/bash→code_tested` | ✅ | ✅ PRODUCTION |
+| cleanup_agent | ✅ | ✅ | ✅ | ✅ `dead_code_detect→dead_code_scanned` | ✅ | ✅ PRODUCTION |
+| tech_debt_agent | ✅ | ✅ | ✅ | ✅ `run_linter→lint_ran` | ✅ | ✅ PRODUCTION |
 | release_notes_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 4 |
 | evaluation_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 4 |
 | rag_engineer_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 4 |
@@ -83,7 +83,7 @@ Last updated: 2026-07-17
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| capability_registry | ✅ 24 agents registered | 13 Day 1 + 11 Day 2; remaining added per day |
+| capability_registry | ✅ 33 agents registered | 13 Day 1 + 11 Day 2 + 9 Day 3; remaining added per day |
 | agent_registry | ✅ SLEEP/IDLE/RUNNING states wired | `complete_task()` → AgentState.SLEEP after every run |
 | Event bus | ✅ 8 typed events | TaskCreated, TaskStarted, TaskCompleted, TaskFailed, ReviewRequested, LessonPublished, HealthUpdated, MemoryCreated |
 | fleet_checkpoint | ✅ save/restore/rollback + trace_id | trace_id stored in metadata — Gap 10 closed |
@@ -109,7 +109,7 @@ Last updated: 2026-07-17
 | VerificationConfig set_by for planning agents | ✅ CLOSED | Gap fix 2026-07-17 |
 | AGENT_CONTRACT + _register() Day 1 agents | ✅ CLOSED | Sessions 1–4 |
 | AGENT_CONTRACT + _register() Day 2 agents | ✅ CLOSED | Day 2 |
-| AGENT_CONTRACT Day 3 batch | ❌ OPEN | Day 3 |
+| AGENT_CONTRACT Day 3 batch | ✅ CLOSED | Day 3 2026-07-17 |
 | AGENT_CONTRACT Day 4 batch | ❌ OPEN | Day 4 |
 | AGENT_CONTRACT Day 5 batch | ❌ OPEN | Day 5 |
 | AGENT_CONTRACT Day 6 batch | ❌ OPEN | Day 6 |
@@ -139,3 +139,4 @@ Last updated: 2026-07-17
 | Day 1 | 2026-07-17 | +17 | 13 agents: fleet flags wired explicitly + VerificationConfig + role prompts |
 | Day 2 | 2026-07-17 | +81 | 11 agents: AGENT_CONTRACT + _register() + role prompts (9-section) |
 | Gap Fixes | 2026-07-17 | — | trace_id checkpoint, VerificationConfig 5 agents, role prompts 67/67, PCC + arch graphs |
+| Day 3 | 2026-07-17 | +76 | 9 agents: AGENT_CONTRACT + _register() + fleet flags + VerificationConfig enforce; fix test path bug |
