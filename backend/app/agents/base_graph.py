@@ -782,13 +782,28 @@ def run_agent_graph(
 
     tid = trace_id or _uuid.uuid4().hex[:12]
 
+    # Day 5A: ModelRouter wins over passed-in model — router is source of truth.
+    # Agents pass model=settings.model_coder as a fallback; router overrides per role_name.
+    try:
+        from app.fleet.model_router import get_model_router as _get_router
+        _rc = _get_router().route(role_name)
+        model = _rc.model
+        logger.debug("ModelRouter: %s → %s (tier=%s)", role_name, model, _rc.tier)
+    except Exception:
+        pass  # Keep caller-provided model as fallback
+
     # Wire settings-based defaults when not explicitly provided (Day 0)
     if not model_haiku:
         try:
-            from app.config import get_settings as _gs
-            model_haiku = _gs().model_router
+            from app.fleet.model_router import get_model_router as _get_router
+            _haiku_agents = _get_router().agents_by_tier("haiku")
+            model_haiku = _get_router().model_for(_haiku_agents[0]) if _haiku_agents else model
         except Exception:
-            model_haiku = model
+            try:
+                from app.config import get_settings as _gs
+                model_haiku = _gs().model_router
+            except Exception:
+                model_haiku = model
     if not repo_path:
         try:
             from app.config import get_settings as _gs
