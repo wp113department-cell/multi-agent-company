@@ -97,6 +97,14 @@ class Settings(BaseSettings):
     # Log retention — automatic cleanup of old task logs
     log_retention_days: int = Field(default=90, description="Days to keep task_logs rows before automated cleanup. Set to 0 to disable cleanup.")
 
+    # Day 5A — Fleet Platform enhancements
+    openai_api_key: str = Field(default="", description="OpenAI API key — used when an agent is routed to 'openai' provider via agent_models.json.")
+    agent_models_path: str = Field(default="", description="Override path to agent_models.json. Defaults to backend/app/fleet/agent_models.json when empty.")
+    max_tokens_opus: int = Field(default=8192, description="Max tokens for Opus-tier agents.")
+    thinking_budget_opus: int = Field(default=2048, description="Extended thinking budget for Opus-tier agents (tokens).")
+    allowed_workspace_parent: str = Field(default="/home", description="Workspace paths must start with this prefix (path traversal guard for Repo Console).")
+    git_allowed_hosts: str = Field(default="github.com,gitlab.com,bitbucket.org", description="Comma-separated list of git remote hostnames allowed for clone/push in Repo Console.")
+
     # Groq (optional — enables Groq as LLM backend when ANTHROPIC_API_KEY is unavailable)
     groq_api_key: str = Field(default="", description="Groq API key (gsk_...). When set and USE_GROQ=true, all agent calls use Groq instead of Anthropic.")
     use_groq: bool = Field(default=False, description="Route all agent calls to Groq instead of Anthropic. Useful when ANTHROPIC_API_KEY is unavailable.")

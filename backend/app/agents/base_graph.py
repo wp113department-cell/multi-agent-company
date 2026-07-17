@@ -350,9 +350,11 @@ def _make_call_llm_node(
     model: str,
     tools: list[dict[str, Any]],
     context_token_budget: int,
+    task_id: str = "",
 ) -> Callable[[AgentRunState], dict[str, Any]]:
     """Calls Anthropic. Injects plan + memory_context into system prompt.
     Applies context trim when tokens_in exceeds budget.
+    Pushes thinking/token_usage events to ActivityStream when task_id is set.
     """
     system_prompt = load_role(role_name)
     anthropic_tools: list[anthropic.types.ToolParam] = [
@@ -365,6 +367,16 @@ def _make_call_llm_node(
     ]
 
     def call_llm(state: AgentRunState) -> dict[str, Any]:
+        # Check abort flag before calling LLM
+        if task_id:
+            try:
+                from app.services.activity_stream import get_activity_registry
+                if get_activity_registry().should_abort(task_id):
+                    logger.info("Abort flag set for task %s — stopping agent", task_id)
+                    return {"submitted": True, "status": "stopped"}
+            except Exception:
+                pass
+
         client = anthropic.Anthropic(api_key=get_effective_api_key())
 
         # Context trim
@@ -397,6 +409,20 @@ def _make_call_llm_node(
             tools=anthropic_tools,
         )
         serialized = _serialize_content(response.content)
+
+        # Push activity stream events (non-fatal)
+        if task_id:
+            try:
+                from app.services.activity_stream import push_thinking, push_token_usage
+                text = _text_from_content(serialized)
+                if text:
+                    push_thinking(task_id, text, role_name)
+                tokens_in_new = state.get("tokens_in", 0) + response.usage.input_tokens
+                tokens_out_new = state.get("tokens_out", 0) + response.usage.output_tokens
+                push_token_usage(task_id, tokens_in_new, tokens_out_new)
+            except Exception:
+                pass
+
         return {
             "messages": list(state["messages"]) + [{"role": "assistant", "content": serialized}],
             "tokens_in": state.get("tokens_in", 0) + response.usage.input_tokens,
@@ -456,8 +482,11 @@ def _make_execute_tools_node(
     tool_handlers: dict[str, Any],
     verification_cfg: VerificationConfig,
     human_approval_required: bool,
+    task_id: str = "",
 ) -> Callable[[AgentRunState], dict[str, Any]]:
-    """Runs tool calls, enforces verification contract, resets stall counter."""
+    """Runs tool calls, enforces verification contract, resets stall counter.
+    Pushes tool_call / tool_result / file_edit / terminal events to ActivityStream.
+    """
 
     def execute_tools(state: AgentRunState) -> dict[str, Any]:
         last_msg = state["messages"][-1]
@@ -473,6 +502,14 @@ def _make_execute_tools_node(
             tu_id = str(tu.get("id", ""))
             tu_name = str(tu.get("name", ""))
             tu_input = dict(tu.get("input", {}))
+
+            # Push tool_call event
+            if task_id:
+                try:
+                    from app.services.activity_stream import push_tool_call
+                    push_tool_call(task_id, tu_name, tu_input, tu_id)
+                except Exception:
+                    pass
 
             denial = _policy_check(tu_name, tu_input)
             if denial:
@@ -512,6 +549,22 @@ def _make_execute_tools_node(
                             raw_result[result_field] = actual
                         raw_result["_requires_human_approval"] = human_approval_required
                         new_result.update(raw_result)
+
+            # Push tool_result + specialized events
+            if task_id:
+                try:
+                    from app.services.activity_stream import (
+                        push_tool_result, push_file_edit, push_terminal,
+                    )
+                    ok = not result_content.startswith("[ERROR]") and not result_content.startswith("[POLICY")
+                    push_tool_result(task_id, tu_name, result_content, ok, tu_id)
+                    if tu_name in ("write_file", "edit_file", "apply_patch", "delete_file"):
+                        path = str(tu_input.get("path", ""))
+                        push_file_edit(task_id, path, tu_name)
+                    if tu_name == "bash":
+                        push_terminal(task_id, str(tu_input.get("command", "")), result_content)
+                except Exception:
+                    pass
 
             tool_results.append({"type": "tool_result", "tool_use_id": tu_id, "content": result_content})
 
@@ -640,6 +693,7 @@ def build_agent_graph(
     model_haiku: str = "",
     context_token_budget: int = 60_000,
     max_stalls: int = 3,
+    task_id: str = "",
 ) -> Any:
     """Build a production LangGraph StateGraph for a worker agent.
 
@@ -647,8 +701,8 @@ def build_agent_graph(
     True — every agent gets planning + memory + reflection unless it opts out.
     """
     haiku = model_haiku or model
-    call_llm = _make_call_llm_node(role_name, model, tools, context_token_budget)
-    execute_tools_node = _make_execute_tools_node(tool_handlers, verification_cfg, human_approval_required)
+    call_llm = _make_call_llm_node(role_name, model, tools, context_token_budget, task_id)
+    execute_tools_node = _make_execute_tools_node(tool_handlers, verification_cfg, human_approval_required, task_id)
     router = _make_router(max_turns, max_stalls, enable_reflection)
 
     g: StateGraph = StateGraph(AgentRunState)
@@ -717,6 +771,7 @@ def run_agent_graph(
     context_token_budget: int = 60_000,
     max_stalls: int = 3,
     trace_id: str = "",
+    task_id: str = "",
 ) -> AgentRunState:
     """Build + run the agent graph, return the final state.
 
@@ -778,6 +833,7 @@ def run_agent_graph(
             model_haiku=model_haiku,
             context_token_budget=context_token_budget,
             max_stalls=max_stalls,
+            task_id=task_id,
         )
 
         initial_state: AgentRunState = {
@@ -811,6 +867,19 @@ def run_agent_graph(
         if _span is not None:
             _span.__exit__(None, None, None)
 
+        # Push done or stopped event to activity stream (non-fatal)
+        if task_id:
+            try:
+                from app.services.activity_stream import push_done, push_stopped
+                tok_in = final_state.get("tokens_in", 0)
+                tok_out = final_state.get("tokens_out", 0)
+                if final_state.get("status") == "stopped":
+                    push_stopped(task_id, checkpoint_id=tid, tokens_in=tok_in, tokens_out=tok_out)
+                else:
+                    push_done(task_id, final_state.get("result", {}), tok_in, tok_out)
+            except Exception:
+                pass
+
         # Lifecycle: SLEEP + events (Gap 7 / Gap 10) — runs after span closes, always
         try:
             from app.fleet.agent_registry import get_agent_registry
@@ -826,6 +895,14 @@ def run_agent_graph(
         return final_state
 
     except Exception as exc:
+        # Push error event to activity stream (non-fatal)
+        if task_id:
+            try:
+                from app.services.activity_stream import push_error
+                push_error(task_id, str(exc)[:500])
+            except Exception:
+                pass
+
         # Lifecycle: agent transitions to ERROR on unhandled exception (Gap 7)
         try:
             from app.fleet.agent_registry import get_agent_registry
