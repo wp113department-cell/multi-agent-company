@@ -89,6 +89,9 @@ Last updated: 2026-07-17
 | fleet_checkpoint | ✅ save/restore/rollback + trace_id | trace_id stored in metadata — Gap 10 closed |
 | Fleet OS flags (20 capabilities) | ✅ All default True in base_graph.py | enable_planning, enable_memory, enable_reflection, enable_lesson |
 | Role prompts (9-section template) | ✅ 67/67 files | All agents have all 9 sections |
+| **P1 Activity Stream UI** | ❌ Day 5A | SSE streaming: thinking/tool_call/file_edit/terminal events + Stop+Resume |
+| **P2 Model Router** | ❌ Day 5A | Central model routing for all 68 agents; agent_models.json; Anthropic+OpenAI |
+| **P3 Repo Console** | ❌ Day 5A | Clone→Work→Push web console; git_service.py; workspace scoping |
 | Budget manager | ❌ Not built | Day 10 |
 | Benchmark manager | ❌ Not built | Day 10 |
 | Prompt registry | ❌ Not built | Day 11 |
@@ -111,7 +114,10 @@ Last updated: 2026-07-17
 | AGENT_CONTRACT + _register() Day 2 agents | ✅ CLOSED | Day 2 |
 | AGENT_CONTRACT Day 3 batch | ✅ CLOSED | Day 3 2026-07-17 |
 | AGENT_CONTRACT Day 4 batch | ✅ CLOSED | Day 4 2026-07-17 |
-| AGENT_CONTRACT Day 5 batch | ❌ OPEN | Day 5 |
+| P1 Activity Stream UI (streaming, stop, resume, file attach) | ❌ OPEN | Day 5A |
+| P2 Central Model Router (68-agent mapping, Anthropic+OpenAI) | ❌ OPEN | Day 5A |
+| P3 Repo Console (clone→work→push, workspace service) | ❌ OPEN | Day 5A |
+| AGENT_CONTRACT Day 5 batch | ❌ OPEN | Day 5B |
 | AGENT_CONTRACT Day 6 batch | ❌ OPEN | Day 6 |
 | enforce_in_result empty for 7 Day 1 agents | ✅ CLOSED | Gap fix 2026-07-17 |
 | Capability collisions (decomposer/arch_reviewer, reviewer/security_reviewer, bug_fix/refactor) | ✅ CLOSED | Gap fix 2026-07-17 |
@@ -146,3 +152,4 @@ Last updated: 2026-07-17
 | Gap Fix (enforce) | 2026-07-17 | +7 | enforce_in_result filled for 7 Day 1 agents; 7 new parametrized tests added; 33/33 agents fully verified |
 | Gap Fix (deep audit) | 2026-07-17 | — | 3 capability collisions fixed; 5 model tier bugs fixed; final audit 0 issues across 33 agents |
 | Day 4 | 2026-07-17 | +158 | 8 agents: AGENT_CONTRACT + _register() + fleet flags + VerificationConfig; 0 audit issues; 1878/1878 suite pass |
+| Plan Update | 2026-07-17 | — | 3 Platform Enhancements added: P1 Streaming UI, P2 Model Router, P3 Repo Console — Day 5 split into 5A (platform) + 5B (agents) |

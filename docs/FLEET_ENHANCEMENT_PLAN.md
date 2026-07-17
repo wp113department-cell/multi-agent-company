@@ -1,5 +1,5 @@
 # Fleet Enhancement Plan — 68 Agents, 20+ Capabilities
-Last updated: 2026-07-16 | Status: Sessions 0–4 complete
+Last updated: 2026-07-17 | Status: Day 4 complete — 3 Platform Enhancements added for Day 5
 
 ---
 
@@ -252,10 +252,477 @@ Same task list as Day 2.
 
 ---
 
-### Day 5 — AGENT_CONTRACT batch 4
+---
+
+## THREE PLATFORM ENHANCEMENTS (added 2026-07-17, land in Day 5)
+
+These are cross-cutting platform features that affect all agents past and present.
+Research source: `/home/pc-117/Documents/CRR2906/repos/` — opencode, roo-code, cline, langgraph, continue, open-hands, composio.
+
+---
+
+### Enhancement P1 — Streaming Agent Activity UI (Claude Code in the web)
+
+**What it is:** Real-time agent activity feed in the Next.js web portal (port 3000) that shows users:
+- What the agent is thinking (planner_node output, reflection output)
+- Which files are being read / written / edited
+- Which terminal commands are running and their output
+- Token usage counter (live, in header and sidebar)
+- A "Stop" button that pauses the agent mid-run, saves state, then opens a chat input so the user can inject new instructions, add files via `@` or `+`, and resume
+
+**Reference repos used:**
+- `opencode/packages/schema/src/session-event.ts` — typed event system: `Step.Started/Delta/Ended`, `Tool.Called/Progress/Success/Failed`, `Text.Started/Delta/Ended`, `Revert.Staged/Committed`
+- `roo-code/src/core/task/Task.ts` — `abort: boolean` flag pattern; `abortReason: ClineApiReqCancelReason`; state saved before abort returns
+- `continue/core/context/providers/FileContextProvider.ts` — `FileAttachment { uri, name, description, source }` → passed as fenced code blocks in context
+- `opencode/packages/schema/src/prompt-input.ts` — `Prompt { text, files: FileAttachment[], agents: AgentAttachment[] }`
+- `langgraph/libs/langgraph/langgraph/types.py` — `interrupt(value)` + `Command(resume=...)` for mid-run injection
+
+**Architecture — Backend (`backend/app/`):**
+
+```
+app/
+  services/
+    activity_stream.py    ← NEW: singleton SSE event bus for per-task streaming
+  api/
+    activity.py           ← NEW: GET /api/tasks/{id}/stream  (SSE endpoint)
+                                  POST /api/tasks/{id}/stop   (sets cancellation flag)
+                                  POST /api/tasks/{id}/resume (injects message + files)
+                                  GET  /api/tasks/{id}/token-usage
+  pipeline/
+    event_hooks.py        ← NEW: hook callbacks injected into base_graph.py
+```
+
+**Event stream format (SSE, `text/event-stream`):**
+```json
+{"type": "thinking",     "content": "Analyzing the task requirements...", "agent": "planner"}
+{"type": "tool_call",    "tool": "read_file", "input": {"path": "backend/app/main.py"}, "id": "tc_1"}
+{"type": "tool_result",  "tool": "read_file", "preview": "First 200 chars...", "id": "tc_1", "ok": true}
+{"type": "file_edit",    "path": "backend/app/api/tasks.py", "action": "write", "lines_changed": 12}
+{"type": "terminal",     "command": "pytest tests/ -q", "output": "37 passed", "exit_code": 0}
+{"type": "token_usage",  "tokens_in": 1240, "tokens_out": 340, "cost_usd": 0.0043}
+{"type": "agent_switch", "from": "planner", "to": "coder"}
+{"type": "stopped",      "checkpoint_id": "ckpt_abc123", "tokens_in": 1240, "tokens_out": 340}
+{"type": "done",         "result": {...}, "tokens_in": 3200, "tokens_out": 800, "cost_usd": 0.014}
+{"type": "error",        "message": "Max retries exceeded", "recoverable": false}
+```
+
+**Stop + Resume flow:**
+```
+User clicks Stop
+→ POST /api/tasks/{id}/stop
+→ backend sets task._abort_flag = True in ActivityStream singleton
+→ base_graph.py checks flag after each node, calls interrupt() if set
+→ LangGraph saves checkpoint via fleet_checkpoint.py
+→ returns {"stopped": true, "checkpoint_id": "ckpt_abc123"}
+→ frontend opens chat input panel (same SSE connection, now bidirectional via POST)
+
+User types message, optionally attaches files via @ or +
+→ POST /api/tasks/{id}/resume  {"message": "...", "files": [{"uri": "...", "name": "...", "content": "..."}]}
+→ backend loads checkpoint from fleet_checkpoint.py
+→ injects message + file contents into LangGraph state via Command(resume={...})
+→ SSE stream resumes from where it stopped
+```
+
+**File attachment format (@ and + button):**
+```json
+{
+  "uri": "file:///home/user/project/auth.py",
+  "name": "auth.py",
+  "content": "full file content as string",
+  "mime_type": "text/x-python"
+}
+```
+Files sent: PDF (extract text via PyMuPDF), images (base64 encoded → vision message), `.md`/`.txt`/code files (raw content), Word/Excel (convert via python-docx/openpyxl).
+File content is injected into the agent's system context as fenced code blocks (Continue pattern).
+
+**Frontend changes (`apps/web/`):**
+```
+pages/tasks/[id]/stream.tsx   ← NEW: streaming activity feed page
+components/
+  ActivityFeed.tsx             ← NEW: renders typed events in real-time
+  ThinkingBlock.tsx            ← NEW: collapsible thinking display
+  FileEditBlock.tsx            ← NEW: shows file path + line count changed
+  TerminalBlock.tsx            ← NEW: shows command + output with syntax color
+  TokenCounter.tsx             ← NEW: live counter in header
+  StopButton.tsx               ← NEW: stop → chat input panel
+  FileAttachButton.tsx         ← NEW: + button → file picker (local or @repo)
+  ChatInputPanel.tsx           ← NEW: appears after stop; accepts text + files
+```
+
+**Retroactive impact on Days 0–4:**
+All 41 already-upgraded agents automatically benefit from the event stream because the stream hooks live in `base_graph.py` — no per-agent code change needed. The only per-agent enhancement is emitting `{"type": "thinking"}` from the planner_node output already stored in state.
+
+---
+
+### Enhancement P2 — Central Model Router (68-agent multi-provider LLM routing)
+
+**What it is:** A single `ModelRouter` class in `backend/app/fleet/model_router.py` that:
+- Maps all 68 agents to their designated model and provider (from `files/agent_models.md`)
+- Returns `(provider, model, token_config)` for any agent name — no hardcoded model strings in agent files
+- Supports Anthropic SDK (Claude Opus 4.1, Claude Sonnet 4) and OpenAI SDK (GPT-5.5) from one interface
+- Smart token budgets: Opus agents get more tokens + thinking budget; Sonnet gets standard; GPT-5.5 configured for structured output
+
+**Reference repos used:**
+- `composio/python/providers/anthropic/composio_anthropic/provider.py` — `wrap_tool()` re-serializes unified Tool → Anthropic ToolParam
+- `autogen/python/packages/autogen-core/src/autogen_core/models/_model_client.py` — `ChatCompletionClient` ABC + `ModelInfo` TypedDict; provider-agnostic interface
+- `aider/aider/models.py` — LiteLLM `litellm_provider` string prefix; simplest possible routing via `anthropic/claude-...` or `openai/gpt-...`
+
+**Architecture:**
+
+```
+backend/app/fleet/
+  model_router.py          ← NEW: ModelRouter class + route(agent_name) → RouteConfig
+  agent_models.json        ← NEW: the 68-agent mapping table (from files/agent_models.md)
+  providers/
+    base.py                ← NEW: LLMProvider ABC: call(messages, tools, config) → response
+    anthropic_provider.py  ← NEW: wraps anthropic.Anthropic SDK
+    openai_provider.py     ← NEW: wraps openai.OpenAI SDK (for GPT-5.5 agents)
+```
+
+**`agent_models.json` format (derived from `files/agent_models.md`):**
+```json
+{
+  "architect":          {"provider": "anthropic", "model": "claude-opus-4-20251101", "tier": "opus"},
+  "decomposer":         {"provider": "anthropic", "model": "claude-opus-4-20251101", "tier": "opus"},
+  "planner":            {"provider": "anthropic", "model": "claude-opus-4-20251101", "tier": "opus"},
+  "executive":          {"provider": "anthropic", "model": "claude-opus-4-20251101", "tier": "opus"},
+  "research":           {"provider": "anthropic", "model": "claude-opus-4-20251101", "tier": "opus"},
+  "manager":            {"provider": "anthropic", "model": "claude-opus-4-20251101", "tier": "opus"},
+  "rag_engineer_agent": {"provider": "anthropic", "model": "claude-opus-4-20251101", "tier": "opus"},
+  "security_architect": {"provider": "anthropic", "model": "claude-opus-4-20251101", "tier": "opus"},
+  "backend_dev":        {"provider": "openai",    "model": "gpt-5.5",                "tier": "gpt"},
+  "coder":              {"provider": "openai",    "model": "gpt-5.5",                "tier": "gpt"},
+  "...":                {}
+}
+```
+
+**Token config by tier:**
+```python
+TOKEN_CONFIGS = {
+    "opus":   {"max_tokens": 8192,  "thinking_budget": 2048, "temperature": 1.0},
+    "sonnet": {"max_tokens": 4096,  "thinking_budget": None,  "temperature": 1.0},
+    "haiku":  {"max_tokens": 1024,  "thinking_budget": None,  "temperature": 0.5},
+    "gpt":    {"max_tokens": 4096,  "thinking_budget": None,  "response_format": "json_object"},
+}
+```
+
+**`ModelRouter` interface:**
+```python
+class ModelRouter:
+    def route(self, agent_name: str) -> RouteConfig:
+        """Return provider, model, token_config for agent_name."""
+    
+    def get_provider(self, agent_name: str) -> LLMProvider:
+        """Return configured provider instance ready to call."""
+    
+    def token_budget(self, agent_name: str) -> dict[str, Any]:
+        """Return token limits for agent_name."""
+```
+
+**`config.py` additions (no hardcoding):**
+```
+OPENAI_API_KEY=sk-...           # for GPT-5.5 agents
+AGENT_MODELS_PATH=backend/app/fleet/agent_models.json  # can swap entire routing table
+MODEL_OVERRIDE_architect=...   # per-agent override without code change
+MAX_TOKENS_OPUS=8192
+MAX_TOKENS_SONNET=4096
+MAX_TOKENS_GPT=4096
+THINKING_BUDGET_OPUS=2048
+```
+
+**`base_graph.py` integration:**
+```python
+# Replace: model=settings.model_coder in run_agent_graph()
+# With:    model = model_router.route(role_name).model
+#          provider = model_router.get_provider(role_name)
+# The graph uses provider.call() instead of anthropic.messages.create() directly
+# This makes ALL 68 agents use the correct model automatically once wired
+```
+
+**Retroactive impact on Days 0–4:**
+All 41 already-upgraded agents are currently hardcoded to `settings.model_coder` or `settings.model_planner`. Day 5 wires them all to `model_router.route(role_name)` instead. This is a single-point change in `base_graph.py` — no per-agent changes needed after that.
+
+---
+
+### Enhancement P3 — Repo Console (Clone → Work → Push, no cloud needed)
+
+**What it is:** A web console in the portal (port 3000) where users can:
+1. Paste a GitHub/GitLab URL → backend clones it to a local path they choose
+2. See the repo file tree, current branch, git status
+3. All agent work runs inside that cloned repo path (uses existing `target_repo_path` in config)
+4. Push changes, create branches, view diffs — all from the web UI
+5. No Docker, no cloud — runs fully local on the user's machine
+
+**Reference repos used:**
+- `open-hands/openhands/app_server/utils/git.py` — `is_valid_git_branch_name()` + `ensure_valid_git_branch_name()` via subprocess; safe branch validation before git ops
+- `roo-code/src/core/task/Task.ts` — workspace-bound agent: all file operations scoped to a single root path; no escape beyond that path
+- `swe-agent/sweagent/environment/swe_env.py` — repo isolation concept: agent lives inside one repo dir, cannot touch parent
+
+**Architecture:**
+
+```
+backend/app/
+  services/
+    git_service.py         ← NEW: subprocess git ops (clone, status, diff, add, commit, push, branch)
+    workspace_service.py   ← NEW: manage active workspace path, validate scope, prevent path escape
+  api/
+    console.py             ← NEW: REST + SSE endpoints for repo console
+```
+
+**`git_service.py` — git operations (no shell injection):**
+```python
+class GitService:
+    def clone(self, url: str, dest_path: str) -> AsyncGenerator[str, None]:
+        """Stream clone progress via SSE. url validated against allowlist pattern."""
+    
+    def status(self, repo_path: str) -> GitStatus:
+        """Return branch, staged, unstaged, untracked files."""
+    
+    def diff(self, repo_path: str, staged: bool = False) -> str:
+        """Return git diff output."""
+    
+    def commit(self, repo_path: str, message: str, files: list[str]) -> str:
+        """Stage specific files and commit. Never uses git add -A."""
+    
+    def push(self, repo_path: str, branch: str, force: bool = False) -> AsyncGenerator[str, None]:
+        """Stream push progress. force=True requires explicit user confirmation."""
+    
+    def create_branch(self, repo_path: str, branch: str) -> None:
+        """Create and checkout branch. Name validated via git check-ref-format."""
+```
+
+**Console API endpoints:**
+```
+POST /api/console/clone          {"url": "https://github.com/...", "dest": "/home/user/projects/myrepo"}
+                                  → streams clone progress as SSE
+GET  /api/console/status         → {branch, staged, unstaged, untracked, ahead, behind}
+GET  /api/console/files          → file tree of active workspace (like file browser)
+GET  /api/console/diff           → full git diff of workspace
+POST /api/console/commit         {"message": "...", "files": [...]}
+POST /api/console/push           {"branch": "...", "force": false}
+POST /api/console/branch         {"name": "feature/xyz"}
+GET  /api/console/log            → recent git log (last 20 commits)
+POST /api/console/workspace      {"path": "/path/to/existing/repo"} → set active workspace
+```
+
+**Security rules (enforced in `workspace_service.py`):**
+```python
+# 1. All git operations scoped to WORKSPACE_ROOT (set once at session start)
+# 2. dest_path for clone must be under ALLOWED_WORKSPACE_PARENT from config
+# 3. URL allowlist: only https:// github.com, gitlab.com, bitbucket.org (configurable)
+# 4. No git push --force to main/master without explicit confirmation
+# 5. All shell calls use subprocess list form (no shell=True) — no injection possible
+# 6. Path traversal check: os.path.realpath(path).startswith(WORKSPACE_ROOT)
+```
+
+**Frontend (`apps/web/`):**
+```
+pages/console/index.tsx     ← NEW: main console page
+components/
+  RepoClonePanel.tsx         ← NEW: URL input + path picker + stream clone progress
+  FileBrowser.tsx            ← NEW: tree view of active repo
+  GitStatusPanel.tsx         ← NEW: shows branch, staged/unstaged files, diff viewer
+  CommitPanel.tsx            ← NEW: select files, write message, commit + push
+  BranchPanel.tsx            ← NEW: create/switch branches
+  ConsoleOutput.tsx          ← NEW: streaming git command output
+```
+
+**`.env.example` additions:**
+```
+ALLOWED_WORKSPACE_PARENT=/home/user/projects   # clones must land under this
+GIT_ALLOWED_HOSTS=github.com,gitlab.com,bitbucket.org
+```
+
+**Retroactive impact on Days 0–4:**
+None. The console uses the existing `target_repo_path` that all agents already accept. Once the user clones a repo via the console, they set it as the active workspace — agents then automatically use it via `settings.target_repo_path`.
+
+---
+
+## Retroactive Enhancement Checklist (Days 0–4 → must be updated in Day 5 BEFORE agent batch)
+
+| Day | Agent/Component | Enhancement Required |
+|-----|----------------|----------------------|
+| Day 0 | `base_graph.py` | Add `on_event` callback param → called after each node with typed event dict. ActivityStream registers as the default handler |
+| Day 0 | `base_graph.py` | Add `_abort_flag` check between every node. If set: call `interrupt()`, save checkpoint, return `{"stopped": true}` |
+| Day 0 | `base_graph.py` | Replace `model=model_string` with `model=model_router.route(role_name).model` — reads from `agent_models.json` |
+| Day 0 | `config.py` | Add: `OPENAI_API_KEY`, `AGENT_MODELS_PATH`, `MAX_TOKENS_OPUS/SONNET/GPT`, `THINKING_BUDGET_OPUS`, `ALLOWED_WORKSPACE_PARENT`, `GIT_ALLOWED_HOSTS` |
+| Day 1–4 | All 41 agents | No per-agent code change — they inherit streaming from `base_graph.py` automatically |
+| Day 1–4 | 8 Opus-tier agents | `model_router.route()` will return `claude-opus-4-20251101` for: architect, decomposer, planner, executive, research, manager, rag_engineer_agent, security_architect |
+| Day 1–4 | GPT-5.5 agents | 29 agents will route to OpenAI; `openai_provider.py` must handle their tool schemas |
+| All | `fleet_checkpoint.py` | Confirm `save()` is called before `interrupt()` fires — needed for Stop+Resume to work |
+
+---
+
+### Day 5 — AGENT_CONTRACT batch 4 + Three Platform Enhancements (UPDATED)
+
+**This day now has two parts. Part A must complete before Part B.**
+
+---
+
+#### Day 5A — Platform Foundations (3 enhancements, must do first)
+
+**Step 1 — Read repos (15 min, required before writing any code):**
+- `opencode/packages/schema/src/session-event.ts` — exact event shape
+- `roo-code/src/core/task/Task.ts` lines 264–280 — abort flag pattern
+- `langgraph/libs/langgraph/langgraph/types.py` — `interrupt()` + `Interrupt` class
+- `open-hands/openhands/app_server/utils/git.py` — subprocess git pattern
+- `autogen/python/packages/autogen-core/src/autogen_core/models/_model_client.py` — `ChatCompletionClient` ABC
+
+**Step 2 — Model Router (P2 first, enables P1 token tracking):**
+
+File: `backend/app/fleet/model_router.py`
+```python
+# 1. Load agent_models.json at startup (from AGENT_MODELS_PATH config)
+# 2. route(agent_name) → RouteConfig(provider, model, tier, token_config)
+# 3. get_provider(agent_name) → LLMProvider instance (cached)
+# 4. on unknown agent_name: log warning, fall back to settings.model_coder
+# 5. ModelRouter is a singleton: get_model_router()
+```
+
+File: `backend/app/fleet/agent_models.json`
+```json
+{
+  "architect":    {"provider": "anthropic", "model": "claude-opus-4-20251101",  "tier": "opus"},
+  "decomposer":   {"provider": "anthropic", "model": "claude-opus-4-20251101",  "tier": "opus"},
+  "planner":      {"provider": "anthropic", "model": "claude-opus-4-20251101",  "tier": "opus"},
+  "executive":    {"provider": "anthropic", "model": "claude-opus-4-20251101",  "tier": "opus"},
+  "research":     {"provider": "anthropic", "model": "claude-opus-4-20251101",  "tier": "opus"},
+  "manager":      {"provider": "anthropic", "model": "claude-opus-4-20251101",  "tier": "opus"},
+  "rag_engineer_agent": {"provider": "anthropic", "model": "claude-opus-4-20251101", "tier": "opus"},
+  "security_architect": {"provider": "anthropic", "model": "claude-opus-4-20251101", "tier": "opus"},
+  "reviewer":     {"provider": "anthropic", "model": "claude-sonnet-4-20251101","tier": "sonnet"},
+  "qa":           {"provider": "openai",    "model": "gpt-5.5",                 "tier": "gpt"},
+  "backend_dev":  {"provider": "openai",    "model": "gpt-5.5",                 "tier": "gpt"},
+  "frontend_dev": {"provider": "openai",    "model": "gpt-5.5",                 "tier": "gpt"},
+  "coder":        {"provider": "openai",    "model": "gpt-5.5",                 "tier": "gpt"},
+  "...":{},
+  "DEFAULT":      {"provider": "anthropic", "model": "claude-sonnet-4-20251101","tier": "sonnet"}
+}
+```
+*(Full 68-agent mapping derived from `files/agent_models.md` — every agent listed there gets an entry.)*
+
+File: `backend/app/fleet/providers/base.py`
+```python
+from abc import ABC, abstractmethod
+class LLMProvider(ABC):
+    @abstractmethod
+    async def call(self, messages, tools, config) -> LLMResponse: ...
+```
+
+File: `backend/app/fleet/providers/anthropic_provider.py` — wraps existing `anthropic.Anthropic`
+File: `backend/app/fleet/providers/openai_provider.py` — wraps `openai.OpenAI`
+
+Wire into `base_graph.py`:
+```python
+# Inside run_agent_graph():
+from app.fleet.model_router import get_model_router
+route = get_model_router().route(role_name)
+model = route.model   # replaces settings.model_coder
+```
+
+**Step 3 — Activity Stream Backend (P1 backend):**
+
+File: `backend/app/services/activity_stream.py`
+```python
+# Singleton per task_id: stores asyncio.Queue
+# push_event(task_id, event_dict) — called from base_graph hooks
+# subscribe(task_id) → AsyncIterator[dict] — consumed by SSE endpoint
+# set_abort(task_id) — sets cancellation flag checked by base_graph
+# save_context(task_id, message, files) — stores resume payload
+```
+
+File: `backend/app/api/activity.py`
+```python
+# GET  /api/tasks/{id}/stream  → StreamingResponse(text/event-stream)
+# POST /api/tasks/{id}/stop   → sets abort flag; returns checkpoint_id
+# POST /api/tasks/{id}/resume → {"message": str, "files": list[FileAttachment]}
+# GET  /api/tasks/{id}/token-usage → {"tokens_in": N, "tokens_out": N, "cost_usd": F}
+```
+
+`base_graph.py` hook additions:
+```python
+# After planner_node: push_event(task_id, {"type": "thinking", "content": plan_text, "agent": role_name})
+# After each tool call: push_event(task_id, {"type": "tool_call", "tool": name, "input": inp})
+# After each tool result: push_event(task_id, {"type": "tool_result", ...})
+# After write_file: push_event(task_id, {"type": "file_edit", "path": path, "action": "write"})
+# After bash: push_event(task_id, {"type": "terminal", "command": cmd, "output": out})
+# Before each node: check abort flag → if set: interrupt() + push "stopped" event
+# After graph ends: push_event(task_id, {"type": "done", "result": result, ...})
+```
+
+**Step 4 — Repo Console Backend (P3 backend):**
+
+File: `backend/app/services/git_service.py` — async subprocess git wrapper
+File: `backend/app/services/workspace_service.py` — path scope enforcement
+File: `backend/app/api/console.py` — all console endpoints
+Wire router into `backend/app/main.py`
+
+**Step 5 — Frontend (P1 + P3 UI):**
+
+Next.js pages and components listed in Enhancement P1 and P3 architecture above.
+All use existing Tailwind + existing API client pattern.
+SSE consumed via `EventSource` hook (`useEventSource`).
+File attachment: `<input type="file">` for local files; `@` triggers a search-as-you-type dropdown over repo file tree.
+
+**Step 6 — Tests for Day 5A:**
+
+File: `backend/tests/test_model_router.py`
+- `test_route_returns_correct_model_for_opus_agents` (architect, decomposer, etc.)
+- `test_route_returns_openai_for_gpt_agents` (backend_dev, coder, etc.)
+- `test_unknown_agent_falls_back_to_default`
+- `test_token_config_by_tier`
+- `test_agent_models_json_covers_all_68_agents`
+
+File: `backend/tests/test_activity_stream.py`
+- `test_push_and_subscribe_delivers_event`
+- `test_abort_flag_set_prevents_new_events`
+- `test_thinking_event_shape_valid`
+- `test_tool_call_event_shape_valid`
+- `test_done_event_has_result`
+
+File: `backend/tests/test_git_service.py`
+- `test_valid_url_passes`
+- `test_disallowed_host_rejected`
+- `test_path_traversal_rejected`
+- `test_git_status_parses_output`
+- `test_branch_name_validated`
+
+**Day 5A Exit Criteria (all must pass before Day 5B):**
+- [ ] `model_router.route("architect")` returns `claude-opus-4-20251101`
+- [ ] `model_router.route("backend_dev")` returns `gpt-5.5` + `provider=openai`
+- [ ] `agent_models.json` has entries for all 68 agents
+- [ ] `GET /api/tasks/{id}/stream` returns `text/event-stream` with `data: {...}\n\n`
+- [ ] `POST /api/tasks/{id}/stop` sets abort flag, stream emits `{"type": "stopped"}`
+- [ ] `POST /api/console/clone` rejects non-allowlisted hosts
+- [ ] `GET /api/console/status` returns branch + file counts
+- [ ] All `test_model_router.py`, `test_activity_stream.py`, `test_git_service.py` tests pass
+- [ ] Frontend renders at least one `thinking` event in the activity feed
+
+---
+
+#### Day 5B — AGENT_CONTRACT batch 4 (9 agents)
+
 **Agents:** chat_agent, code_explainer_agent, code_quality_agent, accessibility_agent, api_designer_agent, compliance_agent, cost_estimator_agent, data_pipeline_agent, debugger_agent
 
-Same task list as Day 2.
+**Same task list as Day 2** (AGENT_CONTRACT + _register() + fleet flags + VerificationConfig + role prompt)
+
+**Additional for Day 5B agents:** each agent's model is now resolved via `model_router.route(role_name)` automatically — no manual `model=settings.model_coder` needed if Step 3 of Day 5A wired base_graph correctly.
+
+**Day 5B Exit Criteria:**
+- [ ] All 9 agents in capability_registry with non-empty capabilities
+- [ ] All 9 agents have AGENT_CONTRACT + _register() + enforce_in_result non-empty
+- [ ] Programmatic audit: 0 issues across all 50 agents (41 previous + 9 new)
+- [ ] `test_day5_agent_contracts.py` + `test_day5_agents.py` pass
+- [ ] Full suite: 1878+ tests pass (Day 5A tests + Day 5B tests added)
+
+---
+
+**Integration note for future days (Day 6 onward):** Every new agent and enhancement automatically benefits from P1 (streaming), P2 (correct model routing), and P3 (repo console) because:
+- P1: hooks in `base_graph.py` fire for every `run_agent_graph()` call
+- P2: `model_router.route(role_name)` is called once at graph entry; just add the agent to `agent_models.json`
+- P3: uses `settings.target_repo_path` already passed to every agent
+
+No per-agent work is needed to enable these 3 features on future agents.
 
 ---
 
