@@ -2084,14 +2084,57 @@ pytest backend/tests/ -q → 1636 passed, 55 skipped (20 pre-existing failures u
 **Modified (frontend):** `apps/web/lib/auth.ts`, `apps/web/app/providers.tsx`, `apps/web/middleware.ts`
 
 ### Fleet Enhancement Plan Status
-| Day | Agents | Status |
-|-----|--------|--------|
+| Day | Agents / Feature | Status |
+|-----|-----------------|--------|
 | Day 0 | All 20 capabilities enabled fleet-wide | ✅ COMPLETE |
 | Day 1 | 13 migrated agents — fleet OS flags + VerificationConfig | ✅ COMPLETE |
 | Day 2 | 11 agents — AGENT_CONTRACT + _register() + role prompts | ✅ COMPLETE |
-| Day 3 | 9 agents (performance_reviewer, style_reviewer, sprint_planner, business_analyst, migration_agent, schema_agent, ai_engineer, cleanup_agent, tech_debt_agent) | NEXT |
-| Day 4+ | Remaining batches | PENDING |
+| Day 3 | 9 agents (performance_reviewer, style_reviewer, sprint_planner, business_analyst, migration_agent, schema_agent, ai_engineer, cleanup_agent, tech_debt_agent) | ✅ COMPLETE |
+| Day 4 | 8 agents (release_notes, evaluation, rag_engineer, changelog, user_story, security_architect, database_architect, manager) | ✅ COMPLETE |
+| Day 5A | P1 Activity Stream, P2 Model Router, P3 Repo Console — platform foundations | ✅ COMPLETE (2026-07-17) |
+| Day 5B | 9 agents (chat_agent, code_explainer, code_quality, accessibility, api_designer, compliance, cost_estimator, data_pipeline, debugger) | NEXT |
+
+---
+
+## 2026-07-17 — Day 5A Complete: Three Platform Enhancements
+
+### Commits
+- `0820b5d` — feat(fleet): Day 5A complete — streaming activity feed, central model router, repo console
+- `6ec619a` — feat(fleet): wire ModelRouter into run_agent_graph — all 68 agents auto-route via agent_models.json
+
+### What Was Built
+
+#### P1 — Activity Stream (Claude Code-like streaming UI)
+- `backend/app/services/activity_stream.py` — per-task SSE event bus with typed events
+- `backend/app/api/activity.py` — 4 endpoints: `/stream` (SSE), `/stop`, `/resume`, `/tokens`
+- `apps/web/app/stream/[taskId]/page.tsx` — real-time activity feed: thinking blocks, tool calls, file edits, terminal output, token counter, Stop button, resume injection
+- `base_graph.py` — `task_id` parameter wired into `call_llm` (thinking + abort check) and `execute_tools` (tool_call/tool_result/file_edit/terminal events)
+
+#### P2 — Central Model Router
+- `backend/app/fleet/agent_models.json` — 68-agent routing table (8 Opus, 2 Haiku, 58 Sonnet)
+- `backend/app/fleet/model_router.py` — thread-safe singleton, hot-reload, `RouteConfig.token_kwargs()`
+- `backend/app/fleet/providers/base.py` — `LLMProvider` ABC + `LLMResponse`
+- **Router auto-wired into `run_agent_graph()`**: router wins over passed-in `model=` param — all 68 agents now use correct model from JSON without per-agent changes
+
+#### P3 — Repo Console (fully local git operations)
+- `backend/app/services/git_service.py` — async git ops (clone/status/log/diff/add/commit/push/branch/checkout/pull), URL allowlist, no `shell=True`, workspace scoping
+- `backend/app/services/workspace_service.py` — path traversal guard
+- `backend/app/api/console.py` — 11 REST endpoints
+- `apps/web/app/console/page.tsx` — file browser + git panel UI in web portal
+- NavBar: added "Console" link
+
+#### Config additions
+`config.py`: `openai_api_key`, `agent_models_path`, `max_tokens_opus`, `thinking_budget_opus`, `allowed_workspace_parent`, `git_allowed_hosts`
+
+### Test Results
+- **53 new Day 5A tests**: 16 ModelRouter + 20 ActivityStream + 17 GitService — **53/53 pass**
+- **Full suite**: 1931 passed, 16 pre-existing failures (same as before Day 5A), 55 skipped
+
+### Live Verification
+- Backend endpoints verified: `/api/tasks/{id}/stop`, `/api/tasks/{id}/tokens`, `/api/console/workspace/browse`, `/api/console/repos/{path}/status`, `/api/console/repos/{path}/log`
+- Frontend pages: `/console` (200, compiles), `/stream/[taskId]` (200, compiles)
+- Router override confirmed: `architect → claude-opus-4-20250514`, `coder → claude-sonnet-4-20250514`
 
 ### Next Steps
-1. **Day 3 Fleet Enhancement** — AGENT_CONTRACT batch 2 (9 agents): performance_reviewer, style_reviewer, sprint_planner, business_analyst, migration_agent, schema_agent, ai_engineer, cleanup_agent, tech_debt_agent
-2. Continue per 19-day fleet plan in `docs/FLEET_ENHANCEMENT_PLAN.md`
+1. **Day 5B** — AGENT_CONTRACT batch 4 (9 agents): chat_agent, code_explainer_agent, code_quality_agent, accessibility_agent, api_designer_agent, compliance_agent, cost_estimator_agent, data_pipeline_agent, debugger_agent
+2. Run Day 5B programmatic audit (0 issues required before close)
