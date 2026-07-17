@@ -40,14 +40,14 @@ Last updated: 2026-07-17
 | ai_engineer | ✅ | ✅ | ✅ | ✅ `run_python_snippet/bash→code_tested` | ✅ | ✅ PRODUCTION |
 | cleanup_agent | ✅ | ✅ | ✅ | ✅ `dead_code_detect→dead_code_scanned` | ✅ | ✅ PRODUCTION |
 | tech_debt_agent | ✅ | ✅ | ✅ | ✅ `run_linter→lint_ran` | ✅ | ✅ PRODUCTION |
-| release_notes_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 4 |
-| evaluation_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 4 |
-| rag_engineer_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 4 |
-| changelog_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 4 |
-| user_story_generator | — | ❌ | ✅ | ❌ | — | ⏳ Day 4 |
-| security_architect | — | ❌ | ✅ | ❌ | — | ⏳ Day 4 |
-| database_architect | — | ❌ | ✅ | ❌ | — | ⏳ Day 4 |
-| manager | — | ❌ | ✅ | ❌ | — | ⏳ Day 4 |
+| release_notes_agent | ✅ | ✅ | ✅ | ✅ `git_log→git_log_read` | ✅ | ✅ PRODUCTION |
+| evaluation_agent | ✅ | ✅ | ✅ | ✅ `run_python_snippet→eval_run` | ✅ | ✅ PRODUCTION |
+| rag_engineer_agent | ✅ | ✅ | ✅ | ✅ `read_file→codebase_read` | ✅ | ✅ PRODUCTION |
+| changelog_agent | ✅ | ✅ | ✅ | ✅ `generate_changelog→git_log_read` | ✅ | ✅ PRODUCTION |
+| user_story_generator | ✅ | ✅ | ✅ | ✅ `read_file→codebase_read` | ✅ | ✅ PRODUCTION |
+| security_architect | ✅ | ✅ | ✅ | ✅ `read_file→codebase_read` | ✅ | ✅ PRODUCTION |
+| database_architect | ✅ | ✅ | ✅ | ✅ `read_file→schema_read` | ✅ | ✅ PRODUCTION |
+| manager | ✅ | ✅ | N/A | N/A (orchestrator) | ✅ | ✅ PRODUCTION |
 | chat_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 5 |
 | code_explainer_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 5 |
 | code_quality_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 5 |
@@ -83,7 +83,7 @@ Last updated: 2026-07-17
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| capability_registry | ✅ 33 agents registered | 13 Day 1 + 11 Day 2 + 9 Day 3; remaining added per day |
+| capability_registry | ✅ 41 agents registered | 13 Day 1 + 11 Day 2 + 9 Day 3 + 8 Day 4; remaining added per day |
 | agent_registry | ✅ SLEEP/IDLE/RUNNING states wired | `complete_task()` → AgentState.SLEEP after every run |
 | Event bus | ✅ 8 typed events | TaskCreated, TaskStarted, TaskCompleted, TaskFailed, ReviewRequested, LessonPublished, HealthUpdated, MemoryCreated |
 | fleet_checkpoint | ✅ save/restore/rollback + trace_id | trace_id stored in metadata — Gap 10 closed |
@@ -110,7 +110,7 @@ Last updated: 2026-07-17
 | AGENT_CONTRACT + _register() Day 1 agents | ✅ CLOSED | Sessions 1–4 |
 | AGENT_CONTRACT + _register() Day 2 agents | ✅ CLOSED | Day 2 |
 | AGENT_CONTRACT Day 3 batch | ✅ CLOSED | Day 3 2026-07-17 |
-| AGENT_CONTRACT Day 4 batch | ❌ OPEN | Day 4 |
+| AGENT_CONTRACT Day 4 batch | ✅ CLOSED | Day 4 2026-07-17 |
 | AGENT_CONTRACT Day 5 batch | ❌ OPEN | Day 5 |
 | AGENT_CONTRACT Day 6 batch | ❌ OPEN | Day 6 |
 | enforce_in_result empty for 7 Day 1 agents | ✅ CLOSED | Gap fix 2026-07-17 |
@@ -145,3 +145,4 @@ Last updated: 2026-07-17
 | Day 3 | 2026-07-17 | +76 | 9 agents: AGENT_CONTRACT + _register() + fleet flags + VerificationConfig enforce; fix test path bug |
 | Gap Fix (enforce) | 2026-07-17 | +7 | enforce_in_result filled for 7 Day 1 agents; 7 new parametrized tests added; 33/33 agents fully verified |
 | Gap Fix (deep audit) | 2026-07-17 | — | 3 capability collisions fixed; 5 model tier bugs fixed; final audit 0 issues across 33 agents |
+| Day 4 | 2026-07-17 | +158 | 8 agents: AGENT_CONTRACT + _register() + fleet flags + VerificationConfig; 0 audit issues; 1878/1878 suite pass |

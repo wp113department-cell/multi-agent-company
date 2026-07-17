@@ -13,11 +13,29 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# AGENT_CONTRACT — Fleet OS capability declaration
+# Note: manager is an async orchestrator, not a LangGraph node.
+# It does not call run_agent_graph; fleet flags are N/A.
+# ---------------------------------------------------------------------------
+AGENT_CONTRACT: dict[str, Any] = {
+    "name": "manager",
+    "description": "Orchestrates the full Dev → QA → Review pipeline per subtask. Manages epic lifecycle, halt conditions, and assembles the approval package.",
+    "allowed_tools": [],
+    "input_types": ["task_id", "subtasks", "worktree_path", "plan", "repo_path", "epic_id"],
+    "output_types": ["EpicApprovalPackage"],
+    "side_effects": ["dispatches backend_dev/frontend_dev/qa/reviewer agents", "writes to DB", "publishes events"],
+    "permissions": ["read_repo", "write_repo", "database_write", "event_bus_publish"],
+    "risk_level": "high",
+    "expected_verification": {},
+    "dependencies": ["backend_dev", "frontend_dev", "qa", "reviewer"],
+}
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -494,3 +512,29 @@ async def run_epic_manager(
         all_review_findings=all_findings,
         cost_actual_usd=cost_actual,
     )
+
+
+# ---------------------------------------------------------------------------
+# Capability registry registration
+# ---------------------------------------------------------------------------
+
+def _register() -> None:
+    try:
+        from app.fleet.capability_registry import AgentCapability, register
+        from app.fleet.agent_registry import get_agent_registry
+        register(AgentCapability(
+            name=AGENT_CONTRACT["name"],
+            description=AGENT_CONTRACT["description"],
+            tools=AGENT_CONTRACT["allowed_tools"],
+            input_types=AGENT_CONTRACT["input_types"],
+            output_types=AGENT_CONTRACT["output_types"],
+            capabilities=["task_orchestration", "epic_management", "pipeline_coordination"],
+            risk_level=AGENT_CONTRACT["risk_level"],
+            dependencies=AGENT_CONTRACT["dependencies"],
+        ))
+        get_agent_registry().register(AGENT_CONTRACT["name"])
+    except Exception as exc:
+        logger.debug("Fleet registry not available: %s", exc)
+
+
+_register()

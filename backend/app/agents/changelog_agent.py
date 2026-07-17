@@ -6,12 +6,35 @@ Verification contract:
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import READ_ONLY_TOOLS, make_chat_handlers
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# AGENT_CONTRACT — Fleet OS capability declaration
+# ---------------------------------------------------------------------------
+AGENT_CONTRACT: dict[str, Any] = {
+    "name": "changelog_agent",
+    "description": "Generates and maintains CHANGELOG.md in Keep-a-Changelog format by reading git history and categorizing commits.",
+    "allowed_tools": [
+        "read_file", "list_files", "search_code", "get_file_tree",
+        "git_log", "git_show", "git_status", "read_files", "file_exists",
+        "generate_changelog", "write_file", "submit_changelog",
+    ],
+    "input_types": ["task_id", "description", "repo_path"],
+    "output_types": ["AgentResult"],
+    "side_effects": ["writes CHANGELOG.md"],
+    "permissions": ["read_repo", "write_repo"],
+    "risk_level": "low",
+    "expected_verification": {"git_log_read": "generate_changelog must run before writing changelog"},
+    "dependencies": [],
+}
 
 _SUBMIT_CHANGELOG_TOOL: dict[str, Any] = {
     "name": "submit_changelog",
@@ -72,7 +95,7 @@ _VERIFICATION_CFG = VerificationConfig(
     set_by={"generate_changelog": "git_log_read", "write_file": "changelog_written"},
     reset_by=(),
     reset_keys=(),
-    enforce_in_result={},
+    enforce_in_result={"git_log_read": "git_log_read"},
     initial={"git_log_read": False, "changelog_written": False},
 )
 
@@ -128,6 +151,13 @@ def run_changelog_agent(
         tool_handlers=handlers,
         verification_cfg=_VERIFICATION_CFG,
         initial_message=message,
+        task_description=description[:120],
+        repo_path=repo,
+        model_haiku=settings.model_router,
+        enable_planning=True,
+        enable_memory=True,
+        enable_reflection=True,
+        enable_lesson=True,
         max_turns=15,
     )
 
@@ -145,3 +175,29 @@ def run_changelog_agent(
         status="completed" if final_state["submitted"] else "blocked",
         raw=raw,
     )
+
+
+# ---------------------------------------------------------------------------
+# Capability registry registration
+# ---------------------------------------------------------------------------
+
+def _register() -> None:
+    try:
+        from app.fleet.capability_registry import AgentCapability, register
+        from app.fleet.agent_registry import get_agent_registry
+        register(AgentCapability(
+            name=AGENT_CONTRACT["name"],
+            description=AGENT_CONTRACT["description"],
+            tools=AGENT_CONTRACT["allowed_tools"],
+            input_types=AGENT_CONTRACT["input_types"],
+            output_types=AGENT_CONTRACT["output_types"],
+            capabilities=["changelog_generation", "commit_categorization", "version_documentation"],
+            risk_level=AGENT_CONTRACT["risk_level"],
+            dependencies=AGENT_CONTRACT["dependencies"],
+        ))
+        get_agent_registry().register(AGENT_CONTRACT["name"])
+    except Exception as exc:
+        logger.debug("Fleet registry not available: %s", exc)
+
+
+_register()

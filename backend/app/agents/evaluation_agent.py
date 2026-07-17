@@ -5,12 +5,35 @@ Verification contract:
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import READ_ONLY_TOOLS, make_chat_handlers
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# AGENT_CONTRACT — Fleet OS capability declaration
+# ---------------------------------------------------------------------------
+AGENT_CONTRACT: dict[str, Any] = {
+    "name": "evaluation_agent",
+    "description": "Runs LLM output evaluation suites, scores test cases, and reports overall pass/fail metrics.",
+    "allowed_tools": [
+        "read_file", "list_files", "search_code", "get_file_tree",
+        "git_log", "read_files", "file_exists", "file_info",
+        "run_python_snippet", "run_tests", "submit_eval_result",
+    ],
+    "input_types": ["task_id", "description", "repo_path"],
+    "output_types": ["AgentResult"],
+    "side_effects": ["executes Python code"],
+    "permissions": ["read_repo", "execute_code"],
+    "risk_level": "medium",
+    "expected_verification": {"eval_run": "run_python_snippet or run_tests must execute before submit"},
+    "dependencies": [],
+}
 
 _SUBMIT_EVAL_TOOL: dict[str, Any] = {
     "name": "submit_eval_result",
@@ -68,7 +91,7 @@ _VERIFICATION_CFG = VerificationConfig(
     set_by={"run_python_snippet": "eval_run", "run_tests": "eval_run"},
     reset_by=(),
     reset_keys=(),
-    enforce_in_result={},
+    enforce_in_result={"eval_run": "eval_run"},
     initial={"eval_run": False},
 )
 
@@ -117,6 +140,13 @@ def run_evaluation_agent(
         tool_handlers=handlers,
         verification_cfg=_VERIFICATION_CFG,
         initial_message=message,
+        task_description=description[:120],
+        repo_path=repo,
+        model_haiku=settings.model_router,
+        enable_planning=True,
+        enable_memory=True,
+        enable_reflection=True,
+        enable_lesson=True,
         max_turns=20,
     )
 
@@ -134,3 +164,29 @@ def run_evaluation_agent(
         status="completed" if final_state["submitted"] else "blocked",
         raw=raw,
     )
+
+
+# ---------------------------------------------------------------------------
+# Capability registry registration
+# ---------------------------------------------------------------------------
+
+def _register() -> None:
+    try:
+        from app.fleet.capability_registry import AgentCapability, register
+        from app.fleet.agent_registry import get_agent_registry
+        register(AgentCapability(
+            name=AGENT_CONTRACT["name"],
+            description=AGENT_CONTRACT["description"],
+            tools=AGENT_CONTRACT["allowed_tools"],
+            input_types=AGENT_CONTRACT["input_types"],
+            output_types=AGENT_CONTRACT["output_types"],
+            capabilities=["llm_evaluation", "eval_suite_execution", "output_scoring"],
+            risk_level=AGENT_CONTRACT["risk_level"],
+            dependencies=AGENT_CONTRACT["dependencies"],
+        ))
+        get_agent_registry().register(AGENT_CONTRACT["name"])
+    except Exception as exc:
+        logger.debug("Fleet registry not available: %s", exc)
+
+
+_register()

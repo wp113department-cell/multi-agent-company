@@ -64,6 +64,7 @@ class TestRunExecutive:
     ) -> None:
         mock_settings.return_value = SimpleNamespace(
             model_router="claude-haiku-4-5-20251001",
+            model_planner="claude-sonnet-4-6",
             executive_max_epics_per_goal=5,
             target_repo_path="/tmp/test-repo",
         )
@@ -89,6 +90,7 @@ class TestRunExecutive:
     ) -> None:
         mock_settings.return_value = SimpleNamespace(
             model_router="claude-haiku-4-5-20251001",
+            model_planner="claude-sonnet-4-6",
             executive_max_epics_per_goal=2,
             target_repo_path="/tmp/test-repo",
         )
@@ -110,6 +112,7 @@ class TestRunExecutive:
     ) -> None:
         mock_settings.return_value = SimpleNamespace(
             model_router="claude-haiku-4-5-20251001",
+            model_planner="claude-sonnet-4-6",
             executive_max_epics_per_goal=5,
             target_repo_path="/tmp/test-repo",
         )
@@ -127,6 +130,7 @@ class TestRunExecutive:
     ) -> None:
         mock_settings.return_value = SimpleNamespace(
             model_router="claude-haiku-4-5-20251001",
+            model_planner="claude-sonnet-4-6",
             executive_max_epics_per_goal=5,
             target_repo_path="/tmp/test-repo",
         )
@@ -143,6 +147,7 @@ class TestRunExecutive:
     ) -> None:
         mock_settings.return_value = SimpleNamespace(
             model_router="claude-haiku-4-5-20251001",
+            model_planner="claude-sonnet-4-6",
             executive_max_epics_per_goal=5,
             target_repo_path="/tmp/test-repo",
         )
