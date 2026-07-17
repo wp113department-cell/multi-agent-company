@@ -51,7 +51,7 @@ _VERIFICATION_CFG = VerificationConfig(
     set_by={"bash": "tests_run"},
     reset_by=(),
     reset_keys=(),
-    enforce_in_result={},
+    enforce_in_result={"tests_run": "tests_run"},
     initial={"tests_run": False},
 )
 

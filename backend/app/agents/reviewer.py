@@ -50,7 +50,7 @@ _VERIFICATION_CFG = VerificationConfig(
     set_by={"git_diff": "diff_reviewed"},
     reset_by=(),
     reset_keys=(),
-    enforce_in_result={},
+    enforce_in_result={"diff_reviewed": "diff_reviewed"},
     initial={},
 )
 

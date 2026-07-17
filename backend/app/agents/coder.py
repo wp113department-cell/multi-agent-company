@@ -53,7 +53,7 @@ _VERIFICATION_CFG = VerificationConfig(
     set_by={"bash": "checks_run", "git_diff": "diff_checked"},
     reset_by=("edit_file", "write_file"),
     reset_keys=("checks_run",),
-    enforce_in_result={},
+    enforce_in_result={"checks_run": "checks_run"},
     initial={"checks_run": False, "diff_checked": False},
 )
 
