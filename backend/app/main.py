@@ -108,6 +108,36 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning("Could not load API key from DB at startup: %s", exc)
 
+    # Auto-seed default admin user if JWT is configured but no users exist yet
+    if settings.jwt_secret_key:
+        try:
+            import json
+            from sqlalchemy import text
+            from app.auth.jwt import hash_password
+            factory = get_session_factory()
+            async with factory() as db:
+                row = await db.execute(
+                    text("SELECT value FROM system_settings WHERE key = 'auth_users'")
+                )
+                existing: list[dict[str, str]] = json.loads(row.scalar_one_or_none() or "[]")
+                if not existing:
+                    admin = {
+                        "username": "admin",
+                        "hashed_password": hash_password(settings.default_admin_password),
+                        "role": "approver",
+                    }
+                    await db.execute(
+                        text(
+                            "INSERT INTO system_settings (key, value) VALUES ('auth_users', :v) "
+                            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+                        ),
+                        {"v": json.dumps([admin])},
+                    )
+                    await db.commit()
+                    logger.info("Auto-seeded admin user (username=admin)")
+        except Exception as exc:
+            logger.warning("Could not auto-seed admin user: %s", exc)
+
     reindex_task = asyncio.create_task(_weekly_reindex_loop(get_active_repo_path()))
     retention_task = asyncio.create_task(start_retention_loop())
 
