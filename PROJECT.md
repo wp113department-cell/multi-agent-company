@@ -2,7 +2,47 @@
 
 **This is a living document. Update it every session — it is the single source of truth for "what actually exists right now," separate from `PLAN.md` (what's intended) and `files/` (the original spec suite, which describes the full 7-stage vision, not the current build).**
 
-Last updated: 2026-07-16 (Session 4 complete — pm, research, executive, docs migrated)
+Last updated: 2026-07-17 (Day 5B complete — 8 agents AGENT_CONTRACT + debugger_agent + 97 new tests)
+
+---
+
+## 2026-07-17 — Day 5B Complete + Platform Enhancements
+
+### Day 5B — COMPLETE
+All 8 target agents now have AGENT_CONTRACT, VerificationConfig with non-empty `enforce_in_result`, `_register()`, and upgraded `run_agent_graph()` calls.
+
+**Agents completed:**
+
+| Agent | Capability Tag | enforce_in_result |
+|---|---|---|
+| code_explainer_agent | `code_explanation` | `{"read": "read"}` |
+| code_quality_agent | `code_quality_review` | `{"read": "read"}` |
+| accessibility_agent | `accessibility_audit` | `{"read": "read"}` |
+| api_designer_agent | `api_design` | `{"read": "read"}` |
+| compliance_agent | `compliance_audit` | `{"read": "read"}` |
+| cost_estimator_agent | `cost_estimation` | `{"read": "read"}` |
+| data_pipeline_agent | `data_pipeline_design` | `{"read": "read"}` |
+| debugger_agent | `debug_analysis` | `{"read": "read"}` |
+
+**Tests:** `backend/tests/test_day5b_agents.py` — 97 parametrized tests: AGENT_CONTRACT shape, enforce_in_result non-empty, role file exists, submit tool in _TOOLS, handler factory returns dict + updates result, run_fn returns AgentResult (with mocked run_agent_graph), capability tag uniqueness, _register() callable.
+
+### Platform Enhancements (earlier in session)
+- **Settings page**: OpenAI API key management + Verify button for both Anthropic and OpenAI
+- **Onboarding page** (`/onboarding`): public repo clone (URL + folder browse/mkdir) + private repo clone (GitHub PAT injected into HTTPS URL, stripped from error output before returning)
+- **Task form**: expandable textarea (500k char soft limit), up to 5 PDF attachments with pdfplumber text extraction, character counter
+- **Auth fix**: admin auto-seed on startup now ALWAYS re-syncs if stored hash doesn't match `DEFAULT_ADMIN_PASSWORD` — eliminates 401 on fresh DB
+
+**New files:** `apps/web/app/onboarding/page.tsx`, `backend/tests/test_enhancements_settings_pdf.py`, `backend/tests/test_day5b_agents.py`
+
+**Changed files:** `backend/app/api/settings.py`, `backend/app/api/console.py`, `backend/app/api/tasks.py`, `backend/app/services/git_service.py`, `backend/app/config.py`, `backend/app/main.py`, `apps/web/app/settings/page.tsx`, `apps/web/components/NewTaskForm.tsx`, `apps/web/lib/api.ts`, `backend/requirements.txt`
+
+**Test results:** 2061 passed, 1 pre-existing flake (test_session3_migration ordering issue — passes alone), 55 skipped, 0 Day 5B failures
+
+### Known issues
+- `test_returns_review_result_on_success` in `test_session3_migration.py` fails when run as part of the full suite (import ordering / registry state leak) but passes when run in isolation. Pre-existing, not introduced by Day 5B.
+
+### Next steps — Day 6 (17+1 agents)
+dependency_security_agent, devex_agent, env_checker_agent, feature_flag_agent, incident_responder_agent, infra_agent, load_test_agent, localization_agent, onboarding_agent, pair_programmer_agent, rollback_agent, runbook_generator_agent, slo_agent, spike_agent, test_coverage_agent, test_writer_agent, version_manager_agent, groq_adapter (stub only)
 
 ---
 
