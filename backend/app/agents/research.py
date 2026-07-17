@@ -46,11 +46,11 @@ AGENT_CONTRACT: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 _VERIFICATION_CFG = VerificationConfig(
-    set_by={},
+    set_by={"submit_research": "research_submitted"},
     reset_by=(),
     reset_keys=(),
-    enforce_in_result={},
-    initial={},
+    enforce_in_result={"research_submitted": "research_submitted"},
+    initial={"research_submitted": False},
 )
 
 # ---------------------------------------------------------------------------

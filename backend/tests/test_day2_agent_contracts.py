@@ -379,5 +379,5 @@ class TestFleetManagerCapabilityQuery:
 
     def test_monitoring_agent_selectable_by_capability(self) -> None:
         import app.agents.monitoring_agent  # noqa: F401
-        names = self._get_by_capability("system_monitoring")
+        names = self._get_by_capability("infrastructure_monitoring")
         assert "monitoring_agent" in names

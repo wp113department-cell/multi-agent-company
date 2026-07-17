@@ -126,7 +126,7 @@ def _register() -> None:
             tools=AGENT_CONTRACT["allowed_tools"],
             input_types=AGENT_CONTRACT["input_types"],
             output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["system_monitoring", "health_checking", "metrics_collection"],
+            capabilities=["infrastructure_monitoring", "health_checking", "metrics_collection"],
             risk_level=AGENT_CONTRACT["risk_level"],
             dependencies=AGENT_CONTRACT["dependencies"],
         ))

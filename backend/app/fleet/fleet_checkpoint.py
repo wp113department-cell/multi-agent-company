@@ -77,9 +77,13 @@ class CheckpointStore:
         task_id: str = "",
         label: str = "",
         metadata: dict[str, Any] | None = None,
+        trace_id: str = "",
     ) -> str:
         """Deep-copy state and return a new checkpoint_id."""
         checkpoint_id = f"ckpt-{uuid.uuid4().hex[:12]}"
+        merged_metadata = dict(metadata or {})
+        if trace_id:
+            merged_metadata["trace_id"] = trace_id
         cp = AgentCheckpoint(
             checkpoint_id=checkpoint_id,
             agent_name=agent_name,
@@ -87,7 +91,7 @@ class CheckpointStore:
             created_at=datetime.now(timezone.utc),
             state_snapshot=copy.deepcopy(state),
             label=label,
-            metadata=metadata or {},
+            metadata=merged_metadata,
         )
         with self._lock:
             if len(self._store) >= self._capacity:
@@ -190,10 +194,12 @@ def save_checkpoint(
     task_id: str = "",
     label: str = "",
     metadata: dict[str, Any] | None = None,
+    trace_id: str = "",
 ) -> str:
     """Save a checkpoint and return its ID. Uses the process-wide store."""
     return get_checkpoint_store().save(
-        state, agent_name=agent_name, task_id=task_id, label=label, metadata=metadata
+        state, agent_name=agent_name, task_id=task_id, label=label,
+        metadata=metadata, trace_id=trace_id,
     )
 
 
