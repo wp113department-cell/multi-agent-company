@@ -99,6 +99,20 @@ export async function createTask(input: { title: string; description: string; re
   return handleResponse<DevTask>(res);
 }
 
+export interface PdfFileResult {
+  filename: string;
+  text: string;
+  chars: number;
+}
+
+export async function extractPdfs(files: File[]): Promise<PdfFileResult[]> {
+  const form = new FormData();
+  for (const f of files) form.append("files", f);
+  const res = await fetch("/api/tasks/extract-pdfs", { method: "POST", body: form });
+  const data = await handleResponse<{ ok: boolean; files: PdfFileResult[] }>(res);
+  return data.files;
+}
+
 export async function updateTaskStatus(taskId: string, status: string): Promise<DevTask> {
   const res = await fetch(`/api/tasks/${taskId}`, {
     method: "PATCH",

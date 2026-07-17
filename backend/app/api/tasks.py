@@ -1,5 +1,5 @@
 from typing import Any
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -315,3 +315,59 @@ async def get_diff(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return {"diff": task.diff, "filesTouched": task.files_touched or []}
+
+
+# ---------------------------------------------------------------------------
+# PDF attachment extraction — POST /api/tasks/extract-pdfs
+# Up to 5 PDF files; returns extracted text from each.
+# ---------------------------------------------------------------------------
+
+MAX_PDF_FILES = 5
+MAX_PDF_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB per file
+
+
+@router.post("/extract-pdfs")
+async def extract_pdfs(files: list[UploadFile] = File(...)) -> dict[str, Any]:
+    """Extract text from up to 5 PDF files. Returns extracted text for each file.
+
+    The caller can then append this text to the task description before submitting.
+    """
+    if len(files) > MAX_PDF_FILES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum {MAX_PDF_FILES} PDF files allowed. Got {len(files)}.",
+        )
+
+    results = []
+    for upload in files:
+        fname = upload.filename or "file.pdf"
+        if not fname.lower().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail=f"'{fname}' is not a PDF file.")
+
+        raw = await upload.read()
+        if len(raw) > MAX_PDF_SIZE_BYTES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{fname}' exceeds 20 MB limit ({len(raw) // 1024 // 1024} MB).",
+            )
+
+        text = _extract_pdf_text(raw, fname)
+        results.append({"filename": fname, "text": text, "chars": len(text)})
+
+    return {"ok": True, "files": results}
+
+
+def _extract_pdf_text(raw: bytes, fname: str) -> str:
+    """Extract plain text from PDF bytes using pdfplumber."""
+    try:
+        import io
+        import pdfplumber
+        with pdfplumber.open(io.BytesIO(raw)) as pdf:
+            pages = []
+            for i, page in enumerate(pdf.pages):
+                page_text = page.extract_text() or ""
+                if page_text.strip():
+                    pages.append(f"[Page {i + 1}]\n{page_text}")
+            return "\n\n".join(pages)
+    except Exception as exc:
+        return f"[Could not extract text from '{fname}': {exc}]"

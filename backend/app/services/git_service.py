@@ -84,7 +84,6 @@ async def git_clone(url: str, dest_path: str, branch: str | None = None) -> dict
     dest_path must be inside allowed_workspace_parent. url must be on allowlist.
     """
     _validate_url(url)
-    # Validate parent directory, not the dest itself (it won't exist yet)
     _validate_workspace(str(Path(dest_path).parent))
 
     args = ["clone", url, dest_path]
@@ -92,6 +91,42 @@ async def git_clone(url: str, dest_path: str, branch: str | None = None) -> dict
         args += ["--branch", branch]
     rc, stdout, stderr = await _run_git(args, timeout=300.0)
     return {"ok": rc == 0, "stdout": stdout, "stderr": stderr, "returncode": rc}
+
+
+async def git_clone_with_token(
+    url: str, dest_path: str, token: str, branch: str | None = None
+) -> dict[str, Any]:
+    """Clone a private HTTPS repo by embedding a PAT in the URL.
+
+    The token is never logged — we strip it from any logged output.
+    Supported URL formats:
+      https://github.com/user/repo.git  (token injected as https://TOKEN@github.com/...)
+      https://TOKEN@github.com/user/repo.git  (already has token — used as-is)
+    """
+    if not token.strip():
+        raise ValueError("Token is required for private repo clone.")
+    _validate_url(url)
+    _validate_workspace(str(Path(dest_path).parent))
+
+    # Inject token into HTTPS URL
+    from urllib.parse import urlparse, urlunparse
+    parsed = urlparse(url)
+    if not parsed.netloc:
+        raise ValueError(f"Could not parse URL: {url!r}")
+    # If no credentials in URL yet, inject the token as username (GitHub PAT style)
+    if "@" not in parsed.netloc:
+        netloc_with_token = f"{token.strip()}@{parsed.netloc}"
+        auth_url = urlunparse(parsed._replace(netloc=netloc_with_token))
+    else:
+        auth_url = url  # Token already embedded
+
+    args = ["clone", auth_url, dest_path]
+    if branch:
+        args += ["--branch", branch]
+    rc, stdout, stderr = await _run_git(args, timeout=300.0)
+    # Strip token from any error output before returning
+    safe_stderr = stderr.replace(token, "***") if token else stderr
+    return {"ok": rc == 0, "stdout": stdout, "stderr": safe_stderr, "returncode": rc}
 
 
 async def git_status(repo_path: str) -> dict[str, Any]:

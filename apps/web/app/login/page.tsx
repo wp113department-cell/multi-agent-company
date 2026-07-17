@@ -18,7 +18,7 @@ export default function LoginPage() {
     const result = await login(username, password);
     setLoading(false);
     if (result.ok) {
-      router.push("/tasks");
+      router.push("/onboarding");
     } else {
       setError(result.error ?? "Login failed");
     }

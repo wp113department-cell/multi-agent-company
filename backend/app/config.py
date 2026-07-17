@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     # Anthropic (required unless USE_GROQ=true)
     anthropic_api_key: str = Field(default="", description="Anthropic API key (required when USE_GROQ=false)")
 
+    # OpenAI (optional — used by agents/tools that need GPT models)
+    openai_api_key: str = Field(default="", description="OpenAI API key. Can also be set via UI Settings page.")
+
     # Model tiers
     model_planner: str = Field(default="claude-haiku-4-5-20251001", description="Model for PM/Architect/Decomposer")
     model_coder: str = Field(default="claude-sonnet-5", description="Model for Coder/QA/Review agents")

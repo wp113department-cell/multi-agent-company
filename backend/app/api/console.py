@@ -56,6 +56,17 @@ class CheckoutRequest(BaseModel):
     create: bool = False
 
 
+class MkdirRequest(BaseModel):
+    path: str  # absolute path inside workspace
+
+
+class ClonePrivateRequest(BaseModel):
+    url: str
+    dest_path: str
+    token: str        # GitHub PAT or other HTTPS token
+    branch: str = ""
+
+
 # ---------------------------------------------------------------------------
 # Shared helper
 # ---------------------------------------------------------------------------
@@ -88,6 +99,35 @@ async def browse_workspace(req: BrowseRequest) -> dict[str, Any]:
         entries = workspace_service.list_directory(req.path)
         is_git = workspace_service.is_git_repo(req.path)
         return {"ok": True, "path": req.path, "entries": entries, "is_git_repo": is_git}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/workspace/mkdir")
+async def make_directory(req: MkdirRequest) -> dict[str, Any]:
+    """Create a new directory inside the allowed workspace."""
+    import os
+    try:
+        workspace_service.assert_in_workspace(req.path)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    try:
+        os.makedirs(req.path, exist_ok=True)
+        return {"ok": True, "path": req.path}
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not create directory: {exc}")
+
+
+@router.post("/repos/clone-private")
+async def clone_private_repo(req: ClonePrivateRequest) -> dict[str, Any]:
+    """Clone a private repo using a GitHub Personal Access Token (HTTPS token auth)."""
+    try:
+        result = await git_service.git_clone_with_token(
+            req.url, req.dest_path, req.token, req.branch or None
+        )
+        if not result["ok"]:
+            raise HTTPException(status_code=422, detail=result.get("stderr", "git clone failed"))
+        return {"ok": True, "path": req.dest_path, "stderr": result.get("stderr", "")}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

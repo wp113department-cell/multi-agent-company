@@ -27,3 +27,5 @@ sentry-sdk[fastapi]==2.65.0
 slowapi==0.1.10
 python-jose[cryptography]==3.5.0
 bcrypt==5.0.0
+openai==1.109.1
+python-multipart==0.0.20
