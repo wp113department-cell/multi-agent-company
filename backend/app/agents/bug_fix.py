@@ -7,31 +7,39 @@ Verification contract:
 """
 from __future__ import annotations
 
-# ---------------------------------------------------------------------------
-# AGENT_CONTRACT — Fleet OS §5  (reference implementation #2 of 3)
-# ---------------------------------------------------------------------------
-AGENT_CONTRACT = {
-    "name": "bug_fix",
-    "inputs": {"task_id": "int", "error_description": "str", "repo_path": "str | None"},
-    "outputs": {"AgentResult": "status, files_changed, diff, summary, tests_passed"},
-    "side_effects": ["writes files in repo (non-guarded paths)", "executes pytest"],
-    "permissions": ["read_repo", "write_repo", "execute_tests"],
-    "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "edit_file", "write_file", "git_diff", "bash", "submit_patch",
-    ],
-    "expected_verification": ["tests_passed via run_tests", "diff_checked via git_diff"],
-    "risk_level": "medium",
-}
-
+import logging
 from typing import Any
 
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import BUG_FIX_TOOLS, make_bug_fix_handlers
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# AGENT_CONTRACT — Fleet OS capability declaration
+# ---------------------------------------------------------------------------
+AGENT_CONTRACT: dict[str, Any] = {
+    "name": "bug_fix",
+    "description": "Diagnoses and fixes bugs in the codebase with verified test coverage.",
+    "allowed_tools": [
+        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
+        "git_log", "read_files", "file_exists", "file_info", "find_references",
+        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
+        "analyze_file", "edit_file", "write_file", "git_diff", "bash", "submit_patch",
+    ],
+    "input_types": ["task_id", "error_description", "repo_path"],
+    "output_types": ["AgentResult"],
+    "side_effects": ["writes files in repo", "executes pytest"],
+    "permissions": ["read_repo", "write_repo", "execute_tests"],
+    "risk_level": "medium",
+    "expected_verification": {
+        "tests_passed": "tests_passed via run_tests",
+        "diff_checked": "diff via git_diff",
+    },
+    "dependencies": [],
+}
 
 _VERIFICATION_CFG = VerificationConfig(
     set_by={"run_tests": "tests_passed", "git_diff": "diff_checked"},
@@ -74,6 +82,13 @@ def run_bug_fix(
         tool_handlers=handlers,
         verification_cfg=_VERIFICATION_CFG,
         initial_message=message,
+        task_description=f"Bug fix — task {task_id}",
+        repo_path=repo,
+        model_haiku=settings.model_router,
+        enable_planning=True,
+        enable_memory=True,
+        enable_reflection=True,
+        enable_lesson=True,
         max_turns=25,
     )
 
@@ -89,3 +104,29 @@ def run_bug_fix(
         status="completed" if final_state["submitted"] else "blocked",
         raw=raw,
     )
+
+
+# ---------------------------------------------------------------------------
+# Capability registry registration
+# ---------------------------------------------------------------------------
+
+def _register() -> None:
+    try:
+        from app.fleet.capability_registry import AgentCapability, register
+        from app.fleet.agent_registry import get_agent_registry
+        register(AgentCapability(
+            name=AGENT_CONTRACT["name"],
+            description=AGENT_CONTRACT["description"],
+            tools=AGENT_CONTRACT["allowed_tools"],
+            input_types=AGENT_CONTRACT["input_types"],
+            output_types=AGENT_CONTRACT["output_types"],
+            capabilities=["bug_fixing", "code_repair", "test_verification"],
+            risk_level=AGENT_CONTRACT["risk_level"],
+            dependencies=AGENT_CONTRACT["dependencies"],
+        ))
+        get_agent_registry().register(AGENT_CONTRACT["name"])
+    except Exception as exc:
+        logger.debug("Fleet registry not available: %s", exc)
+
+
+_register()

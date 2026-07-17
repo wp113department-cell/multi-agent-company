@@ -2039,3 +2039,59 @@ git tag v1.2.0
 - Actual cloud deploy: Vercel + Supabase + staging environment (needs account provisioning)
 - Playwright E2E tests (requires running frontend + browser infra)
 
+
+---
+
+## Session: 2026-07-17 — Fleet Enhancement Day 1 + Day 2
+
+### What Was Built
+
+#### Auth Fix (session start)
+- Cookie-based JWT persistence so Next.js middleware can read token server-side.
+- `apps/web/lib/auth.ts`: `setCookie()`, `deleteCookie()`, `syncAuthCookie()` helpers; `setToken()`/`clearToken()` now write both localStorage + cookie.
+- `apps/web/app/providers.tsx`: `syncAuthCookie()` called on mount.
+- `apps/web/middleware.ts`: `decodeURIComponent` on raw cookie value.
+- Result: no more logout when navigating between pages.
+
+#### Fleet Enhancement — Day 1
+13 migrated agents updated with explicit fleet OS flags:
+- `enable_planning=True`, `enable_memory=True`, `enable_reflection=True`, `enable_lesson=True`
+- `task_description`, `repo_path`, `model_haiku` wired on every `run_agent_graph()` call
+- Agents: architect, decomposer, planner, pm, backend_dev, frontend_dev, coder, reviewer, qa, devops, research, executive, docs
+- 2-section role prompt appended to all 13 role files (Understanding First + Self Review)
+- Tests: `backend/tests/test_day1_agent_flags.py` — 17 tests, all pass
+
+#### Fleet Enhancement — Day 2
+11 base_graph agents updated (batch 1 of 5):
+- **Updated agents:** bug_fix, security_reviewer, architecture_reviewer, sql_agent, docker_agent, cicd_agent, refactor_agent, readme_agent, api_docs_agent, dependency_agent, monitoring_agent
+- `bug_fix.py`: AGENT_CONTRACT upgraded from old format (inputs/outputs as dicts) → new format (input_types/output_types as lists, added description + dependencies)
+- All 10 other agents: new AGENT_CONTRACT added + `import logging` + `logger` + `_register()` at module level
+- All 11: fleet OS flags wired on `run_agent_graph()` call
+- All 11 role files: full 9-section master template appended (Understanding First → Production Quality)
+- Tests: `backend/tests/test_day2_agent_contracts.py` — 81 tests, all pass
+
+### Test Results — 2026-07-17
+```
+pytest backend/tests/test_day1_agent_flags.py -q   → 17 passed
+pytest backend/tests/test_day2_agent_contracts.py -q → 81 passed
+pytest backend/tests/ -q → 1636 passed, 55 skipped (20 pre-existing failures unchanged)
+```
+
+### Files Created/Changed
+**New:** `backend/tests/test_day1_agent_flags.py`, `backend/tests/test_day2_agent_contracts.py`, `docs/reports/FLEET_DAY1_TEST_REPORT.md`, `docs/reports/FLEET_DAY2_TEST_REPORT.md`
+**Modified (agents):** `bug_fix.py`, `security_reviewer.py`, `architecture_reviewer.py`, `sql_agent.py`, `docker_agent.py`, `cicd_agent.py`, `refactor_agent.py`, `readme_agent.py`, `api_docs_agent.py`, `dependency_agent.py`, `monitoring_agent.py` (and 13 Day 1 agents)
+**Modified (roles):** `bug_fix.md`, `security_reviewer.md`, `architecture_reviewer.md`, `sql_agent.md`, `docker_agent.md`, `cicd_agent.md`, `refactor_agent.md`, `readme_agent.md`, `api_docs_agent.md`, `dependency_agent.md`, `monitoring_agent.md` (and 13 Day 1 roles)
+**Modified (frontend):** `apps/web/lib/auth.ts`, `apps/web/app/providers.tsx`, `apps/web/middleware.ts`
+
+### Fleet Enhancement Plan Status
+| Day | Agents | Status |
+|-----|--------|--------|
+| Day 0 | All 20 capabilities enabled fleet-wide | ✅ COMPLETE |
+| Day 1 | 13 migrated agents — fleet OS flags + VerificationConfig | ✅ COMPLETE |
+| Day 2 | 11 agents — AGENT_CONTRACT + _register() + role prompts | ✅ COMPLETE |
+| Day 3 | 9 agents (performance_reviewer, style_reviewer, sprint_planner, business_analyst, migration_agent, schema_agent, ai_engineer, cleanup_agent, tech_debt_agent) | NEXT |
+| Day 4+ | Remaining batches | PENDING |
+
+### Next Steps
+1. **Day 3 Fleet Enhancement** — AGENT_CONTRACT batch 2 (9 agents): performance_reviewer, style_reviewer, sprint_planner, business_analyst, migration_agent, schema_agent, ai_engineer, cleanup_agent, tech_debt_agent
+2. Continue per 19-day fleet plan in `docs/FLEET_ENHANCEMENT_PLAN.md`

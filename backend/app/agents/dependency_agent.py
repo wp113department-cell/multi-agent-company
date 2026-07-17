@@ -7,12 +7,36 @@ Verification contract:
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import DEPENDENCY_AGENT_TOOLS, make_dependency_agent_handlers
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# AGENT_CONTRACT — Fleet OS capability declaration
+# ---------------------------------------------------------------------------
+AGENT_CONTRACT: dict[str, Any] = {
+    "name": "dependency_agent",
+    "description": "Audits dependencies for outdated versions and security issues using live registry checks.",
+    "allowed_tools": [
+        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
+        "git_log", "read_files", "file_exists", "file_info", "find_references",
+        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
+        "analyze_file", "bash", "edit_file", "submit_dependency_report",
+    ],
+    "input_types": ["task_id", "task_description", "repo_path"],
+    "output_types": ["AgentResult"],
+    "side_effects": ["may edit requirements.txt/package.json"],
+    "permissions": ["read_repo", "write_repo", "bash_allowlisted"],
+    "risk_level": "medium",
+    "expected_verification": {"manifest_read": "read_file on manifest must run"},
+    "dependencies": [],
+}
 
 _VERIFICATION_CFG = VerificationConfig(
     set_by={
@@ -62,6 +86,13 @@ def run_dependency_agent(
         tool_handlers=handlers,
         verification_cfg=_VERIFICATION_CFG,
         initial_message=message,
+        task_description=task_description,
+        repo_path=repo,
+        model_haiku=settings.model_router,
+        enable_planning=True,
+        enable_memory=True,
+        enable_reflection=True,
+        enable_lesson=True,
         max_turns=20,
     )
 
@@ -78,3 +109,29 @@ def run_dependency_agent(
         status="completed" if final_state["submitted"] else "blocked",
         raw=raw,
     )
+
+
+# ---------------------------------------------------------------------------
+# Capability registry registration
+# ---------------------------------------------------------------------------
+
+def _register() -> None:
+    try:
+        from app.fleet.capability_registry import AgentCapability, register
+        from app.fleet.agent_registry import get_agent_registry
+        register(AgentCapability(
+            name=AGENT_CONTRACT["name"],
+            description=AGENT_CONTRACT["description"],
+            tools=AGENT_CONTRACT["allowed_tools"],
+            input_types=AGENT_CONTRACT["input_types"],
+            output_types=AGENT_CONTRACT["output_types"],
+            capabilities=["dependency_management", "version_auditing", "security_auditing"],
+            risk_level=AGENT_CONTRACT["risk_level"],
+            dependencies=AGENT_CONTRACT["dependencies"],
+        ))
+        get_agent_registry().register(AGENT_CONTRACT["name"])
+    except Exception as exc:
+        logger.debug("Fleet registry not available: %s", exc)
+
+
+_register()

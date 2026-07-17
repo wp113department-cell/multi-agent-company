@@ -6,12 +6,37 @@ Verification contract:
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import API_DOCS_AGENT_TOOLS, make_api_docs_agent_handlers
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# AGENT_CONTRACT — Fleet OS capability declaration
+# ---------------------------------------------------------------------------
+AGENT_CONTRACT: dict[str, Any] = {
+    "name": "api_docs_agent",
+    "description": "Documents API endpoints by reading actual route handlers and Pydantic schemas.",
+    "allowed_tools": [
+        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
+        "git_log", "read_files", "file_exists", "file_info", "find_references",
+        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
+        "analyze_file", "find_route", "find_api", "parse_ast", "list_functions",
+        "write_file", "submit_docs",
+    ],
+    "input_types": ["task_id", "doc_request", "repo_path"],
+    "output_types": ["AgentResult"],
+    "side_effects": ["writes .md files"],
+    "permissions": ["read_repo", "write_docs"],
+    "risk_level": "low",
+    "expected_verification": {"routes_found": "find_route must run"},
+    "dependencies": [],
+}
 
 _VERIFICATION_CFG = VerificationConfig(
     set_by={
@@ -62,6 +87,13 @@ def run_api_docs_agent(
         tool_handlers=handlers,
         verification_cfg=_VERIFICATION_CFG,
         initial_message=message,
+        task_description=doc_request[:120],
+        repo_path=repo,
+        model_haiku=settings.model_router,
+        enable_planning=True,
+        enable_memory=True,
+        enable_reflection=True,
+        enable_lesson=True,
         max_turns=20,
     )
 
@@ -77,3 +109,29 @@ def run_api_docs_agent(
         status="completed" if final_state["submitted"] else "blocked",
         raw=raw,
     )
+
+
+# ---------------------------------------------------------------------------
+# Capability registry registration
+# ---------------------------------------------------------------------------
+
+def _register() -> None:
+    try:
+        from app.fleet.capability_registry import AgentCapability, register
+        from app.fleet.agent_registry import get_agent_registry
+        register(AgentCapability(
+            name=AGENT_CONTRACT["name"],
+            description=AGENT_CONTRACT["description"],
+            tools=AGENT_CONTRACT["allowed_tools"],
+            input_types=AGENT_CONTRACT["input_types"],
+            output_types=AGENT_CONTRACT["output_types"],
+            capabilities=["api_documentation", "endpoint_documentation"],
+            risk_level=AGENT_CONTRACT["risk_level"],
+            dependencies=AGENT_CONTRACT["dependencies"],
+        ))
+        get_agent_registry().register(AGENT_CONTRACT["name"])
+    except Exception as exc:
+        logger.debug("Fleet registry not available: %s", exc)
+
+
+_register()
