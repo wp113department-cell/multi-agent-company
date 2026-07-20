@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -36,7 +36,7 @@ async def stream_task_events(task_id: str) -> StreamingResponse:
     registry = get_activity_registry()
     stream = registry.get_or_create(task_id)
 
-    async def _generate():  # type: ignore[return]
+    async def _generate() -> AsyncIterator[str]:
         async for event in stream.subscribe(timeout=30.0):
             payload = json.dumps(event, default=str)
             yield f"data: {payload}\n\n"

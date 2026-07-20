@@ -30,6 +30,13 @@ except ImportError:
 
 from tests.groq_compat import groq_llm_patch  # noqa: F401 — registers fixture
 
+# Real network calls against the Groq free tier — excluded from the default
+# `pytest tests/ -q` sweep (matches pytest.ini's `-m "not slow"` addopts) since
+# concurrent free-tier calls 429 or the model call itself takes long enough to
+# make the full-suite run unreliable. Run explicitly on demand:
+#   pytest tests/test_day0_groq_integration.py -v -m slow
+pytestmark = pytest.mark.slow
+
 
 # ---------------------------------------------------------------------------
 # Helpers

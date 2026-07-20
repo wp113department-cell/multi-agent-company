@@ -238,8 +238,15 @@ def test_login_page_calls_auth_login() -> None:
 
 
 def test_cost_page_calls_metrics_api() -> None:
+    # 2026-07-20: cost page was consolidated into /metrics (single KPI page) —
+    # it now redirects there instead of duplicating the /api/metrics fetch.
     src = (_ROOT / "apps/web/app/cost/page.tsx").read_text()
-    assert "/api/metrics" in src
+    assert "redirect" in src
+    assert "/metrics" in src
+    metrics_src = (_ROOT / "apps/web/app/metrics/page.tsx").read_text()
+    assert "metrics" in metrics_src.lower()
+    api_src = (_ROOT / "apps/web/lib/api.ts").read_text()
+    assert "/api/metrics" in api_src
 
 
 def test_middleware_protects_routes() -> None:
