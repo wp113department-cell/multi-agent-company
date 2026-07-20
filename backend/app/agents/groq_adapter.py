@@ -6,11 +6,21 @@ Used when USE_GROQ=true in settings. Groq uses an OpenAI-compatible API so:
   - Tool calls come back in choice.message.tool_calls[i]
   - Tool results go back as {"role": "tool", "tool_call_id": ..., "content": ...}
   - No prompt caching (cache tokens always return 0)
+
+tool_use_failed recovery:
+  Some llama models emit function calls in a legacy XML-like format:
+    <function=NAME [{"arg": "val"}]</function>
+  Groq rejects these with 400 tool_use_failed + a failed_generation field.
+  We parse that field and synthesize a proper tool-use response so the agent
+  loop can continue without the caller seeing an error.
 """
 from __future__ import annotations
 
 import json
 import logging
+import re
+import uuid
+from types import SimpleNamespace
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -180,6 +190,60 @@ class _GroqUsage:
         self.cache_creation_input_tokens: int | None = None
 
 
+# ---------------------------------------------------------------------------
+# tool_use_failed recovery helpers
+# ---------------------------------------------------------------------------
+
+def _parse_failed_generation(failed_gen: str) -> tuple[str, dict[str, Any]] | None:
+    """Parse Groq's failed_generation string to recover function name + args.
+
+    Handles llama legacy format:
+      <function=NAME [{"key": "value", ...}]</function>
+      <function=NAME {"key": "value"}</function>
+
+    Returns (function_name, args_dict) or None if unparseable.
+    """
+    name_match = re.match(r"<function=(\w+)", failed_gen)
+    if not name_match:
+        return None
+    fn_name = name_match.group(1)
+
+    # Extract the JSON object — find first { and last }
+    start = failed_gen.find("{")
+    end = failed_gen.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+
+    try:
+        args = json.loads(failed_gen[start : end + 1])
+        return fn_name, args
+    except json.JSONDecodeError:
+        return None
+
+
+def _synthesize_tool_call_response(
+    fn_name: str,
+    args: dict[str, Any],
+    tokens_in: int = 0,
+    tokens_out: int = 0,
+) -> "_GroqResponse":
+    """Build a _GroqResponse that looks like the model made a successful tool call."""
+    call_id = f"call_{uuid.uuid4().hex[:8]}"
+    fake_tool_call = SimpleNamespace(
+        id=call_id,
+        function=SimpleNamespace(name=fn_name, arguments=json.dumps(args)),
+    )
+    fake_choice = SimpleNamespace(
+        message=SimpleNamespace(content=None, tool_calls=[fake_tool_call]),
+        finish_reason="tool_calls",
+    )
+    logger.info(
+        "tool_use_failed recovery: synthesised tool call %s with %d args",
+        fn_name, len(args),
+    )
+    return _GroqResponse(fake_choice, tokens_in, tokens_out)
+
+
 def run_groq(
     *,
     system_prompt: str,
@@ -235,13 +299,18 @@ def run_groq(
             else:
                 raise
         except groq_module.BadRequestError as exc:
-            # tool_use_failed means the model emitted malformed function-call text.
-            # Surface as a structured error so the caller sees a clear message.
             body = getattr(exc, "body", {}) or {}
-            if isinstance(body, dict) and body.get("error", {}).get("code") == "tool_use_failed":
+            err = body.get("error", {}) if isinstance(body, dict) else {}
+            if err.get("code") == "tool_use_failed":
+                failed_gen = err.get("failed_generation", "")
+                parsed = _parse_failed_generation(failed_gen) if failed_gen else None
+                if parsed:
+                    fn_name, args = parsed
+                    return _synthesize_tool_call_response(fn_name, args)
+                # Could not parse — surface a clear error
                 raise RuntimeError(
                     f"Groq tool_use_failed (model={groq_model}): "
-                    f"{body['error'].get('message', str(exc))}"
+                    f"{err.get('message', str(exc))}"
                 ) from exc
             raise
 

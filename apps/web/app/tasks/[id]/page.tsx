@@ -12,6 +12,7 @@ import {
   fetchPipelineState,
   fetchTask,
   rejectPipeline,
+  restartTask,
   triggerAgentRun,
   triggerPipeline,
   updateTaskStatus,
@@ -88,6 +89,14 @@ export default function TaskDetailPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["task", params.id] }),
   });
 
+  const restartMutation = useMutation({
+    mutationFn: () => restartTask(params.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["task", params.id] });
+      qc.invalidateQueries({ queryKey: ["pipeline", params.id] });
+    },
+  });
+
   if (isLoading) return <p className="text-sm text-slate-500">Loading…</p>;
   if (error) return <p className="text-sm text-red-600">{(error as Error).message}</p>;
   if (!task) return null;
@@ -96,6 +105,7 @@ export default function TaskDetailPage() {
   const isPlanReview = task.status === "ready_for_review" && !!task.plan && !task.diff;
   const isDiffReview = task.status === "ready_for_review" && !!task.diff;
   const canRun = ["pending", "rejected"].includes(task.status);
+  const canRestart = ["error", "failed", "blocked"].includes(task.status);
   const isPipelineRunning = task.status === "planning" && (!pipeline || pipeline.stage === "pm");
   const isPipelineAwaitingApproval = pipeline?.stage === "awaiting_approval";
   const canRunPipeline = canRun && !isPipelineRunning && !isPipelineAwaitingApproval;
@@ -174,6 +184,16 @@ export default function TaskDetailPage() {
             </>
           )}
 
+          {canRestart && (
+            <button
+              onClick={() => restartMutation.mutate()}
+              disabled={restartMutation.isPending}
+              className="rounded bg-orange-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-orange-700 disabled:opacity-50"
+            >
+              {restartMutation.isPending ? "Restarting…" : "↺ Restart Pipeline"}
+            </button>
+          )}
+
           {isActive && (
             <span className="inline-flex items-center gap-1.5 rounded bg-amber-100 px-3 py-1.5 text-xs font-medium text-amber-800">
               <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-amber-500" />
@@ -220,9 +240,9 @@ export default function TaskDetailPage() {
           )}
         </div>
 
-        {(runMutation.isError || startCodingMutation.isError || runPipelineMutation.isError) && (
+        {(runMutation.isError || startCodingMutation.isError || runPipelineMutation.isError || restartMutation.isError) && (
           <p className="mt-2 text-xs text-red-600">
-            {((runMutation.error ?? startCodingMutation.error ?? runPipelineMutation.error) as Error).message}
+            {((runMutation.error ?? startCodingMutation.error ?? runPipelineMutation.error ?? restartMutation.error) as Error).message}
           </p>
         )}
       </div>

@@ -2,10 +2,10 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { fetchAppSettings, saveApiKey, deleteApiKey, type AppSettings } from "../../lib/api";
+import { fetchAppSettings, saveApiKey, type AppSettings } from "../../lib/api";
 
 // ---------------------------------------------------------------------------
-// API helpers for new endpoints
+// API helpers
 // ---------------------------------------------------------------------------
 
 async function saveOpenAiKey(key: string) {
@@ -21,13 +21,7 @@ async function saveOpenAiKey(key: string) {
   return res.json();
 }
 
-async function deleteOpenAiKey() {
-  const res = await fetch("/api/settings/openai-key", { method: "DELETE" });
-  if (!res.ok) throw new Error("Delete failed");
-  return res.json();
-}
-
-async function verifyKey(provider: "anthropic" | "openai", key: string) {
+async function verifyKey(provider: "anthropic" | "openai", key: string): Promise<{ ok: boolean; error?: string }> {
   const res = await fetch("/api/settings/verify-key", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -37,166 +31,149 @@ async function verifyKey(provider: "anthropic" | "openai", key: string) {
     const b = await res.json().catch(() => ({})) as { detail?: string };
     throw new Error(b.detail ?? "Verify failed");
   }
-  return res.json() as Promise<{ ok: boolean; provider: string; error?: string }>;
+  return res.json();
 }
 
 // ---------------------------------------------------------------------------
-// Reusable key section component
+// Reusable key card: 1 input + 1 button (Verify → Save)
 // ---------------------------------------------------------------------------
 
-type VerifyState = { status: "idle" | "pending" | "ok" | "error"; message?: string };
+type Phase = "idle" | "verifying" | "verified" | "saving" | "saved";
 
-function ApiKeySection({
+function ApiKeyCard({
   provider,
   label,
-  placeholder,
   hint,
+  placeholder,
   isSet,
   masked,
-  source,
   onSave,
-  onDelete,
   isSaving,
-  isDeleting,
 }: {
   provider: "anthropic" | "openai";
   label: string;
-  placeholder: string;
   hint: string;
+  placeholder: string;
   isSet: boolean;
   masked: string;
-  source: string;
-  onSave: (key: string) => void;
-  onDelete: () => void;
+  onSave: (key: string) => Promise<void>;
   isSaving: boolean;
-  isDeleting: boolean;
 }) {
   const [input, setInput] = useState("");
-  const [verifyInput, setVerifyInput] = useState("");
-  const [verify, setVerify] = useState<VerifyState>({ status: "idle" });
-  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [errorMsg, setErrorMsg] = useState("");
 
-  function handleSave(e: React.FormEvent) {
-    e.preventDefault();
-    if (!input.trim()) return;
-    onSave(input.trim());
-    setSaveSuccess(true);
-    setInput("");
-    setTimeout(() => setSaveSuccess(false), 3000);
-  }
+  async function handleAction() {
+    const key = input.trim();
+    if (!key) return;
 
-  async function handleVerify() {
-    const key = verifyInput.trim() || (isSet ? "STORED_KEY_PLACEHOLDER" : "");
-    if (!key || key === "STORED_KEY_PLACEHOLDER") {
-      setVerify({ status: "error", message: "Paste a key to verify" });
-      return;
-    }
-    setVerify({ status: "pending" });
-    try {
-      const result = await verifyKey(provider, verifyInput.trim());
-      if (result.ok) {
-        setVerify({ status: "ok", message: `Connected to ${label} successfully` });
-      } else {
-        setVerify({ status: "error", message: result.error ?? "Verification failed" });
+    if (phase === "idle" || phase === "saved") {
+      setErrorMsg("");
+      setPhase("verifying");
+      try {
+        const result = await verifyKey(provider, key);
+        if (result.ok) {
+          setPhase("verified");
+        } else {
+          setErrorMsg(result.error ?? "Key verification failed — check the key and try again.");
+          setPhase("idle");
+        }
+      } catch (e) {
+        setErrorMsg(e instanceof Error ? e.message : "Network error");
+        setPhase("idle");
       }
-    } catch (err) {
-      setVerify({ status: "error", message: err instanceof Error ? err.message : "Network error" });
+    } else if (phase === "verified") {
+      setPhase("saving");
+      try {
+        await onSave(key);
+        setPhase("saved");
+        setInput("");
+        setTimeout(() => setPhase("idle"), 3000);
+      } catch (e) {
+        setErrorMsg(e instanceof Error ? e.message : "Save failed");
+        setPhase("verified");
+      }
     }
   }
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setInput(e.target.value);
+    if (phase === "verified" || phase === "saved") setPhase("idle");
+    setErrorMsg("");
+  }
+
+  const buttonLabel =
+    phase === "verifying" ? "Verifying…"
+    : phase === "verified" ? "Save"
+    : phase === "saving" ? "Saving…"
+    : phase === "saved" ? "Saved ✓"
+    : "Verify";
+
+  const buttonDisabled =
+    !input.trim() || phase === "verifying" || phase === "saving" || phase === "saved" || isSaving;
+
+  const buttonClass =
+    phase === "verified"
+      ? "rounded-lg bg-green-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50 shrink-0"
+      : phase === "saved"
+      ? "rounded-lg bg-green-600 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-75 shrink-0"
+      : "rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 shrink-0";
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900">
-      <h2 className="mb-1 text-sm font-semibold text-slate-800 dark:text-slate-200">{label}</h2>
-      <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">{hint}</p>
+    <section className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900 space-y-4">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{label}</h2>
+        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{hint}</p>
+      </div>
 
       {/* Current status */}
-      <div className="mb-4 rounded-md bg-slate-50 p-3 text-sm dark:bg-slate-800">
-        <div className="flex items-center justify-between">
+      <div className="rounded-lg bg-slate-50 px-4 py-3 dark:bg-slate-800">
+        <div className="flex items-center justify-between text-sm">
           <span className="text-slate-600 dark:text-slate-300">
             Status:{" "}
             {isSet ? (
-              <span className="font-medium text-green-700 dark:text-green-400">Set</span>
+              <span className="font-semibold text-green-700 dark:text-green-400">Set</span>
             ) : (
-              <span className="font-medium text-amber-600 dark:text-amber-400">Not set</span>
+              <span className="font-semibold text-amber-600 dark:text-amber-400">Not set</span>
             )}
           </span>
-          <span className="text-xs capitalize text-slate-400">Source: {source}</span>
+          {isSet && masked && (
+            <span className="font-mono text-xs text-slate-400 dark:text-slate-500">{masked}</span>
+          )}
         </div>
-        {isSet && (
-          <p className="mt-1 font-mono text-xs text-slate-500 dark:text-slate-400">{masked}</p>
-        )}
       </div>
 
-      {/* Save key form */}
-      <form onSubmit={handleSave} className="mb-4 space-y-2">
-        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400">
-          Add / replace key
-        </label>
+      {/* Input + button */}
+      <div className="space-y-2">
         <div className="flex gap-2">
           <input
             type="password"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={handleChange}
             placeholder={placeholder}
-            className="flex-1 rounded-md border border-slate-300 px-3 py-2 font-mono text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+            className="flex-1 rounded-lg border border-slate-300 px-3 py-2.5 font-mono text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
           />
-          <button
-            type="submit"
-            disabled={!input.trim() || isSaving}
-            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {isSaving ? "Saving…" : "Save"}
+          <button onClick={handleAction} disabled={buttonDisabled} className={buttonClass}>
+            {buttonLabel}
           </button>
         </div>
-        {saveSuccess && (
-          <p className="text-xs text-green-600 dark:text-green-400">
-            Saved — effective immediately.
-          </p>
-        )}
-        {source === "database" && (
-          <button
-            type="button"
-            onClick={onDelete}
-            disabled={isDeleting}
-            className="text-xs text-red-500 hover:underline disabled:opacity-50"
-          >
-            {isDeleting ? "Removing…" : "Remove stored key"}
-          </button>
-        )}
-      </form>
 
-      {/* Verify key section */}
-      <div className="border-t border-slate-100 pt-4 dark:border-slate-700">
-        <label className="mb-2 block text-xs font-medium text-slate-600 dark:text-slate-400">
-          Verify a key (paste to test — not saved)
-        </label>
-        <div className="flex gap-2">
-          <input
-            type="password"
-            value={verifyInput}
-            onChange={(e) => { setVerifyInput(e.target.value); setVerify({ status: "idle" }); }}
-            placeholder={placeholder}
-            className="flex-1 rounded-md border border-slate-300 px-3 py-2 font-mono text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-          />
-          <button
-            type="button"
-            onClick={handleVerify}
-            disabled={verify.status === "pending" || !verifyInput.trim()}
-            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
-          >
-            {verify.status === "pending" ? "Checking…" : "Verify"}
-          </button>
-        </div>
-        {verify.status === "ok" && (
-          <div className="mt-2 flex items-center gap-1.5 text-sm text-green-700 dark:text-green-400">
-            <span className="text-base">✓</span>
-            <span>{verify.message}</span>
+        {phase === "verified" && (
+          <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400">
+            <span>✓</span>
+            <span>Key verified — click Save to store it.</span>
           </div>
         )}
-        {verify.status === "error" && (
-          <div className="mt-2 flex items-start gap-1.5 text-sm text-red-600 dark:text-red-400">
-            <span className="text-base leading-tight">✗</span>
-            <span>{verify.message}</span>
+        {phase === "saved" && (
+          <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400">
+            <span>✓</span>
+            <span>Key saved and active.</span>
+          </div>
+        )}
+        {errorMsg && (
+          <div className="flex items-start gap-2 text-sm text-red-600 dark:text-red-400">
+            <span>✗</span>
+            <span>{errorMsg}</span>
           </div>
         )}
       </div>
@@ -216,32 +193,27 @@ export default function SettingsPage() {
     queryFn: fetchAppSettings,
   });
 
-  // Anthropic mutations
   const saveAnthropicMutation = useMutation({
     mutationFn: (key: string) => saveApiKey(key),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["app-settings"] }),
   });
-  const deleteAnthropicMutation = useMutation({
-    mutationFn: deleteApiKey,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["app-settings"] }),
-  });
 
-  // OpenAI mutations
   const saveOpenAiMutation = useMutation({
     mutationFn: (key: string) => saveOpenAiKey(key),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["app-settings"] }),
   });
-  const deleteOpenAiMutation = useMutation({
-    mutationFn: deleteOpenAiKey,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["app-settings"] }),
-  });
+
+  const extSettings = settings as (AppSettings & {
+    openaiKeySet?: boolean;
+    openaiKeyMasked?: string;
+  }) | undefined;
 
   return (
-    <div className="mx-auto max-w-2xl space-y-8">
+    <div className="mx-auto max-w-lg space-y-8">
       <div>
         <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Settings</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Runtime configuration — changes take effect immediately without restart.
+          Runtime configuration — changes take effect immediately.
         </p>
       </div>
 
@@ -249,37 +221,31 @@ export default function SettingsPage() {
         <p className="text-sm text-slate-400">Loading…</p>
       ) : (
         <>
-          <ApiKeySection
+          <ApiKeyCard
             provider="anthropic"
             label="Anthropic API Key"
+            hint="Powers all 68 fleet agents. Stored in your local database — never leaves your machine."
             placeholder="sk-ant-..."
-            hint="Powers all 68 fleet agents. Stored in your local PostgreSQL database — never leaves your machine."
             isSet={settings?.anthropicKeySet ?? false}
             masked={settings?.anthropicKeyMasked ?? ""}
-            source={settings?.anthropicKeySource ?? "none"}
-            onSave={(key) => saveAnthropicMutation.mutate(key)}
-            onDelete={() => deleteAnthropicMutation.mutate()}
+            onSave={(key) => saveAnthropicMutation.mutateAsync(key).then(() => {})}
             isSaving={saveAnthropicMutation.isPending}
-            isDeleting={deleteAnthropicMutation.isPending}
           />
 
-          <ApiKeySection
+          <ApiKeyCard
             provider="openai"
             label="OpenAI API Key"
+            hint="Required for GPT-based tools and embeddings used by some agents. Stored locally."
             placeholder="sk-..."
-            hint="Optional. Used by agents or tools that need GPT models. Stored locally in your database."
-            isSet={(settings as AppSettings & { openaiKeySet?: boolean })?.openaiKeySet ?? false}
-            masked={(settings as AppSettings & { openaiKeyMasked?: string })?.openaiKeyMasked ?? ""}
-            source={(settings as AppSettings & { openaiKeySource?: string })?.openaiKeySource ?? "none"}
-            onSave={(key) => saveOpenAiMutation.mutate(key)}
-            onDelete={() => deleteOpenAiMutation.mutate()}
+            isSet={extSettings?.openaiKeySet ?? false}
+            masked={extSettings?.openaiKeyMasked ?? ""}
+            onSave={(key) => saveOpenAiMutation.mutateAsync(key)}
             isSaving={saveOpenAiMutation.isPending}
-            isDeleting={deleteOpenAiMutation.isPending}
           />
 
           {/* Model config (read-only) */}
           {settings && (
-            <section className="rounded-lg border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900">
+            <section className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900">
               <h2 className="mb-1 text-sm font-semibold text-slate-800 dark:text-slate-200">
                 Model Configuration
               </h2>

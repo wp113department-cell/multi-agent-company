@@ -178,6 +178,47 @@ async def run_task(
     return {"triggered": True, "mode": mode}
 
 
+@router.post("/{task_id}/restart")
+async def restart_task(
+    task_id: int,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Reset a failed/blocked/error task back to pending and re-trigger the planning pipeline."""
+    from app.api.agents import launch_planning_pipeline
+    from app.db.models import Repo, DevTask
+    from sqlalchemy import select, update
+
+    task = await get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Force-reset to pending regardless of current status
+    await db.execute(update(DevTask).where(DevTask.id == task_id).values(status="pending"))
+    await db.commit()
+
+    # Re-fetch to get fresh state for the pipeline
+    task = await get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found after reset")
+
+    repo_path: str | None = None
+    if task.repo_id:
+        result = await db.execute(select(Repo).where(Repo.id == task.repo_id))
+        repo_obj = result.scalar_one_or_none()
+        if repo_obj and repo_obj.status == "ready":
+            repo_path = repo_obj.local_path
+
+    await transition_task(db, task_id, "planning")
+    await append_log(db, task_id, "pipeline", "Task restarted — planning pipeline re-triggered")
+
+    background_tasks.add_task(
+        launch_planning_pipeline, task_id, str(task.title), str(task.description), repo_path
+    )
+
+    return {"restarted": True, "taskId": task_id}
+
+
 @router.post("/{task_id}/approve")
 async def approve_task(
     task_id: int,

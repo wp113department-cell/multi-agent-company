@@ -1,11 +1,12 @@
 """Repository management API.
 
-GET  /api/repo            — list all cloned repos + active repo
-POST /api/repo/clone      — clone a GitHub repo and auto-activate it
-POST /api/repo/{id}/activate — switch active repo
-GET  /api/repo/reindex    — reindex status
-POST /api/repo/reindex    — trigger reindex
-GET  /api/repo/context    — build context for a task description
+GET    /api/repo            — list all cloned repos + active repo
+POST   /api/repo/clone      — clone a GitHub repo and auto-activate it
+POST   /api/repo/{id}/activate — switch active repo
+DELETE /api/repo/{id}       — remove a repo record from the database
+GET    /api/repo/reindex    — reindex status
+POST   /api/repo/reindex    — trigger reindex
+GET    /api/repo/context    — build context for a task description
 """
 from __future__ import annotations
 
@@ -64,12 +65,27 @@ async def init_active_repo() -> None:
 # Background clone task
 # ---------------------------------------------------------------------------
 
-async def _clone_and_activate(repo_id: int, github_url: str, local_path: str) -> None:
+async def _clone_and_activate(
+    repo_id: int,
+    github_url: str,
+    local_path: str,
+    branch: str | None = None,
+    token: str | None = None,
+) -> None:
     global _active_repo_path
     async with get_async_session() as db:
         try:
             target = Path(local_path)
-            if target.exists():
+            # Build the clone URL — inject token for private repos
+            clone_url = github_url
+            if token:
+                # https://TOKEN@github.com/...
+                clone_url = github_url.replace("https://", f"https://{token}@", 1)
+
+            is_git_repo = (target / ".git").exists()
+
+            if target.exists() and is_git_repo:
+                # Already a cloned repo — pull latest
                 proc = await asyncio.create_subprocess_exec(
                     "git", "pull",
                     cwd=local_path,
@@ -77,9 +93,14 @@ async def _clone_and_activate(repo_id: int, github_url: str, local_path: str) ->
                     stderr=asyncio.subprocess.PIPE,
                 )
             else:
-                target.parent.mkdir(parents=True, exist_ok=True)
+                # Directory doesn't exist or exists but isn't a git repo — clone fresh
+                target.mkdir(parents=True, exist_ok=True)
+                cmd = ["git", "clone"]
+                if branch:
+                    cmd += ["-b", branch]
+                cmd += [clone_url, local_path]
                 proc = await asyncio.create_subprocess_exec(
-                    "git", "clone", github_url, local_path,
+                    *cmd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
@@ -137,6 +158,9 @@ async def _clone_and_activate(repo_id: int, github_url: str, local_path: str) ->
 
 class CloneRequest(BaseModel):
     github_url: str
+    dest_path: str | None = None   # optional; auto-computed if omitted
+    branch: str | None = None      # optional branch to check out
+    token: str | None = None       # optional GitHub PAT for private repos
 
 
 class RepoResponse(BaseModel):
@@ -200,7 +224,9 @@ async def clone_repo(
 
     settings = get_settings()
     name = _extract_name(url)
-    local_path = str(Path(settings.repos_dir) / name)
+    local_path = body.dest_path.strip() if body.dest_path and body.dest_path.strip() else str(Path(settings.repos_dir) / name)
+    branch = body.branch.strip() if body.branch and body.branch.strip() else None
+    token = body.token.strip() if body.token and body.token.strip() else None
 
     # If already in DB, return existing record and re-trigger clone (pull)
     existing = await db.execute(select(Repo).where(Repo.github_url == url))
@@ -224,11 +250,26 @@ async def clone_repo(
         await db.refresh(new_repo)
         repo_id = new_repo.id
 
-    background_tasks.add_task(_clone_and_activate, repo_id, url, local_path)
+    background_tasks.add_task(_clone_and_activate, repo_id, url, local_path, branch, token)
 
     result = await db.execute(select(Repo).where(Repo.id == repo_id))
     repo = result.scalar_one()
     return _repo_to_dict(repo)
+
+
+@router.delete("/{repo_id}")
+async def delete_repo(repo_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Remove a repo record from the database. Local files are left untouched."""
+    global _active_repo_path
+    result = await db.execute(select(Repo).where(Repo.id == repo_id))
+    repo = result.scalar_one_or_none()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repo not found.")
+    if repo.is_active:
+        _active_repo_path = None
+    await db.delete(repo)
+    await db.commit()
+    return {"deleted": True, "id": repo_id}
 
 
 @router.post("/{repo_id}/activate")

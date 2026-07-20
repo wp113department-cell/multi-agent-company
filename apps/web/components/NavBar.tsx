@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { logout, isAuthenticated } from "../lib/auth";
 
 function ThemeToggle() {
   const [dark, setDark] = useState(false);
 
   useEffect(() => {
-    // Sync with system preference on mount
     const stored = localStorage.getItem("gridiron_theme");
     const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     const isDark = stored ? stored === "dark" : prefersDark;
@@ -41,33 +41,53 @@ function ThemeToggle() {
   );
 }
 
+const NAV_LINKS = [
+  { href: "/repo", label: "Repository" },
+  { href: "/tasks", label: "Tasks" },
+  { href: "/epics", label: "Epics" },
+  { href: "/goals", label: "Goals" },
+  { href: "/metrics", label: "KPIs" },
+  { href: "/settings", label: "Settings" },
+];
+
 export function NavBar() {
   const [authed, setAuthed] = useState(false);
+  const pathname = usePathname();
 
   useEffect(() => {
     setAuthed(isAuthenticated());
   }, []);
+
+  function isActive(href: string) {
+    if (href === "/tasks") return pathname === "/tasks" || pathname === "/";
+    return pathname.startsWith(href);
+  }
 
   return (
     <header className="mb-6 flex items-center justify-between">
       <a href="/tasks" className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">
         Mission Control
       </a>
-      <nav className="flex items-center gap-3">
-        <a href="/chat" className="text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400">Chat</a>
-        <a href="/repo" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Repository</a>
-        <a href="/tasks" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Tasks</a>
-        <a href="/epics" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Epics</a>
-        <a href="/goals" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Goals</a>
-        <a href="/metrics" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Metrics</a>
-        <a href="/cost" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Cost</a>
-        <a href="/console" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Console</a>
-        <a href="/settings" className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">Settings</a>
+      <nav className="flex items-center gap-1">
+        {NAV_LINKS.map(({ href, label }) => (
+          <a
+            key={href}
+            href={href}
+            className={`rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors ${
+              isActive(href)
+                ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                : "text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+            }`}
+          >
+            {label}
+          </a>
+        ))}
+        <div className="mx-1 h-4 w-px bg-slate-200 dark:bg-slate-700" />
         <ThemeToggle />
         {authed && (
           <button
             onClick={logout}
-            className="rounded-md px-2.5 py-1 text-xs font-medium text-slate-500 hover:bg-red-50 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+            className="ml-1 rounded-md px-2.5 py-1.5 text-sm font-medium text-slate-500 hover:bg-red-50 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-900/20 dark:hover:text-red-400"
           >
             Sign out
           </button>
