@@ -832,6 +832,60 @@ def run_agent_graph(
         pass
 
     try:
+        # ------------------------------------------------------------------
+        # Groq bypass — LangGraph nodes call anthropic.Anthropic() directly.
+        # When USE_GROQ=true, delegate to run_agent() in base.py which already
+        # handles Groq routing + model name remapping via groq_adapter.py.
+        # ------------------------------------------------------------------
+        from app.config import get_settings as _gs
+        if _gs().use_groq:
+            from app.agents.base import run_agent as _run_agent
+
+            # Wrap every submit_* handler to capture its input into tool_handlers["_result"].
+            # Without this, the bypass can't detect submission because the handlers
+            # only return strings and never populate "_result" themselves.
+            for _hname in list(tool_handlers.keys()):
+                if _hname.startswith("submit_"):
+                    _orig_h = tool_handlers[_hname]
+                    def _make_wrapper(_oh: Any) -> Any:
+                        def _wrapper(inp: dict[str, Any]) -> Any:
+                            tool_handlers["_result"] = inp
+                            return _oh(inp)
+                        return _wrapper
+                    tool_handlers[_hname] = _make_wrapper(_orig_h)
+
+            _msgs: list[dict[str, Any]] = [{"role": "user", "content": initial_message}]
+            _text, _in, _out, _cr, _cc = _run_agent(
+                role_name=role_name,
+                model=model,
+                messages=_msgs,
+                tools=tools,
+                tool_handlers=tool_handlers,
+                max_turns=max_turns,
+            )
+            _result: dict[str, Any] = tool_handlers.get("_result") or {}  # type: ignore[assignment]
+            _submitted = bool(_result)
+            _groq_state: AgentRunState = {
+                "messages": _msgs,
+                "verification": dict(verification_cfg.initial),
+                "result": _result,
+                "turns": 1,
+                "submitted": _submitted,
+                "requires_human_approval": False,
+                "tokens_in": _in,
+                "tokens_out": _out,
+                "plan": "",
+                "facts": "",
+                "n_stalls": 0,
+                "retry_count": 0,
+                "confidence": 1.0,
+                "status": "completed" if _submitted else "blocked",
+                "trace_id": tid,
+                "memory_context": "",
+                "repo_context": "",
+            }
+            return _groq_state
+
         graph = build_agent_graph(
             role_name=role_name,
             model=model,

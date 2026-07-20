@@ -18,7 +18,7 @@ export default function LoginPage() {
     const result = await login(username, password);
     setLoading(false);
     if (result.ok) {
-      router.push("/onboarding");
+      router.push("/repo");
     } else {
       setError(result.error ?? "Login failed");
     }

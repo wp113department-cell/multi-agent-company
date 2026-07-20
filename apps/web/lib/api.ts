@@ -113,6 +113,11 @@ export async function extractPdfs(files: File[]): Promise<PdfFileResult[]> {
   return data.files;
 }
 
+export async function restartTask(taskId: string): Promise<{ restarted: boolean; taskId: number }> {
+  const res = await fetch(`/api/tasks/${taskId}/restart`, { method: "POST" });
+  return handleResponse(res);
+}
+
 export async function updateTaskStatus(taskId: string, status: string): Promise<DevTask> {
   const res = await fetch(`/api/tasks/${taskId}`, {
     method: "PATCH",
@@ -314,13 +319,28 @@ export async function listRepos(): Promise<{ repos: RepoRecord[]; activeRepoPath
   return handleResponse(res);
 }
 
-export async function cloneRepo(githubUrl: string): Promise<RepoRecord> {
+export async function cloneRepo(input: {
+  githubUrl: string;
+  destPath?: string;
+  branch?: string;
+  token?: string;
+}): Promise<RepoRecord> {
   const res = await fetch("/api/repo/clone", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ github_url: githubUrl }),
+    body: JSON.stringify({
+      github_url: input.githubUrl,
+      dest_path: input.destPath ?? null,
+      branch: input.branch ?? null,
+      token: input.token ?? null,
+    }),
   });
   return handleResponse<RepoRecord>(res);
+}
+
+export async function deleteRepo(repoId: number): Promise<{ deleted: boolean; id: number }> {
+  const res = await fetch(`/api/repo/${repoId}`, { method: "DELETE" });
+  return handleResponse(res);
 }
 
 export async function activateRepo(repoId: number): Promise<RepoRecord> {
