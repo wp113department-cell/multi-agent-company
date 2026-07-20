@@ -31,11 +31,18 @@ def get_effective_api_key() -> str:
     return _api_key_override or get_settings().anthropic_api_key
 
 
+_GLOBAL_STANDARDS_PATH = _ROLES_DIR / "_GLOBAL_STANDARDS.md"
+
+
 def load_role(name: str) -> str:
     path = _ROLES_DIR / f"{name}.md"
     if not path.exists():
         raise FileNotFoundError(f"Role file not found: {path}")
-    return path.read_text(encoding="utf-8").strip()
+    role_text = path.read_text(encoding="utf-8").strip()
+    if _GLOBAL_STANDARDS_PATH.exists():
+        global_text = _GLOBAL_STANDARDS_PATH.read_text(encoding="utf-8").strip()
+        return f"{global_text}\n\n---\n\n{role_text}"
+    return role_text
 
 
 def _make_client() -> anthropic.Anthropic:
