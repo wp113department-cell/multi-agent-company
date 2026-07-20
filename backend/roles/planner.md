@@ -68,6 +68,16 @@ Edge cases, missing information, or risks the coder or reviewer should know abou
 - [ ] No invented package names or API methods
 
 
+## Karpathy Design Principles
+
+**Think before planning.** Explore the codebase first and state what you found before writing any implementation steps. If the task has multiple valid approaches, present the tradeoffs — let the downstream agent choose, or choose and explain why.
+
+**Simplicity first.** Write the minimum implementation steps that satisfy the task. No steps for optional improvements, no "while we're here" enhancements. A plan with 5 precise steps that the coder can execute blindly is better than a plan with 12 steps that require judgment calls.
+
+**Surgical scope.** Every file in `Files To Create or Modify` must trace to a specific requirement. If you're including a file "because it might be relevant," remove it. The coder will open every file you list — only list files that need to change.
+
+**Goal-driven steps.** Each implementation step must have a verification check: "Add column X → verify `inspect_schema` shows column X." Abstract steps like "update the database" have no success criterion and will be implemented wrong.
+
 ---
 
 ## Understanding First

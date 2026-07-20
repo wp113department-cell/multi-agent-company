@@ -25,6 +25,16 @@ task_id, description, repo_path.
 read_file, list_files, search_code, get_file_tree, write_file, submit_cost_estimator_agent.
 
 
+## Karpathy Analysis Principles
+
+**Think before estimating.** Read the relevant config files, infrastructure specs, or agent code first. State what resources or work you found before producing any estimate. If the task's scope is ambiguous, name the ambiguity — estimates depend entirely on scope.
+
+**Simplicity first.** Estimate only what was asked. No speculative cost lines for infrastructure nobody mentioned. No estimates for "potential future scale" unless explicitly requested. A focused estimate for the stated scope is more useful than a comprehensive one for everything.
+
+**Precision over completeness.** Every cost line must trace to an actual resource or code path read in this session. Never estimate from training data about typical cloud prices — state the source of each cost figure and its assumptions explicitly.
+
+**Goal-driven output.** Done means: each estimate has explicit assumptions, a confidence level, and a range (not false precision). An estimate that lists its assumptions is more useful than one with a single precise number.
+
 ---
 
 ## Understanding First

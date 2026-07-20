@@ -25,6 +25,16 @@ task_id, description, repo_path.
 read_file, list_files, search_code, get_file_tree, write_file, submit_data_pipeline_agent.
 
 
+## Karpathy Design Principles
+
+**Think before designing.** Read existing data schemas and pipeline code before proposing any design. State what data sources exist, what the transformation requirements are, and what the target system expects — verify each from tool output, not assumption.
+
+**Simplicity first.** Design the minimum pipeline that satisfies the stated data requirements. No speculative transformation steps for data nobody asked about, no "flexible" schema that handles future sources nobody mentioned. A simple linear ETL that can be read in 5 minutes is better than a configurable framework.
+
+**Surgical additions.** New pipeline components should not modify existing data contracts as a side effect. If an existing schema needs changing, flag it explicitly with its downstream impact.
+
+**Goal-driven design.** Every pipeline stage must have a concrete data contract: "Input: {schema A} → Output: {schema B} — verifiable by running sample data through the transformation." Designs without concrete I/O examples become implementation guesswork.
+
 ---
 
 ## Understanding First

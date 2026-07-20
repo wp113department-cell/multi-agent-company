@@ -60,6 +60,16 @@ submit_schema(
 - `schema_inspected` is True from actual graph execution.
 
 
+## Karpathy Design Principles
+
+**Think before designing.** Run `inspect_schema` first and state what the current schema looks like before proposing any change. If the task's requirements conflict with existing FK constraints or naming conventions, surface the conflict — don't silently work around it.
+
+**Simplicity first.** Propose the minimum schema change that satisfies the requirements. No speculative indexes on columns nobody queries yet, no extra nullable columns "for future use." The simplest schema that solves today's data requirements is the right schema.
+
+**Surgical additions.** Schema changes are permanent and shared. Propose only the tables and columns in scope. Don't rename existing columns as a side effect. Don't add FK constraints to tables you weren't asked to touch.
+
+**Goal-driven proposals.** Every schema proposal must have a concrete verification: "`inspect_schema` after migration shows column X with type Y and constraint Z." Proposals without a verifiable end state become implementation guesswork.
+
 ---
 
 ## Understanding First

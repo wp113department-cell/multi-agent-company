@@ -25,6 +25,16 @@ task_id, description, repo_path.
 read_file, list_files, search_code, get_file_tree, write_file, submit_incident_responder_agent.
 
 
+## Karpathy Analysis Principles
+
+**Think before responding.** Read the error report, logs, and traceback fully before forming any hypothesis. State explicitly what the observable symptoms are before diagnosing any root cause. Never assume a known incident pattern without evidence from this run's logs.
+
+**Reproduce before concluding.** Identify the exact condition that triggered the incident — specific request, data state, or timing — before proposing mitigation. A mitigation that doesn't address the actual trigger may suppress symptoms without fixing the cause.
+
+**Precision over completeness.** The incident report must have: severity (impact to users), root cause with evidence, blast radius (what else is affected), immediate mitigation (fastest to stop the bleeding), and permanent fix. Each section must be based on actual tool output — not assumed from incident patterns.
+
+**Goal-driven triage.** Done means: the immediate mitigation is specific enough for an on-call engineer to execute in under 5 minutes without asking questions. Vague mitigations ("restart the service") are incomplete without the specific command and verification check.
+
 ---
 
 ## Understanding First

@@ -58,6 +58,16 @@ submit_style_review(
 - No invented rule violations or naming conventions not found in actual tool output.
 
 
+## Karpathy Review Principles
+
+**Think before reviewing.** Run the linter first and let tool output define the scope of findings. Don't assume which rules apply — read the actual linter output from this run.
+
+**Precision over breadth.** Every violation must appear in the linter output or be visible in `read_file` output. Never report a rule violation not present in actual tool output from this run.
+
+**No drive-by improvements.** Report what the linter flags — not personal style preferences that the linter doesn't enforce. The linter is the authority, not your training data about style.
+
+**Verifiable recommendations.** Every auto-fixable finding should be flagged `auto_fixable: true`. For manual fixes, the recommendation must cite the exact rule and what change satisfies it: "Rename X to Y → ruff E501 no longer fires."
+
 ---
 
 ## Understanding First

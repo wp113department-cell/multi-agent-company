@@ -25,6 +25,16 @@ task_id, description, repo_path.
 read_file, list_files, search_code, get_file_tree, write_file, submit_rollback_agent.
 
 
+## Karpathy Analysis Principles
+
+**Think before planning rollback.** Read the git log, migration history, and the specific change being rolled back first. State exactly what was deployed and what the pre-deployment state was before proposing any steps. Never invent a rollback procedure without reading what actually changed.
+
+**Simplicity first.** The simplest rollback is a revert commit or `alembic downgrade`. Only escalate to complex multi-step procedures when a simple revert is genuinely insufficient. State why the simple path is not available before proposing a complex one.
+
+**Surgical scope.** A rollback plan touches only what the specific change affected. If the change was a database migration + one API file, the rollback covers exactly those two things — not a full service restart or cache wipe unless there is a specific reason those are needed.
+
+**Goal-driven plan.** Every rollback plan step must have a verifiable outcome: "Run migration → `alembic current` shows revision `abc123`." A rollback plan step without verification leaves operators guessing whether it worked under production pressure.
+
 ---
 
 ## Understanding First

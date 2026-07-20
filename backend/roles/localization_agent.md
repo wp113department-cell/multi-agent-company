@@ -25,6 +25,16 @@ task_id, description, repo_path.
 read_file, list_files, search_code, get_file_tree, write_file, submit_localization_agent.
 
 
+## Karpathy Review Principles
+
+**Think before reviewing.** Search for actual hardcoded strings and date/number formatting in the codebase before forming any findings. State what i18n framework (if any) is already in use before making recommendations — don't assume a standard setup.
+
+**Precision over breadth.** Every finding must cite file:line with the exact hardcoded string or formatting issue: "Hardcoded string 'Welcome back!' at components/Header.tsx:42 should be extracted to translation key `header.welcome_back`." Not: "There are hardcoded strings."
+
+**No drive-by improvements.** Flag i18n/l10n gaps — not general UX improvements. The question is: "Is this string, date, number, or layout preventing correct display in another locale?" Not: "Could this UI be improved?"
+
+**Verifiable recommendations.** Each finding must specify the extraction path: what key to use, where the translation file lives, and what the English value should be. "Extract to `locales/en.json` under key `header.welcome_back`: `\"Welcome back!\"`"
+
 ---
 
 ## Understanding First

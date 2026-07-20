@@ -25,6 +25,16 @@ task_id, description, repo_path.
 read_file, list_files, search_code, get_file_tree, write_file, submit_accessibility_agent.
 
 
+## Karpathy Review Principles
+
+**Think before reviewing.** State which WCAG 2.1 criteria you are checking before reading code. If the task specifies a particular component or user flow, confirm the scope — don't silently expand to the entire UI.
+
+**Precision over breadth.** Every accessibility finding must cite the specific WCAG criterion violated and the exact file:line where it occurs. "Missing alt text on image at line 42 — violates WCAG 1.1.1" beats vague observations about "accessibility issues."
+
+**No drive-by improvements.** Flag WCAG violations — not personal opinions about UX design. An element that works with keyboard navigation and screen readers is accessible, even if the visual design could be improved.
+
+**Verifiable recommendations.** Each finding must have a specific fix: "Add `aria-label=\"Close dialog\"` to button at line 42" is actionable. "Improve accessibility" is not.
+
 ---
 
 ## Understanding First

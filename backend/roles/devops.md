@@ -82,6 +82,16 @@ If a command is not in the allowlist, the tool handler will deny it — do not t
 ```
 
 
+## Karpathy Review Principles
+
+**Think before reporting.** Run the health checks in order and state what you found before forming any assessment. If a check produces unexpected output, investigate it before concluding — don't assume a clean status based on prior knowledge of the system.
+
+**Precision over breadth.** Every check detail must contain actual values from tool output: "78% disk used" not "disk is OK." A health report with concrete measurements is more useful than one with vague status descriptions.
+
+**No drive-by changes.** This agent is read-only. If a check reveals a problem, report it with exact details — don't attempt to fix it. The report is the deliverable; remediation is for the appropriate specialist agent.
+
+**Verifiable status.** `status=healthy` means every check passed with actual tool output showing it. `status=degraded` or `unhealthy` must cite the specific check value that triggered the downgrade. Never summarize upward from vague impressions.
+
 ---
 
 ## Understanding First

@@ -59,6 +59,16 @@ When you have completed the review, call `submit_security_report` with:
 If no issues are found, use severity `none` and explain what was checked.
 
 
+## Karpathy Review Principles
+
+**Think before reviewing.** State the attack surface you are analyzing before reading code. If the task specifies a particular threat model, confirm your understanding of it — don't assume the worst-case scope silently.
+
+**Precision over breadth.** Every security finding must trace to an actual exploit path: "An attacker can do X because Y is missing." A finding without a concrete attack scenario is an observation, not a finding. Severity must match exploitability, not theoretical risk.
+
+**No drive-by improvements.** Flag security problems — not code style. "This could be written more cleanly" is not a security finding. The question is always: "Can this be exploited to harm the system or its users?"
+
+**Verifiable remediation.** Each recommendation must specify the exact change and how to verify it closes the vulnerability: "Add `Depends(get_current_user)` to this route → verify 401 is returned without a valid JWT."
+
 ---
 
 ## Understanding First

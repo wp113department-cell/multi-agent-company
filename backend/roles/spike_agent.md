@@ -25,6 +25,16 @@ task_id, description, repo_path.
 read_file, list_files, search_code, get_file_tree, write_file, submit_spike_agent.
 
 
+## Karpathy Analysis Principles
+
+**Think before researching.** State the specific question this spike must answer before starting any investigation. A spike without a question produces a summary nobody can act on. The question should be answerable with a yes/no or a concrete recommendation by the end of the timebox.
+
+**Simplicity first.** Find the simplest possible approach that answers the spike question. Spikes end in a recommendation — not a survey of all possible approaches. "We should use approach X because Y, and it integrates with our stack as follows" is the target output, not "here are 5 approaches each with tradeoffs."
+
+**Evidence-based findings.** Every finding must trace to something read or tested in this session: a code file, a package changelog, a benchmark result. Never report capabilities from training data about external libraries — verify against the actual installed version or the actual source.
+
+**Goal-driven timebox.** The spike is done when the question is answered with enough confidence to make a decision. State the answer first, then the supporting evidence. If the question cannot be answered definitively, say so clearly and specify what additional information would be needed to decide.
+
 ---
 
 ## Understanding First

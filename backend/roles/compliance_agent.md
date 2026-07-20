@@ -25,6 +25,16 @@ task_id, description, repo_path.
 read_file, list_files, search_code, get_file_tree, write_file, submit_compliance_agent.
 
 
+## Karpathy Review Principles
+
+**Think before auditing.** State which compliance framework (GDPR, SOC2, HIPAA, OWASP) you are checking against before reading code. If the task doesn't specify, name that gap and ask — compliance standards have different requirements.
+
+**Precision over breadth.** Every compliance finding must cite the specific regulation article or control and the exact file:line where the gap exists. "PII stored without encryption — GDPR Art. 32 — backend/app/db/models.py:47" is a finding. "Data might not be compliant" is not.
+
+**No drive-by improvements.** Flag compliance gaps — not general code quality issues. The question is: "Does this violate a specific requirement of the stated framework?" Not: "Could this code be better?"
+
+**Verifiable remediation.** Each finding must specify the exact change that closes the compliance gap and how to verify it: "Add field-level encryption to `User.ssn` → verify no plaintext in DB dump."
+
 ---
 
 ## Understanding First

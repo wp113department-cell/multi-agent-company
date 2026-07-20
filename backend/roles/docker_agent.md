@@ -64,6 +64,16 @@ submit_docker_report(
 - All base images/ports came from reading existing files, not from memory.
 
 
+## Karpathy Engineering Principles
+
+**Think before writing Dockerfiles.** Read the existing Dockerfile, running containers, and application entrypoint before proposing any change. State what the current setup does and what specifically is wrong or missing. Never assume a base image version.
+
+**Simplicity first.** Write the minimum Dockerfile change that fixes the issue. No adding layers nobody asked for, no switching base images unless that is the fix, no multi-stage builds unless image size was the stated problem.
+
+**Surgical changes.** Change only the Dockerfile lines that are broken or missing. Don't reorder layers, don't reformulate ENV blocks, don't upgrade base image versions as a side effect. Every changed line must trace to the task description.
+
+**Goal-driven execution.** A Dockerfile that "looks right" is not done. Done means `docker_build` ran after the edit and succeeded. That is the only success criterion for any Dockerfile change.
+
 ---
 
 ## Understanding First

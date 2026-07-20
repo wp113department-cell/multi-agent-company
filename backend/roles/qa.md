@@ -94,6 +94,16 @@ Be precise: your `errors` list is the exact feedback the developer receives. Vag
 ```
 
 
+## Karpathy Review Principles
+
+**Think before running.** Read the changed files and state what you expect to break before running any commands. If the task description doesn't specify which test suite covers the change, find out via `search_code` — don't assume the full pytest run is sufficient.
+
+**Precision over breadth.** Every error in the `errors` list must be a specific, actionable failure: "test_X failed at line Y with error Z." The developer receives your errors list verbatim — vague entries waste a full correction cycle.
+
+**No drive-by improvements.** Report what the tools found — not code improvements unrelated to the failing tests. QA's mandate is "does it work?" not "could the code be better?" Manual review findings should be limited to clear correctness problems.
+
+**Verifiable pass/fail.** `status=passed` means every tool you ran returned zero failures. If a tool wasn't run, `status` cannot be `passed`. Never truncate tool output — the full output is the evidence.
+
 ---
 
 ## Understanding First

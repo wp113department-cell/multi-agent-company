@@ -64,6 +64,16 @@ submit_cicd_report(
 - `requires_human_approval: true` in the result — always, no exceptions.
 
 
+## Karpathy Engineering Principles
+
+**Think before editing pipelines.** Read all existing workflow files first. State what the pipeline currently does and what specifically needs to change. If the task is ambiguous about which stage to add or modify, surface that ambiguity — never guess on CI/CD.
+
+**Simplicity first.** Add the minimum workflow change that achieves the goal. No new jobs unless explicitly required. No adding steps to every job when the change only affects one. The smallest valid YAML that passes the lint is better than an elaborate rewrite.
+
+**Surgical changes.** CI/CD is shared infrastructure — highest blast radius of all agents. Touch only the specific job, step, or trigger that needs changing. Never "clean up" or reorganize adjacent jobs. Every changed line must trace to the task description.
+
+**Goal-driven execution.** A workflow that "looks right" is not done. Done means `yamllint` or `actionlint` ran and passed, and `requires_human_approval: true` is in the result. Those are the only acceptable success criteria.
+
 ---
 
 ## Understanding First

@@ -62,6 +62,16 @@ submit_migration(
 - `bash alembic history` ran to confirm revision chain integrity.
 
 
+## Karpathy Engineering Principles
+
+**Think before writing migrations.** Introspect the actual schema first — state what you found and what the migration needs to change before writing a single line. If the requested change conflicts with existing data or constraints, surface that conflict — don't silently work around it.
+
+**Simplicity first.** Write the minimum migration that achieves the schema change. No multi-step data backfills unless required. No altering columns you weren't asked to touch. A migration that touches fewer columns is safer.
+
+**Surgical changes.** Migrations are permanent changes to shared infrastructure. Only alter the exact tables and columns required. Add columns nullable first when in doubt. Never drop columns in the same migration that adds new ones.
+
+**Goal-driven execution.** Success means: `inspect_schema` confirmed the target state, `alembic history` shows a clean revision chain, and the migration has both `upgrade()` and `downgrade()`. These are the only acceptable success criteria.
+
 ---
 
 ## Understanding First

@@ -17,6 +17,16 @@ Completes code quality agent tasks by reading the codebase, analysing the releva
 read_file, list_files, search_code, get_file_tree, write_file, submit_code_quality_agent.
 
 
+## Karpathy Review Principles
+
+**Think before reviewing.** State your interpretation of the change's intent before finding issues. Name any ambiguity about what was being attempted — don't assume.
+
+**Precision over breadth.** Every finding must trace to a concrete failure scenario: "This will fail when X" or "This violates constraint Y." Five specific, actionable findings beat twenty style observations.
+
+**No drive-by improvements.** Flag real quality problems — don't flag personal preferences. Ask: "Does this create a maintainability risk, correctness risk, or type-safety gap?" If none of those, it's not a finding.
+
+**Verifiable recommendations.** Each suggestion needs a clear success criterion: "Change X to Y → mypy passes / test Z passes." Vague recommendations create rework loops with no exit condition.
+
 ---
 
 ## Understanding First

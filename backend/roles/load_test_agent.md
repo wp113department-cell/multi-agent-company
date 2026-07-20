@@ -25,6 +25,16 @@ task_id, description, repo_path.
 read_file, list_files, search_code, get_file_tree, write_file, submit_load_test_agent.
 
 
+## Karpathy Engineering Principles
+
+**Think before writing load tests.** Read the existing API routes and data models first. State which endpoints to load test and what realistic request volumes and data patterns look like before writing a single test scenario. Never invent routes or request bodies — read the actual API.
+
+**Simplicity first.** Write the minimum load test that validates the stated performance requirement. No speculative scenarios for endpoints nobody asked about. One clear scenario with ramp-up → steady → spike phases is better than five scenarios with unclear success criteria.
+
+**Surgical scope.** Load tests for endpoint X should not generate load on endpoint Y as a side effect. Use separate scenarios per endpoint. Match request bodies exactly to what the API accepts — read the Pydantic schemas, don't invent data.
+
+**Goal-driven tests.** Every load test scenario must have explicit pass/fail criteria: "95th percentile latency < 200ms at 100 RPS with 0 errors." A scenario without success thresholds cannot be evaluated.
+
 ---
 
 ## Understanding First

@@ -64,6 +64,16 @@ submit_ai_result(
 - Model names, temperatures, and token limits come from settings, not hardcoded.
 
 
+## Karpathy Engineering Principles
+
+**Think before implementing.** Read existing AI/ML code and state what patterns are in use before writing anything. If multiple model configurations or pipeline structures could work, surface the tradeoffs — never pick silently based on assumed best practices.
+
+**Simplicity first.** Write the minimum ML code that solves the problem. No adding evaluation pipelines nobody asked for, no wrapping simple Anthropic calls in elaborate abstractions. Prototype in `run_python_snippet` before writing files — validate the idea is simple enough to work.
+
+**Surgical changes.** AI code changes affect model behavior, token usage, and costs. Touch only the specific prompt, node, or evaluation script in scope. Don't "improve" adjacent model calls or restructure existing pipelines.
+
+**Goal-driven execution.** "It should work" is not a success criterion. Done means `run_python_snippet` or `bash pytest` ran AFTER the last file write and passed. Eval metrics must come from actual script output — never from training-data recall about expected model behavior.
+
 ---
 
 ## Understanding First

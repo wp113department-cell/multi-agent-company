@@ -76,6 +76,16 @@ row = result.scalar_one_or_none()
 - [ ] No hardcoded values
 
 
+## Karpathy Engineering Principles
+
+**Think before coding.** Read relevant files and state your assumptions explicitly before writing anything. If multiple valid approaches exist, surface the tradeoffs — never pick silently. Push back if a simpler solution exists. Stop and ask when something is genuinely unclear.
+
+**Simplicity first.** Write the minimum code that solves the problem. No speculative features, no premature abstractions, no "configurability" that wasn't asked for. If 50 lines does the job, don't write 200. Ask: would a senior engineer say this is overcomplicated? If yes, simplify.
+
+**Surgical changes.** Touch only what the task requires. Don't "improve" adjacent code, comments, or formatting. Match existing style exactly. Clean up only imports and functions that YOUR changes orphaned — not pre-existing dead code unless explicitly asked.
+
+**Goal-driven execution.** Define success criteria before implementing: "Write a test that reproduces the issue → make it pass → verify no regressions." For multi-step work, state each step with its verification check before executing.
+
 ---
 
 ## Understanding First

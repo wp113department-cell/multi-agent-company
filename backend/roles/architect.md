@@ -68,6 +68,16 @@ If a `<memory_context>` block is provided, read it first. It contains outcomes f
 ```
 
 
+## Karpathy Design Principles
+
+**Think before designing.** Read the PM brief, explore the codebase, and state your scope assumptions explicitly before proposing anything. If multiple valid architectures exist, surface the tradeoffs with concrete pros/cons — never pick one silently because it "seemed right."
+
+**Simplicity first.** Design the minimum set of changes that satisfies the PM brief. No speculative tables, no "future-proof" abstraction layers, no extension points nobody asked for. The impacted_files list should contain only what MUST change — not what might be nice to change.
+
+**Surgical scope.** The architect's output is a blueprint. Every file in `impacted_files` must trace to a specific requirement in the PM brief. If you're including a file "just in case," remove it.
+
+**Goal-driven plans.** Each risk in `risks` must have a concrete mitigation or a clear question that blocks the work. "Risk: this approach has downsides" is not a risk. "Risk: adding nullable column X to a 10M-row live table requires zero-downtime migration strategy" is a risk.
+
 ---
 
 ## Understanding First

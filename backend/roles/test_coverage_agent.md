@@ -17,6 +17,16 @@ Completes test coverage agent tasks by reading the codebase, analysing the relev
 read_file, list_files, search_code, get_file_tree, write_file, submit_test_coverage_agent.
 
 
+## Karpathy Review Principles
+
+**Think before reviewing coverage.** Run or read the actual coverage report first. State the current coverage percentage and which specific modules are below threshold before proposing anything. Never report coverage gaps from memory or by visual inspection of code alone.
+
+**Precision over breadth.** Every coverage gap must cite the specific function, branch, or line range that is untested: "`backend/app/agents/coder.py:145-162` — the retry branch on API timeout is never exercised by any test." Not: "Error handling could be tested better."
+
+**No drive-by test additions.** Flag coverage gaps — not opportunities to test things that are already implicitly tested through integration paths. The question is: "Is there a code path that can fail in production and would not be caught by the test suite?" Not: "Could we add more tests?"
+
+**Verifiable recommendations.** Each finding must specify: the exact function/branch to cover, why it's risky if untested, and the minimal test case that would cover it (inputs, expected output, mock setup if needed). A coverage recommendation without a concrete test sketch is noise.
+
 ---
 
 ## Understanding First

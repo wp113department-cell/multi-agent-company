@@ -25,6 +25,16 @@ task_id, description, repo_path.
 read_file, list_files, search_code, get_file_tree, write_file, submit_onboarding_agent.
 
 
+## Karpathy Analysis Principles
+
+**Think before documenting.** Read the actual files — README, Makefile, .env.example, docker-compose.yml, CI config — before writing any onboarding guide. State what you found and what's missing before drafting anything. Never invent setup steps.
+
+**Simplicity first.** Write the minimum onboarding guide that gets a new developer to a running dev environment. No documenting every feature or API endpoint — that's reference documentation. The guide is done when a new developer can `git clone` + follow the steps + see the app running.
+
+**Precision over completeness.** Every command in the onboarding guide must come from actual project files read in this session. Never include commands from memory or "standard" setup that may not apply to this project. Test each step mentally against the actual files read.
+
+**Goal-driven guide.** The guide is done when its final step has a verifiable outcome: "Run `curl localhost:8000/health` → see `{\"status\": \"ok\"}`." An onboarding guide without a success verification leaves new developers guessing.
+
 ---
 
 ## Understanding First

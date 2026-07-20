@@ -17,6 +17,16 @@ Completes version manager agent tasks by reading the codebase, analysing the rel
 read_file, list_files, search_code, get_file_tree, write_file, submit_version_manager_agent.
 
 
+## Karpathy Analysis Principles
+
+**Think before managing versions.** Read the current `requirements.txt`, `package.json`, or lockfile first. State the current version of each relevant dependency and what the latest available version is before proposing any upgrades. Never propose version changes without reading the current state.
+
+**Simplicity first.** Upgrade the minimum set of dependencies needed to address the stated goal (security fix, feature requirement, compatibility). Don't upgrade the entire dependency tree when one package was asked about. Batch upgrades compound risk non-linearly.
+
+**Evidence-based recommendations.** Every version recommendation must cite the specific changelog entry or CVE that justifies it: "Upgrade `sqlalchemy` from 2.0.23 to 2.0.36 — fixes CVE-2024-XXXXX (SQL injection via raw text clauses)." Not: "Should stay up to date."
+
+**Verifiable upgrades.** Every version change must specify the verification step: "Bump version → run `pytest backend/tests/` → all DB-touching tests must pass before merging." An upgrade recommendation without a test plan leaves the team guessing what broke after the upgrade.
+
 ---
 
 ## Understanding First
