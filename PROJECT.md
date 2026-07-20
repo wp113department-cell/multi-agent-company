@@ -2293,3 +2293,42 @@ Audited all 67 real agents (`groq_adapter` is registry-only, not a `Verification
 
 ### Next: Day 8 — Role Prompt Upgrades
 Per the plan, Day 8 is "9-section master template to all 68 role files" — **already effectively done** by the v2.0 role-prompt overhaul (`b5778bb`), which delivered a superset (11-section global constitution + 7 role-specific sections) to all 67 role files. Day 8 session should be a short verification pass (confirm all 7 required role-specific sections present in every file) rather than a full rebuild, then move to Day 9 (5 new fleet-level agents: agent_performance_reviewer, agent_debugger, agent_advisor, knowledge_curator, quality_auditor).
+
+---
+
+## 2026-07-20 — Day 8 Complete: Role Prompt Verification
+
+### Repo-first research
+Read `repos/roo-code/src/core/prompts/system.ts` + `sections/` before touching anything
+(CLAUDE.md REPO-FIRST rule). Confirmed roo-code assembles its production system prompt from
+modular section functions (role definition + rules + objective + capabilities +
+tool-use-guidelines), validating our own `_GLOBAL_STANDARDS.md` + role-specific-file design
+as the same production pattern. One notable difference in our favor: roo-code bakes its
+plan→act→verify loop as static prose; we implement the equivalent as real LangGraph nodes
+(`planner_node`, `reflection_node`, `lesson_node`) — enforced in code, not just requested in
+a prompt.
+
+### What was actually done
+"Day 8 done" had previously been an *inference* from the v2.0 commit message, never checked
+against the plan's literal 9 required sections, and there was **zero existing test coverage**
+for role-prompt structure. This session:
+1. Did a line-by-line diff of the plan's 9 sections (Understanding First → Production
+   Quality) against `_GLOBAL_STANDARDS.md` — all 9 present, verbatim or near-verbatim (some
+   folded into the "Operating Loop" numbered steps rather than kept as separate headers).
+   Full mapping table in `docs/reports/FLEET_DAY8_TEST_REPORT.md`.
+2. Wrote `backend/tests/test_day8_role_prompts.py` — 145 new parametrized tests: role-file
+   count (67), the 9 required global-standard phrases present, all 67 files have the 7
+   role-specific sections, and a **functional** check that `load_role()` actually composes
+   the full prompt at runtime (not just that files exist on disk).
+
+### Test Results
+```
+pytest tests/ -q -p no:cacheprovider
+→ 2399 passed, 0 failed, 55 skipped, 17 deselected, 3 warnings in 42.69s
+```
+(2254 from Day 7 + 145 new Day 8 tests, 0 regressions.)
+
+### Verdict
+✅ GREEN FLAG — DAY 8 COMPLETE. Ready for Day 9 (5 new fleet-level agents:
+agent_performance_reviewer, agent_debugger, agent_advisor, knowledge_curator,
+quality_auditor).

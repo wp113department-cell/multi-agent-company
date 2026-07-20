@@ -1,5 +1,5 @@
 # Project Control Center — Live State
-Last updated: 2026-07-20 (full audit + gap-closure + Day 7 session)
+Last updated: 2026-07-20 (full audit + gap-closure + Day 7 + Day 8 session)
 
 ---
 
@@ -128,6 +128,7 @@ Last updated: 2026-07-20 (full audit + gap-closure + Day 7 session)
 | ReviewResult isinstance bug (importlib.reload class-identity) | ✅ CLOSED | Gap fix 2026-07-20 |
 | chat_agent._BACKGROUND_PROCESSES runtime bug | ✅ CLOSED | Gap fix 2026-07-20 |
 | VerificationConfig hardening all agents (Day 7) | ✅ CLOSED | Day 7 — 2026-07-20 |
+| Role prompt 9-section verification + durable test coverage (Day 8) | ✅ CLOSED | Day 8 — 2026-07-20 |
 | 5 new fleet agents | ❌ OPEN | Day 9 |
 | budget_manager + benchmark_manager + tool_discovery | ❌ OPEN | Day 10 |
 | prompt_registry + regression_detector + versioned_memory | ❌ OPEN | Day 11 |
@@ -160,3 +161,4 @@ Last updated: 2026-07-20 (full audit + gap-closure + Day 7 session)
 | v2.0 Role Prompts | 2026-07-20 | 2260 | DRY `_GLOBAL_STANDARDS.md` + 7 role-specific sections, all 67 files |
 | **Full Audit + Gap-Closure** | **2026-07-20** | **2254/2254, 0 failed** | Found + fixed 11 real gaps (see PROJECT.md session log): chat_agent migration, groq_adapter registration, Groq-bypass regression + test-network-leak, repo-context injection bug, duplicate capability tags, test-order pollution, ReviewResult reload bug, chat_agent background-process bug, 13 mypy fixes |
 | **Day 7 — VerificationConfig Hardening** | **2026-07-20** | **2254/2254** | 0 empty configs (except legitimate executive/manager), 0 duplicate tags, 0 dead enforce keys, 0 `verify_agent_contract()` violations |
+| **Day 8 — Role Prompt Verification** | **2026-07-20** | **2399/2399** | Read roo-code's prompt-section pattern first (REPO-FIRST); verified all 9 plan-required sections present (verbatim/near-verbatim) in `_GLOBAL_STANDARDS.md`; wrote 145 new durable tests (`test_day8_role_prompts.py`) — 0 prior test coverage existed for role-prompt structure |
