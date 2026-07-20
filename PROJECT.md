@@ -2,7 +2,65 @@
 
 **This is a living document. Update it every session — it is the single source of truth for "what actually exists right now," separate from `PLAN.md` (what's intended) and `files/` (the original spec suite, which describes the full 7-stage vision, not the current build).**
 
-Last updated: 2026-07-17 (Day 5B complete — 8 agents AGENT_CONTRACT + debugger_agent + 97 new tests)
+Last updated: 2026-07-20 (Day 6 complete — Karpathy skills across 60+ role files + 17 Day 6B agents with AGENT_CONTRACT + 205 tests)
+
+---
+
+## 2026-07-20 — Day 6 Complete: Karpathy Skills + Day 6B Agents
+
+### Day 6A — COMPLETE: Karpathy Engineering Principles Added to 60+ Role Files
+
+Extracted 4 core Karpathy principles from `repos/andrej-karpathy-skills` and added tailored variants to every matching agent role file. Selective — only applied to agents where the principles are relevant. Skipped pure routing/summary/docs/PM agents.
+
+**Principle variants used:**
+- **CODING** (think-before-coding, simplicity-first, surgical changes, verifiable success criterion)
+- **REVIEW** (read first, file:line precision, no drive-by improvements, concrete remediation)
+- **DESIGN/PLANNING** (surface ambiguities, concrete I/O contracts, surgical proposals)
+- **ANALYSIS/DEBUG** (read traceback first, reproduce before concluding, observable outcomes)
+
+**Role files updated (60+ files):**
+- CODING: coder, backend_dev, frontend_dev, bug_fix, refactor_agent, migration_agent, sql_agent, docker_agent, cicd_agent, ai_engineer, cleanup_agent, load_test_agent, test_writer_agent, pair_programmer_agent
+- REVIEW: reviewer, code_quality_agent, security_reviewer, architecture_reviewer, performance_reviewer, style_reviewer, tech_debt_agent, accessibility_agent, compliance_agent, qa, dependency_security_agent, devex_agent, env_checker_agent, feature_flag_agent, infra_agent, localization_agent, test_coverage_agent
+- DESIGN: architect, planner, decomposer, api_designer_agent, data_pipeline_agent, schema_agent, database_architect, slo_agent
+- ANALYSIS: debugger_agent, code_explainer_agent, cost_estimator_agent, incident_responder_agent, onboarding_agent, rollback_agent, runbook_generator_agent, spike_agent, version_manager_agent, devops
+
+### Day 6B — COMPLETE: 17 Agents with Full AGENT_CONTRACT
+
+All 17 Day 6B agents now have complete AGENT_CONTRACT, VerificationConfig with non-empty `enforce_in_result`, unique capability tags, `_register()`, enhanced `run_agent_graph()` calls with `task_description`, `model_haiku`, `enable_planning`, `enable_memory`, `enable_reflection`, `enable_lesson`.
+
+| Agent | Capability Tag |
+|---|---|
+| dependency_security_agent | `dependency_vulnerability_scan` |
+| devex_agent | `developer_experience_review` |
+| env_checker_agent | `environment_config_audit` |
+| feature_flag_agent | `feature_flag_management` |
+| incident_responder_agent | `incident_triage` |
+| infra_agent | `infrastructure_security_review` |
+| load_test_agent | `load_test_generation` |
+| localization_agent | `i18n_l10n_review` |
+| onboarding_agent | `onboarding_doc_generation` |
+| pair_programmer_agent | `pair_programming` |
+| rollback_agent | `rollback_planning` |
+| runbook_generator_agent | `runbook_generation` |
+| slo_agent | `slo_definition` |
+| spike_agent | `research_spike` |
+| test_coverage_agent | `test_gap_analysis` |
+| test_writer_agent | `test_suite_generation` |
+| version_manager_agent | `dependency_version_management` |
+
+**Tests:** `backend/tests/test_day6b_agents.py` — 205 parametrized tests (same structure as Day 5B: AGENT_CONTRACT shape, enforce_in_result non-empty, role file exists, submit tool in _TOOLS, handler factory returns dict + updates result, run_fn returns AgentResult, capability tag uniqueness, _register() callable).
+
+**Test results:** 2260 passed, 7 pre-existing failures (4 Groq integration need real API key, 2 fleet manager registry state, 1 reviewer type flake — all pre-existing). 205 new tests added, 0 new failures.
+
+**Commit:** 4d3866a
+
+### Known issues (unchanged from Day 5B)
+- `test_returns_review_result_on_success` in `test_session3_migration.py` — pre-existing registry state flake
+- `test_session2_migration.py::TestFleetManagerSelection` — pre-existing full-suite ordering issue
+- `test_day0_groq_integration.py` — pre-existing, requires real Groq API key
+
+### Next steps — Day 7
+All 68 agents — VerificationConfig hardening (verify all agents comply, fix any gaps found by programmatic audit). Per fleet plan: `verify_agent_contract()` must return 0 violations.
 
 ---
 
