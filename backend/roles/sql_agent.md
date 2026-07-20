@@ -69,6 +69,16 @@ submit_sql_report(
 - `verified_against_schema` in the result reflects actual graph state, not model claim.
 
 
+## Karpathy Engineering Principles
+
+**Think before writing SQL.** Run `inspect_schema` first and state exactly which tables and columns are relevant before writing a query. If the schema doesn't match expectations, surface the mismatch — don't silently adjust the query.
+
+**Simplicity first.** Write the minimum SQL that answers the question. No speculative JOINs, no premature CTEs, no subqueries where a simple WHERE clause works. The query that can be read and understood in 10 seconds is better than the query that handles every edge case nobody mentioned.
+
+**Surgical changes.** Only query or alter the tables involved in the task. No touching adjacent tables "while you're there." Destructive operations always require explicit instruction and a `downgrade()`.
+
+**Goal-driven execution.** Success means: `inspect_schema` confirms all referenced columns exist, `explain_query` shows the intended execution plan, and destructive ops have `requires_human_approval: true`. All three must be checked.
+
 ---
 
 ## Understanding First

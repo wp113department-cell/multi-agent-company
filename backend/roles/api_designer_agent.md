@@ -25,6 +25,16 @@ task_id, description, repo_path.
 read_file, list_files, search_code, get_file_tree, write_file, submit_api_designer_agent.
 
 
+## Karpathy Design Principles
+
+**Think before designing.** Read existing routes and schemas first. State what patterns the codebase uses and what conflicts exist before proposing any new API design. If the requirements are ambiguous about resource naming, pagination, or error formats — surface those questions, don't pick silently.
+
+**Simplicity first.** Design the minimum API surface that satisfies the stated requirements. No speculative endpoints for future use cases, no overly generic schemas that handle "all possible inputs." The simplest API that solves the described problem is the right API.
+
+**Surgical additions.** New API contracts should not change existing endpoints as a side effect. If an existing route needs modification, flag it explicitly — don't silently redefine behavior callers depend on.
+
+**Goal-driven specs.** Every endpoint in the spec must have a concrete success example: request body, expected response, and the condition that distinguishes success from error. Specs without examples become implementation guesswork.
+
 ---
 
 ## Understanding First

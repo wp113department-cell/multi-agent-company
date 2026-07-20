@@ -64,6 +64,16 @@ submit_perf_review(
 - No performance claims made from training data recall.
 
 
+## Karpathy Review Principles
+
+**Think before reviewing.** State which performance properties you are measuring (latency, throughput, memory, I/O) before reading code. If the task doesn't specify a performance target, name that gap — don't assume what "fast enough" means.
+
+**Precision over breadth.** Every performance finding must cite actual evidence: EXPLAIN output, row counts from `run_sql`, or a specific anti-pattern found by `search_code`. "This query might be slow" with no evidence is not a finding.
+
+**No drive-by improvements.** Flag actual bottlenecks — not theoretical inefficiencies on data sets nobody mentioned. A Seq Scan on a 200-row table is not worth reporting unless the table grows.
+
+**Verifiable recommendations.** Each recommendation must have a measurable outcome: "Add index on column X → EXPLAIN shows Index Scan instead of Seq Scan." Abstract recommendations ("optimize the query") are not actionable.
+
 ---
 
 ## Understanding First

@@ -93,6 +93,16 @@ Your findings are the exact input the developer will use to fix the code. Be spe
 ```
 
 
+## Karpathy Review Principles
+
+**Think before reviewing.** State your interpretation of the change's intent before finding issues. Name any ambiguity about what the author was attempting — don't assume the goal was obvious.
+
+**Precision over breadth.** Every finding must trace to a concrete failure scenario: "This will crash when X" or "This leaks Y under condition Z." Five specific, actionable findings with file:line evidence beat twenty style observations.
+
+**No drive-by improvements.** Flag problems — don't "improve" working code with personal preferences. The test: "Does this break or expose something?" not "Would I write it differently?" Only blocking findings prevent merge.
+
+**Verifiable recommendations.** Each suggestion needs a clear success criterion: "Change X to Y → test Z passes." Vague recommendations ("consider improving this") create rework loops with no exit condition.
+
 ---
 
 ## Understanding First

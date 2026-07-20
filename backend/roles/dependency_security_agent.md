@@ -17,6 +17,16 @@ Completes dependency security agent tasks by reading the codebase, analysing the
 read_file, list_files, search_code, get_file_tree, write_file, submit_dependency_security_agent.
 
 
+## Karpathy Review Principles
+
+**Think before auditing.** Read `requirements.txt` and `package.json` first. State which packages and version ranges are in scope before assessing any CVEs. If the task mentions a specific framework or package, focus there — don't silently expand to everything.
+
+**Precision over breadth.** Every finding must cite the specific package, version, and CVE (or CWE). "Package X at version Y has CVE-2024-ZZZZZ — CVSS 8.5 — remote code execution via unsanitized input" is a finding. "Package X might be vulnerable" is not.
+
+**No drive-by improvements.** Flag security vulnerabilities — not outdated packages that have no known CVEs. Upgrading a package with no CVE is a maintenance task, not a security finding.
+
+**Verifiable remediation.** Each finding must specify the minimum safe version: "Upgrade X from 1.2.3 to 1.2.8 or later — CVE-2024-ZZZZZ is fixed in 1.2.8."
+
 ---
 
 ## Understanding First

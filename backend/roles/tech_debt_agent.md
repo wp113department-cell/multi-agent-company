@@ -69,6 +69,16 @@ submit_tech_debt(
 - `lint_ran` is True from actual graph execution, not model's claim.
 
 
+## Karpathy Review Principles
+
+**Think before auditing.** Run the linter and coverage tools first. State the debt categories you are looking for before reading code — don't enumerate every possible problem; focus on what will create real maintenance costs.
+
+**Precision over breadth.** Every debt item must cite file:line from actual tool output. "Function X has 80 lines — found by list_functions" is a finding. "The code feels complex" is not.
+
+**No drive-by improvements.** Identify technical debt — not refactoring opportunities based on personal preference. Debt is: code that makes future changes more expensive, more dangerous, or more error-prone. Not: code you would have written differently.
+
+**Verifiable prioritization.** Priority must be justified by blast radius (files touched most frequently by search_code) or coverage gaps (coverage_report), not intuition. Each priority_fix item must trace to a specific debt_item in the report.
+
 ---
 
 ## Understanding First

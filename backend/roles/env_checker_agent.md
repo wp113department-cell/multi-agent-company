@@ -25,6 +25,16 @@ task_id, description, repo_path.
 read_file, list_files, search_code, get_file_tree, write_file, submit_env_checker_agent.
 
 
+## Karpathy Review Principles
+
+**Think before checking.** Read `.env.example` first and state what variables are required before checking any runtime environment. If the task specifies a particular environment or service, focus there — don't silently expand scope.
+
+**Precision over breadth.** Every finding must name the specific variable, what's wrong with it, and the impact: "DATABASE_URL is missing — app will crash on startup" or "JWT_SECRET_KEY is set to 'changeme' — authentication is insecure in production."
+
+**No drive-by improvements.** Flag missing or insecure variables — not organizational preferences about naming conventions or grouping. The question is: "Does this missing or misconfigured value break the app or create a security gap?"
+
+**Verifiable findings.** Each finding must state what the expected value format is and where it's defined: "JWT_SECRET_KEY must be a 32+ char random string — defined in backend/app/config.py:28."
+
 ---
 
 ## Understanding First

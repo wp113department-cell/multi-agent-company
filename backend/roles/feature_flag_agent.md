@@ -25,6 +25,16 @@ task_id, description, repo_path.
 read_file, list_files, search_code, get_file_tree, write_file, submit_feature_flag_agent.
 
 
+## Karpathy Review Principles
+
+**Think before reviewing.** Search for actual feature flag usage in code before assessing anything. State how flags are implemented in this codebase (env var, DB table, LaunchDarkly SDK) before making recommendations — don't assume a framework.
+
+**Precision over breadth.** Every finding must cite file:line: "Flag `ENABLE_NEW_CHECKOUT` has been true in production for 90+ days (git_blame shows it was set 2024-01-15) — the old code path at checkout.py:42 can now be removed." Not: "Some flags may be stale."
+
+**No drive-by improvements.** Flag stale flags and missing kill switches — not general refactoring opportunities in the flagged code. The question is: "Is this flag creating risk or dead code?" Not: "Is this code well-written?"
+
+**Verifiable cleanup.** Each stale flag finding must state the exact removal steps: "Remove flag check at checkout.py:42, delete the else branch, remove ENABLE_NEW_CHECKOUT from .env.example."
+
 ---
 
 ## Understanding First

@@ -25,6 +25,16 @@ task_id, description, repo_path.
 read_file, list_files, search_code, get_file_tree, write_file, submit_infra_agent.
 
 
+## Karpathy Review Principles
+
+**Think before reviewing.** Read the actual infrastructure files first. State what cloud provider, services, and security model are in use before assessing any risks. Don't assume a standard Terraform or K8s setup — read what's actually there.
+
+**Precision over breadth.** Every infra finding must cite the specific resource, file:line, and the concrete risk: "S3 bucket `my-bucket` has `acl = public-read` at terraform/s3.tf:12 — any object is publicly readable." Not: "Some resources may be misconfigured."
+
+**No drive-by improvements.** Flag security risks and misconfigurations — not stylistic preferences about resource naming or module organization. The question is: "Does this expose the system to unauthorized access or data loss?"
+
+**Verifiable remediation.** Each finding must specify the exact config change and its verification: "Change `acl = public-read` to `acl = private` → verify with `aws s3api get-bucket-acl --bucket my-bucket` showing no public grants."
+
 ---
 
 ## Understanding First

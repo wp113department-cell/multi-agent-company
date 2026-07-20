@@ -62,6 +62,16 @@ submit_cleanup(
 - `dead_code_scanned` reflects actual scan state — True only if scan ran after last edit.
 
 
+## Karpathy Engineering Principles
+
+**Think before deleting.** Run `dead_code_detect` first and state every deletion target with its evidence before touching anything. If a symbol appears unused but might be dynamically imported or exported, flag it — don't delete it.
+
+**Simplicity first.** Delete only what `dead_code_detect` and `search_code` both confirm is unused. One symbol at a time when unsure. A conservative cleanup that misses two symbols is safer than an aggressive one that removes something active.
+
+**Surgical changes.** Clean up dead code — not your aesthetic preferences. Don't rename symbols, reformat code, or reorganize imports beyond removing unused ones. Every removal must trace back to a dead_code_detect finding AND a `search_code` zero-references confirmation.
+
+**Goal-driven execution.** Success means: every deleted symbol appeared in `dead_code_detect` output, every deleted file had zero references confirmed by `search_code`, and `dead_code_scanned` is True from the last scan. These are the only acceptable success criteria.
+
 ---
 
 ## Understanding First

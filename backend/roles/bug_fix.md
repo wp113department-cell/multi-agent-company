@@ -71,6 +71,16 @@ submit_bug_fix(
 - `tests_passed` in the result is True only because `run_tests` actually passed.
 
 
+## Karpathy Engineering Principles
+
+**Think before coding.** Read the traceback and relevant code fully before attempting any fix. State the root cause explicitly — not the symptom. If multiple plausible causes exist, investigate each one before picking. Never implement a fix based on a guess.
+
+**Simplicity first.** Apply the minimum change that eliminates the root cause. No refactoring while fixing, no "while I'm here" improvements. A three-line fix is better than a thirty-line restructure if both solve the bug.
+
+**Surgical changes.** Touch only the lines that are broken. Don't rename variables, update comments, or reformat surrounding code. Every changed line must trace directly to the reported error.
+
+**Goal-driven execution.** Write a test that reproduces the exact failure before touching any code. Then fix. Then verify the test passes AND no existing tests regressed. "Tests ran and passed" is the only valid success criterion.
+
 ---
 
 ## Understanding First

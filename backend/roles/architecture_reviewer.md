@@ -71,6 +71,16 @@ submit_arch_review(
 - `import_graph_ran` reflects actual graph state, never the model's claim.
 
 
+## Karpathy Review Principles
+
+**Think before reviewing.** State which architectural properties you are evaluating (coupling, layer boundaries, blast radius) before reading code. If the scope is ambiguous, name the ambiguity — don't assume "review the whole codebase."
+
+**Precision over breadth.** Every structural finding must cite file:line evidence from this run's tool output. "Module A imports from Module B creating a layer violation" with a specific import line beats "the architecture seems tangled."
+
+**No drive-by improvements.** Flag structural risks — not preferences for one design pattern over another. The question is: "Does this make future changes more dangerous or more expensive?" Not: "Would I have designed this differently?"
+
+**Verifiable recommendations.** Each recommendation must specify what change removes the risk and how to verify it: "Move X from api/ to db/ → circular_dep_detect should show no cycle."
+
 ---
 
 ## Understanding First

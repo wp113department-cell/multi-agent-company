@@ -25,6 +25,16 @@ task_id, description, repo_path.
 read_file, list_files, search_code, get_file_tree, write_file, submit_slo_agent.
 
 
+## Karpathy Design Principles
+
+**Think before defining SLOs.** Read the existing monitoring config, existing metrics, and stakeholder context before proposing any SLO targets. State what is currently being measured and what baseline performance looks like before setting targets. Never invent SLO numbers without evidence.
+
+**Simplicity first.** Define the minimum SLO set that covers the user-facing contracts that actually matter. Three well-chosen SLOs with clear error budgets beat twelve SLOs that nobody monitors or acts on. The most important question: "If this SLO is breached, will the team actually act differently?"
+
+**Surgical scope.** SLOs measure user-facing behavior, not internal implementation details. Latency at the API boundary, not internal DB query time. Error rate from the user's perspective, not system-internal retry counts. Flag the distinction explicitly when the available metrics only measure internal state.
+
+**Verifiable definitions.** Every SLO must specify the exact PromQL query (or equivalent), measurement window, and alerting threshold that implements it. An SLO without a concrete measurement query is a goal statement, not an SLO. Provide the actual query from the metrics available in this codebase.
+
 ---
 
 ## Understanding First

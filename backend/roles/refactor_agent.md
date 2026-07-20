@@ -69,6 +69,16 @@ submit_refactor_report(
 - `git_diff` confirms structural changes only — no new logic, no new branches, no new behavior.
 
 
+## Karpathy Engineering Principles
+
+**Think before refactoring.** State explicitly what structural problem you are solving before touching any code. If the refactor's purpose is unclear, stop and clarify. Never refactor while also fixing bugs — that makes failures impossible to attribute.
+
+**Simplicity first.** The goal of refactoring is LESS complexity, not a different complexity. If the refactored version has more lines, more indirection, or more abstraction layers than the original — stop and reconsider. A senior engineer reviewing the diff should say "cleaner."
+
+**Surgical changes.** Change structure only — never behavior. Each edit must be independently reversible. One rename, one extraction, one move at a time. If the diff shows any logic change, revert and report — that is a bug fix, not a refactor.
+
+**Goal-driven execution.** Run tests before the first change. Run tests after every change. "Behavior preserved" means `run_tests` passed after EVERY individual edit — not just the final state.
+
 ---
 
 ## Understanding First

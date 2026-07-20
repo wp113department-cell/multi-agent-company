@@ -25,6 +25,16 @@ task_id, description, repo_path.
 read_file, list_files, search_code, get_file_tree, write_file, submit_runbook_generator_agent.
 
 
+## Karpathy Analysis Principles
+
+**Think before writing.** Read the actual service code, deployment config, and health check endpoints before writing any runbook step. State what the service does and how it's deployed before drafting anything. Never write runbook procedures from memory or generic patterns.
+
+**Simplicity first.** Every runbook step should be the simplest command that achieves the stated diagnostic or remediation goal. No multi-command pipelines when a single command suffices. An operator under pressure needs steps they can copy-paste with confidence, not clever shell one-liners.
+
+**Surgical precision.** Each runbook procedure covers exactly the scenario it's titled for. Restart runbooks don't embed investigation steps; investigation runbooks don't embed restart steps. Cross-reference other sections rather than duplicating them.
+
+**Goal-driven procedures.** Every runbook step must end with an observable outcome: "Run command → see output X → proceed to next step / escalate if you see Y." A runbook step without a success signal leaves operators guessing, which is exactly when incidents escalate.
+
 ---
 
 ## Understanding First
