@@ -17,12 +17,70 @@ from anthropic.types import (
 )
 
 from app.agents.base import get_effective_api_key
+from app.agents.base_graph import VerificationConfig
 from app.agents.tools import CHAT_TOOLS, _is_dangerous_command, _is_protected_path
 from app.config import get_settings
 from app.models.chat import ChatSession
 from app.repo_tools import ast_engine as _ast_engine
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Fleet OS capability declaration.
+#
+# ChatAgent is an interactive, open-ended, multi-turn session (not a single-shot
+# run_agent_graph task) — dangerous tool calls already gate on
+# session.request_confirmation() instead of a post-hoc VerificationConfig state
+# machine. AGENT_CONTRACT/_register() exist so the fleet capability_registry can
+# discover it like every other agent; VerificationConfig documents the same
+# read/write verification semantics the other 67 agents declare, for parity.
+# ---------------------------------------------------------------------------
+
+AGENT_CONTRACT: dict[str, Any] = {
+    "name": "chat_agent",
+    "description": "Interactive streaming chat agent — full agentic loop over the repo (read/search/edit/git/test/db/docker) with human confirmation gating dangerous actions.",
+    "allowed_tools": [t["name"] for t in CHAT_TOOLS],
+    "input_types": ["chat_session", "user_message"],
+    "output_types": ["streamed_events", "AgentResult"],
+    "side_effects": ["reads/writes repo files", "runs bash", "runs git (incl. push, with confirmation)"],
+    "permissions": ["read_repo", "write_repo", "execute_bash", "git_write"],
+    "risk_level": "high",
+    "expected_verification": {"read": "read_file or search_code must run before write/bash tools"},
+    "dependencies": [],
+}
+
+_VERIFICATION_CFG = VerificationConfig(
+    set_by={
+        "run_tests": "tests_passed", "run_linter": "lint_ran",
+        "git_diff": "diff_checked", "read_file": "read", "search_code": "read",
+    },
+    reset_by=("write_file", "edit_file", "apply_patch"),
+    reset_keys=("tests_passed",),
+    enforce_in_result={"read": "read"},
+    initial={"read": False, "tests_passed": False, "lint_ran": False, "diff_checked": False},
+)
+
+
+def _register() -> None:
+    try:
+        from app.fleet.capability_registry import AgentCapability, register
+        from app.fleet.agent_registry import get_agent_registry
+        register(AgentCapability(
+            name=AGENT_CONTRACT["name"],
+            description=AGENT_CONTRACT["description"],
+            tools=AGENT_CONTRACT["allowed_tools"],
+            input_types=AGENT_CONTRACT["input_types"],
+            output_types=AGENT_CONTRACT["output_types"],
+            capabilities=["interactive_chat_session"],
+            risk_level=AGENT_CONTRACT["risk_level"],
+            dependencies=AGENT_CONTRACT["dependencies"],
+        ))
+        get_agent_registry().register(AGENT_CONTRACT["name"])
+    except Exception as exc:
+        logger.debug("Fleet registry unavailable: %s", exc)
+
+
+_register()
 
 
 def _load_role(name: str) -> str:
@@ -80,6 +138,10 @@ class ChatAgent:
         self.session = session
         self.root = Path(session.repo_path)
         self._system = _load_role("chat")
+        # Per-session background process table (one ChatAgent per ChatSession) —
+        # mirrors make_chat_handlers()'s per-session isolation in tools.py so one
+        # session cannot kill or read another session's background process.
+        self._background_processes: dict[int, subprocess.Popen[str]] = {}
 
     def _client(self) -> anthropic.AsyncAnthropic:
         return anthropic.AsyncAnthropic(api_key=get_effective_api_key())
@@ -721,7 +783,6 @@ class ChatAgent:
         # ========== BATCH 2 — Terminal extras ==========
 
         if tool_name == "run_background":
-            from app.agents.tools import _BACKGROUND_PROCESSES
             rb_command = str(inp["command"])
             rb_cwd = str(inp.get("cwd") or repo)
             try:
@@ -729,7 +790,7 @@ class ChatAgent:
                     rb_command, shell=True, cwd=rb_cwd,
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                 )
-                _BACKGROUND_PROCESSES[proc.pid] = proc
+                self._background_processes[proc.pid] = proc
                 return f"Started background process PID {proc.pid}: {rb_command[:80]}"
             except Exception as e:
                 return f"[ERROR] {e}"
@@ -1217,12 +1278,11 @@ class ChatAgent:
         # ========== BATCH 12 — Terminal extras ==========
 
         if tool_name == "read_output":
-            from app.agents.tools import _BACKGROUND_PROCESSES
             import fcntl as _fcntl2
             import os as _os2
             ro_pid = int(inp["pid"])
             ro_max_lines = int(inp.get("lines", 50))
-            ro_proc = _BACKGROUND_PROCESSES.get(ro_pid)
+            ro_proc = self._background_processes.get(ro_pid)
             if ro_proc is None:
                 return f"[ERROR] No tracked background process with PID {ro_pid}"
             if ro_proc.poll() is not None:

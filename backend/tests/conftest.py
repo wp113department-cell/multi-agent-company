@@ -14,6 +14,15 @@ os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-test-placeholder-not-real")
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://gridiron:gridiron_dev_only@localhost:5432/gridiron_dev")
 os.environ.setdefault("TARGET_REPO_PATH", ".")
 
+# The general unit suite mocks anthropic.Anthropic directly and expects
+# run_agent_graph() to go through the real LangGraph node path. .env sets
+# USE_GROQ=true for local manual/dev-server use — without this override the
+# Groq bypass in base_graph.py would make real, unmocked network calls to
+# Groq for every test, which either hang or slow-burn through rate-limit
+# retries. tests/groq_compat.py explicitly sets/pops USE_GROQ=true around its
+# own fixture, so the dedicated Groq integration tests are unaffected.
+os.environ["USE_GROQ"] = "false"
+
 import pytest  # noqa: E402 — must come after env vars are set
 
 

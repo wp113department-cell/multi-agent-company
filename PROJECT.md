@@ -2236,3 +2236,60 @@ pytest backend/tests/ -q → 1636 passed, 55 skipped (20 pre-existing failures u
 ### Next Steps
 1. **Day 5B** — AGENT_CONTRACT batch 4 (9 agents): chat_agent, code_explainer_agent, code_quality_agent, accessibility_agent, api_designer_agent, compliance_agent, cost_estimator_agent, data_pipeline_agent, debugger_agent
 2. Run Day 5B programmatic audit (0 issues required before close)
+
+---
+
+## 2026-07-20 — Full Audit + Gap-Closure Session (Day 0–6 verification, Day 7 complete)
+
+**Context:** PROJECT.md and docs/PROJECT_CONTROL_CENTER.md had not been updated since Day 5A (2026-07-17), even though commits `67409e2` (Day 5B), `4d3866a`/`7140b9e` (Day 6), `b5778bb` (v2.0 role prompts), `44be261`, and `dc27e1e` ("enhanced") had all landed since. This session re-verified actual code state (not the stale docs) via a real `pytest`/`mypy` run and a mechanical audit of all 68 agents, found and fixed real gaps, then completed Day 7.
+
+### Day 5B / Day 6 — retroactively confirmed complete (code-verified, not just doc-claimed)
+- Day 5B: 8/9 planned agents got AGENT_CONTRACT (chat_agent was silently skipped — see gap below, now fixed).
+- Day 6: 17 agents + groq_adapter — confirmed via `capability_registry` (67 real task agents registered; groq_adapter is infra-only per the plan's own note).
+- v2.0 role prompts (`b5778bb`, `44be261`): all 67 role files now inherit `backend/roles/_GLOBAL_STANDARDS.md` (11-section constitution) + 7 role-specific sections (Non-Responsibilities, Success Criteria, Failure Conditions, Output Contract, Quality Gates, Edge Cases, Escalation). Verified — this is real, well-documented work (see `backend/gridiron_production_prompts_v2/UPGRADE_REPORT.md`).
+
+### Gaps found and fixed this session
+1. **`chat_agent` never migrated to Fleet OS** — Day 5B commit only did 8/9 agents. Added `AGENT_CONTRACT`, `_register()`, `VerificationConfig` to `chat_agent.py`. Now 67/67 real agents in `capability_registry` (was 66/68).
+2. **`groq_adapter` had zero registry entry** — added a lightweight `agent_registry` registration (infra utility, no `AGENT_CONTRACT` per the plan's own Day 6 note).
+3. **Regression: Day 0 Gap-7 Sleep-wiring exit criterion broken** by the undocumented `dc27e1e` commit's Groq-bypass block in `run_agent_graph()` (raised `FileNotFoundError` for role names with no real `.md` file, landing the agent in `ERROR` instead of `SLEEP`). Fixed: the bypass now only falls through to the normal graph on `FileNotFoundError` specifically; every other exception still raises exactly as before (kept intentionally narrow — Groq is a temporary, removable local-testing shim per user instruction, not something that should touch the Anthropic/OpenAI production path).
+4. **Root cause of the same commit's deeper problem**: `tests/conftest.py` never overrode `USE_GROQ`, so the *entire* unit-test suite (which mocks `anthropic.Anthropic` directly) was silently inheriting `USE_GROQ=true` from `.env` and taking the Groq bypass path — making real, unmocked network calls to Groq for every `run_agent_graph()` call in ~2000 tests. Fixed by forcing `USE_GROQ=false` in `conftest.py` (the dedicated Groq integration tests already set/unset it themselves around their own fixture, so they're unaffected).
+5. **Real-LLM Groq tests rate-limit under full-suite load** (free tier 429s) — `tests/test_day0_groq_integration.py` marked `pytestmark = pytest.mark.slow` (excluded by `pytest.ini`'s existing `-m "not slow"` default, same as the already-established convention). Run explicitly later: `pytest tests/test_day0_groq_integration.py -v -m slow`. These + the 4 `anthropic_only` tests stay pending until a real `ANTHROPIC_API_KEY` is available (see memory `pending_anthropic_tests`).
+6. **`memory_hook_node` repo-context injection was silently broken since it was written** — called `app.repo_tools.scanner.build_repo_index` which doesn't exist (real function is `index_repository`); wrapped in a broad `except Exception`, so it always failed silently and Fleet OS capability #15 (Architecture Awareness) never actually fired. Fixed the function name.
+7. **Duplicate capability tags** (violates CLAUDE.md rule #6): `business_analyst`/`user_story_generator` both claimed `user_story_generation`; `changelog_agent`/`release_notes_agent` both claimed `version_documentation`. Renamed `business_analyst`'s to `requirements_story_drafting` and `changelog_agent`'s to `changelog_documentation`.
+8. **Test-order pollution**: `TestFleetManagerSelection` in `test_session2_migration.py` depended on `coder`/`backend_dev`/`frontend_dev` being in `SLEEP` state in the process-wide `agent_registry` singleton — broken by whatever test ran before it in full-suite order. Added an autouse `recover()` fixture.
+9. **`ReviewResult` isinstance failure (real bug, not flakiness)**: `test_day1_agent_flags.py` called `importlib.reload(app.agents.reviewer)` in a test, which creates a brand-new `ReviewResult` class object in the module; `test_session3_migration.py` (collected later, alphabetically after `test_day1...`) had imported the *old* class reference at module load time, so `isinstance(result, ReviewResult)` failed. Removed the 3 superfluous `importlib.reload()` calls (for reviewer/devops/docs) — they served no purpose since the module was already imported.
+10. **`chat_agent.py`'s `run_background`/`read_output` tools were broken** (pre-existing, unrelated to the fleet plan): imported `app.agents.tools._BACKGROUND_PROCESSES`, which was intentionally removed and made per-session inside `make_chat_handlers()` — `ChatAgent` never got updated, so those two tools would `ImportError` at runtime. Fixed with a per-`ChatAgent`-instance `self._background_processes` dict.
+11. **mypy `--strict`: 47 → 34 errors.** Fixed: 5 unused `# type: ignore` comments in `base_graph.py`, missing return type on `app/api/activity.py`'s SSE generator, `no-any-return` in research/executive/docs/devops (Day 1 agents), the `_BACKGROUND_PROCESSES` attr-errors above. Remaining 34 are pre-existing debt unrelated to the fleet work: 18 in `app/repo_tools/browser_driver.py` (from 2026-07-16, before Fleet Days), 7 in `base_graph.py` (LangGraph `StateGraph` overload/generic-args typing — a known library-stub limitation, already flagged in this file's Open Issues), and a handful of scattered `no-any-return`/redef issues elsewhere.
+
+### Ground-truth test/mypy state after fixes
+```
+pytest tests/ -q          → 2254 passed, 0 failed, 55 skipped, 17 deselected (slow/Groq), 41.8s
+mypy app/ --strict        → 34 errors (all pre-existing debt, 0 new) — see Open Issues
+```
+
+### Day 7 — VerificationConfig Hardening: COMPLETE
+Audited all 67 real agents (`groq_adapter` is registry-only, not a `VerificationConfig` agent) against the plan's category table and the actual `verify_agent_contract()` in `app/fleet/tool_manifest.py` (not the illustrative pseudocode snippet in the plan doc, which uses placeholder tool names like `execute_tests` that don't match the codebase's real `run_tests`/`bash` convention).
+- 66/67 agents have non-empty, real `set_by` + `enforce_in_result` (the 67th, `chat_agent`, fixed this session).
+- `executive` and `manager` are the only agents with an empty/absent `VerificationConfig` — both legitimate: `executive` calls zero tools (`tool_handlers={}`, pure LLM), `manager` is a pure orchestrator that never calls `run_agent_graph` itself. Both still have full `AGENT_CONTRACT` + `_register()`.
+- 0 dead `enforce_in_result` keys (verified no agent enforces a verification key that no tool in its `set_by` ever sets).
+- 0 duplicate capability tags fleet-wide (2 found and fixed — see gap #7 above).
+- 0 `verify_agent_contract()` violations against the real implementation.
+- ~22 "read-only auditor" agents (debugger_agent, code_quality_agent, test_coverage_agent, dependency_security_agent, etc.) deliberately share a minimal `set_by={"read_file": "read", ...}` / `enforce_in_result={"read": "read"}` pattern — confirmed intentional and uniform via `backend/gridiron_production_prompts_v2/UPGRADE_REPORT.md`'s explicit "read-only auditor" category labels, not a per-agent oversight. Left as-is rather than forcing a fake stronger signal these agents have no tool to actually produce.
+
+**Day 7 success criteria (from the plan): `verify_agent_contract()` returns 0 violations for all agents; tests pass. Both met.**
+
+### Files changed this session
+- `backend/app/agents/base_graph.py` — Groq-bypass narrowed to `FileNotFoundError` only; fixed `index_repository` call; removed 5 stale `type: ignore`
+- `backend/app/agents/chat_agent.py` — added `AGENT_CONTRACT`/`_register()`/`VerificationConfig`; fixed `_BACKGROUND_PROCESSES` bug
+- `backend/app/agents/groq_adapter.py` — added `_register()`
+- `backend/app/agents/business_analyst.py`, `changelog_agent.py` — renamed duplicate capability tags
+- `backend/app/agents/research.py`, `executive.py`, `docs.py`, `devops.py` — mypy `no-any-return` fixes
+- `backend/app/api/activity.py` — SSE generator return type
+- `backend/tests/conftest.py` — force `USE_GROQ=false` for the general suite
+- `backend/tests/test_day0_groq_integration.py` — marked `slow`
+- `backend/tests/test_day1_agent_flags.py` — removed 3 buggy `importlib.reload()` calls
+- `backend/tests/test_session2_migration.py` — added `agent_registry` recovery fixture
+- `backend/tests/test_final_session.py` — updated cost-page test for the consolidated `/metrics` redirect
+
+### Next: Day 8 — Role Prompt Upgrades
+Per the plan, Day 8 is "9-section master template to all 68 role files" — **already effectively done** by the v2.0 role-prompt overhaul (`b5778bb`), which delivered a superset (11-section global constitution + 7 role-specific sections) to all 67 role files. Day 8 session should be a short verification pass (confirm all 7 required role-specific sections present in every file) rather than a full rebuild, then move to Day 9 (5 new fleet-level agents: agent_performance_reviewer, agent_debugger, agent_advisor, knowledge_curator, quality_auditor).

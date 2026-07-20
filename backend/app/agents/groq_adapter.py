@@ -26,6 +26,21 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _register() -> None:
+    """Lightweight agent_registry entry only — groq_adapter is a translation
+    utility (Anthropic <-> Groq/OpenAI format), not a task-running agent, so it
+    carries no AGENT_CONTRACT / capability_registry entry (see
+    docs/FLEET_ENHANCEMENT_PLAN.md Day 6 note)."""
+    try:
+        from app.fleet.agent_registry import get_agent_registry
+        get_agent_registry().register("groq_adapter", kind="infra_utility")
+    except Exception as exc:
+        logger.debug("Fleet registry unavailable: %s", exc)
+
+
+_register()
+
+
 def _anthropic_model_to_groq(model: str, settings: Any) -> str:
     """Map an Anthropic model name to the equivalent Groq model."""
     coder: str = settings.groq_model_coder

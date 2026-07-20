@@ -82,7 +82,7 @@ def _last_assistant_text(messages: list[dict[str, Any]]) -> str:
             if isinstance(content, list):
                 for block in content:
                     if isinstance(block, dict) and block.get("type") == "text":
-                        return block.get("text", "")
+                        return str(block.get("text", ""))
     return ""
 
 

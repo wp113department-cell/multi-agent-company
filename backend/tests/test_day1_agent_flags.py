@@ -180,7 +180,6 @@ class TestReviewerFlags:
 
     def test_verification_cfg_set_by(self) -> None:
         import app.agents.reviewer as mod
-        importlib.reload(mod)
         assert mod._VERIFICATION_CFG.set_by == {"git_diff": "diff_reviewed"}
 
 
@@ -209,7 +208,6 @@ class TestDevopsFlags:
 
     def test_verification_cfg_set_by(self) -> None:
         import app.agents.devops as mod
-        importlib.reload(mod)
         assert mod._VERIFICATION_CFG.set_by == {"bash": "checks_run"}
 
 
@@ -291,7 +289,6 @@ class TestDocsFlags:
 
     def test_verification_cfg_set_by(self) -> None:
         import app.agents.docs as mod
-        importlib.reload(mod)
         assert mod._VERIFICATION_CFG.set_by == {"write_file": "docs_written"}
 
 

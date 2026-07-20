@@ -1,12 +1,12 @@
 # Project Control Center — Live State
-Last updated: 2026-07-17
+Last updated: 2026-07-20 (full audit + gap-closure + Day 7 session)
 
 ---
 
 ## Agent Production Readiness
 
-| Agent | Flags | CONTRACT | Role Prompt (9-section) | VerificationConfig | Tests | Status |
-|-------|-------|----------|------------------------|--------------------|-------|--------|
+| Agent | Flags | CONTRACT | Role Prompt | VerificationConfig | Tests | Status |
+|-------|-------|----------|-------------|--------------------|-------|--------|
 | architect | ✅ | ✅ | ✅ | ✅ `submit_architect_plan→plan_submitted` | ✅ | ✅ PRODUCTION |
 | decomposer | ✅ | ✅ | ✅ | ✅ `submit_subtasks→subtasks_submitted` | ✅ | ✅ PRODUCTION |
 | planner | ✅ | ✅ | ✅ | ✅ `submit_plan→plan_submitted` | ✅ | ✅ PRODUCTION |
@@ -18,7 +18,7 @@ Last updated: 2026-07-17
 | qa | ✅ | ✅ | ✅ | ✅ `bash→tests_run` | ✅ | ✅ PRODUCTION |
 | devops | ✅ | ✅ | ✅ | ✅ `bash→checks_run` | ✅ | ✅ PRODUCTION |
 | research | ✅ | ✅ | ✅ | ✅ `submit_research→research_submitted` | ✅ | ✅ PRODUCTION |
-| executive | ✅ | ✅ | ✅ | ✅ (no tools — pure LLM) | ✅ | ✅ PRODUCTION |
+| executive | ✅ | ✅ | ✅ | N/A — no tools (pure LLM), legitimate | ✅ | ✅ PRODUCTION |
 | docs | ✅ | ✅ | ✅ | ✅ `write_file→docs_written` | ✅ | ✅ PRODUCTION |
 | bug_fix | ✅ | ✅ | ✅ | ✅ `run_tests→tests_passed, git_diff→diff_checked` | ✅ | ✅ PRODUCTION |
 | security_reviewer | ✅ | ✅ | ✅ | ✅ `secrets_scan→scan_ran` | ✅ | ✅ PRODUCTION |
@@ -34,7 +34,7 @@ Last updated: 2026-07-17
 | performance_reviewer | ✅ | ✅ | ✅ | ✅ `explain_query→query_explained` | ✅ | ✅ PRODUCTION |
 | style_reviewer | ✅ | ✅ | ✅ | ✅ `run_linter→lint_ran` | ✅ | ✅ PRODUCTION |
 | sprint_planner | ✅ | ✅ | ✅ | ✅ `estimate_complexity→complexity_estimated` | ✅ | ✅ PRODUCTION |
-| business_analyst | ✅ | ✅ | ✅ | ✅ `read_file→requirements_read` | ✅ | ✅ PRODUCTION |
+| business_analyst | ✅ | ✅ | ✅ | ✅ `read_file→requirements_read` (tag deduped 2026-07-20) | ✅ | ✅ PRODUCTION |
 | migration_agent | ✅ | ✅ | ✅ | ✅ `inspect_schema→schema_inspected` | ✅ | ✅ PRODUCTION |
 | schema_agent | ✅ | ✅ | ✅ | ✅ `inspect_schema→schema_inspected` | ✅ | ✅ PRODUCTION |
 | ai_engineer | ✅ | ✅ | ✅ | ✅ `run_python_snippet/bash→code_tested` | ✅ | ✅ PRODUCTION |
@@ -43,39 +43,42 @@ Last updated: 2026-07-17
 | release_notes_agent | ✅ | ✅ | ✅ | ✅ `git_log→git_log_read` | ✅ | ✅ PRODUCTION |
 | evaluation_agent | ✅ | ✅ | ✅ | ✅ `run_python_snippet→eval_run` | ✅ | ✅ PRODUCTION |
 | rag_engineer_agent | ✅ | ✅ | ✅ | ✅ `read_file→codebase_read` | ✅ | ✅ PRODUCTION |
-| changelog_agent | ✅ | ✅ | ✅ | ✅ `generate_changelog→git_log_read` | ✅ | ✅ PRODUCTION |
+| changelog_agent | ✅ | ✅ | ✅ | ✅ `generate_changelog→git_log_read` (tag deduped 2026-07-20) | ✅ | ✅ PRODUCTION |
 | user_story_generator | ✅ | ✅ | ✅ | ✅ `read_file→codebase_read` | ✅ | ✅ PRODUCTION |
 | security_architect | ✅ | ✅ | ✅ | ✅ `read_file→codebase_read` | ✅ | ✅ PRODUCTION |
 | database_architect | ✅ | ✅ | ✅ | ✅ `read_file→schema_read` | ✅ | ✅ PRODUCTION |
-| manager | ✅ | ✅ | N/A | N/A (orchestrator) | ✅ | ✅ PRODUCTION |
-| chat_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 5 |
-| code_explainer_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 5 |
-| code_quality_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 5 |
-| accessibility_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 5 |
-| api_designer_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 5 |
-| compliance_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 5 |
-| cost_estimator_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 5 |
-| data_pipeline_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 5 |
-| debugger_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 5 |
-| dependency_security_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 6 |
-| devex_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 6 |
-| env_checker_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 6 |
-| feature_flag_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 6 |
-| incident_responder_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 6 |
-| infra_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 6 |
-| load_test_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 6 |
-| localization_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 6 |
-| onboarding_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 6 |
-| pair_programmer_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 6 |
-| rollback_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 6 |
-| runbook_generator_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 6 |
-| slo_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 6 |
-| spike_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 6 |
-| test_coverage_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 6 |
-| test_writer_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 6 |
-| version_manager_agent | — | ❌ | ✅ | ❌ | — | ⏳ Day 6 |
+| manager | N/A (orchestrator, never calls run_agent_graph) | ✅ | ✅ | N/A — legitimate | ✅ | ✅ PRODUCTION |
+| chat_agent | N/A (interactive session, not run_agent_graph) | ✅ *(added 2026-07-20)* | ✅ | ✅ `read_file/search_code→read` *(added 2026-07-20)* | ✅ | ✅ PRODUCTION |
+| code_explainer_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| code_quality_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| accessibility_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| api_designer_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| compliance_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| cost_estimator_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| data_pipeline_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| debugger_agent | ✅ | ✅ | ✅ | ✅ `read_file/git_blame→read` | ✅ | ✅ PRODUCTION |
+| dependency_security_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| devex_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| env_checker_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| feature_flag_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| incident_responder_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| infra_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| load_test_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| localization_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| onboarding_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| pair_programmer_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| rollback_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| runbook_generator_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| slo_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| spike_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| test_coverage_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| test_writer_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| version_manager_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
+| groq_adapter | N/A (infra utility, not a task agent) | N/A *(per plan's own Day 6 note)* | N/A | N/A | — | ✅ registry-only, by design |
 
-*Agents not listed (5 fleet agents): not yet built — Day 9.*
+**67/67 real task agents in `capability_registry`. 68/68 names (incl. groq_adapter) in `agent_models.json`. Day 7 hardening: COMPLETE — see 2026-07-20 session in PROJECT.md.**
+
+*5 fleet-level agents (agent_performance_reviewer, agent_debugger, agent_advisor, knowledge_curator, quality_auditor): not yet built — Day 9.*
 
 ---
 
@@ -83,15 +86,17 @@ Last updated: 2026-07-17
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| capability_registry | ✅ 41 agents registered | 13 Day 1 + 11 Day 2 + 9 Day 3 + 8 Day 4; remaining added per day |
-| agent_registry | ✅ SLEEP/IDLE/RUNNING states wired | `complete_task()` → AgentState.SLEEP after every run |
+| capability_registry | ✅ 67 agents registered | All Day 1–6 batches confirmed via live import + registry inspection (not just doc claims) |
+| agent_registry | ✅ SLEEP/IDLE/RUNNING states wired | `complete_task()` → AgentState.SLEEP after every run; sleep-wiring regression from `dc27e1e` fixed 2026-07-20 |
 | Event bus | ✅ 8 typed events | TaskCreated, TaskStarted, TaskCompleted, TaskFailed, ReviewRequested, LessonPublished, HealthUpdated, MemoryCreated |
-| fleet_checkpoint | ✅ save/restore/rollback + trace_id | trace_id stored in metadata — Gap 10 closed |
+| fleet_checkpoint | ✅ save/restore/rollback + trace_id | trace_id stored in metadata |
 | Fleet OS flags (20 capabilities) | ✅ All default True in base_graph.py | enable_planning, enable_memory, enable_reflection, enable_lesson |
-| Role prompts (9-section template) | ✅ 67/67 files | All agents have all 9 sections |
-| **P1 Activity Stream UI** | ❌ Day 5A | SSE streaming: thinking/tool_call/file_edit/terminal events + Stop+Resume |
-| **P2 Model Router** | ❌ Day 5A | Central model routing for all 68 agents; agent_models.json; Anthropic+OpenAI |
-| **P3 Repo Console** | ❌ Day 5A | Clone→Work→Push web console; git_service.py; workspace scoping |
+| memory_hook_node repo-context injection | ✅ FIXED 2026-07-20 | Was calling a nonexistent `scanner.build_repo_index` (real name: `index_repository`), silently swallowed by a broad except — capability #15 (Architecture Awareness) never actually fired until this fix |
+| Role prompts (v2.0: 11-section global + 7 role-specific) | ✅ 67/67 files verified | Superset of the plan's original 9-section template — see Day 8 note below |
+| **P1 Activity Stream UI** | ✅ Day 5A complete | SSE streaming: thinking/tool_call/file_edit/terminal events + Stop+Resume |
+| **P2 Model Router** | ✅ Day 5A complete | `agent_models.json` covers all 68 names; wired into `run_agent_graph()` |
+| **P3 Repo Console** | ✅ Day 5A complete | Clone→Work→Push web console; `git_service.py`; workspace scoping |
+| Groq test shim | ✅ TEMPORARY, isolated | `USE_GROQ=true` in `.env` is for local manual/dev-server use only; `tests/conftest.py` forces `USE_GROQ=false` for the unit suite (fixed 2026-07-20 — was silently making real network calls for ~2000 tests) |
 | Budget manager | ❌ Not built | Day 10 |
 | Benchmark manager | ❌ Not built | Day 10 |
 | Prompt registry | ❌ Not built | Day 11 |
@@ -101,41 +106,40 @@ Last updated: 2026-07-17
 
 ---
 
-## Gap Summary (as of 2026-07-17)
+## Gap Summary (as of 2026-07-20)
 
 | Gap | Status | Day |
 |-----|--------|-----|
 | Fleet OS flags default True | ✅ CLOSED | Day 0 |
-| Agent SLEEP transition (Gap 7) | ✅ CLOSED | Day 0 |
+| Agent SLEEP transition (Gap 7) | ✅ CLOSED (regression fixed 2026-07-20) | Day 0 |
 | trace_id in fleet_checkpoint (Gap 10) | ✅ CLOSED | Gap fix 2026-07-17 |
-| Role prompts all 67 files (9 sections) | ✅ CLOSED | Gap fix 2026-07-17 |
-| VerificationConfig set_by for planning agents | ✅ CLOSED | Gap fix 2026-07-17 |
+| Role prompts all files | ✅ CLOSED (v2.0 superset, verified 2026-07-20) | Gap fix 2026-07-17 + v2.0 2026-07-20 |
 | AGENT_CONTRACT + _register() Day 1 agents | ✅ CLOSED | Sessions 1–4 |
 | AGENT_CONTRACT + _register() Day 2 agents | ✅ CLOSED | Day 2 |
-| AGENT_CONTRACT Day 3 batch | ✅ CLOSED | Day 3 2026-07-17 |
-| AGENT_CONTRACT Day 4 batch | ✅ CLOSED | Day 4 2026-07-17 |
-| P1 Activity Stream UI (streaming, stop, resume, file attach) | ❌ OPEN | Day 5A |
-| P2 Central Model Router (68-agent mapping, Anthropic+OpenAI) | ❌ OPEN | Day 5A |
-| P3 Repo Console (clone→work→push, workspace service) | ❌ OPEN | Day 5A |
-| AGENT_CONTRACT Day 5 batch | ❌ OPEN | Day 5B |
-| AGENT_CONTRACT Day 6 batch | ❌ OPEN | Day 6 |
-| enforce_in_result empty for 7 Day 1 agents | ✅ CLOSED | Gap fix 2026-07-17 |
-| Capability collisions (decomposer/arch_reviewer, reviewer/security_reviewer, bug_fix/refactor) | ✅ CLOSED | Gap fix 2026-07-17 |
-| Model tier wrong (devops/docs/monitoring=router; research/executive=router) | ✅ CLOSED | Gap fix 2026-07-17 |
-| VerificationConfig hardening all 68 (Day 7) | ⏳ PARTIAL (33/68 done) | Day 7 |
+| AGENT_CONTRACT Day 3 batch | ✅ CLOSED | Day 3 |
+| AGENT_CONTRACT Day 4 batch | ✅ CLOSED | Day 4 |
+| P1 Activity Stream UI | ✅ CLOSED | Day 5A |
+| P2 Central Model Router | ✅ CLOSED | Day 5A |
+| P3 Repo Console | ✅ CLOSED | Day 5A |
+| AGENT_CONTRACT Day 5B batch (9 agents) | ✅ CLOSED (chat_agent gap found + fixed 2026-07-20) | Day 5B + gap fix |
+| AGENT_CONTRACT Day 6 batch (17 + groq_adapter) | ✅ CLOSED | Day 6 |
+| Capability tag duplicates (business_analyst/user_story_generator, changelog_agent/release_notes_agent) | ✅ CLOSED | Gap fix 2026-07-20 |
+| Groq-bypass sleep-wiring regression + test-suite network-call leak | ✅ CLOSED | Gap fix 2026-07-20 |
+| ReviewResult isinstance bug (importlib.reload class-identity) | ✅ CLOSED | Gap fix 2026-07-20 |
+| chat_agent._BACKGROUND_PROCESSES runtime bug | ✅ CLOSED | Gap fix 2026-07-20 |
+| VerificationConfig hardening all agents (Day 7) | ✅ CLOSED | Day 7 — 2026-07-20 |
 | 5 new fleet agents | ❌ OPEN | Day 9 |
 | budget_manager + benchmark_manager + tool_discovery | ❌ OPEN | Day 10 |
 | prompt_registry + regression_detector + versioned_memory | ❌ OPEN | Day 11 |
 | End-to-end pipeline smoke test | ❌ OPEN | Day 12 |
-| PROJECT_CONTROL_CENTER.md | ✅ CLOSED | Gap fix 2026-07-17 |
-| ARCHITECTURE_GRAPHS.md | ✅ CLOSED | Gap fix 2026-07-17 |
 
 ---
 
 ## Open Issues
 
-- [ ] 17 pre-existing test failures in `test_final_session.py` / `test_new_tools.py` — caused by unbuilt frontend features (login page, migration 010, etc.). Not fleet-related; blocked on infra work.
-- [ ] `mypy --strict` non-zero errors in `base_graph.py` (LangGraph overload typing) — pre-existing, not introduced by fleet work.
+- [ ] mypy `--strict`: 34 pre-existing errors, 0 new. 18 in `app/repo_tools/browser_driver.py` (predates Fleet Days, unrelated to fleet work). 7 in `base_graph.py` (LangGraph `StateGraph` generic/overload typing — known library-stub limitation). Remainder scattered (`tools.py`, `agent_result.py`, `audit_log.py`, `config.py`, `jwt.py`).
+- [ ] 55 skipped tests (pre-existing — unbuilt frontend features) + 17 deselected (real-LLM Groq tests, rate-limited on free tier, pending until `ANTHROPIC_API_KEY` available — see memory `pending_anthropic_tests`).
+- [ ] Fleet work has been happening directly on `main` rather than the plan's prescribed `fleet-enhancement-day0` branch (Pre-Day 0A). Process deviation, not a functional bug — flagged for awareness, not blocking.
 
 ---
 
@@ -144,12 +148,15 @@ Last updated: 2026-07-17
 | Day | Date | Tests | Key Deliverable |
 |-----|------|-------|-----------------|
 | Sessions 1–4 | 2026-07-16 | 123/123 | 13 agents migrated to run_agent_graph + AGENT_CONTRACT |
-| Day 0 | 2026-07-16 | 1525+ | 20 Fleet OS capabilities enabled fleet-wide (all flags default True) |
-| Day 1 | 2026-07-17 | +17 | 13 agents: fleet flags wired explicitly + VerificationConfig + role prompts |
-| Day 2 | 2026-07-17 | +81 | 11 agents: AGENT_CONTRACT + _register() + role prompts (9-section) |
-| Gap Fixes | 2026-07-17 | — | trace_id checkpoint, VerificationConfig 5 agents, role prompts 67/67, PCC + arch graphs |
-| Day 3 | 2026-07-17 | +76 | 9 agents: AGENT_CONTRACT + _register() + fleet flags + VerificationConfig enforce; fix test path bug |
-| Gap Fix (enforce) | 2026-07-17 | +7 | enforce_in_result filled for 7 Day 1 agents; 7 new parametrized tests added; 33/33 agents fully verified |
-| Gap Fix (deep audit) | 2026-07-17 | — | 3 capability collisions fixed; 5 model tier bugs fixed; final audit 0 issues across 33 agents |
-| Day 4 | 2026-07-17 | +158 | 8 agents: AGENT_CONTRACT + _register() + fleet flags + VerificationConfig; 0 audit issues; 1878/1878 suite pass |
-| Plan Update | 2026-07-17 | — | 3 Platform Enhancements added: P1 Streaming UI, P2 Model Router, P3 Repo Console — Day 5 split into 5A (platform) + 5B (agents) |
+| Day 0 | 2026-07-16 | 1525+ | 20 Fleet OS capabilities enabled fleet-wide |
+| Day 1 | 2026-07-17 | +17 | 13 agents: fleet flags + VerificationConfig + role prompts |
+| Day 2 | 2026-07-17 | +81 | 11 agents: AGENT_CONTRACT + _register() + role prompts |
+| Gap Fixes | 2026-07-17 | — | trace_id checkpoint, VerificationConfig, role prompts 67/67, PCC + arch graphs |
+| Day 3 | 2026-07-17 | +76 | 9 agents: AGENT_CONTRACT + _register() + fleet flags + VerificationConfig |
+| Day 4 | 2026-07-17 | +158 | 8 agents: AGENT_CONTRACT + _register() + fleet flags + VerificationConfig |
+| Day 5A | 2026-07-17 | +53 | P1 Streaming UI, P2 Model Router, P3 Repo Console — platform foundations |
+| Day 5B | 2026-07-17 | +97 | 8/9 agents AGENT_CONTRACT (chat_agent gap found + closed 2026-07-20) |
+| Day 6 | ~2026-07-18/19 | — | 17 agents + groq_adapter AGENT_CONTRACT batch |
+| v2.0 Role Prompts | 2026-07-20 | 2260 | DRY `_GLOBAL_STANDARDS.md` + 7 role-specific sections, all 67 files |
+| **Full Audit + Gap-Closure** | **2026-07-20** | **2254/2254, 0 failed** | Found + fixed 11 real gaps (see PROJECT.md session log): chat_agent migration, groq_adapter registration, Groq-bypass regression + test-network-leak, repo-context injection bug, duplicate capability tags, test-order pollution, ReviewResult reload bug, chat_agent background-process bug, 13 mypy fixes |
+| **Day 7 — VerificationConfig Hardening** | **2026-07-20** | **2254/2254** | 0 empty configs (except legitimate executive/manager), 0 duplicate tags, 0 dead enforce keys, 0 `verify_agent_contract()` violations |

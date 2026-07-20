@@ -299,6 +299,20 @@ class TestAgentRegistryRegistration:
 # ---------------------------------------------------------------------------
 
 class TestFleetManagerSelection:
+    @pytest.fixture(autouse=True)
+    def _recover_agents(self) -> None:
+        # agent_registry is a process-wide singleton; another test elsewhere in
+        # the full-suite run may leave backend_dev/frontend_dev/coder in a
+        # non-available state (RUNNING/ERROR) via start_task() without a
+        # matching complete_task()/fail_task(). recover() resets state=SLEEP,
+        # error_count=0, health=healthy so selection here doesn't depend on
+        # test execution order.
+        from app.fleet.agent_registry import get_agent_registry
+        reg = get_agent_registry()
+        for name in ("backend_dev", "frontend_dev", "coder"):
+            instance = reg.get(name) or reg.register(name)
+            instance.recover()
+
     def test_selects_backend_dev(self) -> None:
         from app.fleet.fleet_manager import FleetManager
         plan = FleetManager().select("backend_development")

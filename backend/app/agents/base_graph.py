@@ -330,8 +330,8 @@ def _make_memory_hook_node(
         if repo_path and not state.get("repo_context"):
             try:
                 from app.repo_tools.context_builder import build_context
-                from app.repo_tools.scanner import build_repo_index
-                idx = build_repo_index(repo_path)
+                from app.repo_tools.scanner import index_repository
+                idx = index_repository(repo_path)
                 ctx = build_context(task_description=query or "general", index=idx, top_k=10)
                 summary = f"## Repo context\nRelevant files: {', '.join(ctx.relevant_files[:8])}"
                 if ctx.related_symbols:
@@ -649,10 +649,10 @@ def _make_router(
 
     def router(state: AgentRunState) -> str:
         if state.get("submitted"):
-            return END  # type: ignore[return-value]
+            return END
         if state["turns"] >= max_turns:
             logger.warning("Agent hit max_turns (%d) — stopping", max_turns)
-            return END  # type: ignore[return-value]
+            return END
 
         last_msg = state["messages"][-1] if state["messages"] else {}
         content = last_msg.get("content", []) if isinstance(last_msg, dict) else []
@@ -665,7 +665,7 @@ def _make_router(
         n_stalls = state.get("n_stalls", 0) + 1
         if n_stalls >= max_stalls:
             logger.warning("Agent stalled %d turns without tool calls — stopping", n_stalls)
-        return END  # type: ignore[return-value]
+        return END
 
     return router
 
@@ -839,52 +839,66 @@ def run_agent_graph(
         # ------------------------------------------------------------------
         from app.config import get_settings as _gs
         if _gs().use_groq:
-            from app.agents.base import run_agent as _run_agent
+            # TEMPORARY shim, easily removable — see docs/FLEET_ENHANCEMENT_PLAN.md
+            # "Testing Strategy — Groq (now) vs Anthropic (later)". Production always
+            # runs on Anthropic/OpenAI; this path only exists until a real key is
+            # available. Only a missing role file (synthetic/test role names with
+            # no roles/<name>.md) falls through to the normal LangGraph path below —
+            # every other exception (real Groq API/network errors) still raises
+            # normally, exactly as before this shim existed, so it can never mask
+            # a real failure or silently retry into a slow/hanging fallback call.
+            try:
+                from app.agents.base import run_agent as _run_agent
 
-            # Wrap every submit_* handler to capture its input into tool_handlers["_result"].
-            # Without this, the bypass can't detect submission because the handlers
-            # only return strings and never populate "_result" themselves.
-            for _hname in list(tool_handlers.keys()):
-                if _hname.startswith("submit_"):
-                    _orig_h = tool_handlers[_hname]
-                    def _make_wrapper(_oh: Any) -> Any:
-                        def _wrapper(inp: dict[str, Any]) -> Any:
-                            tool_handlers["_result"] = inp
-                            return _oh(inp)
-                        return _wrapper
-                    tool_handlers[_hname] = _make_wrapper(_orig_h)
+                # Wrap every submit_* handler to capture its input into tool_handlers["_result"].
+                # Without this, the bypass can't detect submission because the handlers
+                # only return strings and never populate "_result" themselves.
+                for _hname in list(tool_handlers.keys()):
+                    if _hname.startswith("submit_"):
+                        _orig_h = tool_handlers[_hname]
+                        def _make_wrapper(_oh: Any) -> Any:
+                            def _wrapper(inp: dict[str, Any]) -> Any:
+                                tool_handlers["_result"] = inp
+                                return _oh(inp)
+                            return _wrapper
+                        tool_handlers[_hname] = _make_wrapper(_orig_h)
 
-            _msgs: list[dict[str, Any]] = [{"role": "user", "content": initial_message}]
-            _text, _in, _out, _cr, _cc = _run_agent(
-                role_name=role_name,
-                model=model,
-                messages=_msgs,
-                tools=tools,
-                tool_handlers=tool_handlers,
-                max_turns=max_turns,
-            )
-            _result: dict[str, Any] = tool_handlers.get("_result") or {}  # type: ignore[assignment]
-            _submitted = bool(_result)
-            _groq_state: AgentRunState = {
-                "messages": _msgs,
-                "verification": dict(verification_cfg.initial),
-                "result": _result,
-                "turns": 1,
-                "submitted": _submitted,
-                "requires_human_approval": False,
-                "tokens_in": _in,
-                "tokens_out": _out,
-                "plan": "",
-                "facts": "",
-                "n_stalls": 0,
-                "retry_count": 0,
-                "confidence": 1.0,
-                "status": "completed" if _submitted else "blocked",
-                "trace_id": tid,
-                "memory_context": "",
-                "repo_context": "",
-            }
-            return _groq_state
+                _msgs: list[dict[str, Any]] = [{"role": "user", "content": initial_message}]
+                _text, _in, _out, _cr, _cc = _run_agent(
+                    role_name=role_name,
+                    model=model,
+                    messages=_msgs,
+                    tools=tools,
+                    tool_handlers=tool_handlers,
+                    max_turns=max_turns,
+                )
+                _result: dict[str, Any] = tool_handlers.get("_result") or {}
+                _submitted = bool(_result)
+                _groq_state: AgentRunState = {
+                    "messages": _msgs,
+                    "verification": dict(verification_cfg.initial),
+                    "result": _result,
+                    "turns": 1,
+                    "submitted": _submitted,
+                    "requires_human_approval": False,
+                    "tokens_in": _in,
+                    "tokens_out": _out,
+                    "plan": "",
+                    "facts": "",
+                    "n_stalls": 0,
+                    "retry_count": 0,
+                    "confidence": 1.0,
+                    "status": "completed" if _submitted else "blocked",
+                    "trace_id": tid,
+                    "memory_context": "",
+                    "repo_context": "",
+                }
+                return _groq_state
+            except FileNotFoundError as _groq_exc:
+                logger.warning(
+                    "Groq bypass found no role file for %s (%s) — falling through to normal graph",
+                    role_name, _groq_exc,
+                )
 
         graph = build_agent_graph(
             role_name=role_name,
@@ -927,7 +941,7 @@ def run_agent_graph(
             "repo_context": "",
         }
 
-        final_state: AgentRunState = graph.invoke(initial_state)  # type: ignore[assignment]
+        final_state: AgentRunState = graph.invoke(initial_state)
 
         # Post-graph lesson extraction (non-fatal, runs after graph completes)
         if enable_lesson and final_state.get("submitted"):
