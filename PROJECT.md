@@ -2332,3 +2332,33 @@ pytest tests/ -q -p no:cacheprovider
 ✅ GREEN FLAG — DAY 8 COMPLETE. Ready for Day 9 (5 new fleet-level agents:
 agent_performance_reviewer, agent_debugger, agent_advisor, knowledge_curator,
 quality_auditor).
+
+---
+
+## 2026-07-20 — Day 9 Planning Session (research only, implementation next session)
+
+Per user request: research Day 9 fully today (repos + codebase grounding) so tomorrow is
+pure implementation. Full concrete, implementation-ready plan written to
+**`docs/DAY9_PLAN.md`** — read that file first at the start of the Day 9 implementation
+session, before re-deriving anything.
+
+Summary of what was resolved today (full detail + code citations in the plan doc):
+- Repo research: `swe-agent/reviewer.py` (independent verification, not self-report —
+  informs agent_performance_reviewer + quality_auditor), autogen's MemoryController pattern
+  (already implemented as `LessonStore`/`lesson_node` — informs knowledge_curator's scope)
+- Grounded every one of the 5 agents' required tools against real existing code:
+  `MetricsCollector` (`app/fleet/metrics.py`) for `fleet_metrics_read`, `AuditLog`
+  (`app/fleet/audit_log.py`) for `audit_log_read`, `query_similar_tasks`/`MemoryEmbedding`
+  (`app/memory/store.py`, `app/api/memory.py`) for `knowledge_curator`'s memory tools
+- **Resolved a real ambiguity**: two different "memory" systems exist (in-process
+  `LessonStore` vs. persistent `memory_embeddings` DB table) — decided `knowledge_curator`
+  must curate the persistent DB-backed one, since Day 11's `versioned_memory.py` is designed
+  to extend it and `LessonStore` has no list/delete API to curate against anyway
+- Resolved the async-DB-from-sync-tool-handler question: plain `asyncio.run(...)` is safe
+  here (no event loop already running when `execute_tools` calls a handler), no need for the
+  `run_coroutine_threadsafe` pattern used elsewhere in `tools.py` for a different case
+- 3 genuinely new tools identified (`fleet_metrics_read`, `audit_log_read`,
+  `memory_search`/`memory_curate_read`/`memory_curate_write`) — everything else is the
+  well-established per-agent `debugger_agent.py`-shaped pattern
+- Picked 5 collision-checked capability tags (`agent_performance_review`, `agent_debugging`,
+  `architecture_advisory`, `knowledge_curation`, `fleet_quality_audit`)
