@@ -352,10 +352,13 @@ def test_submit_enhancement_request_writes_row() -> None:
         return r.scalars().first()
 
     row = asyncio.run(_with_isolated_session(_fetch))
-    assert row is not None
-    assert row.status == "pending"
-    assert row.title == "pytest title"
-    asyncio.run(_cleanup_enhancement_requests([row.id]))
+    try:
+        assert row is not None
+        assert row.status == "pending"
+        assert row.title == "pytest title"
+    finally:
+        if row is not None:
+            asyncio.run(_cleanup_enhancement_requests([row.id]))
 
 
 def test_submit_enhancement_request_repeated_calls_same_process() -> None:
@@ -367,12 +370,14 @@ def test_submit_enhancement_request_repeated_calls_same_process() -> None:
     handler = make_submit_enhancement_request_handler("test_agent_xyz2", trace_id="pytest-trace-2")
     r1 = handler({"title": "a", "description": "a", "category": "bug", "priority": "low", "evidence": {}})
     r2 = handler({"title": "b", "description": "b", "category": "bug", "priority": "low", "evidence": {}})
-    assert "[ERROR]" not in r1
-    assert "[ERROR]" not in r2
 
     import re
     ids = [int(m.group(1)) for r in (r1, r2) if (m := re.search(r"#(\d+)", r))]
-    asyncio.run(_cleanup_enhancement_requests(ids))
+    try:
+        assert "[ERROR]" not in r1
+        assert "[ERROR]" not in r2
+    finally:
+        asyncio.run(_cleanup_enhancement_requests(ids))
 
 
 def test_memory_curate_write_updates_row() -> None:
