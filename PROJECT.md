@@ -2483,3 +2483,71 @@ mypy app/ --strict
 ### Verdict
 ✅ GREEN FLAG — DAY 10 COMPLETE. Ready for Day 11 (prompt_registry,
 regression_detector, versioned_memory).
+
+## 2026-07-21 — Day 11 Complete: prompt_registry, regression_detector, versioned_memory
+
+Plan: `docs/DAY11_PLAN.md` (repo-first research done before any design — see plan doc for the
+full findings). Full report: `docs/reports/FLEET_DAY11_TEST_REPORT.md`.
+
+### Repo-first research findings (grounded before building anything)
+Checked `repos/roo-code` (checkpoint/rollback), `repos/langgraph` (checkpoint lineage +
+cross-thread store), `repos/swe-agent` (reviewer.py), `repos/autogen` (MemoryController),
+`repos/open-hands` (memory module — this checkout has none), `repos/aider` (prompt versioning —
+none). Honest finding: **none of the 10 repos implement an approval-gate prompt lifecycle,
+baseline-regression blocking, or merge-on-conflict memory** — all three modules are novel designs
+here. What was borrowed: roo-code's immutable-snapshot + pointer-swap-restore mechanics,
+LangGraph's parent-pointer lineage concept, and — critically — Day 10's own `benchmark_manager`
+already solves the "regression" half of the problem, so `regression_detector.py` wraps it instead
+of reimplementing comparison logic.
+
+Also corrected a wrong assumption in the original plan doc during verification: it claimed lessons
+already live in "the existing memory DB table" — grepping confirmed there is no `lessons` table
+anywhere; `LessonStore` (`base_graph.py`) is a plain in-process list with zero persistence.
+`versioned_memory.py` needed a genuinely new table (`versioned_lessons`, migration 014), not new
+columns on an existing one.
+
+### regression_detector.py (built first — prompt_registry depends on it)
+Thin deploy-time gate wrapping `benchmark_manager.compare_to_baseline()` — no new comparison math.
+`RegressionGate`, `DeploymentBlocked` exception, `check_agent()`, `gate_deploy()` (raises before any
+write happens), `check_fleet()`. 7 tests.
+
+### prompt_registry.py
+Versioned role prompts: `draft → in_review → approved → deployed → superseded`, each version an
+immutable DB row (`prompt_versions`, migration 013) with a `parent_version_id` lineage pointer.
+`deploy()` calls `regression_detector.gate_deploy()` first — a regressed agent's approved prompt
+version cannot go live — then writes `content` to the real `backend/roles/{role_name}.md` file
+(`app.agents.base.load_role()` needed zero changes, since it already reads fresh from disk every
+call). `rollback()` restores the most recent superseded version by re-deploying its content
+directly (skips re-approval, mirrors roo-code's hard-reset restore). Path writes are confined to
+`backend/roles/` with an explicit traversal check, verified with a `../../etc/passwd` test case.
+10 tests, including a real Postgres + real-file round-trip with `try/finally` cleanup of both.
+
+### versioned_memory.py
+New `versioned_lessons` table (migration 014). `publish(topic, content)` embeds via
+`app.memory.store._embed()` (reused, not reimplemented — same Voyage AI + zero-vector-fallback
+pattern as Day 6's engineering memory) and searches existing `published` rows by cosine similarity
+(`<=>`, reusing the exact pgvector query pattern from `query_similar_tasks()`). Below
+`MEMORY_MERGE_SIMILARITY_THRESHOLD` (config, default 0.85): fresh V1. At or above: a real conflict
+— inserts V2 as `draft`, calls the configured planner-tier (Haiku) model once to merge V1+V2 into
+`V_merged`, publishes `V_merged`, flips V1 to `superseded` and V2 to `merged_into`. `rollback()` and
+`archive_expired()` (respecting `LESSON_RETENTION_DAYS`) round out the lifecycle. Does not replace
+`LessonStore` — that stays the in-process fast-read cache for prompt injection during a live run;
+this is the durable version-history layer underneath it. 10 tests, including a found-and-fixed bug
+(`rollback()` was returning the stale pre-flip `state` value instead of the real post-rollback
+state — caught by a test assertion, not assumed correct).
+
+### Test Results
+```
+pytest tests/ -q
+→ 2544 passed, 0 failed, 55 skipped, 17 deselected, 4 warnings in 58.30s
+
+mypy app/ --strict
+→ 32 errors, all pre-existing (identical to the Day 10 baseline), 0 new
+```
+
+Verified 0 residual rows in both new tables (`prompt_versions`, `versioned_lessons`) and 0
+leftover files in `backend/roles/` after the full suite run.
+
+### Verdict
+✅ GREEN FLAG — DAY 11 COMPLETE. Ready for Day 12 (end-to-end pipeline smoke test + failure
+recovery ladder + event compliance + hierarchy chain verification).
