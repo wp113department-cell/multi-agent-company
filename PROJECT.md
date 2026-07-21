@@ -2623,3 +2623,80 @@ mypy app/ --strict
 ### Verdict
 ✅ GREEN FLAG — DAY 12 COMPLETE. Ready for Day 13 (Human Approval UI —
 LangGraph `interrupt()` + `Command(resume=...)` for full agent-run-level approval flows).
+
+## 2026-07-21 — Day 13 Complete: Human Approval UI
+
+Plan: `docs/DAY13_PLAN.md`, grounded in a live, empirical test against the installed LangGraph
+1.2.7 package (not just reading `repos/langgraph`'s source) before any design. Full report:
+`docs/reports/FLEET_DAY13_TEST_REPORT.md`.
+
+### Key research finding, verified empirically, not assumed
+Ran a real `interrupt()`/`Command(resume=...)` cycle against an `InMemorySaver`-checkpointed graph
+and confirmed: (1) `invoke()`'s return value carries a `"__interrupt__"` key when paused, and
+`get_state(config).interrupts` is the live source of truth for "is this thread paused right now";
+(2) **the entire node body re-runs from the top on resume** — a counter incremented before
+`interrupt()` went from 1 to 2 across a pause/resume cycle. This means any DB write meant to record
+"a pause just happened" must happen in the *calling* code after `invoke()` confirms the pause, never
+inside the paused node itself. Also confirmed a real architectural constraint: `base_graph.py`'s
+`run_agent_graph()` (all 72+ agents) takes `tool_handlers` as external Python closures, which can't
+be reconstructed from a cold HTTP request without per-agent work — but `pipeline/graph.py`'s nodes
+rebuild everything from primitive `state` fields, so its existing checkpointer + `interrupt()` (real,
+proven correct in Day 12's smoke test) is the one resumable-from-cold approval gate that exists today.
+
+### Scope decision
+Built a **generic approvals system** (tracking table, audit log integration, list/get/approve/reject
+API, frontend page) as infrastructure any future `interrupt()` call site registers into, wired to the
+one real, already-working call site (`pipeline/graph.py`'s `human_review_node`) as its first
+consumer — rather than retrofitting the 72-agent-shared `base_graph.py` hot path (a separate, larger,
+riskier piece of work) or reusing the plan's literal git-push example (explicitly Day 14's job,
+`git_push_tool.py` doesn't exist yet). The existing `/pipeline/approve`/`/pipeline/reject` endpoints
+(tested in Day 12) are untouched; the new `/api/approvals/*` endpoints call the exact same
+`resume_planning_pipeline()` internally — reused, not duplicated — so Day 14's git-push gate can
+register into this same system with zero new plumbing.
+
+### What was built
+- `pending_approvals` table (migration 015) + `app/fleet/approval_gate.py` — pure tracking/indexing,
+  no `interrupt()`-calling logic (that already exists and works). Both sync (`record_pending`,
+  `list_pending`, `get_pending`, `record_decision`) and async (`arecord_pending`, etc.) facades —
+  needed both, see bug below.
+- Wired `record_pending()`/`record_decision()` into `launch_planning_pipeline`/
+  `resume_planning_pipeline`, plus `audit_log.record_approval()` (already existed — reused).
+- `backend/app/api/approvals.py`: `GET /pending`, `GET /{thread_id}`, `POST /{thread_id}/approve`,
+  `POST /{thread_id}/reject` — 404/409 semantics mirroring Day 9's `enhancement_requests` pattern.
+- `apps/web/app/approvals/page.tsx` + NavBar link with a live pending-count badge, same shape as
+  Day 9's `/fleet` page. Verified with a real production build (`next build`, `/approvals` compiles
+  clean) and against real running backend + frontend dev servers (found and worked around a stale
+  uvicorn process from earlier in the session squatting on port 8000, serving pre-Day-13 code).
+
+### Two real bugs found and fixed, not assumed away
+1. **Silent failure calling sync `asyncio.run()` facades from already-async code**: the first wiring
+   attempt called the sync `record_pending`/`record_decision` (which use `asyncio.run()` internally)
+   directly from `launch_planning_pipeline`/`resume_planning_pipeline` — themselves async, running
+   inside FastAPI's live event loop. `asyncio.run()` cannot be called from a running loop; the calls
+   failed every time, silently swallowed by a broad `except Exception`. Fixed by adding proper async
+   facades (`arecord_pending`, `arecord_decision`) for async call sites — a new variant of the
+   asyncio-loop hazard already documented in memory, not the same shape as the prior two occurrences.
+2. **Pre-existing, unrelated to Day 13's own changes**: `resume_planning_pipeline`'s reject path calls
+   `transition_task(db, task_id, "rejected")`, but `DevTask.status` is still `"planning"` at that point
+   (the pause is tracked in the separate `PipelineState.stage` column) — and `"planning"` → `"rejected"`
+   was never a valid transition in `VALID_TRANSITIONS`. This means **rejecting a plan during the
+   approval pause has been broken since Day 0** in real production use, not just in the new test that
+   found it (Day 12 never tested the reject path). Fixed by adding the missing transition.
+
+### Test Results
+```
+pytest tests/ -q
+→ 2583 passed, 0 failed, 55 skipped, 17 deselected, 10 warnings in 76.40s
+
+mypy app/ --strict
+→ 32 errors, all pre-existing (identical to the Day 12 baseline), 0 new
+
+Frontend: npm run lint (0 errors, 3 pre-existing unrelated warnings), npm run build (succeeds,
+/approvals route compiles at 1.78kB), tsc --noEmit (clean)
+```
+
+Verified 0 residual `pending_approvals` rows after the full suite run.
+
+### Verdict
+✅ GREEN FLAG — DAY 13 COMPLETE. Ready for Day 14 (Git Push Workflow — branch/commit/PR creation,
+registers into this same approvals system for the push-approval gate).

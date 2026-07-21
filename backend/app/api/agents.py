@@ -90,6 +90,24 @@ async def launch_planning_pipeline(task_id: int, title: str, description: str, r
             if subtasks:
                 await save_subtasks(db, task_id, subtasks)
 
+            # Day 13 — generic approvals index. Recorded here (after ainvoke()
+            # confirms the real pause), never inside human_review_node itself —
+            # LangGraph re-runs the whole node body on resume, so a write there
+            # would duplicate on every approve/reject cycle.
+            try:
+                from app.fleet.approval_gate import arecord_pending
+                await arecord_pending(
+                    thread_id=f"task-{task_id}", action="plan_review",
+                    details={
+                        "subtasks_count": len(subtasks),
+                        "risk_level": architect_plan.get("risk_level", "unknown"),
+                        "technical_approach": str(architect_plan.get("technical_approach", ""))[:500],
+                    },
+                    agent_name="decomposer", task_id=task_id,
+                )
+            except Exception:
+                logger.warning("Failed to record pending approval for task %d", task_id, exc_info=True)
+
             if pm_brief:
                 await save_artifact_async(task_id, "pm_brief", pm_brief, "pm_agent", db=db)
             if architect_plan:
@@ -125,6 +143,22 @@ async def resume_planning_pipeline(task_id: int, approved: bool, repo_path: str 
         try:
             result = await resume_pipeline(task_id=task_id, approved=approved)
             stage = result.get("stage", "rejected")
+
+            try:
+                from app.fleet.approval_gate import arecord_decision
+                await arecord_decision(thread_id=f"task-{task_id}", approved=approved, decided_by="user")
+            except Exception:
+                logger.warning("Failed to record approval decision for task %d", task_id, exc_info=True)
+
+            try:
+                from app.fleet.audit_log import get_audit_log
+                get_audit_log().record_approval(
+                    agent_name="decomposer", action_type="plan_review",
+                    description=f"Plan review for task {task_id}",
+                    approved=approved, task_id=str(task_id),
+                )
+            except Exception:
+                logger.warning("Failed to write audit log entry for task %d", task_id, exc_info=True)
 
             if approved and stage == "done":
                 await update_pipeline_state(db, task_id, "done", approved=True)

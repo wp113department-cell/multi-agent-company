@@ -19,8 +19,15 @@ VALID_TRANSITIONS: dict[str, list[str]] = {
     # Ladder's Abort rung, app/fleet/failure_ladder.py). Previously nothing
     # ever transitioned into "failed" despite it being a defined terminal
     # status — confirmed by inspection before this change, not assumed.
+    # "rejected" added to "planning" (Day 13 — found via test_approvals_api.py):
+    # resume_planning_pipeline()'s reject path calls transition_task(db,
+    # task_id, "rejected") while the task's DevTask.status is still "planning"
+    # (the human_review pause is tracked in the separate PipelineState.stage
+    # column, not DevTask.status) — this transition was missing since Day 0,
+    # meaning rejecting a plan during the approval pause has always raised
+    # TransitionError in real use, not just in this new test.
     "pending": ["planning", "blocked", "failed"],
-    "planning": ["ready_for_review", "blocked", "failed"],
+    "planning": ["ready_for_review", "blocked", "rejected", "failed"],
     "ready_for_review": ["coding", "blocked", "rejected", "failed"],
     "coding": ["testing", "blocked", "failed"],
     "testing": ["ready_for_review", "blocked", "failed"],
@@ -425,3 +432,29 @@ class VersionedLesson(Base):
     state: Mapped[str] = mapped_column(String(20), default="draft", index=True)  # draft|published|superseded|merged_into|archived
     supersedes_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("versioned_lessons.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PendingApproval(Base):
+    """Day 13 — app/fleet/approval_gate.py.
+
+    Generic index of "a LangGraph thread is paused at interrupt() awaiting a
+    human decision" — sits above whichever flow actually owns the interrupt()
+    call (today: app/pipeline/graph.py's human_review_node, exercised via
+    launch_planning_pipeline/resume_planning_pipeline; Day 14's git-push
+    approval gate registers into this same table). Rows are written once,
+    after invoke() returns and the pause is confirmed — never inside the
+    paused node itself, since LangGraph re-runs the whole node body on
+    resume (verified empirically before writing this model).
+    """
+    __tablename__ = "pending_approvals"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    thread_id: Mapped[str] = mapped_column(String(100), index=True)
+    task_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    agent_name: Mapped[str] = mapped_column(String(100), default="")
+    action: Mapped[str] = mapped_column(String(50))  # e.g. "plan_review"
+    details: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)  # pending|approved|rejected
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
