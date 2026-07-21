@@ -115,3 +115,29 @@ def test_record_decision_is_idempotent_only_against_pending_rows() -> None:
         assert still.decided_by == "alice"
     finally:
         _cleanup(thread_id)
+
+
+def test_record_pending_supersedes_prior_undecided_row_for_same_thread() -> None:
+    """Gap-closure (2026-07-21): restarting a task via POST /tasks/{id}/restart
+    while paused at human_review previously left the old row orphaned as
+    "pending" forever — a stale duplicate list_pending() could never clear."""
+    thread_id = "td_ag_restart_supersede"
+    try:
+        first = ag.record_pending(thread_id, "plan_review", {"round": 1}, task_id=5)
+        assert first.status == "pending"
+
+        second = ag.record_pending(thread_id, "plan_review", {"round": 2}, task_id=5)
+        assert second.status == "pending"
+        assert second.id != first.id
+
+        # the old row must no longer show up as pending
+        pending_ids = {p.id for p in ag.list_pending() if p.thread_id == thread_id}
+        assert pending_ids == {second.id}
+
+        # get_pending() (latest row) must return the new one
+        latest = ag.get_pending(thread_id)
+        assert latest is not None
+        assert latest.id == second.id
+        assert latest.details["round"] == 2
+    finally:
+        _cleanup(thread_id)

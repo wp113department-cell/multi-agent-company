@@ -2700,3 +2700,71 @@ Verified 0 residual `pending_approvals` rows after the full suite run.
 ### Verdict
 ✅ GREEN FLAG — DAY 13 COMPLETE. Ready for Day 14 (Git Push Workflow — branch/commit/PR creation,
 registers into this same approvals system for the push-approval gate).
+
+## 2026-07-21 — Days 11–13 Gap-Closure Audit
+
+Per user request, before starting Day 14: an independent audit of Days 11–13, checking not just
+"do tests pass" but "is every built module actually called from real code, or just built and
+tested in isolation." Found the same recurring pattern Day 12 already found once for
+`fleet_manager`/`agent_bus` — this time in Day 10–11's own infrastructure. Full report:
+`docs/reports/GAP_CLOSURE_DAY11_13_REPORT.md`.
+
+### Gaps found and closed (user approved fixing all before Day 14)
+
+1. **`versioned_memory.publish()` (Day 11) was never called from any real code path.**
+   `_extract_and_store_lesson()` — the exact call site Day 11's own plan doc identified as the
+   target — still only wrote to the in-process `LessonStore`. Wired in, gated on a real
+   `VOYAGE_API_KEY` being configured: a zero-vector embedding can never be found again by
+   similarity search anyway, and unconditionally calling it (enable_lesson defaults True across
+   ~2500 existing tests) was found — by running the full suite, not assumed — to pollute OTHER
+   tests' similarity searches with unrelated zero-vector rows, causing 3 real test failures
+   fixed by adding this gate.
+2. **`versioned_memory.archive_expired()` (Day 11) was never wired into `main.py`'s lifespan**,
+   despite Day 11's own plan doc explicitly saying it would be. Added
+   `_versioned_lesson_archive_loop()`, same once-per-day cadence as the existing log-retention loop.
+3. **`benchmark_manager.store_baseline()` (Day 10) was never called automatically.** No real agent
+   has ever had a baseline, meaning `regression_detector`'s gate (used by `prompt_registry.deploy()`)
+   was a no-op for every real agent by design ("no baseline" = "no regression"). Added
+   `_benchmark_baseline_loop()` (new `BENCHMARK_BASELINE_INTERVAL_HOURS` config, default 24h) that
+   sweeps `capability_registry` and stores an initial baseline for any agent with real
+   `MetricsCollector` runs but none yet — skips agents with no data, never overwrites an existing
+   baseline.
+4. **`tool_discovery.py` (Day 10) was never consulted anywhere.** Added an opt-in
+   `verify_tool_availability` parameter to `fleet_manager.select()` (defaults `False`, zero risk to
+   existing callers) that skips candidate agents whose declared tools aren't resolvable via
+   `tool_discovery.check_availability()`; enabled it at the one real call site
+   (`run_manager()`, wired in Day 12).
+5. **Minor: `approval_gate.record_pending()` (Day 13) always inserted a fresh row**, never
+   superseding a prior undecided one for the same `thread_id` — restarting a task via
+   `POST /tasks/{id}/restart` while paused at human_review left an orphaned "pending" row forever.
+   Fixed: a new `record_pending()` call now flips any existing `pending` row for that thread to
+   `superseded` first.
+
+### A second real bug found while fixing gap #1, not assumed away
+Wiring `versioned_memory.publish()` unconditionally into the lesson-extraction hot path (used by
+all 72+ agents, `enable_lesson` defaults `True`) broke 3 of Day 11's OWN tests
+(`test_versioned_memory.py`) when run as part of the full suite — confirmed by actually running the
+full suite after the change, not just the new tests in isolation. Root cause: other tests' mocked
+runs wrote real (zero-vector) rows into the shared `versioned_lessons` table, and
+`_find_most_similar_published()`'s similarity search picked up that contaminating data, changing
+which code branch Day 11's own deterministic-mock tests took and breaking their call-count
+assumptions. Fixed by gating the new call on a real embedding key being configured (item 1 above),
+which also happens to be the environmentally-correct behavior for this dev/test setup.
+
+### Test Results
+```
+pytest tests/ -q
+→ 2596 passed, 0 failed, 55 skipped, 17 deselected, 10 warnings in 78.51s
+
+mypy app/ --strict
+→ 32 errors, all pre-existing (identical to the Day 13 baseline), 0 new
+```
+
+Verified 0 residual rows across `prompt_versions`, `versioned_lessons`, `agent_benchmarks`, and
+`pending_approvals` after the full suite run — including tracking down and fixing a SECOND round
+of test contamination (real baseline rows for "pm"/"architect"/"decomposer" created by the new
+benchmark-baseline-loop tests sweeping the same process-wide registries Day 12's own tests already
+populated with real data).
+
+### Verdict
+✅ GREEN FLAG — GAP-CLOSURE COMPLETE. Ready for Day 14 (Git Push Workflow).

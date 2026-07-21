@@ -118,6 +118,67 @@ async def _fleet_agents_scan_loop() -> None:
                 logger.warning("Fleet scan failed for %s: %s", agent_name, exc)
 
 
+async def _versioned_lesson_archive_loop() -> None:
+    """Gap-closure (2026-07-21) — Day 11's plan doc for versioned_memory.py said
+    archive_expired() would be "called from the same background-loop slot
+    pattern already used for retention/reindex" — it never was. Runs once per
+    day, same cadence as the log-retention loop. Set LESSON_RETENTION_DAYS=0
+    to disable (archive_expired() itself already no-ops in that case).
+    """
+    interval_seconds = 24 * 3600
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            from app.fleet.versioned_memory import get_versioned_memory_store
+            archived = await asyncio.to_thread(get_versioned_memory_store().archive_expired)
+            if archived:
+                logger.info("Versioned lesson archive: %d row(s) archived", archived)
+        except Exception as exc:
+            logger.warning("Versioned lesson archive loop failed: %s", exc)
+
+
+async def _benchmark_baseline_loop() -> None:
+    """Gap-closure (2026-07-21) — Day 10 built benchmark_manager.store_baseline()
+    but nothing ever called it automatically, so no real agent has ever had a
+    baseline. Since regression_detector treats "no baseline" as "no
+    regression" by design, this meant prompt_registry.deploy()'s regression
+    gate was a no-op for every real agent. Sweeps capability_registry
+    periodically and stores an initial baseline for any agent that has real
+    MetricsCollector runs but no baseline yet. Set
+    BENCHMARK_BASELINE_INTERVAL_HOURS=0 to disable.
+    """
+    interval_hours = get_settings().benchmark_baseline_interval_hours
+    if interval_hours <= 0:
+        logger.info("Benchmark baseline loop disabled (BENCHMARK_BASELINE_INTERVAL_HOURS=0)")
+        return
+
+    while True:
+        await asyncio.sleep(interval_hours * 60 * 60)
+        try:
+            from app.fleet.benchmark_manager import get_benchmark_manager
+            from app.fleet.capability_registry import get_capability_registry
+            from app.fleet.metrics import get_metrics_collector
+
+            bm = get_benchmark_manager()
+            collector = get_metrics_collector()
+            for cap in get_capability_registry().all():
+                try:
+                    if not collector.by_agent(cap.name, n=1):
+                        continue  # no real runs yet — nothing meaningful to baseline
+                    report = await asyncio.to_thread(bm.compare_to_baseline, cap.name)
+                    if report.baseline_score is None:
+                        result = await asyncio.to_thread(bm.run_benchmark, cap.name)
+                        await asyncio.to_thread(bm.store_baseline, cap.name, result)
+                        logger.info(
+                            "Stored initial baseline for %s: benchmark_score=%.3f",
+                            cap.name, result.objectives["benchmark_score"],
+                        )
+                except Exception as exc:
+                    logger.warning("Baseline population failed for %s: %s", cap.name, exc)
+        except Exception as exc:
+            logger.warning("Benchmark baseline loop iteration failed: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.pipeline.graph import init_checkpointer, close_checkpointer
@@ -183,13 +244,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     reindex_task = asyncio.create_task(_weekly_reindex_loop(get_active_repo_path()))
     retention_task = asyncio.create_task(start_retention_loop())
     fleet_scan_task = asyncio.create_task(_fleet_agents_scan_loop())
+    lesson_archive_task = asyncio.create_task(_versioned_lesson_archive_loop())
+    benchmark_baseline_task = asyncio.create_task(_benchmark_baseline_loop())
 
     yield
 
     reindex_task.cancel()
     retention_task.cancel()
     fleet_scan_task.cancel()
-    for task in (reindex_task, retention_task, fleet_scan_task):
+    lesson_archive_task.cancel()
+    benchmark_baseline_task.cancel()
+    for task in (reindex_task, retention_task, fleet_scan_task, lesson_archive_task, benchmark_baseline_task):
         try:
             await task
         except asyncio.CancelledError:

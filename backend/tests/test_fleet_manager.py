@@ -151,3 +151,42 @@ class TestReferenceAgents:
         plan = fm.select("qa_verification")
         assert plan is not None
         assert plan.agent_name == "qa"
+
+
+class TestVerifyToolAvailability:
+    """Gap-closure (2026-07-21) — tool_discovery.py (Day 10) was built and
+    tested in isolation but never consulted by any real code path. select()'s
+    new opt-in verify_tool_availability flag is the first real caller."""
+
+    def test_defaults_to_false_preserving_existing_behavior(self) -> None:
+        cap = _cap("agent_with_bogus_tool", ["cap_x"])
+        cap.tools.append("td_totally_made_up_tool_xyz")
+        fm = _setup([cap])
+        plan = fm.select("cap_x")  # no verify_tool_availability kwarg — old behavior
+        assert plan is not None
+        assert plan.agent_name == "agent_with_bogus_tool"
+
+    def test_skips_agent_whose_declared_tool_is_unresolvable(self) -> None:
+        cap = _cap("agent_with_bogus_tool", ["cap_y"])
+        cap.tools.append("td_totally_made_up_tool_xyz")
+        fm = _setup([cap])
+        plan = fm.select("cap_y", verify_tool_availability=True)
+        assert plan is None
+
+    def test_selects_agent_whose_tools_are_all_real(self) -> None:
+        cap = _cap("agent_with_real_tools", ["cap_z"])
+        cap.tools.append("bash")  # real entry in tool_manifest.py
+        fm = _setup([cap])
+        plan = fm.select("cap_z", verify_tool_availability=True)
+        assert plan is not None
+        assert plan.agent_name == "agent_with_real_tools"
+
+    def test_falls_back_to_next_candidate_when_first_has_bogus_tool(self) -> None:
+        bad_cap = _cap("agent_bad", ["cap_w"])
+        bad_cap.tools.append("td_totally_made_up_tool_xyz")
+        good_cap = _cap("agent_good", ["cap_w"])
+        good_cap.tools.append("bash")
+        fm = _setup([bad_cap, good_cap])
+        plan = fm.select("cap_w", verify_tool_availability=True)
+        assert plan is not None
+        assert plan.agent_name == "agent_good"

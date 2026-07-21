@@ -123,6 +123,7 @@ class Settings(BaseSettings):
     benchmark_weight_compile_success: float = Field(default=0.15, description="Composite benchmark_score weight for compile_success.")
     benchmark_weight_hallucination: float = Field(default=0.15, description="Composite benchmark_score weight for (1 - hallucination_rate).")
     benchmark_regression_threshold: float = Field(default=0.10, description="Fractional drop in benchmark_score vs. baseline that flags a regression (0.10 = 10%).")
+    benchmark_baseline_interval_hours: int = Field(default=24, description="Hours between automatic baseline-population sweeps for agents with real MetricsCollector runs but no stored baseline yet. 0 disables.")
 
     # Day 11 — Fleet OS Versioned Memory (merge-on-conflict lesson lifecycle)
     memory_merge_similarity_threshold: float = Field(default=0.85, description="Cosine similarity above which a newly published lesson on the same topic triggers a merge instead of a plain new version.")
