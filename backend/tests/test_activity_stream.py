@@ -1,15 +1,12 @@
 """Tests for ActivityStream (Day 5A)."""
 from __future__ import annotations
 
-import asyncio
-import time
 
 import pytest
 
 from app.services.activity_stream import (
     TaskStream,
     ActivityStreamRegistry,
-    get_activity_registry,
     push_thinking,
     push_tool_call,
     push_tool_result,
@@ -122,7 +119,6 @@ class TestConvenienceHelpers:
     """Integration: helpers create events in a real TaskStream."""
 
     def setup_method(self):
-        from app.services.activity_stream import _registry_lock
         import app.services.activity_stream as _mod
         # Use fresh registry for isolation
         self.reg = ActivityStreamRegistry()

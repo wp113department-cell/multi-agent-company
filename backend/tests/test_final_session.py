@@ -3,14 +3,13 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # Resolve paths relative to this file so tests pass regardless of cwd
 _BACKEND = Path(__file__).parent.parent   # .../backend/
 _ROOT = _BACKEND.parent                   # project root (one level above backend/)
 
-import pytest
+import pytest  # noqa: E402
 
 
 # ---- Tool count ----
@@ -22,7 +21,7 @@ def test_total_tools_190() -> None:
 
 
 def test_chat_tools_count() -> None:
-    import sys; sys.path.insert(0, "backend")
+    import sys; sys.path.insert(0, "backend")  # noqa: E702
     from app.agents.tools import CHAT_TOOLS
     assert len(CHAT_TOOLS) >= 165
 
@@ -30,13 +29,13 @@ def test_chat_tools_count() -> None:
 # ---- Agent registry count ----
 
 def test_agent_registry_60() -> None:
-    import sys; sys.path.insert(0, "backend")
+    import sys; sys.path.insert(0, "backend")  # noqa: E702
     from app.api.specialized_agents import _REGISTRY
     assert len(_REGISTRY) >= 60, f"Expected ≥60 agents, got {len(_REGISTRY)}"
 
 
 def test_all_new_agents_in_registry() -> None:
-    import sys; sys.path.insert(0, "backend")
+    import sys; sys.path.insert(0, "backend")  # noqa: E702
     from app.api.specialized_agents import _REGISTRY
     new_agents = [
         "infra_agent", "test_writer_agent", "code_explainer_agent",
@@ -52,7 +51,8 @@ def test_all_new_agents_in_registry() -> None:
 
 
 def test_all_agent_modules_import() -> None:
-    import sys, importlib
+    import sys
+    import importlib
     sys.path.insert(0, "backend")
     from app.api.specialized_agents import _REGISTRY
     errors = []
@@ -62,7 +62,7 @@ def test_all_agent_modules_import() -> None:
             getattr(m, fn)
         except Exception as e:
             errors.append(f"{name}: {e}")
-    assert not errors, f"Import errors:\n" + "\n".join(errors)
+    assert not errors, "Import errors:\n" + "\n".join(errors)
 
 
 def test_all_new_agent_role_files_exist() -> None:
@@ -102,7 +102,7 @@ def test_migration_010_adds_category_column() -> None:
 # ---- Memory model has category field ----
 
 def test_memory_embedding_model_has_category() -> None:
-    import sys; sys.path.insert(0, "backend")
+    import sys; sys.path.insert(0, "backend")  # noqa: E702
     from app.db.models import MemoryEmbedding
     assert hasattr(MemoryEmbedding, "category"), "MemoryEmbedding missing 'category' column"
 
@@ -111,7 +111,7 @@ def test_memory_embedding_model_has_category() -> None:
 
 @pytest.mark.asyncio
 async def test_memory_patterns_accepts_category_filter() -> None:
-    import sys; sys.path.insert(0, "backend")
+    import sys; sys.path.insert(0, "backend")  # noqa: E702
     from app.api.memory import get_memory_patterns
 
     mock_db = AsyncMock()
@@ -142,7 +142,7 @@ async def test_memory_patterns_accepts_category_filter() -> None:
 
 @pytest.mark.asyncio
 async def test_memory_patterns_no_filter() -> None:
-    import sys; sys.path.insert(0, "backend")
+    import sys; sys.path.insert(0, "backend")  # noqa: E702
     from app.api.memory import get_memory_patterns
 
     mock_db = AsyncMock()
@@ -160,16 +160,15 @@ async def test_memory_patterns_no_filter() -> None:
 # ---- Retention service ----
 
 def test_retention_service_has_enforce_function() -> None:
-    import sys; sys.path.insert(0, "backend")
+    import sys; sys.path.insert(0, "backend")  # noqa: E702
     from app.services.retention import enforce_retention_policy, start_retention_loop
-    import asyncio
     assert callable(enforce_retention_policy)
     assert callable(start_retention_loop)
 
 
 @pytest.mark.asyncio
 async def test_enforce_retention_disabled_returns_zero() -> None:
-    import sys; sys.path.insert(0, "backend")
+    import sys; sys.path.insert(0, "backend")  # noqa: E702
     with patch("app.services.retention.get_settings") as mock_settings:
         mock_settings.return_value.log_retention_days = 0
         from app.services.retention import enforce_retention_policy
@@ -179,7 +178,7 @@ async def test_enforce_retention_disabled_returns_zero() -> None:
 
 @pytest.mark.asyncio
 async def test_enforce_retention_executes_delete() -> None:
-    import sys; sys.path.insert(0, "backend")
+    import sys; sys.path.insert(0, "backend")  # noqa: E702
     mock_session = AsyncMock()
     mock_result = MagicMock()
     mock_result.rowcount = 3

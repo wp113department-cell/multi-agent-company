@@ -23,7 +23,6 @@ async def test_manager_dispatches_subtasks_and_completes() -> None:
     async with get_async_session() as db:
         epic_id = str(uuid.uuid4())
         from app.db.models import Epic
-        from decimal import Decimal
         epic = Epic(
             epic_id=epic_id,
             title="Add a hello world endpoint",
@@ -42,7 +41,6 @@ async def test_manager_dispatches_subtasks_and_completes() -> None:
 @pytest.mark.asyncio
 async def test_epic_halts_on_repeated_subtask_failures() -> None:
     """Manager: force 2 subtasks to fail repeatedly → epic.halted event emitted."""
-    from app.db.session import get_async_session
     from app.agents.manager import run_manager
     from app.event_bus.bus import subscribe, unsubscribe
     from app.event_bus.models import GridironEvent
@@ -83,7 +81,6 @@ async def test_cost_estimate_before_execution() -> None:
 
     settings = get_settings()
     # Force a threshold so low any estimate exceeds it
-    import app.config as cfg_module
     original_threshold = settings.cost_approval_threshold
 
     try:

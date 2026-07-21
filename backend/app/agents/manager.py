@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
@@ -33,9 +33,9 @@ AGENT_CONTRACT: dict[str, Any] = {
     "dependencies": ["backend_dev", "frontend_dev", "qa", "reviewer"],
 }
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
-from app.config import get_settings
+from app.config import get_settings  # noqa: E402
 
 
 @dataclass
@@ -331,7 +331,7 @@ async def run_epic_manager(
 
     # Load the epic
     result = await db.execute(select(Epic).where(Epic.epic_id == epic_id))
-    epic = result.scalar_one()
+    epic = result.scalar_one()  # noqa: F841
 
     # --- Step 1: Rough cost estimate (subtask count unknown yet; use 5 as baseline) ---
     estimate = await estimate_epic_cost(subtask_count=5, db=db)
@@ -438,7 +438,7 @@ async def run_epic_manager(
 
     # Collect tokens from agent_runs for cost_actual
     from sqlalchemy import func as sqlfunc
-    token_result = await db.execute(
+    token_result = await db.execute(  # noqa: F841
         select(sqlfunc.sum(DevTask.id))  # placeholder — real token sum via agent_runs
     )
     # Approximate: use refined estimate as fallback

@@ -1,7 +1,6 @@
 """Tests for Fleet OS audit_log.py — Phase F5."""
 from __future__ import annotations
 
-import pytest
 
 from app.fleet.audit_log import AuditEntry, AuditLog, audit, get_audit_log
 

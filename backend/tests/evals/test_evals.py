@@ -56,7 +56,7 @@ class TestEvalTaskDefinitions:
             assert agent in _REGISTRY, f"Eval task {task['id']} uses unknown agent '{agent}'"
 
     def test_eval_runner_importable(self) -> None:
-        from tests.evals.eval_runner import load_tasks, run_evals, print_summary, _score_result
+        from tests.evals.eval_runner import load_tasks, run_evals, print_summary
         assert callable(load_tasks)
         assert callable(run_evals)
         assert callable(print_summary)

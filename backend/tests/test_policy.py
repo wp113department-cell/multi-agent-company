@@ -1,7 +1,6 @@
 """Policy engine tests — path checks, command checks, worktree boundary."""
 import os
 import tempfile
-import pytest
 from app.policy.engine import check_path, check_command, check_path_in_worktree
 
 

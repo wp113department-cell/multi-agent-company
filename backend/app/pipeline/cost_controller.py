@@ -7,7 +7,6 @@ epics over COST_APPROVAL_THRESHOLD require explicit human approval.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession

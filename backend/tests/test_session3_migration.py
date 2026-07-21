@@ -19,7 +19,6 @@ import inspect
 from typing import Any
 from unittest.mock import patch
 
-import pytest
 
 import app.agents.reviewer as rv_mod
 import app.agents.qa as qa_mod
@@ -142,7 +141,8 @@ class TestDevopsContract:
 
 class TestMigrationComplete:
     def _imports_run_agent(self, mod: Any) -> bool:
-        import ast, textwrap
+        import ast
+        import textwrap
         src = textwrap.dedent(inspect.getsource(mod))
         try:
             tree = ast.parse(src)

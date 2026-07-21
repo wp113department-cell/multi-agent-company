@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address, enabled=get_settings().rate_limit_enabled)
 
 
-def _init_sentry(settings: "Settings") -> None:  # type: ignore[name-defined]
+def _init_sentry(settings: "Settings") -> None:  # type: ignore[name-defined]  # noqa: F821
     """Initialise Sentry SDK if SENTRY_DSN is configured. No-op otherwise."""
     if not settings.sentry_dsn:
         return

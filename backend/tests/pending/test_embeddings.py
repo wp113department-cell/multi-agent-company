@@ -11,7 +11,6 @@ class TestEmbeddings:
 
     def test_generate_embeddings_returns_list(self, tmp_path: pytest.TempPathFactory) -> None:
         """generate_embeddings returns one embedding dict per file in the index."""
-        import os
         from app.repo_tools.scanner import index_repository
         from app.repo_tools.embeddings import generate_embeddings
 
@@ -78,7 +77,6 @@ class TestEmbeddings:
 
     def test_semantic_search_empty_without_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """semantic_search returns [] gracefully when VOYAGE_API_KEY is empty."""
-        import os
         monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
 
         import app.config as cfg_module

@@ -7,10 +7,8 @@ from __future__ import annotations
 import pytest
 
 from app.fleet.fleet_events import (
-    FLEET_TO_LEGACY,
     LEGACY_TO_FLEET,
     FleetBus,
-    FleetEvent,
     FleetEventType,
     health_updated,
     lesson_published,

@@ -1,8 +1,6 @@
 """Full API end-to-end tests — require ANTHROPIC_API_KEY + real DATABASE_URL."""
 from __future__ import annotations
 
-import asyncio
-import pytest
 from tests.pending.conftest import requires_all
 
 
@@ -158,5 +156,5 @@ class TestAPIE2E:
 
         logs = self._get(f"/api/tasks/{task_id}/logs")
         assert isinstance(logs.get("logs"), list)
-        messages = [l["message"] for l in logs["logs"]]
+        messages = [lg["message"] for lg in logs["logs"]]
         assert "E2E log entry" in messages

@@ -252,7 +252,7 @@ class VersionedMemoryStore:
         return record
 
     async def _rollback(self, lesson_id: str, prior: Any) -> None:
-        from sqlalchemy import select, update
+        from sqlalchemy import update
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
         from app.db.models import VersionedLesson

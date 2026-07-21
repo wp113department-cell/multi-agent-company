@@ -50,7 +50,6 @@ _has_db = (
 # creates a fresh engine for its own loop.
 # ---------------------------------------------------------------------------
 
-import pytest
 
 @pytest.fixture(autouse=True)
 def reset_db_engine() -> None:

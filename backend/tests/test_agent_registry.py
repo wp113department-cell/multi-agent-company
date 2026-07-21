@@ -171,7 +171,6 @@ async def test_register_new_agent_via_sql_dispatched_by_tag() -> None:
 def test_agent_registry_orm_fields() -> None:
     """Agent ORM model has all required Phase 6 fields."""
     from app.db.models import Agent
-    import sqlalchemy.inspection as _insp
     cols = {c.key for c in Agent.__table__.columns}
     required = {
         "agent_id", "name", "capability_tags", "tool_list",

@@ -5,7 +5,6 @@ import asyncio
 import logging
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db.repository import (
@@ -45,7 +44,6 @@ async def launch_planning_pipeline(task_id: int, title: str, description: str, r
     from app.pipeline.graph import run_planning_pipeline
     from app.artifacts.store import save_artifact_async
 
-    settings = get_settings()
     factory = get_session_factory()
 
     async with factory() as db:
@@ -181,7 +179,6 @@ async def resume_planning_pipeline(task_id: int, approved: bool, repo_path: str 
 
 def _build_plan_summary(pipeline_result: Any) -> str:
     """Convert pipeline state into a readable plan string for the coder."""
-    import json
     arch = pipeline_result.get("architect_plan", {})
     subtasks = pipeline_result.get("subtasks", [])
     lines = [
@@ -213,7 +210,6 @@ async def launch_manager(
     from app.agents.manager import run_manager
     from app.artifacts.store import save_artifact_async
 
-    settings = get_settings()
     factory = get_session_factory()
 
     async with factory() as db:

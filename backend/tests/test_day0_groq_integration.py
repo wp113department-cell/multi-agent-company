@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import os
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -58,7 +57,7 @@ SUBMIT_TOOL: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 class TestPlannerNodeRealLLM:
-    def test_planner_produces_json_with_steps(self, groq_llm_patch: Any) -> None:
+    def test_planner_produces_json_with_steps(self, groq_llm_patch: Any) -> None:  # noqa: F811
         """planner_node calls Groq and returns parseable plan JSON with steps list."""
         from app.agents.base_graph import _make_planner_node, AgentRunState
 
@@ -85,7 +84,7 @@ class TestPlannerNodeRealLLM:
         # Either steps key exists OR plan text is non-empty (model returned something)
         assert out["plan"] != "{}" or plan_data.get("steps") is not None
 
-    def test_planner_sets_status_running(self, groq_llm_patch: Any) -> None:
+    def test_planner_sets_status_running(self, groq_llm_patch: Any) -> None:  # noqa: F811
         """planner_node always sets status=running in output."""
         from app.agents.base_graph import _make_planner_node, AgentRunState
 
@@ -99,7 +98,7 @@ class TestPlannerNodeRealLLM:
         out = planner(state)
         assert out.get("status") == "running"
 
-    def test_planner_survives_bad_model_response(self, groq_llm_patch: Any) -> None:
+    def test_planner_survives_bad_model_response(self, groq_llm_patch: Any) -> None:  # noqa: F811
         """planner_node must not raise even when LLM returns non-JSON text."""
         from app.agents.base_graph import _make_planner_node, AgentRunState
 
@@ -120,7 +119,7 @@ class TestPlannerNodeRealLLM:
 # ---------------------------------------------------------------------------
 
 class TestReflectionNodeRealLLM:
-    def test_reflection_returns_satisfied_field(self, groq_llm_patch: Any) -> None:
+    def test_reflection_returns_satisfied_field(self, groq_llm_patch: Any) -> None:  # noqa: F811
         """reflection_node produces a JSON response with a 'satisfied' boolean."""
         from app.agents.base_graph import _make_reflection_node, AgentRunState
 
@@ -141,7 +140,7 @@ class TestReflectionNodeRealLLM:
             last = out["messages"][-1]
             assert "[Self-review]" in last.get("content", "")
 
-    def test_reflection_is_non_fatal_on_partial_json(self, groq_llm_patch: Any) -> None:
+    def test_reflection_is_non_fatal_on_partial_json(self, groq_llm_patch: Any) -> None:  # noqa: F811
         """reflection_node must not raise when LLM returns partial or non-JSON."""
         from app.agents.base_graph import _make_reflection_node, AgentRunState
 
@@ -161,7 +160,7 @@ class TestReflectionNodeRealLLM:
 # ---------------------------------------------------------------------------
 
 class TestLessonExtractionRealLLM:
-    def test_lesson_extracted_and_stored(self, groq_llm_patch: Any) -> None:
+    def test_lesson_extracted_and_stored(self, groq_llm_patch: Any) -> None:  # noqa: F811
         """_extract_and_store_lesson uses Groq to extract a real lesson and stores it."""
         from app.agents.base_graph import _extract_and_store_lesson, get_lesson_store, AgentRunState
 
@@ -183,7 +182,7 @@ class TestLessonExtractionRealLLM:
         assert len(last.lesson) > 10, "lesson text must be non-trivial"
         assert last.category in ("testing", "security", "refactor", "debugging", "planning", "docs", "general")
 
-    def test_lesson_retrieval_finds_stored_lesson(self, groq_llm_patch: Any) -> None:
+    def test_lesson_retrieval_finds_stored_lesson(self, groq_llm_patch: Any) -> None:  # noqa: F811
         """After storing a lesson, retrieve it by keyword overlap."""
         from app.agents.base_graph import _extract_and_store_lesson, get_lesson_store, AgentRunState
 
@@ -209,7 +208,7 @@ class TestLessonExtractionRealLLM:
 # ---------------------------------------------------------------------------
 
 class TestFullGraphRunGroq:
-    def test_mini_task_runs_end_to_end(self, groq_llm_patch: Any) -> None:
+    def test_mini_task_runs_end_to_end(self, groq_llm_patch: Any) -> None:  # noqa: F811
         """Run a real mini-task through the graph with Groq. Agent must call submit_result."""
         from app.agents.base_graph import run_agent_graph, VerificationConfig
 
@@ -238,7 +237,7 @@ class TestFullGraphRunGroq:
         )
         assert result_state["result"] != {}, "result must be non-empty after submit"
 
-    def test_trace_id_in_final_state(self, groq_llm_patch: Any) -> None:
+    def test_trace_id_in_final_state(self, groq_llm_patch: Any) -> None:  # noqa: F811
         """trace_id passed to run_agent_graph appears in final state."""
         from app.agents.base_graph import run_agent_graph, VerificationConfig
 

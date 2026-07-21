@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.db.models import DevTask, Epic, PolicyApproval
+from app.db.models import DevTask, Epic
 from app.event_bus.bus import publish_event
 from app.event_bus.models import GridironEvent
 from app.middleware.rbac import require_approver
@@ -274,7 +274,6 @@ async def batch_review(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     Returns epics in 'ready_for_review', 'pending_cost_approval', and tasks in
     'ready_for_review' or 'awaiting_approval' — ordered by age (oldest first).
     """
-    from sqlalchemy import or_
 
     epic_result = await db.execute(
         select(Epic)

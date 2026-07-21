@@ -10,8 +10,6 @@ Tests cover:
 """
 from __future__ import annotations
 
-import importlib
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -454,7 +452,7 @@ class TestAgentResultSchema:
 
 class TestSpecializedAgentsRouter:
     def test_registry_contains_all_day3_agents(self) -> None:
-        from app.api.specialized_agents import _REGISTRY, SUPPORTED_AGENTS
+        from app.api.specialized_agents import _REGISTRY
         day3 = [
             "performance_reviewer", "style_reviewer", "sprint_planner",
             "business_analyst", "migration_agent", "schema_agent",

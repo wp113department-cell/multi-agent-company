@@ -51,7 +51,7 @@ _AGENT_MAP: dict[str, tuple[str, str]] = {
 }
 
 
-def _run_agent(agent_name: str, task_id: int, description: str, repo_path: str) -> "AgentResult":  # type: ignore[name-defined]
+def _run_agent(agent_name: str, task_id: int, description: str, repo_path: str) -> "AgentResult":  # type: ignore[name-defined]  # noqa: F821
     import importlib
     entry = _AGENT_MAP.get(agent_name)
     if entry is None:
@@ -87,7 +87,7 @@ def _score_result(task: dict[str, Any], result: Any) -> EvalResult:
     eval_id = task["id"]
     agent_name = task["agent"]
     expected_fields: list[str] = task.get("expected_fields", [])
-    quality_checks: list[str] = task.get("quality_checks", [])
+    quality_checks: list[str] = task.get("quality_checks", [])  # noqa: F841
     min_stories = task.get("expected_story_count_min")
     max_stories = task.get("expected_story_count_max")
 

@@ -1,7 +1,6 @@
 """Tests for the Cost Controller (sync path — no DB required)."""
 from __future__ import annotations
 
-import pytest
 
 from app.pipeline.cost_controller import estimate_epic_cost_sync, CostEstimate
 

@@ -16,12 +16,9 @@ Tests prove:
 from __future__ import annotations
 
 import inspect
-import json
-from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 import app.agents.pm as pm_mod
 import app.agents.research as rs_mod
@@ -31,8 +28,7 @@ import app.agents.docs as dc_mod
 from app.agents.pm import AGENT_CONTRACT as PM_CONTRACT, pm_node
 from app.agents.research import AGENT_CONTRACT as RS_CONTRACT, run_research, ResearchReport
 from app.agents.executive import (
-    AGENT_CONTRACT as EX_CONTRACT, run_executive, _parse_json,
-    _last_assistant_text as ex_last_text,
+    AGENT_CONTRACT as EX_CONTRACT, run_executive, _last_assistant_text as ex_last_text,
 )
 from app.agents.docs import AGENT_CONTRACT as DC_CONTRACT, run_docs, DocsReport, _build_docs_context
 
@@ -168,7 +164,8 @@ class TestDocsContract:
 
 class TestMigrationComplete:
     def _imports_run_agent(self, mod: Any) -> bool:
-        import ast, textwrap
+        import ast
+        import textwrap
         src = textwrap.dedent(inspect.getsource(mod))
         try:
             tree = ast.parse(src)

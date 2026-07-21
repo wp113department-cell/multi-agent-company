@@ -16,9 +16,7 @@ Covers:
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -34,7 +32,7 @@ _BACKEND = Path(__file__).parent.parent       # backend/
 class TestConfigNewFields:
     def test_rate_limit_fields(self) -> None:
         from app.config import Settings
-        fields = {f.alias or name for name, f in Settings.model_fields.items()}
+        fields = {f.alias or name for name, f in Settings.model_fields.items()}  # noqa: F841
         # field names (not aliases)
         names = set(Settings.model_fields.keys())
         assert "rate_limit_enabled" in names
@@ -73,7 +71,6 @@ class TestConfigNewFields:
 class TestRateLimiting:
     def test_slowapi_import(self) -> None:
         from slowapi import Limiter
-        from slowapi.util import get_remote_address
         assert callable(Limiter)
 
     def test_limiter_in_main(self) -> None:
@@ -115,11 +112,11 @@ class TestS3Dispatch:
 
             with up("app.artifacts.s3_store.save_artifact_s3") as mock_s3:
                 from app.artifacts.store import save_artifact
-                record = save_artifact(1, "plan", "hello", "agent")
+                record = save_artifact(1, "plan", "hello", "agent")  # noqa: F841
                 mock_s3.assert_not_called()
 
     def test_s3_store_module_exists(self) -> None:
-        from app.artifacts.s3_store import save_artifact_s3, load_artifact_s3, _make_key
+        from app.artifacts.s3_store import save_artifact_s3, load_artifact_s3
         assert callable(save_artifact_s3)
         assert callable(load_artifact_s3)
 
@@ -162,7 +159,6 @@ class TestAlertingWiring:
 
 class TestHealthEndpoint:
     def test_health_function_returns_dict(self) -> None:
-        import asyncio
         from app.main import health
         # Check that the function is async
         import inspect
@@ -451,7 +447,7 @@ class TestEvalSuite:
                 assert isinstance(case, EvalCase)
 
     def test_eval_runner_imports(self) -> None:
-        from evals.eval_runner import run_eval_case, run_suite, save_report, EvalCase, EvalResult, EvalReport
+        from evals.eval_runner import run_eval_case, run_suite, save_report
         assert callable(run_eval_case)
         assert callable(run_suite)
         assert callable(save_report)

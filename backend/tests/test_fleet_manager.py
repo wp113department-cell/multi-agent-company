@@ -4,7 +4,6 @@ Key assertion: fleet_manager selects agents via registry lookup, NOT by hardcode
 """
 from __future__ import annotations
 
-import pytest
 
 from app.fleet.agent_registry import AgentRegistry, AgentState
 from app.fleet.capability_registry import AgentCapability, CapabilityRegistry

@@ -13,7 +13,6 @@ from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
     FLEET_APPLY_TOOLS,
-    READ_ONLY_TOOLS,
     _FLEET_BASH_TOOL,
     make_fleet_apply_handlers,
     make_scoped_bash_handler,

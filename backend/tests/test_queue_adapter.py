@@ -11,7 +11,6 @@ from app.pipeline.queue_adapter import (
     BullMQQueueAdapter,
     QueueAdapter,
     get_queue_adapter,
-    queue,
 )
 
 
@@ -71,7 +70,7 @@ class TestAsyncioQueueAdapter:
             await asyncio.sleep(0.02)
             results.append(n)
 
-        ids = [await adapter.enqueue(job, n=i) for i in range(3)]
+        ids = [await adapter.enqueue(job, n=i) for i in range(3)]  # noqa: F841
         await asyncio.sleep(0.1)
         assert sorted(results) == [0, 1, 2]
         await adapter.shutdown()

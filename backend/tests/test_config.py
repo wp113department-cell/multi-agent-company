@@ -1,6 +1,5 @@
 """Config loader tests — verify Pydantic Settings reads env vars correctly."""
 import os
-import pytest
 from unittest.mock import patch
 
 

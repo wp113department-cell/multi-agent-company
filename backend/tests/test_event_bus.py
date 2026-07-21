@@ -1,7 +1,6 @@
 """Event bus tests — publish/subscribe, per-task ordering, retry, failed handlers."""
 from __future__ import annotations
 
-import asyncio
 import pytest
 
 from app.event_bus.bus import publish_event, subscribe, unsubscribe, _subscribers

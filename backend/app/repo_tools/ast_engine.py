@@ -112,7 +112,7 @@ def build_call_graph(path: str, function_name: str = "") -> str:
     if not p.exists():
         return f"[ERROR] File not found: {path}"
     if p.suffix != ".py":
-        return f"[ERROR] call_graph only supports .py files"
+        return "[ERROR] call_graph only supports .py files"
     try:
         source = p.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(p))

@@ -1,5 +1,4 @@
 """Status transition state machine tests."""
-import pytest
 from app.db.models import can_transition, VALID_TRANSITIONS
 
 

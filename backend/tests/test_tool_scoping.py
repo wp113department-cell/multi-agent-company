@@ -104,8 +104,8 @@ def test_reviewer_tools_structurally_has_no_submit_patch() -> None:
 
 # ---- QA bash allowlist tests ----
 
-from app.agents.tools import _QA_ALLOWED_PREFIXES
-from app.policy.engine import check_allowlisted_command
+from app.agents.tools import _QA_ALLOWED_PREFIXES  # noqa: E402
+from app.policy.engine import check_allowlisted_command  # noqa: E402
 
 
 def _is_qa_command_allowed(cmd: str) -> bool:

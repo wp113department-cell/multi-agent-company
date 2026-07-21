@@ -20,7 +20,7 @@ from unittest.mock import patch
 import pytest
 
 from app.fleet.benchmark_manager import get_benchmark_manager
-from app.fleet.capability_registry import AgentCapability, get_capability_registry, register
+from app.fleet.capability_registry import AgentCapability, register
 from app.fleet.metrics import get_metrics_collector
 from app.main import _benchmark_baseline_loop
 

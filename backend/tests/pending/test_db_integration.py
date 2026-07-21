@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import uuid
-import pytest
 from tests.pending.conftest import requires_db
 
 

@@ -622,7 +622,7 @@ class ChatAgent:
                      "-not", "-path", "*/.venv/*"],
                     capture_output=True, text=True, timeout=15,
                 )
-                found = [l for l in r.stdout.splitlines() if l.strip()]
+                found = [ln for ln in r.stdout.splitlines() if ln.strip()]
                 if not found:
                     return f"(no files matching '{name}')"
                 ff_rel_paths: list[str] = []

@@ -93,7 +93,7 @@ def _get_repo(params: dict[str, Any]) -> str:
 
 
 def _handle(method: str, params: dict[str, Any]) -> Any:
-    settings = get_settings()
+    settings = get_settings()  # noqa: F841
 
     if method == "tools/list":
         return {"tools": _TOOLS}

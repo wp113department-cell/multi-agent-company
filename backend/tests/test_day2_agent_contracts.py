@@ -44,7 +44,7 @@ _FINAL_STATE: dict[str, Any] = {
         "risks": [], "recommendations": [], "blast_radius": "low",
         "query_or_migration": "SELECT 1", "explain_plan_summary": "ok",
         "verified_against_schema": True, "is_destructive": False, "warnings": [],
-        "files_written": [], "files_changed": [], "status": "healthy",
+        "files_written": [], "files_changed": [], "status": "healthy",  # noqa: F601
         "metrics": {}, "issues": [], "dependencies": [],
         "content_markdown": "# README", "verified_commands": [], "sections": [],
         "endpoints": [], "spec_drift": [],

@@ -57,7 +57,7 @@ async def pick_agent_by_tag(
     This function is the proof point that new agents registered via SQL are
     automatically discovered — zero code changes needed.
     """
-    from sqlalchemy import select, text
+    from sqlalchemy import select
     from app.db.models import Agent
 
     # Use PostgreSQL ARRAY @> operator: capability_tags @> ARRAY[:tag]
