@@ -193,6 +193,11 @@ class Settings(BaseSettings):
     jwt_auth_enabled: bool = Field(default=False, description="Enable JWT authentication. When false, X-User-Role header is still accepted (backward compat).")
     default_admin_password: str = Field(default="gridiron123", description="Password auto-seeded for the 'admin' user on first startup. Change in production.")
 
+    # Day 9 — Fleet Enhancement Dashboard (5 self-improvement agents target the
+    # Gridiron platform's own codebase, not a user-connected repo)
+    fleet_self_repo_path: str = Field(default=".", description="Root of the Gridiron project itself — where the 5 fleet-enhancement agents read/write (backend/ + apps/web/). Defaults to the process cwd (repo root when run normally).")
+    fleet_scan_interval_hours: float = Field(default=4.0, description="Hours between automatic SCAN-phase runs of the 5 fleet-enhancement agents (background loop). Set to 0 to disable the background loop entirely.")
+
 
 _settings: Settings | None = None
 

@@ -59,9 +59,12 @@ class TestModelRouter:
     def test_loads_production_json(self):
         router = ModelRouter()  # loads real agent_models.json
         agents = router.all_agents()
-        assert len(agents) == 68
+        # 68 from Days 0-8 + 5 Day 9 fleet-enhancement agents (agent_performance_reviewer,
+        # agent_debugger, agent_advisor, knowledge_curator, quality_auditor)
+        assert len(agents) == 73
         assert "architect" in agents
         assert "coder" in agents
+        assert "agent_debugger" in agents
 
     def test_route_opus_tier(self):
         router = ModelRouter()

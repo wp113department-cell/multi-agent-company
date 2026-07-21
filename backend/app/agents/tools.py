@@ -932,29 +932,32 @@ _SUBMIT_RESEARCH_TOOL = {
 RESEARCH_TOOLS = [READ_ONLY_TOOLS[0], READ_ONLY_TOOLS[1], READ_ONLY_TOOLS[2], _SUBMIT_RESEARCH_TOOL]
 
 
+def web_search(inp: dict[str, Any]) -> str:
+    """Search the web via DuckDuckGo — no API key needed. Standalone (not repo-scoped)
+    so any agent can reuse it, not just the research agent."""
+    query = str(inp.get("query", "")).strip()
+    if not query:
+        return "[ERROR] query is required"
+    try:
+        from duckduckgo_search import DDGS
+        results = list(DDGS().text(query, max_results=5))
+        if not results:
+            return f"(no results found for: {query!r})"
+        lines = []
+        for r in results:
+            title = r.get("title", "")
+            href = r.get("href", "")
+            body = r.get("body", "")[:300]
+            lines.append(f"## {title}\n{href}\n{body}")
+        return "\n\n".join(lines)[:6000]
+    except Exception as exc:
+        return f"[ERROR] web_search failed: {exc}"
+
+
 def make_research_handlers(repo_path: str) -> dict[str, Any]:
     """Research agent: read-only + web_search placeholder + submit_research. No write, no bash."""
     handlers = make_read_only_handlers(repo_path)
     research_result: dict[str, Any] = {}
-
-    def web_search(inp: dict[str, Any]) -> str:
-        query = str(inp.get("query", "")).strip()
-        if not query:
-            return "[ERROR] query is required"
-        try:
-            from duckduckgo_search import DDGS
-            results = list(DDGS().text(query, max_results=5))
-            if not results:
-                return f"(no results found for: {query!r})"
-            lines = []
-            for r in results:
-                title = r.get("title", "")
-                href = r.get("href", "")
-                body = r.get("body", "")[:300]
-                lines.append(f"## {title}\n{href}\n{body}")
-            return "\n\n".join(lines)[:6000]
-        except Exception as exc:
-            return f"[ERROR] web_search failed: {exc}"
 
     def submit_research(inp: dict[str, Any]) -> str:
         research_result.update(inp)
@@ -5219,6 +5222,25 @@ def _is_protected_path(path: str, worktree_path: str = "") -> bool:
     return not check_path(path).allowed
 
 
+def task_history_query(inp: dict[str, Any]) -> str:
+    """Query recent task history from task_logs. Standalone (not repo-scoped) so any
+    agent can reuse it, not just chat."""
+    db_url = getattr(get_settings(), "database_url", "")
+    if not db_url:
+        return "[ERROR] DATABASE_URL not set"
+    limit = int(inp.get("limit", 20))
+    status_filter = inp.get("status")
+    sql = "SELECT id, status, created_at FROM task_logs"
+    if status_filter:
+        sql += f" WHERE status = '{status_filter}'"
+    sql += f" ORDER BY created_at DESC LIMIT {limit};"
+    try:
+        r = subprocess.run(["psql", db_url, "-c", sql, "--no-psqlrc"], capture_output=True, text=True, timeout=15)
+        return (r.stdout + r.stderr).strip() or "(no output)"
+    except Exception as e:
+        return f"[ERROR] {e}"
+
+
 def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     """
     Full-access handlers for the interactive chat agent.
@@ -7326,25 +7348,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
-    def task_history_query_h(inp: dict[str, Any]) -> str:
-        import subprocess as _sp_mem
-        from app.config import get_settings as _gs_mem
-        settings = _gs_mem()
-        db_url = getattr(settings, "database_url", "")
-        if not db_url:
-            return "[ERROR] DATABASE_URL not set"
-        limit = int(inp.get("limit", 20))
-        status_filter = inp.get("status")
-        sql = "SELECT id, status, created_at FROM task_logs"
-        if status_filter:
-            sql += f" WHERE status = '{status_filter}'"
-        sql += f" ORDER BY created_at DESC LIMIT {limit};"
-        try:
-            r = _sp_mem.run(["psql", db_url, "-c", sql, "--no-psqlrc"],
-                            capture_output=True, text=True, timeout=15)
-            return (r.stdout + r.stderr).strip() or "(no output)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+    task_history_query_h = task_history_query
 
     def known_issues_read_h(inp: dict[str, Any]) -> str:
         if not _mem_issues_path.exists():
@@ -8446,3 +8450,489 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["template_render"] = template_render_h
 
     return handlers
+
+
+# ---------------------------------------------------------------------------
+# Day 9 — Fleet Enhancement Dashboard tools
+#
+# Shared by the 5 self-improvement agents (agent_performance_reviewer,
+# agent_debugger, agent_advisor, knowledge_curator, quality_auditor). These
+# agents target the Gridiron project's own codebase (settings.fleet_self_repo_path),
+# not a user-connected repo.
+#
+# SCAN phase (autonomous, read-only): fleet_metrics_read, audit_log_read,
+# task_history_query (already exists above), memory_search, memory_curate_read,
+# submit_enhancement_request — writes a pending row, nothing else happens.
+#
+# APPLY phase (only after human approval on a specific request):
+# memory_curate_write, git_commit_change — stages only the named files, never `-A`.
+# ---------------------------------------------------------------------------
+
+def _new_isolated_db_engine() -> Any:
+    """A throwaway async engine, NOT the shared app.db.session singleton.
+
+    Tool handlers are sync functions called from arbitrary contexts (a fleet
+    agent's scan loop may call several DB tools in the same process run).
+    asyncio.run() opens and tears down its own event loop per call; the shared
+    engine/pool in app.db.session gets bound to whichever loop first touched
+    it, so reusing it across multiple asyncio.run() calls raises
+    "Future attached to a different loop". A fresh, disposed-after-use engine
+    per call avoids that entirely — slightly less efficient, always correct.
+    """
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.config import get_settings as _gs
+
+    return create_async_engine(_gs().database_url, pool_pre_ping=True)
+
+
+_FLEET_METRICS_READ_TOOL: dict[str, Any] = {
+    "name": "fleet_metrics_read",
+    "description": "Read real runtime performance data for an agent (or the whole fleet): recent runs, p50/p95 latency, average tool accuracy. Use this before claiming an agent is slow or unreliable — never guess.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "agent_name": {"type": "string", "description": "Agent to inspect. Omit to see the most recent runs across all agents."},
+            "n": {"type": "integer", "description": "Max runs to consider (default 20)."},
+        },
+        "required": [],
+    },
+}
+
+
+def fleet_metrics_read(inp: dict[str, Any]) -> str:
+    from app.fleet.metrics import get_metrics_collector
+
+    agent_name = str(inp.get("agent_name", "")).strip()
+    n = int(inp.get("n", 20))
+    collector = get_metrics_collector()
+
+    if not agent_name:
+        runs = collector.recent(n)
+        if not runs:
+            return "(no runs recorded yet)"
+        lines = [f"{m.agent_name}: status={m.status} time={m.execution_time_ms:.0f}ms tokens_in={m.tokens_in} tokens_out={m.tokens_out}" for m in runs]
+        return "\n".join(lines)
+
+    runs = collector.by_agent(agent_name, n)
+    if not runs:
+        return f"(no recorded runs for agent {agent_name!r})"
+    p50 = collector.p50_latency_ms(agent_name)
+    p95 = collector.p95_latency_ms(agent_name)
+    accuracy = collector.avg_tool_accuracy(agent_name)
+    failed = sum(1 for m in runs if m.status == "failed")
+    lines = [
+        f"agent: {agent_name}",
+        f"runs considered: {len(runs)} (failed: {failed})",
+        f"p50 latency: {p50:.0f}ms" if p50 is not None else "p50 latency: n/a",
+        f"p95 latency: {p95:.0f}ms" if p95 is not None else "p95 latency: n/a",
+        f"avg tool accuracy: {accuracy:.2f}" if accuracy is not None else "avg tool accuracy: n/a",
+    ]
+    return "\n".join(lines)
+
+
+_AUDIT_LOG_READ_TOOL: dict[str, Any] = {
+    "name": "audit_log_read",
+    "description": "Read the fleet audit trail: what actions ran, for which agent, with what outcome. Use this to diagnose failing agents from real evidence, not speculation.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "agent_name": {"type": "string", "description": "Filter to one agent. Omit for the most recent entries across all agents."},
+            "n": {"type": "integer", "description": "Max entries to return (default 50)."},
+        },
+        "required": [],
+    },
+}
+
+
+def audit_log_read(inp: dict[str, Any]) -> str:
+    from app.fleet.audit_log import get_audit_log
+
+    agent_name = str(inp.get("agent_name", "")).strip()
+    n = int(inp.get("n", 50))
+    log = get_audit_log()
+    entries = log.recent(max(n, 200))
+    if agent_name:
+        entries = [e for e in entries if e.agent_name == agent_name]
+    entries = entries[-n:]
+    if not entries:
+        return f"(no audit entries{f' for agent {agent_name!r}' if agent_name else ''})"
+    lines = [
+        f"[{e.timestamp}] {e.agent_name} — {e.action_type} — outcome={e.outcome}"
+        + (f" — {e.description}" if e.description else "")
+        for e in entries
+    ]
+    return "\n".join(lines)
+
+
+_SUBMIT_ENHANCEMENT_REQUEST_TOOL: dict[str, Any] = {
+    "name": "submit_enhancement_request",
+    "description": (
+        "File a proposed enhancement for human review on the Fleet Dashboard. "
+        "Call this only when you have real evidence for a genuine issue or improvement — "
+        "an empty scan with nothing to report is a normal, expected outcome, not a failure. "
+        "This only creates a pending request; nothing changes on disk until a human approves it."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "Short title, plain language."},
+            "description": {"type": "string", "description": "Full explanation in plain, non-technical-jargon language — this is what the human reads to decide approve/reject."},
+            "category": {"type": "string", "enum": ["performance", "bug", "orchestration", "knowledge", "quality", "security"]},
+            "priority": {"type": "string", "enum": ["emergency", "medium", "low"]},
+            "evidence": {"type": "object", "description": "file:line citations, metrics, or other evidence backing this claim."},
+        },
+        "required": ["title", "description", "category", "priority"],
+    },
+}
+
+
+def make_submit_enhancement_request_handler(agent_name: str, trace_id: str = "") -> Any:
+    def submit_enhancement_request(inp: dict[str, Any]) -> str:
+        import asyncio
+
+        async def _write() -> int:
+            from sqlalchemy.ext.asyncio import async_sessionmaker
+
+            from app.db.models import EnhancementRequest
+
+            engine = _new_isolated_db_engine()
+            try:
+                async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                    row = EnhancementRequest(
+                        agent_name=agent_name,
+                        title=str(inp["title"]),
+                        description=str(inp["description"]),
+                        category=str(inp["category"]),
+                        priority=str(inp["priority"]),
+                        evidence=dict(inp.get("evidence") or {}),
+                        status="pending",
+                        trace_id=trace_id or None,
+                    )
+                    session.add(row)
+                    await session.commit()
+                    await session.refresh(row)
+                    return int(row.id)
+            finally:
+                await engine.dispose()
+
+        try:
+            req_id = asyncio.run(_write())
+        except Exception as exc:
+            return f"[ERROR] Could not file enhancement request: {exc}"
+
+        try:
+            from app.services.activity_stream import get_activity_registry
+            stream = get_activity_registry().get_or_create("fleet-dashboard")
+            stream.push({
+                "type": "new_request",
+                "id": req_id,
+                "agentName": agent_name,
+                "title": str(inp["title"]),
+                "priority": str(inp["priority"]),
+                "category": str(inp["category"]),
+            })
+        except Exception:
+            pass  # dashboard notification is non-fatal — the row is already written
+
+        return f"Enhancement request #{req_id} filed for human review."
+
+    return submit_enhancement_request
+
+
+_MEMORY_SEARCH_TOOL: dict[str, Any] = {
+    "name": "memory_search",
+    "description": "Semantic search over the fleet's persistent engineering memory (past task outcomes, architecture decisions, failures, lessons) — NOT the same as memory_read/memory_write (those are a different, per-repo scratch store).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "What to search for."},
+            "top_k": {"type": "integer", "description": "Max results (default 5)."},
+        },
+        "required": ["query"],
+    },
+}
+
+
+def memory_search(inp: dict[str, Any]) -> str:
+    import asyncio
+
+    query = str(inp.get("query", "")).strip()
+    if not query:
+        return "[ERROR] query is required"
+    top_k = int(inp.get("top_k", 5))
+
+    async def _search() -> list[dict[str, Any]]:
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        from app.memory.store import query_similar_tasks
+
+        engine = _new_isolated_db_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                return await query_similar_tasks(description=query, db=session, top_k=top_k)
+        finally:
+            await engine.dispose()
+
+    try:
+        results = asyncio.run(_search())
+    except Exception as exc:
+        return f"[ERROR] memory_search failed: {exc}"
+    if not results:
+        return "(no similar memories found)"
+    lines = [
+        f"[{r.get('similarity', 0):.2f}] task={r.get('task_id')} outcome={r.get('outcome')} — {str(r.get('summary', ''))[:200]}"
+        for r in results
+    ]
+    return "\n".join(lines)
+
+
+_MEMORY_CURATE_READ_TOOL: dict[str, Any] = {
+    "name": "memory_curate_read",
+    "description": "List engineering-memory entries for curation review (duplicates, stale entries, mis-categorized entries) — distinct from memory_search (similarity search) and from memory_read (unrelated per-repo scratch store).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "category": {"type": "string", "description": "Filter: task | architecture | failure | learning. Omit for all."},
+            "limit": {"type": "integer", "description": "Max rows (default 20)."},
+        },
+        "required": [],
+    },
+}
+
+
+def memory_curate_read(inp: dict[str, Any]) -> str:
+    import asyncio
+
+    category = str(inp.get("category", "")).strip()
+    limit = int(inp.get("limit", 20))
+
+    async def _list() -> list[dict[str, Any]]:
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        from app.db.models import MemoryEmbedding
+
+        engine = _new_isolated_db_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                q = select(MemoryEmbedding).order_by(MemoryEmbedding.created_at.desc()).limit(limit)
+                if category:
+                    q = q.where(MemoryEmbedding.category == category)
+                result = await session.execute(q)
+                rows = result.scalars().all()
+                return [
+                    {
+                        "id": r.id,
+                        "task_id": r.task_id,
+                        "category": r.category,
+                        "outcome": r.outcome,
+                        "summary": r.summary[:200],
+                        "created_at": r.created_at.isoformat(),
+                    }
+                    for r in rows
+                ]
+        finally:
+            await engine.dispose()
+
+    try:
+        rows = asyncio.run(_list())
+    except Exception as exc:
+        return f"[ERROR] memory_curate_read failed: {exc}"
+    if not rows:
+        return "(no memory entries found)"
+    return "\n".join(
+        f"#{r['id']} [{r['category']}] {r['outcome']} ({r['created_at']}) — {r['summary']}"
+        for r in rows
+    )
+
+
+_MEMORY_CURATE_WRITE_TOOL: dict[str, Any] = {
+    "name": "memory_curate_write",
+    "description": "Update a memory entry during curation (recategorize, or mark as a superseded duplicate by rewriting its summary to note the supersession). Precursor to the full versioned-lesson lifecycle — light-touch, not a rewrite of history.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "id": {"type": "integer", "description": "MemoryEmbedding row id."},
+            "category": {"type": "string", "description": "New category, if recategorizing."},
+            "note": {"type": "string", "description": "Note to append to the summary, e.g. superseded-by info."},
+        },
+        "required": ["id"],
+    },
+}
+
+
+def memory_curate_write(inp: dict[str, Any]) -> str:
+    import asyncio
+
+    row_id = int(inp["id"])
+    new_category = inp.get("category")
+    note = inp.get("note")
+    if not new_category and not note:
+        return "[ERROR] provide category and/or note — nothing to update"
+
+    async def _update() -> bool:
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        from app.db.models import MemoryEmbedding
+
+        engine = _new_isolated_db_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                row = await session.get(MemoryEmbedding, row_id)
+                if row is None:
+                    return False
+                if new_category:
+                    row.category = str(new_category)
+                if note:
+                    row.summary = f"{row.summary}\n[curated] {note}"
+                await session.commit()
+                return True
+        finally:
+            await engine.dispose()
+
+    try:
+        found = asyncio.run(_update())
+    except Exception as exc:
+        return f"[ERROR] memory_curate_write failed: {exc}"
+    if not found:
+        return f"[ERROR] No memory entry with id={row_id}"
+    return f"Memory entry #{row_id} updated."
+
+
+_GIT_COMMIT_CHANGE_TOOL: dict[str, Any] = {
+    "name": "git_commit_change",
+    "description": "Stage exactly the named files (never all changes) and commit them. Only usable in the APPLY phase, after a human has approved this specific fix.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "files": {"type": "array", "items": {"type": "string"}, "description": "Paths (relative to repo root) to stage. Never pass a wildcard — list every file explicitly."},
+            "message": {"type": "string", "description": "Commit message."},
+        },
+        "required": ["files", "message"],
+    },
+}
+
+
+def make_git_commit_change_handler(repo_path: str) -> Any:
+    def git_commit_change(inp: dict[str, Any]) -> str:
+        files = [str(f) for f in (inp.get("files") or [])]
+        message = str(inp.get("message", "")).strip()
+        if not files:
+            return "[ERROR] files is required — list every file explicitly, never a wildcard"
+        if not message:
+            return "[ERROR] message is required"
+
+        for f in files:
+            result = check_path(f)
+            if not result.allowed:
+                return f"[POLICY DENIED] {f}: {result.reason}"
+
+        try:
+            add_result = subprocess.run(
+                ["git", "add", "--"] + files, cwd=repo_path, capture_output=True, text=True, timeout=30,
+            )
+            if add_result.returncode != 0:
+                return f"[ERROR] git add failed: {add_result.stderr.strip()}"
+            commit_result = subprocess.run(
+                ["git", "commit", "-m", message], cwd=repo_path, capture_output=True, text=True, timeout=30,
+            )
+            if commit_result.returncode != 0:
+                return f"[ERROR] git commit failed: {(commit_result.stdout + commit_result.stderr).strip()}"
+            sha_result = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=repo_path, capture_output=True, text=True, timeout=10,
+            )
+            sha = sha_result.stdout.strip()
+            return f"Committed {len(files)} file(s) as {sha[:12]}: {message}"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] git operation timed out"
+        except Exception as exc:
+            return f"[ERROR] {exc}"
+
+    return git_commit_change
+
+
+def make_fleet_apply_handlers(repo_path: str) -> dict[str, Any]:
+    """Shared APPLY-phase handler set for the 4 write-capable fleet-enhancement
+    agents (agent_performance_reviewer, agent_debugger, knowledge_curator,
+    quality_auditor) — only ever invoked after a human approves a specific
+    enhancement request. read_file + write_file + edit_file + run_tests +
+    git_commit_change, all scoped to repo_path (settings.fleet_self_repo_path)."""
+    base = Path(repo_path)
+
+    def write_file_h(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        result = check_path(rel)
+        if not result.allowed:
+            return f"[POLICY DENIED] {rel}: {result.reason}"
+        target = base / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(str(inp["content"]), encoding="utf-8")
+        return f"Written {rel}"
+
+    def edit_file_h(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        result = check_path(rel)
+        if not result.allowed:
+            return f"[POLICY DENIED] {rel}: {result.reason}"
+        target = base / rel
+        if not target.exists():
+            return f"[ERROR] File not found: {rel}"
+        text = target.read_text(encoding="utf-8")
+        old_s, new_s = str(inp["old_string"]), str(inp["new_string"])
+        count = text.count(old_s)
+        if count == 0:
+            return f"[ERROR] old_string not found in {rel}"
+        if count > 1:
+            return f"[ERROR] old_string appears {count} times in {rel} — must be unique"
+        target.write_text(text.replace(old_s, new_s, 1), encoding="utf-8")
+        return f"Edited {rel}"
+
+    def run_tests_h(inp: dict[str, Any]) -> str:
+        path = str(inp.get("path", "backend/tests/"))
+        flags = str(inp.get("flags", ""))
+        cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null; python -m pytest {path} {flags} -q --tb=short 2>&1 | tail -50"
+        try:
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=180)
+            return r.stdout or r.stderr or "(no output)"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] tests timed out"
+
+    return {
+        "read_file": make_read_only_handlers(repo_path)["read_file"],
+        "write_file": write_file_h,
+        "edit_file": edit_file_h,
+        "run_tests": run_tests_h,
+        "git_commit_change": make_git_commit_change_handler(repo_path),
+    }
+
+
+FLEET_APPLY_TOOLS = [READ_ONLY_TOOLS[0], _WRITE_FILE_TOOL_SPEC, _EDIT_FILE_TOOL_SPEC, _RUN_TESTS_TOOL, _GIT_COMMIT_CHANGE_TOOL]
+
+_FLEET_BASH_TOOL: dict[str, Any] = {
+    "name": "bash",
+    "description": "Run a diagnostic or check command (git log/blame/status, ps, grep, test/lint runners). Scoped by the same command-allowlist guardrail every bash-using agent uses — destructive/deploy commands are blocked regardless of role.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"command": {"type": "string", "description": "Command to run"}},
+        "required": ["command"],
+    },
+}
+
+
+def make_scoped_bash_handler(repo_path: str) -> Any:
+    """Shared scoped-bash handler for fleet agents — check_command() guardrail,
+    same pattern every other bash-using agent already follows."""
+    def bash_h(inp: dict[str, Any]) -> str:
+        cmd = str(inp["command"])
+        policy = check_command(cmd)
+        if not policy.allowed:
+            return f"[POLICY DENIED] {policy.reason}"
+        try:
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=60)
+            out = (result.stdout + result.stderr)[:4000]
+            return out if out else "(no output)"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] Command timed out after 60s"
+
+    return bash_h
