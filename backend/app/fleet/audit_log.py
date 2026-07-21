@@ -220,10 +220,10 @@ class AuditLog:
 
     async def _write_to_db(self, entry: AuditEntry) -> None:
         try:
-            from app.db.session import async_session_factory
+            from app.db.session import get_session_factory
             from sqlalchemy import text
 
-            async with async_session_factory() as session:
+            async with get_session_factory()() as session:
                 await session.execute(
                     text(
                         "INSERT INTO audit_log "

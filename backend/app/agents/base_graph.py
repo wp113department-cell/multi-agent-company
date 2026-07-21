@@ -496,7 +496,7 @@ def _make_reflection_node(model: str) -> Callable[[AgentRunState], dict[str, Any
             r = client.messages.create(
                 model=model,
                 max_tokens=384,
-                messages=list(state["messages"])
+                messages=list(state["messages"])  # type: ignore[arg-type]
                 + [{"role": "user", "content": REFLECTION_PROMPT}],
                 # No tools param → tool_choice=none equivalent
             )
@@ -846,18 +846,18 @@ def build_agent_graph(
     )
     router = _make_router(max_turns, max_stalls, enable_reflection)
 
-    g: StateGraph = StateGraph(AgentRunState)
-    g.add_node("call_llm", call_llm)
-    g.add_node("execute_tools", execute_tools_node)
+    g: StateGraph[Any, Any, Any, Any] = StateGraph(AgentRunState)
+    g.add_node("call_llm", call_llm)  # type: ignore[call-overload]
+    g.add_node("execute_tools", execute_tools_node)  # type: ignore[call-overload]
 
     if enable_planning:
-        g.add_node("planner_node", _make_planner_node(haiku, task_description))
+        g.add_node("planner_node", _make_planner_node(haiku, task_description))  # type: ignore[call-overload]
     if enable_memory:
-        g.add_node(
+        g.add_node(  # type: ignore[call-overload]
             "memory_hook_node", _make_memory_hook_node(task_description, repo_path)
         )
     if enable_reflection:
-        g.add_node("reflection_node", _make_reflection_node(model))
+        g.add_node("reflection_node", _make_reflection_node(model))  # type: ignore[call-overload]
 
     # --- Entry point ---
     if enable_planning and enable_memory:

@@ -6,6 +6,7 @@ The orchestrator (manager.py / pm.py) handles all agents uniformly via this type
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -17,11 +18,13 @@ class AgentResult:
     """
 
     summary: str
-    findings: list[dict] = field(default_factory=list)
+    findings: list[dict[str, Any]] = field(default_factory=list)
     files_touched: list[str] = field(default_factory=list)
     verified: bool = False  # from state["verification"], never from the model
     requires_human_approval: bool = False
     tokens_in: int = 0
     tokens_out: int = 0
     status: str = "completed"  # completed | blocked | needs_approval
-    raw: dict = field(default_factory=dict)  # full result dict from submit_* tool
+    raw: dict[str, Any] = field(
+        default_factory=dict
+    )  # full result dict from submit_* tool
