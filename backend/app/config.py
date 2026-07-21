@@ -220,10 +220,6 @@ class Settings(BaseSettings):
     )
 
     # Day 5A — Fleet Platform enhancements
-    openai_api_key: str = Field(
-        default="",
-        description="OpenAI API key — used when an agent is routed to 'openai' provider via agent_models.json.",
-    )
     agent_models_path: str = Field(
         default="",
         description="Override path to agent_models.json. Defaults to backend/app/fleet/agent_models.json when empty.",

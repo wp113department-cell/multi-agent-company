@@ -41,7 +41,7 @@ def create_access_token(data: dict[str, Any]) -> str:
     )
     payload["exp"] = expire
     payload["iat"] = datetime.now(timezone.utc)
-    return jwt.encode(
+    return jwt.encode(  # type: ignore[no-any-return]
         payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm
     )
 

@@ -106,7 +106,7 @@ def _get_page(session_id: str) -> Any:
     return page
 
 
-def _run(fn, *args, **kwargs):
+def _run(fn: Any, *args: Any, **kwargs: Any) -> Any:
     future = _executor.submit(fn, *args, **kwargs)
     return future.result(timeout=90)
 
@@ -147,7 +147,7 @@ def _do_read_dom(selector: str | None, session_id: str) -> str:
             return el.inner_text() if el else f"[ERROR] Selector not found: {selector}"
         except Exception as e:
             return f"[ERROR] {e}"
-    return page.inner_text("body")
+    return str(page.inner_text("body"))
 
 
 def _do_click(selector: str, session_id: str) -> str:
@@ -203,36 +203,36 @@ def _do_close_all() -> str:
 
 
 def browser_open(url: str, session_id: str = _DEFAULT_SESSION) -> dict[str, str]:
-    return _run(_do_open, url, session_id)
+    return _run(_do_open, url, session_id)  # type: ignore[no-any-return]
 
 
 def browser_navigate(url: str, session_id: str = _DEFAULT_SESSION) -> dict[str, str]:
-    return _run(_do_navigate, url, session_id)
+    return _run(_do_navigate, url, session_id)  # type: ignore[no-any-return]
 
 
 def browser_screenshot(
     path: str | None = None, session_id: str = _DEFAULT_SESSION
 ) -> str:
-    return _run(_do_screenshot, path, session_id)
+    return _run(_do_screenshot, path, session_id)  # type: ignore[no-any-return]
 
 
 def browser_read_dom(
     selector: str | None = None, session_id: str = _DEFAULT_SESSION
 ) -> str:
-    return _run(_do_read_dom, selector, session_id)
+    return _run(_do_read_dom, selector, session_id)  # type: ignore[no-any-return]
 
 
 def browser_click(selector: str, session_id: str = _DEFAULT_SESSION) -> str:
-    return _run(_do_click, selector, session_id)
+    return _run(_do_click, selector, session_id)  # type: ignore[no-any-return]
 
 
 def browser_type(selector: str, text: str, session_id: str = _DEFAULT_SESSION) -> str:
-    return _run(_do_type, selector, text, session_id)
+    return _run(_do_type, selector, text, session_id)  # type: ignore[no-any-return]
 
 
 def browser_close(session_id: str = _DEFAULT_SESSION) -> str:
-    return _run(_do_close, session_id)
+    return _run(_do_close, session_id)  # type: ignore[no-any-return]
 
 
 def browser_close_all() -> str:
-    return _run(_do_close_all)
+    return _run(_do_close_all)  # type: ignore[no-any-return]

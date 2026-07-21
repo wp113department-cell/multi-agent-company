@@ -5460,7 +5460,7 @@ def make_ai_engineer_handlers(repo_path: str) -> dict[str, Any]:
         try:
             with _ur.urlopen(url, timeout=10) as resp:
                 body = resp.read(8192).decode("utf-8", errors="replace")
-            return body[:2000]
+            return str(body[:2000])
         except Exception as e:
             return f"[ERROR] {e}"
 
@@ -10373,7 +10373,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 template_str = (root / str(path)).read_text(encoding="utf-8")
             if not template_str:
                 return "[ERROR] Provide either template or path"
-            return _Tpl(str(template_str)).render(**variables)
+            return str(_Tpl(str(template_str)).render(**variables))
         except ImportError:
             src = (
                 str(template_str)
