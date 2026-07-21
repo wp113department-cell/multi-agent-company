@@ -1,5 +1,5 @@
 # Project Control Center — Live State
-Last updated: 2026-07-21 (Day 9: Fleet Enhancement Dashboard + 5 self-improvement agents)
+Last updated: 2026-07-21 (Day 10: budget_manager, benchmark_manager, tool_discovery)
 
 ---
 
@@ -103,11 +103,12 @@ COMPLETE — see 2026-07-21 session in PROJECT.md.**
 | **P3 Repo Console** | ✅ Day 5A complete | Clone→Work→Push web console; `git_service.py`; workspace scoping |
 | Groq test shim | ✅ TEMPORARY, isolated | `USE_GROQ=true` in `.env` is for local manual/dev-server use only; `tests/conftest.py` forces `USE_GROQ=false` for the unit suite (fixed 2026-07-20 — was silently making real network calls for ~2000 tests) |
 | **Fleet Enhancement Dashboard** | ✅ Day 9 complete | `enhancement_requests` table + `app/api/fleet_dashboard.py` + `/fleet` page + background scan loop (`FLEET_SCAN_INTERVAL_HOURS`) |
-| Budget manager | ❌ Not built | Day 10 |
-| Benchmark manager | ❌ Not built | Day 10 |
+| **RunMetrics real-data wiring** | ✅ Day 10 complete | Found `_span.__enter__()` return value discarded since Day 0 — no run had ever populated tokens/cost/verification/tool_calls. Fixed in `base_graph.py`; verified with `test_metrics_wiring.py` |
+| **Budget manager** | ✅ Day 10 complete | `app/fleet/budget_manager.py` — two-tier per-run + daily cumulative enforcement, wired into `run_agent_graph()` post-graph section |
+| **Benchmark manager** | ✅ Day 10 complete | `app/fleet/benchmark_manager.py` — 7 objectives, Postgres-backed baselines (`agent_benchmarks` table, migration 012), regression detection |
 | Prompt registry | ❌ Not built | Day 11 |
 | Regression detector | ❌ Not built | Day 11 |
-| Tool discovery | ❌ Not built | Day 10 |
+| **Tool discovery** | ✅ Day 10 complete | `app/fleet/tool_discovery.py` — thin index over `tool_manifest.py` + `capability_registry.py` |
 | Versioned memory | ❌ Not built | Day 11 |
 
 ---
@@ -136,7 +137,7 @@ COMPLETE — see 2026-07-21 session in PROJECT.md.**
 | VerificationConfig hardening all agents (Day 7) | ✅ CLOSED | Day 7 — 2026-07-20 |
 | Role prompt 9-section verification + durable test coverage (Day 8) | ✅ CLOSED | Day 8 — 2026-07-20 |
 | 5 new fleet agents + Fleet Enhancement Dashboard (Day 9) | ✅ CLOSED | Day 9 — 2026-07-21 |
-| budget_manager + benchmark_manager + tool_discovery | ❌ OPEN | Day 10 |
+| budget_manager + benchmark_manager + tool_discovery | ✅ CLOSED | Day 10 — 2026-07-21 |
 | prompt_registry + regression_detector + versioned_memory | ❌ OPEN | Day 11 |
 | End-to-end pipeline smoke test | ❌ OPEN | Day 12 |
 
@@ -169,3 +170,4 @@ COMPLETE — see 2026-07-21 session in PROJECT.md.**
 | **Day 7 — VerificationConfig Hardening** | **2026-07-20** | **2254/2254** | 0 empty configs (except legitimate executive/manager), 0 duplicate tags, 0 dead enforce keys, 0 `verify_agent_contract()` violations |
 | **Day 8 — Role Prompt Verification** | **2026-07-20** | **2399/2399** | Read roo-code's prompt-section pattern first (REPO-FIRST); verified all 9 plan-required sections present (verbatim/near-verbatim) in `_GLOBAL_STANDARDS.md`; wrote 145 new durable tests (`test_day8_role_prompts.py`) — 0 prior test coverage existed for role-prompt structure |
 | **Day 9 — Fleet Enhancement Dashboard** | **2026-07-21** | **2479/2479** | 5 self-improvement agents (scan/apply two-phase) + `enhancement_requests` DB table + approve/reject API + background scan loop + `/fleet` dashboard page. Found + fixed 5 real bugs (2 pre-existing: `MemoryEmbedding.created_at` missing from ORM despite being a real column; 3 self-introduced: duplicate field caught by mypy, a timezone-column mismatch, and a repeat of the Day 7 asyncio-loop-reuse bug in new tools). Verified end-to-end against the real backend+frontend+Postgres stack, not just mocks |
+| **Day 10 — budget_manager + benchmark_manager + tool_discovery** | **2026-07-21** | **2517/2517** | Found + fixed the foundational bug first: `RunMetrics` had never been populated by any run since Day 0 (`_span.__enter__()` return value discarded in `base_graph.py`). Then built `tool_discovery.py` (index over existing registries), `budget_manager.py` (two-tier per-run + daily enforcement, wired into `run_agent_graph()`), `benchmark_manager.py` (7 objectives, Postgres-backed baselines via new `agent_benchmarks` table/migration 012, regression detection). Added a real `reflection_unsatisfied_count` signal to close the hallucination_rate objective properly rather than stub it. 0 new mypy errors |

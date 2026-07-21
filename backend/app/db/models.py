@@ -360,3 +360,19 @@ class EnhancementRequest(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     decided_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AgentBenchmark(Base):
+    """Day 10 — Fleet OS benchmark_manager.py.
+
+    Each row is one benchmark run's 7 objectives for one agent. is_baseline=True
+    rows are what compare_to_baseline() diffs new runs against; storing a new
+    baseline never deletes the old one — history is append-only for audit.
+    """
+    __tablename__ = "agent_benchmarks"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    agent_name: Mapped[str] = mapped_column(String(100), index=True)
+    objectives: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    is_baseline: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

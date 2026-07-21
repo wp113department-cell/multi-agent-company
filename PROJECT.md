@@ -2410,3 +2410,76 @@ mypy app/ --strict
 ### Verdict
 ✅ GREEN FLAG — DAY 9 COMPLETE. Ready for Day 10 (budget_manager, benchmark_manager,
 tool_discovery).
+
+## 2026-07-21 — Day 10 Complete: Fleet OS Infrastructure (budget_manager, benchmark_manager, tool_discovery)
+
+Plan: `docs/DAY10_PLAN.md`. Full report: `docs/reports/FLEET_DAY10_TEST_REPORT.md`.
+
+### The foundational bug found during planning, fixed first
+`app/fleet/metrics.py`'s `RunMetrics`/`MetricsCollector` looked fully built (tokens,
+cost, verification_pct, confidence, retries, tool_calls) but **no run had ever
+populated any of it, since Day 0**. Root cause in `base_graph.py`: `run_span()` is a
+`@contextmanager`; the code called `_span.__enter__()` and discarded the return value,
+so `_span` held the context-manager wrapper, never the actual `RunMetrics` instance.
+Fixed by capturing `_metrics = _span.__enter__()` as its own variable, then wiring
+`record_tokens()`, `confidence`, `retries`, `verification_pct` from `final_state` after
+`graph.invoke()`, and `record_tool()` (with real duration_ms) inside `execute_tools`.
+Verified with `tests/test_metrics_wiring.py` (3 tests) before building anything on top
+of it — budget/benchmark managers would otherwise have measured nothing.
+
+### tool_discovery.py
+Thin index over the two registries that already existed — `tool_manifest.py` (tool →
+risk/permission data) and `capability_registry.py` (agent → tools) — rather than
+re-scanning agent source via AST as the plan's literal text first suggested.
+`discover_tools(capability)`, `check_compatibility(tool, agent)` (mirrors
+`verify_agent_contract()`'s declared-vs-used rule), `check_availability(tool)`
+(manifest or `app.agents.tools` top-level function, not a live handler probe),
+`register_tool(spec)` (in-process overlay, never mutates the static manifest).
+14 tests in `tests/test_tool_discovery.py`.
+
+### budget_manager.py
+Two-tier live enforcement (per-run + daily cumulative), following swe-agent's
+`per_instance_cost_limit`/`total_cost_limit` split — complementary to, not a
+replacement for, `app/pipeline/concurrency.py` (concurrency caps) and
+`app/pipeline/cost_controller.py` (pre-flight cost *estimation*).
+`BudgetExceeded(dimension, scope, limit, actual)`, `check_run()` (tokens/time/memory
+— memory via stdlib `resource.getrusage`, no new dependency), `check_daily()` (sums
+`MetricsCollector.all_runs()` — new accessor added — filtered to today's UTC date,
+optionally per-agent). Wired into `base_graph.py`'s post-graph section: on
+`BudgetExceeded`, `final_state["status"] = "blocked"` + a `health_updated` fleet
+event; no new escalation pathway (that's Day 12). New config:
+`MAX_TOKENS_PER_AGENT_RUN`, `COST_BUDGET_DAILY_USD`, `MAX_RUN_TIME_SECONDS`,
+`MAX_MEMORY_MB`. 10 tests in `tests/test_budget_manager.py`.
+
+### benchmark_manager.py
+7 objectives per agent, computed from real `MetricsCollector` data: `latency_p50`,
+`tool_accuracy`, `verification_coverage`, `retry_success` (retried runs only),
+`compile_success` (from `run_tests`/`run_linter` tool_calls specifically),
+`hallucination_rate` (new proxy — see below), `benchmark_score` (config-weighted
+composite). Baselines persist in Postgres (`agent_benchmarks` table, migration 012)
+rather than in-process-only, since regression history needs to survive restarts;
+`store_baseline()` flips the prior baseline row to `is_baseline=false` instead of
+deleting it (append-only history for audit). New config: 6 `BENCHMARK_WEIGHT_*`
+fields + `BENCHMARK_LATENCY_TARGET_MS` + `BENCHMARK_REGRESSION_THRESHOLD` — zero
+hardcoded weights. Fixture-repos-per-agent-type explicitly deferred (measuring real
+production runs first). 11 tests in `tests/test_benchmark_manager.py`.
+
+**New signal added to close a real gap, not just documented as a limitation**:
+`hallucination_rate` needed `reflection_node`'s `satisfied` judgment, which was
+computed locally and discarded every run. Added `reflection_unsatisfied_count` to
+`AgentRunState` (optional field, zero breakage), incremented it in
+`reflection_node`, and wired it into `RunMetrics.reflection_unsatisfied` alongside
+the other Day 10 metrics — so this objective is real, not a stub.
+
+### Test Results
+```
+pytest tests/ -q
+→ 2517 passed, 0 failed, 55 skipped, 17 deselected, 4 warnings in 44.97s
+
+mypy app/ --strict
+→ 32 errors, all pre-existing (same baseline as Day 9), 0 new
+```
+
+### Verdict
+✅ GREEN FLAG — DAY 10 COMPLETE. Ready for Day 11 (prompt_registry,
+regression_detector, versioned_memory).

@@ -89,6 +89,10 @@ class RunMetrics:
     # Confidence (0.0 – 1.0, estimated by the agent at submit time)
     confidence: float = 1.0
 
+    # Times reflection_node judged its own tool output unsatisfactory this run
+    # (a conservative hallucination-rate proxy — see benchmark_manager.py)
+    reflection_unsatisfied: int = 0
+
     # Final outcome
     status: str = "running"
 
@@ -144,6 +148,7 @@ class RunMetrics:
             "memory_retrieved": self.memory_retrieved,
             "memory_written": self.memory_written,
             "confidence": self.confidence,
+            "reflection_unsatisfied": self.reflection_unsatisfied,
             "status": self.status,
         }
 
@@ -182,6 +187,12 @@ class MetricsCollector:
     def by_agent(self, agent_name: str, n: int = 20) -> list[RunMetrics]:
         with self._lock:
             return [m for m in self._ring if m.agent_name == agent_name][-n:]
+
+    def all_runs(self) -> list[RunMetrics]:
+        """Every run currently held in the ring (bounded by _RING_CAPACITY).
+        Used by budget_manager's daily cumulative-spend check."""
+        with self._lock:
+            return list(self._ring)
 
     def p50_latency_ms(self, agent_name: str) -> float | None:
         runs = [m.execution_time_ms for m in self.by_agent(agent_name) if m.execution_time_ms > 0]
