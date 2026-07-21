@@ -1,5 +1,5 @@
 # Project Control Center — Live State
-Last updated: 2026-07-21 (Day 11: prompt_registry, regression_detector, versioned_memory)
+Last updated: 2026-07-21 (Day 12: E2E smoke test, failure recovery ladder, event compliance, hierarchy chain)
 
 ---
 
@@ -110,6 +110,10 @@ COMPLETE — see 2026-07-21 session in PROJECT.md.**
 | **Regression detector** | ✅ Day 11 complete | `app/fleet/regression_detector.py` — thin deploy-time gate wrapping Day 10's `benchmark_manager.compare_to_baseline()` |
 | **Tool discovery** | ✅ Day 10 complete | `app/fleet/tool_discovery.py` — thin index over `tool_manifest.py` + `capability_registry.py` |
 | **Versioned memory** | ✅ Day 11 complete | `app/fleet/versioned_memory.py` — `versioned_lessons` table (migration 014), merge-on-conflict lesson lifecycle (DRAFT→PUBLISHED→SUPERSEDED/MERGED_INTO→ARCHIVED) |
+| **E2E pipeline smoke test** | ✅ Day 12 complete | `tests/test_day12_smoke_test.py` — POST /tasks → run → pipeline pause → approve → launch_manager, previously zero coverage |
+| **Failure Recovery Ladder** | ✅ Day 12 complete | `app/fleet/failure_ladder.py` — all 7 states runnable; wired into `run_manager()`'s existing retry loop + `base_graph.py`'s stall path |
+| **Event compliance** | ✅ Day 12 complete | `tests/test_event_compliance.py` — static AST scan, only the 8 canonical `FleetEventType`s ever emitted |
+| **Hierarchy chain (partial)** | ✅ Day 12 complete | `fleet_manager.select()` + `agent_bus.publish(task_created)` now actually called from `run_manager()` — previously registered-but-unused; "knowledge_graph" step doesn't exist as a module, excluded |
 
 ---
 
@@ -139,7 +143,7 @@ COMPLETE — see 2026-07-21 session in PROJECT.md.**
 | 5 new fleet agents + Fleet Enhancement Dashboard (Day 9) | ✅ CLOSED | Day 9 — 2026-07-21 |
 | budget_manager + benchmark_manager + tool_discovery | ✅ CLOSED | Day 10 — 2026-07-21 |
 | prompt_registry + regression_detector + versioned_memory | ✅ CLOSED | Day 11 — 2026-07-21 |
-| End-to-end pipeline smoke test | ❌ OPEN | Day 12 |
+| End-to-end pipeline smoke test + failure recovery ladder + event compliance + hierarchy chain | ✅ CLOSED | Day 12 — 2026-07-21 |
 
 ---
 
@@ -172,3 +176,4 @@ COMPLETE — see 2026-07-21 session in PROJECT.md.**
 | **Day 9 — Fleet Enhancement Dashboard** | **2026-07-21** | **2479/2479** | 5 self-improvement agents (scan/apply two-phase) + `enhancement_requests` DB table + approve/reject API + background scan loop + `/fleet` dashboard page. Found + fixed 5 real bugs (2 pre-existing: `MemoryEmbedding.created_at` missing from ORM despite being a real column; 3 self-introduced: duplicate field caught by mypy, a timezone-column mismatch, and a repeat of the Day 7 asyncio-loop-reuse bug in new tools). Verified end-to-end against the real backend+frontend+Postgres stack, not just mocks |
 | **Day 10 — budget_manager + benchmark_manager + tool_discovery** | **2026-07-21** | **2517/2517** | Found + fixed the foundational bug first: `RunMetrics` had never been populated by any run since Day 0 (`_span.__enter__()` return value discarded in `base_graph.py`). Then built `tool_discovery.py` (index over existing registries), `budget_manager.py` (two-tier per-run + daily enforcement, wired into `run_agent_graph()`), `benchmark_manager.py` (7 objectives, Postgres-backed baselines via new `agent_benchmarks` table/migration 012, regression detection). Added a real `reflection_unsatisfied_count` signal to close the hallucination_rate objective properly rather than stub it. 0 new mypy errors |
 | **Day 11 — prompt_registry + regression_detector + versioned_memory** | **2026-07-21** | **2544/2544** | REPO-FIRST research first (roo-code, langgraph, swe-agent, autogen, open-hands, aider) found all 3 modules are novel designs — no repo has an approval-gate prompt lifecycle, baseline-regression blocking, or merge-on-conflict memory. `regression_detector.py` wraps Day 10's `benchmark_manager` instead of reimplementing comparison logic. `prompt_registry.py` (new `prompt_versions` table, migration 013) writes approved versions straight to `backend/roles/*.md` — zero changes needed to `load_role()`. `versioned_memory.py` (new `versioned_lessons` table, migration 014) reuses `app.memory.store._embed()` for conflict detection and does a real LLM merge call on conflict. Corrected a wrong plan-doc assumption (no `lessons` DB table existed) before building. Found + fixed a real bug in `rollback()` returning stale pre-flip state. 0 new mypy errors |
+| **Day 12 — E2E Smoke Test + Failure Ladder + Event Compliance + Hierarchy Chain** | **2026-07-21** | **2569/2569** | Found the real pipeline flow (`POST /tasks→run→approve→launch_manager`) had zero test coverage anywhere, despite being fully wired — closed with `test_day12_smoke_test.py`. Found `fleet_manager`/`capability_registry`/`agent_bus` were registered-but-never-called from the live path — added additive `fleet_manager.select()` + `publish(task_created(...))` calls into `run_manager()`. Built `failure_ladder.py` (all 7 recovery states): closed a real gap where `VALID_TRANSITIONS` had an unreachable `"failed"` status; wired retry-exhaustion into `run_manager()`'s existing bounded retry loop rather than adding a second, riskier one inside `base_graph.py`'s hot path. Static AST event-compliance scan + hierarchy-chain integration test (6 real steps verified against 2 real integration points, not 1 imagined chain). 0 new mypy errors |

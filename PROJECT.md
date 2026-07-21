@@ -2551,3 +2551,75 @@ leftover files in `backend/roles/` after the full suite run.
 ### Verdict
 ✅ GREEN FLAG — DAY 11 COMPLETE. Ready for Day 12 (end-to-end pipeline smoke test + failure
 recovery ladder + event compliance + hierarchy chain verification).
+
+## 2026-07-21 — Day 12 Complete: E2E Smoke Test + Failure Recovery Ladder + Event Compliance + Hierarchy Chain
+
+Plan: `docs/DAY12_PLAN.md` (repo-first + codebase-first research before any design — see plan doc).
+Full report: `docs/reports/FLEET_DAY12_TEST_REPORT.md`.
+
+### Key research finding: two separate LangGraph graphs, and what's really wired
+Confirmed by reading `app/pipeline/graph.py`, `app/agents/manager.py`, `app/api/agents.py` in full:
+there are two distinct graphs in this codebase — `pipeline/graph.py`'s epic-level
+`pm→architect→decomposer→human_review` graph (real `AsyncPostgresSaver` checkpointer +
+`interrupt_before`), and `base_graph.py`'s per-agent `run_agent_graph()` (no checkpointer, used by
+all 72+ agents). The real live flow (`POST /tasks` → `/run` → pipeline pauses → `/pipeline/approve`
+→ `resume_pipeline` → `asyncio.create_task(launch_manager)` → `run_manager()` → direct calls to
+`run_qa`/`run_reviewer`) is fully wired and had **zero test coverage anywhere** before this session
+(confirmed by grep). But `fleet_manager.select()`, `capability_registry` lookups, and `agent_bus`
+(`fleet_events.publish`) — despite existing, being unit-tested in isolation, and every agent
+self-registering into them — were **never actually called from the live path**. Decision: add
+small, additive instrumentation into `run_manager()` rather than restructure its working dispatch
+logic.
+
+### Part 1 — Smoke test (`tests/test_day12_smoke_test.py`, 4 tests)
+Drove a real task through the FastAPI `TestClient` end-to-end: `POST /tasks` → `POST /{id}/run`
+(mocked LLM) → pipeline pauses at `human_review` with real decomposer-produced subtasks →
+`POST /{id}/pipeline/approve` → verified `launch_manager` gets scheduled with correct args. Since
+`run_backend_dev`/`run_qa`/`run_reviewer` already have dedicated test coverage elsewhere, scoped
+`run_manager()`'s own orchestration (subtask iteration, bounded retry loop, status aggregation) as
+a separate, function-level-mocked test rather than re-simulating 3 more LLM personas through a
+real git worktree — including a retry-then-succeed case.
+
+### Part 2 — Failure Recovery Ladder (`app/fleet/failure_ladder.py`, 15 tests)
+Verified what already existed before writing anything: Checkpoint + Rollback were real and
+complete (`fleet_checkpoint.py`). Escalate existed as an *implicit* side effect
+(`run_agent_graph()`'s exception handler already called `agent_registry.fail_task()`) — made
+explicit and nameable. Abort was genuinely unreachable: `VALID_TRANSITIONS` had a `"failed"`
+terminal status that **nothing ever transitioned into** — closed by adding it as a valid target
+from every in-progress status. Resume and Human Review were fully missing. Rather than add a new
+retry loop inside `base_graph.py`'s hot path (shared by all 72+ agents — too risky for the value),
+wired `escalate`/`abort`/`request_human_review` into `run_manager()`'s **existing, already-tested**
+per-subtask retry loop at its failure-exhaustion points, and added a low-risk, additive
+stall-detection hook (escalate → human_review) in `base_graph.py`'s post-graph section, following
+swe-agent's `forward_with_handling()` bounded-requery pattern for `should_retry()`.
+
+### Part 3 — Event Compliance (`tests/test_event_compliance.py`, 3 tests)
+Static AST scan of every `publish(<constructor>(...))` call site under `app/`, asserting the
+observed event types are a subset of the 8 canonical `FleetEventType` values. Deliberately a subset
+check, not equality — `task_created`/`memory_created` had zero call sites before this session
+(confirmed by grep), and requiring all 8 to be in active use at all times would make this
+regression guard fragile to legitimate temporary gaps; the plan's own stated rationale ("any event
+type NOT in this set → fails") is about preventing invented types, which a subset check catches.
+
+### Part 4 — Hierarchy Chain (`tests/test_hierarchy_chain.py`, 3 tests)
+Added the actual `fleet_manager.select()` + `publish(task_created(...))` calls into
+`run_manager()`'s subtask dispatch loop — additive, doesn't change which function actually runs.
+Verified all 6 real chain steps against the two real integration points (not one aspirational
+chain): fleet_manager/capability_registry via `run_manager()`, agent_bus via a real `FleetBus`
+subscriber (not just a mock assertion), and verification/reflection/lesson/result via a direct
+`run_agent_graph()` call with a stateful mock LLM that correctly satisfies reflection's and lesson
+extraction's real JSON parsing (unlike Part 1's simpler generic mock). "knowledge_graph" does not
+exist as a module anywhere — confirmed by search, excluded rather than faked.
+
+### Test Results
+```
+pytest tests/ -q
+→ 2569 passed, 0 failed, 55 skipped, 17 deselected, 7 warnings in 64.07s
+
+mypy app/ --strict
+→ 32 errors, all pre-existing (identical to the Day 11 baseline), 0 new
+```
+
+### Verdict
+✅ GREEN FLAG — DAY 12 COMPLETE. Ready for Day 13 (Human Approval UI —
+LangGraph `interrupt()` + `Command(resume=...)` for full agent-run-level approval flows).
