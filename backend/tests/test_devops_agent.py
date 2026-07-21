@@ -1,14 +1,11 @@
 """Tests for DevOps Agent — tool scoping and bash allowlist enforcement."""
 from __future__ import annotations
 
-import pytest
 from unittest.mock import patch
 
 from app.agents.tools import (
     DEVOPS_TOOLS,
     make_devops_handlers,
-    make_coder_handlers,
-    REVIEWER_TOOLS,
 )
 
 

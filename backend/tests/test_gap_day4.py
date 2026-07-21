@@ -34,7 +34,6 @@ class TestConfigGapDay4Fields:
 
     def test_redis_url_has_default(self) -> None:
         from app.config import Settings
-        import inspect
         fields = Settings.model_fields
         assert "redis_url" in fields
         assert "redis" in (fields["redis_url"].default or "").lower()
@@ -269,7 +268,7 @@ class TestCIWorkflow:
 
     def test_ci_yml_is_valid_yaml(self) -> None:
         try:
-            import yaml
+            import yaml  # noqa: F401
         except ImportError:
             pytest.skip("pyyaml not installed")
         data = self._load()

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.policy.engine_v2 import match_pattern_sync, _glob_to_regex
+from app.policy.engine_v2 import match_pattern_sync
 
 
 # ---- Glob pattern unit tests (sync, no DB) ----

@@ -1,7 +1,6 @@
 """Tests for Engineering Memory v1 — embedding, storage, similarity query."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -76,7 +75,7 @@ async def test_embed_task_outcome_inserts_row() -> None:
         ms.return_value = MagicMock(memory_enabled=True, voyage_api_key="", voyage_model="m")
         mock_embed.return_value = _ZERO_VECTOR_1536
 
-        result = await embed_task_outcome(
+        result = await embed_task_outcome(  # noqa: F841
             task_id="task-123",
             description="Add login endpoint",
             summary="Login endpoint added",

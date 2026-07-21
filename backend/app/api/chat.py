@@ -17,7 +17,6 @@ from app.models.chat import (
     create_session,
     get_session,
     delete_session,
-    get_or_restore_session,
     load_history_from_db,
     save_message_to_db,
 )

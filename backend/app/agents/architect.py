@@ -15,7 +15,6 @@ import json
 import logging
 from typing import Any
 
-from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import READ_ONLY_TOOLS, make_read_only_handlers
 from app.config import get_settings

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -17,9 +16,7 @@ import pytest
 from app.agents.tools import (
     CHAT_TOOLS,
     make_chat_handlers,
-    make_read_only_handlers,
 )
-from app.policy.engine import check_command, check_path
 
 
 # ---------------------------------------------------------------------------

@@ -13,7 +13,6 @@ from __future__ import annotations
 import pytest
 
 from app.fleet.fleet_checkpoint import (
-    AgentCheckpoint,
     CheckpointStore,
     get_checkpoint_store,
     restore_checkpoint,
@@ -170,7 +169,7 @@ class TestListFilter:
 
     def test_latest_for_returns_most_recent(self) -> None:
         store = _fresh()
-        id1 = store.save(_state(turns=1), agent_name="coder", task_id="t1")
+        id1 = store.save(_state(turns=1), agent_name="coder", task_id="t1")  # noqa: F841
         id2 = store.save(_state(turns=2), agent_name="coder", task_id="t1")
         latest = store.latest_for("coder", "t1")
         assert latest is not None
@@ -186,7 +185,7 @@ class TestRingBuffer:
         store = CheckpointStore(capacity=3)
         id1 = store.save(_state(), agent_name="a")
         id2 = store.save(_state(), agent_name="a")
-        id3 = store.save(_state(), agent_name="a")
+        id3 = store.save(_state(), agent_name="a")  # noqa: F841
         id4 = store.save(_state(), agent_name="a")  # evicts id1
         assert store.restore(id1) is None
         assert store.restore(id2) is not None

@@ -90,10 +90,10 @@ class _ShimResponse:
 
 def _make_groq_backed_anthropic(groq_api_key: str) -> Any:
     """Return a fake anthropic.Anthropic() instance whose .messages.create() calls Groq."""
-    from app.agents.groq_adapter import run_groq, _to_groq_tools, _build_groq_messages
+    from app.agents.groq_adapter import run_groq
     from app.config import get_settings
 
-    settings = get_settings()
+    settings = get_settings()  # noqa: F841
 
     def _messages_create(
         *,

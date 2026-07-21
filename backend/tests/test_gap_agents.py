@@ -14,7 +14,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Import all 7 gap agent modules — catches syntax errors at collection time

@@ -1,10 +1,8 @@
 """Tests for Fleet OS agent_registry.py — Phase F2."""
 from __future__ import annotations
 
-import pytest
 
 from app.fleet.agent_registry import (
-    AgentInstance,
     AgentRegistry,
     AgentState,
     get_agent_registry,

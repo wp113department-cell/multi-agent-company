@@ -74,7 +74,7 @@ def _task_to_dict(task: Any, logs: list[Any] | None = None) -> dict[str, Any]:
         "repoName": repo.name if repo else None,
         "createdAt": task.created_at.isoformat() if task.created_at else None,
         "updatedAt": task.updated_at.isoformat() if task.updated_at else None,
-        "logs": [_log_to_dict(l) for l in (logs or [])],
+        "logs": [_log_to_dict(lg) for lg in (logs or [])],
     }
 
 
@@ -129,7 +129,7 @@ async def add_log(
 @router.get("/{task_id}/logs")
 async def get_logs(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     logs = await list_logs(db, task_id)
-    return {"logs": [_log_to_dict(l) for l in logs]}
+    return {"logs": [_log_to_dict(lg) for lg in logs]}
 
 
 @router.post("/{task_id}/run")

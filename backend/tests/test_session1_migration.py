@@ -17,9 +17,8 @@ from __future__ import annotations
 
 import inspect
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -33,7 +32,6 @@ import app.agents.planner as plan_mod
 from app.agents.architect import AGENT_CONTRACT as ARCH_CONTRACT, architect_node
 from app.agents.decomposer import AGENT_CONTRACT as DEC_CONTRACT, decomposer_node
 from app.agents.planner import AGENT_CONTRACT as PLAN_CONTRACT, run_planner, _validate_plan
-from app.agents.base_graph import VerificationConfig
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +128,9 @@ class TestPlannerContract:
 class TestMigrationComplete:
     def _has_run_agent_import(self, mod: Any) -> bool:
         """True if module actually imports run_agent (not run_agent_graph)."""
-        import ast, inspect, textwrap
+        import ast
+        import inspect
+        import textwrap
         src = textwrap.dedent(inspect.getsource(mod))
         try:
             tree = ast.parse(src)

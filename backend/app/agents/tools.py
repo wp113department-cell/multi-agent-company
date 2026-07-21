@@ -518,7 +518,7 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
     def git_log(inp: dict[str, Any]) -> str:
         count = min(int(inp.get("count", 10)), 30)
         file_filter = str(inp.get("file", ""))
-        cmd = ["git", "log", f"--oneline", f"-{count}", "--no-merges"]
+        cmd = ["git", "log", "--oneline", f"-{count}", "--no-merges"]
         if file_filter:
             cmd.extend(["--", file_filter])
         try:
@@ -2621,7 +2621,7 @@ def make_bug_fix_handlers(repo_path: str) -> dict[str, Any]:
 
     def bf_analyze_error(inp: dict[str, Any]) -> str:
         tb = str(inp.get("traceback", ""))
-        lines = [l for l in tb.splitlines() if "File" in l or "Error" in l or "Exception" in l]
+        lines = [ln for ln in tb.splitlines() if "File" in ln or "Error" in ln or "Exception" in ln]
         return "\n".join(lines[:40]) or "(no error markers found)"
 
     def bf_read_logs(inp: dict[str, Any]) -> str:
@@ -4012,7 +4012,6 @@ TECH_DEBT_AGENT_TOOLS: list[dict[str, Any]] = READ_ONLY_TOOLS + [
 
 def make_performance_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     """Handler factory for Performance Reviewer agent."""
-    import re as _re
     import subprocess as _sp
     from app.config import get_settings as _gs
 
@@ -4159,7 +4158,6 @@ def make_style_reviewer_handlers(repo_path: str) -> dict[str, Any]:
 
 def make_sprint_planner_handlers(repo_path: str) -> dict[str, Any]:
     """Handler factory for Sprint Planner agent."""
-    root = Path(repo_path)
     handlers = make_read_only_handlers(repo_path)
     sprint_result: dict[str, Any] = {}
 
@@ -4364,7 +4362,6 @@ def make_schema_agent_handlers(repo_path: str) -> dict[str, Any]:
 def make_ai_engineer_handlers(repo_path: str) -> dict[str, Any]:
     """Handler factory for AI/ML Engineer agent."""
     import subprocess as _sp
-    import textwrap as _tw
 
     root = Path(repo_path)
     handlers = make_read_only_handlers(repo_path)
@@ -5330,11 +5327,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
                     # We're inside an async context — schedule and block
-                    import concurrent.futures
                     future = asyncio.run_coroutine_threadsafe(
                         session.request_confirmation(
                             action_id=action_id,
-                            description=f"Run dangerous command",
+                            description="Run dangerous command",
                             details=command,
                         ),
                         loop,
@@ -5406,7 +5402,6 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                import concurrent.futures
                 future = asyncio.run_coroutine_threadsafe(
                     session.request_confirmation(
                         action_id=action_id,
@@ -5501,7 +5496,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         from_rel = str(inp["from_path"])
         to_rel = str(inp["to_path"])
         if _is_protected_path(from_rel, repo_path) or _is_protected_path(to_rel, repo_path):
-            return f"[POLICY DENIED] Protected path involved."
+            return "[POLICY DENIED] Protected path involved."
         src = root / from_rel
         dst = root / to_rel
         if not src.exists():
@@ -5733,7 +5728,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                  "-not", "-path", "*/.venv/*"],
                 capture_output=True, text=True, timeout=15,
             )
-            found = [l for l in r.stdout.splitlines() if l.strip()]
+            found = [ln for ln in r.stdout.splitlines() if ln.strip()]
             if not found:
                 return f"(no files matching '{name}')"
             rel_paths = []
@@ -6756,7 +6751,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             lines = r.stdout
             if frt_path_pat:
                 lines = "\n".join(ln for ln in lines.splitlines() if frt_path_pat in ln)
-            return lines[:5000] if lines.strip() else f"No routes found" + (f" for {frt_method}" if frt_method else "")
+            return lines[:5000] if lines.strip() else "No routes found" + (f" for {frt_method}" if frt_method else "")
         except Exception as e:
             return f"[ERROR] {e}"
 
@@ -6772,7 +6767,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 ["grep", "-rn", "-E", pat, repo_path, "--include=*.py", "--include=*.ts"] + exclude,
                 capture_output=True, text=True, timeout=15,
             )
-            return r.stdout[:5000] if r.stdout.strip() else f"No API definitions found" + (f" matching '{fapi_name}'" if fapi_name else "")
+            return r.stdout[:5000] if r.stdout.strip() else "No API definitions found" + (f" matching '{fapi_name}'" if fapi_name else "")
         except Exception as e:
             return f"[ERROR] {e}"
 
@@ -7015,7 +7010,6 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                import concurrent.futures as _cf
                 fut = asyncio.run_coroutine_threadsafe(
                     session.request_confirmation(
                         action_id=action_id,
@@ -7115,7 +7109,6 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                import concurrent.futures as _cf
                 fut = asyncio.run_coroutine_threadsafe(
                     session.request_confirmation(
                         action_id=action_id,
@@ -7176,7 +7169,6 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                import concurrent.futures as _cf
                 fut = asyncio.run_coroutine_threadsafe(
                     session.request_confirmation(
                         action_id=action_id,
@@ -7418,8 +7410,8 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 text = fp.read_text(encoding="utf-8", errors="replace")
                 lines = text.splitlines()
                 n_lines = len(lines)
-                n_funcs = sum(1 for l in lines if l.strip().startswith("def ") or l.strip().startswith("async def "))
-                n_classes = sum(1 for l in lines if l.strip().startswith("class "))
+                n_funcs = sum(1 for ln in lines if ln.strip().startswith("def ") or ln.strip().startswith("async def "))
+                n_classes = sum(1 for ln in lines if ln.strip().startswith("class "))
                 rel = fp.relative_to(root)
                 results.append(f"**{rel}** — {n_lines} lines, {n_funcs} functions, {n_classes} classes")
             except Exception as e:
@@ -7479,8 +7471,8 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 tname = parts[1].strip()
                 if tname and not tname.startswith("-") and tname not in ("Name", "Schema"):
                     lines.append(f"    {tname} {{")
-                    lines.append(f"        string id")
-                    lines.append(f"    }}")
+                    lines.append("        string id")
+                    lines.append("    }")
         lines.append("```")
         return "\n".join(lines) if len(lines) > 3 else f"(raw schema)\n{raw}"
 
@@ -7550,7 +7542,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         description = str(inp["description"])
         team_key = str(inp["team_key"])
         # First resolve team key → team ID
-        query = f'{{"query": "query {{ teams {{ nodes {{ id key }} }} }}"}}'
+        query = '{"query": "query { teams { nodes { id key } } }"}'
         try:
             req = _ur_li.Request(
                 "https://api.linear.app/graphql",
@@ -7609,13 +7601,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def find_queue_h(inp: dict[str, Any]) -> str:
         _rp = str(inp.get("repo_path", repo_path))
-        patterns = [
+        patterns = [  # noqa: F841
             r"asyncio\.Queue",
             r"class.*Queue",
             r"BullMQ\|rq\.Queue\|celery\|dramatiq\|huey",
             r"Queue\(",
         ]
-        import subprocess as _sq
         results: list[str] = []
         try:
             pat = r"asyncio\.Queue|class.*Queue|rq\.Queue|Queue\(|BullMQ|celery|dramatiq"
@@ -7624,7 +7615,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 capture_output=True, text=True, timeout=15,
             )
             lines = out.stdout.strip().splitlines()
-            results = [l for l in lines if ".venv/" not in l and "node_modules/" not in l][:30]
+            results = [ln for ln in lines if ".venv/" not in ln and "node_modules/" not in ln][:30]
         except Exception as e:
             return f"[ERROR] find_queue: {e}"
         if not results:
@@ -7640,7 +7631,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 capture_output=True, text=True, timeout=15,
             )
             lines = out.stdout.strip().splitlines()
-            results = [l for l in lines if ".venv/" not in l and "node_modules/" not in l][:30]
+            results = [ln for ln in lines if ".venv/" not in ln and "node_modules/" not in ln][:30]
         except Exception as e:
             return f"[ERROR] find_worker: {e}"
         if not results:
@@ -7982,9 +7973,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 m = _re.search(pattern, text)
                 if m:
                     major, minor, patch_v = int(m.group(2)), int(m.group(3)), int(m.group(4))
-                    if part == "major": major, minor, patch_v = major + 1, 0, 0
-                    elif part == "minor": minor, patch_v = minor + 1, 0
-                    else: patch_v += 1
+                    if part == "major":
+                        major, minor, patch_v = major + 1, 0, 0
+                    elif part == "minor":
+                        minor, patch_v = minor + 1, 0
+                    else:
+                        patch_v += 1
                     new_ver = f"{major}.{minor}.{patch_v}"
                     new_text = _re.sub(pattern, lambda x: f"{x.group(1)}{new_ver}{x.group(5)}", text, count=1)
                     fp.write_text(new_text, encoding="utf-8")
@@ -8004,7 +7998,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             r = subprocess.run(["ps", "aux"], capture_output=True, text=True, timeout=10)
             lines = r.stdout.strip().splitlines()
             if name_filter:
-                lines = [l for l in lines if name_filter.lower() in l.lower() or l.startswith("USER")]
+                lines = [ln for ln in lines if name_filter.lower() in ln.lower() or ln.startswith("USER")]
             return "\n".join(lines[:50])
         except Exception as e:
             return f"[ERROR] list_processes: {e}"
@@ -8019,7 +8013,8 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] list_open_ports: {e}"
 
     def wait_for_port_h(inp: dict[str, Any]) -> str:
-        import socket as _socket, time as _time
+        import socket as _socket
+        import time as _time
         port = int(inp["port"])
         host = str(inp.get("host", "localhost"))
         timeout = int(inp.get("timeout", 30))
@@ -8034,7 +8029,8 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         return f"[TIMEOUT] Port {host}:{port} not open after {timeout}s"
 
     def check_url_status_h(inp: dict[str, Any]) -> str:
-        import urllib.request as _req, time as _time
+        import urllib.request as _req
+        import time as _time
         url = str(inp["url"])
         try:
             start = _time.time()
@@ -8048,7 +8044,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         command = str(inp["command"])
         top = int(inp.get("top", 20))
         try:
-            profiled = f"python -m cProfile -s cumulative -c 'import subprocess; subprocess.run({command!r}.split(), check=True)'"
+            profiled = f"python -m cProfile -s cumulative -c 'import subprocess; subprocess.run({command!r}.split(), check=True)'"  # noqa: F841
             r = subprocess.run(
                 ["python", "-m", "cProfile", "-s", "cumulative"] + command.split()[1:],
                 capture_output=True, text=True, cwd=repo_path, timeout=60,
@@ -8275,7 +8271,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         target_dir = str(root / directory)
         if manager == "auto":
             has_pip = (root / "requirements.txt").exists() or (root / "pyproject.toml").exists()
-            has_npm = (root / "package.json").exists()
+            has_npm = (root / "package.json").exists()  # noqa: F841
             manager = "pip" if has_pip else "npm"
         try:
             if manager == "pip":
@@ -8340,7 +8336,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             r = subprocess.run([sys.executable, "-m", "pip", "list", "--format=columns"], capture_output=True, text=True, timeout=30)
             lines = r.stdout.strip().splitlines()
             if name_filter:
-                lines = [l for l in lines if name_filter.lower() in l.lower() or l.startswith("Package")]
+                lines = [ln for ln in lines if name_filter.lower() in ln.lower() or ln.startswith("Package")]
             return "\n".join(lines)
         except Exception as e:
             return f"[ERROR] pip_list: {e}"
@@ -8357,7 +8353,8 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] create_directory: {e}"
 
     def http_request_h(inp: dict[str, Any]) -> str:
-        import urllib.request as _req, json as _json, urllib.error as _uerr
+        import urllib.request as _req
+        import urllib.error as _uerr
         method = str(inp["method"]).upper()
         url = str(inp["url"])
         headers = dict(inp.get("headers") or {})

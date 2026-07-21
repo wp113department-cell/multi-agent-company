@@ -17,7 +17,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Handler factory imports (inline in each agent module, not in tools.py)
@@ -26,46 +25,38 @@ from app.agents.release_notes_agent import (
     make_release_notes_handlers,
     _RELEASE_NOTES_TOOLS,
     _VERIFICATION_CFG as _RN_VCFG,
-    run_release_notes_agent,
 )
 from app.agents.evaluation_agent import (
     make_evaluation_handlers,
     _EVAL_TOOLS,
     _VERIFICATION_CFG as _EVAL_VCFG,
-    run_evaluation_agent,
 )
 from app.agents.rag_engineer_agent import (
     make_rag_engineer_handlers,
     _RAG_TOOLS,
     _VERIFICATION_CFG as _RAG_VCFG,
-    run_rag_engineer_agent,
 )
 from app.agents.changelog_agent import (
     make_changelog_handlers,
     _CHANGELOG_TOOLS,
     _VERIFICATION_CFG as _CL_VCFG,
-    run_changelog_agent,
 )
 from app.agents.user_story_generator import (
     make_user_story_handlers,
     _USER_STORY_TOOLS,
     _VERIFICATION_CFG as _US_VCFG,
-    run_user_story_generator,
 )
 from app.agents.security_architect import (
     make_security_architect_handlers,
     _SECURITY_TOOLS,
     _VERIFICATION_CFG as _SA_VCFG,
-    run_security_architect,
 )
 from app.agents.database_architect import (
     make_database_architect_handlers,
     _DB_TOOLS,
     _VERIFICATION_CFG as _DA_VCFG,
-    run_database_architect,
 )
 from app.agents.manager import run_manager  # noqa: F401 (import sanity check)
-from app.agents.agent_result import AgentResult
 from app.agents.tools import READ_ONLY_TOOLS
 
 _REPO = str(Path(__file__).parent.parent.parent)

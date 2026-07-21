@@ -19,8 +19,6 @@ Tests cover:
 """
 from __future__ import annotations
 
-import os
-import pytest
 from pathlib import Path
 
 from tests.pending.conftest import requires_anthropic, requires_all
@@ -181,7 +179,6 @@ async def test_full_dev_qa_review_pipeline_happy_path(tmp_path: Path) -> None:
     from app.agents.reviewer import run_reviewer
 
     wt = tmp_path / "worktree"
-    import shutil
     shutil.copytree(FIXTURE_REPO, str(wt))
 
     plan = "Add a function add(a: int, b: int) -> int that returns a + b to demo_module.py."

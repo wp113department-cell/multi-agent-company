@@ -2,7 +2,6 @@ from functools import cached_property
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Any
 
 
 class Settings(BaseSettings):

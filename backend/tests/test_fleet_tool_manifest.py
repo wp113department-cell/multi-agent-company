@@ -7,7 +7,6 @@ from app.fleet.tool_manifest import (
     TOOL_MANIFEST,
     ToolManifestEntry,
     get_high_risk_tools,
-    get_manifest,
     is_high_risk,
     verify_agent_contract,
 )

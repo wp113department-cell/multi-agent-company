@@ -8,7 +8,6 @@ import pytest
 from app.fleet.metrics import (
     MetricsCollector,
     RunMetrics,
-    ToolCallRecord,
     get_metrics_collector,
     new_trace_id,
     run_span,
@@ -151,7 +150,7 @@ class TestRunSpan:
 
     def test_run_span_registers_in_collector(self) -> None:
         collector = get_metrics_collector()
-        before = len(collector.recent(1000))
+        before = len(collector.recent(1000))  # noqa: F841
         with run_span("pm", task_id="t1", trace_id="span-test-001"):
             pass
         after = collector.recent(1000)

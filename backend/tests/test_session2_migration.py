@@ -124,7 +124,8 @@ class TestCoderContract:
 
 class TestMigrationComplete:
     def _imports_run_agent(self, mod: Any) -> bool:
-        import ast, textwrap
+        import ast
+        import textwrap
         src = textwrap.dedent(inspect.getsource(mod))
         try:
             tree = ast.parse(src)

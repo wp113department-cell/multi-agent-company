@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import pytest
 from tests.pending.conftest import requires_anthropic
 
 _THIS_REPO = "/home/pc-117/Documents/CRR2906"

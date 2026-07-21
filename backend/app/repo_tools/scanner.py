@@ -6,7 +6,6 @@ import hashlib
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from tree_sitter import Language, Node, Parser
 import tree_sitter_python as tspython

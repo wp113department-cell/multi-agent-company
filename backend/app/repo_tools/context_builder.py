@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from app.repo_tools.scanner import RepoIndex, build_call_graph
 from app.repo_tools.embeddings import semantic_search

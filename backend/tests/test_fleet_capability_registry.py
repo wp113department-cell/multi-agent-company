@@ -1,13 +1,11 @@
 """Tests for Fleet OS capability_registry.py — Phase F1."""
 from __future__ import annotations
 
-import pytest
 
 from app.fleet.capability_registry import (
     AgentCapability,
     CapabilityRegistry,
     get_capability_registry,
-    register,
 )
 
 

@@ -13,7 +13,7 @@ Pattern from: swe-agent RetryAgent (preserve external interface, swap internal r
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from app.agents.base_graph import VerificationConfig, run_agent_graph

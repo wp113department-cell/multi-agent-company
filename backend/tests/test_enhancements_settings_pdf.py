@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 import io
-import json
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -15,7 +13,7 @@ import pytest
 
 class TestSettingsOpenAiKey:
     def test_save_openai_key_valid(self) -> None:
-        from app.api.settings import save_openai_key, ApiKeyRequest
+        from app.api.settings import ApiKeyRequest
         # Just verify the function exists and accepts the right model
         req = ApiKeyRequest(api_key="sk-test1234567890")
         assert req.api_key == "sk-test1234567890"
