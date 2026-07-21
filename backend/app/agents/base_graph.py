@@ -652,6 +652,24 @@ def _extract_and_store_lesson(
                 publish(lesson_published(role_name, lesson.lesson, lesson.category, trace_id=trace_id))
             except Exception:
                 pass
+            # Gap-closure (2026-07-21) — Day 11's versioned_memory.py was built and tested
+            # but never actually received a real lesson: this was the exact call site
+            # Day 11's own plan doc identified as the target, never wired until now.
+            # LessonStore.add() above is unaffected — this is the durable layer underneath it.
+            # Skipped entirely without a real embedding key — a zero-vector row can never be
+            # found again by similarity search anyway (same "meaningless without a key" logic
+            # app.memory.store already uses), and every one of the ~2500 existing tests in this
+            # suite runs with enable_lesson defaulting True and no VOYAGE_API_KEY configured;
+            # writing a real row per test polluted OTHER tests' similarity searches with
+            # unrelated zero-vector rows — found by running the full suite, not assumed safe.
+            from app.config import get_settings as _get_settings
+            if _get_settings().voyage_api_key:
+                try:
+                    from app.fleet.versioned_memory import get_versioned_memory_store
+                    topic = lesson.pattern or lesson.category or "general"
+                    get_versioned_memory_store().publish(topic, lesson.lesson, agent_name=role_name)
+                except Exception as exc:
+                    logger.debug("versioned_memory.publish failed (non-fatal): %s", exc)
     except Exception as exc:
         logger.debug("lesson extraction failed (non-fatal): %s", exc)
 

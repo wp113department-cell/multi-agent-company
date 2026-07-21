@@ -111,7 +111,7 @@ async def run_manager(
             from app.fleet.fleet_manager import get_fleet_manager
 
             required_capability = "frontend_development" if subtask_type == "frontend" else "backend_development"
-            get_fleet_manager().select(required_capability=required_capability)
+            get_fleet_manager().select(required_capability=required_capability, verify_tool_availability=True)
             publish(task_created(task_id=str(task_id), title=subtask_title, agent_name="manager", trace_id=""))
         except Exception:
             pass

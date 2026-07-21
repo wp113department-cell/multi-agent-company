@@ -62,10 +62,20 @@ class FleetManager:
         required_capability: str,
         requested_side_effects: list[str] | None = None,
         prefer_low_risk: bool = False,
+        verify_tool_availability: bool = False,
     ) -> DispatchPlan | None:
         """Find the best available agent for the requested capability.
 
         Returns None if no healthy available agent can handle the request.
+
+        verify_tool_availability (gap-closure, 2026-07-21): Day 10 built
+        tool_discovery.py (a thin index over tool_manifest.py +
+        capability_registry.py) but it was never consulted from any real code
+        path. Opt-in here — when True, skip candidates whose declared tools
+        include one that isn't documented/resolvable
+        (tool_discovery.check_availability()), catching a stale or typo'd
+        tool name in an agent's own contract. Defaults False so every
+        existing caller keeps its exact current behavior.
         """
         candidates = self._caps.find_by_capability(required_capability)
         if not candidates:
@@ -78,6 +88,13 @@ class FleetManager:
         for cap in candidates:
             if prefer_low_risk and cap.risk_level == "high":
                 continue
+
+            if verify_tool_availability:
+                from app.fleet.tool_discovery import check_availability
+                unavailable = [t for t in cap.tools if not check_availability(t)]
+                if unavailable:
+                    logger.warning("Agent %r declares unresolvable tool(s) %s — skipping", cap.name, unavailable)
+                    continue
 
             instance = self._agents.get(cap.name)
             if instance is None:

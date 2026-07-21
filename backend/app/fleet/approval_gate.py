@@ -66,6 +66,7 @@ def _new_isolated_db_engine() -> Any:
 async def _record_pending(
     thread_id: str, action: str, details: dict[str, Any], agent_name: str, task_id: int | None
 ) -> Any:
+    from sqlalchemy import update
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from app.db.models import PendingApproval
@@ -73,6 +74,16 @@ async def _record_pending(
     engine = _new_isolated_db_engine()
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            # Gap-closure (2026-07-21): supersede any prior undecided row for this
+            # thread_id first. Without this, restarting a task via
+            # POST /tasks/{id}/restart while it's paused at human_review left the
+            # old row orphaned as "pending" forever — list_pending() would show a
+            # stale duplicate entry no decision could ever reach again.
+            await session.execute(
+                update(PendingApproval)
+                .where(PendingApproval.thread_id == thread_id, PendingApproval.status == "pending")
+                .values(status="superseded")
+            )
             row = PendingApproval(
                 thread_id=thread_id, task_id=task_id, agent_name=agent_name,
                 action=action, details=details, status="pending",
