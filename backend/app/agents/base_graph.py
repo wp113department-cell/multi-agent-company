@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any, Callable, TypedDict
@@ -71,6 +72,7 @@ class AgentRunState(_AgentRunStateBase, total=False):
     trace_id: str       # Fleet OS correlation ID
     memory_context: str # retrieved past lessons, injected into system prompt
     repo_context: str   # repo structure snapshot from context_builder
+    reflection_unsatisfied_count: int  # times reflection_node judged its own tool output unsatisfactory
 
 
 # ---------------------------------------------------------------------------
@@ -469,7 +471,8 @@ def _make_reflection_node(model: str) -> Callable[[AgentRunState], dict[str, Any
                 return {
                     "messages": list(state["messages"]) + [
                         {"role": "user", "content": f"[Self-review]\n{text}"}
-                    ]
+                    ],
+                    "reflection_unsatisfied_count": state.get("reflection_unsatisfied_count", 0) + 1,
                 }
         except Exception as exc:
             logger.warning("reflection_node failed (non-fatal): %s", exc)
@@ -483,6 +486,7 @@ def _make_execute_tools_node(
     verification_cfg: VerificationConfig,
     human_approval_required: bool,
     task_id: str = "",
+    trace_id: str = "",
 ) -> Callable[[AgentRunState], dict[str, Any]]:
     """Runs tool calls, enforces verification contract, resets stall counter.
     Pushes tool_call / tool_result / file_edit / terminal events to ActivityStream.
@@ -520,11 +524,27 @@ def _make_execute_tools_node(
                 if handler is None:
                     result_content = f"[ERROR] Unknown tool: {tu_name}"
                 else:
+                    _t0 = time.monotonic()
                     try:
                         result_content = str(handler(tu_input))
                     except Exception as exc:
                         result_content = f"[ERROR] {tu_name} raised: {exc}"
                         logger.exception("Tool %s raised", tu_name)
+                    _duration_ms = (time.monotonic() - _t0) * 1000
+                    _ok = not result_content.startswith("[ERROR]") and not result_content.startswith("[POLICY")
+
+                    # Day 10 — wire real tool-call data into RunMetrics (non-fatal).
+                    # avg_tool_accuracy() depends on this; before this fix it was
+                    # always computed from an empty tool_calls list.
+                    if trace_id:
+                        try:
+                            from app.fleet.metrics import get_metrics_collector
+                            _m = get_metrics_collector().get(trace_id)
+                            if _m is not None:
+                                _err = None if _ok else result_content[:200]
+                                _m.record_tool(tu_name, _ok, _duration_ms, _err)
+                        except Exception:
+                            pass
 
                     if not result_content.startswith("[ERROR]") and not result_content.startswith("[POLICY"):
                         if tu_name in verification_cfg.set_by:
@@ -694,6 +714,7 @@ def build_agent_graph(
     context_token_budget: int = 60_000,
     max_stalls: int = 3,
     task_id: str = "",
+    trace_id: str = "",
 ) -> Any:
     """Build a production LangGraph StateGraph for a worker agent.
 
@@ -702,7 +723,9 @@ def build_agent_graph(
     """
     haiku = model_haiku or model
     call_llm = _make_call_llm_node(role_name, model, tools, context_token_budget, task_id)
-    execute_tools_node = _make_execute_tools_node(tool_handlers, verification_cfg, human_approval_required, task_id)
+    execute_tools_node = _make_execute_tools_node(
+        tool_handlers, verification_cfg, human_approval_required, task_id, trace_id
+    )
     router = _make_router(max_turns, max_stalls, enable_reflection)
 
     g: StateGraph = StateGraph(AgentRunState)
@@ -813,12 +836,15 @@ def run_agent_graph(
 
     # Fleet OS metrics span (non-fatal if fleet not wired)
     _span: Any = None
+    _metrics: Any = None  # the actual RunMetrics instance — __enter__() returns it,
+                           # it is NOT the same object as _span (the context manager)
     try:
         from app.fleet.metrics import run_span
         _span = run_span(role_name, task_id="", trace_id=tid)
-        _span.__enter__()
+        _metrics = _span.__enter__()
     except Exception:
         _span = None
+        _metrics = None
 
     # Lifecycle: agent transitions to RUNNING + emits TaskStarted (Gap 7 / Gap 10)
     try:
@@ -917,6 +943,7 @@ def run_agent_graph(
             context_token_budget=context_token_budget,
             max_stalls=max_stalls,
             task_id=task_id,
+            trace_id=tid,
         )
 
         initial_state: AgentRunState = {
@@ -939,6 +966,7 @@ def run_agent_graph(
             "trace_id": tid,
             "memory_context": "",
             "repo_context": "",
+            "reflection_unsatisfied_count": 0,
         }
 
         final_state: AgentRunState = graph.invoke(initial_state)
@@ -947,8 +975,43 @@ def run_agent_graph(
         if enable_lesson and final_state.get("submitted"):
             _extract_and_store_lesson(final_state, role_name, model_haiku or model, trace_id=tid)
 
+        # Day 10 — wire real data into the RunMetrics instance (non-fatal). Without this,
+        # MetricsCollector records every run with zeroed tokens/cost/verification —
+        # budget_manager and benchmark_manager both depend on this being real.
+        if _metrics is not None:
+            try:
+                _metrics.record_tokens(final_state.get("tokens_in", 0), final_state.get("tokens_out", 0))
+                _metrics.confidence = final_state.get("confidence", 1.0)
+                _metrics.retries = final_state.get("retry_count", 0)
+                _metrics.reflection_unsatisfied = final_state.get("reflection_unsatisfied_count", 0)
+                verification = final_state.get("verification") or {}
+                bool_values = [v for v in verification.values() if isinstance(v, bool)]
+                if bool_values:
+                    _metrics.verification_pct = sum(bool_values) / len(bool_values)
+            except Exception:
+                pass
+
         if _span is not None:
             _span.__exit__(None, None, None)
+
+        # Day 10 — budget enforcement (non-fatal to the run's own control flow;
+        # a run that already finished can't be un-run, so this only marks the
+        # outcome as blocked and raises a health event for a human/Day 12's
+        # escalation ladder to act on — it does not retry or roll anything back).
+        if _metrics is not None:
+            try:
+                from app.fleet.budget_manager import BudgetExceeded, get_budget_manager
+                from app.fleet.fleet_events import health_updated, publish
+
+                bm = get_budget_manager()
+                try:
+                    bm.check_run(_metrics)
+                    bm.check_daily(agent_name=role_name)
+                except BudgetExceeded as exc:
+                    final_state["status"] = "blocked"
+                    publish(health_updated(role_name, health="budget_exceeded", state=str(exc), trace_id=tid))
+            except Exception:
+                pass
 
         # Push done or stopped event to activity stream (non-fatal)
         if task_id:

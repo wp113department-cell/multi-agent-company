@@ -108,6 +108,22 @@ class Settings(BaseSettings):
     allowed_workspace_parent: str = Field(default="/home", description="Workspace paths must start with this prefix (path traversal guard for Repo Console).")
     git_allowed_hosts: str = Field(default="github.com,gitlab.com,bitbucket.org", description="Comma-separated list of git remote hostnames allowed for clone/push in Repo Console.")
 
+    # Day 10 — Fleet OS Budget Manager (live enforcement, per-run + daily cumulative)
+    max_tokens_per_agent_run: int = Field(default=100_000, description="Max total tokens (in+out) a single agent run may consume before BudgetExceeded is raised.")
+    cost_budget_daily_usd: float = Field(default=25.0, description="Max cumulative agent spend (USD) per calendar day before BudgetExceeded is raised.")
+    max_run_time_seconds: int = Field(default=600, description="Max wall-clock seconds a single agent run may take before BudgetExceeded is raised.")
+    max_memory_mb: int = Field(default=1024, description="Max resident memory (MB) a single agent run may use before BudgetExceeded is raised.")
+
+    # Day 10 — Fleet OS Benchmark Manager (composite score weights + regression threshold)
+    benchmark_latency_target_ms: float = Field(default=30_000.0, description="p50 latency (ms) considered 'perfect' (score 1.0) when normalizing the latency objective; 0 at 2x this value.")
+    benchmark_weight_latency: float = Field(default=0.15, description="Composite benchmark_score weight for the normalized latency objective.")
+    benchmark_weight_tool_accuracy: float = Field(default=0.20, description="Composite benchmark_score weight for tool_accuracy.")
+    benchmark_weight_verification_coverage: float = Field(default=0.20, description="Composite benchmark_score weight for verification_coverage.")
+    benchmark_weight_retry_success: float = Field(default=0.15, description="Composite benchmark_score weight for retry_success.")
+    benchmark_weight_compile_success: float = Field(default=0.15, description="Composite benchmark_score weight for compile_success.")
+    benchmark_weight_hallucination: float = Field(default=0.15, description="Composite benchmark_score weight for (1 - hallucination_rate).")
+    benchmark_regression_threshold: float = Field(default=0.10, description="Fractional drop in benchmark_score vs. baseline that flags a regression (0.10 = 10%).")
+
     # Groq (optional — enables Groq as LLM backend when ANTHROPIC_API_KEY is unavailable)
     groq_api_key: str = Field(default="", description="Groq API key (gsk_...). When set and USE_GROQ=true, all agent calls use Groq instead of Anthropic.")
     use_groq: bool = Field(default=False, description="Route all agent calls to Groq instead of Anthropic. Useful when ANTHROPIC_API_KEY is unavailable.")
