@@ -1,5 +1,5 @@
 # Project Control Center — Live State
-Last updated: 2026-07-20 (full audit + gap-closure + Day 7 + Day 8 session)
+Last updated: 2026-07-21 (Day 9: Fleet Enhancement Dashboard + 5 self-improvement agents)
 
 ---
 
@@ -75,10 +75,15 @@ Last updated: 2026-07-20 (full audit + gap-closure + Day 7 + Day 8 session)
 | test_writer_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
 | version_manager_agent | ✅ | ✅ | ✅ | ✅ `read_file→read` | ✅ | ✅ PRODUCTION |
 | groq_adapter | N/A (infra utility, not a task agent) | N/A *(per plan's own Day 6 note)* | N/A | N/A | — | ✅ registry-only, by design |
+| **agent_performance_reviewer** | ✅ (2-phase: scan/apply) | ✅ | ✅ | ✅ `fleet_metrics_read→metrics_read` (scan), `git_commit_change→committed` (apply) | ✅ | ✅ PRODUCTION — Day 9 |
+| **agent_debugger** | ✅ (2-phase, full apply toolset) | ✅ | ✅ | ✅ `audit_log_read→diagnosed` (scan), `git_commit_change→committed` (apply) | ✅ | ✅ PRODUCTION — Day 9 |
+| **agent_advisor** | ✅ (scan-only by design, never writes) | ✅ | ✅ | ✅ `task_history_query→history_read` | ✅ | ✅ PRODUCTION — Day 9 |
+| **knowledge_curator** | ✅ (2-phase) | ✅ | ✅ | ✅ `memory_search→memory_searched` (scan), `memory_curate_write→curated` (apply) | ✅ | ✅ PRODUCTION — Day 9 |
+| **quality_auditor** | ✅ (2-phase, one issue per request) | ✅ | ✅ | ✅ `secrets_scan→scan_ran` (scan), `git_commit_change→committed` (apply) | ✅ | ✅ PRODUCTION — Day 9 |
 
-**67/67 real task agents in `capability_registry`. 68/68 names (incl. groq_adapter) in `agent_models.json`. Day 7 hardening: COMPLETE — see 2026-07-20 session in PROJECT.md.**
-
-*5 fleet-level agents (agent_performance_reviewer, agent_debugger, agent_advisor, knowledge_curator, quality_auditor): not yet built — Day 9.*
+**72/72 real task agents in `capability_registry` (67 from Days 0-8 + 5 Day 9 fleet-enhancement
+agents). 73/73 names (incl. groq_adapter) in `agent_models.json`. Day 7 hardening + Day 9:
+COMPLETE — see 2026-07-21 session in PROJECT.md.**
 
 ---
 
@@ -97,6 +102,7 @@ Last updated: 2026-07-20 (full audit + gap-closure + Day 7 + Day 8 session)
 | **P2 Model Router** | ✅ Day 5A complete | `agent_models.json` covers all 68 names; wired into `run_agent_graph()` |
 | **P3 Repo Console** | ✅ Day 5A complete | Clone→Work→Push web console; `git_service.py`; workspace scoping |
 | Groq test shim | ✅ TEMPORARY, isolated | `USE_GROQ=true` in `.env` is for local manual/dev-server use only; `tests/conftest.py` forces `USE_GROQ=false` for the unit suite (fixed 2026-07-20 — was silently making real network calls for ~2000 tests) |
+| **Fleet Enhancement Dashboard** | ✅ Day 9 complete | `enhancement_requests` table + `app/api/fleet_dashboard.py` + `/fleet` page + background scan loop (`FLEET_SCAN_INTERVAL_HOURS`) |
 | Budget manager | ❌ Not built | Day 10 |
 | Benchmark manager | ❌ Not built | Day 10 |
 | Prompt registry | ❌ Not built | Day 11 |
@@ -129,7 +135,7 @@ Last updated: 2026-07-20 (full audit + gap-closure + Day 7 + Day 8 session)
 | chat_agent._BACKGROUND_PROCESSES runtime bug | ✅ CLOSED | Gap fix 2026-07-20 |
 | VerificationConfig hardening all agents (Day 7) | ✅ CLOSED | Day 7 — 2026-07-20 |
 | Role prompt 9-section verification + durable test coverage (Day 8) | ✅ CLOSED | Day 8 — 2026-07-20 |
-| 5 new fleet agents | ❌ OPEN | Day 9 |
+| 5 new fleet agents + Fleet Enhancement Dashboard (Day 9) | ✅ CLOSED | Day 9 — 2026-07-21 |
 | budget_manager + benchmark_manager + tool_discovery | ❌ OPEN | Day 10 |
 | prompt_registry + regression_detector + versioned_memory | ❌ OPEN | Day 11 |
 | End-to-end pipeline smoke test | ❌ OPEN | Day 12 |
@@ -138,7 +144,7 @@ Last updated: 2026-07-20 (full audit + gap-closure + Day 7 + Day 8 session)
 
 ## Open Issues
 
-- [ ] mypy `--strict`: 34 pre-existing errors, 0 new. 18 in `app/repo_tools/browser_driver.py` (predates Fleet Days, unrelated to fleet work). 7 in `base_graph.py` (LangGraph `StateGraph` generic/overload typing — known library-stub limitation). Remainder scattered (`tools.py`, `agent_result.py`, `audit_log.py`, `config.py`, `jwt.py`).
+- [ ] mypy `--strict`: 32 pre-existing errors, 0 new. 18 in `app/repo_tools/browser_driver.py` (predates Fleet Days, unrelated to fleet work). 7 in `base_graph.py` (LangGraph `StateGraph` generic/overload typing — known library-stub limitation). Remainder scattered (`tools.py`, `agent_result.py`, `audit_log.py`, `config.py`, `jwt.py`).
 - [ ] 55 skipped tests (pre-existing — unbuilt frontend features) + 17 deselected (real-LLM Groq tests, rate-limited on free tier, pending until `ANTHROPIC_API_KEY` available — see memory `pending_anthropic_tests`).
 - [ ] Fleet work has been happening directly on `main` rather than the plan's prescribed `fleet-enhancement-day0` branch (Pre-Day 0A). Process deviation, not a functional bug — flagged for awareness, not blocking.
 
@@ -162,3 +168,4 @@ Last updated: 2026-07-20 (full audit + gap-closure + Day 7 + Day 8 session)
 | **Full Audit + Gap-Closure** | **2026-07-20** | **2254/2254, 0 failed** | Found + fixed 11 real gaps (see PROJECT.md session log): chat_agent migration, groq_adapter registration, Groq-bypass regression + test-network-leak, repo-context injection bug, duplicate capability tags, test-order pollution, ReviewResult reload bug, chat_agent background-process bug, 13 mypy fixes |
 | **Day 7 — VerificationConfig Hardening** | **2026-07-20** | **2254/2254** | 0 empty configs (except legitimate executive/manager), 0 duplicate tags, 0 dead enforce keys, 0 `verify_agent_contract()` violations |
 | **Day 8 — Role Prompt Verification** | **2026-07-20** | **2399/2399** | Read roo-code's prompt-section pattern first (REPO-FIRST); verified all 9 plan-required sections present (verbatim/near-verbatim) in `_GLOBAL_STANDARDS.md`; wrote 145 new durable tests (`test_day8_role_prompts.py`) — 0 prior test coverage existed for role-prompt structure |
+| **Day 9 — Fleet Enhancement Dashboard** | **2026-07-21** | **2479/2479** | 5 self-improvement agents (scan/apply two-phase) + `enhancement_requests` DB table + approve/reject API + background scan loop + `/fleet` dashboard page. Found + fixed 5 real bugs (2 pre-existing: `MemoryEmbedding.created_at` missing from ORM despite being a real column; 3 self-introduced: duplicate field caught by mypy, a timezone-column mismatch, and a repeat of the Day 7 asyncio-loop-reuse bug in new tools). Verified end-to-end against the real backend+frontend+Postgres stack, not just mocks |

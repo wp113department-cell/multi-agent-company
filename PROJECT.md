@@ -2362,3 +2362,51 @@ Summary of what was resolved today (full detail + code citations in the plan doc
   well-established per-agent `debugger_agent.py`-shaped pattern
 - Picked 5 collision-checked capability tags (`agent_performance_review`, `agent_debugging`,
   `architecture_advisory`, `knowledge_curation`, `fleet_quality_audit`)
+
+---
+
+## 2026-07-21 — Day 9 Complete: Fleet Enhancement Dashboard + 5 Self-Improvement Agents
+
+User expanded the plan same-day into a real product: a dedicated dashboard with priority
+triage (emergency/medium/low) and explicit human approve/reject, not just 5 agent files —
+see `docs/DAY9_PLAN.md` v2 for the full design and `docs/reports/FLEET_DAY9_TEST_REPORT.md`
+for full detail. Summary:
+
+**Built**: 5 agents (`agent_performance_reviewer`, `agent_debugger`, `agent_advisor` —
+scan-only by design, `knowledge_curator`, `quality_auditor`), each with a SCAN phase
+(autonomous, read-only, files an `enhancement_requests` row) and an APPLY phase (write-
+capable, only runs after human approval). New: `enhancement_requests` DB table (migration
+011), `app/api/fleet_dashboard.py` (list/detail/approve/reject + dashboard SSE channel),
+a background scan loop (`FLEET_SCAN_INTERVAL_HOURS`, default 4h), and
+`apps/web/app/fleet/page.tsx` + a live pending-count badge on the NavBar.
+
+**Architecture call**: two-phase Scan→Approve→Apply instead of LangGraph's native
+`interrupt()`, because `build_agent_graph()` compiles with no checkpointer anywhere in this
+codebase — confirmed via `inspect.signature()` against the installed package before deciding.
+
+**5 real bugs found and fixed**: (1) `MemoryEmbedding.created_at` was missing from the ORM
+model despite being a real DB column — the `/api/memory/patterns` endpoint had been crashing
+on every call since it was written; (2) a duplicate `EnhancementRequest.created_at` field
+this session's own edits introduced, caught by mypy's `no-redef` check; (3) a
+timezone-column/Python-datetime mismatch in the new migration, fixed and the migration
+re-applied; (4) the same asyncio-event-loop-reuse hazard from the 2026-07-20 gap-closure
+session, reintroduced by this session's new DB-backed tools — fixed with a fresh,
+disposed-after-use engine per call instead of the shared singleton; (5) a flawed test
+assertion caught during self-review and removed rather than papered over.
+
+**Verified end-to-end, not just unit-tested**: started the real backend + frontend together,
+confirmed the Next.js proxy → FastAPI → real Postgres round-trip, tested reject/404/409 flows
+against the live stack, then cleaned up all test data.
+
+### Test Results
+```
+pytest tests/ -q -p no:cacheprovider
+→ 2479 passed, 0 failed, 55 skipped, 17 deselected, 4 warnings in 43.85s
+
+mypy app/ --strict
+→ 32 errors, all pre-existing (same as the 2026-07-20 baseline), 0 new
+```
+
+### Verdict
+✅ GREEN FLAG — DAY 9 COMPLETE. Ready for Day 10 (budget_manager, benchmark_manager,
+tool_discovery).

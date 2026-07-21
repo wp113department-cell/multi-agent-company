@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, Boolean, Float, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -332,3 +332,31 @@ class MemoryEmbedding(Base):
     files_changed: Mapped[Any] = mapped_column(ARRAY(Text), nullable=False, default=list)
     embedding: Mapped[Any] = mapped_column(Vector(1536), nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class EnhancementRequest(Base):
+    """Day 9 — Fleet self-improvement dashboard.
+
+    Written by the 5 fleet-enhancement agents' SCAN phase (read-only, autonomous).
+    Nothing acts on a row until a human approves it from the dashboard; APPLY phase
+    (write-capable) only ever runs against an approved row.
+    """
+    __tablename__ = "enhancement_requests"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    agent_name: Mapped[str] = mapped_column(String(100), index=True)
+    title: Mapped[str] = mapped_column(Text)
+    description: Mapped[str] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(String(50))  # performance | bug | orchestration | knowledge | quality | security
+    priority: Mapped[str] = mapped_column(String(20), index=True)  # emergency | medium | low
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)  # pending|approved|rejected|in_progress|completed|failed
+    files_touched: Mapped[Any] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    restart_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

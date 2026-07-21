@@ -29,6 +29,7 @@ from app.api.chat import router as chat_router
 from app.api.specialized_agents import router as specialized_agents_router
 from app.api.activity import router as activity_router
 from app.api.console import router as console_router
+from app.api.fleet_dashboard import router as fleet_dashboard_router
 
 from app.config import get_settings
 
@@ -79,6 +80,41 @@ async def _weekly_reindex_loop(repo_path: str) -> None:
             logger.info("Weekly auto-reindex complete for %s", repo_path)
         except Exception as exc:
             logger.warning("Weekly reindex failed: %s", exc)
+
+
+async def _fleet_agents_scan_loop() -> None:
+    """Day 9 — periodic SCAN phase for the 5 fleet self-improvement agents.
+
+    Runs sequentially (not parallel — real LLM calls, avoid a runaway-cost loop).
+    Each agent's own scan function is fully autonomous and read-only; it only ever
+    files a pending enhancement_requests row for a human to approve/reject on the
+    Fleet Dashboard — nothing here writes to disk. Set FLEET_SCAN_INTERVAL_HOURS=0
+    to disable.
+    """
+    interval_hours = get_settings().fleet_scan_interval_hours
+    if interval_hours <= 0:
+        logger.info("Fleet agent scan loop disabled (FLEET_SCAN_INTERVAL_HOURS=0)")
+        return
+
+    scan_fns = [
+        ("agent_performance_reviewer", "app.agents.agent_performance_reviewer", "run_agent_performance_reviewer_scan"),
+        ("agent_debugger", "app.agents.agent_debugger", "run_agent_debugger_scan"),
+        ("agent_advisor", "app.agents.agent_advisor", "run_agent_advisor_scan"),
+        ("knowledge_curator", "app.agents.knowledge_curator", "run_knowledge_curator_scan"),
+        ("quality_auditor", "app.agents.quality_auditor", "run_quality_auditor_scan"),
+    ]
+
+    while True:
+        await asyncio.sleep(interval_hours * 60 * 60)
+        for agent_name, module_path, fn_name in scan_fns:
+            try:
+                import importlib
+                mod = importlib.import_module(module_path)
+                scan_fn = getattr(mod, fn_name)
+                result = await asyncio.to_thread(scan_fn)
+                logger.info("Fleet scan complete: %s (%s)", agent_name, result.summary)
+            except Exception as exc:
+                logger.warning("Fleet scan failed for %s: %s", agent_name, exc)
 
 
 @asynccontextmanager
@@ -145,12 +181,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     reindex_task = asyncio.create_task(_weekly_reindex_loop(get_active_repo_path()))
     retention_task = asyncio.create_task(start_retention_loop())
+    fleet_scan_task = asyncio.create_task(_fleet_agents_scan_loop())
 
     yield
 
     reindex_task.cancel()
     retention_task.cancel()
-    for task in (reindex_task, retention_task):
+    fleet_scan_task.cancel()
+    for task in (reindex_task, retention_task, fleet_scan_task):
         try:
             await task
         except asyncio.CancelledError:
@@ -191,6 +229,7 @@ app.include_router(chat_router)
 app.include_router(specialized_agents_router)
 app.include_router(activity_router)
 app.include_router(console_router)
+app.include_router(fleet_dashboard_router)
 
 
 @app.exception_handler(StarletteHTTPException)

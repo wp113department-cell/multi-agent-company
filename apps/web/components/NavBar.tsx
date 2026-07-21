@@ -46,13 +46,53 @@ const NAV_LINKS = [
   { href: "/tasks", label: "Tasks" },
   { href: "/epics", label: "Epics" },
   { href: "/goals", label: "Goals" },
+  { href: "/console", label: "Console" },
+  { href: "/fleet", label: "Fleet" },
   { href: "/metrics", label: "KPIs" },
   { href: "/settings", label: "Settings" },
 ];
 
+function useFleetPendingCount(): number {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refresh() {
+      try {
+        const res = await fetch("/api/fleet/requests?status=pending");
+        if (!res.ok) return;
+        const data = (await res.json()) as unknown[];
+        if (!cancelled) setCount(data.length);
+      } catch {
+        // non-fatal — badge just stays at its last known value
+      }
+    }
+
+    void refresh();
+    const es = new EventSource("/api/fleet/requests/stream");
+    es.onmessage = (e: MessageEvent) => {
+      try {
+        const event = JSON.parse(e.data) as { type: string };
+        if (event.type === "new_request" || event.type === "status_changed") void refresh();
+      } catch {
+        // ignore ping/parse errors
+      }
+    };
+
+    return () => {
+      cancelled = true;
+      es.close();
+    };
+  }, []);
+
+  return count;
+}
+
 export function NavBar() {
   const [authed, setAuthed] = useState(false);
   const pathname = usePathname();
+  const fleetPending = useFleetPendingCount();
 
   useEffect(() => {
     setAuthed(isAuthenticated());
@@ -80,6 +120,11 @@ export function NavBar() {
             }`}
           >
             {label}
+            {href === "/fleet" && fleetPending > 0 && (
+              <span className="ml-1.5 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">
+                {fleetPending}
+              </span>
+            )}
           </a>
         ))}
         <div className="mx-1 h-4 w-px bg-slate-200 dark:bg-slate-700" />

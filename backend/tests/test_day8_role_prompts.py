@@ -52,11 +52,11 @@ _REQUIRED_ROLE_SPECIFIC_SECTIONS = (
 )
 
 
-def test_role_file_count_is_67() -> None:
-    assert len(_ROLE_NAMES) == 67, (
-        f"expected 67 role files (68 agent_models.json entries minus groq_adapter, "
-        f"which has no role file), found {len(_ROLE_NAMES)}"
-    )
+def test_role_file_count_is_72() -> None:
+    # 67 from Day 0-8 (68 agent_models.json entries minus groq_adapter, which has no role
+    # file) + 5 Day 9 fleet-enhancement agents (agent_performance_reviewer, agent_debugger,
+    # agent_advisor, knowledge_curator, quality_auditor).
+    assert len(_ROLE_NAMES) == 72, f"expected 72 role files, found {len(_ROLE_NAMES)}"
 
 
 def test_global_standards_file_exists() -> None:
