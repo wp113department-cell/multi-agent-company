@@ -1,4 +1,5 @@
 """Architect Agent live tests — require ANTHROPIC_API_KEY or Groq."""
+
 from __future__ import annotations
 
 import os
@@ -47,6 +48,7 @@ class TestArchitectAgent:
 
     def _make_state(self, task_id: int, title: str, desc: str, repo_path: str) -> dict:  # type: ignore[type-arg]
         from app.pipeline.state import PipelineState
+
         return PipelineState(
             task_id=task_id,
             task_title=title,
@@ -66,7 +68,9 @@ class TestArchitectAgent:
         from app.agents.architect import architect_node
 
         repo = _make_minimal_repo(tmp_path)  # type: ignore[arg-type]
-        state = self._make_state(10, "Add GET /health endpoint", "Return {status: ok}", repo)
+        state = self._make_state(
+            10, "Add GET /health endpoint", "Return {status: ok}", repo
+        )
         result = architect_node(state)
 
         assert result["stage"] != "blocked", f"Architect blocked: {result.get('error')}"
@@ -77,7 +81,9 @@ class TestArchitectAgent:
         assert isinstance(plan.get("risks"), list)
         assert plan.get("risk_level") in ("low", "medium", "high")
 
-    def test_architect_impacted_files_non_empty(self, tmp_path: pytest.TempPathFactory) -> None:
+    def test_architect_impacted_files_non_empty(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
         """Architect proposes at least one impacted file for a route addition task."""
         from app.agents.architect import architect_node
 
@@ -93,14 +99,18 @@ class TestArchitectAgent:
         assert result["stage"] != "blocked", f"Architect blocked: {result.get('error')}"
         plan = result["architect_plan"]
         assert isinstance(plan.get("impacted_files"), list)
-        assert len(plan["impacted_files"]) >= 1, "Architect should propose at least one file"
+        assert (
+            len(plan["impacted_files"]) >= 1
+        ), "Architect should propose at least one file"
 
     def test_architect_risk_level_valid(self, tmp_path: pytest.TempPathFactory) -> None:
         """risk_level is exactly one of low / medium / high."""
         from app.agents.architect import architect_node
 
         repo = _make_minimal_repo(tmp_path)  # type: ignore[arg-type]
-        state = self._make_state(12, "Refactor config module", "Split config.py into sub-modules.", repo)
+        state = self._make_state(
+            12, "Refactor config module", "Split config.py into sub-modules.", repo
+        )
         result = architect_node(state)
 
         assert result["stage"] != "blocked", f"Architect blocked: {result.get('error')}"

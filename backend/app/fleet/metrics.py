@@ -22,6 +22,7 @@ Design decisions:
 - Cost estimate uses the per-token rates from app.config so it matches the
   existing cost_controller.py accounting.
 """
+
 from __future__ import annotations
 
 import threading
@@ -47,6 +48,7 @@ def _new_trace() -> str:
 # ---------------------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ToolCallRecord:
@@ -100,8 +102,21 @@ class RunMetrics:
         self.finished_at = _now_iso()
         self.status = status
 
-    def record_tool(self, tool_name: str, success: bool, duration_ms: float, error: str | None = None) -> None:
-        self.tool_calls.append(ToolCallRecord(tool_name=tool_name, success=success, duration_ms=duration_ms, error=error))
+    def record_tool(
+        self,
+        tool_name: str,
+        success: bool,
+        duration_ms: float,
+        error: str | None = None,
+    ) -> None:
+        self.tool_calls.append(
+            ToolCallRecord(
+                tool_name=tool_name,
+                success=success,
+                duration_ms=duration_ms,
+                error=error,
+            )
+        )
 
     def record_tokens(self, tokens_in: int, tokens_out: int) -> None:
         self.tokens_in += tokens_in
@@ -111,6 +126,7 @@ class RunMetrics:
     def _recompute_cost(self) -> None:
         try:
             from app.config import get_settings
+
             s = get_settings()
             self.cost_estimate_usd = (
                 self.tokens_in * s.cost_per_input_token
@@ -140,7 +156,12 @@ class RunMetrics:
             "retries": self.retries,
             "failures": self.failures,
             "tool_calls": [
-                {"tool": t.tool_name, "success": t.success, "duration_ms": t.duration_ms, "error": t.error}
+                {
+                    "tool": t.tool_name,
+                    "success": t.success,
+                    "duration_ms": t.duration_ms,
+                    "error": t.error,
+                }
                 for t in self.tool_calls
             ],
             "tool_accuracy": self.tool_accuracy,
@@ -157,6 +178,7 @@ class RunMetrics:
 # Collector
 # ---------------------------------------------------------------------------
 
+
 class MetricsCollector:
     """Thread-safe ring buffer of RunMetrics with trace_id lookup."""
 
@@ -165,7 +187,9 @@ class MetricsCollector:
         self._index: dict[str, RunMetrics] = {}
         self._lock = threading.Lock()
 
-    def start_run(self, agent_name: str, task_id: str | None = None, trace_id: str | None = None) -> RunMetrics:
+    def start_run(
+        self, agent_name: str, task_id: str | None = None, trace_id: str | None = None
+    ) -> RunMetrics:
         m = RunMetrics(
             trace_id=trace_id or _new_trace(),
             agent_name=agent_name,
@@ -195,14 +219,22 @@ class MetricsCollector:
             return list(self._ring)
 
     def p50_latency_ms(self, agent_name: str) -> float | None:
-        runs = [m.execution_time_ms for m in self.by_agent(agent_name) if m.execution_time_ms > 0]
+        runs = [
+            m.execution_time_ms
+            for m in self.by_agent(agent_name)
+            if m.execution_time_ms > 0
+        ]
         if not runs:
             return None
         runs.sort()
         return runs[len(runs) // 2]
 
     def p95_latency_ms(self, agent_name: str) -> float | None:
-        runs = [m.execution_time_ms for m in self.by_agent(agent_name) if m.execution_time_ms > 0]
+        runs = [
+            m.execution_time_ms
+            for m in self.by_agent(agent_name)
+            if m.execution_time_ms > 0
+        ]
         if not runs:
             return None
         runs.sort()
@@ -221,6 +253,7 @@ class MetricsCollector:
 # Context manager for automatic timing
 # ---------------------------------------------------------------------------
 
+
 @contextmanager
 def run_span(
     agent_name: str,
@@ -228,9 +261,9 @@ def run_span(
     trace_id: str | None = None,
 ) -> Generator[RunMetrics, None, None]:
     """Usage:
-        with run_span("bug_fix", task_id=str(task_id)) as m:
-            m.record_tokens(1000, 200)
-            result = do_work()
+    with run_span("bug_fix", task_id=str(task_id)) as m:
+        m.record_tokens(1000, 200)
+        result = do_work()
     """
     collector = get_metrics_collector()
     m = collector.start_run(agent_name, task_id=task_id, trace_id=trace_id)

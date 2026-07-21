@@ -5,6 +5,7 @@ tests never touch the real database and can't hit the asyncio-event-loop
 pitfalls that app.agents.tools' DB-backed tools have their own dedicated
 tests for in test_day9_fleet_agents.py.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
@@ -124,7 +125,9 @@ class TestApprove:
         app = _make_test_app(db)
 
         with TestClient(app) as client:
-            resp = client.post("/api/fleet/requests/1/approve", json={"decided_by": "tester"})
+            resp = client.post(
+                "/api/fleet/requests/1/approve", json={"decided_by": "tester"}
+            )
 
         assert resp.status_code == 200
         body = resp.json()
@@ -166,7 +169,9 @@ class TestReject:
         app = _make_test_app(db)
 
         with TestClient(app) as client:
-            resp = client.post("/api/fleet/requests/1/reject", json={"decided_by": "tester"})
+            resp = client.post(
+                "/api/fleet/requests/1/reject", json={"decided_by": "tester"}
+            )
 
         assert resp.status_code == 200
         assert resp.json()["status"] == "rejected"
@@ -200,7 +205,10 @@ class TestApplyDispatch:
 
         dispatch = _apply_dispatch()
         assert set(dispatch.keys()) == {
-            "agent_performance_reviewer", "agent_debugger", "knowledge_curator", "quality_auditor",
+            "agent_performance_reviewer",
+            "agent_debugger",
+            "knowledge_curator",
+            "quality_auditor",
         }
 
     def test_advisor_excluded_scan_only_by_design(self) -> None:
@@ -223,8 +231,10 @@ async def test_run_apply_phase_marks_completed_on_verified_result() -> None:
     session_cm.get = AsyncMock(return_value=fake_row)
     session_cm.commit = AsyncMock()
 
-    with patch("app.db.session.get_async_session", return_value=session_cm), \
-         patch("app.api.fleet_dashboard._apply_dispatch", return_value={"agent_debugger": MagicMock(return_value=fake_result)}):
+    with patch("app.db.session.get_async_session", return_value=session_cm), patch(
+        "app.api.fleet_dashboard._apply_dispatch",
+        return_value={"agent_debugger": MagicMock(return_value=fake_result)},
+    ):
         await _run_apply_phase(1, "agent_debugger", "desc", "trace-1")
 
     assert fake_row.status == "completed"
@@ -246,8 +256,10 @@ async def test_run_apply_phase_marks_failed_on_exception() -> None:
     def _raise(*args: Any, **kwargs: Any) -> Any:
         raise RuntimeError("boom")
 
-    with patch("app.db.session.get_async_session", return_value=session_cm), \
-         patch("app.api.fleet_dashboard._apply_dispatch", return_value={"agent_debugger": _raise}):
+    with patch("app.db.session.get_async_session", return_value=session_cm), patch(
+        "app.api.fleet_dashboard._apply_dispatch",
+        return_value={"agent_debugger": _raise},
+    ):
         await _run_apply_phase(1, "agent_debugger", "desc", "trace-1")
 
     assert fake_row.status == "failed"

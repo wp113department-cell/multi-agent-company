@@ -1,12 +1,13 @@
 """Tests for Policy Engine v2 — glob matching, async DB operations mocked."""
+
 from __future__ import annotations
 
 import pytest
 
 from app.policy.engine_v2 import match_pattern_sync
 
-
 # ---- Glob pattern unit tests (sync, no DB) ----
+
 
 @pytest.mark.parametrize(
     "path,pattern,expected",
@@ -41,7 +42,10 @@ def test_glob_pattern_matching(path: str, pattern: str, expected: bool) -> None:
 
 
 def test_migrations_gate_blocks_exact_migration_file() -> None:
-    assert match_pattern_sync("app/db/migrations/0042_add_column.py", "**/migrations/**") is True
+    assert (
+        match_pattern_sync("app/db/migrations/0042_add_column.py", "**/migrations/**")
+        is True
+    )
 
 
 def test_auth_gate_does_not_match_partial_segment() -> None:
@@ -50,7 +54,9 @@ def test_auth_gate_does_not_match_partial_segment() -> None:
 
 
 def test_double_star_matches_deep_nesting() -> None:
-    assert match_pattern_sync("a/b/c/d/migrations/e/f/file.py", "**/migrations/**") is True
+    assert (
+        match_pattern_sync("a/b/c/d/migrations/e/f/file.py", "**/migrations/**") is True
+    )
 
 
 def test_adding_rule_to_empty_list_takes_effect() -> None:

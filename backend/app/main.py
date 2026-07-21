@@ -37,7 +37,9 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 # Rate limiter — keyed by remote IP; enabled only when RATE_LIMIT_ENABLED=true
-limiter = Limiter(key_func=get_remote_address, enabled=get_settings().rate_limit_enabled)
+limiter = Limiter(
+    key_func=get_remote_address, enabled=get_settings().rate_limit_enabled
+)
 
 
 def _init_sentry(settings: "Settings") -> None:  # type: ignore[name-defined]  # noqa: F821
@@ -98,10 +100,18 @@ async def _fleet_agents_scan_loop() -> None:
         return
 
     scan_fns = [
-        ("agent_performance_reviewer", "app.agents.agent_performance_reviewer", "run_agent_performance_reviewer_scan"),
+        (
+            "agent_performance_reviewer",
+            "app.agents.agent_performance_reviewer",
+            "run_agent_performance_reviewer_scan",
+        ),
         ("agent_debugger", "app.agents.agent_debugger", "run_agent_debugger_scan"),
         ("agent_advisor", "app.agents.agent_advisor", "run_agent_advisor_scan"),
-        ("knowledge_curator", "app.agents.knowledge_curator", "run_knowledge_curator_scan"),
+        (
+            "knowledge_curator",
+            "app.agents.knowledge_curator",
+            "run_knowledge_curator_scan",
+        ),
         ("quality_auditor", "app.agents.quality_auditor", "run_quality_auditor_scan"),
     ]
 
@@ -110,6 +120,7 @@ async def _fleet_agents_scan_loop() -> None:
         for agent_name, module_path, fn_name in scan_fns:
             try:
                 import importlib
+
                 mod = importlib.import_module(module_path)
                 scan_fn = getattr(mod, fn_name)
                 result = await asyncio.to_thread(scan_fn)
@@ -130,7 +141,10 @@ async def _versioned_lesson_archive_loop() -> None:
         await asyncio.sleep(interval_seconds)
         try:
             from app.fleet.versioned_memory import get_versioned_memory_store
-            archived = await asyncio.to_thread(get_versioned_memory_store().archive_expired)
+
+            archived = await asyncio.to_thread(
+                get_versioned_memory_store().archive_expired
+            )
             if archived:
                 logger.info("Versioned lesson archive: %d row(s) archived", archived)
         except Exception as exc:
@@ -149,7 +163,9 @@ async def _benchmark_baseline_loop() -> None:
     """
     interval_hours = get_settings().benchmark_baseline_interval_hours
     if interval_hours <= 0:
-        logger.info("Benchmark baseline loop disabled (BENCHMARK_BASELINE_INTERVAL_HOURS=0)")
+        logger.info(
+            "Benchmark baseline loop disabled (BENCHMARK_BASELINE_INTERVAL_HOURS=0)"
+        )
         return
 
     while True:
@@ -171,10 +187,13 @@ async def _benchmark_baseline_loop() -> None:
                         await asyncio.to_thread(bm.store_baseline, cap.name, result)
                         logger.info(
                             "Stored initial baseline for %s: benchmark_score=%.3f",
-                            cap.name, result.objectives["benchmark_score"],
+                            cap.name,
+                            result.objectives["benchmark_score"],
                         )
                 except Exception as exc:
-                    logger.warning("Baseline population failed for %s: %s", cap.name, exc)
+                    logger.warning(
+                        "Baseline population failed for %s: %s", cap.name, exc
+                    )
         except Exception as exc:
             logger.warning("Benchmark baseline loop iteration failed: %s", exc)
 
@@ -212,21 +231,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             import json
             from sqlalchemy import text
             from app.auth.jwt import hash_password, verify_password
+
             factory = get_session_factory()
             async with factory() as db:
                 row = await db.execute(
                     text("SELECT value FROM system_settings WHERE key = 'auth_users'")
                 )
-                existing: list[dict[str, str]] = json.loads(row.scalar_one_or_none() or "[]")
-                admin_user = next((u for u in existing if u.get("username") == "admin"), None)
+                existing: list[dict[str, str]] = json.loads(
+                    row.scalar_one_or_none() or "[]"
+                )
+                admin_user = next(
+                    (u for u in existing if u.get("username") == "admin"), None
+                )
                 # Re-seed if admin is missing OR if their password no longer matches
                 if admin_user is None or not verify_password(
-                    settings.default_admin_password, admin_user.get("hashed_password", "")
+                    settings.default_admin_password,
+                    admin_user.get("hashed_password", ""),
                 ):
                     non_admin = [u for u in existing if u.get("username") != "admin"]
                     admin = {
                         "username": "admin",
-                        "hashed_password": hash_password(settings.default_admin_password),
+                        "hashed_password": hash_password(
+                            settings.default_admin_password
+                        ),
                         "role": "approver",
                     }
                     await db.execute(
@@ -254,7 +281,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     fleet_scan_task.cancel()
     lesson_archive_task.cancel()
     benchmark_baseline_task.cancel()
-    for task in (reindex_task, retention_task, fleet_scan_task, lesson_archive_task, benchmark_baseline_task):
+    for task in (
+        reindex_task,
+        retention_task,
+        fleet_scan_task,
+        lesson_archive_task,
+        benchmark_baseline_task,
+    ):
         try:
             await task
         except asyncio.CancelledError:
@@ -275,7 +308,9 @@ app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in get_settings().cors_origins.split(",") if o.strip()],
+    allow_origins=[
+        o.strip() for o in get_settings().cors_origins.split(",") if o.strip()
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -300,7 +335,9 @@ app.include_router(approvals_router)
 
 
 @app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+async def http_exception_handler(
+    request: Request, exc: StarletteHTTPException
+) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": {"code": str(exc.status_code), "message": str(exc.detail)}},
@@ -308,7 +345,9 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+async def validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
     return JSONResponse(
         status_code=422,
         content={"error": {"code": "422", "message": str(exc)}},
@@ -319,12 +358,14 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 async def health() -> dict[str, object]:
     """Liveness + readiness probe: checks DB, Redis (if enabled), S3 (if enabled)."""
     import asyncio
+
     checks: dict[str, str] = {}
 
     # DB check
     try:
         from app.db.session import get_session_factory
         from sqlalchemy import text
+
         factory = get_session_factory()
         async with factory() as db:
             await db.execute(text("SELECT 1"))
@@ -337,6 +378,7 @@ async def health() -> dict[str, object]:
     if settings.redis_streams_enabled or settings.queue_backend == "rq":
         try:
             import redis.asyncio as aioredis
+
             r = aioredis.from_url(settings.redis_url, socket_connect_timeout=2)
             await r.ping()
             await r.aclose()
@@ -348,10 +390,9 @@ async def health() -> dict[str, object]:
     if settings.artifact_backend == "s3":
         try:
             from app.artifacts.s3_store import _get_s3
+
             s3 = await asyncio.to_thread(_get_s3)
-            await asyncio.to_thread(
-                s3.head_bucket, Bucket=settings.s3_bucket
-            )
+            await asyncio.to_thread(s3.head_bucket, Bucket=settings.s3_bucket)
             checks["s3"] = "ok"
         except Exception as exc:
             checks["s3"] = f"error: {exc}"

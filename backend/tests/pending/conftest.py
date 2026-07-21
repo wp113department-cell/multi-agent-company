@@ -16,6 +16,7 @@ Supports both Anthropic (sk-ant-...) and Groq (gsk_...) backends.
     DATABASE_URL=postgresql+asyncpg://gridiron:gridiron@localhost/gridiron_dev \\
     pytest tests/pending/ -v
 """
+
 from __future__ import annotations
 
 import os
@@ -33,15 +34,9 @@ _has_llm = _RUN and (
     or (_use_groq and len(_groq_key) > 10 and _groq_key.startswith("gsk_"))
 )
 
-_has_voyage = (
-    _RUN
-    and len(os.environ.get("VOYAGE_API_KEY", "")) > 10
-)
+_has_voyage = _RUN and len(os.environ.get("VOYAGE_API_KEY", "")) > 10
 
-_has_db = (
-    _RUN
-    and "gridiron" in os.environ.get("DATABASE_URL", "")
-)
+_has_db = _RUN and "gridiron" in os.environ.get("DATABASE_URL", "")
 
 # ---------------------------------------------------------------------------
 # Engine reset — each async test gets its own event loop (pytest-asyncio
@@ -55,6 +50,7 @@ _has_db = (
 def reset_db_engine() -> None:
     """Reset SQLAlchemy engine/session globals before each test."""
     import app.db.session as _sess
+
     _sess._engine = None
     _sess._session_factory = None
 

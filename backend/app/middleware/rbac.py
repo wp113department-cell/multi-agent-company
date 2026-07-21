@@ -10,6 +10,7 @@ Role lookup (in priority order):
 
 When RBAC_ENABLED=false all requests are treated as "approver" (local dev).
 """
+
 from __future__ import annotations
 
 import logging
@@ -54,9 +55,10 @@ async def require_approver(
     if settings.jwt_auth_enabled:
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
-            token = auth_header[len("Bearer "):]
+            token = auth_header[len("Bearer ") :]
             try:
                 from app.auth.jwt import decode_access_token
+
                 payload = decode_access_token(token)
                 role = str(payload.get("role", "viewer"))
                 username = str(payload.get("sub", "unknown"))
@@ -69,7 +71,9 @@ async def require_approver(
             except Exception as exc:
                 if isinstance(exc, HTTPException):
                     raise
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+                ) from exc
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authorization: Bearer <token> header required when JWT auth is enabled",

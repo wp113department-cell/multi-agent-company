@@ -1,4 +1,5 @@
 """code_explainer_agent — reads code and produces plain-English explanations."""
+
 from __future__ import annotations
 
 import logging
@@ -18,10 +19,20 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "code_explainer_agent",
     "description": "Reads source code and produces plain-English explanations at varying detail levels.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "get_file_tree",
-        "search_symbols", "find_references", "list_functions", "parse_ast",
-        "analyze_file", "read_files", "file_exists", "file_info",
-        "write_file", "submit_code_explainer_agent",
+        "read_file",
+        "list_files",
+        "search_code",
+        "get_file_tree",
+        "search_symbols",
+        "find_references",
+        "list_functions",
+        "parse_ast",
+        "analyze_file",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "write_file",
+        "submit_code_explainer_agent",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -57,7 +68,12 @@ _WRITE = {
 _TOOLS = READ_ONLY_TOOLS + [_WRITE, _SUBMIT]
 
 _CFG = VerificationConfig(
-    set_by={"read_file": "read", "search_code": "read", "parse_ast": "read", "analyze_file": "read"},
+    set_by={
+        "read_file": "read",
+        "search_code": "read",
+        "parse_ast": "read",
+        "analyze_file": "read",
+    },
     reset_by=(),
     reset_keys=(),
     enforce_in_result={"read": "read"},
@@ -133,20 +149,24 @@ def run_code_explainer_agent(
 # Fleet registry
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["code_explanation"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["code_explanation"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry unavailable: %s", exc)

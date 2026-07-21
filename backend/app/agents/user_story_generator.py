@@ -4,6 +4,7 @@ Verification contract:
   - codebase_read: set True when read_file or search_code examines existing features
   - stories_written: set True when write_file outputs .feature / story files
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,16 +24,25 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "user_story_generator",
     "description": "Generates structured user stories with Gherkin acceptance criteria from feature descriptions and existing codebase context.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "get_file_tree",
-        "git_log", "read_files", "file_exists", "find_todos",
-        "write_file", "submit_user_stories",
+        "read_file",
+        "list_files",
+        "search_code",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "find_todos",
+        "write_file",
+        "submit_user_stories",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
     "side_effects": ["may write .feature or stories.md files"],
     "permissions": ["read_repo", "write_repo"],
     "risk_level": "low",
-    "expected_verification": {"codebase_read": "must inspect existing features before generating stories"},
+    "expected_verification": {
+        "codebase_read": "must inspect existing features before generating stories"
+    },
     "dependencies": [],
 }
 
@@ -53,13 +63,28 @@ _SUBMIT_STORIES_TOOL: dict[str, Any] = {
                         "as_a": {"type": "string"},
                         "i_want": {"type": "string"},
                         "so_that": {"type": "string"},
-                        "acceptance_criteria": {"type": "array", "items": {"type": "string"}},
-                        "gherkin": {"type": "string", "description": "Full Given/When/Then scenario block"},
+                        "acceptance_criteria": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "gherkin": {
+                            "type": "string",
+                            "description": "Full Given/When/Then scenario block",
+                        },
                     },
-                    "required": ["title", "as_a", "i_want", "so_that", "acceptance_criteria"],
+                    "required": [
+                        "title",
+                        "as_a",
+                        "i_want",
+                        "so_that",
+                        "acceptance_criteria",
+                    ],
                 },
             },
-            "file_path": {"type": "string", "description": "Path to written .feature or .md file if applicable"},
+            "file_path": {
+                "type": "string",
+                "description": "Path to written .feature or .md file if applicable",
+            },
             "summary": {"type": "string"},
         },
         "required": ["feature", "stories", "summary"],
@@ -155,7 +180,14 @@ def run_user_story_generator(
     stories = raw.get("stories", [])
     return AgentResult(
         summary=f"User stories for '{raw.get('feature', '?')}': {len(stories)} stories. {raw.get('summary', '')}",
-        findings=[{"as_a": s.get("as_a", "?"), "i_want": s.get("i_want", "?"), "title": s.get("title", "")} for s in stories],
+        findings=[
+            {
+                "as_a": s.get("as_a", "?"),
+                "i_want": s.get("i_want", "?"),
+                "title": s.get("title", ""),
+            }
+            for s in stories
+        ],
         files_touched=[raw["file_path"]] if raw.get("file_path") else [],
         verified=bool(final_state["verification"].get("codebase_read", False)),
         requires_human_approval=False,
@@ -170,20 +202,28 @@ def run_user_story_generator(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["user_story_generation", "gherkin_scenario_writing", "acceptance_criteria_definition"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=[
+                    "user_story_generation",
+                    "gherkin_scenario_writing",
+                    "acceptance_criteria_definition",
+                ],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

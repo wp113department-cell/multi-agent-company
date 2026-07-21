@@ -1,4 +1,5 @@
 """Context builder — combines keyword scoring + semantic search to find relevant files."""
+
 from __future__ import annotations
 
 import hashlib
@@ -41,7 +42,9 @@ class ContextResult:
     memory_context: str = ""  # pre-fetched engineering memory (similar past tasks)
 
 
-def _keyword_score(file_path: str, symbols: list[str], query_tokens: list[str]) -> float:
+def _keyword_score(
+    file_path: str, symbols: list[str], query_tokens: list[str]
+) -> float:
     """Score a file by how many query tokens appear in its path or symbol names."""
     combined = file_path.lower() + " " + " ".join(s.lower() for s in symbols)
     return sum(1.0 for tok in query_tokens if tok in combined)
@@ -105,7 +108,6 @@ def build_context(
             for sym in fi_opt.symbols:
                 if any(tok in sym.name.lower() for tok in query_tokens):
                     related_symbols.append(f"{rf}::{sym.name}")
-
 
     summary = (
         f"Found {len(relevant_files)} relevant files, "

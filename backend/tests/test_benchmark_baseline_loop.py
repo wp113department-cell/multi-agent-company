@@ -12,6 +12,7 @@ helper hits the exact "asyncio.run() cannot be called from a running event
 loop" bug documented in Day 13's own gap-closure notes; caught by running
 this file, not assumed safe.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -36,7 +37,11 @@ def _cleanup_benchmark(agent_name: str) -> None:
         engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                await session.execute(delete(AgentBenchmark).where(AgentBenchmark.agent_name == agent_name))
+                await session.execute(
+                    delete(AgentBenchmark).where(
+                        AgentBenchmark.agent_name == agent_name
+                    )
+                )
                 await session.commit()
         finally:
             await engine.dispose()
@@ -56,8 +61,16 @@ def _existing_baseline_agent_names() -> set[str]:
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
                 rows = (
-                    await session.execute(select(AgentBenchmark.agent_name).where(AgentBenchmark.is_baseline.is_(True)))
-                ).scalars().all()
+                    (
+                        await session.execute(
+                            select(AgentBenchmark.agent_name).where(
+                                AgentBenchmark.is_baseline.is_(True)
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
                 return set(rows)
         finally:
             await engine.dispose()
@@ -98,10 +111,16 @@ def _run_loop_once(own_agent_name: str) -> None:
 def test_baseline_loop_stores_baseline_for_agent_with_real_runs() -> None:
     agent_name = "td_bbl_agent_with_runs"
     try:
-        register(AgentCapability(
-            name=agent_name, description="t", tools=[], input_types=[], output_types=[],
-            capabilities=["td_bbl_cap"],
-        ))
+        register(
+            AgentCapability(
+                name=agent_name,
+                description="t",
+                tools=[],
+                input_types=[],
+                output_types=[],
+                capabilities=["td_bbl_cap"],
+            )
+        )
         m = get_metrics_collector().start_run(agent_name, trace_id="td-bbl-1")
         m.verification_pct = 1.0
 
@@ -116,15 +135,23 @@ def test_baseline_loop_stores_baseline_for_agent_with_real_runs() -> None:
 def test_baseline_loop_skips_agent_with_no_runs() -> None:
     agent_name = "td_bbl_agent_no_runs"
     try:
-        register(AgentCapability(
-            name=agent_name, description="t", tools=[], input_types=[], output_types=[],
-            capabilities=["td_bbl_cap_2"],
-        ))
+        register(
+            AgentCapability(
+                name=agent_name,
+                description="t",
+                tools=[],
+                input_types=[],
+                output_types=[],
+                capabilities=["td_bbl_cap_2"],
+            )
+        )
 
         _run_loop_once(agent_name)
 
         report = get_benchmark_manager().compare_to_baseline(agent_name)
-        assert report.baseline_score is None  # nothing stored — no real runs to base it on
+        assert (
+            report.baseline_score is None
+        )  # nothing stored — no real runs to base it on
     finally:
         _cleanup_benchmark(agent_name)
 
@@ -132,10 +159,16 @@ def test_baseline_loop_skips_agent_with_no_runs() -> None:
 def test_baseline_loop_does_not_overwrite_existing_baseline() -> None:
     agent_name = "td_bbl_agent_existing_baseline"
     try:
-        register(AgentCapability(
-            name=agent_name, description="t", tools=[], input_types=[], output_types=[],
-            capabilities=["td_bbl_cap_3"],
-        ))
+        register(
+            AgentCapability(
+                name=agent_name,
+                description="t",
+                tools=[],
+                input_types=[],
+                output_types=[],
+                capabilities=["td_bbl_cap_3"],
+            )
+        )
         bm = get_benchmark_manager()
         collector = get_metrics_collector()
 
@@ -145,7 +178,9 @@ def test_baseline_loop_does_not_overwrite_existing_baseline() -> None:
         bm.store_baseline(agent_name, first_result)
 
         m2 = collector.start_run(agent_name, trace_id="td-bbl-3b")
-        m2.verification_pct = 0.0  # would look like a regression if a NEW baseline got stored from this
+        m2.verification_pct = (
+            0.0  # would look like a regression if a NEW baseline got stored from this
+        )
 
         _run_loop_once(agent_name)
 
@@ -155,8 +190,12 @@ def test_baseline_loop_does_not_overwrite_existing_baseline() -> None:
         _cleanup_benchmark(agent_name)
 
 
-def test_baseline_loop_disabled_when_interval_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_baseline_loop_disabled_when_interval_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from app.config import get_settings
 
     monkeypatch.setattr(get_settings(), "benchmark_baseline_interval_hours", 0)
-    asyncio.run(_benchmark_baseline_loop())  # returns immediately, never sleeps, never raises
+    asyncio.run(
+        _benchmark_baseline_loop()
+    )  # returns immediately, never sleeps, never raises

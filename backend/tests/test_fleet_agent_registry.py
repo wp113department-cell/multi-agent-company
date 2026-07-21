@@ -1,4 +1,5 @@
 """Tests for Fleet OS agent_registry.py — Phase F2."""
+
 from __future__ import annotations
 
 
@@ -121,6 +122,7 @@ def test_total_runs_increments() -> None:
 
 
 # ---- Singleton pre-registered reference agents ----
+
 
 def test_reference_agents_pre_registered_in_sleep() -> None:
     r = get_agent_registry()

@@ -1,4 +1,5 @@
 """Tests for ActivityStream (Day 5A)."""
+
 from __future__ import annotations
 
 
@@ -18,10 +19,10 @@ from app.services.activity_stream import (
     push_error,
 )
 
-
 # ---------------------------------------------------------------------------
 # TaskStream
 # ---------------------------------------------------------------------------
+
 
 class TestTaskStream:
     @pytest.mark.asyncio
@@ -56,7 +57,15 @@ class TestTaskStream:
     @pytest.mark.asyncio
     async def test_done_event_terminates_subscribe(self):
         stream = TaskStream("t4")
-        stream.push({"type": "done", "result": {}, "tokens_in": 10, "tokens_out": 5, "cost_usd": 0.0})
+        stream.push(
+            {
+                "type": "done",
+                "result": {},
+                "tokens_in": 10,
+                "tokens_out": 5,
+                "cost_usd": 0.0,
+            }
+        )
 
         events = []
         async for ev in stream.subscribe(timeout=2.0):
@@ -75,6 +84,7 @@ class TestTaskStream:
 # ---------------------------------------------------------------------------
 # ActivityStreamRegistry
 # ---------------------------------------------------------------------------
+
 
 class TestActivityStreamRegistry:
     def test_create_and_get(self):
@@ -115,11 +125,13 @@ class TestActivityStreamRegistry:
 # Convenience helpers
 # ---------------------------------------------------------------------------
 
+
 class TestConvenienceHelpers:
     """Integration: helpers create events in a real TaskStream."""
 
     def setup_method(self):
         import app.services.activity_stream as _mod
+
         # Use fresh registry for isolation
         self.reg = ActivityStreamRegistry()
         self.reg.create("h1")
@@ -128,6 +140,7 @@ class TestConvenienceHelpers:
 
     def teardown_method(self):
         import app.services.activity_stream as _mod
+
         _mod._registry = self._orig
 
     def _drain(self, task_id: str) -> list[dict]:

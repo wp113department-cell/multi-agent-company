@@ -10,6 +10,7 @@ Convention:
       token count > 0) — not specific LLM output wording.
     - One case per agent is sufficient for smoke testing; add more for regressions.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -18,12 +19,14 @@ from evals.eval_runner import EvalCase
 
 # Path used as repo_path in all evals — points at the backend itself for real reads
 import os
+
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 # ---------------------------------------------------------------------------
 # Common criteria factories
 # ---------------------------------------------------------------------------
+
 
 def _status_completed(result: Any) -> bool:
     return result.status == "completed"
@@ -60,8 +63,18 @@ SUITES: dict[str, list[EvalCase]] = {
             agent_slug="bug_fix",
             task_id=9001,
             repo_path=_REPO,
-            criteria=[_status_completed, _findings_list, _has_summary, _tokens_consumed],
-            criteria_labels=["status=completed", "findings is list", "has summary", "tokens consumed"],
+            criteria=[
+                _status_completed,
+                _findings_list,
+                _has_summary,
+                _tokens_consumed,
+            ],
+            criteria_labels=[
+                "status=completed",
+                "findings is list",
+                "has summary",
+                "tokens consumed",
+            ],
         ),
     ],
     "security_reviewer": [

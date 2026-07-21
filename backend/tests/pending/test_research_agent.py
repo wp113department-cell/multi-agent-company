@@ -1,4 +1,5 @@
 """Research Agent — real Anthropic API tests. Skip unless RUN_PENDING_TESTS=1."""
+
 from __future__ import annotations
 
 import os
@@ -6,7 +7,9 @@ import os
 import pytest
 
 SKIP = not os.environ.get("RUN_PENDING_TESTS")
-pytestmark = pytest.mark.skipif(SKIP, reason="Requires RUN_PENDING_TESTS=1 + ANTHROPIC_API_KEY")
+pytestmark = pytest.mark.skipif(
+    SKIP, reason="Requires RUN_PENDING_TESTS=1 + ANTHROPIC_API_KEY"
+)
 
 
 @pytest.mark.asyncio
@@ -50,6 +53,7 @@ async def test_research_agent_respects_research_enabled_false() -> None:
 async def test_research_agent_cannot_write() -> None:
     """Research agent tools do NOT include write_file or submit_patch."""
     from app.agents.tools import RESEARCH_TOOLS
+
     names = {t["name"] for t in RESEARCH_TOOLS}
     assert "write_file" not in names
     assert "submit_patch" not in names

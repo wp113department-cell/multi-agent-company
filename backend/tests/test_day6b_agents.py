@@ -1,4 +1,5 @@
 """Tests for Day 6B agents: AGENT_CONTRACT, handler structure, role files, and fleet registration."""
+
 from __future__ import annotations
 
 import importlib
@@ -32,28 +33,88 @@ _DAY6B_MODULES = [
 ]
 
 _REQUIRED_CONTRACT_KEYS = [
-    "name", "description", "allowed_tools", "input_types", "output_types",
-    "side_effects", "permissions", "risk_level", "expected_verification", "dependencies",
+    "name",
+    "description",
+    "allowed_tools",
+    "input_types",
+    "output_types",
+    "side_effects",
+    "permissions",
+    "risk_level",
+    "expected_verification",
+    "dependencies",
 ]
 
 _HANDLER_PAIRS = [
-    ("app.agents.dependency_security_agent", "make_dependency_security_agent_handlers", "submit_dependency_security_agent"),
+    (
+        "app.agents.dependency_security_agent",
+        "make_dependency_security_agent_handlers",
+        "submit_dependency_security_agent",
+    ),
     ("app.agents.devex_agent", "make_devex_agent_handlers", "submit_devex_agent"),
-    ("app.agents.env_checker_agent", "make_env_checker_agent_handlers", "submit_env_checker_agent"),
-    ("app.agents.feature_flag_agent", "make_feature_flag_agent_handlers", "submit_feature_flag_agent"),
-    ("app.agents.incident_responder_agent", "make_incident_responder_agent_handlers", "submit_incident_responder_agent"),
+    (
+        "app.agents.env_checker_agent",
+        "make_env_checker_agent_handlers",
+        "submit_env_checker_agent",
+    ),
+    (
+        "app.agents.feature_flag_agent",
+        "make_feature_flag_agent_handlers",
+        "submit_feature_flag_agent",
+    ),
+    (
+        "app.agents.incident_responder_agent",
+        "make_incident_responder_agent_handlers",
+        "submit_incident_responder_agent",
+    ),
     ("app.agents.infra_agent", "make_infra_agent_handlers", "submit_infra_agent"),
-    ("app.agents.load_test_agent", "make_load_test_agent_handlers", "submit_load_test_agent"),
-    ("app.agents.localization_agent", "make_localization_agent_handlers", "submit_localization_agent"),
-    ("app.agents.onboarding_agent", "make_onboarding_agent_handlers", "submit_onboarding_agent"),
-    ("app.agents.pair_programmer_agent", "make_pair_programmer_agent_handlers", "submit_pair_programmer_agent"),
-    ("app.agents.rollback_agent", "make_rollback_agent_handlers", "submit_rollback_agent"),
-    ("app.agents.runbook_generator_agent", "make_runbook_generator_agent_handlers", "submit_runbook_generator_agent"),
+    (
+        "app.agents.load_test_agent",
+        "make_load_test_agent_handlers",
+        "submit_load_test_agent",
+    ),
+    (
+        "app.agents.localization_agent",
+        "make_localization_agent_handlers",
+        "submit_localization_agent",
+    ),
+    (
+        "app.agents.onboarding_agent",
+        "make_onboarding_agent_handlers",
+        "submit_onboarding_agent",
+    ),
+    (
+        "app.agents.pair_programmer_agent",
+        "make_pair_programmer_agent_handlers",
+        "submit_pair_programmer_agent",
+    ),
+    (
+        "app.agents.rollback_agent",
+        "make_rollback_agent_handlers",
+        "submit_rollback_agent",
+    ),
+    (
+        "app.agents.runbook_generator_agent",
+        "make_runbook_generator_agent_handlers",
+        "submit_runbook_generator_agent",
+    ),
     ("app.agents.slo_agent", "make_slo_agent_handlers", "submit_slo_agent"),
     ("app.agents.spike_agent", "make_spike_agent_handlers", "submit_spike_agent"),
-    ("app.agents.test_coverage_agent", "make_test_coverage_agent_handlers", "submit_test_coverage_agent"),
-    ("app.agents.test_writer_agent", "make_test_writer_agent_handlers", "submit_test_writer_agent"),
-    ("app.agents.version_manager_agent", "make_version_manager_agent_handlers", "submit_version_manager_agent"),
+    (
+        "app.agents.test_coverage_agent",
+        "make_test_coverage_agent_handlers",
+        "submit_test_coverage_agent",
+    ),
+    (
+        "app.agents.test_writer_agent",
+        "make_test_writer_agent_handlers",
+        "submit_test_writer_agent",
+    ),
+    (
+        "app.agents.version_manager_agent",
+        "make_version_manager_agent_handlers",
+        "submit_version_manager_agent",
+    ),
 ]
 
 _RUN_PAIRS = [
@@ -98,6 +159,7 @@ def _make_fake_state(**kwargs: Any) -> dict[str, Any]:
 # AGENT_CONTRACT presence and shape
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("module_name", _DAY6B_MODULES)
 def test_agent_contract_exists(module_name: str) -> None:
     mod = _load(module_name)
@@ -121,14 +183,15 @@ def test_agent_contract_non_empty_lists(module_name: str) -> None:
 def test_agent_contract_name_matches_module(module_name: str) -> None:
     mod = _load(module_name)
     short_name = module_name.split(".")[-1]
-    assert mod.AGENT_CONTRACT["name"] == short_name, (
-        f"{module_name}: contract name '{mod.AGENT_CONTRACT['name']}' != '{short_name}'"
-    )
+    assert (
+        mod.AGENT_CONTRACT["name"] == short_name
+    ), f"{module_name}: contract name '{mod.AGENT_CONTRACT['name']}' != '{short_name}'"
 
 
 # ---------------------------------------------------------------------------
 # VerificationConfig: enforce_in_result and set_by non-empty
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("module_name", _DAY6B_MODULES)
 def test_verification_config_enforce_non_empty(module_name: str) -> None:
@@ -136,7 +199,9 @@ def test_verification_config_enforce_non_empty(module_name: str) -> None:
     cfg = getattr(mod, "_CFG", None)
     assert cfg is not None, f"{module_name} missing _CFG"
     assert hasattr(cfg, "enforce_in_result")
-    assert cfg.enforce_in_result, f"{module_name} _CFG.enforce_in_result must not be empty"
+    assert (
+        cfg.enforce_in_result
+    ), f"{module_name} _CFG.enforce_in_result must not be empty"
 
 
 @pytest.mark.parametrize("module_name", _DAY6B_MODULES)
@@ -149,6 +214,7 @@ def test_verification_config_set_by_non_empty(module_name: str) -> None:
 # Role file exists and is non-trivial
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("module_name", _DAY6B_MODULES)
 def test_role_file_exists(module_name: str) -> None:
     short_name = module_name.split(".")[-1]
@@ -160,6 +226,7 @@ def test_role_file_exists(module_name: str) -> None:
 # ---------------------------------------------------------------------------
 # _TOOLS: submit and write_file present
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("module_name", _DAY6B_MODULES)
 def test_submit_tool_in_tools_list(module_name: str) -> None:
@@ -183,8 +250,11 @@ def test_write_file_tool_in_tools_list(module_name: str) -> None:
 # Handler factory: returns dict with _result; submit is callable
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("module_name,factory_fn,submit_key", _HANDLER_PAIRS)
-def test_handler_factory_returns_dict(module_name: str, factory_fn: str, submit_key: str) -> None:
+def test_handler_factory_returns_dict(
+    module_name: str, factory_fn: str, submit_key: str
+) -> None:
     mod = _load(module_name)
     factory = getattr(mod, factory_fn, None)
     assert factory is not None, f"{module_name} missing {factory_fn}"
@@ -211,6 +281,7 @@ def test_submit_handler_callable_and_updates_result(
 # run_<agent> returns AgentResult when run_agent_graph is mocked
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("module_name,run_fn", _RUN_PAIRS)
 def test_run_fn_returns_agent_result(module_name: str, run_fn: str) -> None:
     from app.agents.agent_result import AgentResult
@@ -223,7 +294,9 @@ def test_run_fn_returns_agent_result(module_name: str, run_fn: str) -> None:
     with patch(patch_target, return_value=_make_fake_state()):
         result = fn(task_id=1, description="test task", repo_path="/tmp/fake_repo")
 
-    assert isinstance(result, AgentResult), f"{module_name} {run_fn} must return AgentResult"
+    assert isinstance(
+        result, AgentResult
+    ), f"{module_name} {run_fn} must return AgentResult"
     assert result.status in ("completed", "blocked")
     assert isinstance(result.tokens_in, int)
     assert isinstance(result.tokens_out, int)
@@ -232,6 +305,7 @@ def test_run_fn_returns_agent_result(module_name: str, run_fn: str) -> None:
 # ---------------------------------------------------------------------------
 # Capability tags unique across Day 6B agents
 # ---------------------------------------------------------------------------
+
 
 def test_capability_tags_unique_across_day6b() -> None:
     from app.fleet.capability_registry import get_capability_registry
@@ -254,6 +328,7 @@ def test_capability_tags_unique_across_day6b() -> None:
 # ---------------------------------------------------------------------------
 # _register() exists and is callable
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("module_name", _DAY6B_MODULES)
 def test_register_function_exists(module_name: str) -> None:

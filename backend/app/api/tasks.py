@@ -1,5 +1,13 @@
 from typing import Any
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+)
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,7 +50,9 @@ class RejectRequest(BaseModel):
 
 
 class RunRequest(BaseModel):
-    mode: str | None = None  # "full" | "simple" — overrides PIPELINE_MODE env for this request
+    mode: str | None = (
+        None  # "full" | "simple" — overrides PIPELINE_MODE env for this request
+    )
 
 
 def _log_to_dict(log: Any) -> dict[str, Any]:
@@ -79,7 +89,9 @@ def _task_to_dict(task: Any, logs: list[Any] | None = None) -> dict[str, Any]:
 
 
 @router.post("", status_code=201)
-async def create(body: CreateTaskRequest, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def create(
+    body: CreateTaskRequest, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     task = await create_task(db, body.title, body.description, repo_id=body.repo_id)
     return _task_to_dict(task)
 
@@ -92,7 +104,9 @@ async def list_all(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    tasks, next_cursor = await list_tasks(db, status=status, repo_id=repo_id, cursor=cursor, limit=limit)
+    tasks, next_cursor = await list_tasks(
+        db, status=status, repo_id=repo_id, cursor=cursor, limit=limit
+    )
     return {"tasks": [_task_to_dict(t) for t in tasks], "nextCursor": next_cursor}
 
 
@@ -168,7 +182,11 @@ async def run_task(
 
     if mode == "full":
         background_tasks.add_task(
-            launch_planning_pipeline, task_id, str(task.title), str(task.description), repo_path
+            launch_planning_pipeline,
+            task_id,
+            str(task.title),
+            str(task.description),
+            repo_path,
         )
     else:
         background_tasks.add_task(
@@ -194,7 +212,9 @@ async def restart_task(
         raise HTTPException(status_code=404, detail="Task not found")
 
     # Force-reset to pending regardless of current status
-    await db.execute(update(DevTask).where(DevTask.id == task_id).values(status="pending"))
+    await db.execute(
+        update(DevTask).where(DevTask.id == task_id).values(status="pending")
+    )
     await db.commit()
 
     # Re-fetch to get fresh state for the pipeline
@@ -210,10 +230,16 @@ async def restart_task(
             repo_path = repo_obj.local_path
 
     await transition_task(db, task_id, "planning")
-    await append_log(db, task_id, "pipeline", "Task restarted — planning pipeline re-triggered")
+    await append_log(
+        db, task_id, "pipeline", "Task restarted — planning pipeline re-triggered"
+    )
 
     background_tasks.add_task(
-        launch_planning_pipeline, task_id, str(task.title), str(task.description), repo_path
+        launch_planning_pipeline,
+        task_id,
+        str(task.title),
+        str(task.description),
+        repo_path,
     )
 
     return {"restarted": True, "taskId": task_id}
@@ -233,7 +259,8 @@ async def approve_task(
         raise HTTPException(status_code=404, detail="Task not found")
     if task.status != "ready_for_review":
         raise HTTPException(
-            status_code=400, detail=f"Task must be ready_for_review, got {task.status!r}"
+            status_code=400,
+            detail=f"Task must be ready_for_review, got {task.status!r}",
         )
 
     plan = str(task.plan or "")
@@ -317,7 +344,9 @@ async def pipeline_reject(
 
 
 @router.get("/{task_id}/subtasks")
-async def get_subtasks(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def get_subtasks(
+    task_id: int, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     subtasks = await list_subtasks(db, task_id)
     return {
         "subtasks": [
@@ -336,7 +365,9 @@ async def get_subtasks(task_id: int, db: AsyncSession = Depends(get_db)) -> dict
 
 
 @router.get("/{task_id}/pipeline")
-async def get_pipeline(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def get_pipeline(
+    task_id: int, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     ps = await get_pipeline_state(db, task_id)
     if ps is None:
         raise HTTPException(status_code=404, detail="No pipeline state for this task")
@@ -403,6 +434,7 @@ def _extract_pdf_text(raw: bytes, fname: str) -> str:
     try:
         import io
         import pdfplumber
+
         with pdfplumber.open(io.BytesIO(raw)) as pdf:
             pages = []
             for i, page in enumerate(pdf.pages):

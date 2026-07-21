@@ -23,6 +23,7 @@ Session 0 additions (2026-07-16) — all flags default False, zero breaking chan
   run_span         — Fleet OS metrics wrapper. fleet/metrics.py.
   Context trim     — token budget enforcement. LangGraph RemainingSteps + roo-code condense.
 """
+
 from __future__ import annotations
 
 import json
@@ -45,8 +46,10 @@ logger = logging.getLogger(__name__)
 # LangGraph State — 8 original required fields + 9 new optional Fleet OS fields
 # ---------------------------------------------------------------------------
 
+
 class _AgentRunStateBase(TypedDict):
     """Original 8 required fields — unchanged from Day 3."""
+
     messages: list[dict[str, Any]]
     verification: dict[str, Any]
     result: dict[str, Any]
@@ -63,21 +66,25 @@ class AgentRunState(_AgentRunStateBase, total=False):
     All new fields are optional (total=False) so existing callers need zero changes.
     run_agent_graph() populates them with safe defaults in initial_state.
     """
-    plan: str           # structured plan JSON from planner_node
-    facts: str          # gathered-facts JSON from planner_node
-    n_stalls: int       # consecutive turns without tool calls (stall detection)
-    retry_count: int    # total replan cycles
-    confidence: float   # planner-assigned confidence 0.0–1.0
-    status: str         # running | completed | blocked | failed
-    trace_id: str       # Fleet OS correlation ID
-    memory_context: str # retrieved past lessons, injected into system prompt
-    repo_context: str   # repo structure snapshot from context_builder
-    reflection_unsatisfied_count: int  # times reflection_node judged its own tool output unsatisfactory
+
+    plan: str  # structured plan JSON from planner_node
+    facts: str  # gathered-facts JSON from planner_node
+    n_stalls: int  # consecutive turns without tool calls (stall detection)
+    retry_count: int  # total replan cycles
+    confidence: float  # planner-assigned confidence 0.0–1.0
+    status: str  # running | completed | blocked | failed
+    trace_id: str  # Fleet OS correlation ID
+    memory_context: str  # retrieved past lessons, injected into system prompt
+    repo_context: str  # repo structure snapshot from context_builder
+    reflection_unsatisfied_count: (
+        int  # times reflection_node judged its own tool output unsatisfactory
+    )
 
 
 # ---------------------------------------------------------------------------
 # Verification configuration (per agent)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class VerificationConfig:
@@ -94,6 +101,7 @@ class VerificationConfig:
     initial: dict[str, Any]
         Initial values for the verification dict.
     """
+
     set_by: dict[str, str] = field(default_factory=dict)
     reset_by: tuple[str, ...] = field(default_factory=tuple)
     reset_keys: tuple[str, ...] = field(default_factory=tuple)
@@ -105,6 +113,7 @@ class VerificationConfig:
 # LessonStore — in-process cross-agent lesson sharing
 # Pattern from: AutoGen MemoryController + LangGraph cross-thread store
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class Lesson:
@@ -155,7 +164,9 @@ class LessonStore:
         retrieved = self.retrieve(query, top_k=top_k)
         if not retrieved:
             return ""
-        lines = ["## Relevant past insights:"] + [ls.as_context_line() for ls in retrieved]
+        lines = ["## Relevant past insights:"] + [
+            ls.as_context_line() for ls in retrieved
+        ]
         return "\n".join(lines)
 
     @property
@@ -181,6 +192,7 @@ def get_lesson_store() -> LessonStore:
 # Serialization helpers
 # ---------------------------------------------------------------------------
 
+
 def _serialize_content(content: Any) -> list[dict[str, Any]]:
     """Convert Anthropic response content to plain JSON-serialisable dicts."""
     if isinstance(content, list):
@@ -190,12 +202,14 @@ def _serialize_content(content: Any) -> list[dict[str, Any]]:
                 if block.type == "text":
                     out.append({"type": "text", "text": getattr(block, "text", "")})
                 elif block.type == "tool_use":
-                    out.append({
-                        "type": "tool_use",
-                        "id": block.id,
-                        "name": block.name,
-                        "input": dict(block.input or {}),
-                    })
+                    out.append(
+                        {
+                            "type": "tool_use",
+                            "id": block.id,
+                            "name": block.name,
+                            "input": dict(block.input or {}),
+                        }
+                    )
             elif isinstance(block, dict):
                 out.append(block)
         return out
@@ -204,7 +218,8 @@ def _serialize_content(content: Any) -> list[dict[str, Any]]:
 
 def _text_from_content(content: list[dict[str, Any]]) -> str:
     return " ".join(
-        b.get("text", "") for b in content
+        b.get("text", "")
+        for b in content
         if isinstance(b, dict) and b.get("type") == "text"
     ).strip()
 
@@ -213,6 +228,7 @@ def _text_from_content(content: list[dict[str, Any]]) -> str:
 # Context trim — token budget enforcement before call_llm
 # Pattern from: LangGraph RemainingSteps + roo-code src/core/condense/
 # ---------------------------------------------------------------------------
+
 
 def _trim_messages(
     messages: list[dict[str, Any]],
@@ -225,15 +241,18 @@ def _trim_messages(
     trimmed = messages[:1] + messages[-4:]
     logger.info(
         "Context trim: %d → %d messages (tokens_in=%d > budget=%d)",
-        len(messages), len(trimmed), tokens_in, token_budget,
+        len(messages),
+        len(trimmed),
+        tokens_in,
+        token_budget,
     )
     return trimmed
-
 
 
 # ---------------------------------------------------------------------------
 # Policy enforcement (delegates to guardrails)
 # ---------------------------------------------------------------------------
+
 
 def _policy_check(tool_name: str, tool_input: dict[str, Any]) -> str | None:
     """Return denial string if the tool call is policy-denied, else None."""
@@ -253,6 +272,7 @@ def _policy_check(tool_name: str, tool_input: dict[str, Any]) -> str | None:
 # ---------------------------------------------------------------------------
 # Node factories
 # ---------------------------------------------------------------------------
+
 
 def _make_planner_node(
     model_haiku: str,
@@ -277,7 +297,8 @@ def _make_planner_node(
         facts_text = "{}"
         try:
             r = client.messages.create(
-                model=model_haiku, max_tokens=512,
+                model=model_haiku,
+                max_tokens=512,
                 messages=[{"role": "user", "content": facts_prompt}],
             )
             facts_text = _text_from_content(_serialize_content(r.content))
@@ -294,7 +315,8 @@ def _make_planner_node(
         confidence = 0.8
         try:
             r2 = client.messages.create(
-                model=model_haiku, max_tokens=512,
+                model=model_haiku,
+                max_tokens=512,
                 messages=[{"role": "user", "content": plan_prompt}],
             )
             plan_text = _text_from_content(_serialize_content(r2.content))
@@ -303,7 +325,12 @@ def _make_planner_node(
             logger.warning("planner_node plan call failed: %s", exc)
 
         logger.info("planner_node done (confidence=%.2f)", confidence)
-        return {"facts": facts_text, "plan": plan_text, "confidence": confidence, "status": "running"}
+        return {
+            "facts": facts_text,
+            "plan": plan_text,
+            "confidence": confidence,
+            "status": "running",
+        }
 
     return planner_node
 
@@ -333,8 +360,11 @@ def _make_memory_hook_node(
             try:
                 from app.repo_tools.context_builder import build_context
                 from app.repo_tools.scanner import index_repository
+
                 idx = index_repository(repo_path)
-                ctx = build_context(task_description=query or "general", index=idx, top_k=10)
+                ctx = build_context(
+                    task_description=query or "general", index=idx, top_k=10
+                )
                 summary = f"## Repo context\nRelevant files: {', '.join(ctx.relevant_files[:8])}"
                 if ctx.related_symbols:
                     summary += f"\nKey symbols: {', '.join(ctx.related_symbols[:6])}"
@@ -373,6 +403,7 @@ def _make_call_llm_node(
         if task_id:
             try:
                 from app.services.activity_stream import get_activity_registry
+
                 if get_activity_registry().should_abort(task_id):
                     logger.info("Abort flag set for task %s — stopping agent", task_id)
                     return {"submitted": True, "status": "stopped"}
@@ -406,7 +437,13 @@ def _make_call_llm_node(
         response = client.messages.create(
             model=model,
             max_tokens=8096,
-            system=[{"type": "text", "text": full_system, "cache_control": {"type": "ephemeral"}}],
+            system=[
+                {
+                    "type": "text",
+                    "text": full_system,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
             messages=messages,  # type: ignore[arg-type]
             tools=anthropic_tools,
         )
@@ -416,17 +453,21 @@ def _make_call_llm_node(
         if task_id:
             try:
                 from app.services.activity_stream import push_thinking, push_token_usage
+
                 text = _text_from_content(serialized)
                 if text:
                     push_thinking(task_id, text, role_name)
                 tokens_in_new = state.get("tokens_in", 0) + response.usage.input_tokens
-                tokens_out_new = state.get("tokens_out", 0) + response.usage.output_tokens
+                tokens_out_new = (
+                    state.get("tokens_out", 0) + response.usage.output_tokens
+                )
                 push_token_usage(task_id, tokens_in_new, tokens_out_new)
             except Exception:
                 pass
 
         return {
-            "messages": list(state["messages"]) + [{"role": "assistant", "content": serialized}],
+            "messages": list(state["messages"])
+            + [{"role": "assistant", "content": serialized}],
             "tokens_in": state.get("tokens_in", 0) + response.usage.input_tokens,
             "tokens_out": state.get("tokens_out", 0) + response.usage.output_tokens,
         }
@@ -453,10 +494,10 @@ def _make_reflection_node(model: str) -> Callable[[AgentRunState], dict[str, Any
         client = anthropic.Anthropic(api_key=get_effective_api_key())
         try:
             r = client.messages.create(
-                model=model, max_tokens=384,
-                messages=list(state["messages"]) + [
-                    {"role": "user", "content": REFLECTION_PROMPT}
-                ],
+                model=model,
+                max_tokens=384,
+                messages=list(state["messages"])
+                + [{"role": "user", "content": REFLECTION_PROMPT}],
                 # No tools param → tool_choice=none equivalent
             )
             text = _text_from_content(_serialize_content(r.content))
@@ -467,12 +508,16 @@ def _make_reflection_node(model: str) -> Callable[[AgentRunState], dict[str, Any
                 pass
 
             if not satisfied:
-                logger.info("reflection_node: not satisfied — adding self-review message")
+                logger.info(
+                    "reflection_node: not satisfied — adding self-review message"
+                )
                 return {
-                    "messages": list(state["messages"]) + [
-                        {"role": "user", "content": f"[Self-review]\n{text}"}
-                    ],
-                    "reflection_unsatisfied_count": state.get("reflection_unsatisfied_count", 0) + 1,
+                    "messages": list(state["messages"])
+                    + [{"role": "user", "content": f"[Self-review]\n{text}"}],
+                    "reflection_unsatisfied_count": state.get(
+                        "reflection_unsatisfied_count", 0
+                    )
+                    + 1,
                 }
         except Exception as exc:
             logger.warning("reflection_node failed (non-fatal): %s", exc)
@@ -495,7 +540,9 @@ def _make_execute_tools_node(
     def execute_tools(state: AgentRunState) -> dict[str, Any]:
         last_msg = state["messages"][-1]
         content = last_msg.get("content", []) if isinstance(last_msg, dict) else []
-        tool_uses = [b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"]
+        tool_uses = [
+            b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"
+        ]
 
         new_verification = dict(state["verification"])
         new_result = dict(state["result"])
@@ -511,6 +558,7 @@ def _make_execute_tools_node(
             if task_id:
                 try:
                     from app.services.activity_stream import push_tool_call
+
                     push_tool_call(task_id, tu_name, tu_input, tu_id)
                 except Exception:
                     pass
@@ -531,7 +579,9 @@ def _make_execute_tools_node(
                         result_content = f"[ERROR] {tu_name} raised: {exc}"
                         logger.exception("Tool %s raised", tu_name)
                     _duration_ms = (time.monotonic() - _t0) * 1000
-                    _ok = not result_content.startswith("[ERROR]") and not result_content.startswith("[POLICY")
+                    _ok = not result_content.startswith(
+                        "[ERROR]"
+                    ) and not result_content.startswith("[POLICY")
 
                     # Day 10 — wire real tool-call data into RunMetrics (non-fatal).
                     # avg_tool_accuracy() depends on this; before this fix it was
@@ -539,6 +589,7 @@ def _make_execute_tools_node(
                     if trace_id:
                         try:
                             from app.fleet.metrics import get_metrics_collector
+
                             _m = get_metrics_collector().get(trace_id)
                             if _m is not None:
                                 _err = None if _ok else result_content[:200]
@@ -546,11 +597,15 @@ def _make_execute_tools_node(
                         except Exception:
                             pass
 
-                    if not result_content.startswith("[ERROR]") and not result_content.startswith("[POLICY"):
+                    if not result_content.startswith(
+                        "[ERROR]"
+                    ) and not result_content.startswith("[POLICY"):
                         if tu_name in verification_cfg.set_by:
                             key = verification_cfg.set_by[tu_name]
                             new_verification[key] = True
-                            logger.debug("Verification: %s=True (from %s)", key, tu_name)
+                            logger.debug(
+                                "Verification: %s=True (from %s)", key, tu_name
+                            )
 
                     if tu_name in verification_cfg.reset_by:
                         for key in verification_cfg.reset_keys:
@@ -559,12 +614,17 @@ def _make_execute_tools_node(
                     if tu_name.startswith("submit_"):
                         submitted = True
                         raw_result = dict(tu_input)
-                        for result_field, verif_key in verification_cfg.enforce_in_result.items():
+                        for (
+                            result_field,
+                            verif_key,
+                        ) in verification_cfg.enforce_in_result.items():
                             actual = new_verification.get(verif_key, False)
                             if raw_result.get(result_field) != actual:
                                 logger.info(
                                     "Verification override: result[%s]=%s → %s",
-                                    result_field, raw_result.get(result_field), actual,
+                                    result_field,
+                                    raw_result.get(result_field),
+                                    actual,
                                 )
                             raw_result[result_field] = actual
                         raw_result["_requires_human_approval"] = human_approval_required
@@ -574,22 +634,37 @@ def _make_execute_tools_node(
             if task_id:
                 try:
                     from app.services.activity_stream import (
-                        push_tool_result, push_file_edit, push_terminal,
+                        push_tool_result,
+                        push_file_edit,
+                        push_terminal,
                     )
-                    ok = not result_content.startswith("[ERROR]") and not result_content.startswith("[POLICY")
+
+                    ok = not result_content.startswith(
+                        "[ERROR]"
+                    ) and not result_content.startswith("[POLICY")
                     push_tool_result(task_id, tu_name, result_content, ok, tu_id)
-                    if tu_name in ("write_file", "edit_file", "apply_patch", "delete_file"):
+                    if tu_name in (
+                        "write_file",
+                        "edit_file",
+                        "apply_patch",
+                        "delete_file",
+                    ):
                         path = str(tu_input.get("path", ""))
                         push_file_edit(task_id, path, tu_name)
                     if tu_name == "bash":
-                        push_terminal(task_id, str(tu_input.get("command", "")), result_content)
+                        push_terminal(
+                            task_id, str(tu_input.get("command", "")), result_content
+                        )
                 except Exception:
                     pass
 
-            tool_results.append({"type": "tool_result", "tool_use_id": tu_id, "content": result_content})
+            tool_results.append(
+                {"type": "tool_result", "tool_use_id": tu_id, "content": result_content}
+            )
 
         return {
-            "messages": list(state["messages"]) + [{"role": "user", "content": tool_results}],
+            "messages": list(state["messages"])
+            + [{"role": "user", "content": tool_results}],
             "verification": new_verification,
             "result": new_result,
             "submitted": submitted,
@@ -606,6 +681,7 @@ def _make_execute_tools_node(
 # AutoGen MemoryController.train_on_task() pattern
 # ---------------------------------------------------------------------------
 
+
 def _extract_and_store_lesson(
     final_state: AgentRunState,
     role_name: str,
@@ -615,7 +691,11 @@ def _extract_and_store_lesson(
     """Extract a reusable lesson from the completed run and store in LessonStore.
     Non-fatal — any failure is logged and swallowed.
     """
-    task = str(final_state["messages"][0].get("content", "")) if final_state["messages"] else ""
+    task = (
+        str(final_state["messages"][0].get("content", ""))
+        if final_state["messages"]
+        else ""
+    )
     result = final_state.get("result", {})
     result_summary = json.dumps(
         {k: v for k, v in result.items() if not k.startswith("_")}, default=str
@@ -632,7 +712,8 @@ def _extract_and_store_lesson(
     try:
         client = anthropic.Anthropic(api_key=get_effective_api_key())
         r = client.messages.create(
-            model=model_haiku, max_tokens=256,
+            model=model_haiku,
+            max_tokens=256,
             messages=[{"role": "user", "content": prompt}],
         )
         text = _text_from_content(_serialize_content(r.content))
@@ -646,10 +727,17 @@ def _extract_and_store_lesson(
         )
         if lesson.lesson:
             get_lesson_store().add(lesson)
-            logger.info("lesson stored for %s (category=%s)", role_name, lesson.category)
+            logger.info(
+                "lesson stored for %s (category=%s)", role_name, lesson.category
+            )
             try:
                 from app.fleet.fleet_events import lesson_published, publish
-                publish(lesson_published(role_name, lesson.lesson, lesson.category, trace_id=trace_id))
+
+                publish(
+                    lesson_published(
+                        role_name, lesson.lesson, lesson.category, trace_id=trace_id
+                    )
+                )
             except Exception:
                 pass
             # Gap-closure (2026-07-21) — Day 11's versioned_memory.py was built and tested
@@ -663,11 +751,15 @@ def _extract_and_store_lesson(
             # writing a real row per test polluted OTHER tests' similarity searches with
             # unrelated zero-vector rows — found by running the full suite, not assumed safe.
             from app.config import get_settings as _get_settings
+
             if _get_settings().voyage_api_key:
                 try:
                     from app.fleet.versioned_memory import get_versioned_memory_store
+
                     topic = lesson.pattern or lesson.category or "general"
-                    get_versioned_memory_store().publish(topic, lesson.lesson, agent_name=role_name)
+                    get_versioned_memory_store().publish(
+                        topic, lesson.lesson, agent_name=role_name
+                    )
                 except Exception as exc:
                     logger.debug("versioned_memory.publish failed (non-fatal): %s", exc)
     except Exception as exc:
@@ -677,6 +769,7 @@ def _extract_and_store_lesson(
 # ---------------------------------------------------------------------------
 # Graph routing — stall detection (AutoGen MagenticOne progress_ledger pattern)
 # ---------------------------------------------------------------------------
+
 
 def _make_router(
     max_turns: int,
@@ -694,7 +787,9 @@ def _make_router(
 
         last_msg = state["messages"][-1] if state["messages"] else {}
         content = last_msg.get("content", []) if isinstance(last_msg, dict) else []
-        has_tools = any(isinstance(b, dict) and b.get("type") == "tool_use" for b in content)
+        has_tools = any(
+            isinstance(b, dict) and b.get("type") == "tool_use" for b in content
+        )
 
         if has_tools:
             return "reflection_node" if enable_reflection else "execute_tools"
@@ -702,7 +797,9 @@ def _make_router(
         # No tool calls this turn — stall detection
         n_stalls = state.get("n_stalls", 0) + 1
         if n_stalls >= max_stalls:
-            logger.warning("Agent stalled %d turns without tool calls — stopping", n_stalls)
+            logger.warning(
+                "Agent stalled %d turns without tool calls — stopping", n_stalls
+            )
         return END
 
     return router
@@ -711,6 +808,7 @@ def _make_router(
 # ---------------------------------------------------------------------------
 # Public builder
 # ---------------------------------------------------------------------------
+
 
 def build_agent_graph(
     *,
@@ -740,7 +838,9 @@ def build_agent_graph(
     True — every agent gets planning + memory + reflection unless it opts out.
     """
     haiku = model_haiku or model
-    call_llm = _make_call_llm_node(role_name, model, tools, context_token_budget, task_id)
+    call_llm = _make_call_llm_node(
+        role_name, model, tools, context_token_budget, task_id
+    )
     execute_tools_node = _make_execute_tools_node(
         tool_handlers, verification_cfg, human_approval_required, task_id, trace_id
     )
@@ -753,7 +853,9 @@ def build_agent_graph(
     if enable_planning:
         g.add_node("planner_node", _make_planner_node(haiku, task_description))
     if enable_memory:
-        g.add_node("memory_hook_node", _make_memory_hook_node(task_description, repo_path))
+        g.add_node(
+            "memory_hook_node", _make_memory_hook_node(task_description, repo_path)
+        )
     if enable_reflection:
         g.add_node("reflection_node", _make_reflection_node(model))
 
@@ -774,14 +876,20 @@ def build_agent_graph(
     # --- Router edges from call_llm ---
     if enable_reflection:
         g.add_conditional_edges(
-            "call_llm", router,
-            {"reflection_node": "reflection_node", "execute_tools": "execute_tools", END: END},
+            "call_llm",
+            router,
+            {
+                "reflection_node": "reflection_node",
+                "execute_tools": "execute_tools",
+                END: END,
+            },
         )
         # reflection runs after call_llm (when tools present), then execute_tools
         g.add_edge("reflection_node", "execute_tools")
     else:
         g.add_conditional_edges(
-            "call_llm", router,
+            "call_llm",
+            router,
             {"execute_tools": "execute_tools", END: END},
         )
 
@@ -827,6 +935,7 @@ def run_agent_graph(
     # Agents pass model=settings.model_coder as a fallback; router overrides per role_name.
     try:
         from app.fleet.model_router import get_model_router as _get_router
+
         _rc = _get_router().route(role_name)
         model = _rc.model
         logger.debug("ModelRouter: %s → %s (tier=%s)", role_name, model, _rc.tier)
@@ -837,17 +946,22 @@ def run_agent_graph(
     if not model_haiku:
         try:
             from app.fleet.model_router import get_model_router as _get_router
+
             _haiku_agents = _get_router().agents_by_tier("haiku")
-            model_haiku = _get_router().model_for(_haiku_agents[0]) if _haiku_agents else model
+            model_haiku = (
+                _get_router().model_for(_haiku_agents[0]) if _haiku_agents else model
+            )
         except Exception:
             try:
                 from app.config import get_settings as _gs
+
                 model_haiku = _gs().model_router
             except Exception:
                 model_haiku = model
     if not repo_path:
         try:
             from app.config import get_settings as _gs
+
             repo_path = _gs().target_repo_path
         except Exception:
             repo_path = ""
@@ -855,9 +969,10 @@ def run_agent_graph(
     # Fleet OS metrics span (non-fatal if fleet not wired)
     _span: Any = None
     _metrics: Any = None  # the actual RunMetrics instance — __enter__() returns it,
-                           # it is NOT the same object as _span (the context manager)
+    # it is NOT the same object as _span (the context manager)
     try:
         from app.fleet.metrics import run_span
+
         _span = run_span(role_name, task_id="", trace_id=tid)
         _metrics = _span.__enter__()
     except Exception:
@@ -868,6 +983,7 @@ def run_agent_graph(
     try:
         from app.fleet.agent_registry import get_agent_registry
         from app.fleet.fleet_events import publish, task_started
+
         _reg = get_agent_registry()
         if _reg.get(role_name) is not None:
             _reg.start_task(role_name, task_id=tid)
@@ -882,6 +998,7 @@ def run_agent_graph(
         # handles Groq routing + model name remapping via groq_adapter.py.
         # ------------------------------------------------------------------
         from app.config import get_settings as _gs
+
         if _gs().use_groq:
             # TEMPORARY shim, easily removable — see docs/FLEET_ENHANCEMENT_PLAN.md
             # "Testing Strategy — Groq (now) vs Anthropic (later)". Production always
@@ -900,14 +1017,19 @@ def run_agent_graph(
                 for _hname in list(tool_handlers.keys()):
                     if _hname.startswith("submit_"):
                         _orig_h = tool_handlers[_hname]
+
                         def _make_wrapper(_oh: Any) -> Any:
                             def _wrapper(inp: dict[str, Any]) -> Any:
                                 tool_handlers["_result"] = inp
                                 return _oh(inp)
+
                             return _wrapper
+
                         tool_handlers[_hname] = _make_wrapper(_orig_h)
 
-                _msgs: list[dict[str, Any]] = [{"role": "user", "content": initial_message}]
+                _msgs: list[dict[str, Any]] = [
+                    {"role": "user", "content": initial_message}
+                ]
                 _text, _in, _out, _cr, _cc = _run_agent(
                     role_name=role_name,
                     model=model,
@@ -941,7 +1063,8 @@ def run_agent_graph(
             except FileNotFoundError as _groq_exc:
                 logger.warning(
                     "Groq bypass found no role file for %s (%s) — falling through to normal graph",
-                    role_name, _groq_exc,
+                    role_name,
+                    _groq_exc,
                 )
 
         graph = build_agent_graph(
@@ -991,17 +1114,23 @@ def run_agent_graph(
 
         # Post-graph lesson extraction (non-fatal, runs after graph completes)
         if enable_lesson and final_state.get("submitted"):
-            _extract_and_store_lesson(final_state, role_name, model_haiku or model, trace_id=tid)
+            _extract_and_store_lesson(
+                final_state, role_name, model_haiku or model, trace_id=tid
+            )
 
         # Day 10 — wire real data into the RunMetrics instance (non-fatal). Without this,
         # MetricsCollector records every run with zeroed tokens/cost/verification —
         # budget_manager and benchmark_manager both depend on this being real.
         if _metrics is not None:
             try:
-                _metrics.record_tokens(final_state.get("tokens_in", 0), final_state.get("tokens_out", 0))
+                _metrics.record_tokens(
+                    final_state.get("tokens_in", 0), final_state.get("tokens_out", 0)
+                )
                 _metrics.confidence = final_state.get("confidence", 1.0)
                 _metrics.retries = final_state.get("retry_count", 0)
-                _metrics.reflection_unsatisfied = final_state.get("reflection_unsatisfied_count", 0)
+                _metrics.reflection_unsatisfied = final_state.get(
+                    "reflection_unsatisfied_count", 0
+                )
                 verification = final_state.get("verification") or {}
                 bool_values = [v for v in verification.values() if isinstance(v, bool)]
                 if bool_values:
@@ -1027,7 +1156,14 @@ def run_agent_graph(
                     bm.check_daily(agent_name=role_name)
                 except BudgetExceeded as exc:
                     final_state["status"] = "blocked"
-                    publish(health_updated(role_name, health="budget_exceeded", state=str(exc), trace_id=tid))
+                    publish(
+                        health_updated(
+                            role_name,
+                            health="budget_exceeded",
+                            state=str(exc),
+                            trace_id=tid,
+                        )
+                    )
             except Exception:
                 pass
 
@@ -1037,11 +1173,24 @@ def run_agent_graph(
         # observable. Per the ladder's own design for stalls: escalate then
         # request human review — retrying from the same node with no new
         # information is unlikely to help, so retry/abort are skipped here.
-        if not final_state.get("submitted") and final_state.get("n_stalls", 0) >= max_stalls:
+        if (
+            not final_state.get("submitted")
+            and final_state.get("n_stalls", 0) >= max_stalls
+        ):
             try:
                 from app.fleet.failure_ladder import escalate, request_human_review
-                escalate(role_name, f"stalled after {final_state['n_stalls']} turns without tool calls", trace_id=tid)
-                request_human_review(task_id or None, role_name, "agent stalled — no tool calls", trace_id=tid)
+
+                escalate(
+                    role_name,
+                    f"stalled after {final_state['n_stalls']} turns without tool calls",
+                    trace_id=tid,
+                )
+                request_human_review(
+                    task_id or None,
+                    role_name,
+                    "agent stalled — no tool calls",
+                    trace_id=tid,
+                )
                 final_state["status"] = "blocked"
             except Exception:
                 pass
@@ -1050,10 +1199,13 @@ def run_agent_graph(
         if task_id:
             try:
                 from app.services.activity_stream import push_done, push_stopped
+
                 tok_in = final_state.get("tokens_in", 0)
                 tok_out = final_state.get("tokens_out", 0)
                 if final_state.get("status") == "stopped":
-                    push_stopped(task_id, checkpoint_id=tid, tokens_in=tok_in, tokens_out=tok_out)
+                    push_stopped(
+                        task_id, checkpoint_id=tid, tokens_in=tok_in, tokens_out=tok_out
+                    )
                 else:
                     push_done(task_id, final_state.get("result", {}), tok_in, tok_out)
             except Exception:
@@ -1063,11 +1215,14 @@ def run_agent_graph(
         try:
             from app.fleet.agent_registry import get_agent_registry
             from app.fleet.fleet_events import publish, task_completed, health_updated
+
             _reg = get_agent_registry()
             if _reg.get(role_name) is not None:
                 _reg.complete_task(role_name)  # → AgentState.SLEEP
             publish(task_completed(task_id=tid, agent_name=role_name, trace_id=tid))
-            publish(health_updated(role_name, health="healthy", state="sleep", trace_id=tid))
+            publish(
+                health_updated(role_name, health="healthy", state="sleep", trace_id=tid)
+            )
         except Exception:
             pass
 
@@ -1078,6 +1233,7 @@ def run_agent_graph(
         if task_id:
             try:
                 from app.services.activity_stream import push_error
+
                 push_error(task_id, str(exc)[:500])
             except Exception:
                 pass
@@ -1086,10 +1242,18 @@ def run_agent_graph(
         try:
             from app.fleet.agent_registry import get_agent_registry
             from app.fleet.fleet_events import publish, task_failed
+
             _reg = get_agent_registry()
             if _reg.get(role_name) is not None:
                 _reg.fail_task(role_name, reason=str(exc))
-            publish(task_failed(task_id=tid, agent_name=role_name, reason=str(exc)[:200], trace_id=tid))
+            publish(
+                task_failed(
+                    task_id=tid,
+                    agent_name=role_name,
+                    reason=str(exc)[:200],
+                    trace_id=tid,
+                )
+            )
         except Exception:
             pass
 

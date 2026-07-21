@@ -20,6 +20,7 @@ Fixes vs. previous version:
   7. Added check_allowlisted_command() combining chaining-metachar rejection +
      prefix allowlist in one call — use this for all allowlist-based bash agents.
 """
+
 from __future__ import annotations
 
 import os
@@ -36,6 +37,7 @@ class PolicyResult:
 # ---------------------------------------------------------------------------
 # Path rules
 # ---------------------------------------------------------------------------
+
 
 def _matches_path_rule(path: str) -> str | None:
     """Return denial reason string if path matches a deny rule, else None."""
@@ -74,7 +76,9 @@ def _matches_path_rule(path: str) -> str | None:
 def check_path(file_path: str) -> PolicyResult:
     reason = _matches_path_rule(file_path)
     if reason:
-        return PolicyResult(allowed=False, reason=f"Policy denied path {file_path!r}: {reason}")
+        return PolicyResult(
+            allowed=False, reason=f"Policy denied path {file_path!r}: {reason}"
+        )
     return PolicyResult(allowed=True)
 
 
@@ -104,6 +108,7 @@ def check_path_in_worktree(file_path: str, worktree_path: str) -> PolicyResult:
 # ---------------------------------------------------------------------------
 # Command rules
 # ---------------------------------------------------------------------------
+
 
 def _normalize_command(command: str) -> str:
     """Normalize rm flag variants so all map to `rm -rf` for pattern matching."""
@@ -161,19 +166,23 @@ def check_command(command: str, *, strict: bool = False) -> PolicyResult:
 
     for pattern in _DENIED_COMMAND_PATTERNS:
         if re.search(pattern, normalized, re.IGNORECASE):
-            return PolicyResult(allowed=False, reason=f"Policy denied command: matched rule {pattern!r}")
+            return PolicyResult(
+                allowed=False, reason=f"Policy denied command: matched rule {pattern!r}"
+            )
 
     if strict and _CHAINING_METACHARS.search(command):
         return PolicyResult(
             allowed=False,
             reason="Policy denied: command contains shell chaining/substitution metacharacters "
-                   "(;, &&, ||, |, `, $()) which are not permitted for allowlisted agents",
+            "(;, &&, ||, |, `, $()) which are not permitted for allowlisted agents",
         )
 
     return PolicyResult(allowed=True)
 
 
-def check_allowlisted_command(command: str, allowed_prefixes: tuple[str, ...]) -> PolicyResult:
+def check_allowlisted_command(
+    command: str, allowed_prefixes: tuple[str, ...]
+) -> PolicyResult:
     """Combined check for agents restricted to a fixed set of command prefixes.
 
     Rejects chaining/substitution metacharacters first (strict=True), then

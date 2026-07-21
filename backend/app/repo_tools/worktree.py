@@ -1,4 +1,5 @@
 """Git worktree isolation — creates per-task isolated worktrees for agent code changes."""
+
 import os
 import shutil
 import subprocess

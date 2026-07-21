@@ -1,4 +1,5 @@
 """Goals API — POST /api/goals, GET /api/goals, GET /api/goals/{goal_id}."""
+
 from __future__ import annotations
 
 import logging

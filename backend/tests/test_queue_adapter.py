@@ -1,4 +1,5 @@
 """Tests for QueueAdapter contract — AsyncioQueueAdapter and interface."""
+
 from __future__ import annotations
 
 import asyncio
@@ -109,6 +110,7 @@ class TestGetQueueAdapter:
     @patch("app.config.get_settings")
     def test_asyncio_backend_by_default(self, mock_settings: object) -> None:
         from unittest.mock import MagicMock
+
         s = MagicMock()
         s.queue_backend = "asyncio"
         (mock_settings if callable(mock_settings) else mock_settings).return_value = s  # type: ignore[union-attr]
@@ -118,6 +120,7 @@ class TestGetQueueAdapter:
     @patch("app.config.get_settings")
     def test_bullmq_backend_returns_bullmq(self, mock_settings: object) -> None:
         from unittest.mock import MagicMock
+
         s = MagicMock()
         s.queue_backend = "bullmq"
         (mock_settings if callable(mock_settings) else mock_settings).return_value = s  # type: ignore[union-attr]

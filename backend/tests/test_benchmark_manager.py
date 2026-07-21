@@ -7,6 +7,7 @@ dev DB (agent_benchmarks table) — every test that calls store_baseline cleans
 up its own rows in a try/finally, following the same pattern already
 established for Day 9's enhancement_requests tests.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -28,7 +29,11 @@ def _delete_benchmarks(agent_name: str) -> None:
         engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                await session.execute(delete(AgentBenchmark).where(AgentBenchmark.agent_name == agent_name))
+                await session.execute(
+                    delete(AgentBenchmark).where(
+                        AgentBenchmark.agent_name == agent_name
+                    )
+                )
                 await session.commit()
         finally:
             await engine.dispose()
@@ -203,14 +208,24 @@ def test_store_baseline_flips_prior_baseline_row_instead_of_deleting() -> None:
         from app.db.models import AgentBenchmark
 
         async def _query() -> tuple[int, int]:
-            engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
+            engine = create_async_engine(
+                get_settings().database_url, pool_pre_ping=True
+            )
             try:
-                async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                async with async_sessionmaker(
+                    engine, expire_on_commit=False
+                )() as session:
                     total = (
-                        await session.execute(
-                            select(AgentBenchmark).where(AgentBenchmark.agent_name == agent_name)
+                        (
+                            await session.execute(
+                                select(AgentBenchmark).where(
+                                    AgentBenchmark.agent_name == agent_name
+                                )
+                            )
                         )
-                    ).scalars().all()
+                        .scalars()
+                        .all()
+                    )
                     baselines = [r for r in total if r.is_baseline]
                     return len(total), len(baselines)
             finally:

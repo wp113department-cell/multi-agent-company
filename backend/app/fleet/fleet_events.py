@@ -20,6 +20,7 @@ Bidirectional mapping:
 Migration rule: do not remove a legacy event type until ALL agents that publish
   or subscribe to it have been migrated and verified.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -29,10 +30,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-
 # ---------------------------------------------------------------------------
 # Fleet OS typed event protocol
 # ---------------------------------------------------------------------------
+
 
 class FleetEventType(str, Enum):
     TASK_CREATED = "TaskCreated"
@@ -67,7 +68,10 @@ class FleetEvent(BaseModel):
 # Typed constructors (one per event type — prevents ad-hoc dict creation)
 # ---------------------------------------------------------------------------
 
-def task_created(task_id: str, title: str, agent_name: str = "", trace_id: str = "") -> FleetEvent:
+
+def task_created(
+    task_id: str, title: str, agent_name: str = "", trace_id: str = ""
+) -> FleetEvent:
     return FleetEvent(
         event_type=FleetEventType.TASK_CREATED,
         task_id=task_id,
@@ -87,7 +91,9 @@ def task_started(task_id: str, agent_name: str, trace_id: str = "") -> FleetEven
     )
 
 
-def task_completed(task_id: str, agent_name: str, summary: str = "", trace_id: str = "") -> FleetEvent:
+def task_completed(
+    task_id: str, agent_name: str, summary: str = "", trace_id: str = ""
+) -> FleetEvent:
     return FleetEvent(
         event_type=FleetEventType.TASK_COMPLETED,
         task_id=task_id,
@@ -97,7 +103,9 @@ def task_completed(task_id: str, agent_name: str, summary: str = "", trace_id: s
     )
 
 
-def task_failed(task_id: str, agent_name: str, reason: str, trace_id: str = "") -> FleetEvent:
+def task_failed(
+    task_id: str, agent_name: str, reason: str, trace_id: str = ""
+) -> FleetEvent:
     return FleetEvent(
         event_type=FleetEventType.TASK_FAILED,
         task_id=task_id,
@@ -107,7 +115,9 @@ def task_failed(task_id: str, agent_name: str, reason: str, trace_id: str = "") 
     )
 
 
-def review_requested(task_id: str, agent_name: str, review_type: str = "", trace_id: str = "") -> FleetEvent:
+def review_requested(
+    task_id: str, agent_name: str, review_type: str = "", trace_id: str = ""
+) -> FleetEvent:
     return FleetEvent(
         event_type=FleetEventType.REVIEW_REQUESTED,
         task_id=task_id,
@@ -117,7 +127,9 @@ def review_requested(task_id: str, agent_name: str, review_type: str = "", trace
     )
 
 
-def lesson_published(agent_name: str, lesson: str, category: str = "", trace_id: str = "") -> FleetEvent:
+def lesson_published(
+    agent_name: str, lesson: str, category: str = "", trace_id: str = ""
+) -> FleetEvent:
     return FleetEvent(
         event_type=FleetEventType.LESSON_PUBLISHED,
         agent_name=agent_name,
@@ -126,7 +138,9 @@ def lesson_published(agent_name: str, lesson: str, category: str = "", trace_id:
     )
 
 
-def health_updated(agent_name: str, health: str, state: str, trace_id: str = "") -> FleetEvent:
+def health_updated(
+    agent_name: str, health: str, state: str, trace_id: str = ""
+) -> FleetEvent:
     return FleetEvent(
         event_type=FleetEventType.HEALTH_UPDATED,
         agent_name=agent_name,
@@ -135,7 +149,9 @@ def health_updated(agent_name: str, health: str, state: str, trace_id: str = "")
     )
 
 
-def memory_created(agent_name: str, memory_key: str, category: str = "", trace_id: str = "") -> FleetEvent:
+def memory_created(
+    agent_name: str, memory_key: str, category: str = "", trace_id: str = ""
+) -> FleetEvent:
     return FleetEvent(
         event_type=FleetEventType.MEMORY_CREATED,
         agent_name=agent_name,
@@ -191,6 +207,7 @@ def translate_fleet_to_legacy(fleet_event_type: FleetEventType) -> str | None:
 # Fleet OS bus (thin wrapper — publishes to existing bus AND records trace)
 # ---------------------------------------------------------------------------
 
+
 class FleetBus:
     """Overlay bus that publishes Fleet OS typed events while also forwarding
     to the existing event_bus so legacy subscribers receive them.
@@ -212,7 +229,11 @@ class FleetBus:
             legacy = GridironEvent(
                 event_type=legacy_type,
                 task_id=event.task_id,
-                payload={**event.payload, "fleet_trace_id": event.trace_id, "fleet_event_type": event.event_type.value},
+                payload={
+                    **event.payload,
+                    "fleet_trace_id": event.trace_id,
+                    "fleet_event_type": event.event_type.value,
+                },
                 emitted_by=event.agent_name or "fleet_os",
             )
 

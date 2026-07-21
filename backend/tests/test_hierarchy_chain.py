@@ -26,6 +26,7 @@ This test verifies each of the 6 real, checkable chain steps against the
 correct one of those two integration points, rather than pretending they're
 one literal call chain.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -58,11 +59,13 @@ class _HierarchyChainLLM:
 
         if "Extract a reusable lesson" in last_text:
             return SimpleNamespace(
-                content=[SimpleNamespace(
-                    type="text",
-                    text='{"lesson": "always validate boundary inputs", "pattern": "input validation", '
-                         '"category": "general", "reusable": true}',
-                )],
+                content=[
+                    SimpleNamespace(
+                        type="text",
+                        text='{"lesson": "always validate boundary inputs", "pattern": "input validation", '
+                        '"category": "general", "reusable": true}',
+                    )
+                ],
                 usage=SimpleNamespace(input_tokens=20, output_tokens=15),
             )
 
@@ -80,15 +83,25 @@ class _HierarchyChainLLM:
             self.main_turn_calls += 1
             if self.main_turn_calls == 1:
                 return SimpleNamespace(
-                    content=[SimpleNamespace(type="tool_use", id="tu_do", name="do_thing", input={})],
+                    content=[
+                        SimpleNamespace(
+                            type="tool_use", id="tu_do", name="do_thing", input={}
+                        )
+                    ],
                     usage=SimpleNamespace(input_tokens=30, output_tokens=10),
                 )
-            submit_tool = next(t for t in tools if str(t.get("name", "")).startswith("submit_"))
+            submit_tool = next(
+                t for t in tools if str(t.get("name", "")).startswith("submit_")
+            )
             return SimpleNamespace(
-                content=[SimpleNamespace(
-                    type="tool_use", id="tu_chain", name=submit_tool["name"],
-                    input={"summary": "done"},
-                )],
+                content=[
+                    SimpleNamespace(
+                        type="tool_use",
+                        id="tu_chain",
+                        name=submit_tool["name"],
+                        input={"summary": "done"},
+                    )
+                ],
                 usage=SimpleNamespace(input_tokens=50, output_tokens=20),
             )
 
@@ -105,12 +118,14 @@ def test_step1_and_step2_fleet_manager_selects_via_capability_registry() -> None
     FleetManager.select() itself calls capability_registry internally."""
     from app.fleet.fleet_manager import get_fleet_manager
 
-    assert get_capability_registry().get("backend_dev") is not None, (
-        "backend_dev must be registered in capability_registry for this chain step to be real"
-    )
+    assert (
+        get_capability_registry().get("backend_dev") is not None
+    ), "backend_dev must be registered in capability_registry for this chain step to be real"
 
     plan = get_fleet_manager().select(required_capability="backend_development")
-    assert plan is not None, "fleet_manager.select() found no agent for backend_development"
+    assert (
+        plan is not None
+    ), "fleet_manager.select() found no agent for backend_development"
     assert plan.agent_name == "backend_dev"
     assert plan.capability is get_capability_registry().get("backend_dev")
 
@@ -137,37 +152,61 @@ def test_step3_agent_bus_publishes_task_created_from_run_manager() -> None:
         "app.agents.backend_dev.run_backend_dev"
     ) as mock_backend_dev, patch("app.agents.qa.run_qa") as mock_qa, patch(
         "app.agents.reviewer.run_reviewer"
-    ) as mock_reviewer, patch("app.repo_tools.worktree.get_diff", return_value=""):
+    ) as mock_reviewer, patch(
+        "app.repo_tools.worktree.get_diff", return_value=""
+    ):
         mock_backend_dev.return_value = (["app/api/hello.py"], None)
         mock_qa.return_value = QAResult(
-            status="passed", tests_run=1, tests_passed=1, tests_failed=0,
-            typecheck_clean=True, lint_clean=True, summary="ok",
+            status="passed",
+            tests_run=1,
+            tests_passed=1,
+            tests_failed=0,
+            typecheck_clean=True,
+            lint_clean=True,
+            summary="ok",
         )
         mock_reviewer.return_value = ReviewResult(verdict="approved", summary="ok")
 
         asyncio.run(
             run_manager(
                 task_id=999_201,
-                subtasks=[{"id": 1, "type": "backend", "title": "chain test subtask", "description": "..."}],
+                subtasks=[
+                    {
+                        "id": 1,
+                        "type": "backend",
+                        "title": "chain test subtask",
+                        "description": "...",
+                    }
+                ],
                 worktree_path="/tmp/does-not-need-to-exist",
                 plan="plan",
                 repo_path="/home/pc-117/Documents/CRR2906",
             )
         )
 
-    task_created_events = [e for e in captured if e.event_type == FleetEventType.TASK_CREATED]
-    assert len(task_created_events) >= 1, "run_manager() did not publish a real TaskCreated event"
+    task_created_events = [
+        e for e in captured if e.event_type == FleetEventType.TASK_CREATED
+    ]
+    assert (
+        len(task_created_events) >= 1
+    ), "run_manager() did not publish a real TaskCreated event"
     assert task_created_events[0].payload.get("title") == "chain test subtask"
 
 
 @patch("app.agents.base_graph.load_role", return_value="You are a test agent.")
 @patch("anthropic.Anthropic")
-def test_steps_4_5_6_verification_reflection_lesson_and_result(mock_anthropic_cls: Any, _load_role: Any) -> None:
+def test_steps_4_5_6_verification_reflection_lesson_and_result(
+    mock_anthropic_cls: Any, _load_role: Any
+) -> None:
     """Step 4 (reflection_node ran with a non-empty verification dict already
     populated by tool_layer/execute_tools), Step 5 (lesson_node wrote to
     LessonStore, the learning_layer), Step 6 (AgentResult/final_state.result
     is non-empty) — all real inside run_agent_graph()'s own node graph."""
-    from app.agents.base_graph import VerificationConfig, get_lesson_store, run_agent_graph
+    from app.agents.base_graph import (
+        VerificationConfig,
+        get_lesson_store,
+        run_agent_graph,
+    )
 
     mock_client = MagicMock()
     mock_client.messages.create.side_effect = _HierarchyChainLLM()
@@ -177,12 +216,17 @@ def test_steps_4_5_6_verification_reflection_lesson_and_result(mock_anthropic_cl
     lessons_before = lesson_store.total
 
     do_thing_tool = {
-        "name": "do_thing", "description": "Do a thing",
+        "name": "do_thing",
+        "description": "Do a thing",
         "input_schema": {"type": "object", "properties": {}},
     }
     submit_tool = {
-        "name": "submit_result", "description": "Submit",
-        "input_schema": {"type": "object", "properties": {"summary": {"type": "string"}}},
+        "name": "submit_result",
+        "description": "Submit",
+        "input_schema": {
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+        },
     }
 
     def _do_thing_handler(inp: dict[str, Any]) -> str:
@@ -197,7 +241,10 @@ def test_steps_4_5_6_verification_reflection_lesson_and_result(mock_anthropic_cl
         tools=[do_thing_tool, submit_tool],
         tool_handlers={"do_thing": _do_thing_handler, "submit_result": _submit_handler},
         verification_cfg=VerificationConfig(
-            initial={}, set_by={"do_thing": "did_thing"}, reset_by=(), reset_keys=(),
+            initial={},
+            set_by={"do_thing": "did_thing"},
+            reset_by=(),
+            reset_keys=(),
             enforce_in_result={"did_thing": "did_thing"},
         ),
         initial_message="do a task",
@@ -212,13 +259,17 @@ def test_steps_4_5_6_verification_reflection_lesson_and_result(mock_anthropic_cl
     assert final_state["verification"].get("did_thing") is True
 
     reflection_calls = [
-        c for c in mock_client.messages.create.call_args_list
-        if "Review what the tools just produced" in str((c.kwargs.get("messages") or [{}])[-1].get("content", ""))
+        c
+        for c in mock_client.messages.create.call_args_list
+        if "Review what the tools just produced"
+        in str((c.kwargs.get("messages") or [{}])[-1].get("content", ""))
     ]
     assert len(reflection_calls) >= 1, "reflection_node never actually called the LLM"
 
     # Step 5: lesson_node (_extract_and_store_lesson) wrote to the learning layer.
-    assert lesson_store.total > lessons_before, "no lesson was stored after the run completed"
+    assert (
+        lesson_store.total > lessons_before
+    ), "no lesson was stored after the run completed"
 
     # Step 6: AgentResult (final_state["result"]) is non-empty.
     assert final_state.get("submitted") is True

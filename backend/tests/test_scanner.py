@@ -1,4 +1,5 @@
 """Repo intelligence scanner tests — using fixture files."""
+
 import pytest
 from pathlib import Path
 

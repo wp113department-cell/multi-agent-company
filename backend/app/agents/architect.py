@@ -9,6 +9,7 @@ Session 1 migration (2026-07-16):
 
 Pattern from: swe-agent RetryAgent (preserve external interface, swap internal runner).
 """
+
 from __future__ import annotations
 
 import json
@@ -30,10 +31,23 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "architect",
     "description": "Reads PM brief + codebase to produce a technical plan with impacted files and risks.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "submit_architect_plan",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "submit_architect_plan",
     ],
     "input_types": ["pm_brief", "repo_path", "task_title"],
     "output_types": ["architect_plan"],
@@ -71,7 +85,10 @@ _SUBMIT_TOOL: dict[str, Any] = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "severity": {"type": "string", "enum": ["low", "medium", "high"]},
+                        "severity": {
+                            "type": "string",
+                            "enum": ["low", "medium", "high"],
+                        },
                         "description": {"type": "string"},
                     },
                     "required": ["severity", "description"],
@@ -98,6 +115,7 @@ _VERIFICATION_CFG = VerificationConfig(
 # ---------------------------------------------------------------------------
 # Pipeline node — external interface unchanged from Day 3
 # ---------------------------------------------------------------------------
+
 
 def architect_node(state: PipelineState) -> PipelineState:
     settings = get_settings()
@@ -148,7 +166,11 @@ def architect_node(state: PipelineState) -> PipelineState:
 
     plan_result = final_state.get("result", {})
     if not plan_result or not final_state.get("submitted"):
-        return {**state, "stage": "blocked", "error": "Architect Agent did not submit a plan"}
+        return {
+            **state,
+            "stage": "blocked",
+            "error": "Architect Agent did not submit a plan",
+        }
 
     # Strip internal Fleet OS keys before storing in pipeline state
     clean_plan = {k: v for k, v in plan_result.items() if not k.startswith("_")}
@@ -159,20 +181,24 @@ def architect_node(state: PipelineState) -> PipelineState:
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["architecture_design", "technical_planning"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["architecture_design", "technical_planning"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register("architect")
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

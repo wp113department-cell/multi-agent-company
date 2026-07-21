@@ -20,6 +20,7 @@ USAGE IN TESTS:
   def test_something(groq_llm_patch):   # fixture auto-patches anthropic
       result = run_agent_graph(...)      # calls Groq transparently
 """
+
 from __future__ import annotations
 
 import os
@@ -28,20 +29,22 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Groq → Anthropic response shim
 # Wraps Groq's response so _serialize_content() sees the same shape as Anthropic
 # ---------------------------------------------------------------------------
 
+
 class _ShimTextBlock:
     type = "text"
+
     def __init__(self, text: str) -> None:
         self.text = text
 
 
 class _ShimToolUse:
     type = "tool_use"
+
     def __init__(self, id: str, name: str, input: dict[str, Any]) -> None:
         self.id = id
         self.name = name
@@ -61,6 +64,7 @@ def _clean_text(raw: str) -> str:
     This normalises the text so json.loads() works the same as with Anthropic responses.
     """
     import re
+
     # Remove <think>...</think> blocks (including empty ones)
     text = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
     # Strip ```json ... ``` or ``` ... ``` fences
@@ -71,6 +75,7 @@ def _clean_text(raw: str) -> str:
 
 class _ShimResponse:
     """Duck-type Anthropic Message → wraps a Groq _GroqResponse."""
+
     def __init__(self, groq_resp: Any) -> None:
         self.content: list[Any] = []
         self.usage = _ShimUsage(
@@ -87,6 +92,7 @@ class _ShimResponse:
 # ---------------------------------------------------------------------------
 # Fake Anthropic client backed by Groq
 # ---------------------------------------------------------------------------
+
 
 def _make_groq_backed_anthropic(groq_api_key: str) -> Any:
     """Return a fake anthropic.Anthropic() instance whose .messages.create() calls Groq."""
@@ -107,7 +113,9 @@ def _make_groq_backed_anthropic(groq_api_key: str) -> Any:
         # Extract system prompt string from Anthropic-format system block
         sys_prompt = ""
         if isinstance(system, list) and system:
-            sys_prompt = system[0].get("text", "") if isinstance(system[0], dict) else ""
+            sys_prompt = (
+                system[0].get("text", "") if isinstance(system[0], dict) else ""
+            )
         elif isinstance(system, str):
             sys_prompt = system
 
@@ -118,11 +126,13 @@ def _make_groq_backed_anthropic(groq_api_key: str) -> Any:
                 if isinstance(t, dict):
                     plain_tools.append(t)
                 else:
-                    plain_tools.append({
-                        "name": t["name"],
-                        "description": t.get("description", ""),
-                        "input_schema": t["input_schema"],
-                    })
+                    plain_tools.append(
+                        {
+                            "name": t["name"],
+                            "description": t.get("description", ""),
+                            "input_schema": t["input_schema"],
+                        }
+                    )
 
         # Convert Anthropic messages format to plain dicts
         plain_msgs: list[dict[str, Any]] = []
@@ -150,6 +160,7 @@ def _make_groq_backed_anthropic(groq_api_key: str) -> Any:
 # ---------------------------------------------------------------------------
 # pytest fixture — use in any test that needs a real LLM call via Groq
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def groq_llm_patch():

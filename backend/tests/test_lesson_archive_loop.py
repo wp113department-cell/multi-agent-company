@@ -6,6 +6,7 @@ iteration, using the same technique as other loop tests in this codebase:
 let asyncio.sleep fire once, then raise CancelledError to break the
 otherwise-infinite `while True` loop after exactly one iteration.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -49,7 +50,9 @@ async def test_archive_loop_is_non_fatal_on_archive_expired_exception() -> None:
     with patch("asyncio.sleep", side_effect=_sleep_once_then_cancel), patch(
         "app.fleet.versioned_memory.get_versioned_memory_store"
     ) as mock_get_store:
-        mock_get_store.return_value.archive_expired.side_effect = RuntimeError("db down")
+        mock_get_store.return_value.archive_expired.side_effect = RuntimeError(
+            "db down"
+        )
 
         # must not raise RuntimeError — only the CancelledError from the sleep patch
         with pytest.raises(asyncio.CancelledError):

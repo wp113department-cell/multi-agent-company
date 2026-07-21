@@ -6,6 +6,7 @@ Tests verify:
   - Handler factories produce correct results for each new tool
   - Edge cases and error handling
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -41,54 +42,64 @@ def _make_handlers() -> dict[str, Any]:
 # Tool spec structure tests
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestToolSpecStructure:
     """All new tool specs must have name, description, input_schema."""
 
-    @pytest.mark.parametrize("spec", [
-        _FIND_QUEUE_TOOL,
-        _FIND_WORKER_TOOL,
-        _INSERT_BEFORE_TOOL,
-        _INSERT_AFTER_TOOL,
-        _DELETE_BLOCK_TOOL,
-        _GENERATE_CHANGELOG_TOOL,
-        _SUMMARIZE_REPO_TOOL,
-        _GENERATE_RELEASE_NOTES_TOOL,
-        _READ_PDF_TOOL,
-        _READ_IMAGE_TOOL,
-        _GITHUB_CREATE_PR_TOOL,
-    ])
+    @pytest.mark.parametrize(
+        "spec",
+        [
+            _FIND_QUEUE_TOOL,
+            _FIND_WORKER_TOOL,
+            _INSERT_BEFORE_TOOL,
+            _INSERT_AFTER_TOOL,
+            _DELETE_BLOCK_TOOL,
+            _GENERATE_CHANGELOG_TOOL,
+            _SUMMARIZE_REPO_TOOL,
+            _GENERATE_RELEASE_NOTES_TOOL,
+            _READ_PDF_TOOL,
+            _READ_IMAGE_TOOL,
+            _GITHUB_CREATE_PR_TOOL,
+        ],
+    )
     def test_has_name(self, spec: dict[str, Any]) -> None:
         assert "name" in spec and spec["name"]
 
-    @pytest.mark.parametrize("spec", [
-        _FIND_QUEUE_TOOL,
-        _FIND_WORKER_TOOL,
-        _INSERT_BEFORE_TOOL,
-        _INSERT_AFTER_TOOL,
-        _DELETE_BLOCK_TOOL,
-        _GENERATE_CHANGELOG_TOOL,
-        _SUMMARIZE_REPO_TOOL,
-        _GENERATE_RELEASE_NOTES_TOOL,
-        _READ_PDF_TOOL,
-        _READ_IMAGE_TOOL,
-        _GITHUB_CREATE_PR_TOOL,
-    ])
+    @pytest.mark.parametrize(
+        "spec",
+        [
+            _FIND_QUEUE_TOOL,
+            _FIND_WORKER_TOOL,
+            _INSERT_BEFORE_TOOL,
+            _INSERT_AFTER_TOOL,
+            _DELETE_BLOCK_TOOL,
+            _GENERATE_CHANGELOG_TOOL,
+            _SUMMARIZE_REPO_TOOL,
+            _GENERATE_RELEASE_NOTES_TOOL,
+            _READ_PDF_TOOL,
+            _READ_IMAGE_TOOL,
+            _GITHUB_CREATE_PR_TOOL,
+        ],
+    )
     def test_has_description(self, spec: dict[str, Any]) -> None:
         assert "description" in spec and len(spec["description"]) > 10
 
-    @pytest.mark.parametrize("spec", [
-        _FIND_QUEUE_TOOL,
-        _FIND_WORKER_TOOL,
-        _INSERT_BEFORE_TOOL,
-        _INSERT_AFTER_TOOL,
-        _DELETE_BLOCK_TOOL,
-        _GENERATE_CHANGELOG_TOOL,
-        _SUMMARIZE_REPO_TOOL,
-        _GENERATE_RELEASE_NOTES_TOOL,
-        _READ_PDF_TOOL,
-        _READ_IMAGE_TOOL,
-        _GITHUB_CREATE_PR_TOOL,
-    ])
+    @pytest.mark.parametrize(
+        "spec",
+        [
+            _FIND_QUEUE_TOOL,
+            _FIND_WORKER_TOOL,
+            _INSERT_BEFORE_TOOL,
+            _INSERT_AFTER_TOOL,
+            _DELETE_BLOCK_TOOL,
+            _GENERATE_CHANGELOG_TOOL,
+            _SUMMARIZE_REPO_TOOL,
+            _GENERATE_RELEASE_NOTES_TOOL,
+            _READ_PDF_TOOL,
+            _READ_IMAGE_TOOL,
+            _GITHUB_CREATE_PR_TOOL,
+        ],
+    )
     def test_has_input_schema(self, spec: dict[str, Any]) -> None:
         assert "input_schema" in spec
         assert spec["input_schema"]["type"] == "object"
@@ -98,6 +109,7 @@ class TestToolSpecStructure:
 # ──────────────────────────────────────────────────────────────────────────────
 # CHAT_TOOLS membership tests
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TestChatToolsMembership:
     def test_find_queue_in_chat_tools(self) -> None:
@@ -134,7 +146,9 @@ class TestChatToolsMembership:
         assert "github_create_pr" in _TOOL_NAMES
 
     def test_chat_tools_count_gte_131(self) -> None:
-        assert len(CHAT_TOOLS) >= 131, f"Expected ≥131 CHAT_TOOLS, got {len(CHAT_TOOLS)}"
+        assert (
+            len(CHAT_TOOLS) >= 131
+        ), f"Expected ≥131 CHAT_TOOLS, got {len(CHAT_TOOLS)}"
 
     def test_all_chat_tools_have_names(self) -> None:
         for tool in CHAT_TOOLS:
@@ -145,14 +159,22 @@ class TestChatToolsMembership:
 # Handler presence tests
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestHandlerPresence:
     def test_all_new_handlers_present(self) -> None:
         h = _make_handlers()
         expected = [
-            "find_queue", "find_worker",
-            "insert_before", "insert_after", "delete_block",
-            "generate_changelog", "summarize_repo", "generate_release_notes",
-            "read_pdf", "read_image", "github_create_pr",
+            "find_queue",
+            "find_worker",
+            "insert_before",
+            "insert_after",
+            "delete_block",
+            "generate_changelog",
+            "summarize_repo",
+            "generate_release_notes",
+            "read_pdf",
+            "read_image",
+            "github_create_pr",
         ]
         for name in expected:
             assert name in h, f"Handler '{name}' missing from make_chat_handlers()"
@@ -160,10 +182,17 @@ class TestHandlerPresence:
     def test_all_new_handlers_callable(self) -> None:
         h = _make_handlers()
         for name in [
-            "find_queue", "find_worker",
-            "insert_before", "insert_after", "delete_block",
-            "generate_changelog", "summarize_repo", "generate_release_notes",
-            "read_pdf", "read_image", "github_create_pr",
+            "find_queue",
+            "find_worker",
+            "insert_before",
+            "insert_after",
+            "delete_block",
+            "generate_changelog",
+            "summarize_repo",
+            "generate_release_notes",
+            "read_pdf",
+            "read_image",
+            "github_create_pr",
         ]:
             assert callable(h[name]), f"Handler '{name}' is not callable"
 
@@ -172,13 +201,18 @@ class TestHandlerPresence:
 # find_queue handler tests
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestFindQueueHandler:
     def test_finds_asyncio_queue_in_repo(self) -> None:
         h = _make_handlers()
         result = h["find_queue"]({"repo_path": str(Path(__file__).parent.parent)})
         assert isinstance(result, str)
         # Our codebase uses asyncio.Queue in chat.py
-        assert "asyncio" in result.lower() or "queue" in result.lower() or "No queue" in result
+        assert (
+            "asyncio" in result.lower()
+            or "queue" in result.lower()
+            or "No queue" in result
+        )
 
     def test_returns_string(self) -> None:
         h = _make_handlers()
@@ -194,6 +228,7 @@ class TestFindQueueHandler:
 # ──────────────────────────────────────────────────────────────────────────────
 # find_worker handler tests
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TestFindWorkerHandler:
     def test_returns_string(self) -> None:
@@ -211,12 +246,15 @@ class TestFindWorkerHandler:
 # insert_before handler tests
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestInsertBeforeHandler:
     def test_inserts_before_matching_line(self, tmp_path: Path) -> None:
         h = make_chat_handlers(str(tmp_path))
         f = tmp_path / "test.py"
         f.write_text("def foo():\n    pass\n")
-        result = h["insert_before"]({"path": "test.py", "pattern": "def foo", "content": "# inserted"})
+        result = h["insert_before"](
+            {"path": "test.py", "pattern": "def foo", "content": "# inserted"}
+        )
         assert "Inserted" in result
         content = f.read_text()
         lines = content.splitlines()
@@ -227,19 +265,25 @@ class TestInsertBeforeHandler:
         h = make_chat_handlers(str(tmp_path))
         f = tmp_path / "test.py"
         f.write_text("def foo():\n    pass\n")
-        result = h["insert_before"]({"path": "test.py", "pattern": "nonexistent_xyz", "content": "# x"})
+        result = h["insert_before"](
+            {"path": "test.py", "pattern": "nonexistent_xyz", "content": "# x"}
+        )
         assert "WARN" in result or "not found" in result.lower()
 
     def test_blocks_protected_path(self, tmp_path: Path) -> None:
         h = make_chat_handlers(str(tmp_path))
-        result = h["insert_before"]({"path": ".env", "pattern": "KEY", "content": "INJECTED=true"})
+        result = h["insert_before"](
+            {"path": ".env", "pattern": "KEY", "content": "INJECTED=true"}
+        )
         assert "BLOCKED" in result
 
     def test_multiline_insert(self, tmp_path: Path) -> None:
         h = make_chat_handlers(str(tmp_path))
         f = tmp_path / "test.py"
         f.write_text("class Foo:\n    pass\n")
-        result = h["insert_before"]({"path": "test.py", "pattern": "class Foo", "content": "# line 1\n# line 2"})
+        result = h["insert_before"](
+            {"path": "test.py", "pattern": "class Foo", "content": "# line 1\n# line 2"}
+        )
         assert "2 line(s)" in result
         content = f.read_text()
         assert "# line 1" in content
@@ -250,12 +294,15 @@ class TestInsertBeforeHandler:
 # insert_after handler tests
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestInsertAfterHandler:
     def test_inserts_after_matching_line(self, tmp_path: Path) -> None:
         h = make_chat_handlers(str(tmp_path))
         f = tmp_path / "test.py"
         f.write_text("def bar():\n    pass\n")
-        result = h["insert_after"]({"path": "test.py", "pattern": "def bar", "content": "    # body comment"})
+        result = h["insert_after"](
+            {"path": "test.py", "pattern": "def bar", "content": "    # body comment"}
+        )
         assert "Inserted" in result
         content = f.read_text()
         lines = content.splitlines()
@@ -271,7 +318,9 @@ class TestInsertAfterHandler:
     def test_pattern_not_found(self, tmp_path: Path) -> None:
         h = make_chat_handlers(str(tmp_path))
         (tmp_path / "f.py").write_text("x = 1\n")
-        result = h["insert_after"]({"path": "f.py", "pattern": "does_not_exist", "content": "z = 2"})
+        result = h["insert_after"](
+            {"path": "f.py", "pattern": "does_not_exist", "content": "z = 2"}
+        )
         assert "WARN" in result or "not found" in result.lower()
 
 
@@ -279,12 +328,21 @@ class TestInsertAfterHandler:
 # delete_block handler tests
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestDeleteBlockHandler:
     def test_deletes_lines_between_patterns(self, tmp_path: Path) -> None:
         h = make_chat_handlers(str(tmp_path))
         f = tmp_path / "config.py"
-        f.write_text("KEEP_THIS = 1\n# BEGIN_DELETE\nremove_a = 2\nremove_b = 3\n# END_DELETE\nKEEP_THIS_TOO = 4\n")
-        result = h["delete_block"]({"path": "config.py", "start_pattern": "# BEGIN_DELETE", "end_pattern": "# END_DELETE"})
+        f.write_text(
+            "KEEP_THIS = 1\n# BEGIN_DELETE\nremove_a = 2\nremove_b = 3\n# END_DELETE\nKEEP_THIS_TOO = 4\n"
+        )
+        result = h["delete_block"](
+            {
+                "path": "config.py",
+                "start_pattern": "# BEGIN_DELETE",
+                "end_pattern": "# END_DELETE",
+            }
+        )
         assert "Deleted" in result
         content = f.read_text()
         assert "KEEP_THIS = 1" in content
@@ -295,19 +353,28 @@ class TestDeleteBlockHandler:
 
     def test_blocks_protected_path(self, tmp_path: Path) -> None:
         h = make_chat_handlers(str(tmp_path))
-        result = h["delete_block"]({"path": ".env", "start_pattern": "A", "end_pattern": "B"})
+        result = h["delete_block"](
+            {"path": ".env", "start_pattern": "A", "end_pattern": "B"}
+        )
         assert "BLOCKED" in result
 
     def test_warns_when_block_not_found(self, tmp_path: Path) -> None:
         h = make_chat_handlers(str(tmp_path))
         (tmp_path / "f.py").write_text("x = 1\n")
-        result = h["delete_block"]({"path": "f.py", "start_pattern": "NONEXISTENT_START", "end_pattern": "NONEXISTENT_END"})
+        result = h["delete_block"](
+            {
+                "path": "f.py",
+                "start_pattern": "NONEXISTENT_START",
+                "end_pattern": "NONEXISTENT_END",
+            }
+        )
         assert "WARN" in result or "not found" in result.lower()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # generate_changelog handler tests
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TestGenerateChangelogHandler:
     def test_returns_string(self) -> None:
@@ -322,6 +389,7 @@ class TestGenerateChangelogHandler:
 
     def test_has_today_date(self) -> None:
         import datetime
+
         h = _make_handlers()
         result = h["generate_changelog"]({"repo_path": _REPO})
         today = datetime.date.today().isoformat()
@@ -339,6 +407,7 @@ class TestGenerateChangelogHandler:
 # ──────────────────────────────────────────────────────────────────────────────
 # summarize_repo handler tests
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TestSummarizeRepoHandler:
     def test_returns_string(self) -> None:
@@ -379,6 +448,7 @@ class TestSummarizeRepoHandler:
 # generate_release_notes handler tests
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestGenerateReleaseNotesHandler:
     def test_returns_string(self) -> None:
         h = _make_handlers()
@@ -397,6 +467,7 @@ class TestGenerateReleaseNotesHandler:
 
     def test_today_date_in_notes(self) -> None:
         import datetime
+
         h = _make_handlers()
         result = h["generate_release_notes"]({"version": "v1.0.0", "repo_path": _REPO})
         today = datetime.date.today().isoformat()
@@ -406,6 +477,7 @@ class TestGenerateReleaseNotesHandler:
 # ──────────────────────────────────────────────────────────────────────────────
 # read_pdf handler tests
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TestReadPdfHandler:
     def test_errors_gracefully_on_nonexistent_file(self) -> None:
@@ -419,6 +491,7 @@ class TestReadPdfHandler:
         try:
             import reportlab.pdfgen.canvas as _rc  # noqa: F401
             from reportlab.pdfgen import canvas
+
             pdf_path = tmp_path / "test.pdf"
             c = canvas.Canvas(str(pdf_path))
             c.drawString(100, 750, "Hello from Gridiron test")
@@ -432,12 +505,14 @@ class TestReadPdfHandler:
 
     def test_pdfplumber_importable(self) -> None:
         import pdfplumber
+
         assert pdfplumber is not None
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # read_image handler tests
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TestReadImageHandler:
     def test_errors_gracefully_on_nonexistent_file(self) -> None:
@@ -447,6 +522,7 @@ class TestReadImageHandler:
 
     def test_reads_valid_png(self, tmp_path: Path) -> None:
         from PIL import Image
+
         img_path = tmp_path / "test.png"
         img = Image.new("RGB", (100, 100), color=(255, 0, 0))
         img.save(str(img_path))
@@ -459,6 +535,7 @@ class TestReadImageHandler:
 
     def test_returns_metadata_format(self, tmp_path: Path) -> None:
         from PIL import Image
+
         img_path = tmp_path / "sample.jpg"
         img = Image.new("RGB", (200, 150), color=(0, 128, 255))
         img.save(str(img_path), format="JPEG")
@@ -468,12 +545,14 @@ class TestReadImageHandler:
 
     def test_pil_importable(self) -> None:
         from PIL import Image
+
         assert Image is not None
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # github_create_pr handler tests
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TestGithubCreatePrHandler:
     def test_errors_gracefully_when_gh_not_authed(self) -> None:
@@ -483,8 +562,11 @@ class TestGithubCreatePrHandler:
         assert isinstance(result, str)
         assert len(result) > 0
 
-    def test_errors_when_gh_not_installed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_errors_when_gh_not_installed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         import subprocess as sp
+
         original_run = sp.run
 
         def fake_run(cmd: Any, **kwargs: Any) -> Any:
@@ -502,6 +584,7 @@ class TestGithubCreatePrHandler:
 # Tool name uniqueness — all CHAT_TOOLS names must be unique
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestChatToolsIntegrity:
     def test_no_duplicate_tool_names(self) -> None:
         names = [t["name"] for t in CHAT_TOOLS]
@@ -510,7 +593,9 @@ class TestChatToolsIntegrity:
 
     def test_all_tools_have_input_schema(self) -> None:
         for tool in CHAT_TOOLS:
-            assert "input_schema" in tool, f"Tool '{tool.get('name')}' missing input_schema"
+            assert (
+                "input_schema" in tool
+            ), f"Tool '{tool.get('name')}' missing input_schema"
 
     def test_all_required_fields_are_in_properties(self) -> None:
         for tool in CHAT_TOOLS:
@@ -518,6 +603,6 @@ class TestChatToolsIntegrity:
             props = schema.get("properties", {})
             required = schema.get("required", [])
             for r in required:
-                assert r in props, (
-                    f"Tool '{tool['name']}': required field '{r}' not in properties"
-                )
+                assert (
+                    r in props
+                ), f"Tool '{tool['name']}': required field '{r}' not in properties"

@@ -1,4 +1,5 @@
 """Status transition state machine tests."""
+
 from app.db.models import can_transition, VALID_TRANSITIONS
 
 

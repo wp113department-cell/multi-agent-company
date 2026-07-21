@@ -4,6 +4,7 @@ Verification contract:
   - dead_code_scanned is forced to state["verification"]["dead_code_scanned"]
   - dead_code_detect sets it; edit_file / delete_file reset it (scan must re-run after mutation)
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,18 +24,37 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "cleanup_agent",
     "description": "Removes dead code, organizes imports, and deletes unused files with scan-before-delete enforcement.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "dead_code_detect", "organize_imports", "delete_file",
-        "edit_file", "bash", "submit_cleanup",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "dead_code_detect",
+        "organize_imports",
+        "delete_file",
+        "edit_file",
+        "bash",
+        "submit_cleanup",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
     "side_effects": ["edits source files", "deletes files", "reorganizes imports"],
     "permissions": ["read_repo", "write_repo"],
     "risk_level": "medium",
-    "expected_verification": {"dead_code_scanned": "dead_code_detect must run before any deletions"},
+    "expected_verification": {
+        "dead_code_scanned": "dead_code_detect must run before any deletions"
+    },
     "dependencies": [],
 }
 
@@ -95,7 +115,12 @@ def run_cleanup_agent(
     dead_code_removed = list(raw.get("dead_code_removed", []))
     return AgentResult(
         summary=str(raw.get("summary", "(no summary)")),
-        findings=[{"dead_code_removed": dead_code_removed, "imports_cleaned": raw.get("imports_cleaned", [])}],
+        findings=[
+            {
+                "dead_code_removed": dead_code_removed,
+                "imports_cleaned": raw.get("imports_cleaned", []),
+            }
+        ],
         files_touched=files_deleted + list(raw.get("imports_cleaned", [])),
         verified=bool(final_state["verification"].get("dead_code_scanned", False)),
         requires_human_approval=False,
@@ -110,20 +135,28 @@ def run_cleanup_agent(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["code_cleanup", "dead_code_removal", "import_organization"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=[
+                    "code_cleanup",
+                    "dead_code_removal",
+                    "import_organization",
+                ],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

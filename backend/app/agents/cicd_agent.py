@@ -7,6 +7,7 @@ Verification contract:
   - write_file resets lint_passed
   - requires_human_approval ALWAYS True (cannot be overridden)
 """
+
 from __future__ import annotations
 
 import logging
@@ -26,10 +27,26 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "cicd_agent",
     "description": "Manages CI/CD pipeline configuration; always requires human approval.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "bash", "edit_file", "write_file", "submit_cicd_report",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "bash",
+        "edit_file",
+        "write_file",
+        "submit_cicd_report",
     ],
     "input_types": ["task_id", "task_description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -42,7 +59,7 @@ AGENT_CONTRACT: dict[str, Any] = {
 
 _VERIFICATION_CFG = VerificationConfig(
     set_by={
-        "bash": "lint_ran",     # bash running actionlint/yamllint = lint
+        "bash": "lint_ran",  # bash running actionlint/yamllint = lint
         "read_file": "files_read",
     },
     reset_by=("write_file", "edit_file"),
@@ -114,20 +131,28 @@ def run_cicd_agent(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["cicd_management", "pipeline_configuration", "workflow_editing"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=[
+                    "cicd_management",
+                    "pipeline_configuration",
+                    "workflow_editing",
+                ],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

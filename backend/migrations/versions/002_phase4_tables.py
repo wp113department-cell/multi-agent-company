@@ -4,6 +4,7 @@ Revision ID: 002
 Revises: 001
 Create Date: 2026-07-02
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -26,7 +27,12 @@ def upgrade() -> None:
         sa.Column("epic_id", sa.Text(), nullable=True),
         sa.Column("payload", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("emitted_by", sa.String(100), nullable=False, server_default=""),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("event_id"),
     )
     op.create_index("ix_events_task_id", "events", ["task_id"])
@@ -44,7 +50,12 @@ def upgrade() -> None:
         sa.Column("emitted_by", sa.String(100), nullable=False, server_default=""),
         sa.Column("handler_name", sa.String(200), nullable=False),
         sa.Column("error", sa.Text(), nullable=False),
-        sa.Column("failed_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "failed_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_failed_events_event_id", "failed_events", ["event_id"])
@@ -59,7 +70,12 @@ def upgrade() -> None:
         sa.Column("version", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("storage_path", sa.Text(), nullable=False),
         sa.Column("created_by_agent", sa.String(100), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("artifact_id"),
     )
     op.create_index("ix_artifacts_task_id", "artifacts", ["task_id"])

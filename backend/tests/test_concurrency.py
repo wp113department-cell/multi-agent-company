@@ -1,4 +1,5 @@
 """Tests for concurrency caps and worktree epic namespacing."""
+
 from __future__ import annotations
 
 import asyncio
@@ -93,6 +94,7 @@ class TestWorktreeEpicNamespacing:
     @patch("app.repo_tools.worktree.get_settings")
     def test_path_without_epic(self, mock_settings: object) -> None:
         from unittest.mock import MagicMock
+
         s = MagicMock()
         s.worktrees_dir = "/tmp/wt"
         (mock_settings if callable(mock_settings) else mock_settings).return_value = s  # type: ignore[union-attr]
@@ -102,6 +104,7 @@ class TestWorktreeEpicNamespacing:
     @patch("app.repo_tools.worktree.get_settings")
     def test_path_with_epic(self, mock_settings: object) -> None:
         from unittest.mock import MagicMock
+
         s = MagicMock()
         s.worktrees_dir = "/tmp/wt"
         (mock_settings if callable(mock_settings) else mock_settings).return_value = s  # type: ignore[union-attr]
@@ -111,6 +114,7 @@ class TestWorktreeEpicNamespacing:
     @patch("app.repo_tools.worktree.get_settings")
     def test_different_epics_different_paths(self, mock_settings: object) -> None:
         from unittest.mock import MagicMock
+
         s = MagicMock()
         s.worktrees_dir = "/tmp/wt"
         (mock_settings if callable(mock_settings) else mock_settings).return_value = s  # type: ignore[union-attr]
@@ -121,6 +125,7 @@ class TestWorktreeEpicNamespacing:
     @patch("app.repo_tools.worktree.get_settings")
     def test_same_task_different_epic_no_collision(self, mock_settings: object) -> None:
         from unittest.mock import MagicMock
+
         s = MagicMock()
         s.worktrees_dir = "/tmp/wt"
         (mock_settings if callable(mock_settings) else mock_settings).return_value = s  # type: ignore[union-attr]

@@ -3,6 +3,7 @@
 Adds approval rules on top of the v1 hard-coded denylist (v1 stays as floor).
 Rules live in the `policies` table so adding a rule = DB insert, zero code change.
 """
+
 from __future__ import annotations
 
 import re
@@ -46,7 +47,9 @@ class PolicyMatch:
     blocking: bool
 
 
-async def load_active_policies(db: AsyncSession) -> list[tuple[Policy, re.Pattern[str]]]:
+async def load_active_policies(
+    db: AsyncSession,
+) -> list[tuple[Policy, re.Pattern[str]]]:
     """Load all active policies and pre-compile their glob patterns."""
     result = await db.execute(select(Policy).where(Policy.active.is_(True)))
     policies = list(result.scalars().all())

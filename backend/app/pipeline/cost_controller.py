@@ -4,6 +4,7 @@ Uses historical averages from agent_runs when available, then falls back to
 config-driven per-subtask coefficients. The estimate gates epic execution:
 epics over COST_APPROVAL_THRESHOLD require explicit human approval.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -59,16 +60,23 @@ async def estimate_epic_cost(
 
     if hist_in is not None:
         tokens_in_per_subtask = int(hist_in * complexity_multiplier)
-        tokens_out_per_subtask = int(hist_out * complexity_multiplier) if hist_out else int(hist_in * settings.cost_output_ratio)
+        tokens_out_per_subtask = (
+            int(hist_out * complexity_multiplier)
+            if hist_out
+            else int(hist_in * settings.cost_output_ratio)
+        )
     else:
-        tokens_in_per_subtask = int(settings.cost_tokens_per_subtask * complexity_multiplier)
+        tokens_in_per_subtask = int(
+            settings.cost_tokens_per_subtask * complexity_multiplier
+        )
         tokens_out_per_subtask = int(tokens_in_per_subtask * settings.cost_output_ratio)
 
     total_in = tokens_in_per_subtask * subtask_count
     total_out = tokens_out_per_subtask * subtask_count
 
     cost = round(
-        total_in * settings.cost_per_input_token + total_out * settings.cost_per_output_token,
+        total_in * settings.cost_per_input_token
+        + total_out * settings.cost_per_output_token,
         6,
     )
 
@@ -93,16 +101,23 @@ def estimate_epic_cost_sync(
 
     if avg_tokens_in is not None:
         tokens_in_per_sub = int(avg_tokens_in * complexity_multiplier)
-        tokens_out_per_sub = int(avg_tokens_out * complexity_multiplier) if avg_tokens_out else int(avg_tokens_in * settings.cost_output_ratio)
+        tokens_out_per_sub = (
+            int(avg_tokens_out * complexity_multiplier)
+            if avg_tokens_out
+            else int(avg_tokens_in * settings.cost_output_ratio)
+        )
     else:
-        tokens_in_per_sub = int(settings.cost_tokens_per_subtask * complexity_multiplier)
+        tokens_in_per_sub = int(
+            settings.cost_tokens_per_subtask * complexity_multiplier
+        )
         tokens_out_per_sub = int(tokens_in_per_sub * settings.cost_output_ratio)
 
     total_in = tokens_in_per_sub * subtask_count
     total_out = tokens_out_per_sub * subtask_count
 
     cost = round(
-        total_in * settings.cost_per_input_token + total_out * settings.cost_per_output_token,
+        total_in * settings.cost_per_input_token
+        + total_out * settings.cost_per_output_token,
         6,
     )
 

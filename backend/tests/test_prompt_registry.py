@@ -7,6 +7,7 @@ production role, and cleans up both its DB rows and its roles/*.md file in a
 try/finally — writing to the real roles/ directory is the whole point of this
 module, so tests must not leave residue there.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -38,7 +39,9 @@ def _cleanup(role_name: str) -> None:
         engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                await session.execute(delete(PromptVersion).where(PromptVersion.role_name == role_name))
+                await session.execute(
+                    delete(PromptVersion).where(PromptVersion.role_name == role_name)
+                )
                 await session.commit()
         finally:
             await engine.dispose()
@@ -60,7 +63,11 @@ def _delete_benchmarks(agent_name: str) -> None:
         engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                await session.execute(delete(AgentBenchmark).where(AgentBenchmark.agent_name == agent_name))
+                await session.execute(
+                    delete(AgentBenchmark).where(
+                        AgentBenchmark.agent_name == agent_name
+                    )
+                )
                 await session.commit()
         finally:
             await engine.dispose()

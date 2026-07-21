@@ -1,4 +1,5 @@
 """Database operations for tasks, logs, agent runs, subtasks, and pipeline state."""
+
 from __future__ import annotations
 
 import uuid
@@ -9,15 +10,27 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.models import AgentRun, DevTask, PipelineState, Subtask, SystemSetting, TaskLog, can_transition
+from app.db.models import (
+    AgentRun,
+    DevTask,
+    PipelineState,
+    Subtask,
+    SystemSetting,
+    TaskLog,
+    can_transition,
+)
 
 
 class TransitionError(ValueError):
     pass
 
 
-async def create_task(db: AsyncSession, title: str, description: str, repo_id: int | None = None) -> DevTask:
-    task = DevTask(title=title, description=description, status="pending", repo_id=repo_id)
+async def create_task(
+    db: AsyncSession, title: str, description: str, repo_id: int | None = None
+) -> DevTask:
+    task = DevTask(
+        title=title, description=description, status="pending", repo_id=repo_id
+    )
     db.add(task)
     await db.commit()
     created = await get_task(db, task.id)
@@ -27,9 +40,7 @@ async def create_task(db: AsyncSession, title: str, description: str, repo_id: i
 
 async def get_task(db: AsyncSession, task_id: int) -> DevTask | None:
     result = await db.execute(
-        select(DevTask)
-        .options(selectinload(DevTask.repo))
-        .where(DevTask.id == task_id)
+        select(DevTask).options(selectinload(DevTask.repo)).where(DevTask.id == task_id)
     )
     return result.scalar_one_or_none()
 
@@ -63,7 +74,9 @@ async def transition_task(db: AsyncSession, task_id: int, new_status: str) -> De
     if task is None:
         raise ValueError(f"Task {task_id} not found")
     if not can_transition(str(task.status), new_status):
-        raise TransitionError(f"Cannot transition task {task_id} from {task.status!r} to {new_status!r}")
+        raise TransitionError(
+            f"Cannot transition task {task_id} from {task.status!r} to {new_status!r}"
+        )
     task.status = new_status
     await db.commit()
     # Re-fetch via get_task so the repo relationship is eagerly loaded (avoids MissingGreenlet)
@@ -77,7 +90,9 @@ async def update_task_plan(db: AsyncSession, task_id: int, plan: str) -> None:
     await db.commit()
 
 
-async def update_task_diff(db: AsyncSession, task_id: int, diff: str, files_touched: list[str]) -> None:
+async def update_task_diff(
+    db: AsyncSession, task_id: int, diff: str, files_touched: list[str]
+) -> None:
     await db.execute(
         update(DevTask)
         .where(DevTask.id == task_id)
@@ -93,7 +108,9 @@ async def append_log(
     message: str,
     extra_data: dict[str, Any] | None = None,
 ) -> TaskLog:
-    log = TaskLog(task_id=task_id, category=category, message=message, extra_data=extra_data)
+    log = TaskLog(
+        task_id=task_id, category=category, message=message, extra_data=extra_data
+    )
     db.add(log)
     await db.commit()
     await db.refresh(log)
@@ -101,11 +118,15 @@ async def append_log(
 
 
 async def list_logs(db: AsyncSession, task_id: int) -> list[TaskLog]:
-    result = await db.execute(select(TaskLog).where(TaskLog.task_id == task_id).order_by(TaskLog.created_at))
+    result = await db.execute(
+        select(TaskLog).where(TaskLog.task_id == task_id).order_by(TaskLog.created_at)
+    )
     return list(result.scalars())
 
 
-async def create_agent_run(db: AsyncSession, task_id: int, agent_type: str, model_id: str) -> AgentRun:
+async def create_agent_run(
+    db: AsyncSession, task_id: int, agent_type: str, model_id: str
+) -> AgentRun:
     run = AgentRun(
         id=str(uuid.uuid4()),
         task_id=task_id,
@@ -152,7 +173,9 @@ async def finish_agent_run(
     await db.commit()
 
 
-async def save_subtasks(db: AsyncSession, task_id: int, subtasks: list[dict[str, Any]]) -> None:
+async def save_subtasks(
+    db: AsyncSession, task_id: int, subtasks: list[dict[str, Any]]
+) -> None:
     for st in subtasks:
         sub = Subtask(
             task_id=task_id,
@@ -167,13 +190,17 @@ async def save_subtasks(db: AsyncSession, task_id: int, subtasks: list[dict[str,
 
 
 async def list_subtasks(db: AsyncSession, task_id: int) -> list[Subtask]:
-    result = await db.execute(select(Subtask).where(Subtask.task_id == task_id).order_by(Subtask.id))
+    result = await db.execute(
+        select(Subtask).where(Subtask.task_id == task_id).order_by(Subtask.id)
+    )
     return list(result.scalars())
 
 
 async def get_pipeline_state(db: AsyncSession, task_id: int) -> PipelineState | None:
     """Return the pipeline state row if it exists, or None."""
-    result = await db.execute(select(PipelineState).where(PipelineState.task_id == task_id))
+    result = await db.execute(
+        select(PipelineState).where(PipelineState.task_id == task_id)
+    )
     return result.scalar_one_or_none()
 
 
@@ -203,6 +230,7 @@ async def update_pipeline_state(
 
 
 # ---- System settings ----
+
 
 async def get_setting(db: AsyncSession, key: str) -> str | None:
     result = await db.execute(select(SystemSetting).where(SystemSetting.key == key))

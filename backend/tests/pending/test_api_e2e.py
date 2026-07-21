@@ -1,4 +1,5 @@
 """Full API end-to-end tests — require ANTHROPIC_API_KEY + real DATABASE_URL."""
+
 from __future__ import annotations
 
 from tests.pending.conftest import requires_all
@@ -17,6 +18,7 @@ class TestAPIE2E:
     def _get(self, path: str) -> dict:  # type: ignore[type-arg]
         import urllib.request
         import json
+
         req = urllib.request.urlopen(f"{self._BASE}{path}", timeout=10)
         return json.loads(req.read())
 
@@ -24,6 +26,7 @@ class TestAPIE2E:
         import urllib.request
         import urllib.error
         import json
+
         data = json.dumps(body).encode()
         req = urllib.request.Request(
             f"{self._BASE}{path}",
@@ -37,6 +40,7 @@ class TestAPIE2E:
     def _patch(self, path: str, body: dict) -> dict:  # type: ignore[type-arg]
         import urllib.request
         import json
+
         data = json.dumps(body).encode()
         req = urllib.request.Request(
             f"{self._BASE}{path}",
@@ -54,19 +58,25 @@ class TestAPIE2E:
 
     def test_create_task(self) -> None:
         """POST /api/tasks creates a task and returns id + status=pending."""
-        result = self._post("/api/tasks", {
-            "title": "E2E test: add health endpoint",
-            "description": "Add GET /health returning {status: ok}",
-        })
+        result = self._post(
+            "/api/tasks",
+            {
+                "title": "E2E test: add health endpoint",
+                "description": "Add GET /health returning {status: ok}",
+            },
+        )
         assert result.get("id") is not None
         assert result.get("status") == "pending"
 
     def test_get_task(self) -> None:
         """GET /api/tasks/:id returns the created task."""
-        created = self._post("/api/tasks", {
-            "title": "E2E get test",
-            "description": "Fetch me back.",
-        })
+        created = self._post(
+            "/api/tasks",
+            {
+                "title": "E2E get test",
+                "description": "Fetch me back.",
+            },
+        )
         task_id = created["id"]
 
         fetched = self._get(f"/api/tasks/{task_id}")
@@ -84,10 +94,13 @@ class TestAPIE2E:
         """POST /api/tasks/:id/run fires the planning pipeline in the background."""
         import time
 
-        task = self._post("/api/tasks", {
-            "title": "E2E run test: add logging",
-            "description": "Add structlog JSON logging to app/agents/base.py",
-        })
+        task = self._post(
+            "/api/tasks",
+            {
+                "title": "E2E run test: add logging",
+                "description": "Add structlog JSON logging to app/agents/base.py",
+            },
+        )
         task_id = task["id"]
 
         # Fire pipeline
@@ -102,18 +115,22 @@ class TestAPIE2E:
             time.sleep(5)
 
         final = self._get(f"/api/tasks/{task_id}")
-        assert final["status"] in ("ready_for_review", "blocked"), (
-            f"Unexpected final status after pipeline run: {final['status']}"
-        )
+        assert final["status"] in (
+            "ready_for_review",
+            "blocked",
+        ), f"Unexpected final status after pipeline run: {final['status']}"
 
     def test_pipeline_state_populated(self) -> None:
         """GET /api/tasks/:id/pipeline returns pm_brief after pipeline completes."""
         import time
 
-        task = self._post("/api/tasks", {
-            "title": "E2E pipeline state test",
-            "description": "Add a /ping endpoint to FastAPI.",
-        })
+        task = self._post(
+            "/api/tasks",
+            {
+                "title": "E2E pipeline state test",
+                "description": "Add a /ping endpoint to FastAPI.",
+            },
+        )
         task_id = task["id"]
         self._post(f"/api/tasks/{task_id}/run", {})
 
@@ -125,23 +142,28 @@ class TestAPIE2E:
             time.sleep(5)
 
         pipeline = self._get(f"/api/tasks/{task_id}/pipeline")
-        assert pipeline.get("pm_brief") is not None, (
-            "Pipeline state missing pm_brief after run"
-        )
+        assert (
+            pipeline.get("pm_brief") is not None
+        ), "Pipeline state missing pm_brief after run"
 
     def test_reject_task(self) -> None:
         """POST /api/tasks/:id/reject returns the task in rejected status."""
-        task = self._post("/api/tasks", {
-            "title": "E2E reject test",
-            "description": "This task will be rejected.",
-        })
+        task = self._post(
+            "/api/tasks",
+            {
+                "title": "E2E reject test",
+                "description": "This task will be rejected.",
+            },
+        )
         task_id = task["id"]
 
         # Manually move to ready_for_review to allow rejection
         self._patch(f"/api/tasks/{task_id}", {"status": "planning"})
         self._patch(f"/api/tasks/{task_id}", {"status": "ready_for_review"})
 
-        result = self._post(f"/api/tasks/{task_id}/reject", {"feedback": "Not needed anymore."})
+        result = self._post(
+            f"/api/tasks/{task_id}/reject", {"feedback": "Not needed anymore."}
+        )
         assert result.get("status") == "rejected"
 
     def test_append_and_fetch_logs(self) -> None:
@@ -149,10 +171,13 @@ class TestAPIE2E:
         task = self._post("/api/tasks", {"title": "Log test task", "description": "x"})
         task_id = task["id"]
 
-        self._post(f"/api/tasks/{task_id}/logs", {
-            "category": "planning",
-            "message": "E2E log entry",
-        })
+        self._post(
+            f"/api/tasks/{task_id}/logs",
+            {
+                "category": "planning",
+                "message": "E2E log entry",
+            },
+        )
 
         logs = self._get(f"/api/tasks/{task_id}/logs")
         assert isinstance(logs.get("logs"), list)

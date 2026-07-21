@@ -1,16 +1,19 @@
 """Tests for Batch 15 — 34 new tools reaching the 190-tool vision."""
+
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
-
 # ---- helpers ----
+
 
 def _handlers(tmp_path: Path) -> dict:
     import sys
+
     sys.path.insert(0, str(Path(__file__).parents[1]))
     from app.agents.tools import make_chat_handlers
+
     return make_chat_handlers(str(tmp_path))
 
 
@@ -26,20 +29,26 @@ def _make_repo(tmp_path: Path) -> Path:
 
 # ---- Tool count ----
 
+
 def test_chat_tools_count() -> None:
     from app.agents.tools import CHAT_TOOLS
+
     assert len(CHAT_TOOLS) >= 165, f"Expected ≥165 CHAT_TOOLS, got {len(CHAT_TOOLS)}"
 
 
 def test_total_tool_names_190() -> None:
     """All unique tool names across tools.py must reach 190."""
     import re
+
     src = (Path(__file__).parent.parent / "app" / "agents" / "tools.py").read_text()
     names = set(re.findall(r'"name":\s*"([a-z][a-z0-9_]+)"', src))
-    assert len(names) >= 190, f"Expected ≥190 unique tool names, got {len(names)}: {sorted(names)}"
+    assert (
+        len(names) >= 190
+    ), f"Expected ≥190 unique tool names, got {len(names)}: {sorted(names)}"
 
 
 # ---- File ops ----
+
 
 def test_hash_file(tmp_path: Path) -> None:
     f = tmp_path / "hello.txt"
@@ -101,10 +110,15 @@ def test_create_directory(tmp_path: Path) -> None:
 def test_create_directory_protected(tmp_path: Path) -> None:
     h = _handlers(tmp_path)
     result = h["create_directory"]({"path": ".env"})
-    assert "POLICY DENIED" in result or "protected" in result.lower() or "new/.env" not in result
+    assert (
+        "POLICY DENIED" in result
+        or "protected" in result.lower()
+        or "new/.env" not in result
+    )
 
 
 # ---- Environment ----
+
 
 def test_read_env_var(tmp_path: Path) -> None:
     os.environ["_TEST_GRIDIRON_VAR"] = "hello"
@@ -132,7 +146,7 @@ def test_env_diff(tmp_path: Path) -> None:
     h = _handlers(tmp_path)
     result = h["env_diff"]({})
     assert "SECRET_KEY" in result  # missing
-    assert "EXTRA_VAR" in result   # extra
+    assert "EXTRA_VAR" in result  # extra
 
 
 def test_env_diff_no_diff(tmp_path: Path) -> None:
@@ -144,6 +158,7 @@ def test_env_diff_no_diff(tmp_path: Path) -> None:
 
 
 # ---- Data format ----
+
 
 def test_json_validate_valid(tmp_path: Path) -> None:
     (tmp_path / "data.json").write_text('{"key": "value"}')
@@ -169,6 +184,7 @@ def test_csv_preview(tmp_path: Path) -> None:
 
 # ---- Git extras ----
 
+
 def test_git_stash_list(tmp_path: Path) -> None:
     h = _handlers(tmp_path)
     result = h["git_stash_list"]({})
@@ -177,7 +193,9 @@ def test_git_stash_list(tmp_path: Path) -> None:
 
 
 def test_semver_bump_pyproject(tmp_path: Path) -> None:
-    (tmp_path / "pyproject.toml").write_text('[tool.poetry]\nname = "app"\nversion = "1.2.3"\n')
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.poetry]\nname = "app"\nversion = "1.2.3"\n'
+    )
     h = _handlers(tmp_path)
     result = h["semver_bump"]({"part": "patch"})
     assert "1.2.4" in result
@@ -201,6 +219,7 @@ def test_semver_bump_major(tmp_path: Path) -> None:
 
 # ---- Process / System ----
 
+
 def test_list_processes(tmp_path: Path) -> None:
     h = _handlers(tmp_path)
     result = h["list_processes"]({})
@@ -221,15 +240,18 @@ def test_check_url_status_invalid(tmp_path: Path) -> None:
 
 # ---- Base64 ----
 
+
 def test_base64_encode_text(tmp_path: Path) -> None:
     h = _handlers(tmp_path)
     result = h["base64_encode"]({"text": "hello"})
     import base64
+
     assert result == base64.b64encode(b"hello").decode()
 
 
 def test_base64_decode_text(tmp_path: Path) -> None:
     import base64
+
     encoded = base64.b64encode(b"world").decode()
     h = _handlers(tmp_path)
     result = h["base64_encode"]({"text": encoded, "decode": True})
@@ -246,6 +268,7 @@ def test_base64_encode_file(tmp_path: Path) -> None:
 
 # ---- Diagram ----
 
+
 def test_generate_diagram_flowchart(tmp_path: Path) -> None:
     h = _handlers(tmp_path)
     result = h["generate_diagram"]({"description": "user login flow"})
@@ -260,6 +283,7 @@ def test_generate_diagram_sequence(tmp_path: Path) -> None:
 
 # ---- HTTP request ----
 
+
 def test_http_request_invalid(tmp_path: Path) -> None:
     h = _handlers(tmp_path)
     result = h["http_request"]({"method": "GET", "url": "http://localhost:19999/test"})
@@ -267,6 +291,7 @@ def test_http_request_invalid(tmp_path: Path) -> None:
 
 
 # ---- Docs ----
+
 
 def test_find_unused_imports(tmp_path: Path) -> None:
     (tmp_path / "bad.py").write_text("import os\nimport sys\nprint('hi')\n")
@@ -285,9 +310,12 @@ def test_loc_stats(tmp_path: Path) -> None:
 
 # ---- Template render ----
 
+
 def test_template_render_string(tmp_path: Path) -> None:
     h = _handlers(tmp_path)
-    result = h["template_render"]({"template": "Hello {{ name }}!", "vars": {"name": "World"}})
+    result = h["template_render"](
+        {"template": "Hello {{ name }}!", "vars": {"name": "World"}}
+    )
     assert "Hello World!" in result
 
 
@@ -299,6 +327,7 @@ def test_template_render_file(tmp_path: Path) -> None:
 
 
 # ---- Package management ----
+
 
 def test_pip_list(tmp_path: Path) -> None:
     h = _handlers(tmp_path)

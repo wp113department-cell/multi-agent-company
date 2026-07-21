@@ -9,6 +9,7 @@ Session 1 migration (2026-07-16):
 
 Pattern from: swe-agent RetryAgent (preserve external interface, swap internal runner).
 """
+
 from __future__ import annotations
 
 import logging
@@ -28,10 +29,23 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "planner",
     "description": "Reads codebase and produces a validated markdown implementation plan.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "submit_plan",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "submit_plan",
     ],
     "input_types": ["task_id", "title", "description", "repo_path"],
     "output_types": ["plan_text"],
@@ -79,6 +93,7 @@ _VERIFICATION_CFG = VerificationConfig(
 # Plan validation (unchanged from Day 3)
 # ---------------------------------------------------------------------------
 
+
 def _validate_plan(plan: str) -> str | None:
     """Return error string if plan is invalid, else None."""
     if len(plan) < _MIN_PLAN_LENGTH:
@@ -93,6 +108,7 @@ def _validate_plan(plan: str) -> str | None:
 # ---------------------------------------------------------------------------
 # Public runner — external interface unchanged from Day 3
 # ---------------------------------------------------------------------------
+
 
 def run_planner(
     task_id: int,
@@ -154,7 +170,11 @@ def run_planner(
         logger.warning("Planner plan validation failed: %s", error)
         return "", f"Plan validation failed: {error}", tokens_in, tokens_out
 
-    logger.info("Planner done — plan validated, tokens_in=%d tokens_out=%d", tokens_in, tokens_out)
+    logger.info(
+        "Planner done — plan validated, tokens_in=%d tokens_out=%d",
+        tokens_in,
+        tokens_out,
+    )
     return plan, None, tokens_in, tokens_out
 
 
@@ -162,20 +182,24 @@ def run_planner(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["implementation_planning", "codebase_analysis"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["implementation_planning", "codebase_analysis"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register("planner")
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

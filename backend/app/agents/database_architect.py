@@ -4,6 +4,7 @@ Verification contract:
   - schema_read: set True when existing models/migrations inspected via read_file or search_code
   - design_submitted: set True on submit_db_design call
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,16 +24,27 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "database_architect",
     "description": "Reviews and designs database schemas: normalization, index recommendations, DDL generation, and migration sequencing.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "search_imports",
-        "run_python_snippet", "submit_db_design",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "search_imports",
+        "run_python_snippet",
+        "submit_db_design",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
     "side_effects": [],
     "permissions": ["read_repo"],
     "risk_level": "medium",
-    "expected_verification": {"schema_read": "must inspect models and migrations before designing"},
+    "expected_verification": {
+        "schema_read": "must inspect models and migrations before designing"
+    },
     "dependencies": [],
 }
 
@@ -50,7 +62,10 @@ _SUBMIT_DB_DESIGN_TOOL: dict[str, Any] = {
                     "type": "object",
                     "properties": {
                         "name": {"type": "string"},
-                        "action": {"type": "string", "enum": ["create", "modify", "drop", "index"]},
+                        "action": {
+                            "type": "string",
+                            "enum": ["create", "modify", "drop", "index"],
+                        },
                         "ddl": {"type": "string", "description": "SQL DDL statement"},
                         "rationale": {"type": "string"},
                     },
@@ -64,7 +79,10 @@ _SUBMIT_DB_DESIGN_TOOL: dict[str, Any] = {
                     "properties": {
                         "table": {"type": "string"},
                         "columns": {"type": "array", "items": {"type": "string"}},
-                        "type": {"type": "string", "description": "btree, hash, gin, gist, brin"},
+                        "type": {
+                            "type": "string",
+                            "description": "btree, hash, gin, gist, brin",
+                        },
                         "rationale": {"type": "string"},
                     },
                     "required": ["table", "columns", "rationale"],
@@ -172,8 +190,24 @@ def run_database_architect(
     return AgentResult(
         summary=f"DB architecture: {len(tables)} table ops, {len(indexes)} index recommendations. {raw.get('summary', '')}",
         findings=(
-            [{"type": "table", "name": t.get("name", "?"), "action": t.get("action", "?"), "rationale": t.get("rationale", "")} for t in tables]
-            + [{"type": "index", "table": i.get("table", "?"), "columns": i.get("columns", []), "rationale": i.get("rationale", "")} for i in indexes]
+            [
+                {
+                    "type": "table",
+                    "name": t.get("name", "?"),
+                    "action": t.get("action", "?"),
+                    "rationale": t.get("rationale", ""),
+                }
+                for t in tables
+            ]
+            + [
+                {
+                    "type": "index",
+                    "table": i.get("table", "?"),
+                    "columns": i.get("columns", []),
+                    "rationale": i.get("rationale", ""),
+                }
+                for i in indexes
+            ]
         ),
         files_touched=[],
         verified=bool(final_state["verification"].get("schema_read", False)),
@@ -189,20 +223,28 @@ def run_database_architect(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["database_schema_design", "index_recommendation", "db_normalization_review"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=[
+                    "database_schema_design",
+                    "index_recommendation",
+                    "db_normalization_review",
+                ],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

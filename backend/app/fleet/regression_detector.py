@@ -10,11 +10,16 @@ This module does not reimplement comparison logic. It is a thin deploy-time
 gate: the concrete answer to "tests passing alone is NOT sufficient" — it runs
 independently of pytest, wired into prompt_registry.deploy().
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.fleet.benchmark_manager import BenchmarkManager, RegressionReport, get_benchmark_manager
+from app.fleet.benchmark_manager import (
+    BenchmarkManager,
+    RegressionReport,
+    get_benchmark_manager,
+)
 
 
 @dataclass
@@ -37,13 +42,19 @@ def _build_reason(report: RegressionReport) -> str:
     if not report.is_regression:
         return "no regression detected"
     worsened = sorted(
-        ((k, v) for k, v in report.per_objective_delta.items() if k != "benchmark_score" and v < 0),
+        (
+            (k, v)
+            for k, v in report.per_objective_delta.items()
+            if k != "benchmark_score" and v < 0
+        ),
         key=lambda kv: kv[1],
     )
     if not worsened:
         return f"benchmark_score dropped {report.delta:.3f} (baseline={report.baseline_score})"
     detail = ", ".join(f"{k} {v:+.3f}" for k, v in worsened)
-    return f"benchmark_score dropped {report.delta:.3f} — regressed objectives: {detail}"
+    return (
+        f"benchmark_score dropped {report.delta:.3f} — regressed objectives: {detail}"
+    )
 
 
 class RegressionDetector:
@@ -70,7 +81,9 @@ class RegressionDetector:
     def check_fleet(self, n: int = 20) -> list[RegressionGate]:
         from app.fleet.capability_registry import get_capability_registry
 
-        return [self.check_agent(cap.name, n=n) for cap in get_capability_registry().all()]
+        return [
+            self.check_agent(cap.name, n=n) for cap in get_capability_registry().all()
+        ]
 
 
 _regression_detector_singleton: RegressionDetector | None = None

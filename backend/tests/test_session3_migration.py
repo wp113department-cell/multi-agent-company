@@ -13,6 +13,7 @@ Tests prove:
 - devops: _last_assistant_text extracts text from final state messages correctly
 - Fleet manager selects each agent by its specific capability
 """
+
 from __future__ import annotations
 
 import inspect
@@ -25,17 +26,28 @@ import app.agents.qa as qa_mod
 import app.agents.devops as dv_mod
 
 from app.agents.reviewer import (
-    AGENT_CONTRACT as RV_CONTRACT, run_reviewer, ReviewResult, ReviewFinding
+    AGENT_CONTRACT as RV_CONTRACT,
+    run_reviewer,
+    ReviewResult,
+    ReviewFinding,
 )
 from app.agents.qa import AGENT_CONTRACT as QA_CONTRACT, run_qa, QAResult
 from app.agents.devops import (
-    AGENT_CONTRACT as DV_CONTRACT, run_devops, HealthReport, _last_assistant_text
+    AGENT_CONTRACT as DV_CONTRACT,
+    run_devops,
+    HealthReport,
+    _last_assistant_text,
 )
 
-
 REQUIRED_CONTRACT_KEYS = {
-    "name", "description", "allowed_tools", "input_types",
-    "output_types", "side_effects", "permissions", "risk_level",
+    "name",
+    "description",
+    "allowed_tools",
+    "input_types",
+    "output_types",
+    "side_effects",
+    "permissions",
+    "risk_level",
 }
 
 _SUBMIT_PRIVATE = {"submit_review", "submit_qa_result", "submit_health_report"}
@@ -44,6 +56,7 @@ _SUBMIT_PRIVATE = {"submit_review", "submit_qa_result", "submit_health_report"}
 # ---------------------------------------------------------------------------
 # AGENT_CONTRACT structure
 # ---------------------------------------------------------------------------
+
 
 class TestReviewerContract:
     def test_all_required_keys(self) -> None:
@@ -139,10 +152,12 @@ class TestDevopsContract:
 # Migration complete — uses run_agent_graph
 # ---------------------------------------------------------------------------
 
+
 class TestMigrationComplete:
     def _imports_run_agent(self, mod: Any) -> bool:
         import ast
         import textwrap
+
         src = textwrap.dedent(inspect.getsource(mod))
         try:
             tree = ast.parse(src)
@@ -178,6 +193,7 @@ class TestMigrationComplete:
 # External interface unchanged
 # ---------------------------------------------------------------------------
 
+
 class TestExternalInterfaceUnchanged:
     def test_run_reviewer_signature(self) -> None:
         sig = inspect.signature(run_reviewer)
@@ -212,15 +228,22 @@ class TestExternalInterfaceUnchanged:
 
     def test_review_finding_dataclass_preserved(self) -> None:
         f = ReviewFinding(
-            severity="blocking", file="src/auth.py", line=42,
-            finding="SQL injection", recommendation="Use parameterized queries"
+            severity="blocking",
+            file="src/auth.py",
+            line=42,
+            finding="SQL injection",
+            recommendation="Use parameterized queries",
         )
         assert f.severity == "blocking"
 
     def test_qa_result_dataclass_preserved(self) -> None:
         r = QAResult(
-            status="passed", tests_run=10, tests_passed=10,
-            tests_failed=0, typecheck_clean=True, lint_clean=True
+            status="passed",
+            tests_run=10,
+            tests_passed=10,
+            tests_failed=0,
+            typecheck_clean=True,
+            lint_clean=True,
         )
         assert r.status == "passed"
 
@@ -233,6 +256,7 @@ class TestExternalInterfaceUnchanged:
 # devops _last_assistant_text helper
 # ---------------------------------------------------------------------------
 
+
 class TestLastAssistantText:
     def test_extracts_string_content(self) -> None:
         messages = [
@@ -243,10 +267,13 @@ class TestLastAssistantText:
 
     def test_extracts_from_content_list(self) -> None:
         messages = [
-            {"role": "assistant", "content": [
-                {"type": "text", "text": "All checks passed."},
-                {"type": "tool_use", "id": "123"},
-            ]},
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "All checks passed."},
+                    {"type": "tool_use", "id": "123"},
+                ],
+            },
         ]
         assert _last_assistant_text(messages) == "All checks passed."
 
@@ -270,39 +297,47 @@ class TestLastAssistantText:
 # Capability registry auto-registration
 # ---------------------------------------------------------------------------
 
+
 class TestCapabilityRegistryRegistration:
     def test_reviewer_registered(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         assert get_capability_registry().get("reviewer") is not None
 
     def test_qa_registered(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         assert get_capability_registry().get("qa") is not None
 
     def test_devops_registered(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         assert get_capability_registry().get("devops") is not None
 
     def test_reviewer_capabilities(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         cap = get_capability_registry().get("reviewer")
         assert cap is not None
         assert "code_review" in cap.capabilities
 
     def test_qa_capabilities(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         cap = get_capability_registry().get("qa")
         assert cap is not None
         assert "testing" in cap.capabilities
 
     def test_devops_capabilities(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         cap = get_capability_registry().get("devops")
         assert cap is not None
         assert "health_check" in cap.capabilities
 
     def test_all_three_are_low_risk(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         r = get_capability_registry()
         for name in ["reviewer", "qa", "devops"]:
             cap = r.get(name)
@@ -314,17 +349,21 @@ class TestCapabilityRegistryRegistration:
 # Agent registry auto-registration
 # ---------------------------------------------------------------------------
 
+
 class TestAgentRegistryRegistration:
     def test_reviewer_in_agent_registry(self) -> None:
         from app.fleet.agent_registry import get_agent_registry
+
         assert get_agent_registry().get("reviewer") is not None
 
     def test_qa_in_agent_registry(self) -> None:
         from app.fleet.agent_registry import get_agent_registry
+
         assert get_agent_registry().get("qa") is not None
 
     def test_devops_in_agent_registry(self) -> None:
         from app.fleet.agent_registry import get_agent_registry
+
         assert get_agent_registry().get("devops") is not None
 
 
@@ -332,39 +371,46 @@ class TestAgentRegistryRegistration:
 # Fleet manager selection
 # ---------------------------------------------------------------------------
 
+
 class TestFleetManagerSelection:
     def test_selects_reviewer(self) -> None:
         from app.fleet.fleet_manager import FleetManager
+
         plan = FleetManager().select("code_review")
         assert plan is not None
         assert plan.agent_name == "reviewer"
 
     def test_selects_reviewer_by_diff_analysis(self) -> None:
         from app.fleet.fleet_manager import FleetManager
+
         plan = FleetManager().select("diff_analysis")
         assert plan is not None
         assert plan.agent_name == "reviewer"
 
     def test_selects_qa_by_testing(self) -> None:
         from app.fleet.fleet_manager import FleetManager
+
         plan = FleetManager().select("testing")
         assert plan is not None
         assert plan.agent_name == "qa"
 
     def test_selects_qa_by_lint_check(self) -> None:
         from app.fleet.fleet_manager import FleetManager
+
         plan = FleetManager().select("lint_check")
         assert plan is not None
         assert plan.agent_name == "qa"
 
     def test_selects_devops_by_health_check(self) -> None:
         from app.fleet.fleet_manager import FleetManager
+
         plan = FleetManager().select("health_check")
         assert plan is not None
         assert plan.agent_name == "devops"
 
     def test_selects_devops_by_system_monitoring(self) -> None:
         from app.fleet.fleet_manager import FleetManager
+
         plan = FleetManager().select("system_monitoring")
         assert plan is not None
         assert plan.agent_name == "devops"
@@ -374,22 +420,28 @@ class TestFleetManagerSelection:
 # Tool manifest compliance
 # ---------------------------------------------------------------------------
 
+
 class TestToolManifestCompliance:
     def _shared_tools(self, contract: dict[str, Any]) -> list[str]:
         return [t for t in contract["allowed_tools"] if t not in _SUBMIT_PRIVATE]
 
     def test_reviewer_shared_tools_in_manifest(self) -> None:
         from app.fleet.tool_manifest import TOOL_MANIFEST
+
         for tool in self._shared_tools(RV_CONTRACT):
-            assert tool in TOOL_MANIFEST, f"reviewer uses {tool!r} — not in TOOL_MANIFEST"
+            assert (
+                tool in TOOL_MANIFEST
+            ), f"reviewer uses {tool!r} — not in TOOL_MANIFEST"
 
     def test_qa_shared_tools_in_manifest(self) -> None:
         from app.fleet.tool_manifest import TOOL_MANIFEST
+
         for tool in self._shared_tools(QA_CONTRACT):
             assert tool in TOOL_MANIFEST, f"qa uses {tool!r} — not in TOOL_MANIFEST"
 
     def test_devops_shared_tools_in_manifest(self) -> None:
         from app.fleet.tool_manifest import TOOL_MANIFEST
+
         for tool in self._shared_tools(DV_CONTRACT):
             assert tool in TOOL_MANIFEST, f"devops uses {tool!r} — not in TOOL_MANIFEST"
 
@@ -399,21 +451,33 @@ class TestToolManifestCompliance:
 # ---------------------------------------------------------------------------
 
 _BASE_STATE: dict[str, Any] = {
-    "messages": [], "verification": {}, "result": {},
-    "turns": 2, "submitted": True, "requires_human_approval": False,
-    "tokens_in": 800, "tokens_out": 150,
+    "messages": [],
+    "verification": {},
+    "result": {},
+    "turns": 2,
+    "submitted": True,
+    "requires_human_approval": False,
+    "tokens_in": 800,
+    "tokens_out": 150,
 }
 
 
 class TestRunReviewerBehavior:
     @patch("app.agents.reviewer.run_agent_graph")
     @patch("app.agents.reviewer.make_reviewer_handlers")
-    def test_returns_review_result_on_success(self, mock_handlers: Any, mock_graph: Any) -> None:
+    def test_returns_review_result_on_success(
+        self, mock_handlers: Any, mock_graph: Any
+    ) -> None:
         review_raw: dict[str, Any] = {
             "verdict": "approved",
             "findings": [
-                {"severity": "suggestion", "file": "src/auth.py", "line": 10,
-                 "finding": "Use f-string", "recommendation": "Minor style"},
+                {
+                    "severity": "suggestion",
+                    "file": "src/auth.py",
+                    "line": 10,
+                    "finding": "Use f-string",
+                    "recommendation": "Minor style",
+                },
             ],
             "summary": "Looks good",
         }
@@ -429,7 +493,9 @@ class TestRunReviewerBehavior:
 
     @patch("app.agents.reviewer.run_agent_graph", side_effect=RuntimeError("API down"))
     @patch("app.agents.reviewer.make_reviewer_handlers")
-    def test_returns_blocking_finding_on_exception(self, mock_handlers: Any, mock_graph: Any) -> None:
+    def test_returns_blocking_finding_on_exception(
+        self, mock_handlers: Any, mock_graph: Any
+    ) -> None:
         mock_handlers.return_value = {"_review_result": {}}
         result = run_reviewer(1, 1, "diff", "plan")
         assert result.verdict == "changes_required"
@@ -452,10 +518,13 @@ class TestRunReviewerBehavior:
 # run_qa behavior (mocked run_agent_graph)
 # ---------------------------------------------------------------------------
 
+
 class TestRunQaBehavior:
     @patch("app.agents.qa.run_agent_graph")
     @patch("app.agents.qa.make_qa_handlers")
-    def test_returns_qa_result_on_success(self, mock_handlers: Any, mock_graph: Any) -> None:
+    def test_returns_qa_result_on_success(
+        self, mock_handlers: Any, mock_graph: Any
+    ) -> None:
         qa_raw: dict[str, Any] = {
             "status": "passed",
             "tests_run": 42,
@@ -477,7 +546,9 @@ class TestRunQaBehavior:
 
     @patch("app.agents.qa.run_agent_graph", side_effect=RuntimeError("API down"))
     @patch("app.agents.qa.make_qa_handlers")
-    def test_returns_failed_result_on_exception(self, mock_handlers: Any, mock_graph: Any) -> None:
+    def test_returns_failed_result_on_exception(
+        self, mock_handlers: Any, mock_graph: Any
+    ) -> None:
         mock_handlers.return_value = {"_qa_result": {}}
         result = run_qa(1, 1, [], "/tmp/wt")
         assert result.status == "failed"
@@ -485,7 +556,9 @@ class TestRunQaBehavior:
 
     @patch("app.agents.qa.run_agent_graph")
     @patch("app.agents.qa.make_qa_handlers")
-    def test_returns_failed_when_no_qa_submitted(self, mock_handlers: Any, mock_graph: Any) -> None:
+    def test_returns_failed_when_no_qa_submitted(
+        self, mock_handlers: Any, mock_graph: Any
+    ) -> None:
         mock_handlers.return_value = {"_qa_result": {}}
         mock_graph.return_value = {**_BASE_STATE, "submitted": False}
         result = run_qa(1, 1, [], "/tmp/wt")
@@ -498,19 +571,23 @@ class TestRunQaBehavior:
 # run_devops behavior (mocked run_agent_graph)
 # ---------------------------------------------------------------------------
 
+
 class TestRunDevopsBehavior:
     @patch("app.agents.devops.run_agent_graph")
     @patch("app.agents.devops.make_devops_handlers")
-    def test_returns_health_report_on_success(self, mock_handlers: Any, mock_graph: Any) -> None:
+    def test_returns_health_report_on_success(
+        self, mock_handlers: Any, mock_graph: Any
+    ) -> None:
         health_raw: dict[str, Any] = {
             "status": "healthy",
             "checks": [{"name": "db", "status": "ok"}],
             "summary": "All systems nominal",
         }
         mock_handlers.return_value = {"_health_result": health_raw}
-        mock_graph.return_value = {**_BASE_STATE, "messages": [
-            {"role": "assistant", "content": "Everything looks healthy."}
-        ]}
+        mock_graph.return_value = {
+            **_BASE_STATE,
+            "messages": [{"role": "assistant", "content": "Everything looks healthy."}],
+        }
 
         report, error, tokens_in, tokens_out = run_devops()
         assert error is None
@@ -520,11 +597,16 @@ class TestRunDevopsBehavior:
 
     @patch("app.agents.devops.run_agent_graph")
     @patch("app.agents.devops.make_devops_handlers")
-    def test_returns_unknown_when_no_submit(self, mock_handlers: Any, mock_graph: Any) -> None:
+    def test_returns_unknown_when_no_submit(
+        self, mock_handlers: Any, mock_graph: Any
+    ) -> None:
         mock_handlers.return_value = {"_health_result": {}}
-        mock_graph.return_value = {**_BASE_STATE, "messages": [
-            {"role": "assistant", "content": "No health report available."}
-        ]}
+        mock_graph.return_value = {
+            **_BASE_STATE,
+            "messages": [
+                {"role": "assistant", "content": "No health report available."}
+            ],
+        }
         report, error, _, _ = run_devops()
         assert error is None
         assert report is not None
@@ -533,7 +615,9 @@ class TestRunDevopsBehavior:
 
     @patch("app.agents.devops.run_agent_graph", side_effect=RuntimeError("Timeout"))
     @patch("app.agents.devops.make_devops_handlers")
-    def test_returns_error_on_exception(self, mock_handlers: Any, mock_graph: Any) -> None:
+    def test_returns_error_on_exception(
+        self, mock_handlers: Any, mock_graph: Any
+    ) -> None:
         mock_handlers.return_value = {"_health_result": {}}
         report, error, tokens_in, tokens_out = run_devops()
         assert report is None

@@ -13,6 +13,7 @@ Tests prove:
 - Lesson extraction helpers don't raise on bad input
 - get_lesson_store() singleton is stable
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -32,10 +33,10 @@ from app.agents.base_graph import (
     get_lesson_store,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _minimal_state(**overrides: Any) -> AgentRunState:
     base: AgentRunState = {
@@ -69,6 +70,7 @@ def _empty_vcfg() -> VerificationConfig:
 # ---------------------------------------------------------------------------
 # New state fields — 9 added in Session 0
 # ---------------------------------------------------------------------------
+
 
 class TestNewStateFields:
     """Verify all 9 new Fleet OS state fields exist with correct types."""
@@ -111,8 +113,16 @@ class TestNewStateFields:
 
     def test_original_8_fields_still_present(self) -> None:
         s = _minimal_state()
-        for key in ("messages", "verification", "result", "turns",
-                    "submitted", "requires_human_approval", "tokens_in", "tokens_out"):
+        for key in (
+            "messages",
+            "verification",
+            "result",
+            "turns",
+            "submitted",
+            "requires_human_approval",
+            "tokens_in",
+            "tokens_out",
+        ):
             assert key in s, f"Original field {key!r} missing from state"
 
     def test_total_field_count_is_17(self) -> None:
@@ -124,36 +134,72 @@ class TestNewStateFields:
 # LessonStore
 # ---------------------------------------------------------------------------
 
+
 class TestLessonStore:
     def test_add_increments_total(self) -> None:
         store = LessonStore()
-        store.add(Lesson("agent", "Always run tests after edit_file", "test-first", "testing"))
+        store.add(
+            Lesson("agent", "Always run tests after edit_file", "test-first", "testing")
+        )
         assert store.total == 1
 
     def test_retrieve_returns_relevant_lessons(self) -> None:
         store = LessonStore()
-        store.add(Lesson("coder", "Run tests after editing Python files", "test-after-edit", "testing"))
-        store.add(Lesson("qa", "Check migration rollback before applying", "migration-safety", "security"))
+        store.add(
+            Lesson(
+                "coder",
+                "Run tests after editing Python files",
+                "test-after-edit",
+                "testing",
+            )
+        )
+        store.add(
+            Lesson(
+                "qa",
+                "Check migration rollback before applying",
+                "migration-safety",
+                "security",
+            )
+        )
         results = store.retrieve("run tests python", top_k=3)
         assert len(results) >= 1
         assert any("test" in r.lesson.lower() for r in results)
 
     def test_retrieve_returns_empty_for_no_match(self) -> None:
         store = LessonStore()
-        store.add(Lesson("coder", "Always lint after refactoring", "lint-after-refactor", "refactor"))
+        store.add(
+            Lesson(
+                "coder",
+                "Always lint after refactoring",
+                "lint-after-refactor",
+                "refactor",
+            )
+        )
         results = store.retrieve("database migration security", top_k=3)
         assert results == []
 
     def test_retrieve_respects_top_k(self) -> None:
         store = LessonStore()
         for i in range(10):
-            store.add(Lesson("coder", f"test lesson {i} testing tests", f"pattern-{i}", "testing"))
+            store.add(
+                Lesson(
+                    "coder", f"test lesson {i} testing tests", f"pattern-{i}", "testing"
+                )
+            )
         results = store.retrieve("testing tests", top_k=3)
         assert len(results) <= 3
 
     def test_non_reusable_lessons_are_excluded(self) -> None:
         store = LessonStore()
-        store.add(Lesson("coder", "This is a one-time fix testing", "one-time", "testing", reusable=False))
+        store.add(
+            Lesson(
+                "coder",
+                "This is a one-time fix testing",
+                "one-time",
+                "testing",
+                reusable=False,
+            )
+        )
         results = store.retrieve("testing fix", top_k=5)
         assert results == []
 
@@ -164,7 +210,9 @@ class TestLessonStore:
 
     def test_format_for_injection_returns_header_when_matched(self) -> None:
         store = LessonStore()
-        store.add(Lesson("coder", "Always run pytest after editing", "run-pytest", "testing"))
+        store.add(
+            Lesson("coder", "Always run pytest after editing", "run-pytest", "testing")
+        )
         result = store.format_for_injection("run pytest testing", top_k=3)
         assert "Relevant past insights" in result
         assert "testing" in result
@@ -193,7 +241,11 @@ class TestLessonStoreSingleton:
     def test_singleton_persists_lessons_across_calls(self) -> None:
         store = get_lesson_store()
         before = store.total
-        store.add(Lesson("singleton_test", "singleton lesson test pytest", "pattern", "testing"))
+        store.add(
+            Lesson(
+                "singleton_test", "singleton lesson test pytest", "pattern", "testing"
+            )
+        )
         assert get_lesson_store().total == before + 1
 
 
@@ -201,9 +253,13 @@ class TestLessonStoreSingleton:
 # _trim_messages
 # ---------------------------------------------------------------------------
 
+
 class TestTrimMessages:
     def _msgs(self, n: int) -> list[dict[str, Any]]:
-        return [{"role": "user" if i % 2 == 0 else "assistant", "content": f"msg {i}"} for i in range(n)]
+        return [
+            {"role": "user" if i % 2 == 0 else "assistant", "content": f"msg {i}"}
+            for i in range(n)
+        ]
 
     def test_no_trim_when_under_budget(self) -> None:
         msgs = self._msgs(6)
@@ -218,7 +274,7 @@ class TestTrimMessages:
     def test_trim_keeps_head_and_tail(self) -> None:
         msgs = self._msgs(10)
         result = _trim_messages(msgs, token_budget=100, tokens_in=90_000)
-        assert result[0] == msgs[0]   # head preserved
+        assert result[0] == msgs[0]  # head preserved
         assert result[-1] == msgs[-1]  # tail preserved
 
     def test_no_trim_when_few_messages(self) -> None:
@@ -230,6 +286,7 @@ class TestTrimMessages:
 # ---------------------------------------------------------------------------
 # _serialize_content + _text_from_content
 # ---------------------------------------------------------------------------
+
 
 class TestSerializeHelpers:
     def test_serialize_text_block(self) -> None:
@@ -268,6 +325,7 @@ class TestSerializeHelpers:
 # _policy_check (backward compat)
 # ---------------------------------------------------------------------------
 
+
 class TestPolicyCheck:
     def test_blocks_protected_path(self) -> None:
         result = _policy_check("write_file", {"path": ".env"})
@@ -294,6 +352,7 @@ class TestPolicyCheck:
 # ---------------------------------------------------------------------------
 # VerificationConfig — unchanged from Day 3 (backward compat)
 # ---------------------------------------------------------------------------
+
 
 class TestVerificationConfig:
     def test_defaults_are_empty(self) -> None:
@@ -413,27 +472,41 @@ class TestBuildAgentGraph:
 # run_agent_graph signature — accepts all new kwargs
 # ---------------------------------------------------------------------------
 
+
 @patch("app.agents.base_graph.load_role", return_value="You are a test agent.")
 @patch("app.agents.base_graph.get_effective_api_key", return_value="test-key")
 class TestRunAgentGraphSignature:
-    def test_accepts_all_new_fleet_os_kwargs(self, mock_key: Any, mock_load: Any) -> None:
+    def test_accepts_all_new_fleet_os_kwargs(
+        self, mock_key: Any, mock_load: Any
+    ) -> None:
         """Verify run_agent_graph accepts all Session 0 keyword arguments.
         Does not call Anthropic — just tests the signature compiles.
         """
         import inspect
+
         sig = inspect.signature(build_agent_graph)
         new_params = {
-            "enable_planning", "enable_memory", "enable_reflection",
-            "task_description", "repo_path", "model_haiku",
-            "context_token_budget", "max_stalls",
+            "enable_planning",
+            "enable_memory",
+            "enable_reflection",
+            "task_description",
+            "repo_path",
+            "model_haiku",
+            "context_token_budget",
+            "max_stalls",
         }
         actual_params = set(sig.parameters.keys())
         for param in new_params:
-            assert param in actual_params, f"New param {param!r} missing from build_agent_graph"
+            assert (
+                param in actual_params
+            ), f"New param {param!r} missing from build_agent_graph"
 
-    def test_run_agent_graph_has_enable_lesson_param(self, mock_key: Any, mock_load: Any) -> None:
+    def test_run_agent_graph_has_enable_lesson_param(
+        self, mock_key: Any, mock_load: Any
+    ) -> None:
         import inspect
         from app.agents.base_graph import run_agent_graph
+
         sig = inspect.signature(run_agent_graph)
         assert "enable_lesson" in sig.parameters
         assert "trace_id" in sig.parameters

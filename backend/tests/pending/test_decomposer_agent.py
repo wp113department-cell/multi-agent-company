@@ -1,4 +1,5 @@
 """Decomposer Agent live tests — require ANTHROPIC_API_KEY."""
+
 from __future__ import annotations
 
 from tests.pending.conftest import requires_anthropic
@@ -14,6 +15,7 @@ class TestDecomposerAgent:
 
     def _make_state(self, task_id: int, title: str) -> dict:  # type: ignore[type-arg]
         from app.pipeline.state import PipelineState
+
         return PipelineState(
             task_id=task_id,
             task_title=title,
@@ -29,7 +31,10 @@ class TestDecomposerAgent:
                 "technical_approach": "Add a new route in backend/app/api/tasks.py",
                 "impacted_files": [
                     {"path": "backend/app/api/tasks.py", "reason": "Add new endpoint"},
-                    {"path": "backend/tests/test_status_transitions.py", "reason": "Add tests"},
+                    {
+                        "path": "backend/tests/test_status_transitions.py",
+                        "reason": "Add tests",
+                    },
                 ],
                 "risks": [{"severity": "low", "description": "Minimal impact"}],
                 "risk_level": "low",
@@ -44,7 +49,9 @@ class TestDecomposerAgent:
         state = self._make_state(20, "Add GET /health endpoint")
         result = decomposer_node(state)
 
-        assert result["stage"] != "blocked", f"Decomposer blocked: {result.get('error')}"
+        assert (
+            result["stage"] != "blocked"
+        ), f"Decomposer blocked: {result.get('error')}"
         assert "subtasks" in result
         assert isinstance(result["subtasks"], list)
         assert len(result["subtasks"]) >= 1
@@ -59,7 +66,9 @@ class TestDecomposerAgent:
         assert result["stage"] != "blocked"
         for sub in result["subtasks"]:
             assert "title" in sub and sub["title"], f"Subtask missing title: {sub}"
-            assert "description" in sub and sub["description"], f"Subtask missing description: {sub}"
+            assert (
+                "description" in sub and sub["description"]
+            ), f"Subtask missing description: {sub}"
             assert "type" in sub, f"Subtask missing type: {sub}"
 
     def test_decomposer_subtask_types_valid(self) -> None:

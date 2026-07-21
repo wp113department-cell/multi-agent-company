@@ -5,6 +5,7 @@ When JWT_AUTH_ENABLED=false: reads X-User-Role header (backward compat).
 
 The returned CurrentUser is injected into route handlers via Depends(get_current_user).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -18,7 +19,7 @@ from app.config import get_settings
 @dataclass
 class CurrentUser:
     username: str
-    role: str       # "viewer" | "approver" | "admin"
+    role: str  # "viewer" | "approver" | "admin"
     is_authenticated: bool = True
 
 
@@ -38,9 +39,10 @@ async def get_current_user(request: Request) -> CurrentUser:
     if settings.jwt_auth_enabled:
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
-            token = auth_header[len("Bearer "):]
+            token = auth_header[len("Bearer ") :]
             try:
                 from app.auth.jwt import decode_access_token
+
                 payload = decode_access_token(token)
                 return CurrentUser(
                     username=str(payload.get("sub", "unknown")),
@@ -48,7 +50,9 @@ async def get_current_user(request: Request) -> CurrentUser:
                 )
             except JWTError:
                 raise HTTPException(status_code=401, detail="Invalid or expired token")
-        raise HTTPException(status_code=401, detail="Authorization header missing or malformed")
+        raise HTTPException(
+            status_code=401, detail="Authorization header missing or malformed"
+        )
 
     # Legacy fallback: X-User-Role header
     role = request.headers.get("X-User-Role", "viewer").lower()

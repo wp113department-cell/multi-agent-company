@@ -1,4 +1,5 @@
 """Interactive streaming chat agent — the core of the conversational interface."""
+
 from __future__ import annotations
 
 import asyncio
@@ -42,22 +43,36 @@ AGENT_CONTRACT: dict[str, Any] = {
     "allowed_tools": [t["name"] for t in CHAT_TOOLS],
     "input_types": ["chat_session", "user_message"],
     "output_types": ["streamed_events", "AgentResult"],
-    "side_effects": ["reads/writes repo files", "runs bash", "runs git (incl. push, with confirmation)"],
+    "side_effects": [
+        "reads/writes repo files",
+        "runs bash",
+        "runs git (incl. push, with confirmation)",
+    ],
     "permissions": ["read_repo", "write_repo", "execute_bash", "git_write"],
     "risk_level": "high",
-    "expected_verification": {"read": "read_file or search_code must run before write/bash tools"},
+    "expected_verification": {
+        "read": "read_file or search_code must run before write/bash tools"
+    },
     "dependencies": [],
 }
 
 _VERIFICATION_CFG = VerificationConfig(
     set_by={
-        "run_tests": "tests_passed", "run_linter": "lint_ran",
-        "git_diff": "diff_checked", "read_file": "read", "search_code": "read",
+        "run_tests": "tests_passed",
+        "run_linter": "lint_ran",
+        "git_diff": "diff_checked",
+        "read_file": "read",
+        "search_code": "read",
     },
     reset_by=("write_file", "edit_file", "apply_patch"),
     reset_keys=("tests_passed",),
     enforce_in_result={"read": "read"},
-    initial={"read": False, "tests_passed": False, "lint_ran": False, "diff_checked": False},
+    initial={
+        "read": False,
+        "tests_passed": False,
+        "lint_ran": False,
+        "diff_checked": False,
+    },
 )
 
 
@@ -65,16 +80,19 @@ def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["interactive_chat_session"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["interactive_chat_session"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry unavailable: %s", exc)
@@ -115,7 +133,9 @@ def _run_subprocess(command: str, cwd: str, timeout: int = 120) -> str:
 def _git(args: list[str], cwd: str, timeout: int = 30) -> str:
     """Run a git command and return combined output."""
     try:
-        r = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(
+            ["git"] + args, cwd=cwd, capture_output=True, text=True, timeout=timeout
+        )
         return (r.stdout + r.stderr).strip() or "(no output)"
     except subprocess.TimeoutExpired:
         return "[ERROR] git timed out"
@@ -150,7 +170,9 @@ class ChatAgent:
     # Tool execution — dispatches all 36 CHAT_TOOLS
     # ------------------------------------------------------------------
 
-    async def _execute_tool(self, tool_name: str, inp: dict[str, Any]) -> str:  # noqa: C901
+    async def _execute_tool(
+        self, tool_name: str, inp: dict[str, Any]
+    ) -> str:  # noqa: C901
         root = self.root
         repo = str(root)
 
@@ -170,7 +192,11 @@ class ChatAgent:
             for rel in (inp.get("paths") or [])[:20]:
                 fp = root / str(rel)
                 try:
-                    file_parts.append(f"=== {rel} ===\n{fp.read_text(encoding='utf-8')}" if fp.exists() else f"=== {rel} ===\n[NOT FOUND]")
+                    file_parts.append(
+                        f"=== {rel} ===\n{fp.read_text(encoding='utf-8')}"
+                        if fp.exists()
+                        else f"=== {rel} ===\n[NOT FOUND]"
+                    )
                 except Exception as e:
                     file_parts.append(f"=== {rel} ===\n[ERROR] {e}")
             return "\n\n".join(file_parts) or "[ERROR] No paths given"
@@ -181,6 +207,7 @@ class ChatAgent:
 
         if tool_name == "file_info":
             import datetime
+
             p = root / str(inp["path"])
             if not p.exists():
                 return f"[ERROR] Not found: {inp['path']}"
@@ -204,7 +231,9 @@ class ChatAgent:
             if not search_root.exists():
                 return f"[ERROR] Directory not found: {directory}"
             paths = sorted(
-                str(fp.relative_to(root)) for fp in search_root.glob(pattern) if fp.is_file()
+                str(fp.relative_to(root))
+                for fp in search_root.glob(pattern)
+                if fp.is_file()
             )
             return "\n".join(paths[:300])
 
@@ -214,7 +243,17 @@ class ChatAgent:
             start = root / directory if directory else root
             if not start.exists():
                 return f"[ERROR] Not found: {directory}"
-            _SKIP = {"__pycache__", "node_modules", ".next", ".venv", "venv", ".git", "dist", "build", ".mypy_cache"}
+            _SKIP = {
+                "__pycache__",
+                "node_modules",
+                ".next",
+                ".venv",
+                "venv",
+                ".git",
+                "dist",
+                "build",
+                ".mypy_cache",
+            }
             tree_lines: list[str] = [directory or "."]
 
             def _tree(path: Path, depth: int, prefix: str) -> None:
@@ -224,7 +263,11 @@ class ChatAgent:
                     items = sorted(path.iterdir(), key=lambda x: (x.is_file(), x.name))
                 except PermissionError:
                     return
-                items = [i for i in items if i.name not in _SKIP and not i.name.startswith(".")]
+                items = [
+                    i
+                    for i in items
+                    if i.name not in _SKIP and not i.name.startswith(".")
+                ]
                 for idx, item in enumerate(items):
                     conn = "└── " if idx == len(items) - 1 else "├── "
                     tree_lines.append(f"{prefix}{conn}{item.name}")
@@ -240,7 +283,14 @@ class ChatAgent:
         if tool_name == "search_code":
             pattern = str(inp["pattern"])
             fp = inp.get("file_pattern", "")
-            cmd_args = ["grep", "-rn", "--include", str(fp) if fp else "*", pattern, repo]
+            cmd_args = [
+                "grep",
+                "-rn",
+                "--include",
+                str(fp) if fp else "*",
+                pattern,
+                repo,
+            ]
             try:
                 r = subprocess.run(cmd_args, capture_output=True, text=True, timeout=15)
                 return r.stdout[:8000] or "(no matches)"
@@ -252,15 +302,34 @@ class ChatAgent:
             kind = str(inp.get("kind", "all"))
             patterns: list[str] = []
             if kind in ("function", "all"):
-                patterns += [f"def {sym_name}", f"async def {sym_name}", f"function {sym_name}", f"const {sym_name} ="]
+                patterns += [
+                    f"def {sym_name}",
+                    f"async def {sym_name}",
+                    f"function {sym_name}",
+                    f"const {sym_name} =",
+                ]
             if kind in ("class", "all"):
-                patterns += [f"class {sym_name}", f"interface {sym_name}", f"type {sym_name} ="]
+                patterns += [
+                    f"class {sym_name}",
+                    f"interface {sym_name}",
+                    f"type {sym_name} =",
+                ]
             sym_results: list[str] = []
             for pat in patterns:
                 try:
                     r = subprocess.run(
-                        ["grep", "-rn", "--include=*.py", "--include=*.ts", "--include=*.tsx", pat, repo],
-                        capture_output=True, text=True, timeout=10,
+                        [
+                            "grep",
+                            "-rn",
+                            "--include=*.py",
+                            "--include=*.ts",
+                            "--include=*.tsx",
+                            pat,
+                            repo,
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
                     )
                     if r.stdout:
                         sym_results.append(r.stdout[:2000])
@@ -289,9 +358,20 @@ class ChatAgent:
             markers = ["TODO", "FIXME", "HACK", "XXX"] if kind == "all" else [kind]
             try:
                 r = subprocess.run(
-                    ["grep", "-rn", "-E", f"({'|'.join(markers)}):", str(search_root),
-                     "--include=*.py", "--include=*.ts", "--include=*.tsx", "--include=*.md"],
-                    capture_output=True, text=True, timeout=15,
+                    [
+                        "grep",
+                        "-rn",
+                        "-E",
+                        f"({'|'.join(markers)}):",
+                        str(search_root),
+                        "--include=*.py",
+                        "--include=*.ts",
+                        "--include=*.tsx",
+                        "--include=*.md",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
                 )
                 return r.stdout[:5000] or "(no TODOs found)"
             except subprocess.TimeoutExpired:
@@ -300,7 +380,12 @@ class ChatAgent:
         if tool_name == "search_imports":
             module = str(inp["module"])
             fp = inp.get("file_pattern", "")
-            imp_patterns = [f"import {module}", f"from {module}", f'require("{module}")', f"require('{module}')"]
+            imp_patterns = [
+                f"import {module}",
+                f"from {module}",
+                f'require("{module}")',
+                f"require('{module}')",
+            ]
             import_results: list[str] = []
             for pat in imp_patterns:
                 imp_cmd = ["grep", "-rn"]
@@ -308,7 +393,9 @@ class ChatAgent:
                     imp_cmd += ["--include", str(fp)]
                 imp_cmd += [pat, repo]
                 try:
-                    r = subprocess.run(imp_cmd, capture_output=True, text=True, timeout=10)
+                    r = subprocess.run(
+                        imp_cmd, capture_output=True, text=True, timeout=10
+                    )
                     if r.stdout.strip():
                         import_results.append(r.stdout[:2000])
                 except subprocess.TimeoutExpired:
@@ -328,9 +415,20 @@ class ChatAgent:
                 s = line.strip()
                 if s.startswith(("import ", "from ")):
                     af_imports.append(f"  L{i}: {s}")
-                elif s.startswith(("def ", "async def ", "class ", "export function ",
-                                   "export async function ", "export class ", "export const ",
-                                   "export interface ", "export type ", "export default function ")):
+                elif s.startswith(
+                    (
+                        "def ",
+                        "async def ",
+                        "class ",
+                        "export function ",
+                        "export async function ",
+                        "export class ",
+                        "export const ",
+                        "export interface ",
+                        "export type ",
+                        "export default function ",
+                    )
+                ):
                     af_defs.append(f"  L{i}: {s[:120]}")
             af_result = [f"File: {rel}  ({len(af_lines)} lines)"]
             if af_imports:
@@ -400,7 +498,9 @@ class ChatAgent:
             text = target.read_text(encoding="utf-8")
             count = text.count(old_s)
             if count == 0:
-                return f"[ERROR] old_string not found in {rel}. Check whitespace/newlines."
+                return (
+                    f"[ERROR] old_string not found in {rel}. Check whitespace/newlines."
+                )
             if count > 1:
                 return f"[ERROR] old_string appears {count} times — must be unique. Add more context."
             target.write_text(text.replace(old_s, new_s, 1), encoding="utf-8")
@@ -432,6 +532,7 @@ class ChatAgent:
 
         if tool_name == "copy_file":
             import shutil as _shutil
+
             from_rel = str(inp["from_path"])
             to_rel = str(inp["to_path"])
             if _is_protected_path(to_rel):
@@ -452,7 +553,9 @@ class ChatAgent:
             if not target.exists():
                 return f"[ERROR] File not found: {rel}"
             if not target.is_file():
-                return f"[ERROR] {rel} is a directory — use bash 'rm -rf' for directories"
+                return (
+                    f"[ERROR] {rel} is a directory — use bash 'rm -rf' for directories"
+                )
             target.unlink()
             return f"Deleted {rel}"
 
@@ -461,14 +564,28 @@ class ChatAgent:
         if tool_name == "git_commit":
             message = str(inp["message"])
             raw_files = inp.get("files", [])
-            files: list[str] = list(raw_files) if isinstance(raw_files, list) else ["--all"]
+            files: list[str] = (
+                list(raw_files) if isinstance(raw_files, list) else ["--all"]
+            )
             try:
                 if files == ["--all"] or files == ["-a"]:
-                    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+                    subprocess.run(
+                        ["git", "add", "-A"], cwd=repo, check=True, capture_output=True
+                    )
                 else:
                     for gf in files:
-                        subprocess.run(["git", "add", str(gf)], cwd=repo, check=True, capture_output=True)
-                r = subprocess.run(["git", "commit", "-m", message], cwd=repo, capture_output=True, text=True)
+                        subprocess.run(
+                            ["git", "add", str(gf)],
+                            cwd=repo,
+                            check=True,
+                            capture_output=True,
+                        )
+                r = subprocess.run(
+                    ["git", "commit", "-m", message],
+                    cwd=repo,
+                    capture_output=True,
+                    text=True,
+                )
                 return (r.stdout + r.stderr).strip()
             except subprocess.CalledProcessError as e:
                 return f"[ERROR] git add failed: {e}"
@@ -481,9 +598,17 @@ class ChatAgent:
             if action == "list":
                 return _git(["branch", "-a"], repo)
             if action == "create":
-                return "[ERROR] name required" if not bname else _git(["branch", bname], repo) or f"Branch '{bname}' created"
+                return (
+                    "[ERROR] name required"
+                    if not bname
+                    else _git(["branch", bname], repo) or f"Branch '{bname}' created"
+                )
             if action == "delete":
-                return "[ERROR] name required" if not bname else _git(["branch", "-d", bname], repo)
+                return (
+                    "[ERROR] name required"
+                    if not bname
+                    else _git(["branch", "-d", bname], repo)
+                )
             return f"[ERROR] Unknown action: {action}"
 
         if tool_name == "create_branch":
@@ -495,7 +620,10 @@ class ChatAgent:
             if "[ERROR]" in out:
                 return out
             if do_checkout:
-                return _git(["checkout", bname], repo) or f"Created and switched to branch: {bname}"
+                return (
+                    _git(["checkout", bname], repo)
+                    or f"Created and switched to branch: {bname}"
+                )
             return f"Created branch: {bname}"
 
         if tool_name == "git_checkout":
@@ -516,25 +644,36 @@ class ChatAgent:
             remote = str(inp.get("remote", "origin"))
             branch = str(inp.get("branch", ""))
             rebase = bool(inp.get("rebase", False))
-            pull_args = ["pull"] + (["--rebase"] if rebase else []) + [remote] + ([branch] if branch else [])
+            pull_args = (
+                ["pull"]
+                + (["--rebase"] if rebase else [])
+                + [remote]
+                + ([branch] if branch else [])
+            )
             return await asyncio.to_thread(_git, pull_args, repo, 60)
 
         if tool_name == "git_fetch":
             remote = str(inp.get("remote", "origin"))
             prune = bool(inp.get("prune", False))
-            return await asyncio.to_thread(_git, ["fetch", remote] + (["--prune"] if prune else []), repo, 60)
+            return await asyncio.to_thread(
+                _git, ["fetch", remote] + (["--prune"] if prune else []), repo, 60
+            )
 
         if tool_name == "git_restore":
             rel = str(inp["path"])
             restore_staged = bool(inp.get("staged", False))
-            restore_args = ["restore"] + (["--staged"] if restore_staged else []) + [rel]
+            restore_args = (
+                ["restore"] + (["--staged"] if restore_staged else []) + [rel]
+            )
             return _git(restore_args, repo)
 
         if tool_name == "git_push":
             branch = str(inp.get("branch", ""))
             remote = str(inp.get("remote", "origin"))
             force = bool(inp.get("force", False))
-            cmd_preview = f"git push {remote} {branch}{'  --force' if force else ''}".strip()
+            cmd_preview = (
+                f"git push {remote} {branch}{'  --force' if force else ''}".strip()
+            )
             approved = await self.session.request_confirmation(
                 action_id=str(uuid.uuid4()),
                 description="Push commits to remote repository",
@@ -542,7 +681,11 @@ class ChatAgent:
             )
             if not approved:
                 return "[DENIED] User declined git push."
-            push_args = ["push", remote] + ([branch] if branch else []) + (["--force"] if force else [])
+            push_args = (
+                ["push", remote]
+                + ([branch] if branch else [])
+                + (["--force"] if force else [])
+            )
             return await asyncio.to_thread(_git, push_args, repo, 60)
 
         # ========== TERMINAL ==========
@@ -590,21 +733,32 @@ class ChatAgent:
 
             if lint_tool in ("ruff", "all"):
                 t = lint_path or repo
-                await _lint(f"cd {repo} && source .venv/bin/activate 2>/dev/null; python -m ruff check {t} {'--fix' if fix else ''} 2>&1 | head -50", "ruff")
+                await _lint(
+                    f"cd {repo} && source .venv/bin/activate 2>/dev/null; python -m ruff check {t} {'--fix' if fix else ''} 2>&1 | head -50",
+                    "ruff",
+                )
             if lint_tool in ("mypy", "all"):
                 t = lint_path or repo
-                await _lint(f"cd {repo} && source .venv/bin/activate 2>/dev/null; python -m mypy {t} --ignore-missing-imports 2>&1 | head -50", "mypy")
+                await _lint(
+                    f"cd {repo} && source .venv/bin/activate 2>/dev/null; python -m mypy {t} --ignore-missing-imports 2>&1 | head -50",
+                    "mypy",
+                )
             if lint_tool in ("tsc", "all"):
                 web = str(root.parent / "apps" / "web")
                 await _lint(f"cd {web} && npx tsc --noEmit 2>&1 | head -50", "tsc")
             if lint_tool == "black":
                 t = lint_path or repo
-                await _lint(f"cd {repo} && source .venv/bin/activate 2>/dev/null; python -m black {'--check' if not fix else ''} {t} 2>&1 | head -50", "black")
+                await _lint(
+                    f"cd {repo} && source .venv/bin/activate 2>/dev/null; python -m black {'--check' if not fix else ''} {t} 2>&1 | head -50",
+                    "black",
+                )
 
             return "\n\n".join(lint_parts) or f"[ERROR] Unknown linter: {lint_tool}"
 
         if tool_name == "submit_result":
-            return f"Task complete: {inp.get('status', 'done')}\n{inp.get('summary', '')}"
+            return (
+                f"Task complete: {inp.get('status', 'done')}\n{inp.get('summary', '')}"
+            )
 
         # ========== BATCH 1 — File / Editing extras ==========
 
@@ -615,12 +769,27 @@ class ChatAgent:
             try:
                 r = await asyncio.to_thread(
                     subprocess.run,
-                    ["find", str(ff_root), "-name", name,
-                     "-not", "-path", "*/node_modules/*",
-                     "-not", "-path", "*/__pycache__/*",
-                     "-not", "-path", "*/.git/*",
-                     "-not", "-path", "*/.venv/*"],
-                    capture_output=True, text=True, timeout=15,
+                    [
+                        "find",
+                        str(ff_root),
+                        "-name",
+                        name,
+                        "-not",
+                        "-path",
+                        "*/node_modules/*",
+                        "-not",
+                        "-path",
+                        "*/__pycache__/*",
+                        "-not",
+                        "-path",
+                        "*/.git/*",
+                        "-not",
+                        "-path",
+                        "*/.venv/*",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
                 )
                 found = [ln for ln in r.stdout.splitlines() if ln.strip()]
                 if not found:
@@ -645,7 +814,9 @@ class ChatAgent:
                 formatter = "ruff" if fmt_target.suffix == ".py" else "prettier"
             activate = f"source {repo}/.venv/bin/activate 2>/dev/null || true"
             if formatter in ("ruff", "black"):
-                cmd_s = f"{activate} && python -m {formatter} format {str(fmt_target)} 2>&1"
+                cmd_s = (
+                    f"{activate} && python -m {formatter} format {str(fmt_target)} 2>&1"
+                )
             else:
                 cmd_s = f"cd {repo} && npx prettier --write {str(fmt_target)} 2>&1"
             return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 30)
@@ -669,7 +840,9 @@ class ChatAgent:
             if not ial_target.exists():
                 return f"[ERROR] File not found: {rel}"
             try:
-                file_lines = ial_target.read_text(encoding="utf-8").splitlines(keepends=True)
+                file_lines = ial_target.read_text(encoding="utf-8").splitlines(
+                    keepends=True
+                )
                 insert_at = max(0, line_num - 1) if line_num > 0 else len(file_lines)
                 insert_at = min(insert_at, len(file_lines))
                 ins_content = content if content.endswith("\n") else content + "\n"
@@ -689,12 +862,16 @@ class ChatAgent:
             if not rf_target.exists():
                 return f"[ERROR] File not found: {rel}"
             try:
-                rf_lines = rf_target.read_text(encoding="utf-8").splitlines(keepends=True)
+                rf_lines = rf_target.read_text(encoding="utf-8").splitlines(
+                    keepends=True
+                )
                 rf_start: int | None = None
                 rf_indent = 0
                 for rf_i, rf_line in enumerate(rf_lines):
                     s = rf_line.strip()
-                    if s.startswith(f"def {rf_name}(") or s.startswith(f"async def {rf_name}("):
+                    if s.startswith(f"def {rf_name}(") or s.startswith(
+                        f"async def {rf_name}("
+                    ):
                         rf_start = rf_i
                         rf_indent = len(rf_line) - len(rf_line.lstrip())
                         break
@@ -706,11 +883,18 @@ class ChatAgent:
                     if rf_jl.strip() == "":
                         continue
                     rf_jind = len(rf_jl) - len(rf_jl.lstrip())
-                    if rf_jind <= rf_indent and rf_jl.strip() and not rf_jl.strip().startswith(("#", "@")):
+                    if (
+                        rf_jind <= rf_indent
+                        and rf_jl.strip()
+                        and not rf_jl.strip().startswith(("#", "@"))
+                    ):
                         rf_end = rf_j
                         break
                 rf_new = new_code if new_code.endswith("\n") else new_code + "\n"
-                rf_target.write_text("".join(rf_lines[:rf_start] + [rf_new] + rf_lines[rf_end:]), encoding="utf-8")
+                rf_target.write_text(
+                    "".join(rf_lines[:rf_start] + [rf_new] + rf_lines[rf_end:]),
+                    encoding="utf-8",
+                )
                 return f"Replaced '{rf_name}' in {rel} (lines {rf_start + 1}-{rf_end})"
             except Exception as e:
                 return f"[ERROR] {e}"
@@ -727,14 +911,18 @@ class ChatAgent:
             if dl_start < 1 or dl_end < dl_start:
                 return f"[ERROR] Invalid range: {dl_start}-{dl_end}"
             try:
-                dl_lines = dl_target.read_text(encoding="utf-8").splitlines(keepends=True)
+                dl_lines = dl_target.read_text(encoding="utf-8").splitlines(
+                    keepends=True
+                )
                 total = len(dl_lines)
                 if dl_start > total:
                     return f"[ERROR] File only has {total} lines"
                 dl_s = dl_start - 1
                 dl_e = min(dl_end, total)
                 deleted = dl_e - dl_s
-                dl_target.write_text("".join(dl_lines[:dl_s] + dl_lines[dl_e:]), encoding="utf-8")
+                dl_target.write_text(
+                    "".join(dl_lines[:dl_s] + dl_lines[dl_e:]), encoding="utf-8"
+                )
                 return f"Deleted {deleted} lines ({dl_start}-{dl_end}) from {rel}"
             except Exception as e:
                 return f"[ERROR] {e}"
@@ -742,10 +930,13 @@ class ChatAgent:
         if tool_name == "apply_patch":
             import os as _os
             import tempfile as _tempfile
+
             patch_content = str(inp["patch"])
             strip = int(inp.get("strip", 1))
             try:
-                with _tempfile.NamedTemporaryFile(mode="w", suffix=".patch", delete=False) as pf:
+                with _tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".patch", delete=False
+                ) as pf:
                     pf.write(patch_content)
                     pf_name = pf.name
             except Exception as e:
@@ -754,7 +945,10 @@ class ChatAgent:
                 r = await asyncio.to_thread(
                     subprocess.run,
                     ["patch", f"-p{strip}", "--input", pf_name],
-                    cwd=repo, capture_output=True, text=True, timeout=30,
+                    cwd=repo,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
                 )
                 return (r.stdout + r.stderr).strip() or "Patch applied"
             except FileNotFoundError:
@@ -777,7 +971,11 @@ class ChatAgent:
                 return f"[ERROR] File not found: {rel_a}"
             if not cf_b.exists():
                 return f"[ERROR] File not found: {rel_b}"
-            r = subprocess.run(["diff", f"-U{context}", str(cf_a), str(cf_b)], capture_output=True, text=True)
+            r = subprocess.run(
+                ["diff", f"-U{context}", str(cf_a), str(cf_b)],
+                capture_output=True,
+                text=True,
+            )
             return r.stdout[:8000] or "Files are identical"
 
         # ========== BATCH 2 — Terminal extras ==========
@@ -787,8 +985,12 @@ class ChatAgent:
             rb_cwd = str(inp.get("cwd") or repo)
             try:
                 proc = subprocess.Popen(
-                    rb_command, shell=True, cwd=rb_cwd,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    rb_command,
+                    shell=True,
+                    cwd=rb_cwd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
                 )
                 self._background_processes[proc.pid] = proc
                 return f"Started background process PID {proc.pid}: {rb_command[:80]}"
@@ -798,9 +1000,14 @@ class ChatAgent:
         if tool_name == "kill_process":
             import os as _os
             import signal as _signal
+
             kp_pid = int(inp["pid"])
             kp_sig_name = str(inp.get("signal", "TERM"))
-            sig_map = {"TERM": _signal.SIGTERM, "KILL": _signal.SIGKILL, "INT": _signal.SIGINT}
+            sig_map = {
+                "TERM": _signal.SIGTERM,
+                "KILL": _signal.SIGKILL,
+                "INT": _signal.SIGINT,
+            }
             kp_sig = sig_map.get(kp_sig_name, _signal.SIGTERM)
             try:
                 _os.kill(kp_pid, kp_sig)
@@ -812,6 +1019,7 @@ class ChatAgent:
 
         if tool_name == "run_python_snippet":
             import shlex as _shlex
+
             code = str(inp["code"])
             ps_timeout = int(inp.get("timeout", 30))
             activate = f"source {repo}/.venv/bin/activate 2>/dev/null || true"
@@ -822,17 +1030,34 @@ class ChatAgent:
             make_target = str(inp.get("target", ""))
             make_dir_rel = str(inp.get("directory", ""))
             make_dir = (root / make_dir_rel) if make_dir_rel else root
-            if not (make_dir / "Makefile").exists() and not (make_dir / "makefile").exists():
+            if (
+                not (make_dir / "Makefile").exists()
+                and not (make_dir / "makefile").exists()
+            ):
                 return f"[ERROR] No Makefile found in {make_dir}"
             if not make_target:
-                r = subprocess.run(["make", "-pRrq"], cwd=str(make_dir), capture_output=True, text=True, timeout=10)
+                r = subprocess.run(
+                    ["make", "-pRrq"],
+                    cwd=str(make_dir),
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
                 tgts: list[str] = []
                 for mk_line in r.stdout.splitlines():
-                    if mk_line and not mk_line.startswith(("\t", "#", " ")) and ":" in mk_line:
+                    if (
+                        mk_line
+                        and not mk_line.startswith(("\t", "#", " "))
+                        and ":" in mk_line
+                    ):
                         tgt = mk_line.split(":")[0].strip()
                         if tgt and not tgt.startswith(".") and " " not in tgt:
                             tgts.append(tgt)
-                return "Targets:\n" + "\n".join(sorted(set(tgts[:30]))) if tgts else "Makefile found but targets not parseable"
+                return (
+                    "Targets:\n" + "\n".join(sorted(set(tgts[:30])))
+                    if tgts
+                    else "Makefile found but targets not parseable"
+                )
             cmd_s = f"make {make_target}"
             return await asyncio.to_thread(_run_subprocess, cmd_s, str(make_dir), 120)
 
@@ -849,7 +1074,11 @@ class ChatAgent:
             gm_no_ff = bool(inp.get("no_ff", False))
             gm_squash = bool(inp.get("squash", False))
             gm_msg = str(inp.get("message", ""))
-            gm_args = ["merge"] + (["--no-ff"] if gm_no_ff else []) + (["--squash"] if gm_squash else [])
+            gm_args = (
+                ["merge"]
+                + (["--no-ff"] if gm_no_ff else [])
+                + (["--squash"] if gm_squash else [])
+            )
             if gm_msg:
                 gm_args += ["-m", gm_msg]
             gm_args.append(gm_branch)
@@ -877,7 +1106,9 @@ class ChatAgent:
             elif gw_action == "add":
                 if not gw_wt_path or not gw_branch:
                     return "[ERROR] path and branch required for add"
-                return await asyncio.to_thread(_git, ["worktree", "add", gw_wt_path, gw_branch], repo, 30)
+                return await asyncio.to_thread(
+                    _git, ["worktree", "add", gw_wt_path, gw_branch], repo, 30
+                )
             elif gw_action == "remove":
                 if not gw_wt_path:
                     return "[ERROR] path required for remove"
@@ -889,7 +1120,15 @@ class ChatAgent:
             pr_body = str(inp.get("body", ""))
             pr_base = str(inp.get("base", "main"))
             pr_draft = bool(inp.get("draft", False))
-            pr_cmd_parts = ["gh", "pr", "create", "--title", pr_title, "--base", pr_base]
+            pr_cmd_parts = [
+                "gh",
+                "pr",
+                "create",
+                "--title",
+                pr_title,
+                "--base",
+                pr_base,
+            ]
             if pr_body:
                 pr_cmd_parts += ["--body", pr_body]
             if pr_draft:
@@ -946,18 +1185,24 @@ class ChatAgent:
             if tc_lang in ("python", "both"):
                 py_path = tc_path or "backend/"
                 sf = "--strict" if tc_strict else "--ignore-missing-imports"
-                tc_results.append(await asyncio.to_thread(
-                    _run_subprocess,
-                    f"{activate} && python -m mypy {py_path} {sf} 2>&1 | head -60",
-                    repo, 90,
-                ))
+                tc_results.append(
+                    await asyncio.to_thread(
+                        _run_subprocess,
+                        f"{activate} && python -m mypy {py_path} {sf} 2>&1 | head -60",
+                        repo,
+                        90,
+                    )
+                )
             if tc_lang in ("typescript", "both"):
                 web = str(root.parent / "apps" / "web")
-                tc_results.append(await asyncio.to_thread(
-                    _run_subprocess,
-                    f"cd {web} && npx tsc --noEmit 2>&1 | head -60",
-                    repo, 90,
-                ))
+                tc_results.append(
+                    await asyncio.to_thread(
+                        _run_subprocess,
+                        f"cd {web} && npx tsc --noEmit 2>&1 | head -60",
+                        repo,
+                        90,
+                    )
+                )
             return "\n\n".join(tc_results) or "[ERROR] No language selected"
 
         # ========== BATCH 5 — Code Intelligence ==========
@@ -972,12 +1217,25 @@ class ChatAgent:
             for lf_i, lf_line in enumerate(lf_lines, 1):
                 s = lf_line.strip()
                 if s.startswith(("def ", "async def ")):
-                    lf_results.append(f"  L{lf_i}: {s.split(':')[0] if ':' in s else s}")
-                elif s.startswith(("export function ", "export async function ", "function ")) and "(" in s:
+                    lf_results.append(
+                        f"  L{lf_i}: {s.split(':')[0] if ':' in s else s}"
+                    )
+                elif (
+                    s.startswith(
+                        ("export function ", "export async function ", "function ")
+                    )
+                    and "(" in s
+                ):
                     lf_results.append(f"  L{lf_i}: {s[:120]}")
-                elif s.startswith(("export const ", "const ")) and ("=>" in s or "= (" in s or "= async" in s):
+                elif s.startswith(("export const ", "const ")) and (
+                    "=>" in s or "= (" in s or "= async" in s
+                ):
                     lf_results.append(f"  L{lf_i}: {s[:120]}")
-            return f"Functions in {rel} ({len(lf_results)}):\n" + "\n".join(lf_results) if lf_results else f"(no functions in {rel})"
+            return (
+                f"Functions in {rel} ({len(lf_results)}):\n" + "\n".join(lf_results)
+                if lf_results
+                else f"(no functions in {rel})"
+            )
 
         if tool_name == "list_classes":
             rel = str(inp["path"])
@@ -998,11 +1256,25 @@ class ChatAgent:
                 elif lc_current and curr_indent > lc_base_indent:
                     if s.startswith(("def ", "async def ")):
                         lc_results.append(f"    L{lc_i}: {s.split(':')[0]}")
-                    elif s.startswith(("public ", "private ", "protected ", "async ", "static ")) and "(" in s:
+                    elif (
+                        s.startswith(
+                            ("public ", "private ", "protected ", "async ", "static ")
+                        )
+                        and "(" in s
+                    ):
                         lc_results.append(f"    L{lc_i}: {s[:120]}")
-                elif lc_current and lc_line.strip() and curr_indent <= lc_base_indent and not s.startswith(("@", "#", "/")):
+                elif (
+                    lc_current
+                    and lc_line.strip()
+                    and curr_indent <= lc_base_indent
+                    and not s.startswith(("@", "#", "/"))
+                ):
                     lc_current = None
-            return f"Classes in {rel}:\n" + "\n".join(lc_results) if lc_results else f"(no classes in {rel})"
+            return (
+                f"Classes in {rel}:\n" + "\n".join(lc_results)
+                if lc_results
+                else f"(no classes in {rel})"
+            )
 
         if tool_name == "find_function_body":
             rel = str(inp["path"])
@@ -1010,12 +1282,16 @@ class ChatAgent:
             ffb_fp = root / rel
             if not ffb_fp.exists():
                 return f"[ERROR] File not found: {rel}"
-            ffb_lines = ffb_fp.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+            ffb_lines = ffb_fp.read_text(encoding="utf-8", errors="replace").splitlines(
+                keepends=True
+            )
             ffb_start: int | None = None
             ffb_base = 0
             for ffb_i, ffb_line in enumerate(ffb_lines):
                 s = ffb_line.strip()
-                if s.startswith(f"def {ffb_name}(") or s.startswith(f"async def {ffb_name}("):
+                if s.startswith(f"def {ffb_name}(") or s.startswith(
+                    f"async def {ffb_name}("
+                ):
                     ffb_start = ffb_i
                     ffb_base = len(ffb_line) - len(ffb_line.lstrip())
                     break
@@ -1027,7 +1303,11 @@ class ChatAgent:
                 if ffb_jl.strip() == "":
                     continue
                 ffb_jind = len(ffb_jl) - len(ffb_jl.lstrip())
-                if ffb_jind <= ffb_base and ffb_jl.strip() and not ffb_jl.strip().startswith(("@", "#")):
+                if (
+                    ffb_jind <= ffb_base
+                    and ffb_jl.strip()
+                    and not ffb_jl.strip().startswith(("@", "#"))
+                ):
                     ffb_end = ffb_j
                     break
             body = "".join(ffb_lines[ffb_start:ffb_end])
@@ -1041,15 +1321,25 @@ class ChatAgent:
             rl_level = str(inp.get("level", "all"))
             out = ""
             if rl_path and ("/" in rl_path or rl_path.endswith(".log")):
-                log_file = root / rl_path if not Path(rl_path).is_absolute() else Path(rl_path)
+                log_file = (
+                    root / rl_path if not Path(rl_path).is_absolute() else Path(rl_path)
+                )
                 if log_file.exists():
-                    r = subprocess.run(["tail", f"-{rl_lines}", str(log_file)], capture_output=True, text=True)
+                    r = subprocess.run(
+                        ["tail", f"-{rl_lines}", str(log_file)],
+                        capture_output=True,
+                        text=True,
+                    )
                     out = r.stdout
                 else:
                     return f"[ERROR] Log file not found: {rl_path}"
             elif rl_path:
-                r = subprocess.run(["journalctl", "-u", rl_path, f"-n{rl_lines}", "--no-pager"],
-                                    capture_output=True, text=True, timeout=10)
+                r = subprocess.run(
+                    ["journalctl", "-u", rl_path, f"-n{rl_lines}", "--no-pager"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
                 out = r.stdout or r.stderr
             else:
                 log_dirs = [root / "logs", root / "backend" / "logs", Path("/tmp")]
@@ -1060,10 +1350,18 @@ class ChatAgent:
                 if not found_logs:
                     return "(no log files found — specify path or service name)"
                 newest = max(found_logs, key=lambda p: p.stat().st_mtime)
-                r = subprocess.run(["tail", f"-{rl_lines}", str(newest)], capture_output=True, text=True)
+                r = subprocess.run(
+                    ["tail", f"-{rl_lines}", str(newest)],
+                    capture_output=True,
+                    text=True,
+                )
                 out = f"From {newest}:\n" + r.stdout
             if rl_level != "all":
-                out = "\n".join(line for line in out.splitlines() if rl_level.upper() in line.upper())
+                out = "\n".join(
+                    line
+                    for line in out.splitlines()
+                    if rl_level.upper() in line.upper()
+                )
             return out[:5000] or "(no log entries)"
 
         if tool_name == "analyze_error":
@@ -1071,7 +1369,10 @@ class ChatAgent:
             ae_lines = ae_error.strip().splitlines()
             exception_line = ""
             for ae_line in reversed(ae_lines):
-                if any(x in ae_line for x in ("Error:", "Exception:", "Warning:", "Traceback")):
+                if any(
+                    x in ae_line
+                    for x in ("Error:", "Exception:", "Warning:", "Traceback")
+                ):
                     exception_line = ae_line
                     break
             ae_frames: list[str] = []
@@ -1079,8 +1380,14 @@ class ChatAgent:
             while ae_i < len(ae_lines):
                 ae_line = ae_lines[ae_i]
                 if ae_line.strip().startswith("File ") and "line " in ae_line:
-                    if not any(x in ae_line for x in ("site-packages", ".venv", "lib/python")):
-                        code_line = ae_lines[ae_i + 1].strip() if ae_i + 1 < len(ae_lines) else ""
+                    if not any(
+                        x in ae_line for x in ("site-packages", ".venv", "lib/python")
+                    ):
+                        code_line = (
+                            ae_lines[ae_i + 1].strip()
+                            if ae_i + 1 < len(ae_lines)
+                            else ""
+                        )
                         ae_frames.append(f"  {ae_line.strip()}\n    → {code_line}")
                     ae_i += 2
                 else:
@@ -1094,19 +1401,31 @@ class ChatAgent:
             ae_low = ae_error.lower()
             suggestions: list[str] = []
             if "modulenotfounderror" in ae_low or "importerror" in ae_low:
-                suggestions.append("→ Missing dependency — run: pip install -r requirements.txt")
+                suggestions.append(
+                    "→ Missing dependency — run: pip install -r requirements.txt"
+                )
             elif "attributeerror" in ae_low:
-                suggestions.append("→ Object doesn't have this attribute — check spelling and type")
+                suggestions.append(
+                    "→ Object doesn't have this attribute — check spelling and type"
+                )
             elif "typeerror" in ae_low:
-                suggestions.append("→ Wrong argument type/count — check function signature")
+                suggestions.append(
+                    "→ Wrong argument type/count — check function signature"
+                )
             elif "keyerror" in ae_low:
                 suggestions.append("→ Key not found — use .get() or check key exists")
             elif "filenotfounderror" in ae_low:
-                suggestions.append("→ Path doesn't exist — verify path and working directory")
+                suggestions.append(
+                    "→ Path doesn't exist — verify path and working directory"
+                )
             elif "connectionrefusederror" in ae_low or "connection refused" in ae_low:
-                suggestions.append("→ Service not running — check if DB/Redis/backend is started")
+                suggestions.append(
+                    "→ Service not running — check if DB/Redis/backend is started"
+                )
             elif "syntaxerror" in ae_low:
-                suggestions.append("→ Python syntax error — check brackets, colons, indentation")
+                suggestions.append(
+                    "→ Python syntax error — check brackets, colons, indentation"
+                )
             if suggestions:
                 ae_result.append("\nSuggestions:")
                 ae_result.extend(suggestions)
@@ -1116,6 +1435,7 @@ class ChatAgent:
 
         if tool_name == "run_sql":
             from app.config import get_settings as _get_settings
+
             rs_query = str(inp["query"])
             rs_params: list[str] = list(inp.get("params") or [])
             for rs_i, rs_p in enumerate(rs_params, 1):
@@ -1126,11 +1446,13 @@ class ChatAgent:
             return await asyncio.to_thread(
                 _run_subprocess,
                 f"psql '{rs_db_url}' -c {__import__('shlex').quote(rs_query)} --no-password 2>&1",
-                repo, 30,
+                repo,
+                30,
             )
 
         if tool_name == "inspect_schema":
             from app.config import get_settings as _get_settings
+
             is_table = str(inp.get("table", ""))
             is_db_url = str(getattr(_get_settings(), "database_url", ""))
             if not is_db_url:
@@ -1149,31 +1471,40 @@ class ChatAgent:
             return await asyncio.to_thread(
                 _run_subprocess,
                 f"psql '{is_db_url}' -c {__import__('shlex').quote(is_q)} --no-password 2>&1",
-                repo, 10,
+                repo,
+                10,
             )
 
         # ========== BATCH 8 — Docker tools ==========
 
         if tool_name == "docker_ps":
             show_all = bool(inp.get("all", False))
-            cmd_s = "docker ps --format 'table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}'" + (" -a" if show_all else "")
+            cmd_s = (
+                "docker ps --format 'table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}'"
+                + (" -a" if show_all else "")
+            )
             return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 10)
 
         if tool_name == "docker_logs":
             dl_container = str(inp["container"])
             dock_lines = int(inp.get("lines", 50))
             return await asyncio.to_thread(
-                _run_subprocess, f"docker logs --tail {dock_lines} {dl_container} 2>&1", repo, 15
+                _run_subprocess,
+                f"docker logs --tail {dock_lines} {dl_container} 2>&1",
+                repo,
+                15,
             )
 
         if tool_name == "docker_exec":
             import shlex as _shlex
+
             de_container = str(inp["container"])
             de_command = str(inp["command"])
             return await asyncio.to_thread(
                 _run_subprocess,
                 f"docker exec {de_container} sh -c {_shlex.quote(de_command)} 2>&1",
-                repo, 30,
+                repo,
+                30,
             )
 
         if tool_name == "docker_compose":
@@ -1203,15 +1534,26 @@ class ChatAgent:
                 r"(AKIA[0-9A-Z]{16})",
                 r"(ghp_[a-zA-Z0-9]{36})",
             ]
-            ss_exclude = ["--exclude-dir=node_modules", "--exclude-dir=.git", "--exclude-dir=.venv",
-                          "--exclude-dir=__pycache__", "--exclude=*.env", "--exclude=.env*", "--exclude=*.example"]
+            ss_exclude = [
+                "--exclude-dir=node_modules",
+                "--exclude-dir=.git",
+                "--exclude-dir=.venv",
+                "--exclude-dir=__pycache__",
+                "--exclude=*.env",
+                "--exclude=.env*",
+                "--exclude=*.example",
+            ]
             ss_findings: list[str] = []
             for ss_pat in ss_patterns:
                 cmd_s = f"grep -rn -E {__import__('shlex').quote(ss_pat)} {ss_root} {' '.join(ss_exclude)} 2>/dev/null || true"
                 result = await asyncio.to_thread(_run_subprocess, cmd_s, repo, 15)
                 if result and result != "(no output)":
                     ss_findings.append(result)
-            return "⚠️  Potential secrets found:\n\n" + "\n\n".join(ss_findings)[:5000] if ss_findings else "✅ No hardcoded secrets detected."
+            return (
+                "⚠️  Potential secrets found:\n\n" + "\n\n".join(ss_findings)[:5000]
+                if ss_findings
+                else "✅ No hardcoded secrets detected."
+            )
 
         # ========== BATCH 10 — AST Engine ==========
 
@@ -1235,7 +1577,9 @@ class ChatAgent:
             cg_fp = root / cg_rel
             if not cg_fp.exists():
                 return f"[ERROR] File not found: {cg_rel}"
-            return await asyncio.to_thread(_ast_engine.build_call_graph, str(cg_fp), cg_fn)
+            return await asyncio.to_thread(
+                _ast_engine.build_call_graph, str(cg_fp), cg_fn
+            )
 
         if tool_name == "dead_code_detect":
             dcd_d = str(inp.get("directory", ""))
@@ -1245,7 +1589,9 @@ class ChatAgent:
         if tool_name == "circular_dep_detect":
             cdd_d = str(inp.get("directory", ""))
             cdd_target = str(root / cdd_d) if cdd_d else repo
-            return await asyncio.to_thread(_ast_engine.detect_circular_imports, cdd_target)
+            return await asyncio.to_thread(
+                _ast_engine.detect_circular_imports, cdd_target
+            )
 
         if tool_name == "rename_symbol":
             rsym_old = str(inp["old_name"])
@@ -1255,7 +1601,9 @@ class ChatAgent:
             rsym_target = str(root / rsym_d) if rsym_d else repo
             if rsym_old == rsym_new:
                 return "[ERROR] old_name and new_name are the same"
-            return await asyncio.to_thread(_ast_engine.rename_symbol, rsym_old, rsym_new, rsym_target, rsym_pat)
+            return await asyncio.to_thread(
+                _ast_engine.rename_symbol, rsym_old, rsym_new, rsym_target, rsym_pat
+            )
 
         # ========== BATCH 11 — Git extras ==========
 
@@ -1263,9 +1611,7 @@ class ChatAgent:
             grb_onto = str(inp["onto"])
             if bool(inp.get("interactive", False)):
                 return "[BLOCKED] Interactive rebase requires a TTY. Run 'git rebase -i' manually in a terminal."
-            return await asyncio.to_thread(
-                _git, ["rebase", grb_onto], repo, 60
-            )
+            return await asyncio.to_thread(_git, ["rebase", grb_onto], repo, 60)
 
         if tool_name == "git_cherry_pick":
             gcp_hash = str(inp["commit_hash"])
@@ -1280,6 +1626,7 @@ class ChatAgent:
         if tool_name == "read_output":
             import fcntl as _fcntl2
             import os as _os2
+
             ro_pid = int(inp["pid"])
             ro_max_lines = int(inp.get("lines", 50))
             ro_proc = self._background_processes.get(ro_pid)
@@ -1300,18 +1647,27 @@ class ChatAgent:
                         ro_lines.extend(ro_chunk.splitlines())
                 except (IOError, BlockingIOError, TypeError):
                     pass
-            return "\n".join(ro_lines[-ro_max_lines:]) if ro_lines else f"(no output yet from PID {ro_pid})"
+            return (
+                "\n".join(ro_lines[-ro_max_lines:])
+                if ro_lines
+                else f"(no output yet from PID {ro_pid})"
+            )
 
         if tool_name == "run_node":
             import shlex as _shlex2
+
             rnd_code = str(inp["code"])
             rnd_timeout = int(inp.get("timeout", 30))
             rnd_node_chk = await asyncio.to_thread(
-                lambda: subprocess.run(["which", "node"], capture_output=True, text=True, timeout=5)
+                lambda: subprocess.run(
+                    ["which", "node"], capture_output=True, text=True, timeout=5
+                )
             )
             if rnd_node_chk.returncode != 0:
                 rnd_node_chk2 = await asyncio.to_thread(
-                    lambda: subprocess.run(["which", "nodejs"], capture_output=True, text=True, timeout=5)
+                    lambda: subprocess.run(
+                        ["which", "nodejs"], capture_output=True, text=True, timeout=5
+                    )
                 )
                 if rnd_node_chk2.returncode != 0:
                     return "[ERROR] Node.js not found. Install via nvm or your package manager."
@@ -1326,9 +1682,9 @@ class ChatAgent:
             rscr_interp = str(inp.get("interpreter", "auto"))
             if rscr_interp == "auto":
                 rscr_interp = (
-                    "python3" if rscr_fp.suffix == ".py"
-                    else "node" if rscr_fp.suffix in (".js", ".mjs", ".cjs")
-                    else "bash"
+                    "python3"
+                    if rscr_fp.suffix == ".py"
+                    else "node" if rscr_fp.suffix in (".js", ".mjs", ".cjs") else "bash"
                 )
             rscr_cmd = f"{rscr_interp} {str(rscr_fp)} 2>&1"
             return await asyncio.to_thread(_run_subprocess, rscr_cmd, repo, 120)
@@ -1343,6 +1699,7 @@ class ChatAgent:
                 dbld_cmd_parts += ["-f", str(root / str(dbld_df))]
             dbld_cmd_parts.append(dbld_ctx_path)
             import shlex as _shlex3
+
             dbld_cmd_str = " ".join(_shlex3.quote(c) for c in dbld_cmd_parts) + " 2>&1"
             return await asyncio.to_thread(_run_subprocess, dbld_cmd_str, repo, 600)
 
@@ -1357,7 +1714,8 @@ class ChatAgent:
             frt_method = str(inp.get("method", "")).upper()
             frt_path_pat = str(inp.get("path_pattern", ""))
             frt_pat = (
-                rf"@(router|app)\.{frt_method.lower()}\(" if frt_method
+                rf"@(router|app)\.{frt_method.lower()}\("
+                if frt_method
                 else r"@(router|app)\.(get|post|put|delete|patch|head|options)\("
             )
             frt_cmd = (
@@ -1367,15 +1725,20 @@ class ChatAgent:
             )
             frt_result = await asyncio.to_thread(_run_subprocess, frt_cmd, repo, 15)
             if frt_path_pat:
-                frt_result = "\n".join(ln for ln in frt_result.splitlines() if frt_path_pat in ln)
-            return frt_result[:5000] if frt_result.strip() else (
-                "No routes found" + (f" for {frt_method}" if frt_method else "")
+                frt_result = "\n".join(
+                    ln for ln in frt_result.splitlines() if frt_path_pat in ln
+                )
+            return (
+                frt_result[:5000]
+                if frt_result.strip()
+                else ("No routes found" + (f" for {frt_method}" if frt_method else ""))
             )
 
         if tool_name == "find_api":
             fapi_name = str(inp.get("name", ""))
             fapi_pat = (
-                fapi_name if fapi_name
+                fapi_name
+                if fapi_name
                 else r"@(router|app)\.(get|post|put|delete|patch)\("
             )
             fapi_cmd = (
@@ -1384,12 +1747,18 @@ class ChatAgent:
                 "--exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=__pycache__ 2>/dev/null || true"
             )
             fapi_result = await asyncio.to_thread(_run_subprocess, fapi_cmd, repo, 15)
-            return fapi_result[:5000] if fapi_result.strip() else (
-                "No API definitions found" + (f" matching '{fapi_name}'" if fapi_name else "")
+            return (
+                fapi_result[:5000]
+                if fapi_result.strip()
+                else (
+                    "No API definitions found"
+                    + (f" matching '{fapi_name}'" if fapi_name else "")
+                )
             )
 
         if tool_name == "find_sql":
             import shlex as _shlex4
+
             fsql_kw = str(inp.get("keyword", "")).upper()
             if fsql_kw:
                 # -i case-insensitive, -w whole-word; avoid (?i) inline flag
@@ -1405,7 +1774,9 @@ class ChatAgent:
                     "--exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=__pycache__ 2>/dev/null || true"
                 )
             fsql_result = await asyncio.to_thread(_run_subprocess, fsql_cmd, repo, 15)
-            return fsql_result[:5000] if fsql_result.strip() else "No SQL statements found"
+            return (
+                fsql_result[:5000] if fsql_result.strip() else "No SQL statements found"
+            )
 
         if tool_name == "find_test":
             ftest_fn = str(inp["function_name"])
@@ -1416,7 +1787,11 @@ class ChatAgent:
                 "--exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=__pycache__ 2>/dev/null || true"
             )
             ftest_result = await asyncio.to_thread(_run_subprocess, ftest_cmd, repo, 15)
-            return ftest_result[:5000] if ftest_result.strip() else f"No tests found for '{ftest_fn}'"
+            return (
+                ftest_result[:5000]
+                if ftest_result.strip()
+                else f"No tests found for '{ftest_fn}'"
+            )
 
         if tool_name == "find_config":
             fcfg_key = str(inp["key"])
@@ -1435,8 +1810,14 @@ class ChatAgent:
                     "--include=*.yaml --include=*.yml --include=*.toml "
                     "--exclude-dir=node_modules --exclude-dir=.venv 2>/dev/null || true"
                 )
-                fcfg_result = await asyncio.to_thread(_run_subprocess, fcfg_cmd2, repo, 15)
-            return fcfg_result[:5000] if fcfg_result.strip() else f"'{fcfg_key}' not found in config files"
+                fcfg_result = await asyncio.to_thread(
+                    _run_subprocess, fcfg_cmd2, repo, 15
+                )
+            return (
+                fcfg_result[:5000]
+                if fcfg_result.strip()
+                else f"'{fcfg_key}' not found in config files"
+            )
 
         # ========== BATCH 14 — Monitoring ==========
 
@@ -1449,7 +1830,11 @@ class ChatAgent:
                 if len(cpu_fields) >= 5:
                     cpu_total = sum(int(f) for f in cpu_fields[1:] if f.isdigit())
                     cpu_idle = int(cpu_fields[4])
-                    cpu_pct = round((cpu_total - cpu_idle) / cpu_total * 100, 1) if cpu_total else 0
+                    cpu_pct = (
+                        round((cpu_total - cpu_idle) / cpu_total * 100, 1)
+                        if cpu_total
+                        else 0
+                    )
                     return f"CPU: {cpu_pct}% used"
             return f"CPU: {cpu_raw[:300]}"
 
@@ -1459,10 +1844,11 @@ class ChatAgent:
 
         if tool_name == "disk_usage":
             import shutil as _shu2
+
             disk_path = str(inp.get("path", "")) or repo
             try:
                 dsk_u = _shu2.disk_usage(disk_path)
-                dsk_gb = 1024 ** 3
+                dsk_gb = 1024**3
                 dsk_pct = round(dsk_u.used / dsk_u.total * 100, 1) if dsk_u.total else 0
                 return (
                     f"Disk usage for {disk_path}:\n"
@@ -1475,25 +1861,35 @@ class ChatAgent:
 
         if tool_name == "health_check":
             from app.config import get_settings as _gs2
+
             hc_svc = str(inp.get("service", "all"))
             hc_settings = _gs2()
             hc_port = getattr(hc_settings, "port", 8000)
             hc_res: list[str] = []
             if hc_svc in ("all", "backend"):
                 hc_curl = f"curl -s -o /dev/null -w '%{{http_code}}' http://localhost:{hc_port}/health 2>/dev/null || echo 000"
-                hc_code = (await asyncio.to_thread(_run_subprocess, hc_curl, repo, 5)).strip()
-                hc_res.append(f"Backend (:{hc_port}/health): {'✅ UP' if hc_code == '200' else f'⚠️ HTTP {hc_code}'}")
+                hc_code = (
+                    await asyncio.to_thread(_run_subprocess, hc_curl, repo, 5)
+                ).strip()
+                hc_res.append(
+                    f"Backend (:{hc_port}/health): {'✅ UP' if hc_code == '200' else f'⚠️ HTTP {hc_code}'}"
+                )
             if hc_svc in ("all", "db"):
                 hc_db_url = getattr(hc_settings, "database_url", "")
                 if hc_db_url:
-                    hc_pg = await asyncio.to_thread(_run_subprocess, f"pg_isready -d '{hc_db_url}' 2>&1", repo, 5)
-                    hc_res.append(f"Database: {'✅ UP' if 'accepting' in hc_pg else f'❌ {hc_pg[:80]}'}")
+                    hc_pg = await asyncio.to_thread(
+                        _run_subprocess, f"pg_isready -d '{hc_db_url}' 2>&1", repo, 5
+                    )
+                    hc_res.append(
+                        f"Database: {'✅ UP' if 'accepting' in hc_pg else f'❌ {hc_pg[:80]}'}"
+                    )
                 else:
                     hc_res.append("Database: (DATABASE_URL not configured)")
             return "\n".join(hc_res) if hc_res else "No services checked"
 
         if tool_name == "task_progress":
             from app.config import get_settings as _gs3
+
             tprog_tid = inp.get("task_id")
             tprog_lim = int(inp.get("limit", 10))
             tp_db_url = getattr(_gs3(), "database_url", "")
@@ -1522,9 +1918,11 @@ class ChatAgent:
             rcl_base_i = 0
             for rcl_idx, rcl_ln in enumerate(rcl_lines):
                 rcl_s = rcl_ln.strip()
-                if (rcl_s.startswith(f"class {rcl_name}(")
-                        or rcl_s.startswith(f"class {rcl_name}:")
-                        or rcl_s == f"class {rcl_name}"):
+                if (
+                    rcl_s.startswith(f"class {rcl_name}(")
+                    or rcl_s.startswith(f"class {rcl_name}:")
+                    or rcl_s == f"class {rcl_name}"
+                ):
                     rcl_start = rcl_idx
                     rcl_base_i = len(rcl_ln) - len(rcl_ln.lstrip())
                     break
@@ -1536,7 +1934,11 @@ class ChatAgent:
                 if rcl_jl2.strip() == "":
                     continue
                 rcl_ji2 = len(rcl_jl2) - len(rcl_jl2.lstrip())
-                if rcl_ji2 <= rcl_base_i and rcl_jl2.strip() and not rcl_jl2.strip().startswith(("@", "#")):
+                if (
+                    rcl_ji2 <= rcl_base_i
+                    and rcl_jl2.strip()
+                    and not rcl_jl2.strip().startswith(("@", "#"))
+                ):
                     rcl_end_i = rcl_j2
                     break
             rcl_before = "".join(rcl_lines[:rcl_start])
@@ -1563,15 +1965,18 @@ class ChatAgent:
 
         if tool_name == "generate_patch":
             import difflib as _dl
+
             gpatch_a = str(inp.get("content_a", ""))
             gpatch_b = str(inp.get("content_b", ""))
             gpatch_fn = str(inp.get("filename", "file"))
-            gpatch_diff = list(_dl.unified_diff(
-                gpatch_a.splitlines(keepends=True),
-                gpatch_b.splitlines(keepends=True),
-                fromfile=f"a/{gpatch_fn}",
-                tofile=f"b/{gpatch_fn}",
-            ))
+            gpatch_diff = list(
+                _dl.unified_diff(
+                    gpatch_a.splitlines(keepends=True),
+                    gpatch_b.splitlines(keepends=True),
+                    fromfile=f"a/{gpatch_fn}",
+                    tofile=f"b/{gpatch_fn}",
+                )
+            )
             return "".join(gpatch_diff) if gpatch_diff else "(no differences)"
 
         # ========== BATCH 16 — DB extras ==========
@@ -1579,6 +1984,7 @@ class ChatAgent:
         if tool_name == "explain_query":
             expq_sql = str(inp["query"]).strip().rstrip(";")
             from app.config import get_settings as _gs4
+
             expq_db = getattr(_gs4(), "database_url", "")
             if not expq_db:
                 return "[ERROR] DATABASE_URL not set"
@@ -1588,7 +1994,9 @@ class ChatAgent:
 
         if tool_name == "run_migration":
             rmig_dir = str(inp.get("direction", "upgrade"))
-            rmig_rev = str(inp.get("revision", "head" if rmig_dir == "upgrade" else "-1"))
+            rmig_rev = str(
+                inp.get("revision", "head" if rmig_dir == "upgrade" else "-1")
+            )
             rmig_confirmed = await self.session.request_confirmation(
                 action_id=str(uuid.uuid4()),
                 description=f"alembic {rmig_dir} {rmig_rev}",
@@ -1596,9 +2004,13 @@ class ChatAgent:
             )
             if not rmig_confirmed:
                 return "[CANCELLED] run_migration cancelled by user"
-            rmig_backend = str(root / "backend") if (root / "backend").exists() else repo
+            rmig_backend = (
+                str(root / "backend") if (root / "backend").exists() else repo
+            )
             activate = f"source {rmig_backend}/.venv/bin/activate 2>/dev/null || true"
-            rmig_cmd = f"{activate} && cd {rmig_backend} && alembic {rmig_dir} {rmig_rev} 2>&1"
+            rmig_cmd = (
+                f"{activate} && cd {rmig_backend} && alembic {rmig_dir} {rmig_rev} 2>&1"
+            )
             return await asyncio.to_thread(_run_subprocess, rmig_cmd, rmig_backend, 120)
 
         if tool_name == "seed_database":
@@ -1658,20 +2070,26 @@ class ChatAgent:
                             delta = event.delta
                             if isinstance(delta, TextDelta):
                                 full_text += delta.text
-                                await self.session.push({"type": "text_delta", "text": delta.text})
+                                await self.session.push(
+                                    {"type": "text_delta", "text": delta.text}
+                                )
 
                     final = await stream.get_final_message()
                     stop_reason = final.stop_reason or "end_turn"
                     for block in final.content:
                         if block.type == "tool_use":
-                            tool_uses.append({
-                                "id": block.id,
-                                "name": block.name,
-                                "input": block.input,
-                            })
+                            tool_uses.append(
+                                {
+                                    "id": block.id,
+                                    "name": block.name,
+                                    "input": block.input,
+                                }
+                            )
 
             except anthropic.APIStatusError as e:
-                await self.session.push({"type": "error", "message": f"API error: {e.message}"})
+                await self.session.push(
+                    {"type": "error", "message": f"API error: {e.message}"}
+                )
                 break
             except Exception as e:
                 await self.session.push({"type": "error", "message": str(e)})
@@ -1683,9 +2101,18 @@ class ChatAgent:
             if full_text:
                 turn_content.append({"type": "text", "text": full_text})
             for tu in tool_uses:
-                turn_content.append({"type": "tool_use", "id": tu["id"], "name": tu["name"], "input": tu["input"]})
+                turn_content.append(
+                    {
+                        "type": "tool_use",
+                        "id": tu["id"],
+                        "name": tu["name"],
+                        "input": tu["input"],
+                    }
+                )
             if turn_content:
-                self.session.history.append({"role": "assistant", "content": turn_content})
+                self.session.history.append(
+                    {"role": "assistant", "content": turn_content}
+                )
 
             if stop_reason != "tool_use" or not tool_uses:
                 break
@@ -1693,29 +2120,35 @@ class ChatAgent:
             # Execute tools and collect results
             tool_results: list[dict[str, Any]] = []
             for tu in tool_uses:
-                await self.session.push({
-                    "type": "tool_call",
-                    "tool_name": tu["name"],
-                    "tool_input": tu["input"],
-                    "tool_use_id": tu["id"],
-                })
+                await self.session.push(
+                    {
+                        "type": "tool_call",
+                        "tool_name": tu["name"],
+                        "tool_input": tu["input"],
+                        "tool_use_id": tu["id"],
+                    }
+                )
                 try:
                     result = await self._execute_tool(tu["name"], tu["input"])
                 except Exception as e:
                     result = f"[ERROR] Tool {tu['name']} failed: {e}"
                     logger.exception("Tool %s failed", tu["name"])
 
-                await self.session.push({
-                    "type": "tool_result",
-                    "tool_name": tu["name"],
-                    "tool_use_id": tu["id"],
-                    "output": result[:3000],
-                })
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tu["id"],
-                    "content": result,
-                })
+                await self.session.push(
+                    {
+                        "type": "tool_result",
+                        "tool_name": tu["name"],
+                        "tool_use_id": tu["id"],
+                        "output": result[:3000],
+                    }
+                )
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tu["id"],
+                        "content": result,
+                    }
+                )
 
             self.session.history.append({"role": "user", "content": tool_results})
 

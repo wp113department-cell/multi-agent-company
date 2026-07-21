@@ -8,6 +8,7 @@ Tests cover:
   - CI workflow file: exists and has required job keys
   - vercel.json: exists and has correct top-level keys
 """
+
 from __future__ import annotations
 
 import json
@@ -25,51 +26,65 @@ _WORKFLOWS = _ROOT / ".github" / "workflows"
 # Config — new Gap Day 4 fields
 # ===========================================================================
 
+
 class TestConfigGapDay4Fields:
     def setup_method(self) -> None:
         import importlib
         import app.config as cfg_mod
+
         importlib.reload(cfg_mod)
         cfg_mod._settings = None  # type: ignore[attr-defined]
 
     def test_redis_url_has_default(self) -> None:
         from app.config import Settings
+
         fields = Settings.model_fields
         assert "redis_url" in fields
         assert "redis" in (fields["redis_url"].default or "").lower()
 
     def test_redis_streams_enabled_defaults_false(self) -> None:
         from app.config import Settings
+
         assert Settings.model_fields["redis_streams_enabled"].default is False
 
     def test_redis_consumer_group_has_default(self) -> None:
         from app.config import Settings
-        assert Settings.model_fields["redis_consumer_group"].default == "gridiron-consumers"
+
+        assert (
+            Settings.model_fields["redis_consumer_group"].default
+            == "gridiron-consumers"
+        )
 
     def test_artifact_backend_defaults_to_db(self) -> None:
         from app.config import Settings
+
         assert Settings.model_fields["artifact_backend"].default == "db"
 
     def test_s3_bucket_defaults_empty(self) -> None:
         from app.config import Settings
+
         assert Settings.model_fields["s3_bucket"].default == ""
 
     def test_s3_region_defaults_us_east_1(self) -> None:
         from app.config import Settings
+
         assert Settings.model_fields["s3_region"].default == "us-east-1"
 
     def test_s3_key_prefix_has_default(self) -> None:
         from app.config import Settings
+
         prefix = Settings.model_fields["s3_key_prefix"].default
         assert prefix and "gridiron" in prefix
 
     def test_aws_keys_default_empty(self) -> None:
         from app.config import Settings
+
         assert Settings.model_fields["aws_access_key_id"].default == ""
         assert Settings.model_fields["aws_secret_access_key"].default == ""
 
     def test_queue_backend_still_has_default(self) -> None:
         from app.config import Settings
+
         assert Settings.model_fields["queue_backend"].default == "asyncio"
 
 
@@ -77,47 +92,57 @@ class TestConfigGapDay4Fields:
 # RQ Queue Adapter — module structure (no real Redis)
 # ===========================================================================
 
+
 class TestRQAdapterModule:
     def test_module_importable(self) -> None:
         import app.queue.rq_adapter  # noqa: F401
 
     def test_rq_adapter_class_exists(self) -> None:
         from app.queue.rq_adapter import RQQueueAdapter
+
         assert callable(RQQueueAdapter)
 
     def test_get_rq_adapter_is_callable(self) -> None:
         from app.queue.rq_adapter import get_rq_adapter
+
         assert callable(get_rq_adapter)
 
     def test_reset_rq_adapter_is_callable(self) -> None:
         from app.queue.rq_adapter import reset_rq_adapter
+
         assert callable(reset_rq_adapter)
 
     def test_reset_clears_singleton(self) -> None:
         from app.queue import rq_adapter
+
         rq_adapter.reset_rq_adapter()
         assert rq_adapter._adapter_instance is None
 
     def test_class_has_enqueue_method(self) -> None:
         from app.queue.rq_adapter import RQQueueAdapter
+
         assert hasattr(RQQueueAdapter, "enqueue")
         assert callable(RQQueueAdapter.enqueue)
 
     def test_class_has_enqueue_agent_method(self) -> None:
         from app.queue.rq_adapter import RQQueueAdapter
+
         assert hasattr(RQQueueAdapter, "enqueue_agent")
         assert callable(RQQueueAdapter.enqueue_agent)
 
     def test_class_has_queue_sizes_method(self) -> None:
         from app.queue.rq_adapter import RQQueueAdapter
+
         assert hasattr(RQQueueAdapter, "queue_sizes")
 
     def test_class_has_ping_method(self) -> None:
         from app.queue.rq_adapter import RQQueueAdapter
+
         assert hasattr(RQQueueAdapter, "ping")
 
     def test_default_job_timeout_is_set(self) -> None:
         from app.queue.rq_adapter import _DEFAULT_JOB_TIMEOUT
+
         assert _DEFAULT_JOB_TIMEOUT > 0
         assert _DEFAULT_JOB_TIMEOUT <= 3600  # at most 1 hour
 
@@ -126,9 +151,11 @@ class TestRQAdapterModule:
 # Redis Streams Adapter — no-op when disabled
 # ===========================================================================
 
+
 class TestRedisStreamsAdapter:
     def setup_method(self) -> None:
         from app.event_bus import redis_streams
+
         redis_streams.reset_client()
 
     def test_module_importable(self) -> None:
@@ -136,28 +163,34 @@ class TestRedisStreamsAdapter:
 
     def test_publish_to_stream_is_callable(self) -> None:
         from app.event_bus.redis_streams import publish_to_stream
+
         assert callable(publish_to_stream)
 
     def test_read_pending_is_callable(self) -> None:
         from app.event_bus.redis_streams import read_pending
+
         assert callable(read_pending)
 
     def test_acknowledge_is_callable(self) -> None:
         from app.event_bus.redis_streams import acknowledge
+
         assert callable(acknowledge)
 
     def test_stream_length_is_callable(self) -> None:
         from app.event_bus.redis_streams import stream_length
+
         assert callable(stream_length)
 
     def test_reset_client_is_callable(self) -> None:
         from app.event_bus.redis_streams import reset_client
+
         assert callable(reset_client)
 
     def test_publish_noop_when_disabled(self) -> None:
         from app.event_bus.redis_streams import publish_to_stream
         from app.event_bus.models import GridironEvent
         import uuid
+
         # redis_streams_enabled=False by default — must not raise
         event = GridironEvent(
             event_id=str(uuid.uuid4()),
@@ -171,23 +204,28 @@ class TestRedisStreamsAdapter:
 
     def test_read_pending_noop_when_disabled(self) -> None:
         from app.event_bus.redis_streams import read_pending
+
         result = read_pending("consumer-1")
         assert result == []
 
     def test_stream_length_zero_when_disabled(self) -> None:
         from app.event_bus.redis_streams import stream_length
+
         assert stream_length() == 0
 
     def test_acknowledge_noop_when_disabled(self) -> None:
         from app.event_bus.redis_streams import acknowledge
+
         acknowledge("1234567890-0")  # must not raise
 
     def test_stream_key_constant(self) -> None:
         from app.event_bus.redis_streams import _STREAM_KEY
+
         assert _STREAM_KEY == "gridiron:events"
 
     def test_maxlen_constant(self) -> None:
         from app.event_bus.redis_streams import _MAXLEN
+
         assert _MAXLEN > 1000
 
 
@@ -195,9 +233,11 @@ class TestRedisStreamsAdapter:
 # S3 Artifact Store — module structure and key generation
 # ===========================================================================
 
+
 class TestS3Store:
     def setup_method(self) -> None:
         from app.artifacts import s3_store
+
         s3_store.reset_client()
 
     def test_module_importable(self) -> None:
@@ -205,31 +245,38 @@ class TestS3Store:
 
     def test_save_artifact_s3_callable(self) -> None:
         from app.artifacts.s3_store import save_artifact_s3
+
         assert callable(save_artifact_s3)
 
     def test_load_artifact_s3_callable(self) -> None:
         from app.artifacts.s3_store import load_artifact_s3
+
         assert callable(load_artifact_s3)
 
     def test_list_artifacts_s3_callable(self) -> None:
         from app.artifacts.s3_store import list_artifacts_s3
+
         assert callable(list_artifacts_s3)
 
     def test_delete_artifact_s3_callable(self) -> None:
         from app.artifacts.s3_store import delete_artifact_s3
+
         assert callable(delete_artifact_s3)
 
     def test_reset_client_callable(self) -> None:
         from app.artifacts.s3_store import reset_client
+
         assert callable(reset_client)
 
     def test_reset_clears_singleton(self) -> None:
         from app.artifacts import s3_store
+
         s3_store.reset_client()
         assert s3_store._s3_client is None
 
     def test_make_key_format(self) -> None:
         from app.artifacts.s3_store import _make_key
+
         key = _make_key(task_id=42, artifact_type="bug_fix", artifact_id="abc123")
         assert "42" in key
         assert "bug_fix" in key
@@ -238,12 +285,14 @@ class TestS3Store:
 
     def test_make_key_includes_prefix(self) -> None:
         from app.artifacts.s3_store import _make_key
+
         key = _make_key(task_id=1, artifact_type="x", artifact_id="y")
         assert "gridiron" in key
 
     def test_save_raises_without_bucket(self) -> None:
         from app.artifacts.s3_store import save_artifact_s3
         import os
+
         # Ensure s3_bucket is empty
         os.environ.pop("S3_BUCKET", None)
         # This should raise ValueError because s3_bucket is empty and no real S3 client
@@ -255,9 +304,11 @@ class TestS3Store:
 # CI Workflow — file structure validation
 # ===========================================================================
 
+
 class TestCIWorkflow:
     def _load(self) -> dict[str, Any]:
         import yaml
+
         ci_path = _WORKFLOWS / "ci.yml"
         assert ci_path.exists(), f"ci.yml not found at {ci_path}"
         with ci_path.open() as f:
@@ -328,6 +379,7 @@ class TestCIWorkflow:
 # Vercel config
 # ===========================================================================
 
+
 class TestVercelConfig:
     def _load(self) -> dict[str, Any]:
         vercel_path = _ROOT / "vercel.json"
@@ -364,8 +416,6 @@ class TestVercelConfig:
         data = self._load()
         assert "headers" in data
         header_keys = {
-            h["key"]
-            for entry in data["headers"]
-            for h in entry.get("headers", [])
+            h["key"] for entry in data["headers"] for h in entry.get("headers", [])
         }
         assert "X-Frame-Options" in header_keys

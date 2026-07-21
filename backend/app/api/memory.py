@@ -1,4 +1,5 @@
 """Engineering Memory API — GET /api/memory/patterns (read-only)."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -20,7 +21,10 @@ _VALID_CATEGORIES = {"task", "architecture", "failure", "learning"}
 @router.get("/patterns")
 async def get_memory_patterns(
     db: AsyncSession = Depends(get_db),
-    category: str | None = Query(default=None, description="Filter by category: task | architecture | failure | learning"),
+    category: str | None = Query(
+        default=None,
+        description="Filter by category: task | architecture | failure | learning",
+    ),
 ) -> dict[str, Any]:
     """Aggregate view of engineering memory: outcome distribution and recent embeddings.
 
@@ -28,7 +32,9 @@ async def get_memory_patterns(
     """
     base_q = select(MemoryEmbedding)
     count_q = select(func.count(MemoryEmbedding.id))
-    dist_q = select(MemoryEmbedding.outcome, func.count(MemoryEmbedding.id).label("count")).group_by(MemoryEmbedding.outcome)
+    dist_q = select(
+        MemoryEmbedding.outcome, func.count(MemoryEmbedding.id).label("count")
+    ).group_by(MemoryEmbedding.outcome)
 
     if category and category in _VALID_CATEGORIES:
         base_q = base_q.where(MemoryEmbedding.category == category)
@@ -48,10 +54,13 @@ async def get_memory_patterns(
 
     # Category distribution (all categories always shown)
     cat_dist_result = await db.execute(
-        select(MemoryEmbedding.category, func.count(MemoryEmbedding.id).label("count"))
-        .group_by(MemoryEmbedding.category)
+        select(
+            MemoryEmbedding.category, func.count(MemoryEmbedding.id).label("count")
+        ).group_by(MemoryEmbedding.category)
     )
-    category_distribution = {row.category: row.count for row in cat_dist_result.fetchall()}
+    category_distribution = {
+        row.category: row.count for row in cat_dist_result.fetchall()
+    }
 
     return {
         "total": total,

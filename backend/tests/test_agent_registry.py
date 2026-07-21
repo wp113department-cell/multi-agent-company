@@ -1,4 +1,5 @@
 """Tests for Agent Registry — metrics math, tag dispatch, insert-only registration."""
+
 from __future__ import annotations
 
 import uuid
@@ -8,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-
 # ---- Helpers ----
+
 
 def _make_agent(
     name: str,
@@ -32,6 +33,7 @@ def _make_agent(
 
 
 # ---- Metrics math ----
+
 
 def test_success_rate_all_complete() -> None:
     """Success rate = 1.0 when all runs are completed."""
@@ -62,6 +64,7 @@ def test_success_rate_zero_runs_falls_back_to_stored() -> None:
 
 
 # ---- Tag-based dispatch ----
+
 
 @pytest.mark.asyncio
 async def test_pick_agent_by_tag_found() -> None:
@@ -149,6 +152,7 @@ async def test_dispatch_falls_back_when_db_raises() -> None:
 
 # ---- Insert-only registration ----
 
+
 @pytest.mark.asyncio
 async def test_register_new_agent_via_sql_dispatched_by_tag() -> None:
     """A new agent inserted into the registry is discovered by tag — zero code change."""
@@ -171,10 +175,18 @@ async def test_register_new_agent_via_sql_dispatched_by_tag() -> None:
 def test_agent_registry_orm_fields() -> None:
     """Agent ORM model has all required Phase 6 fields."""
     from app.db.models import Agent
+
     cols = {c.key for c in Agent.__table__.columns}
     required = {
-        "agent_id", "name", "capability_tags", "tool_list",
-        "prompt_ref", "version", "success_rate", "avg_retries",
-        "last_computed_at", "created_at",
+        "agent_id",
+        "name",
+        "capability_tags",
+        "tool_list",
+        "prompt_ref",
+        "version",
+        "success_rate",
+        "avg_retries",
+        "last_computed_at",
+        "created_at",
     }
     assert required <= cols, f"Missing columns: {required - cols}"

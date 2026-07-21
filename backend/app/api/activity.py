@@ -5,6 +5,7 @@ POST /api/tasks/{task_id}/stop     — set abort flag (user clicked Stop)
 POST /api/tasks/{task_id}/resume   — clear abort, inject message + files
 GET  /api/tasks/{task_id}/tokens   — cumulative token usage
 """
+
 from __future__ import annotations
 
 import json
@@ -71,7 +72,9 @@ async def resume_task(task_id: str, payload: ResumePayload) -> dict[str, Any]:
     registry = get_activity_registry()
     stream = registry.get(task_id)
     if stream is None:
-        raise HTTPException(status_code=404, detail=f"No active stream for task {task_id!r}")
+        raise HTTPException(
+            status_code=404, detail=f"No active stream for task {task_id!r}"
+        )
     stream.set_resume(payload.message, payload.files)
     logger.info("Resume requested for task %s (msg=%s)", task_id, payload.message[:80])
     return {"ok": True, "task_id": task_id, "message": "Resume signal sent."}

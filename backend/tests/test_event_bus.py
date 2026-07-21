@@ -1,4 +1,5 @@
 """Event bus tests — publish/subscribe, per-task ordering, retry, failed handlers."""
+
 from __future__ import annotations
 
 import pytest
@@ -25,6 +26,7 @@ def clear_subscribers() -> None:  # type: ignore[return]
 
 # ---- Event model tests ----
 
+
 def test_event_model_defaults() -> None:
     evt = GridironEvent(event_type="task.created")
     assert evt.event_id  # UUID generated
@@ -50,11 +52,20 @@ def test_event_factory_helpers() -> None:
 
 
 def test_core_event_types_contains_required() -> None:
-    required = {"task.created", "task.planned", "subtask.assigned", "qa.passed", "qa.failed", "review.completed", "task.blocked"}
+    required = {
+        "task.created",
+        "task.planned",
+        "subtask.assigned",
+        "qa.passed",
+        "qa.failed",
+        "review.completed",
+        "task.blocked",
+    }
     assert required.issubset(CORE_EVENT_TYPES)
 
 
 # ---- Subscribe / unsubscribe tests ----
+
 
 def test_subscribe_registers_handler() -> None:
     received: list[GridironEvent] = []
@@ -92,6 +103,7 @@ def test_unsubscribe_nonexistent_handler_is_noop() -> None:
 
 
 # ---- Publish/subscribe roundtrip tests ----
+
 
 @pytest.mark.asyncio
 async def test_publish_dispatches_to_subscriber() -> None:
@@ -152,6 +164,7 @@ async def test_multiple_subscribers_same_event_type() -> None:
 
 # ---- Per-task ordering test ----
 
+
 @pytest.mark.asyncio
 async def test_events_delivered_in_publish_order_per_task() -> None:
     """Events for the same task are published sequentially (no concurrency) — ordering guaranteed."""
@@ -168,12 +181,14 @@ async def test_events_delivered_in_publish_order_per_task() -> None:
     await publish_event(task_created("1", "T"), db=None)
     await publish_event(task_planned("1", 2), db=None)
     from app.event_bus.models import subtask_assigned
+
     await publish_event(subtask_assigned("1", 1, "backend"), db=None)
 
     assert order == ["task.created", "task.planned", "subtask.assigned"]
 
 
 # ---- Retry / failure tests ----
+
 
 @pytest.mark.asyncio
 async def test_failing_handler_retried_up_to_max_retries() -> None:
@@ -214,6 +229,7 @@ async def test_failing_handler_does_not_block_other_handlers() -> None:
 
 
 # ---- Sync handler support ----
+
 
 @pytest.mark.asyncio
 async def test_sync_handler_is_accepted() -> None:

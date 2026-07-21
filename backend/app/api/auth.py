@@ -12,6 +12,7 @@ This avoids adding a users table before full RBAC is needed.
 When JWT_AUTH_ENABLED=false, login still works but the token is optional
 for all other endpoints (backward compat with X-User-Role header).
 """
+
 from __future__ import annotations
 
 import json
@@ -50,7 +51,9 @@ class MeResponse(BaseModel):
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> LoginResponse:
+async def login(
+    body: LoginRequest, db: AsyncSession = Depends(get_db)
+) -> LoginResponse:
     """Exchange username + password for a signed JWT access token.
 
     Credentials are stored in system_settings.key='auth_users' as a JSON array:
@@ -68,6 +71,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> Login
     # Load credentials from DB settings table
     try:
         from sqlalchemy import text
+
         row = await db.execute(
             text("SELECT value FROM system_settings WHERE key = 'auth_users'")
         )
@@ -79,7 +83,9 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> Login
 
     # Find matching user
     user = next((u for u in users if u.get("username") == body.username), None)
-    if user is None or not verify_password(body.password, user.get("hashed_password", "")):
+    if user is None or not verify_password(
+        body.password, user.get("hashed_password", "")
+    ):
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     role = user.get("role", "viewer")
@@ -110,23 +116,36 @@ async def setup_first_user(
     """
     settings = get_settings()
     if not settings.jwt_secret_key:
-        raise HTTPException(status_code=501, detail="JWT_SECRET_KEY must be set to use auth.")
+        raise HTTPException(
+            status_code=501, detail="JWT_SECRET_KEY must be set to use auth."
+        )
 
     from app.auth.jwt import hash_password
     from sqlalchemy import text
 
     # Load existing users
-    row = await db.execute(text("SELECT value FROM system_settings WHERE key = 'auth_users'"))
+    row = await db.execute(
+        text("SELECT value FROM system_settings WHERE key = 'auth_users'")
+    )
     result = row.scalar_one_or_none()
     existing: list[dict[str, str]] = json.loads(result) if result else []
 
     if existing:
-        raise HTTPException(status_code=409, detail="Auth users already configured. Use the DB to manage users.")
+        raise HTTPException(
+            status_code=409,
+            detail="Auth users already configured. Use the DB to manage users.",
+        )
 
     if role not in ("viewer", "approver", "admin"):
-        raise HTTPException(status_code=400, detail="role must be viewer | approver | admin")
+        raise HTTPException(
+            status_code=400, detail="role must be viewer | approver | admin"
+        )
 
-    new_user = {"username": body.username, "hashed_password": hash_password(body.password), "role": role}
+    new_user = {
+        "username": body.username,
+        "hashed_password": hash_password(body.password),
+        "role": role,
+    }
     users_json = json.dumps([new_user])
 
     await db.execute(

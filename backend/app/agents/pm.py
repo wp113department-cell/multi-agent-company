@@ -11,6 +11,7 @@ Session 4 migration (2026-07-16):
 
 Pattern from: swe-agent RetryAgent (preserve external interface, swap internal runner).
 """
+
 from __future__ import annotations
 
 import logging
@@ -31,10 +32,23 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "pm",
     "description": "Translates a task description into goals, constraints, and acceptance criteria (PM brief).",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "submit_brief",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "submit_brief",
     ],
     "input_types": ["task_description", "repo_path"],
     "output_types": ["pm_brief"],
@@ -79,6 +93,7 @@ _VERIFICATION_CFG = VerificationConfig(
 # ---------------------------------------------------------------------------
 # Pipeline node — external interface unchanged
 # ---------------------------------------------------------------------------
+
 
 def pm_node(state: PipelineState) -> PipelineState:
     settings = get_settings()
@@ -134,22 +149,30 @@ def pm_node(state: PipelineState) -> PipelineState:
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            # Include built-in legacy tags so capability_registry.py entry is superseded cleanly.
-            capabilities=["planning", "requirement_analysis", "goal_extraction",
-                           "product_management"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                # Include built-in legacy tags so capability_registry.py entry is superseded cleanly.
+                capabilities=[
+                    "planning",
+                    "requirement_analysis",
+                    "goal_extraction",
+                    "product_management",
+                ],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register("pm")
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

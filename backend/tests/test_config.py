@@ -1,4 +1,5 @@
 """Config loader tests — verify Pydantic Settings reads env vars correctly."""
+
 import os
 from unittest.mock import patch
 
@@ -11,8 +12,10 @@ def test_config_loads_required_vars():
     with patch.dict(os.environ, env, clear=False):
         # Reset singleton so fresh load picks up patched env
         import app.config as cfg_module
+
         cfg_module._settings = None
         from app.config import Settings
+
         s = Settings()
         assert s.database_url == env["DATABASE_URL"]
         assert s.anthropic_api_key == env["ANTHROPIC_API_KEY"]
@@ -26,8 +29,10 @@ def test_config_defaults():
     }
     with patch.dict(os.environ, env, clear=False):
         import app.config as cfg_module
+
         cfg_module._settings = None
         from app.config import Settings
+
         s = Settings()
         assert s.pipeline_mode == "full"
         assert s.max_retries == 3
@@ -44,8 +49,10 @@ def test_config_model_tier_overridable():
     }
     with patch.dict(os.environ, env, clear=False):
         import app.config as cfg_module
+
         cfg_module._settings = None
         from app.config import Settings
+
         s = Settings()
         assert s.model_planner == "claude-opus-4-8"
         cfg_module._settings = None

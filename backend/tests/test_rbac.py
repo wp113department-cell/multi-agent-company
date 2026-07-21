@@ -1,4 +1,5 @@
 """Tests for RBAC middleware — viewer vs approver enforcement."""
+
 from __future__ import annotations
 
 import pytest
@@ -7,8 +8,8 @@ from fastapi import HTTPException
 
 from app.middleware.rbac import require_approver
 
-
 # ---- Helpers ----
+
 
 def _make_db_mock(role: str | None) -> AsyncMock:
     """Return a mock AsyncSession that returns the given role from user_roles."""
@@ -22,7 +23,9 @@ def _make_db_mock(role: str | None) -> AsyncMock:
         scalar_result.scalar_one_or_none.return_value = user_role_obj
     else:
         scalar_result = MagicMock()
-        scalar_result.scalar_one_or_none.return_value = None  # user not in table → viewer
+        scalar_result.scalar_one_or_none.return_value = (
+            None  # user not in table → viewer
+        )
 
     db.execute = AsyncMock(return_value=scalar_result)
     return db
@@ -36,6 +39,7 @@ def _make_request(x_user_role: str = "") -> MagicMock:
 
 
 # ---- Tests: RBAC enabled (default) ----
+
 
 @pytest.mark.asyncio
 async def test_approver_role_passes() -> None:
@@ -89,6 +93,7 @@ async def test_user_not_in_table_defaults_to_viewer() -> None:
 
 
 # ---- Tests: RBAC disabled ----
+
 
 @pytest.mark.asyncio
 async def test_rbac_disabled_bypasses_check() -> None:

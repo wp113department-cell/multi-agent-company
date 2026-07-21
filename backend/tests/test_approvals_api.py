@@ -7,6 +7,7 @@ they produce the same real resume behavior since approve/reject here just
 call the same resume_planning_pipeline() the old endpoint already calls —
 reused, not duplicated.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -21,7 +22,11 @@ from app.main import app
 _SUBMIT_TOOL_STUB_INPUT: dict[str, dict[str, Any]] = {
     "submit_subtasks": {
         "subtasks": [
-            {"type": "backend", "title": "Add hello route", "description": "Add GET /hello handler."},
+            {
+                "type": "backend",
+                "title": "Add hello route",
+                "description": "Add GET /hello handler.",
+            },
         ]
     },
 }
@@ -40,16 +45,27 @@ def _submit_tool_use_response(tools: list[dict[str, Any]] | None) -> Any:
             usage=SimpleNamespace(input_tokens=10, output_tokens=5),
         )
 
-    stub_input = _SUBMIT_TOOL_STUB_INPUT.get(submit_tool["name"], {"smoke_test_stub": True})
+    stub_input = _SUBMIT_TOOL_STUB_INPUT.get(
+        submit_tool["name"], {"smoke_test_stub": True}
+    )
     return SimpleNamespace(
-        content=[SimpleNamespace(type="tool_use", id="tu_appr", name=submit_tool["name"], input=stub_input)],
+        content=[
+            SimpleNamespace(
+                type="tool_use",
+                id="tu_appr",
+                name=submit_tool["name"],
+                input=stub_input,
+            )
+        ],
         usage=SimpleNamespace(input_tokens=50, output_tokens=20),
     )
 
 
 def _mock_anthropic_client() -> MagicMock:
     client = MagicMock()
-    client.messages.create.side_effect = lambda *a, **kw: _submit_tool_use_response(kw.get("tools"))
+    client.messages.create.side_effect = lambda *a, **kw: _submit_tool_use_response(
+        kw.get("tools")
+    )
     return client
 
 
@@ -65,7 +81,9 @@ def _delete_task(task_id: int) -> None:
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
                 await session.execute(delete(DevTask).where(DevTask.id == task_id))
-                await session.execute(delete(PendingApproval).where(PendingApproval.task_id == task_id))
+                await session.execute(
+                    delete(PendingApproval).where(PendingApproval.task_id == task_id)
+                )
                 await session.commit()
         finally:
             await engine.dispose()
@@ -73,10 +91,13 @@ def _delete_task(task_id: int) -> None:
     asyncio.run(_run())
 
 
-def _run_pipeline_to_awaiting_approval(client: TestClient, mock_anthropic_cls: Any) -> int:
+def _run_pipeline_to_awaiting_approval(
+    client: TestClient, mock_anthropic_cls: Any
+) -> int:
     mock_anthropic_cls.return_value = _mock_anthropic_client()
     create_resp = client.post(
-        "/api/tasks", json={"title": "Approvals API test task", "description": "Add GET /hello."}
+        "/api/tasks",
+        json={"title": "Approvals API test task", "description": "Add GET /hello."},
     )
     assert create_resp.status_code == 201, create_resp.text
     task_id = create_resp.json()["id"]
@@ -152,7 +173,9 @@ def test_approve_via_generic_endpoint_resumes_pipeline_and_updates_status(
 
 
 @patch("anthropic.Anthropic")
-def test_reject_via_generic_endpoint_marks_task_rejected(mock_anthropic_cls: Any) -> None:
+def test_reject_via_generic_endpoint_marks_task_rejected(
+    mock_anthropic_cls: Any,
+) -> None:
     task_id: int | None = None
     try:
         with TestClient(app) as client:
@@ -199,7 +222,9 @@ def test_audit_log_has_the_approval_decision() -> None:
 
     task_id: int | None = None
     try:
-        with patch("anthropic.Anthropic") as mock_anthropic_cls, TestClient(app) as client:
+        with patch("anthropic.Anthropic") as mock_anthropic_cls, TestClient(
+            app
+        ) as client:
             task_id = _run_pipeline_to_awaiting_approval(client, mock_anthropic_cls)
             thread_id = f"task-{task_id}"
 

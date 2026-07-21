@@ -9,6 +9,7 @@ Architecture:
 - Consumer failure triggers retry (up to 3×) then writes to failed_events.
 - get_unprocessed_events() supports replay on restart.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -23,10 +24,14 @@ from app.event_bus.models import GridironEvent
 logger = logging.getLogger(__name__)
 
 # event_type → list of async handler functions
-_subscribers: dict[str, list[Callable[[GridironEvent], Awaitable[None] | None]]] = defaultdict(list)
+_subscribers: dict[str, list[Callable[[GridironEvent], Awaitable[None] | None]]] = (
+    defaultdict(list)
+)
+
 
 def _max_retries() -> int:
     from app.config import get_settings
+
     return get_settings().event_bus_max_retries
 
 
@@ -40,7 +45,9 @@ def subscribe(
         logger.debug("Subscribed %s to event_type=%s", handler.__name__, event_type)
 
 
-def unsubscribe(event_type: str, handler: Callable[[GridironEvent], Awaitable[None] | None]) -> None:
+def unsubscribe(
+    event_type: str, handler: Callable[[GridironEvent], Awaitable[None] | None]
+) -> None:
     """Remove a handler from an event type."""
     try:
         _subscribers[event_type].remove(handler)
@@ -63,10 +70,14 @@ async def _dispatch_to_handler(
         except Exception as e:
             logger.warning(
                 "Handler %s failed for event %s (attempt %d/%d): %s",
-                handler.__name__, event.event_type, attempt + 1, max_r, e,
+                handler.__name__,
+                event.event_type,
+                attempt + 1,
+                max_r,
+                e,
             )
             if attempt < max_r - 1:
-                await asyncio.sleep(0.5 * (2 ** attempt))
+                await asyncio.sleep(0.5 * (2**attempt))
     return False
 
 
@@ -76,6 +87,7 @@ async def _persist_event(event: GridironEvent, db: Any) -> None:
         return
     try:
         from sqlalchemy import text
+
         await db.execute(
             text(
                 "INSERT INTO events (event_id, event_type, task_id, epic_id, payload, emitted_by, created_at) "
@@ -93,20 +105,32 @@ async def _persist_event(event: GridironEvent, db: Any) -> None:
         )
         await db.execute(
             text("SELECT pg_notify('gridiron_events', :payload)"),
-            {"payload": json.dumps({"event_id": event.event_id, "event_type": event.event_type})},
+            {
+                "payload": json.dumps(
+                    {"event_id": event.event_id, "event_type": event.event_type}
+                )
+            },
         )
         await db.commit()
     except Exception:
         logger.exception("Failed to persist event %s", event.event_id)
 
 
-async def _write_failed_event(event: GridironEvent, handler_name: str, error: str, db: Any) -> None:
+async def _write_failed_event(
+    event: GridironEvent, handler_name: str, error: str, db: Any
+) -> None:
     """Write to failed_events table after all retries exhausted."""
     if db is None:
-        logger.error("FAILED EVENT (no DB) event_id=%s handler=%s error=%s", event.event_id, handler_name, error)
+        logger.error(
+            "FAILED EVENT (no DB) event_id=%s handler=%s error=%s",
+            event.event_id,
+            handler_name,
+            error,
+        )
         return
     try:
         from sqlalchemy import text
+
         await db.execute(
             text(
                 "INSERT INTO failed_events (event_id, event_type, task_id, payload, emitted_by, "
@@ -138,7 +162,12 @@ async def publish_event(event: GridironEvent, db: Any = None) -> None:
     - Writes to failed_events if a handler exhausts retries.
     - Events are ordered per task_id (sequential publish within a task pipeline).
     """
-    logger.info("EVENT %s task_id=%s emitted_by=%s", event.event_type, event.task_id, event.emitted_by)
+    logger.info(
+        "EVENT %s task_id=%s emitted_by=%s",
+        event.event_type,
+        event.task_id,
+        event.emitted_by,
+    )
 
     # Persist first so the event is recorded even if handlers fail
     await _persist_event(event, db)
@@ -147,7 +176,9 @@ async def publish_event(event: GridironEvent, db: Any = None) -> None:
     for handler in handlers:
         success = await _dispatch_to_handler(event, handler)
         if not success:
-            await _write_failed_event(event, handler.__name__, "max retries exceeded", db)
+            await _write_failed_event(
+                event, handler.__name__, "max retries exceeded", db
+            )
 
 
 async def get_unprocessed_events(
@@ -163,6 +194,7 @@ async def get_unprocessed_events(
         return []
     try:
         from sqlalchemy import text
+
         rows = await db.execute(
             text(
                 "SELECT event_id, event_type, task_id, epic_id, payload, emitted_by, created_at "
@@ -177,7 +209,11 @@ async def get_unprocessed_events(
                 event_type=str(r["event_type"]),
                 task_id=str(r["task_id"]) if r["task_id"] else None,
                 epic_id=str(r["epic_id"]) if r.get("epic_id") else None,
-                payload=r["payload"] if isinstance(r["payload"], dict) else json.loads(r["payload"]),
+                payload=(
+                    r["payload"]
+                    if isinstance(r["payload"], dict)
+                    else json.loads(r["payload"])
+                ),
                 emitted_by=str(r["emitted_by"]),
                 created_at=r["created_at"],
             )

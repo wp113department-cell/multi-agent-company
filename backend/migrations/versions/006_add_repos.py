@@ -4,6 +4,7 @@ Revision ID: 006
 Revises: 005
 Create Date: 2026-07-09
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -26,7 +27,12 @@ def upgrade() -> None:
         sa.Column("error_msg", sa.Text(), nullable=True),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default="false"),
         sa.Column("cloned_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.UniqueConstraint("github_url", name="uq_repos_github_url"),
     )
     op.create_index("ix_repos_is_active", "repos", ["is_active"])

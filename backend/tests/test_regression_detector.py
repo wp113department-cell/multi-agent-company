@@ -7,6 +7,7 @@ covered by test_benchmark_manager.py.
 Real Postgres round-trip via BenchmarkManager.store_baseline() — every test
 cleans up its own agent_benchmarks rows in a try/finally.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -33,7 +34,11 @@ def _delete_benchmarks(agent_name: str) -> None:
         engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                await session.execute(delete(AgentBenchmark).where(AgentBenchmark.agent_name == agent_name))
+                await session.execute(
+                    delete(AgentBenchmark).where(
+                        AgentBenchmark.agent_name == agent_name
+                    )
+                )
                 await session.commit()
         finally:
             await engine.dispose()

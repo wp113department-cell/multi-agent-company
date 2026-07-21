@@ -1,4 +1,5 @@
 """LangGraph StateGraph: PM → Architect → Decomposer → human_review (interrupt)."""
+
 from __future__ import annotations
 
 import logging
@@ -19,7 +20,9 @@ logger = logging.getLogger(__name__)
 # Falls back to MemorySaver if Postgres init fails (e.g. in tests).
 _checkpointer: Any = MemorySaver()
 _compiled_graph: Any = None
-_pg_cm: Any = None  # holds the AsyncPostgresSaver context manager open for the app lifetime
+_pg_cm: Any = (
+    None  # holds the AsyncPostgresSaver context manager open for the app lifetime
+)
 
 
 async def init_checkpointer(database_url: str) -> None:
@@ -43,9 +46,13 @@ async def init_checkpointer(database_url: str) -> None:
         _pg_cm = cm
         _checkpointer = saver
         _compiled_graph = None  # force rebuild with new checkpointer
-        logger.info("LangGraph PostgreSQL checkpointer initialized — pipeline state is now persistent")
+        logger.info(
+            "LangGraph PostgreSQL checkpointer initialized — pipeline state is now persistent"
+        )
     except Exception as exc:
-        logger.warning("PostgreSQL checkpointer init failed, falling back to MemorySaver: %s", exc)
+        logger.warning(
+            "PostgreSQL checkpointer init failed, falling back to MemorySaver: %s", exc
+        )
 
 
 async def close_checkpointer() -> None:
@@ -89,10 +96,12 @@ def human_review_node(state: PipelineState) -> PipelineState:
     updated: PipelineState = {**state, "stage": "awaiting_approval"}
 
     # Suspend — caller gets state with stage="awaiting_approval"
-    decision: Any = interrupt({
-        "action": "plan_review_required",
-        "subtasks_count": len(state.get("subtasks", [])),
-    })
+    decision: Any = interrupt(
+        {
+            "action": "plan_review_required",
+            "subtasks_count": len(state.get("subtasks", [])),
+        }
+    )
 
     # After resume: decision = {"approved": True|False}
     approved = isinstance(decision, dict) and bool(decision.get("approved", False))
@@ -109,7 +118,9 @@ def build_graph() -> Any:
     graph.add_node("human_review", human_review_node)
 
     graph.add_edge(START, "pm")
-    graph.add_conditional_edges("pm", _route_after_pm, {"architect": "architect", END: END})
+    graph.add_conditional_edges(
+        "pm", _route_after_pm, {"architect": "architect", END: END}
+    )
     graph.add_conditional_edges(
         "architect", _route_after_architect, {"decomposer": "decomposer", END: END}
     )

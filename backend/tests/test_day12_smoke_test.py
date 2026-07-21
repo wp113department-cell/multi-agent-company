@@ -26,6 +26,7 @@ non-JSON response by falling back to safe defaults (verified by reading
 base_graph.py's planner_node/reflection_node — both wrap their JSON parsing
 in try/except with pre-set defaults).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -37,7 +38,6 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-
 _SUBMIT_TOOL_STUB_INPUT: dict[str, dict[str, Any]] = {
     # Most submit_* handlers (pm/architect) ignore their input entirely —
     # {"smoke_test_stub": True} satisfies "non-empty result" for those. But
@@ -45,7 +45,11 @@ _SUBMIT_TOOL_STUB_INPUT: dict[str, dict[str, Any]] = {
     # list before letting the pipeline proceed, so that one needs real shape.
     "submit_subtasks": {
         "subtasks": [
-            {"type": "backend", "title": "Add hello route", "description": "Add GET /hello handler."},
+            {
+                "type": "backend",
+                "title": "Add hello route",
+                "description": "Add GET /hello handler.",
+            },
         ]
     },
 }
@@ -69,11 +73,15 @@ def _submit_tool_use_response(tools: list[dict[str, Any]] | None) -> Any:
             usage=SimpleNamespace(input_tokens=10, output_tokens=5),
         )
 
-    stub_input = _SUBMIT_TOOL_STUB_INPUT.get(submit_tool["name"], {"smoke_test_stub": True})
+    stub_input = _SUBMIT_TOOL_STUB_INPUT.get(
+        submit_tool["name"], {"smoke_test_stub": True}
+    )
     return SimpleNamespace(
         content=[
             SimpleNamespace(
-                type="tool_use", id="tu_smoke", name=submit_tool["name"],
+                type="tool_use",
+                id="tu_smoke",
+                name=submit_tool["name"],
                 input=stub_input,
             )
         ],
@@ -105,7 +113,9 @@ def _delete_task(task_id: int) -> None:
                 await session.execute(delete(DevTask).where(DevTask.id == task_id))
                 # pending_approvals has no FK/cascade to dev_tasks (loosely
                 # coupled index table, Day 13) — clean it up explicitly too.
-                await session.execute(delete(PendingApproval).where(PendingApproval.task_id == task_id))
+                await session.execute(
+                    delete(PendingApproval).where(PendingApproval.task_id == task_id)
+                )
                 await session.commit()
         finally:
             await engine.dispose()
@@ -139,9 +149,10 @@ def test_pipeline_reaches_awaiting_approval_via_http(mock_anthropic_cls: Any) ->
 
         # pm -> architect -> decomposer all completed and the pipeline is
         # correctly paused waiting for a human, not blocked on a real bug.
-        assert task_data["status"] in ("planning", "ready_for_review"), (
-            f"Unexpected task status after pipeline run: {task_data}"
-        )
+        assert task_data["status"] in (
+            "planning",
+            "ready_for_review",
+        ), f"Unexpected task status after pipeline run: {task_data}"
 
         subtasks_resp_status = None
         with TestClient(app) as client:
@@ -150,10 +161,12 @@ def test_pipeline_reaches_awaiting_approval_via_http(mock_anthropic_cls: Any) ->
             if subtasks_resp_status == 200:
                 subtasks_data = subtasks_resp.json()
 
-        assert subtasks_resp_status == 200, "subtasks endpoint should be reachable after pipeline run"
-        assert len(subtasks_data.get("subtasks", [])) >= 1, (
-            f"Decomposer produced no subtasks: {subtasks_data}"
-        )
+        assert (
+            subtasks_resp_status == 200
+        ), "subtasks endpoint should be reachable after pipeline run"
+        assert (
+            len(subtasks_data.get("subtasks", [])) >= 1
+        ), f"Decomposer produced no subtasks: {subtasks_data}"
     finally:
         if task_id is not None:
             _delete_task(task_id)
@@ -174,7 +187,10 @@ def test_approve_resumes_pipeline_and_schedules_launch_manager(
         with TestClient(app) as client:
             create_resp = client.post(
                 "/api/tasks",
-                json={"title": "Add goodbye endpoint", "description": "Add GET /goodbye."},
+                json={
+                    "title": "Add goodbye endpoint",
+                    "description": "Add GET /goodbye.",
+                },
             )
             assert create_resp.status_code == 201, create_resp.text
             task_id = create_resp.json()["id"]
@@ -187,7 +203,9 @@ def test_approve_resumes_pipeline_and_schedules_launch_manager(
 
         mock_launch_manager.assert_called_once()
         call_args = mock_launch_manager.call_args
-        assert call_args.args[0] == task_id or call_args.kwargs.get("task_id") == task_id
+        assert (
+            call_args.args[0] == task_id or call_args.kwargs.get("task_id") == task_id
+        )
     finally:
         if task_id is not None:
             _delete_task(task_id)
@@ -205,15 +223,29 @@ def test_run_manager_orchestrates_one_subtask_to_completion() -> None:
     ):
         mock_backend_dev.return_value = (["app/api/hello.py"], None)
         mock_qa.return_value = QAResult(
-            status="passed", tests_run=3, tests_passed=3, tests_failed=0,
-            typecheck_clean=True, lint_clean=True, summary="all green",
+            status="passed",
+            tests_run=3,
+            tests_passed=3,
+            tests_failed=0,
+            typecheck_clean=True,
+            lint_clean=True,
+            summary="all green",
         )
-        mock_reviewer.return_value = ReviewResult(verdict="approved", summary="looks good")
+        mock_reviewer.return_value = ReviewResult(
+            verdict="approved", summary="looks good"
+        )
 
         result = asyncio.run(
             run_manager(
                 task_id=999_001,
-                subtasks=[{"id": 1, "type": "backend", "title": "Add hello route", "description": "..."}],
+                subtasks=[
+                    {
+                        "id": 1,
+                        "type": "backend",
+                        "title": "Add hello route",
+                        "description": "...",
+                    }
+                ],
                 worktree_path="/tmp/does-not-need-to-exist-for-mocked-agents",
                 plan="Add GET /hello",
                 repo_path="/home/pc-117/Documents/CRR2906",
@@ -234,12 +266,29 @@ def test_run_manager_retries_after_qa_failure_then_succeeds() -> None:
     from app.agents.qa import QAResult
     from app.agents.reviewer import ReviewResult
 
-    qa_responses = iter([
-        QAResult(status="failed", tests_run=3, tests_passed=1, tests_failed=2,
-                  typecheck_clean=True, lint_clean=True, errors=["test_x failed"], summary="2 failing"),
-        QAResult(status="passed", tests_run=3, tests_passed=3, tests_failed=0,
-                  typecheck_clean=True, lint_clean=True, summary="all green"),
-    ])
+    qa_responses = iter(
+        [
+            QAResult(
+                status="failed",
+                tests_run=3,
+                tests_passed=1,
+                tests_failed=2,
+                typecheck_clean=True,
+                lint_clean=True,
+                errors=["test_x failed"],
+                summary="2 failing",
+            ),
+            QAResult(
+                status="passed",
+                tests_run=3,
+                tests_passed=3,
+                tests_failed=0,
+                typecheck_clean=True,
+                lint_clean=True,
+                summary="all green",
+            ),
+        ]
+    )
 
     with patch("app.agents.backend_dev.run_backend_dev") as mock_backend_dev, patch(
         "app.agents.qa.run_qa"
@@ -248,12 +297,21 @@ def test_run_manager_retries_after_qa_failure_then_succeeds() -> None:
     ):
         mock_backend_dev.return_value = (["app/api/hello.py"], None)
         mock_qa.side_effect = lambda *a, **kw: next(qa_responses)
-        mock_reviewer.return_value = ReviewResult(verdict="approved", summary="looks good")
+        mock_reviewer.return_value = ReviewResult(
+            verdict="approved", summary="looks good"
+        )
 
         result = asyncio.run(
             run_manager(
                 task_id=999_002,
-                subtasks=[{"id": 1, "type": "backend", "title": "Add hello route", "description": "..."}],
+                subtasks=[
+                    {
+                        "id": 1,
+                        "type": "backend",
+                        "title": "Add hello route",
+                        "description": "...",
+                    }
+                ],
                 worktree_path="/tmp/does-not-need-to-exist-for-mocked-agents",
                 plan="Add GET /hello",
                 repo_path="/home/pc-117/Documents/CRR2906",

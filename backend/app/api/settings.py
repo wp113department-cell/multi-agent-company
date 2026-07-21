@@ -1,4 +1,5 @@
 """Settings API — runtime-configurable values (API keys, etc.)."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -46,10 +47,16 @@ async def get_settings_view(db: AsyncSession = Depends(get_db)) -> dict[str, Any
     return {
         "anthropicKeySet": bool(eff_anthropic),
         "anthropicKeyMasked": _mask(eff_anthropic),
-        "anthropicKeySource": "database" if db_anthropic else ("env" if settings.anthropic_api_key else "none"),
+        "anthropicKeySource": (
+            "database"
+            if db_anthropic
+            else ("env" if settings.anthropic_api_key else "none")
+        ),
         "openaiKeySet": bool(eff_openai),
         "openaiKeyMasked": _mask(eff_openai),
-        "openaiKeySource": "database" if db_openai else ("env" if settings.openai_api_key else "none"),
+        "openaiKeySource": (
+            "database" if db_openai else ("env" if settings.openai_api_key else "none")
+        ),
         "usingGroq": settings.use_groq,
         "modelPlanner": settings.model_planner,
         "modelCoder": settings.model_coder,
@@ -60,14 +67,20 @@ async def get_settings_view(db: AsyncSession = Depends(get_db)) -> dict[str, Any
 # Anthropic key
 # ---------------------------------------------------------------------------
 
+
 @router.post("/api-key")
-async def save_api_key(body: ApiKeyRequest, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def save_api_key(
+    body: ApiKeyRequest, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     """Save or update the Anthropic API key in the database."""
     key = body.api_key.strip()
     if not key.startswith("sk-"):
-        raise HTTPException(status_code=400, detail="Invalid Anthropic API key — must start with 'sk-'")
+        raise HTTPException(
+            status_code=400, detail="Invalid Anthropic API key — must start with 'sk-'"
+        )
     await set_setting(db, _ANTHROPIC_KEY, key)
     from app.agents.base import set_api_key_override
+
     set_api_key_override(key)
     return {"saved": True, "provider": "anthropic"}
 
@@ -76,6 +89,7 @@ async def save_api_key(body: ApiKeyRequest, db: AsyncSession = Depends(get_db)) 
 async def delete_api_key(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Remove the DB-stored Anthropic API key (falls back to env var)."""
     from app.agents.base import set_api_key_override
+
     await set_setting(db, _ANTHROPIC_KEY, "")
     set_api_key_override("")
     return {"deleted": True, "provider": "anthropic"}
@@ -85,12 +99,17 @@ async def delete_api_key(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
 # OpenAI key
 # ---------------------------------------------------------------------------
 
+
 @router.post("/openai-key")
-async def save_openai_key(body: ApiKeyRequest, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def save_openai_key(
+    body: ApiKeyRequest, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     """Save or update the OpenAI API key in the database."""
     key = body.api_key.strip()
     if not key.startswith("sk-"):
-        raise HTTPException(status_code=400, detail="Invalid OpenAI API key — must start with 'sk-'")
+        raise HTTPException(
+            status_code=400, detail="Invalid OpenAI API key — must start with 'sk-'"
+        )
     await set_setting(db, _OPENAI_KEY, key)
     return {"saved": True, "provider": "openai"}
 
@@ -106,6 +125,7 @@ async def delete_openai_key(db: AsyncSession = Depends(get_db)) -> dict[str, Any
 # Verify endpoint — tests a key against the real API without saving it
 # ---------------------------------------------------------------------------
 
+
 @router.post("/verify-key")
 async def verify_api_key(body: VerifyKeyRequest) -> dict[str, Any]:
     """Test an API key against the provider's API and return ok/error."""
@@ -117,7 +137,10 @@ async def verify_api_key(body: VerifyKeyRequest) -> dict[str, Any]:
     elif provider == "openai":
         return await _verify_openai(key)
     else:
-        raise HTTPException(status_code=400, detail=f"Unknown provider '{provider}'. Use 'anthropic' or 'openai'.")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown provider '{provider}'. Use 'anthropic' or 'openai'.",
+        )
 
 
 async def _verify_anthropic(key: str) -> dict[str, Any]:
@@ -125,6 +148,7 @@ async def _verify_anthropic(key: str) -> dict[str, Any]:
         return {"ok": False, "error": "Key must start with 'sk-'"}
     try:
         import anthropic as _anthropic
+
         client = _anthropic.Anthropic(api_key=key)
         client.messages.create(
             model="claude-haiku-4-5-20251001",
@@ -146,12 +170,17 @@ async def _verify_openai(key: str) -> dict[str, Any]:
         return {"ok": False, "error": "Key must start with 'sk-'"}
     try:
         from openai import OpenAI
+
         client = OpenAI(api_key=key)
         client.models.list()
         return {"ok": True, "provider": "openai"}
     except Exception as exc:
         msg = str(exc)
-        if "401" in msg or "authentication" in msg.lower() or "incorrect" in msg.lower():
+        if (
+            "401" in msg
+            or "authentication" in msg.lower()
+            or "incorrect" in msg.lower()
+        ):
             return {"ok": False, "error": "Invalid API key — authentication failed"}
         if "403" in msg:
             return {"ok": False, "error": "API key valid but lacks permissions"}

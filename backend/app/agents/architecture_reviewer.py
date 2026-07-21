@@ -1,4 +1,5 @@
 """Architecture Reviewer Agent — LangGraph StateGraph, read-only, verification contract."""
+
 from __future__ import annotations
 
 import logging
@@ -18,11 +19,30 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "architecture_reviewer",
     "description": "Reviews codebase architecture: import graphs, circular deps, dead code, layer violations.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "import_graph", "circular_dep_detect", "dead_code_detect",
-        "list_functions", "list_classes", "call_graph", "parse_ast", "submit_arch_review",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "import_graph",
+        "circular_dep_detect",
+        "dead_code_detect",
+        "list_functions",
+        "list_classes",
+        "call_graph",
+        "parse_ast",
+        "submit_arch_review",
     ],
     "input_types": ["task_id", "focus", "repo_path"],
     "output_types": ["AgentResult"],
@@ -45,8 +65,11 @@ _VERIFICATION_CFG = VerificationConfig(
     reset_keys=(),
     enforce_in_result={"import_graph_ran": "import_graph_ran"},
     initial={
-        "import_graph_ran": False, "circular_checked": False,
-        "dead_code_checked": False, "call_graph_ran": False, "ast_ran": False,
+        "import_graph_ran": False,
+        "circular_checked": False,
+        "dead_code_checked": False,
+        "call_graph_ran": False,
+        "ast_ran": False,
     },
 )
 
@@ -112,20 +135,28 @@ def run_arch_review(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["architecture_review", "dependency_analysis", "dead_code_detection"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=[
+                    "architecture_review",
+                    "dependency_analysis",
+                    "dead_code_detection",
+                ],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

@@ -1,4 +1,5 @@
 """Tests for Settings API (OpenAI key + verify) and PDF extraction endpoint."""
+
 from __future__ import annotations
 
 import io
@@ -6,14 +7,15 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Settings API — OpenAI key
 # ---------------------------------------------------------------------------
 
+
 class TestSettingsOpenAiKey:
     def test_save_openai_key_valid(self) -> None:
         from app.api.settings import ApiKeyRequest
+
         # Just verify the function exists and accepts the right model
         req = ApiKeyRequest(api_key="sk-test1234567890")
         assert req.api_key == "sk-test1234567890"
@@ -38,11 +40,13 @@ class TestSettingsOpenAiKey:
 
     def test_mask_short_key(self) -> None:
         from app.api.settings import _mask
+
         assert _mask("") == ""
         assert _mask("short") == "set"
 
     def test_mask_long_key(self) -> None:
         from app.api.settings import _mask
+
         key = "sk-ant-api03-abcdefghijklmnop"
         result = _mask(key)
         assert result.startswith("sk-ant-a")
@@ -54,10 +58,12 @@ class TestSettingsOpenAiKey:
 # Settings API — verify endpoint helpers
 # ---------------------------------------------------------------------------
 
+
 class TestVerifyHelpers:
     def test_verify_anthropic_bad_prefix(self) -> None:
         import asyncio
         from app.api.settings import _verify_anthropic
+
         result = asyncio.run(_verify_anthropic("not-a-real-key"))
         assert result["ok"] is False
         assert "sk-" in result["error"]
@@ -65,6 +71,7 @@ class TestVerifyHelpers:
     def test_verify_openai_bad_prefix(self) -> None:
         import asyncio
         from app.api.settings import _verify_openai
+
         result = asyncio.run(_verify_openai("bad"))
         assert result["ok"] is False
 
@@ -73,7 +80,9 @@ class TestVerifyHelpers:
         from app.api.settings import _verify_anthropic
 
         with patch("anthropic.Anthropic") as mock_cls:
-            mock_cls.return_value.messages.create.side_effect = Exception("401 Unauthorized")
+            mock_cls.return_value.messages.create.side_effect = Exception(
+                "401 Unauthorized"
+            )
             result = asyncio.run(_verify_anthropic("sk-validformat"))
             assert result["ok"] is False
             assert "Invalid API key" in result["error"] or "401" in result["error"]
@@ -83,10 +92,15 @@ class TestVerifyHelpers:
         from app.api.settings import _verify_openai
 
         with patch("openai.OpenAI") as mock_cls:
-            mock_cls.return_value.models.list.side_effect = Exception("401 incorrect api_key")
+            mock_cls.return_value.models.list.side_effect = Exception(
+                "401 incorrect api_key"
+            )
             result = asyncio.run(_verify_openai("sk-validformat"))
             assert result["ok"] is False
-            assert "Invalid API key" in result["error"] or "incorrect" in result["error"].lower()
+            assert (
+                "Invalid API key" in result["error"]
+                or "incorrect" in result["error"].lower()
+            )
 
     def test_verify_unknown_provider_raises(self) -> None:
         import asyncio
@@ -95,7 +109,9 @@ class TestVerifyHelpers:
 
         async def run():
             try:
-                await verify_api_key(VerifyKeyRequest(provider="groq", api_key="sk-test"))
+                await verify_api_key(
+                    VerifyKeyRequest(provider="groq", api_key="sk-test")
+                )
                 return False
             except HTTPException as exc:
                 return exc.status_code == 400
@@ -106,6 +122,7 @@ class TestVerifyHelpers:
 # ---------------------------------------------------------------------------
 # PDF extraction
 # ---------------------------------------------------------------------------
+
 
 def _make_minimal_pdf() -> bytes:
     """Build a tiny but valid PDF containing 'Hello World'."""
@@ -128,12 +145,14 @@ def _make_minimal_pdf() -> bytes:
 class TestPdfExtraction:
     def test_extract_pdf_returns_string(self) -> None:
         from app.api.tasks import _extract_pdf_text
+
         raw = _make_minimal_pdf()
         result = _extract_pdf_text(raw, "test.pdf")
         assert isinstance(result, str)
 
     def test_extract_corrupted_pdf_returns_error_string(self) -> None:
         from app.api.tasks import _extract_pdf_text
+
         result = _extract_pdf_text(b"not a pdf at all", "bad.pdf")
         assert "Could not extract" in result or isinstance(result, str)
 
@@ -149,6 +168,7 @@ class TestPdfExtraction:
 
         files = [make_upload(f"file{i}.pdf") for i in range(MAX_PDF_FILES + 1)]
         from fastapi import HTTPException
+
         try:
             await extract_pdfs(files=files)
             assert False, "Should have raised HTTPException"
@@ -201,6 +221,7 @@ class TestPdfExtraction:
 # git_service — clone_with_token
 # ---------------------------------------------------------------------------
 
+
 class TestGitCloneWithToken:
     def test_clone_with_token_rejects_empty_token(self) -> None:
         import asyncio
@@ -239,8 +260,14 @@ class TestGitCloneWithToken:
 
         async def run():
             with patch("app.services.git_service._validate_workspace"):
-                with patch("app.services.git_service._run_git", new_callable=AsyncMock) as mock_git:
-                    mock_git.return_value = (1, "", "fatal: remote: Repository not found. ghp_secrettoken")
+                with patch(
+                    "app.services.git_service._run_git", new_callable=AsyncMock
+                ) as mock_git:
+                    mock_git.return_value = (
+                        1,
+                        "",
+                        "fatal: remote: Repository not found. ghp_secrettoken",
+                    )
                     result = await git_clone_with_token(
                         "https://github.com/user/private.git",
                         "/home/test/dest",

@@ -1,4 +1,5 @@
 """Artifact store tests — save, get, list, content types."""
+
 from __future__ import annotations
 
 import json
@@ -6,7 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from app.artifacts.store import save_artifact, get_artifact, list_artifacts, ArtifactRecord
+from app.artifacts.store import (
+    save_artifact,
+    get_artifact,
+    list_artifacts,
+    ArtifactRecord,
+)
 
 
 @pytest.fixture()
@@ -16,6 +22,7 @@ def tmp_artifacts_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     worktrees.mkdir()
     # Monkeypatch the settings worktrees_dir so _artifacts_dir() uses tmp_path
     from unittest.mock import MagicMock
+
     mock_settings = MagicMock()
     mock_settings.worktrees_dir = str(worktrees)
     monkeypatch.setattr("app.artifacts.store.get_settings", lambda: mock_settings)

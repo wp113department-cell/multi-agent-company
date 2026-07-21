@@ -2,6 +2,7 @@
 
 Require: ANTHROPIC_API_KEY + live Postgres (DATABASE_URL) + RUN_PENDING_TESTS=1
 """
+
 from __future__ import annotations
 
 import os
@@ -23,6 +24,7 @@ async def test_manager_dispatches_subtasks_and_completes() -> None:
     async with get_async_session() as db:
         epic_id = str(uuid.uuid4())
         from app.db.models import Epic
+
         epic = Epic(
             epic_id=epic_id,
             title="Add a hello world endpoint",
@@ -56,8 +58,18 @@ async def test_epic_halts_on_repeated_subtask_failures() -> None:
     try:
         # Subtasks that will fail (impossible plan)
         bad_subtasks = [
-            {"id": 1, "type": "backend", "title": "This is impossible", "description": "Write code that defies physics"},
-            {"id": 2, "type": "backend", "title": "Also impossible", "description": "Also defies physics"},
+            {
+                "id": 1,
+                "type": "backend",
+                "title": "This is impossible",
+                "description": "Write code that defies physics",
+            },
+            {
+                "id": 2,
+                "type": "backend",
+                "title": "Also impossible",
+                "description": "Also defies physics",
+            },
         ]
         result = await run_manager(
             task_id=9999,
@@ -88,6 +100,7 @@ async def test_cost_estimate_before_execution() -> None:
 
         async with get_async_session() as db:
             from app.db.models import Epic
+
             epic_id = str(uuid.uuid4())
             epic = Epic(
                 epic_id=epic_id,
@@ -98,7 +111,9 @@ async def test_cost_estimate_before_execution() -> None:
             db.add(epic)
             await db.commit()
 
-            package = await run_epic_manager(epic_id=epic_id, goal=epic.description, db=db)
+            package = await run_epic_manager(
+                epic_id=epic_id, goal=epic.description, db=db
+            )
 
         assert package.status == "pending_cost_approval"
         assert package.halt_reason is not None
@@ -114,7 +129,9 @@ async def test_policy_v2_blocks_migration_subtask() -> None:
 
     async with get_async_session() as db:
         # The seed policies from migration 003 should be present
-        matches = await check_file_against_policies("backend/migrations/versions/004.py", db)
+        matches = await check_file_against_policies(
+            "backend/migrations/versions/004.py", db
+        )
         assert len(matches) > 0
         blocking = [m for m in matches if m.blocking]
         assert len(blocking) > 0

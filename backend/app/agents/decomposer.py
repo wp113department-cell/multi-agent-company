@@ -8,6 +8,7 @@ Session 1 migration (2026-07-16):
 
 Pattern from: swe-agent RetryAgent (preserve external interface, swap internal runner).
 """
+
 from __future__ import annotations
 
 import json
@@ -29,10 +30,23 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "decomposer",
     "description": "Breaks architect plan into typed, ordered subtasks with dependency graph.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "submit_subtasks",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "submit_subtasks",
     ],
     "input_types": ["pm_brief", "architect_plan", "task_title"],
     "output_types": ["subtasks"],
@@ -58,7 +72,10 @@ _SUBMIT_TOOL: dict[str, Any] = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "type": {"type": "string", "enum": ["backend", "frontend", "test", "docs"]},
+                        "type": {
+                            "type": "string",
+                            "enum": ["backend", "frontend", "test", "docs"],
+                        },
                         "title": {"type": "string"},
                         "description": {"type": "string"},
                         "files_to_edit": {"type": "array", "items": {"type": "string"}},
@@ -88,12 +105,15 @@ _VERIFICATION_CFG = VerificationConfig(
 # Pipeline node — external interface unchanged from Day 3
 # ---------------------------------------------------------------------------
 
+
 def decomposer_node(state: PipelineState) -> PipelineState:
     settings = get_settings()
     repo = state.get("repo_path", settings.target_repo_path)
 
     handlers = make_read_only_handlers(repo)
-    handlers["submit_subtasks"] = lambda inp: f"Submitted {len(inp.get('subtasks', []))} subtasks"
+    handlers["submit_subtasks"] = (
+        lambda inp: f"Submitted {len(inp.get('subtasks', []))} subtasks"
+    )
 
     pm_brief = json.dumps(state.get("pm_brief", {}), indent=2)
     architect_plan = json.dumps(state.get("architect_plan", {}), indent=2)
@@ -136,11 +156,19 @@ def decomposer_node(state: PipelineState) -> PipelineState:
 
     result = final_state.get("result", {})
     if not result or not final_state.get("submitted"):
-        return {**state, "stage": "blocked", "error": "Decomposer Agent did not submit subtasks"}
+        return {
+            **state,
+            "stage": "blocked",
+            "error": "Decomposer Agent did not submit subtasks",
+        }
 
     subtasks = result.get("subtasks", [])
     if not subtasks:
-        return {**state, "stage": "blocked", "error": "Decomposer Agent submitted empty subtasks list"}
+        return {
+            **state,
+            "stage": "blocked",
+            "error": "Decomposer Agent submitted empty subtasks list",
+        }
 
     return {**state, "subtasks": subtasks, "stage": "done"}
 
@@ -149,20 +177,24 @@ def decomposer_node(state: PipelineState) -> PipelineState:
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["task_decomposition", "subtask_dependency_mapping"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["task_decomposition", "subtask_dependency_mapping"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register("decomposer")
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

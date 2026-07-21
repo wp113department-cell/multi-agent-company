@@ -5,6 +5,7 @@ already exists and works in app/pipeline/graph.py); this only tracks it.
 Every test uses a thread_id prefixed td_ag_ and cleans up its own
 pending_approvals rows in a try/finally, matching the established pattern.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -23,7 +24,11 @@ def _cleanup(thread_id: str) -> None:
         engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                await session.execute(delete(PendingApproval).where(PendingApproval.thread_id == thread_id))
+                await session.execute(
+                    delete(PendingApproval).where(
+                        PendingApproval.thread_id == thread_id
+                    )
+                )
                 await session.commit()
         finally:
             await engine.dispose()
@@ -35,8 +40,11 @@ def test_record_pending_then_get_pending_round_trip() -> None:
     thread_id = "td_ag_round_trip"
     try:
         rec = ag.record_pending(
-            thread_id, "plan_review", {"subtasks_count": 2, "risk_level": "medium"},
-            agent_name="decomposer", task_id=4242,
+            thread_id,
+            "plan_review",
+            {"subtasks_count": 2, "risk_level": "medium"},
+            agent_name="decomposer",
+            task_id=4242,
         )
         assert rec.status == "pending"
         assert rec.task_id == 4242

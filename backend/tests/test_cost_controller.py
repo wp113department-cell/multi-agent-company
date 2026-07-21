@@ -1,4 +1,5 @@
 """Tests for the Cost Controller (sync path — no DB required)."""
+
 from __future__ import annotations
 
 

@@ -12,6 +12,7 @@ tokens, wall-clock time, memory) and cumulative spend across the process
 per_instance_cost_limit / total_cost_limit pattern
 (repos/swe-agent/sweagent/agent/models.py).
 """
+
 from __future__ import annotations
 
 import resource
@@ -64,11 +65,15 @@ class BudgetManager:
 
         total_tokens = metrics.tokens_in + metrics.tokens_out
         if total_tokens > s.max_tokens_per_agent_run:
-            raise BudgetExceeded("tokens", "run", float(s.max_tokens_per_agent_run), float(total_tokens))
+            raise BudgetExceeded(
+                "tokens", "run", float(s.max_tokens_per_agent_run), float(total_tokens)
+            )
 
         run_time_seconds = metrics.execution_time_ms / 1000
         if run_time_seconds > s.max_run_time_seconds:
-            raise BudgetExceeded("time", "run", float(s.max_run_time_seconds), run_time_seconds)
+            raise BudgetExceeded(
+                "time", "run", float(s.max_run_time_seconds), run_time_seconds
+            )
 
         mem_mb = _current_memory_mb()
         if mem_mb > s.max_memory_mb:
@@ -83,7 +88,8 @@ class BudgetManager:
         total_cost = sum(
             m.cost_estimate_usd
             for m in self._collector.all_runs()
-            if (agent_name is None or m.agent_name == agent_name) and _is_same_utc_day(m.started_at, today)
+            if (agent_name is None or m.agent_name == agent_name)
+            and _is_same_utc_day(m.started_at, today)
         )
         if total_cost > s.cost_budget_daily_usd:
             raise BudgetExceeded("cost", "daily", s.cost_budget_daily_usd, total_cost)

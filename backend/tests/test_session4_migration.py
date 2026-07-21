@@ -13,6 +13,7 @@ Tests prove:
 - All 4 in capability_registry + agent_registry
 - Fleet manager selects each by specific capability
 """
+
 from __future__ import annotations
 
 import inspect
@@ -26,16 +27,32 @@ import app.agents.executive as ex_mod
 import app.agents.docs as dc_mod
 
 from app.agents.pm import AGENT_CONTRACT as PM_CONTRACT, pm_node
-from app.agents.research import AGENT_CONTRACT as RS_CONTRACT, run_research, ResearchReport
-from app.agents.executive import (
-    AGENT_CONTRACT as EX_CONTRACT, run_executive, _last_assistant_text as ex_last_text,
+from app.agents.research import (
+    AGENT_CONTRACT as RS_CONTRACT,
+    run_research,
+    ResearchReport,
 )
-from app.agents.docs import AGENT_CONTRACT as DC_CONTRACT, run_docs, DocsReport, _build_docs_context
-
+from app.agents.executive import (
+    AGENT_CONTRACT as EX_CONTRACT,
+    run_executive,
+    _last_assistant_text as ex_last_text,
+)
+from app.agents.docs import (
+    AGENT_CONTRACT as DC_CONTRACT,
+    run_docs,
+    DocsReport,
+    _build_docs_context,
+)
 
 REQUIRED_CONTRACT_KEYS = {
-    "name", "description", "allowed_tools", "input_types",
-    "output_types", "side_effects", "permissions", "risk_level",
+    "name",
+    "description",
+    "allowed_tools",
+    "input_types",
+    "output_types",
+    "side_effects",
+    "permissions",
+    "risk_level",
 }
 
 _SUBMIT_PRIVATE = {"submit_brief", "submit_research", "submit_docs"}
@@ -63,6 +80,7 @@ def _make_final_state(
 # ---------------------------------------------------------------------------
 # AGENT_CONTRACT structure
 # ---------------------------------------------------------------------------
+
 
 class TestPmContract:
     def test_all_required_keys(self) -> None:
@@ -162,10 +180,12 @@ class TestDocsContract:
 # Migration complete — uses run_agent_graph
 # ---------------------------------------------------------------------------
 
+
 class TestMigrationComplete:
     def _imports_run_agent(self, mod: Any) -> bool:
         import ast
         import textwrap
+
         src = textwrap.dedent(inspect.getsource(mod))
         try:
             tree = ast.parse(src)
@@ -204,6 +224,7 @@ class TestMigrationComplete:
 # External interface unchanged
 # ---------------------------------------------------------------------------
 
+
 class TestExternalInterfaceUnchanged:
     def test_pm_node_takes_state(self) -> None:
         assert "state" in inspect.signature(pm_node).parameters
@@ -215,6 +236,7 @@ class TestExternalInterfaceUnchanged:
 
     def test_run_executive_is_async(self) -> None:
         import asyncio
+
         assert asyncio.iscoroutinefunction(run_executive)
 
     def test_run_executive_signature(self) -> None:
@@ -242,7 +264,9 @@ class TestExternalInterfaceUnchanged:
         assert r.files_written == ["CHANGELOG.md"]
 
     def test_build_docs_context_preserved(self) -> None:
-        ctx = _build_docs_context("Epic A", "Desc", ["src/a.py"], "diff here", ["qa ok"])
+        ctx = _build_docs_context(
+            "Epic A", "Desc", ["src/a.py"], "diff here", ["qa ok"]
+        )
         assert "Epic A" in ctx
         assert "src/a.py" in ctx
         assert "diff here" in ctx
@@ -252,15 +276,21 @@ class TestExternalInterfaceUnchanged:
 # _last_assistant_text (shared by research/executive/docs)
 # ---------------------------------------------------------------------------
 
+
 class TestLastAssistantText:
     def test_extracts_string_content(self) -> None:
         messages = [{"role": "assistant", "content": "Report done."}]
         assert ex_last_text(messages) == "Report done."
 
     def test_extracts_from_content_list(self) -> None:
-        messages = [{"role": "assistant", "content": [
-            {"type": "text", "text": "Findings: X"},
-        ]}]
+        messages = [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "Findings: X"},
+                ],
+            }
+        ]
         assert ex_last_text(messages) == "Findings: X"
 
     def test_returns_empty_when_no_assistant(self) -> None:
@@ -279,31 +309,38 @@ class TestLastAssistantText:
 # Capability registry auto-registration
 # ---------------------------------------------------------------------------
 
+
 class TestCapabilityRegistryRegistration:
     def test_pm_registered(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         assert get_capability_registry().get("pm") is not None
 
     def test_research_registered(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         assert get_capability_registry().get("research") is not None
 
     def test_executive_registered(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         assert get_capability_registry().get("executive") is not None
 
     def test_docs_registered(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         assert get_capability_registry().get("docs") is not None
 
     def test_pm_has_planning_capability(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         cap = get_capability_registry().get("pm")
         assert cap is not None
         assert "planning" in cap.capabilities
 
     def test_pm_has_legacy_capabilities(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         cap = get_capability_registry().get("pm")
         assert cap is not None
         assert "requirement_analysis" in cap.capabilities
@@ -311,12 +348,14 @@ class TestCapabilityRegistryRegistration:
 
     def test_executive_is_medium_risk(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         cap = get_capability_registry().get("executive")
         assert cap is not None
         assert cap.risk_level == "medium"
 
     def test_docs_is_medium_risk(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         cap = get_capability_registry().get("docs")
         assert cap is not None
         assert cap.risk_level == "medium"
@@ -326,21 +365,26 @@ class TestCapabilityRegistryRegistration:
 # Agent registry auto-registration
 # ---------------------------------------------------------------------------
 
+
 class TestAgentRegistryRegistration:
     def test_pm_in_agent_registry(self) -> None:
         from app.fleet.agent_registry import get_agent_registry
+
         assert get_agent_registry().get("pm") is not None
 
     def test_research_in_agent_registry(self) -> None:
         from app.fleet.agent_registry import get_agent_registry
+
         assert get_agent_registry().get("research") is not None
 
     def test_executive_in_agent_registry(self) -> None:
         from app.fleet.agent_registry import get_agent_registry
+
         assert get_agent_registry().get("executive") is not None
 
     def test_docs_in_agent_registry(self) -> None:
         from app.fleet.agent_registry import get_agent_registry
+
         assert get_agent_registry().get("docs") is not None
 
 
@@ -348,39 +392,46 @@ class TestAgentRegistryRegistration:
 # Fleet manager selection
 # ---------------------------------------------------------------------------
 
+
 class TestFleetManagerSelection:
     def test_selects_pm_by_planning(self) -> None:
         from app.fleet.fleet_manager import FleetManager
+
         plan = FleetManager().select("planning")
         assert plan is not None
         assert plan.agent_name == "pm"
 
     def test_selects_pm_by_requirement_analysis(self) -> None:
         from app.fleet.fleet_manager import FleetManager
+
         plan = FleetManager().select("requirement_analysis")
         assert plan is not None
         assert plan.agent_name == "pm"
 
     def test_selects_research_by_web_search(self) -> None:
         from app.fleet.fleet_manager import FleetManager
+
         plan = FleetManager().select("web_search")
         assert plan is not None
         assert plan.agent_name == "research"
 
     def test_selects_executive_by_epic_generation(self) -> None:
         from app.fleet.fleet_manager import FleetManager
+
         plan = FleetManager().select("epic_generation")
         assert plan is not None
         assert plan.agent_name == "executive"
 
     def test_selects_docs_by_documentation(self) -> None:
         from app.fleet.fleet_manager import FleetManager
+
         plan = FleetManager().select("documentation")
         assert plan is not None
         assert plan.agent_name == "docs"
 
     def test_selects_docs_by_changelog_writing(self) -> None:
         from app.fleet.fleet_manager import FleetManager
+
         plan = FleetManager().select("changelog_writing")
         assert plan is not None
         assert plan.agent_name == "docs"
@@ -390,23 +441,31 @@ class TestFleetManagerSelection:
 # Tool manifest compliance (shared tools only)
 # ---------------------------------------------------------------------------
 
+
 class TestToolManifestCompliance:
     def _shared_tools(self, contract: dict[str, Any]) -> list[str]:
         return [t for t in contract["allowed_tools"] if t not in _SUBMIT_PRIVATE]
 
     def test_pm_shared_tools_in_manifest(self) -> None:
         from app.fleet.tool_manifest import TOOL_MANIFEST
+
         for tool in self._shared_tools(PM_CONTRACT):
             assert tool in TOOL_MANIFEST, f"pm uses {tool!r} — not in TOOL_MANIFEST"
 
     def test_research_shared_tools_in_manifest(self) -> None:
         from app.fleet.tool_manifest import TOOL_MANIFEST
+
         for tool in self._shared_tools(RS_CONTRACT):
-            assert tool in TOOL_MANIFEST, f"research uses {tool!r} — not in TOOL_MANIFEST"
+            assert (
+                tool in TOOL_MANIFEST
+            ), f"research uses {tool!r} — not in TOOL_MANIFEST"
 
     def test_docs_shared_tools_in_manifest(self) -> None:
         from app.fleet.tool_manifest import TOOL_MANIFEST
-        for tool in [t for t in DC_CONTRACT["allowed_tools"] if t not in {"submit_docs"}]:
+
+        for tool in [
+            t for t in DC_CONTRACT["allowed_tools"] if t not in {"submit_docs"}
+        ]:
             assert tool in TOOL_MANIFEST, f"docs uses {tool!r} — not in TOOL_MANIFEST"
 
 
@@ -425,7 +484,9 @@ _BRIEF = {
 class TestPmNodeBehavior:
     @patch("app.agents.pm.run_agent_graph")
     @patch("app.agents.pm.make_read_only_handlers")
-    def test_returns_brief_on_success(self, mock_handlers: Any, mock_graph: Any) -> None:
+    def test_returns_brief_on_success(
+        self, mock_handlers: Any, mock_graph: Any
+    ) -> None:
         mock_handlers.return_value = {"submit_brief": lambda x: "ok"}
         mock_graph.return_value = _make_final_state(result=_BRIEF, submitted=True)
 
@@ -440,7 +501,9 @@ class TestPmNodeBehavior:
 
     @patch("app.agents.pm.run_agent_graph")
     @patch("app.agents.pm.make_read_only_handlers")
-    def test_returns_blocked_when_not_submitted(self, mock_handlers: Any, mock_graph: Any) -> None:
+    def test_returns_blocked_when_not_submitted(
+        self, mock_handlers: Any, mock_graph: Any
+    ) -> None:
         mock_handlers.return_value = {"submit_brief": lambda x: "ok"}
         mock_graph.return_value = _make_final_state(result={}, submitted=False)
 
@@ -450,7 +513,9 @@ class TestPmNodeBehavior:
 
     @patch("app.agents.pm.run_agent_graph", side_effect=RuntimeError("timeout"))
     @patch("app.agents.pm.make_read_only_handlers")
-    def test_returns_blocked_on_exception(self, mock_handlers: Any, mock_graph: Any) -> None:
+    def test_returns_blocked_on_exception(
+        self, mock_handlers: Any, mock_graph: Any
+    ) -> None:
         mock_handlers.return_value = {"submit_brief": lambda x: "ok"}
         state = {"task_title": "T", "task_description": "D", "repo_path": "/tmp"}
         result = pm_node(state)  # type: ignore[arg-type]
@@ -459,13 +524,17 @@ class TestPmNodeBehavior:
 
     @patch("app.agents.pm.run_agent_graph")
     @patch("app.agents.pm.make_read_only_handlers")
-    def test_memory_block_included_when_present(self, mock_handlers: Any, mock_graph: Any) -> None:
+    def test_memory_block_included_when_present(
+        self, mock_handlers: Any, mock_graph: Any
+    ) -> None:
         mock_handlers.return_value = {"submit_brief": lambda x: "ok"}
         mock_graph.return_value = _make_final_state(result=_BRIEF, submitted=True)
 
         state = {
-            "task_title": "T", "task_description": "D",
-            "repo_path": "/tmp", "memory_context": "prior lessons here",
+            "task_title": "T",
+            "task_description": "D",
+            "repo_path": "/tmp",
+            "memory_context": "prior lessons here",
         }
         pm_node(state)  # type: ignore[arg-type]
         call_kwargs = mock_graph.call_args[1]
@@ -475,6 +544,7 @@ class TestPmNodeBehavior:
 # ---------------------------------------------------------------------------
 # run_research behavior
 # ---------------------------------------------------------------------------
+
 
 class TestRunResearchBehavior:
     @patch("app.agents.research.get_settings")
@@ -531,10 +601,13 @@ class TestRunResearchBehavior:
 # run_docs behavior
 # ---------------------------------------------------------------------------
 
+
 class TestRunDocsBehavior:
     @patch("app.agents.docs.run_agent_graph")
     @patch("app.agents.docs.make_docs_handlers")
-    def test_returns_report_on_success(self, mock_handlers: Any, mock_graph: Any) -> None:
+    def test_returns_report_on_success(
+        self, mock_handlers: Any, mock_graph: Any
+    ) -> None:
         docs_raw = {"files_written": ["CHANGELOG.md"], "summary": "Updated changelog"}
         mock_handlers.return_value = {"_docs_result": docs_raw}
         mock_graph.return_value = _make_final_state(
@@ -551,7 +624,9 @@ class TestRunDocsBehavior:
 
     @patch("app.agents.docs.run_agent_graph")
     @patch("app.agents.docs.make_docs_handlers")
-    def test_returns_error_when_no_submit(self, mock_handlers: Any, mock_graph: Any) -> None:
+    def test_returns_error_when_no_submit(
+        self, mock_handlers: Any, mock_graph: Any
+    ) -> None:
         mock_handlers.return_value = {"_docs_result": {}}
         mock_graph.return_value = _make_final_state(
             messages=[{"role": "assistant", "content": "I forgot to call submit."}]
@@ -563,7 +638,9 @@ class TestRunDocsBehavior:
 
     @patch("app.agents.docs.run_agent_graph", side_effect=RuntimeError("API down"))
     @patch("app.agents.docs.make_docs_handlers")
-    def test_returns_none_on_exception(self, mock_handlers: Any, mock_graph: Any) -> None:
+    def test_returns_none_on_exception(
+        self, mock_handlers: Any, mock_graph: Any
+    ) -> None:
         mock_handlers.return_value = {"_docs_result": {}}
         report, error, tokens_in, _ = run_docs("E", "D", [], "", [], "/tmp/wt")
         assert report is None

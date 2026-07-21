@@ -12,6 +12,7 @@ Fallback routing (used when DB is unavailable or agent not found in registry):
   docs     → docs agent (Phase 6)
   research → research agent (Phase 6)
 """
+
 from __future__ import annotations
 
 import logging
@@ -61,9 +62,7 @@ async def pick_agent_by_tag(
     from app.db.models import Agent
 
     # Use PostgreSQL ARRAY @> operator: capability_tags @> ARRAY[:tag]
-    stmt = select(Agent).where(
-        Agent.capability_tags.contains([tag])
-    )
+    stmt = select(Agent).where(Agent.capability_tags.contains([tag]))
     if prefer_highest_success:
         stmt = stmt.order_by(Agent.success_rate.desc())
 
@@ -107,7 +106,10 @@ async def dispatch_subtask(
 
     logger.info(
         "Dispatcher: task=%d subtask=%d type=%s → agent=%s",
-        task_id, subtask_id, subtask_type, agent_name,
+        task_id,
+        subtask_id,
+        subtask_type,
+        agent_name,
     )
 
     settings = get_settings()
@@ -115,6 +117,7 @@ async def dispatch_subtask(
 
     if subtask_type == "frontend":
         from app.agents.frontend_dev import run_frontend_dev
+
         files_changed, error = run_frontend_dev(
             task_id=task_id,
             subtask_id=subtask_id,
@@ -124,6 +127,7 @@ async def dispatch_subtask(
         )
     elif subtask_type == "test":
         from app.agents.qa import run_qa
+
         qa_result = run_qa(
             task_id=task_id,
             subtask_id=subtask_id,
@@ -135,6 +139,7 @@ async def dispatch_subtask(
         return {"files_changed": [], "error": error, "agent": "qa"}
     else:
         from app.agents.backend_dev import run_backend_dev
+
         files_changed, error = run_backend_dev(
             task_id=task_id,
             subtask_id=subtask_id,

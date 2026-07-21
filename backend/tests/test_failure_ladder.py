@@ -6,6 +6,7 @@ re-export works). Resume/Retry/Escalate/Abort/Human Review were genuinely
 missing before this file — verified by reading fleet_checkpoint.py,
 agent_registry.py, and db/models.py's VALID_TRANSITIONS in full first.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -71,8 +72,11 @@ def _delete_task(task_id: int) -> None:
 # Checkpoint / Rollback / Resume
 # ---------------------------------------------------------------------------
 
+
 def test_checkpoint_and_resume_round_trip() -> None:
-    cp_id = fl.checkpoint({"progress": "step_3"}, agent_name="td_ladder_agent", task_id="td-1")
+    cp_id = fl.checkpoint(
+        {"progress": "step_3"}, agent_name="td_ladder_agent", task_id="td-1"
+    )
     resumed = fl.resume(cp_id)
     assert resumed == {"progress": "step_3"}
 
@@ -92,6 +96,7 @@ def test_rollback_still_works_via_ladder_re_export() -> None:
 # Retry
 # ---------------------------------------------------------------------------
 
+
 def test_should_retry_bounded_by_explicit_max() -> None:
     assert fl.should_retry(0, max_retries=3) is True
     assert fl.should_retry(2, max_retries=3) is True
@@ -107,6 +112,7 @@ def test_should_retry_defaults_to_settings_max_retries() -> None:
 # ---------------------------------------------------------------------------
 # Escalate
 # ---------------------------------------------------------------------------
+
 
 def test_escalate_marks_agent_error_and_increments_error_count() -> None:
     # fail_task() (which escalate() wraps) is a no-op for a name that was
@@ -125,10 +131,13 @@ def test_escalate_marks_agent_error_and_increments_error_count() -> None:
     assert after is not None
     assert after.error_count == before_count + 1
     from app.fleet.agent_registry import AgentState
+
     assert after.state == AgentState.ERROR
 
 
-def test_escalate_is_non_fatal_on_publish_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_escalate_is_non_fatal_on_publish_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import app.fleet.fleet_events as fleet_events_module
 
     def _boom(*args: object, **kwargs: object) -> None:
@@ -141,6 +150,7 @@ def test_escalate_is_non_fatal_on_publish_failure(monkeypatch: pytest.MonkeyPatc
 # ---------------------------------------------------------------------------
 # Abort
 # ---------------------------------------------------------------------------
+
 
 def test_abort_transitions_task_to_failed() -> None:
     task_id = _make_task()
@@ -164,10 +174,13 @@ def test_abort_with_nonexistent_task_id_returns_false_not_raise() -> None:
 # Human Review
 # ---------------------------------------------------------------------------
 
+
 def test_request_human_review_transitions_task_to_blocked() -> None:
     task_id = _make_task()
     try:
-        result = fl.request_human_review(str(task_id), "td_agent", "stall detected", trace_id="t1")
+        result = fl.request_human_review(
+            str(task_id), "td_agent", "stall detected", trace_id="t1"
+        )
         assert result is True
         assert _get_status(task_id) == "blocked"
     finally:
@@ -182,10 +195,18 @@ def test_request_human_review_with_none_task_id_is_a_safe_no_op() -> None:
 # VALID_TRANSITIONS gap closed
 # ---------------------------------------------------------------------------
 
+
 def test_failed_is_now_reachable_from_every_in_progress_status() -> None:
     from app.db.models import can_transition
 
-    for status in ("pending", "planning", "ready_for_review", "coding", "testing", "blocked"):
+    for status in (
+        "pending",
+        "planning",
+        "ready_for_review",
+        "coding",
+        "testing",
+        "blocked",
+    ):
         assert can_transition(status, "failed"), f"{status} -> failed should be valid"
 
 
@@ -196,6 +217,7 @@ def test_failed_is_now_reachable_from_every_in_progress_status() -> None:
 # that existing mechanism rather than adding a second retry loop inside
 # base_graph.py's hot path (shared by all 72+ agents).
 # ---------------------------------------------------------------------------
+
 
 def test_run_manager_calls_escalate_and_human_review_when_subtask_blocked() -> None:
     from unittest.mock import patch
@@ -210,14 +232,22 @@ def test_run_manager_calls_escalate_and_human_review_when_subtask_blocked() -> N
     ) as mock_human_review:
         mock_backend_dev.return_value = (["app/api/hello.py"], None)
         mock_qa.return_value = QAResult(
-            status="failed", tests_run=3, tests_passed=0, tests_failed=3,
-            typecheck_clean=False, lint_clean=False, errors=["always fails"], summary="failing",
+            status="failed",
+            tests_run=3,
+            tests_passed=0,
+            tests_failed=3,
+            typecheck_clean=False,
+            lint_clean=False,
+            errors=["always fails"],
+            summary="failing",
         )
 
         result = asyncio.run(
             run_manager(
                 task_id=999_101,
-                subtasks=[{"id": 1, "type": "backend", "title": "x", "description": "y"}],
+                subtasks=[
+                    {"id": 1, "type": "backend", "title": "x", "description": "y"}
+                ],
                 worktree_path="/tmp/does-not-need-to-exist",
                 plan="plan",
                 repo_path="/home/pc-117/Documents/CRR2906",
@@ -250,8 +280,14 @@ def test_run_manager_calls_abort_when_epic_halted() -> None:
     ) as mock_qa, patch("app.fleet.failure_ladder.abort") as mock_abort:
         mock_backend_dev.return_value = (["app/api/hello.py"], None)
         mock_qa.return_value = QAResult(
-            status="failed", tests_run=1, tests_passed=0, tests_failed=1,
-            typecheck_clean=False, lint_clean=False, errors=["always fails"], summary="failing",
+            status="failed",
+            tests_run=1,
+            tests_passed=0,
+            tests_failed=1,
+            typecheck_clean=False,
+            lint_clean=False,
+            errors=["always fails"],
+            summary="failing",
         )
 
         result = asyncio.run(

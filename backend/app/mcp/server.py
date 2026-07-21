@@ -1,4 +1,5 @@
 """MCP stdio server — exposes repo intelligence tools over JSON-RPC 2.0."""
+
 from __future__ import annotations
 
 import json
@@ -20,7 +21,10 @@ _TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string", "description": "Path to repo (default: TARGET_REPO_PATH)"},
+                "repo_path": {
+                    "type": "string",
+                    "description": "Path to repo (default: TARGET_REPO_PATH)",
+                },
             },
         },
     },
@@ -30,7 +34,10 @@ _TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Symbol name or partial name"},
+                "query": {
+                    "type": "string",
+                    "description": "Symbol name or partial name",
+                },
                 "repo_path": {"type": "string"},
             },
             "required": ["query"],
@@ -66,7 +73,10 @@ _TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Natural-language search query"},
+                "query": {
+                    "type": "string",
+                    "description": "Natural-language search query",
+                },
                 "repo_path": {"type": "string"},
                 "top_k": {"type": "integer", "default": 20},
             },
@@ -79,7 +89,10 @@ _TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "file_path": {"type": "string", "description": "Relative file path within the repo"},
+                "file_path": {
+                    "type": "string",
+                    "description": "Relative file path within the repo",
+                },
                 "repo_path": {"type": "string"},
             },
             "required": ["file_path"],
@@ -110,7 +123,9 @@ def _handle(method: str, params: dict[str, Any]) -> Any:
                 "content": [
                     {
                         "type": "text",
-                        "text": json.dumps({"files": len(idx.files), "symbols": total_symbols}),
+                        "text": json.dumps(
+                            {"files": len(idx.files), "symbols": total_symbols}
+                        ),
                     }
                 ]
             }
@@ -122,12 +137,21 @@ def _handle(method: str, params: dict[str, Any]) -> Any:
             for rel_path, fi in idx.files.items():
                 for sym in fi.symbols:
                     if query in sym.name.lower():
-                        matches.append({"file": rel_path, "name": sym.name, "kind": sym.kind, "line": sym.line_start})
+                        matches.append(
+                            {
+                                "file": rel_path,
+                                "name": sym.name,
+                                "kind": sym.kind,
+                                "line": sym.line_start,
+                            }
+                        )
             return {"content": [{"type": "text", "text": json.dumps(matches[:50])}]}
 
         if tool_name == "build_context":
             idx = index_repository(repo)
-            ctx = build_context(task_description=tool_params["task_description"], index=idx)
+            ctx = build_context(
+                task_description=tool_params["task_description"], index=idx
+            )
             return {
                 "content": [
                     {
@@ -149,10 +173,18 @@ def _handle(method: str, params: dict[str, Any]) -> Any:
             idx = index_repository(repo)
             edges = build_call_graph(idx)
             deps = edges.get(file_path, [])
-            return {"content": [{"type": "text", "text": json.dumps({"file": file_path, "dependencies": deps})}]}
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps({"file": file_path, "dependencies": deps}),
+                    }
+                ]
+            }
 
         if tool_name == "semantic_search":
             import re
+
             query = tool_params.get("query", "")
             top_k = int(tool_params.get("top_k", 20))
             idx = index_repository(repo)
@@ -160,31 +192,57 @@ def _handle(method: str, params: dict[str, Any]) -> Any:
             scores: dict[str, float] = {}
             for rel_path, fi in idx.files.items():
                 symbol_names = [s.name for s in fi.symbols]
-                combined = rel_path.lower() + " " + " ".join(s.lower() for s in symbol_names)
+                combined = (
+                    rel_path.lower() + " " + " ".join(s.lower() for s in symbol_names)
+                )
                 scores[rel_path] = sum(1.0 for tok in query_tokens if tok in combined)
             sorted_files = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-            results = [{"file": p, "score": s} for p, s in sorted_files if s > 0][:top_k]
-            return {"content": [{"type": "text", "text": json.dumps({"results": results, "query": query})}]}
+            results = [{"file": p, "score": s} for p, s in sorted_files if s > 0][
+                :top_k
+            ]
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps({"results": results, "query": query}),
+                    }
+                ]
+            }
 
         if tool_name == "get_file_summary":
             file_path = tool_params.get("file_path", "")
             idx = index_repository(repo)
             file_info = idx.files.get(file_path)
             if file_info is None:
-                return {"content": [{"type": "text", "text": json.dumps({"error": f"File not found: {file_path}"})}]}
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(
+                                {"error": f"File not found: {file_path}"}
+                            ),
+                        }
+                    ]
+                }
             return {
                 "content": [
                     {
                         "type": "text",
-                        "text": json.dumps({
-                            "file": file_path,
-                            "language": file_info.language,
-                            "symbols": [
-                                {"name": s.name, "kind": s.kind, "line": s.line_start}
-                                for s in file_info.symbols
-                            ],
-                            "imports": file_info.imports,
-                        }),
+                        "text": json.dumps(
+                            {
+                                "file": file_path,
+                                "language": file_info.language,
+                                "symbols": [
+                                    {
+                                        "name": s.name,
+                                        "kind": s.kind,
+                                        "line": s.line_start,
+                                    }
+                                    for s in file_info.symbols
+                                ],
+                                "imports": file_info.imports,
+                            }
+                        ),
                     }
                 ]
             }
@@ -211,7 +269,11 @@ def run_stdio_server() -> None:
         try:
             req = json.loads(line)
         except json.JSONDecodeError as e:
-            resp = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": str(e)}}
+            resp = {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32700, "message": str(e)},
+            }
             print(json.dumps(resp), flush=True)
             continue
 
@@ -226,7 +288,11 @@ def run_stdio_server() -> None:
             else:
                 resp = {"jsonrpc": "2.0", "id": req_id, "result": result}
         except Exception as e:
-            resp = {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32603, "message": str(e)}}
+            resp = {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32603, "message": str(e)},
+            }
 
         print(json.dumps(resp), flush=True)
 

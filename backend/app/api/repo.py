@@ -8,6 +8,7 @@ GET    /api/repo/reindex    — reindex status
 POST   /api/repo/reindex    — trigger reindex
 GET    /api/repo/context    — build context for a task description
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -51,7 +52,9 @@ async def init_active_repo() -> None:
     try:
         async with get_async_session() as db:
             result = await db.execute(
-                select(Repo).where(Repo.is_active == True, Repo.status == "ready")  # noqa: E712
+                select(Repo).where(
+                    Repo.is_active == True, Repo.status == "ready"  # noqa: E712
+                )
             )
             repo = result.scalar_one_or_none()
             if repo:
@@ -64,6 +67,7 @@ async def init_active_repo() -> None:
 # ---------------------------------------------------------------------------
 # Background clone task
 # ---------------------------------------------------------------------------
+
 
 async def _clone_and_activate(
     repo_id: int,
@@ -87,7 +91,8 @@ async def _clone_and_activate(
             if target.exists() and is_git_repo:
                 # Already a cloned repo — pull latest
                 proc = await asyncio.create_subprocess_exec(
-                    "git", "pull",
+                    "git",
+                    "pull",
                     cwd=local_path,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
@@ -119,13 +124,19 @@ async def _clone_and_activate(
 
             # Deactivate any previously active repo
             await db.execute(
-                update(Repo).where(Repo.is_active == True).values(is_active=False)  # noqa: E712
+                update(Repo)
+                .where(Repo.is_active == True)  # noqa: E712
+                .values(is_active=False)
             )
             # Mark this repo as ready and active
             await db.execute(
                 update(Repo)
                 .where(Repo.id == repo_id)
-                .values(status="ready", is_active=True, cloned_at=datetime.now(timezone.utc).replace(tzinfo=None))
+                .values(
+                    status="ready",
+                    is_active=True,
+                    cloned_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                )
             )
             await db.commit()
 
@@ -135,6 +146,7 @@ async def _clone_and_activate(
             # Invalidate context cache for old repo, reindex will happen on demand
             try:
                 from app.repo_tools.context_builder import invalidate_context_cache
+
                 invalidate_context_cache(local_path)
             except Exception:
                 pass
@@ -156,11 +168,12 @@ async def _clone_and_activate(
 # Pydantic schemas
 # ---------------------------------------------------------------------------
 
+
 class CloneRequest(BaseModel):
     github_url: str
-    dest_path: str | None = None   # optional; auto-computed if omitted
-    branch: str | None = None      # optional branch to check out
-    token: str | None = None       # optional GitHub PAT for private repos
+    dest_path: str | None = None  # optional; auto-computed if omitted
+    branch: str | None = None  # optional branch to check out
+    token: str | None = None  # optional GitHub PAT for private repos
 
 
 class RepoResponse(BaseModel):
@@ -200,6 +213,7 @@ def _extract_name(url: str) -> str:
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("")
 async def list_repos(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """List all cloned repos and identify the active one."""
@@ -224,7 +238,11 @@ async def clone_repo(
 
     settings = get_settings()
     name = _extract_name(url)
-    local_path = body.dest_path.strip() if body.dest_path and body.dest_path.strip() else str(Path(settings.repos_dir) / name)
+    local_path = (
+        body.dest_path.strip()
+        if body.dest_path and body.dest_path.strip()
+        else str(Path(settings.repos_dir) / name)
+    )
     branch = body.branch.strip() if body.branch and body.branch.strip() else None
     token = body.token.strip() if body.token and body.token.strip() else None
 
@@ -234,7 +252,9 @@ async def clone_repo(
 
     if existing_repo:
         await db.execute(
-            update(Repo).where(Repo.id == existing_repo.id).values(status="cloning", error_msg=None)
+            update(Repo)
+            .where(Repo.id == existing_repo.id)
+            .values(status="cloning", error_msg=None)
         )
         await db.commit()
         repo_id = existing_repo.id
@@ -250,7 +270,9 @@ async def clone_repo(
         await db.refresh(new_repo)
         repo_id = new_repo.id
 
-    background_tasks.add_task(_clone_and_activate, repo_id, url, local_path, branch, token)
+    background_tasks.add_task(
+        _clone_and_activate, repo_id, url, local_path, branch, token
+    )
 
     result = await db.execute(select(Repo).where(Repo.id == repo_id))
     repo = result.scalar_one()
@@ -258,7 +280,9 @@ async def clone_repo(
 
 
 @router.delete("/{repo_id}")
-async def delete_repo(repo_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def delete_repo(
+    repo_id: int, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     """Remove a repo record from the database. Local files are left untouched."""
     global _active_repo_path
     result = await db.execute(select(Repo).where(Repo.id == repo_id))
@@ -273,7 +297,9 @@ async def delete_repo(repo_id: int, db: AsyncSession = Depends(get_db)) -> dict[
 
 
 @router.post("/{repo_id}/activate")
-async def activate_repo(repo_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def activate_repo(
+    repo_id: int, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     """Switch the active repo without re-cloning."""
     global _active_repo_path
     result = await db.execute(select(Repo).where(Repo.id == repo_id))
@@ -281,9 +307,13 @@ async def activate_repo(repo_id: int, db: AsyncSession = Depends(get_db)) -> dic
     if not repo:
         raise HTTPException(status_code=404, detail="Repo not found.")
     if repo.status != "ready":
-        raise HTTPException(status_code=400, detail="Repo is not ready — wait for clone to finish.")
+        raise HTTPException(
+            status_code=400, detail="Repo is not ready — wait for clone to finish."
+        )
 
-    await db.execute(update(Repo).where(Repo.is_active == True).values(is_active=False))  # noqa: E712
+    await db.execute(
+        update(Repo).where(Repo.is_active == True).values(is_active=False)  # noqa: E712
+    )
     await db.execute(update(Repo).where(Repo.id == repo_id).values(is_active=True))
     await db.commit()
 
@@ -295,6 +325,7 @@ async def activate_repo(repo_id: int, db: AsyncSession = Depends(get_db)) -> dic
 # Existing reindex + context endpoints (unchanged behaviour, uses active repo)
 # ---------------------------------------------------------------------------
 
+
 async def _do_reindex() -> None:
     global _indexed_at, _file_count, _known_hashes
 
@@ -302,7 +333,9 @@ async def _do_reindex() -> None:
     from app.repo_tools.context_builder import invalidate_context_cache
 
     repo_path = get_active_repo_path()
-    full_index = index_repository(repo_path, known_hashes=_known_hashes if _known_hashes else None)
+    full_index = index_repository(
+        repo_path, known_hashes=_known_hashes if _known_hashes else None
+    )
     _known_hashes = {rel: fi.content_hash for rel, fi in full_index.files.items()}
     _indexed_at = datetime.now(timezone.utc).isoformat()
     _file_count = len(full_index.files)
@@ -326,7 +359,9 @@ async def get_context(task_description: str) -> dict[str, object]:
     from app.repo_tools.context_builder import build_context
 
     repo_path = get_active_repo_path()
-    idx = index_repository(repo_path, known_hashes=_known_hashes if _known_hashes else None)
+    idx = index_repository(
+        repo_path, known_hashes=_known_hashes if _known_hashes else None
+    )
     ctx = build_context(task_description, idx)
     return {
         "relevantFiles": ctx.relevant_files,

@@ -4,6 +4,7 @@ Revision ID: 001
 Revises:
 Create Date: 2026-07-02
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -30,8 +31,18 @@ def upgrade() -> None:
         sa.Column("plan", sa.Text(), nullable=True),
         sa.Column("diff", sa.Text(), nullable=True),
         sa.Column("files_touched", postgresql.ARRAY(sa.Text()), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_dev_tasks_status", "dev_tasks", ["status"])
@@ -44,7 +55,12 @@ def upgrade() -> None:
         sa.Column("category", sa.String(100), nullable=False),
         sa.Column("message", sa.Text(), nullable=False),
         sa.Column("extra_data", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(["task_id"], ["dev_tasks.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
@@ -63,7 +79,12 @@ def upgrade() -> None:
         sa.Column("cost_estimate", sa.Numeric(10, 6), nullable=True),
         sa.Column("last_heartbeat_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("error", sa.Text(), nullable=True),
-        sa.Column("started_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "started_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(["task_id"], ["dev_tasks.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -80,7 +101,12 @@ def upgrade() -> None:
         sa.Column("files_to_edit", postgresql.ARRAY(sa.Text()), nullable=True),
         sa.Column("depends_on", postgresql.ARRAY(sa.BigInteger()), nullable=True),
         sa.Column("status", sa.String(50), nullable=False, server_default="pending"),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(["task_id"], ["dev_tasks.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
@@ -92,11 +118,25 @@ def upgrade() -> None:
         sa.Column("task_id", sa.BigInteger(), nullable=False),
         sa.Column("stage", sa.String(50), nullable=False, server_default="pm"),
         sa.Column("pm_brief", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-        sa.Column("architect_plan", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-        sa.Column("subtasks_json", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column(
+            "architect_plan", postgresql.JSONB(astext_type=sa.Text()), nullable=True
+        ),
+        sa.Column(
+            "subtasks_json", postgresql.JSONB(astext_type=sa.Text()), nullable=True
+        ),
         sa.Column("approved", sa.Boolean(), nullable=False, server_default="false"),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(["task_id"], ["dev_tasks.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("task_id"),
@@ -110,10 +150,17 @@ def upgrade() -> None:
         sa.Column("file_path", sa.Text(), nullable=False),
         sa.Column("language", sa.String(50), nullable=True),
         sa.Column("content_hash", sa.String(64), nullable=False),
-        sa.Column("last_indexed_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "last_indexed_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_unique_constraint("uq_indexed_files_repo_file", "indexed_files", ["repo_path", "file_path"])
+    op.create_unique_constraint(
+        "uq_indexed_files_repo_file", "indexed_files", ["repo_path", "file_path"]
+    )
 
     # symbols
     op.create_table(
@@ -142,8 +189,7 @@ def upgrade() -> None:
     )
 
     # code_embeddings (pgvector)
-    op.execute(
-        """
+    op.execute("""
         CREATE TABLE code_embeddings (
             id BIGSERIAL PRIMARY KEY,
             repo_path TEXT NOT NULL,
@@ -155,8 +201,7 @@ def upgrade() -> None:
             updated_at TIMESTAMPTZ DEFAULT NOW(),
             UNIQUE (repo_path, file_path, chunk_index)
         )
-        """
-    )
+        """)
     op.execute("CREATE INDEX ix_code_embeddings_repo ON code_embeddings (repo_path)")
 
 

@@ -1,4 +1,5 @@
 """pair_programmer_agent — acts as a pair programmer, guiding implementation step by step."""
+
 from __future__ import annotations
 
 import logging
@@ -15,18 +16,31 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "pair_programmer_agent",
     "description": "Acts as a pair programmer: reads the target code area, explains the current state, then guides implementation with code suggestions, simplicity guidance, and step-by-step verification.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "get_file_tree",
-        "search_symbols", "find_references", "list_functions", "parse_ast",
-        "analyze_file", "read_files", "file_exists", "file_info",
-        "find_todos", "search_imports",
-        "write_file", "submit_pair_programmer_agent",
+        "read_file",
+        "list_files",
+        "search_code",
+        "get_file_tree",
+        "search_symbols",
+        "find_references",
+        "list_functions",
+        "parse_ast",
+        "analyze_file",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_todos",
+        "search_imports",
+        "write_file",
+        "submit_pair_programmer_agent",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
     "side_effects": ["writes code suggestions and implementation guides"],
     "permissions": ["read_repo", "write_docs"],
     "risk_level": "low",
-    "expected_verification": {"read": "read_file must run to understand existing code before suggesting changes"},
+    "expected_verification": {
+        "read": "read_file must run to understand existing code before suggesting changes"
+    },
     "dependencies": [],
 }
 
@@ -134,16 +148,19 @@ def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["pair_programming"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["pair_programming"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry unavailable: %s", exc)

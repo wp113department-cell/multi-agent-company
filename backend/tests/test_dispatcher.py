@@ -1,12 +1,13 @@
 """Dispatcher routing tests — subtask type → correct agent selection."""
+
 from __future__ import annotations
 
 import pytest
 
 from app.pipeline.dispatcher import get_agent_for_type, dispatch_subtask
 
-
 # ---- Routing table tests (pure, no agents called) ----
+
 
 def test_backend_routes_to_backend_dev() -> None:
     assert get_agent_for_type("backend") == "backend_dev"
@@ -31,13 +32,21 @@ def test_unknown_type_defaults_to_backend_dev() -> None:
 
 # ---- dispatch_subtask structural tests ----
 
+
 @pytest.mark.asyncio
-async def test_dispatch_backend_subtask_calls_backend_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_dispatch_backend_subtask_calls_backend_dev(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """dispatch_subtask with type=backend calls run_backend_dev."""
     called_with: dict[str, object] = {}
 
     def fake_run_backend_dev(
-        task_id: int, subtask_id: int, plan: str, worktree_path: str, repo_path: object = None, **kw: object
+        task_id: int,
+        subtask_id: int,
+        plan: str,
+        worktree_path: str,
+        repo_path: object = None,
+        **kw: object,
     ) -> tuple[list[str], None]:
         called_with["task_id"] = task_id
         called_with["subtask_id"] = subtask_id
@@ -47,6 +56,7 @@ async def test_dispatch_backend_subtask_calls_backend_dev(monkeypatch: pytest.Mo
     monkeypatch.setattr("app.agents.backend_dev.run_backend_dev", fake_run_backend_dev)
     # dispatcher imports lazily, so patch at the source
     import app.agents.backend_dev as backend_dev_mod
+
     monkeypatch.setattr(backend_dev_mod, "run_backend_dev", fake_run_backend_dev)
 
     result = await dispatch_subtask(
@@ -63,17 +73,25 @@ async def test_dispatch_backend_subtask_calls_backend_dev(monkeypatch: pytest.Mo
 
 
 @pytest.mark.asyncio
-async def test_dispatch_frontend_subtask_calls_frontend_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_dispatch_frontend_subtask_calls_frontend_dev(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """dispatch_subtask with type=frontend calls run_frontend_dev."""
     called: list[str] = []
 
     def fake_run_frontend_dev(
-        task_id: int, subtask_id: int, plan: str, worktree_path: str, repo_path: object = None, **kw: object
+        task_id: int,
+        subtask_id: int,
+        plan: str,
+        worktree_path: str,
+        repo_path: object = None,
+        **kw: object,
     ) -> tuple[list[str], None]:
         called.append("frontend_dev")
         return ["apps/web/components/Users.tsx"], None
 
     import app.agents.frontend_dev as frontend_dev_mod
+
     monkeypatch.setattr(frontend_dev_mod, "run_frontend_dev", fake_run_frontend_dev)
 
     result = await dispatch_subtask(
@@ -92,7 +110,13 @@ async def test_dispatch_test_subtask_calls_qa(monkeypatch: pytest.MonkeyPatch) -
     """dispatch_subtask with type=test calls run_qa directly (no dev agent)."""
     from app.agents.qa import QAResult
 
-    def fake_run_qa(task_id: int, subtask_id: int, files_changed: list[str], worktree_path: str, **kw: object) -> QAResult:
+    def fake_run_qa(
+        task_id: int,
+        subtask_id: int,
+        files_changed: list[str],
+        worktree_path: str,
+        **kw: object,
+    ) -> QAResult:
         return QAResult(
             status="passed",
             tests_run=10,
@@ -104,6 +128,7 @@ async def test_dispatch_test_subtask_calls_qa(monkeypatch: pytest.MonkeyPatch) -
         )
 
     import app.agents.qa as qa_mod
+
     monkeypatch.setattr(qa_mod, "run_qa", fake_run_qa)
 
     result = await dispatch_subtask(
@@ -118,10 +143,18 @@ async def test_dispatch_test_subtask_calls_qa(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.mark.asyncio
-async def test_dispatch_test_subtask_qa_failed_returns_error(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_dispatch_test_subtask_qa_failed_returns_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from app.agents.qa import QAResult
 
-    def fake_run_qa(task_id: int, subtask_id: int, files_changed: list[str], worktree_path: str, **kw: object) -> QAResult:
+    def fake_run_qa(
+        task_id: int,
+        subtask_id: int,
+        files_changed: list[str],
+        worktree_path: str,
+        **kw: object,
+    ) -> QAResult:
         return QAResult(
             status="failed",
             tests_run=5,
@@ -134,6 +167,7 @@ async def test_dispatch_test_subtask_qa_failed_returns_error(monkeypatch: pytest
         )
 
     import app.agents.qa as qa_mod
+
     monkeypatch.setattr(qa_mod, "run_qa", fake_run_qa)
 
     result = await dispatch_subtask(

@@ -16,6 +16,7 @@ Design decisions:
   Fleet Manager is the top-level dispatcher that selects WHICH agent type to use.
 - Existing dispatcher.py _TYPE_TO_TAG fallback remains unchanged for legacy paths.
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,7 +24,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.fleet.agent_registry import AgentInstance, AgentRegistry, get_agent_registry
-from app.fleet.capability_registry import AgentCapability, CapabilityRegistry, get_capability_registry
+from app.fleet.capability_registry import (
+    AgentCapability,
+    CapabilityRegistry,
+    get_capability_registry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +84,9 @@ class FleetManager:
         """
         candidates = self._caps.find_by_capability(required_capability)
         if not candidates:
-            logger.warning("No agents registered for capability %r", required_capability)
+            logger.warning(
+                "No agents registered for capability %r", required_capability
+            )
             return None
 
         side_effects = requested_side_effects or []
@@ -91,9 +98,14 @@ class FleetManager:
 
             if verify_tool_availability:
                 from app.fleet.tool_discovery import check_availability
+
                 unavailable = [t for t in cap.tools if not check_availability(t)]
                 if unavailable:
-                    logger.warning("Agent %r declares unresolvable tool(s) %s — skipping", cap.name, unavailable)
+                    logger.warning(
+                        "Agent %r declares unresolvable tool(s) %s — skipping",
+                        cap.name,
+                        unavailable,
+                    )
                     continue
 
             instance = self._agents.get(cap.name)
@@ -102,18 +114,32 @@ class FleetManager:
                 instance = self._agents.register(cap.name)
 
             if not instance.is_available:
-                logger.debug("Agent %r is not available (state=%s)", cap.name, instance.state)
+                logger.debug(
+                    "Agent %r is not available (state=%s)", cap.name, instance.state
+                )
                 continue
 
             # Contract check: agent must declare any side_effect it's asked to perform
             # (for reference agents, this is validated via AGENT_CONTRACT in their module)
-            uncovered = [se for se in side_effects if se not in (cap.limits.get("side_effects") or [])]
+            uncovered = [
+                se
+                for se in side_effects
+                if se not in (cap.limits.get("side_effects") or [])
+            ]
             if uncovered and side_effects:
                 # Non-blocking warning on Day 0 — enforcement tightens in Phase F4
-                logger.debug("Agent %r does not declare side_effects %s (non-blocking Day 0)", cap.name, uncovered)
+                logger.debug(
+                    "Agent %r does not declare side_effects %s (non-blocking Day 0)",
+                    cap.name,
+                    uncovered,
+                )
 
-            health_weight = {"healthy": 1.0, "degraded": 0.5, "unhealthy": 0.0}.get(instance.health, 0.0)
-            score = health_weight * cap.success_rate * (1.0 / (1.0 + instance.error_count))
+            health_weight = {"healthy": 1.0, "degraded": 0.5, "unhealthy": 0.0}.get(
+                instance.health, 0.0
+            )
+            score = (
+                health_weight * cap.success_rate * (1.0 / (1.0 + instance.error_count))
+            )
             scored.append((score, cap, instance))
 
         if not scored:
@@ -161,7 +187,9 @@ class FleetManager:
         self._agents.start_task(plan.agent_name, task_id)
         logger.info(
             "Fleet dispatch: task_id=%s → agent=%s (score=%.3f)",
-            task_id, plan.agent_name, plan.score,
+            task_id,
+            plan.agent_name,
+            plan.score,
         )
 
         return {

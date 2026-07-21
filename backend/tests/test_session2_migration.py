@@ -12,6 +12,7 @@ Tests prove:
 - Outer retry loop still works (passes check errors back into next attempt message)
 - Fleet manager can select each agent by its specific capability
 """
+
 from __future__ import annotations
 
 import inspect
@@ -24,14 +25,27 @@ import app.agents.backend_dev as bd_mod
 import app.agents.frontend_dev as fd_mod
 import app.agents.coder as co_mod
 
-from app.agents.backend_dev import AGENT_CONTRACT as BD_CONTRACT, run_backend_dev, _run_backend_checks
-from app.agents.frontend_dev import AGENT_CONTRACT as FD_CONTRACT, run_frontend_dev, _run_frontend_checks
+from app.agents.backend_dev import (
+    AGENT_CONTRACT as BD_CONTRACT,
+    run_backend_dev,
+    _run_backend_checks,
+)
+from app.agents.frontend_dev import (
+    AGENT_CONTRACT as FD_CONTRACT,
+    run_frontend_dev,
+    _run_frontend_checks,
+)
 from app.agents.coder import AGENT_CONTRACT as CO_CONTRACT, run_coder, _run_checks
 
-
 REQUIRED_CONTRACT_KEYS = {
-    "name", "description", "allowed_tools", "input_types",
-    "output_types", "side_effects", "permissions", "risk_level",
+    "name",
+    "description",
+    "allowed_tools",
+    "input_types",
+    "output_types",
+    "side_effects",
+    "permissions",
+    "risk_level",
 }
 
 _WRITE_TOOLS_REQUIRED = {"edit_file", "write_file", "bash", "submit_patch"}
@@ -41,6 +55,7 @@ _SUBMIT_PRIVATE = {"submit_patch"}
 # ---------------------------------------------------------------------------
 # AGENT_CONTRACT structure
 # ---------------------------------------------------------------------------
+
 
 class TestBackendDevContract:
     def test_all_required_keys_present(self) -> None:
@@ -122,10 +137,12 @@ class TestCoderContract:
 # Migration complete — uses run_agent_graph
 # ---------------------------------------------------------------------------
 
+
 class TestMigrationComplete:
     def _imports_run_agent(self, mod: Any) -> bool:
         import ast
         import textwrap
+
         src = textwrap.dedent(inspect.getsource(mod))
         try:
             tree = ast.parse(src)
@@ -160,6 +177,7 @@ class TestMigrationComplete:
 # ---------------------------------------------------------------------------
 # External interface unchanged
 # ---------------------------------------------------------------------------
+
 
 class TestExternalInterfaceUnchanged:
     def test_run_backend_dev_signature(self) -> None:
@@ -197,6 +215,7 @@ class TestExternalInterfaceUnchanged:
 # Static-check helpers preserved
 # ---------------------------------------------------------------------------
 
+
 class TestStaticCheckHelpers:
     def test_run_backend_checks_is_callable(self) -> None:
         assert callable(_run_backend_checks)
@@ -215,7 +234,9 @@ class TestStaticCheckHelpers:
 
     def test_backend_checks_returns_error_on_nonzero_exit(self) -> None:
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=1, stdout="error output", stderr="")
+            mock_run.return_value = MagicMock(
+                returncode=1, stdout="error output", stderr=""
+            )
             result = _run_backend_checks("/tmp/fake")
         assert result is not None
         assert "error output" in result
@@ -237,39 +258,47 @@ class TestStaticCheckHelpers:
 # Capability registry auto-registration
 # ---------------------------------------------------------------------------
 
+
 class TestCapabilityRegistryRegistration:
     def test_backend_dev_registered(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         assert get_capability_registry().get("backend_dev") is not None
 
     def test_frontend_dev_registered(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         assert get_capability_registry().get("frontend_dev") is not None
 
     def test_coder_registered(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         assert get_capability_registry().get("coder") is not None
 
     def test_backend_dev_capability_tags(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         cap = get_capability_registry().get("backend_dev")
         assert cap is not None
         assert "backend_development" in cap.capabilities
 
     def test_frontend_dev_capability_tags(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         cap = get_capability_registry().get("frontend_dev")
         assert cap is not None
         assert "frontend_development" in cap.capabilities
 
     def test_coder_capability_tags(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         cap = get_capability_registry().get("coder")
         assert cap is not None
         assert "code_implementation" in cap.capabilities
 
     def test_all_three_are_medium_risk(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         r = get_capability_registry()
         for name in ["backend_dev", "frontend_dev", "coder"]:
             cap = r.get(name)
@@ -281,23 +310,28 @@ class TestCapabilityRegistryRegistration:
 # Agent registry auto-registration
 # ---------------------------------------------------------------------------
 
+
 class TestAgentRegistryRegistration:
     def test_backend_dev_in_agent_registry(self) -> None:
         from app.fleet.agent_registry import get_agent_registry
+
         assert get_agent_registry().get("backend_dev") is not None
 
     def test_frontend_dev_in_agent_registry(self) -> None:
         from app.fleet.agent_registry import get_agent_registry
+
         assert get_agent_registry().get("frontend_dev") is not None
 
     def test_coder_in_agent_registry(self) -> None:
         from app.fleet.agent_registry import get_agent_registry
+
         assert get_agent_registry().get("coder") is not None
 
 
 # ---------------------------------------------------------------------------
 # Fleet manager selection by specific capability
 # ---------------------------------------------------------------------------
+
 
 class TestFleetManagerSelection:
     @pytest.fixture(autouse=True)
@@ -309,6 +343,7 @@ class TestFleetManagerSelection:
         # error_count=0, health=healthy so selection here doesn't depend on
         # test execution order.
         from app.fleet.agent_registry import get_agent_registry
+
         reg = get_agent_registry()
         for name in ("backend_dev", "frontend_dev", "coder"):
             instance = reg.get(name) or reg.register(name)
@@ -316,24 +351,28 @@ class TestFleetManagerSelection:
 
     def test_selects_backend_dev(self) -> None:
         from app.fleet.fleet_manager import FleetManager
+
         plan = FleetManager().select("backend_development")
         assert plan is not None
         assert plan.agent_name == "backend_dev"
 
     def test_selects_frontend_dev(self) -> None:
         from app.fleet.fleet_manager import FleetManager
+
         plan = FleetManager().select("frontend_development")
         assert plan is not None
         assert plan.agent_name == "frontend_dev"
 
     def test_selects_coder_by_code_implementation(self) -> None:
         from app.fleet.fleet_manager import FleetManager
+
         plan = FleetManager().select("code_implementation")
         assert plan is not None
         assert plan.agent_name == "coder"
 
     def test_selects_coder_by_generic_coding(self) -> None:
         from app.fleet.fleet_manager import FleetManager
+
         plan = FleetManager().select("generic_coding")
         assert plan is not None
         assert plan.agent_name == "coder"
@@ -343,6 +382,7 @@ class TestFleetManagerSelection:
 # Tool manifest compliance (shared tools only; submit_patch is agent-private)
 # ---------------------------------------------------------------------------
 
+
 class TestToolManifestCompliance:
     _PRIVATE = {"submit_patch"}
 
@@ -351,16 +391,23 @@ class TestToolManifestCompliance:
 
     def test_backend_dev_shared_tools_in_manifest(self) -> None:
         from app.fleet.tool_manifest import TOOL_MANIFEST
+
         for tool in self._shared_tools(BD_CONTRACT):
-            assert tool in TOOL_MANIFEST, f"backend_dev uses {tool!r} — not in TOOL_MANIFEST"
+            assert (
+                tool in TOOL_MANIFEST
+            ), f"backend_dev uses {tool!r} — not in TOOL_MANIFEST"
 
     def test_frontend_dev_shared_tools_in_manifest(self) -> None:
         from app.fleet.tool_manifest import TOOL_MANIFEST
+
         for tool in self._shared_tools(FD_CONTRACT):
-            assert tool in TOOL_MANIFEST, f"frontend_dev uses {tool!r} — not in TOOL_MANIFEST"
+            assert (
+                tool in TOOL_MANIFEST
+            ), f"frontend_dev uses {tool!r} — not in TOOL_MANIFEST"
 
     def test_coder_shared_tools_in_manifest(self) -> None:
         from app.fleet.tool_manifest import TOOL_MANIFEST
+
         for tool in self._shared_tools(CO_CONTRACT):
             assert tool in TOOL_MANIFEST, f"coder uses {tool!r} — not in TOOL_MANIFEST"
 
@@ -370,9 +417,14 @@ class TestToolManifestCompliance:
 # ---------------------------------------------------------------------------
 
 _SUBMITTED_STATE = {
-    "messages": [], "verification": {}, "result": {},
-    "turns": 2, "submitted": True, "requires_human_approval": False,
-    "tokens_in": 1000, "tokens_out": 200,
+    "messages": [],
+    "verification": {},
+    "result": {},
+    "turns": 2,
+    "submitted": True,
+    "requires_human_approval": False,
+    "tokens_in": 1000,
+    "tokens_out": 200,
 }
 
 _NOT_SUBMITTED_STATE = {**_SUBMITTED_STATE, "submitted": False}
@@ -386,13 +438,17 @@ class TestRunBackendDevBehavior:
         self, mock_handlers: Any, mock_graph: Any, mock_checks: Any
     ) -> None:
         patch_result: dict[str, Any] = {"files_changed": ["backend/app/auth.py"]}
-        mock_handlers.return_value = {"_patch_result": patch_result,
-                                      "submit_patch": lambda x: None}
+        mock_handlers.return_value = {
+            "_patch_result": patch_result,
+            "submit_patch": lambda x: None,
+        }
         mock_graph.return_value = {**_SUBMITTED_STATE, "result": {}}
+
         # Simulate submit_patch writing to patch_result
         def graph_side_effect(**kwargs: Any) -> dict[str, Any]:
             patch_result["files_changed"] = ["backend/app/auth.py"]
             return {**_SUBMITTED_STATE}
+
         mock_graph.side_effect = graph_side_effect
 
         files, error = run_backend_dev(1, 1, "Add auth", "/tmp/wt")
@@ -400,9 +456,13 @@ class TestRunBackendDevBehavior:
         assert "backend/app/auth.py" in files
 
     @patch("app.agents.backend_dev.get_settings")
-    @patch("app.agents.backend_dev.run_agent_graph", side_effect=RuntimeError("API down"))
+    @patch(
+        "app.agents.backend_dev.run_agent_graph", side_effect=RuntimeError("API down")
+    )
     @patch("app.agents.backend_dev.make_coder_handlers")
-    def test_returns_error_on_exception(self, mock_handlers: Any, mock_graph: Any, mock_settings: Any) -> None:
+    def test_returns_error_on_exception(
+        self, mock_handlers: Any, mock_graph: Any, mock_settings: Any
+    ) -> None:
         mock_handlers.return_value = {"_patch_result": {}}
         mock_settings.return_value = MagicMock(
             model_coder="claude-sonnet", target_repo_path="/repo", max_retries=1
@@ -412,7 +472,10 @@ class TestRunBackendDevBehavior:
         assert error is not None
 
     @patch("app.agents.backend_dev.get_settings")
-    @patch("app.agents.backend_dev._run_backend_checks", return_value="mypy error: type mismatch")
+    @patch(
+        "app.agents.backend_dev._run_backend_checks",
+        return_value="mypy error: type mismatch",
+    )
     @patch("app.agents.backend_dev.run_agent_graph", return_value=_SUBMITTED_STATE)
     @patch("app.agents.backend_dev.make_coder_handlers")
     def test_check_error_included_in_retry_message(
@@ -435,6 +498,7 @@ class TestRunBackendDevBehavior:
 # run_coder token accumulation across retries
 # ---------------------------------------------------------------------------
 
+
 class TestRunCoderTokenAccumulation:
     @patch("app.agents.coder.get_settings")
     @patch("app.agents.coder._run_checks", return_value=None)
@@ -446,7 +510,9 @@ class TestRunCoderTokenAccumulation:
         patch_result: dict[str, Any] = {"files_changed": ["src/main.py"]}
         mock_handlers.return_value = {"_patch_result": patch_result}
         mock_graph.return_value = {
-            **_SUBMITTED_STATE, "tokens_in": 500, "tokens_out": 100
+            **_SUBMITTED_STATE,
+            "tokens_in": 500,
+            "tokens_out": 100,
         }
         mock_settings.return_value = MagicMock(
             model_coder="claude-sonnet", target_repo_path="/repo", max_retries=1
@@ -457,10 +523,13 @@ class TestRunCoderTokenAccumulation:
         assert tokens_out == 100
 
     @patch("app.agents.coder.get_settings")
-    @patch("app.agents.coder._run_checks", side_effect=[
-        "ruff error: line too long",  # first attempt fails
-        None,                          # second attempt passes
-    ])
+    @patch(
+        "app.agents.coder._run_checks",
+        side_effect=[
+            "ruff error: line too long",  # first attempt fails
+            None,  # second attempt passes
+        ],
+    )
     @patch("app.agents.coder.run_agent_graph")
     @patch("app.agents.coder.make_coder_handlers")
     def test_tokens_accumulate_on_retry(
@@ -469,12 +538,14 @@ class TestRunCoderTokenAccumulation:
         patch_result: dict[str, Any] = {"files_changed": ["src/main.py"]}
         mock_handlers.return_value = {"_patch_result": patch_result}
         mock_graph.return_value = {
-            **_SUBMITTED_STATE, "tokens_in": 400, "tokens_out": 80
+            **_SUBMITTED_STATE,
+            "tokens_in": 400,
+            "tokens_out": 80,
         }
         mock_settings.return_value = MagicMock(
             model_coder="claude-sonnet", target_repo_path="/repo", max_retries=3
         )
         _, error, tokens_in, tokens_out = run_coder(1, "Plan", "/tmp/wt")
         assert error is None
-        assert tokens_in == 800   # 400 × 2 attempts
+        assert tokens_in == 800  # 400 × 2 attempts
         assert tokens_out == 160  # 80 × 2 attempts

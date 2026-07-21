@@ -2,6 +2,7 @@
 
 These tests prove BOTH legacy and Fleet OS events function correctly during transition.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -27,8 +28,14 @@ from app.fleet.fleet_events import (
 class TestFleetEventTypes:
     def test_all_8_event_types_exist(self) -> None:
         required = {
-            "TaskCreated", "TaskStarted", "TaskCompleted", "TaskFailed",
-            "ReviewRequested", "LessonPublished", "HealthUpdated", "MemoryCreated",
+            "TaskCreated",
+            "TaskStarted",
+            "TaskCompleted",
+            "TaskFailed",
+            "ReviewRequested",
+            "LessonPublished",
+            "HealthUpdated",
+            "MemoryCreated",
         }
         actual = {e.value for e in FleetEventType}
         assert required == actual, f"Missing types: {required - actual}"
@@ -99,7 +106,9 @@ class TestBidirectionalMapping:
         assert translate_legacy_to_fleet("task.created") == FleetEventType.TASK_CREATED
 
     def test_translate_legacy_to_fleet_epic_completed(self) -> None:
-        assert translate_legacy_to_fleet("epic.completed") == FleetEventType.TASK_COMPLETED
+        assert (
+            translate_legacy_to_fleet("epic.completed") == FleetEventType.TASK_COMPLETED
+        )
 
     def test_translate_legacy_to_fleet_task_blocked(self) -> None:
         assert translate_legacy_to_fleet("task.blocked") == FleetEventType.TASK_FAILED
@@ -109,7 +118,9 @@ class TestBidirectionalMapping:
 
     def test_translate_fleet_to_legacy(self) -> None:
         assert translate_fleet_to_legacy(FleetEventType.TASK_CREATED) == "task.created"
-        assert translate_fleet_to_legacy(FleetEventType.TASK_COMPLETED) == "epic.completed"
+        assert (
+            translate_fleet_to_legacy(FleetEventType.TASK_COMPLETED) == "epic.completed"
+        )
         assert translate_fleet_to_legacy(FleetEventType.TASK_FAILED) == "task.blocked"
 
     def test_translate_fleet_to_legacy_none_for_unmapped(self) -> None:
@@ -123,16 +134,30 @@ class TestLegacyEventTypesPreserved:
         from app.event_bus.models import CORE_EVENT_TYPES
 
         required_legacy = {
-            "task.created", "task.planned", "architecture.ready", "subtask.assigned",
-            "qa.passed", "qa.failed", "review.completed", "epic.completed",
-            "task.blocked", "epic.pending_cost_approval", "epic.planning_started",
-            "epic.ready_for_review", "epic.halted", "epic.approved", "epic.rejected",
+            "task.created",
+            "task.planned",
+            "architecture.ready",
+            "subtask.assigned",
+            "qa.passed",
+            "qa.failed",
+            "review.completed",
+            "epic.completed",
+            "task.blocked",
+            "epic.pending_cost_approval",
+            "epic.planning_started",
+            "epic.ready_for_review",
+            "epic.halted",
+            "epic.approved",
+            "epic.rejected",
         }
         for event_type in required_legacy:
-            assert event_type in CORE_EVENT_TYPES, f"Legacy event {event_type!r} was removed — violation of ADR-001"
+            assert (
+                event_type in CORE_EVENT_TYPES
+            ), f"Legacy event {event_type!r} was removed — violation of ADR-001"
 
     def test_fleet_events_module_does_not_import_replace_legacy(self) -> None:
         import app.fleet.fleet_events as fe
+
         # The overlay must not redefine CORE_EVENT_TYPES
         assert not hasattr(fe, "CORE_EVENT_TYPES")
 

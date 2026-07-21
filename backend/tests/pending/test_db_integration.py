@@ -1,4 +1,5 @@
 """Database integration tests — require a real Postgres (DATABASE_URL pointing to localhost)."""
+
 from __future__ import annotations
 
 import uuid

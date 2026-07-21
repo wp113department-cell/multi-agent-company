@@ -1,4 +1,5 @@
 """LangGraph shared state schema for the planning pipeline."""
+
 from __future__ import annotations
 
 from typing import Any, TypedDict
@@ -23,6 +24,6 @@ class PipelineState(TypedDict, total=False):
     memory_context: str
 
     # Control flow
-    stage: str        # pm | architect | decomposer | done | blocked
+    stage: str  # pm | architect | decomposer | done | blocked
     error: str
     approved: bool

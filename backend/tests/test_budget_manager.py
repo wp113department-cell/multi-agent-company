@@ -5,6 +5,7 @@ per_instance_cost_limit / total_cost_limit pattern. Uses a fresh
 MetricsCollector per test so daily-cost aggregation isn't polluted by other
 tests or the process-wide singleton.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -53,7 +54,9 @@ def test_check_run_raises_on_memory_overage(monkeypatch: pytest.MonkeyPatch) -> 
     bm = BudgetManager(MetricsCollector())
     m = RunMetrics(trace_id="t4", agent_name="agent_x")
 
-    monkeypatch.setattr("app.fleet.budget_manager._current_memory_mb", lambda: 999_999.0)
+    monkeypatch.setattr(
+        "app.fleet.budget_manager._current_memory_mb", lambda: 999_999.0
+    )
 
     with pytest.raises(BudgetExceeded) as exc_info:
         bm.check_run(m)

@@ -3,6 +3,7 @@
 Called by API handlers when a task transitions to 'blocked' or 'failed'.
 Falls back silently when ALERT_WEBHOOK_URL is not configured.
 """
+
 from __future__ import annotations
 
 import logging

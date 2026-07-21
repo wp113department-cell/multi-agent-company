@@ -10,6 +10,7 @@ Usage:
     # config.provider -> "anthropic"
     # config.max_tokens -> 8192
 """
+
 from __future__ import annotations
 
 import json
@@ -26,12 +27,13 @@ logger = logging.getLogger(__name__)
 # Data classes
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class RouteConfig:
     agent_name: str
-    provider: str       # "anthropic" | "openai"
-    model: str          # full model ID
-    tier: str           # "opus" | "sonnet" | "haiku" | "gpt"
+    provider: str  # "anthropic" | "openai"
+    model: str  # full model ID
+    tier: str  # "opus" | "sonnet" | "haiku" | "gpt"
     max_tokens: int
     thinking_budget: int | None
     temperature: float
@@ -51,16 +53,17 @@ class RouteConfig:
 # ---------------------------------------------------------------------------
 
 _DEFAULT_TIERS: dict[str, dict[str, Any]] = {
-    "opus":   {"max_tokens": 8192,  "thinking_budget": 2048, "temperature": 1.0},
-    "sonnet": {"max_tokens": 4096,  "thinking_budget": None,  "temperature": 1.0},
-    "haiku":  {"max_tokens": 1024,  "thinking_budget": None,  "temperature": 0.5},
-    "gpt":    {"max_tokens": 4096,  "thinking_budget": None,  "temperature": 0.7},
+    "opus": {"max_tokens": 8192, "thinking_budget": 2048, "temperature": 1.0},
+    "sonnet": {"max_tokens": 4096, "thinking_budget": None, "temperature": 1.0},
+    "haiku": {"max_tokens": 1024, "thinking_budget": None, "temperature": 0.5},
+    "gpt": {"max_tokens": 4096, "thinking_budget": None, "temperature": 0.7},
 }
 
 
 # ---------------------------------------------------------------------------
 # ModelRouter
 # ---------------------------------------------------------------------------
+
 
 class ModelRouter:
     """Thread-safe singleton. Loads agent_models.json once at startup."""
@@ -78,21 +81,44 @@ class ModelRouter:
             json_path = Path(__file__).parent / "agent_models.json"
         path = Path(json_path)
         if not path.exists():
-            logger.warning("agent_models.json not found at %s — using built-in defaults", path)
+            logger.warning(
+                "agent_models.json not found at %s — using built-in defaults", path
+            )
             self._tiers = _DEFAULT_TIERS
-            self._default = {"provider": "anthropic", "model": "claude-sonnet-4-20250514", "tier": "sonnet"}
+            self._default = {
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-20250514",
+                "tier": "sonnet",
+            }
             return
         try:
             data = json.loads(path.read_text())
             self._tiers = {k: v for k, v in data.get("_tiers", _DEFAULT_TIERS).items()}
-            self._default = data.get("DEFAULT", {"provider": "anthropic", "model": "claude-sonnet-4-20250514", "tier": "sonnet"})
+            self._default = data.get(
+                "DEFAULT",
+                {
+                    "provider": "anthropic",
+                    "model": "claude-sonnet-4-20250514",
+                    "tier": "sonnet",
+                },
+            )
             # Strip metadata keys (start with _ or "DEFAULT")
-            self._table = {k: v for k, v in data.items() if not k.startswith("_") and k != "DEFAULT"}
-            logger.info("ModelRouter loaded %d agent entries from %s", len(self._table), path)
+            self._table = {
+                k: v
+                for k, v in data.items()
+                if not k.startswith("_") and k != "DEFAULT"
+            }
+            logger.info(
+                "ModelRouter loaded %d agent entries from %s", len(self._table), path
+            )
         except Exception as exc:
             logger.error("Failed to load agent_models.json: %s", exc)
             self._tiers = _DEFAULT_TIERS
-            self._default = {"provider": "anthropic", "model": "claude-sonnet-4-20250514", "tier": "sonnet"}
+            self._default = {
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-20250514",
+                "tier": "sonnet",
+            }
 
     def reload(self, json_path: str | Path | None = None) -> None:
         """Hot-reload the routing table without restarting."""
@@ -123,10 +149,16 @@ class ModelRouter:
         return list(self._table.keys())
 
     def agents_by_provider(self, provider: str) -> list[str]:
-        return [name for name, entry in self._table.items() if entry.get("provider") == provider]
+        return [
+            name
+            for name, entry in self._table.items()
+            if entry.get("provider") == provider
+        ]
 
     def agents_by_tier(self, tier: str) -> list[str]:
-        return [name for name, entry in self._table.items() if entry.get("tier") == tier]
+        return [
+            name for name, entry in self._table.items() if entry.get("tier") == tier
+        ]
 
 
 # ---------------------------------------------------------------------------

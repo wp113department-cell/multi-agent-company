@@ -9,6 +9,7 @@ Session 2 migration (2026-07-16):
 Pattern from: swe-agent RetryAgent (preserve external interface, swap internal runner).
 Static-check retry loop kept because mypy/ruff run OUTSIDE the LLM graph.
 """
+
 from __future__ import annotations
 
 import logging
@@ -30,10 +31,27 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "backend_dev",
     "description": "Implements server-side changes in an isolated worktree — Python/FastAPI only.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "edit_file", "write_file", "git_diff", "bash", "submit_patch",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "edit_file",
+        "write_file",
+        "git_diff",
+        "bash",
+        "submit_patch",
     ],
     "input_types": ["task_id", "subtask_id", "plan", "worktree_path", "repo_path"],
     "output_types": ["files_changed"],
@@ -60,6 +78,7 @@ _VERIFICATION_CFG = VerificationConfig(
 # Static checks — run OUTSIDE the LLM graph after submission
 # ---------------------------------------------------------------------------
 
+
 def _run_backend_checks(worktree_path: str) -> str | None:
     """Run mypy + ruff in the backend directory. Returns error output or None on success."""
     python = sys.executable
@@ -68,7 +87,9 @@ def _run_backend_checks(worktree_path: str) -> str | None:
         [python, "-m", "ruff", "check", "."],
     ]
     for cmd in checks:
-        result = subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(
+            cmd, cwd=worktree_path, capture_output=True, text=True, timeout=60
+        )
         if result.returncode != 0:
             return (result.stdout + result.stderr)[:3000]
     return None
@@ -77,6 +98,7 @@ def _run_backend_checks(worktree_path: str) -> str | None:
 # ---------------------------------------------------------------------------
 # Public runner — external interface unchanged
 # ---------------------------------------------------------------------------
+
 
 def run_backend_dev(
     task_id: int,
@@ -131,7 +153,11 @@ def run_backend_dev(
                 max_turns=30,
             )
         except Exception as exc:
-            logger.exception("Backend dev agent failed on attempt %d for subtask %d", attempt + 1, subtask_id)
+            logger.exception(
+                "Backend dev agent failed on attempt %d for subtask %d",
+                attempt + 1,
+                subtask_id,
+            )
             if attempt == max_retries - 1:
                 return [], f"Backend dev agent error: {exc}"
             continue
@@ -149,14 +175,24 @@ def run_backend_dev(
         if check_error is None:
             logger.info(
                 "Backend dev done — subtask %d, attempt %d, %d files, in=%d out=%d",
-                subtask_id, attempt + 1, len(files_changed),
-                final_state.get("tokens_in", 0), final_state.get("tokens_out", 0),
+                subtask_id,
+                attempt + 1,
+                len(files_changed),
+                final_state.get("tokens_in", 0),
+                final_state.get("tokens_out", 0),
             )
             return files_changed, None
 
-        logger.warning("Backend dev checks failed on attempt %d: %s", attempt + 1, check_error[:200])
+        logger.warning(
+            "Backend dev checks failed on attempt %d: %s",
+            attempt + 1,
+            check_error[:200],
+        )
         if attempt == max_retries - 1:
-            return [], f"Checks still failing after {max_retries} attempts:\n{check_error}"
+            return (
+                [],
+                f"Checks still failing after {max_retries} attempts:\n{check_error}",
+            )
 
     return [], f"Backend dev blocked after {max_retries} attempts"
 
@@ -165,20 +201,24 @@ def run_backend_dev(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["backend_development", "python_coding"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["backend_development", "python_coding"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register("backend_dev")
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

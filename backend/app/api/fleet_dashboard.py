@@ -15,6 +15,7 @@ GET  /api/fleet/requests/stream     — SSE: dashboard-level events (new request
                                        status changed) — NOT the same channel as
                                        a specific approved run's activity feed.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -89,10 +90,14 @@ async def list_requests(
 
 
 @router.get("/requests/{request_id}")
-async def get_request(request_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def get_request(
+    request_id: int, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     row = await db.get(EnhancementRequest, request_id)
     if row is None:
-        raise HTTPException(status_code=404, detail=f"No enhancement request #{request_id}")
+        raise HTTPException(
+            status_code=404, detail=f"No enhancement request #{request_id}"
+        )
     return _serialize(row)
 
 
@@ -101,9 +106,12 @@ async def get_request(request_id: int, db: AsyncSession = Depends(get_db)) -> di
 # breaks the whole router at import time.
 # ---------------------------------------------------------------------------
 
+
 def _apply_dispatch() -> dict[str, Callable[[int, str, str], Any]]:
     from app.agents.agent_debugger import run_agent_debugger_apply
-    from app.agents.agent_performance_reviewer import run_agent_performance_reviewer_apply
+    from app.agents.agent_performance_reviewer import (
+        run_agent_performance_reviewer_apply,
+    )
     from app.agents.knowledge_curator import run_knowledge_curator_apply
     from app.agents.quality_auditor import run_quality_auditor_apply
 
@@ -118,7 +126,9 @@ def _apply_dispatch() -> dict[str, Callable[[int, str, str], Any]]:
     }
 
 
-async def _run_apply_phase(request_id: int, agent_name: str, description: str, trace_id: str) -> None:
+async def _run_apply_phase(
+    request_id: int, agent_name: str, description: str, trace_id: str
+) -> None:
     """Background task — runs the APPLY phase and writes the result back to the row."""
     from app.db.session import get_async_session
 
@@ -136,7 +146,9 @@ async def _run_apply_phase(request_id: int, agent_name: str, description: str, t
 
     if apply_fn is None:
         await _mark(status="completed", completed_at=datetime.now(timezone.utc))
-        _push_dashboard_event("status_changed", {"id": request_id, "status": "completed"})
+        _push_dashboard_event(
+            "status_changed", {"id": request_id, "status": "completed"}
+        )
         return
 
     try:
@@ -147,11 +159,21 @@ async def _run_apply_phase(request_id: int, agent_name: str, description: str, t
             files_touched=list(result.files_touched or []),
             restart_required=True,
             completed_at=datetime.now(timezone.utc),
-            error=None if status == "completed" else "Apply phase did not verify successfully",
+            error=(
+                None
+                if status == "completed"
+                else "Apply phase did not verify successfully"
+            ),
         )
     except Exception as exc:
-        logger.exception("APPLY phase failed for request #%s (%s)", request_id, agent_name)
-        await _mark(status="failed", error=str(exc)[:2000], completed_at=datetime.now(timezone.utc))
+        logger.exception(
+            "APPLY phase failed for request #%s (%s)", request_id, agent_name
+        )
+        await _mark(
+            status="failed",
+            error=str(exc)[:2000],
+            completed_at=datetime.now(timezone.utc),
+        )
     finally:
         _push_dashboard_event("status_changed", {"id": request_id})
 
@@ -162,23 +184,32 @@ class DecisionPayload(BaseModel):
 
 @router.post("/requests/{request_id}/approve")
 async def approve_request(
-    request_id: int, payload: DecisionPayload | None = None, db: AsyncSession = Depends(get_db)
+    request_id: int,
+    payload: DecisionPayload | None = None,
+    db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     row = await db.get(EnhancementRequest, request_id)
     if row is None:
-        raise HTTPException(status_code=404, detail=f"No enhancement request #{request_id}")
+        raise HTTPException(
+            status_code=404, detail=f"No enhancement request #{request_id}"
+        )
     if row.status != "pending":
-        raise HTTPException(status_code=409, detail=f"Request #{request_id} is already {row.status!r}, not pending")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Request #{request_id} is already {row.status!r}, not pending",
+        )
 
     trace_id = uuid.uuid4().hex[:12]
     row.status = "in_progress"
     row.decided_at = datetime.now(timezone.utc)
-    row.decided_by = (payload.decided_by if payload else "admin")
+    row.decided_by = payload.decided_by if payload else "admin"
     row.trace_id = trace_id
     await db.commit()
 
     get_activity_registry().get_or_create(trace_id)
-    asyncio.create_task(_run_apply_phase(request_id, row.agent_name, row.description, trace_id))
+    asyncio.create_task(
+        _run_apply_phase(request_id, row.agent_name, row.description, trace_id)
+    )
     _push_dashboard_event("status_changed", {"id": request_id, "status": "in_progress"})
 
     return {"ok": True, "id": request_id, "status": "in_progress", "traceId": trace_id}
@@ -186,17 +217,24 @@ async def approve_request(
 
 @router.post("/requests/{request_id}/reject")
 async def reject_request(
-    request_id: int, payload: DecisionPayload | None = None, db: AsyncSession = Depends(get_db)
+    request_id: int,
+    payload: DecisionPayload | None = None,
+    db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     row = await db.get(EnhancementRequest, request_id)
     if row is None:
-        raise HTTPException(status_code=404, detail=f"No enhancement request #{request_id}")
+        raise HTTPException(
+            status_code=404, detail=f"No enhancement request #{request_id}"
+        )
     if row.status != "pending":
-        raise HTTPException(status_code=409, detail=f"Request #{request_id} is already {row.status!r}, not pending")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Request #{request_id} is already {row.status!r}, not pending",
+        )
 
     row.status = "rejected"
     row.decided_at = datetime.now(timezone.utc)
-    row.decided_by = (payload.decided_by if payload else "admin")
+    row.decided_by = payload.decided_by if payload else "admin"
     await db.commit()
     _push_dashboard_event("status_changed", {"id": request_id, "status": "rejected"})
 
@@ -217,5 +255,9 @@ async def stream_dashboard_events() -> StreamingResponse:
     return StreamingResponse(
         _generate(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
     )

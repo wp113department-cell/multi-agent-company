@@ -4,6 +4,7 @@ Verification contract:
   - schema_inspected is forced to state["verification"]["schema_inspected"]
   - inspect_schema sets it; write_file resets it (schema may have changed)
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,17 +24,35 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "schema_agent",
     "description": "Inspects and designs database schemas, analyzes normalization and indexing strategy.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "run_sql", "inspect_schema", "write_file", "submit_schema",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "run_sql",
+        "inspect_schema",
+        "write_file",
+        "submit_schema",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
     "side_effects": ["optionally writes schema DDL or ORM model files"],
     "permissions": ["read_repo", "write_repo", "read_db"],
     "risk_level": "medium",
-    "expected_verification": {"schema_inspected": "inspect_schema must run before submit"},
+    "expected_verification": {
+        "schema_inspected": "inspect_schema must run before submit"
+    },
     "dependencies": [],
 }
 
@@ -92,7 +111,12 @@ def run_schema_agent(
     raw = final_state["result"]
     return AgentResult(
         summary=str(raw.get("summary", "(no summary)")),
-        findings=[{"tables": raw.get("tables", []), "normalization_issues": raw.get("normalization_issues", [])}],
+        findings=[
+            {
+                "tables": raw.get("tables", []),
+                "normalization_issues": raw.get("normalization_issues", []),
+            }
+        ],
         files_touched=list(raw.get("files_written", [])),
         verified=bool(final_state["verification"].get("schema_inspected", False)),
         requires_human_approval=False,
@@ -107,20 +131,28 @@ def run_schema_agent(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["schema_design", "database_inspection", "normalization_review"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=[
+                    "schema_design",
+                    "database_inspection",
+                    "normalization_review",
+                ],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

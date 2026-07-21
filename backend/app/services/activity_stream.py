@@ -15,6 +15,7 @@ Event types:
   done        — agent graph completed; includes AgentResult summary
   error       — unrecoverable failure
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Per-task stream state
 # ---------------------------------------------------------------------------
+
 
 class TaskStream:
     """Holds the asyncio.Queue and abort/resume state for one task run."""
@@ -49,7 +51,11 @@ class TaskStream:
         try:
             self._queue.put_nowait(event)
         except asyncio.QueueFull:
-            logger.warning("ActivityStream queue full for task %s — dropping event %s", self.task_id, event.get("type"))
+            logger.warning(
+                "ActivityStream queue full for task %s — dropping event %s",
+                self.task_id,
+                event.get("type"),
+            )
 
     def set_abort(self) -> None:
         self._abort_event.set()
@@ -66,7 +72,9 @@ class TaskStream:
         self._resume_payload = None
         return payload
 
-    async def subscribe(self, timeout: float = 60.0) -> AsyncGenerator[dict[str, Any], None]:
+    async def subscribe(
+        self, timeout: float = 60.0
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """Async generator — yields events until 'done', 'error', or 'stopped'."""
         while True:
             try:
@@ -82,6 +90,7 @@ class TaskStream:
 # ---------------------------------------------------------------------------
 # Singleton registry
 # ---------------------------------------------------------------------------
+
 
 class ActivityStreamRegistry:
     """Thread-safe registry of TaskStream objects keyed by task_id (str)."""
@@ -146,59 +155,121 @@ def get_activity_registry() -> ActivityStreamRegistry:
 # Convenience helpers called from base_graph.py hooks
 # ---------------------------------------------------------------------------
 
+
 def push_thinking(task_id: str | int, content: str, agent: str) -> None:
-    get_activity_registry().push_event(task_id, {
-        "type": "thinking", "content": content[:2000], "agent": agent,
-    })
+    get_activity_registry().push_event(
+        task_id,
+        {
+            "type": "thinking",
+            "content": content[:2000],
+            "agent": agent,
+        },
+    )
 
 
-def push_tool_call(task_id: str | int, tool: str, inp: dict[str, Any], call_id: str = "") -> None:
-    get_activity_registry().push_event(task_id, {
-        "type": "tool_call", "tool": tool, "input": inp, "id": call_id,
-    })
+def push_tool_call(
+    task_id: str | int, tool: str, inp: dict[str, Any], call_id: str = ""
+) -> None:
+    get_activity_registry().push_event(
+        task_id,
+        {
+            "type": "tool_call",
+            "tool": tool,
+            "input": inp,
+            "id": call_id,
+        },
+    )
 
 
-def push_tool_result(task_id: str | int, tool: str, preview: str, ok: bool, call_id: str = "") -> None:
-    get_activity_registry().push_event(task_id, {
-        "type": "tool_result", "tool": tool, "preview": preview[:500], "ok": ok, "id": call_id,
-    })
+def push_tool_result(
+    task_id: str | int, tool: str, preview: str, ok: bool, call_id: str = ""
+) -> None:
+    get_activity_registry().push_event(
+        task_id,
+        {
+            "type": "tool_result",
+            "tool": tool,
+            "preview": preview[:500],
+            "ok": ok,
+            "id": call_id,
+        },
+    )
 
 
 def push_file_edit(task_id: str | int, path: str, action: str) -> None:
-    get_activity_registry().push_event(task_id, {
-        "type": "file_edit", "path": path, "action": action,
-    })
+    get_activity_registry().push_event(
+        task_id,
+        {
+            "type": "file_edit",
+            "path": path,
+            "action": action,
+        },
+    )
 
 
-def push_terminal(task_id: str | int, command: str, output: str, exit_code: int = 0) -> None:
-    get_activity_registry().push_event(task_id, {
-        "type": "terminal", "command": command, "output": output[:1000], "exit_code": exit_code,
-    })
+def push_terminal(
+    task_id: str | int, command: str, output: str, exit_code: int = 0
+) -> None:
+    get_activity_registry().push_event(
+        task_id,
+        {
+            "type": "terminal",
+            "command": command,
+            "output": output[:1000],
+            "exit_code": exit_code,
+        },
+    )
 
 
 def push_token_usage(task_id: str | int, tokens_in: int, tokens_out: int) -> None:
-    cost = (tokens_in * 0.000003 + tokens_out * 0.000015)
-    get_activity_registry().push_event(task_id, {
-        "type": "token_usage", "tokens_in": tokens_in, "tokens_out": tokens_out, "cost_usd": round(cost, 6),
-    })
+    cost = tokens_in * 0.000003 + tokens_out * 0.000015
+    get_activity_registry().push_event(
+        task_id,
+        {
+            "type": "token_usage",
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            "cost_usd": round(cost, 6),
+        },
+    )
 
 
-def push_done(task_id: str | int, result: dict[str, Any], tokens_in: int, tokens_out: int) -> None:
-    cost = (tokens_in * 0.000003 + tokens_out * 0.000015)
-    get_activity_registry().push_event(task_id, {
-        "type": "done", "summary": str(result.get("summary", ""))[:300],
-        "tokens_in": tokens_in, "tokens_out": tokens_out, "cost_usd": round(cost, 6),
-    })
+def push_done(
+    task_id: str | int, result: dict[str, Any], tokens_in: int, tokens_out: int
+) -> None:
+    cost = tokens_in * 0.000003 + tokens_out * 0.000015
+    get_activity_registry().push_event(
+        task_id,
+        {
+            "type": "done",
+            "summary": str(result.get("summary", ""))[:300],
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            "cost_usd": round(cost, 6),
+        },
+    )
 
 
-def push_stopped(task_id: str | int, checkpoint_id: str, tokens_in: int, tokens_out: int) -> None:
-    get_activity_registry().push_event(task_id, {
-        "type": "stopped", "checkpoint_id": checkpoint_id,
-        "tokens_in": tokens_in, "tokens_out": tokens_out,
-    })
+def push_stopped(
+    task_id: str | int, checkpoint_id: str, tokens_in: int, tokens_out: int
+) -> None:
+    get_activity_registry().push_event(
+        task_id,
+        {
+            "type": "stopped",
+            "checkpoint_id": checkpoint_id,
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+        },
+    )
 
 
 def push_error(task_id: str | int, message: str, recoverable: bool = False) -> None:
-    get_activity_registry().push_event(task_id, {
-        "type": "error", "message": message, "recoverable": recoverable,
-    })
+    get_activity_registry().push_event(
+        task_id,
+        {
+            "type": "error",
+            "message": message,
+            "recoverable": recoverable,
+        },
+    )

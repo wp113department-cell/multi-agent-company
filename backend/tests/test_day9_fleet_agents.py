@@ -1,6 +1,7 @@
 """Tests for Day 9 fleet self-improvement agents: contracts, role files, tools,
 and the two-phase (SCAN autonomous / APPLY human-approved) execution model.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -24,13 +25,26 @@ _DAY9_MODULES = [
 ]
 
 _REQUIRED_CONTRACT_KEYS = [
-    "name", "description", "allowed_tools", "input_types", "output_types",
-    "side_effects", "permissions", "risk_level", "expected_verification", "dependencies",
+    "name",
+    "description",
+    "allowed_tools",
+    "input_types",
+    "output_types",
+    "side_effects",
+    "permissions",
+    "risk_level",
+    "expected_verification",
+    "dependencies",
 ]
 
 _ROLE_SPECIFIC_SECTIONS = (
-    "Non-Responsibilities", "Success Criteria", "Failure Conditions",
-    "Output Contract", "Quality Gates", "Edge Cases", "Escalation",
+    "Non-Responsibilities",
+    "Success Criteria",
+    "Failure Conditions",
+    "Output Contract",
+    "Quality Gates",
+    "Edge Cases",
+    "Escalation",
 )
 
 
@@ -43,6 +57,7 @@ def _load(module_name: str) -> Any:
 # ---------------------------------------------------------------------------
 # AGENT_CONTRACT shape
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("module_name", _DAY9_MODULES)
 def test_agent_contract_exists_and_complete(module_name: str) -> None:
@@ -67,6 +82,7 @@ def test_agent_contract_name_matches_module(module_name: str) -> None:
 # (same bar as every other agent, verified by test_day8_role_prompts.py's
 # auto-discovery too; this file adds Day-9-specific coverage explicitly)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("module_name", _DAY9_MODULES)
 def test_role_file_exists_and_complete(module_name: str) -> None:
@@ -99,7 +115,9 @@ def test_verification_configs_non_empty(module_name: str) -> None:
             continue
         found_any = True
         assert cfg.set_by, f"{module_name}.{cfg_name}.set_by must not be empty"
-        assert cfg.enforce_in_result, f"{module_name}.{cfg_name}.enforce_in_result must not be empty"
+        assert (
+            cfg.enforce_in_result
+        ), f"{module_name}.{cfg_name}.enforce_in_result must not be empty"
         # no dead enforce keys: every enforced verification key must be produced by set_by
         sb_values = set(cfg.set_by.values())
         for enforced_key in cfg.enforce_in_result.values():
@@ -122,6 +140,7 @@ def test_agent_advisor_has_no_apply_phase() -> None:
 # _register() + capability_registry
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("module_name", _DAY9_MODULES)
 def test_register_function_exists_and_registered(module_name: str) -> None:
     mod = _load(module_name)
@@ -143,7 +162,9 @@ def test_day9_capability_tags_unique() -> None:
     for cap in reg.all():
         for tag in cap.capabilities:
             if tag in all_tags and all_tags[tag] != cap.name:
-                pytest.fail(f"Duplicate capability tag {tag!r}: {all_tags[tag]!r} and {cap.name!r}")
+                pytest.fail(
+                    f"Duplicate capability tag {tag!r}: {all_tags[tag]!r} and {cap.name!r}"
+                )
             all_tags[tag] = cap.name
 
 
@@ -162,12 +183,18 @@ def test_all_5_agents_in_agent_models_json() -> None:
 # SCAN/APPLY run functions — mocked run_agent_graph
 # ---------------------------------------------------------------------------
 
+
 def _fake_state(**kwargs: Any) -> dict[str, Any]:
     return {
         "result": {"summary": "mocked"},
         "verification": {
-            "metrics_read": True, "diagnosed": True, "history_read": True,
-            "memory_searched": True, "scan_ran": True, "committed": True, "tests_run": True,
+            "metrics_read": True,
+            "diagnosed": True,
+            "history_read": True,
+            "memory_searched": True,
+            "scan_ran": True,
+            "committed": True,
+            "tests_run": True,
             "curated": True,
         },
         "submitted": True,
@@ -177,13 +204,19 @@ def _fake_state(**kwargs: Any) -> dict[str, Any]:
     }
 
 
-@pytest.mark.parametrize("module_name,scan_fn", [
-    ("app.agents.agent_performance_reviewer", "run_agent_performance_reviewer_scan"),
-    ("app.agents.agent_debugger", "run_agent_debugger_scan"),
-    ("app.agents.agent_advisor", "run_agent_advisor_scan"),
-    ("app.agents.knowledge_curator", "run_knowledge_curator_scan"),
-    ("app.agents.quality_auditor", "run_quality_auditor_scan"),
-])
+@pytest.mark.parametrize(
+    "module_name,scan_fn",
+    [
+        (
+            "app.agents.agent_performance_reviewer",
+            "run_agent_performance_reviewer_scan",
+        ),
+        ("app.agents.agent_debugger", "run_agent_debugger_scan"),
+        ("app.agents.agent_advisor", "run_agent_advisor_scan"),
+        ("app.agents.knowledge_curator", "run_knowledge_curator_scan"),
+        ("app.agents.quality_auditor", "run_quality_auditor_scan"),
+    ],
+)
 def test_scan_fn_returns_agent_result(module_name: str, scan_fn: str) -> None:
     from app.agents.agent_result import AgentResult
 
@@ -196,13 +229,19 @@ def test_scan_fn_returns_agent_result(module_name: str, scan_fn: str) -> None:
     assert result.status == "completed"
 
 
-@pytest.mark.parametrize("module_name,scan_fn", [
-    ("app.agents.agent_performance_reviewer", "run_agent_performance_reviewer_scan"),
-    ("app.agents.agent_debugger", "run_agent_debugger_scan"),
-    ("app.agents.agent_advisor", "run_agent_advisor_scan"),
-    ("app.agents.knowledge_curator", "run_knowledge_curator_scan"),
-    ("app.agents.quality_auditor", "run_quality_auditor_scan"),
-])
+@pytest.mark.parametrize(
+    "module_name,scan_fn",
+    [
+        (
+            "app.agents.agent_performance_reviewer",
+            "run_agent_performance_reviewer_scan",
+        ),
+        ("app.agents.agent_debugger", "run_agent_debugger_scan"),
+        ("app.agents.agent_advisor", "run_agent_advisor_scan"),
+        ("app.agents.knowledge_curator", "run_knowledge_curator_scan"),
+        ("app.agents.quality_auditor", "run_quality_auditor_scan"),
+    ],
+)
 def test_scan_fn_handles_empty_scan(module_name: str, scan_fn: str) -> None:
     """A scan that finds nothing (submitted=False) is a normal, successful outcome —
     not an error — per every Day 9 role prompt's explicit instruction."""
@@ -210,19 +249,27 @@ def test_scan_fn_handles_empty_scan(module_name: str, scan_fn: str) -> None:
 
     mod = _load(module_name)
     fn = getattr(mod, scan_fn)
-    with patch(f"{module_name}.run_agent_graph", return_value=_fake_state(submitted=False)):
+    with patch(
+        f"{module_name}.run_agent_graph", return_value=_fake_state(submitted=False)
+    ):
         result = fn(trace_id="test-trace")
 
     assert isinstance(result, AgentResult)
     assert result.status == "completed"
 
 
-@pytest.mark.parametrize("module_name,apply_fn", [
-    ("app.agents.agent_performance_reviewer", "run_agent_performance_reviewer_apply"),
-    ("app.agents.agent_debugger", "run_agent_debugger_apply"),
-    ("app.agents.knowledge_curator", "run_knowledge_curator_apply"),
-    ("app.agents.quality_auditor", "run_quality_auditor_apply"),
-])
+@pytest.mark.parametrize(
+    "module_name,apply_fn",
+    [
+        (
+            "app.agents.agent_performance_reviewer",
+            "run_agent_performance_reviewer_apply",
+        ),
+        ("app.agents.agent_debugger", "run_agent_debugger_apply"),
+        ("app.agents.knowledge_curator", "run_knowledge_curator_apply"),
+        ("app.agents.quality_auditor", "run_quality_auditor_apply"),
+    ],
+)
 def test_apply_fn_returns_agent_result(module_name: str, apply_fn: str) -> None:
     from app.agents.agent_result import AgentResult
 
@@ -236,12 +283,18 @@ def test_apply_fn_returns_agent_result(module_name: str, apply_fn: str) -> None:
     assert result.verified is True
 
 
-@pytest.mark.parametrize("module_name,apply_fn", [
-    ("app.agents.agent_performance_reviewer", "run_agent_performance_reviewer_apply"),
-    ("app.agents.agent_debugger", "run_agent_debugger_apply"),
-    ("app.agents.knowledge_curator", "run_knowledge_curator_apply"),
-    ("app.agents.quality_auditor", "run_quality_auditor_apply"),
-])
+@pytest.mark.parametrize(
+    "module_name,apply_fn",
+    [
+        (
+            "app.agents.agent_performance_reviewer",
+            "run_agent_performance_reviewer_apply",
+        ),
+        ("app.agents.agent_debugger", "run_agent_debugger_apply"),
+        ("app.agents.knowledge_curator", "run_knowledge_curator_apply"),
+        ("app.agents.quality_auditor", "run_quality_auditor_apply"),
+    ],
+)
 def test_apply_fn_blocked_when_not_verified(module_name: str, apply_fn: str) -> None:
     """If the agent never actually committed/curated (verification key false), the
     apply phase must report status=blocked, never a false 'completed'."""
@@ -262,6 +315,7 @@ def test_apply_fn_blocked_when_not_verified(module_name: str, apply_fn: str) -> 
 # ---------------------------------------------------------------------------
 # New shared tools — fleet_metrics_read / audit_log_read (in-process, no DB)
 # ---------------------------------------------------------------------------
+
 
 def test_fleet_metrics_read_empty() -> None:
     from app.agents.tools import fleet_metrics_read
@@ -299,6 +353,7 @@ def test_audit_log_read_filters_by_agent() -> None:
 # convention of testing against the live dev Postgres; cleans up after itself)
 # ---------------------------------------------------------------------------
 
+
 async def _with_isolated_session(coro_fn: Any) -> Any:
     """Run coro_fn(session) against a fresh, disposed-after-use engine — never the
     shared app.db.session singleton. Mirrors app.agents.tools._new_isolated_db_engine:
@@ -327,7 +382,9 @@ async def _cleanup_enhancement_requests(ids: list[int]) -> None:
         return
 
     async def _do(session: Any) -> None:
-        await session.execute(delete(EnhancementRequest).where(EnhancementRequest.id.in_(ids)))
+        await session.execute(
+            delete(EnhancementRequest).where(EnhancementRequest.id.in_(ids))
+        )
         await session.commit()
 
     await _with_isolated_session(_do)
@@ -337,17 +394,27 @@ def test_submit_enhancement_request_writes_row() -> None:
     from app.agents.tools import make_submit_enhancement_request_handler
     from app.db.models import EnhancementRequest
 
-    handler = make_submit_enhancement_request_handler("test_agent_xyz", trace_id="pytest-trace")
-    result = handler({
-        "title": "pytest title", "description": "pytest description",
-        "category": "bug", "priority": "low", "evidence": {"k": "v"},
-    })
+    handler = make_submit_enhancement_request_handler(
+        "test_agent_xyz", trace_id="pytest-trace"
+    )
+    result = handler(
+        {
+            "title": "pytest title",
+            "description": "pytest description",
+            "category": "bug",
+            "priority": "low",
+            "evidence": {"k": "v"},
+        }
+    )
     assert "filed for human review" in result
 
     async def _fetch(session: Any) -> EnhancementRequest | None:
         from sqlalchemy import select
+
         r = await session.execute(
-            select(EnhancementRequest).where(EnhancementRequest.agent_name == "test_agent_xyz")
+            select(EnhancementRequest).where(
+                EnhancementRequest.agent_name == "test_agent_xyz"
+            )
         )
         return r.scalars().first()
 
@@ -367,11 +434,30 @@ def test_submit_enhancement_request_repeated_calls_same_process() -> None:
     'Future attached to a different loop'."""
     from app.agents.tools import make_submit_enhancement_request_handler
 
-    handler = make_submit_enhancement_request_handler("test_agent_xyz2", trace_id="pytest-trace-2")
-    r1 = handler({"title": "a", "description": "a", "category": "bug", "priority": "low", "evidence": {}})
-    r2 = handler({"title": "b", "description": "b", "category": "bug", "priority": "low", "evidence": {}})
+    handler = make_submit_enhancement_request_handler(
+        "test_agent_xyz2", trace_id="pytest-trace-2"
+    )
+    r1 = handler(
+        {
+            "title": "a",
+            "description": "a",
+            "category": "bug",
+            "priority": "low",
+            "evidence": {},
+        }
+    )
+    r2 = handler(
+        {
+            "title": "b",
+            "description": "b",
+            "category": "bug",
+            "priority": "low",
+            "evidence": {},
+        }
+    )
 
     import re
+
     ids = [int(m.group(1)) for r in (r1, r2) if (m := re.search(r"#(\d+)", r))]
     try:
         assert "[ERROR]" not in r1
@@ -386,8 +472,12 @@ def test_memory_curate_write_updates_row() -> None:
 
     async def _seed(session: Any) -> int:
         row = MemoryEmbedding(
-            task_id="pytest-task", outcome="completed", category="task",
-            description="d", summary="s", files_changed=[],
+            task_id="pytest-task",
+            outcome="completed",
+            category="task",
+            description="d",
+            summary="s",
+            files_changed=[],
         )
         session.add(row)
         await session.commit()
@@ -409,7 +499,9 @@ def test_memory_curate_write_updates_row() -> None:
     try:
         result = memory_curate_write({"id": row_id, "note": "pytest curated"})
         assert "updated" in result
-        summary = asyncio.run(_with_isolated_session(lambda s: _fetch_summary(s, row_id)))
+        summary = asyncio.run(
+            _with_isolated_session(lambda s: _fetch_summary(s, row_id))
+        )
         assert "pytest curated" in summary
     finally:
         asyncio.run(_with_isolated_session(lambda s: _delete(s, row_id)))
@@ -426,6 +518,7 @@ def test_memory_curate_write_missing_id() -> None:
 # git_commit_change — isolated scratch repo, never touches the real project
 # ---------------------------------------------------------------------------
 
+
 def test_git_commit_change_stages_only_named_files(tmp_path: Path) -> None:
     import subprocess
 
@@ -434,7 +527,9 @@ def test_git_commit_change_stages_only_named_files(tmp_path: Path) -> None:
     repo = tmp_path / "scratch_repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"], cwd=repo, check=True
+    )
     subprocess.run(["git", "config", "user.name", "test"], cwd=repo, check=True)
     (repo / "a.txt").write_text("hello\n")
     (repo / "b.txt").write_text("world\n")
@@ -448,7 +543,9 @@ def test_git_commit_change_stages_only_named_files(tmp_path: Path) -> None:
     result = handler({"files": ["a.txt"], "message": "update a only"})
     assert "Committed 1 file" in result
 
-    status = subprocess.run(["git", "status", "--short"], cwd=repo, capture_output=True, text=True)
+    status = subprocess.run(
+        ["git", "status", "--short"], cwd=repo, capture_output=True, text=True
+    )
     assert "b.txt" in status.stdout  # still unstaged/modified
     assert "a.txt" not in status.stdout  # committed, no longer dirty
 

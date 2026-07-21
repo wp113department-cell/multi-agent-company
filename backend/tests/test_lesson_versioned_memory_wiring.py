@@ -10,6 +10,7 @@ one row per test (enable_lesson defaults True across ~2500 existing tests)
 was found to pollute OTHER tests' similarity searches with unrelated
 zero-vector rows — confirmed by running the full suite, not assumed safe.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -32,7 +33,11 @@ def _cleanup(agent_name: str) -> None:
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
                 # VersionedLesson has no agent_name column — filter by content instead
-                await session.execute(delete(VersionedLesson).where(VersionedLesson.topic.like("td_lvm_%")))
+                await session.execute(
+                    delete(VersionedLesson).where(
+                        VersionedLesson.topic.like("td_lvm_%")
+                    )
+                )
                 await session.commit()
         finally:
             await engine.dispose()
@@ -42,7 +47,11 @@ def _cleanup(agent_name: str) -> None:
 
 def _make_tool_use_response(tool_name: str = "submit_result") -> Any:
     return SimpleNamespace(
-        content=[SimpleNamespace(type="tool_use", id="tu_001", name=tool_name, input={"summary": "done"})],
+        content=[
+            SimpleNamespace(
+                type="tool_use", id="tu_001", name=tool_name, input={"summary": "done"}
+            )
+        ],
         usage=SimpleNamespace(input_tokens=100, output_tokens=50),
     )
 
@@ -77,7 +86,9 @@ def test_lesson_flows_into_versioned_memory_when_voyage_key_configured(
     mock_anthropic.return_value = mock_client
 
     async def _fake_embed(text: str) -> list[float]:
-        return [0.1] * 1536  # non-zero — real Voyage responses are never all-zero either
+        return [
+            0.1
+        ] * 1536  # non-zero — real Voyage responses are never all-zero either
 
     try:
         with patch("app.memory.store._embed", _fake_embed):
@@ -86,12 +97,24 @@ def test_lesson_flows_into_versioned_memory_when_voyage_key_configured(
             final_state = run_agent_graph(
                 role_name="lesson_versioned_memory_wiring_test_agent",
                 model="claude-haiku-4-5-20251001",
-                tools=[{
-                    "name": "submit_result", "description": "Submit",
-                    "input_schema": {"type": "object", "properties": {"summary": {"type": "string"}}},
-                }],
+                tools=[
+                    {
+                        "name": "submit_result",
+                        "description": "Submit",
+                        "input_schema": {
+                            "type": "object",
+                            "properties": {"summary": {"type": "string"}},
+                        },
+                    }
+                ],
                 tool_handlers={"submit_result": lambda inp: "ok"},
-                verification_cfg=VerificationConfig(initial={}, set_by={}, reset_by=(), reset_keys=(), enforce_in_result={}),
+                verification_cfg=VerificationConfig(
+                    initial={},
+                    set_by={},
+                    reset_by=(),
+                    reset_keys=(),
+                    enforce_in_result={},
+                ),
                 initial_message="do a task",
                 enable_planning=False,
                 enable_memory=False,
@@ -104,15 +127,26 @@ def test_lesson_flows_into_versioned_memory_when_voyage_key_configured(
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
         async def _query() -> list[Any]:
-            engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
+            engine = create_async_engine(
+                get_settings().database_url, pool_pre_ping=True
+            )
             try:
-                async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                async with async_sessionmaker(
+                    engine, expire_on_commit=False
+                )() as session:
                     from app.db.models import VersionedLesson
-                    return list((
-                        await session.execute(
-                            select(VersionedLesson).where(VersionedLesson.topic == "td_lvm_gap_closure_topic")
+
+                    return list(
+                        (
+                            await session.execute(
+                                select(VersionedLesson).where(
+                                    VersionedLesson.topic == "td_lvm_gap_closure_topic"
+                                )
+                            )
                         )
-                    ).scalars().all())
+                        .scalars()
+                        .all()
+                    )
             finally:
                 await engine.dispose()
 
@@ -159,12 +193,20 @@ def test_lesson_skips_versioned_memory_without_voyage_key(
         final_state = run_agent_graph(
             role_name="lesson_no_voyage_key_test_agent",
             model="claude-haiku-4-5-20251001",
-            tools=[{
-                "name": "submit_result", "description": "Submit",
-                "input_schema": {"type": "object", "properties": {"summary": {"type": "string"}}},
-            }],
+            tools=[
+                {
+                    "name": "submit_result",
+                    "description": "Submit",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"summary": {"type": "string"}},
+                    },
+                }
+            ],
             tool_handlers={"submit_result": lambda inp: "ok"},
-            verification_cfg=VerificationConfig(initial={}, set_by={}, reset_by=(), reset_keys=(), enforce_in_result={}),
+            verification_cfg=VerificationConfig(
+                initial={}, set_by={}, reset_by=(), reset_keys=(), enforce_in_result={}
+            ),
             initial_message="do a task",
             enable_planning=False,
             enable_memory=False,
@@ -177,19 +219,32 @@ def test_lesson_skips_versioned_memory_without_voyage_key(
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
         async def _query() -> list[Any]:
-            engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
+            engine = create_async_engine(
+                get_settings().database_url, pool_pre_ping=True
+            )
             try:
-                async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                async with async_sessionmaker(
+                    engine, expire_on_commit=False
+                )() as session:
                     from app.db.models import VersionedLesson
-                    return list((
-                        await session.execute(
-                            select(VersionedLesson).where(VersionedLesson.topic == "td_lvm_no_key_topic")
+
+                    return list(
+                        (
+                            await session.execute(
+                                select(VersionedLesson).where(
+                                    VersionedLesson.topic == "td_lvm_no_key_topic"
+                                )
+                            )
                         )
-                    ).scalars().all())
+                        .scalars()
+                        .all()
+                    )
             finally:
                 await engine.dispose()
 
         rows = asyncio.run(_query())
-        assert len(rows) == 0, "should skip versioned_memory entirely without a real embedding key"
+        assert (
+            len(rows) == 0
+        ), "should skip versioned_memory entirely without a real embedding key"
     finally:
         _cleanup("lesson_no_voyage_key_test_agent")

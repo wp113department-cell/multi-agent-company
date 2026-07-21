@@ -3,6 +3,7 @@
 Runs as a background asyncio task started in main.py lifespan.
 Set LOG_RETENTION_DAYS=0 to disable cleanup.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -34,7 +35,9 @@ async def _run_cleanup() -> int:
             {"cutoff": cutoff},
         )
         await db.commit()
-        count: int = getattr(result, "rowcount", 0)  # rowcount available on CursorResult
+        count: int = getattr(
+            result, "rowcount", 0
+        )  # rowcount available on CursorResult
         if count > 0:
             logger.info(
                 "Log retention: deleted %d task_logs rows older than %d days (cutoff %s)",

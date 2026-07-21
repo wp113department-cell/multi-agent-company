@@ -1,4 +1,5 @@
 """Artifact API — GET /api/tasks/:id/artifacts, GET /api/artifacts/:id"""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException

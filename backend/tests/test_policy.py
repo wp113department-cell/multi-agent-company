@@ -1,10 +1,11 @@
 """Policy engine tests — path checks, command checks, worktree boundary."""
+
 import os
 import tempfile
 from app.policy.engine import check_path, check_command, check_path_in_worktree
 
-
 # --- check_path ---
+
 
 class TestCheckPath:
     def test_env_denied(self):
@@ -36,6 +37,7 @@ class TestCheckPath:
 
 
 # --- check_command ---
+
 
 class TestCheckCommand:
     def test_rm_rf_denied(self):
@@ -82,6 +84,7 @@ class TestCheckCommand:
 
 
 # --- check_path_in_worktree ---
+
 
 class TestCheckPathInWorktree:
     def test_relative_path_inside_allowed(self):

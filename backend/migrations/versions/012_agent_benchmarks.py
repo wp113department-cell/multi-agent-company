@@ -9,6 +9,7 @@ Revision ID: 012
 Revises: 011
 Create Date: 2026-07-21
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -27,11 +28,22 @@ def upgrade() -> None:
         sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
         sa.Column("agent_name", sa.String(100), nullable=False),
         sa.Column("objectives", JSONB(), nullable=False, server_default="{}"),
-        sa.Column("is_baseline", sa.Boolean(), nullable=False, server_default=sa.false()),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "is_baseline", sa.Boolean(), nullable=False, server_default=sa.false()
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
     )
-    op.create_index("ix_agent_benchmarks_agent_name", "agent_benchmarks", ["agent_name"])
-    op.create_index("ix_agent_benchmarks_is_baseline", "agent_benchmarks", ["is_baseline"])
+    op.create_index(
+        "ix_agent_benchmarks_agent_name", "agent_benchmarks", ["agent_name"]
+    )
+    op.create_index(
+        "ix_agent_benchmarks_is_baseline", "agent_benchmarks", ["is_baseline"]
+    )
 
 
 def downgrade() -> None:

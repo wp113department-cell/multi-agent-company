@@ -10,6 +10,7 @@ Design decisions:
   that data is merged here at query time when a db session is available.
 - Registry is write-once per name; re-registering the same name updates in place.
 """
+
 from __future__ import annotations
 
 import threading
@@ -100,60 +101,115 @@ def register(entry: AgentCapability) -> None:
 # Validate architecture before fleet-wide rollout.
 # ---------------------------------------------------------------------------
 
-register(AgentCapability(
-    name="pm",
-    description="Product Manager — translates task descriptions into goals, constraints, and acceptance criteria.",
-    tools=["read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-           "git_log", "read_files", "file_exists", "file_info", "find_references",
-           "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-           "analyze_file", "submit_brief"],
-    input_types=["task_description", "repo_path"],
-    output_types=["pm_brief"],
-    capabilities=["planning", "requirement_analysis", "goal_extraction"],
-    limits={"max_turns": 8},
-    dependencies=[],
-    avg_runtime_s=15.0,
-    success_rate=0.95,
-    requires_worktree=False,
-    requires_db=False,
-    risk_level="low",
-))
+register(
+    AgentCapability(
+        name="pm",
+        description="Product Manager — translates task descriptions into goals, constraints, and acceptance criteria.",
+        tools=[
+            "read_file",
+            "list_files",
+            "search_code",
+            "search_symbols",
+            "get_file_tree",
+            "git_log",
+            "read_files",
+            "file_exists",
+            "file_info",
+            "find_references",
+            "find_todos",
+            "search_imports",
+            "git_status",
+            "git_show",
+            "git_blame",
+            "analyze_file",
+            "submit_brief",
+        ],
+        input_types=["task_description", "repo_path"],
+        output_types=["pm_brief"],
+        capabilities=["planning", "requirement_analysis", "goal_extraction"],
+        limits={"max_turns": 8},
+        dependencies=[],
+        avg_runtime_s=15.0,
+        success_rate=0.95,
+        requires_worktree=False,
+        requires_db=False,
+        risk_level="low",
+    )
+)
 
-register(AgentCapability(
-    name="bug_fix",
-    description="Bug Fix specialist — diagnoses and repairs reported bugs using read/edit/test cycle.",
-    tools=["read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-           "git_log", "read_files", "file_exists", "file_info", "find_references",
-           "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-           "analyze_file", "edit_file", "write_file", "git_diff", "bash",
-           "submit_patch"],
-    input_types=["task_id", "error_description", "repo_path"],
-    output_types=["AgentResult"],
-    capabilities=["bug_fix", "code_edit", "fix_regression_check", "git_diff"],
-    limits={"max_turns": 20, "max_retries": 3},
-    dependencies=["qa"],
-    avg_runtime_s=45.0,
-    success_rate=0.82,
-    requires_worktree=True,
-    requires_db=False,
-    risk_level="medium",
-))
+register(
+    AgentCapability(
+        name="bug_fix",
+        description="Bug Fix specialist — diagnoses and repairs reported bugs using read/edit/test cycle.",
+        tools=[
+            "read_file",
+            "list_files",
+            "search_code",
+            "search_symbols",
+            "get_file_tree",
+            "git_log",
+            "read_files",
+            "file_exists",
+            "file_info",
+            "find_references",
+            "find_todos",
+            "search_imports",
+            "git_status",
+            "git_show",
+            "git_blame",
+            "analyze_file",
+            "edit_file",
+            "write_file",
+            "git_diff",
+            "bash",
+            "submit_patch",
+        ],
+        input_types=["task_id", "error_description", "repo_path"],
+        output_types=["AgentResult"],
+        capabilities=["bug_fix", "code_edit", "fix_regression_check", "git_diff"],
+        limits={"max_turns": 20, "max_retries": 3},
+        dependencies=["qa"],
+        avg_runtime_s=45.0,
+        success_rate=0.82,
+        requires_worktree=True,
+        requires_db=False,
+        risk_level="medium",
+    )
+)
 
-register(AgentCapability(
-    name="qa",
-    description="QA Agent — runs tests, typecheck, linter in a worktree. Read + bash (test only). No writes.",
-    tools=["read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-           "git_log", "read_files", "file_exists", "file_info", "find_references",
-           "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-           "analyze_file", "bash", "submit_qa_result"],
-    input_types=["task_id", "subtask_id", "files_changed", "worktree_path"],
-    output_types=["QAResult"],
-    capabilities=["test_execution", "typecheck", "lint", "qa_verification"],
-    limits={"max_turns": 12},
-    dependencies=[],
-    avg_runtime_s=30.0,
-    success_rate=0.91,
-    requires_worktree=True,
-    requires_db=False,
-    risk_level="low",
-))
+register(
+    AgentCapability(
+        name="qa",
+        description="QA Agent — runs tests, typecheck, linter in a worktree. Read + bash (test only). No writes.",
+        tools=[
+            "read_file",
+            "list_files",
+            "search_code",
+            "search_symbols",
+            "get_file_tree",
+            "git_log",
+            "read_files",
+            "file_exists",
+            "file_info",
+            "find_references",
+            "find_todos",
+            "search_imports",
+            "git_status",
+            "git_show",
+            "git_blame",
+            "analyze_file",
+            "bash",
+            "submit_qa_result",
+        ],
+        input_types=["task_id", "subtask_id", "files_changed", "worktree_path"],
+        output_types=["QAResult"],
+        capabilities=["test_execution", "typecheck", "lint", "qa_verification"],
+        limits={"max_turns": 12},
+        dependencies=[],
+        avg_runtime_s=30.0,
+        success_rate=0.91,
+        requires_worktree=True,
+        requires_db=False,
+        risk_level="low",
+    )
+)

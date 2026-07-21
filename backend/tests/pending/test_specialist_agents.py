@@ -17,6 +17,7 @@ Tests cover:
   - Manager orchestration: all subtasks complete
   - Manager orchestration: subtask blocked after max_retries
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -27,6 +28,7 @@ FIXTURE_REPO = str(Path(__file__).parent.parent / "fixtures" / "demo-repo")
 
 
 # ---- Backend Dev agent tests ----
+
 
 @requires_anthropic
 def test_backend_dev_reads_and_writes_file(tmp_path: Path) -> None:
@@ -80,10 +82,13 @@ def test_backend_dev_respects_worktree_boundary(tmp_path: Path) -> None:
     )
 
     # /etc/gridiron-test.txt must NOT exist
-    assert not Path("/etc/gridiron-test.txt").exists(), "Policy must block writes outside worktree"
+    assert not Path(
+        "/etc/gridiron-test.txt"
+    ).exists(), "Policy must block writes outside worktree"
 
 
 # ---- QA agent tests ----
+
 
 @requires_anthropic
 def test_qa_agent_runs_pytest_and_produces_result(tmp_path: Path) -> None:
@@ -92,6 +97,7 @@ def test_qa_agent_runs_pytest_and_produces_result(tmp_path: Path) -> None:
 
     # Copy fixture repo to tmp so QA can run against it
     import shutil
+
     wt = tmp_path / "worktree"
     shutil.copytree(FIXTURE_REPO, str(wt))
 
@@ -122,6 +128,7 @@ def test_qa_agent_cannot_write_files(tmp_path: Path) -> None:
 
 
 # ---- Reviewer agent tests ----
+
 
 @requires_anthropic
 def test_reviewer_produces_structured_findings() -> None:
@@ -166,6 +173,7 @@ def test_reviewer_cannot_write_or_bash() -> None:
 
 # ---- Full pipeline integration tests ----
 
+
 @requires_all
 async def test_full_dev_qa_review_pipeline_happy_path(tmp_path: Path) -> None:
     """
@@ -184,23 +192,33 @@ async def test_full_dev_qa_review_pipeline_happy_path(tmp_path: Path) -> None:
     plan = "Add a function add(a: int, b: int) -> int that returns a + b to demo_module.py."
 
     files_changed, dev_error = run_backend_dev(
-        task_id=9010, subtask_id=10, plan=plan,
-        worktree_path=str(wt), repo_path=str(wt),
+        task_id=9010,
+        subtask_id=10,
+        plan=plan,
+        worktree_path=str(wt),
+        repo_path=str(wt),
     )
     assert dev_error is None, f"Dev error: {dev_error}"
 
     qa_result = run_qa(
-        task_id=9010, subtask_id=10, files_changed=files_changed,
-        worktree_path=str(wt), repo_path=str(wt),
+        task_id=9010,
+        subtask_id=10,
+        files_changed=files_changed,
+        worktree_path=str(wt),
+        repo_path=str(wt),
     )
     assert qa_result.status == "passed", f"QA failed: {qa_result.errors}"
 
     review_result = run_reviewer(
-        task_id=9010, subtask_id=10,
-        diff="(fixture diff)", plan=plan,
+        task_id=9010,
+        subtask_id=10,
+        diff="(fixture diff)",
+        plan=plan,
         repo_path=str(wt),
     )
-    assert not review_result.has_blocking, f"Unexpected blocking findings: {review_result.findings}"
+    assert (
+        not review_result.has_blocking
+    ), f"Unexpected blocking findings: {review_result.findings}"
 
 
 @requires_all
@@ -222,8 +240,11 @@ async def test_qa_failure_triggers_dev_retry(tmp_path: Path) -> None:
     )
 
     files_changed, error = run_backend_dev(
-        task_id=9011, subtask_id=11, plan=plan,
-        worktree_path=str(wt), repo_path=str(wt),
+        task_id=9011,
+        subtask_id=11,
+        plan=plan,
+        worktree_path=str(wt),
+        repo_path=str(wt),
     )
 
     # The agent may succeed on retry — we just check no exception

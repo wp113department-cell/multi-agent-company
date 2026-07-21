@@ -1,4 +1,5 @@
 """Standard tool definitions and handlers for agent use."""
+
 from __future__ import annotations
 
 import os
@@ -8,8 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from app.config import get_settings
-from app.policy.engine import check_allowlisted_command, check_command, check_path, check_path_in_worktree
-
+from app.policy.engine import (
+    check_allowlisted_command,
+    check_command,
+    check_path,
+    check_path_in_worktree,
+)
 
 # --- Tool specs (Anthropic input_schema format) ---
 
@@ -20,7 +25,10 @@ READ_ONLY_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "File path relative to the repo root"},
+                "path": {
+                    "type": "string",
+                    "description": "File path relative to the repo root",
+                },
             },
             "required": ["path"],
         },
@@ -31,8 +39,14 @@ READ_ONLY_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "directory": {"type": "string", "description": "Directory path (default: repo root)"},
-                "pattern": {"type": "string", "description": "Glob pattern filter (e.g. '**/*.py', '**/*.ts')"},
+                "directory": {
+                    "type": "string",
+                    "description": "Directory path (default: repo root)",
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": "Glob pattern filter (e.g. '**/*.py', '**/*.ts')",
+                },
             },
             "required": [],
         },
@@ -43,8 +57,14 @@ READ_ONLY_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "pattern": {"type": "string", "description": "Regex or literal string to search for"},
-                "file_pattern": {"type": "string", "description": "Limit search to files matching this glob (e.g. '*.py', '*.ts')"},
+                "pattern": {
+                    "type": "string",
+                    "description": "Regex or literal string to search for",
+                },
+                "file_pattern": {
+                    "type": "string",
+                    "description": "Limit search to files matching this glob (e.g. '*.py', '*.ts')",
+                },
             },
             "required": ["pattern"],
         },
@@ -55,7 +75,10 @@ READ_ONLY_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "Symbol name or partial name to search for (e.g. 'get_task', 'DevTask', 'fetchTasks')"},
+                "name": {
+                    "type": "string",
+                    "description": "Symbol name or partial name to search for (e.g. 'get_task', 'DevTask', 'fetchTasks')",
+                },
                 "kind": {
                     "type": "string",
                     "enum": ["function", "class", "all"],
@@ -71,8 +94,14 @@ READ_ONLY_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "directory": {"type": "string", "description": "Starting directory (default: repo root)"},
-                "max_depth": {"type": "integer", "description": "Max depth to show, 1-4 (default: 3)"},
+                "directory": {
+                    "type": "string",
+                    "description": "Starting directory (default: repo root)",
+                },
+                "max_depth": {
+                    "type": "integer",
+                    "description": "Max depth to show, 1-4 (default: 3)",
+                },
             },
             "required": [],
         },
@@ -83,8 +112,14 @@ READ_ONLY_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "count": {"type": "integer", "description": "Number of commits to show (default: 10, max: 30)"},
-                "file": {"type": "string", "description": "Optional: show only commits that touched this file"},
+                "count": {
+                    "type": "integer",
+                    "description": "Number of commits to show (default: 10, max: 30)",
+                },
+                "file": {
+                    "type": "string",
+                    "description": "Optional: show only commits that touched this file",
+                },
             },
             "required": [],
         },
@@ -111,7 +146,10 @@ READ_ONLY_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "File or directory path relative to repo root"},
+                "path": {
+                    "type": "string",
+                    "description": "File or directory path relative to repo root",
+                },
             },
             "required": ["path"],
         },
@@ -122,7 +160,10 @@ READ_ONLY_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "File path relative to repo root"},
+                "path": {
+                    "type": "string",
+                    "description": "File path relative to repo root",
+                },
             },
             "required": ["path"],
         },
@@ -133,8 +174,14 @@ READ_ONLY_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "symbol": {"type": "string", "description": "Symbol name to find usages of (e.g. 'get_task', 'DevTask', 'fetchTasks')"},
-                "file_pattern": {"type": "string", "description": "Limit to files matching this glob (e.g. '*.py', '*.ts')"},
+                "symbol": {
+                    "type": "string",
+                    "description": "Symbol name to find usages of (e.g. 'get_task', 'DevTask', 'fetchTasks')",
+                },
+                "file_pattern": {
+                    "type": "string",
+                    "description": "Limit to files matching this glob (e.g. '*.py', '*.ts')",
+                },
             },
             "required": ["symbol"],
         },
@@ -145,7 +192,10 @@ READ_ONLY_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "directory": {"type": "string", "description": "Directory to search (default: repo root)"},
+                "directory": {
+                    "type": "string",
+                    "description": "Directory to search (default: repo root)",
+                },
                 "kind": {
                     "type": "string",
                     "enum": ["all", "TODO", "FIXME", "HACK", "XXX"],
@@ -161,8 +211,14 @@ READ_ONLY_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "module": {"type": "string", "description": "Module/package name to search (e.g. 'fastapi', 'asyncpg', 'useState')"},
-                "file_pattern": {"type": "string", "description": "Limit to file type (e.g. '*.py', '*.ts')"},
+                "module": {
+                    "type": "string",
+                    "description": "Module/package name to search (e.g. 'fastapi', 'asyncpg', 'useState')",
+                },
+                "file_pattern": {
+                    "type": "string",
+                    "description": "Limit to file type (e.g. '*.py', '*.ts')",
+                },
             },
             "required": ["module"],
         },
@@ -182,7 +238,10 @@ READ_ONLY_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "ref": {"type": "string", "description": "Commit hash, tag, or relative ref like HEAD~2 (default: HEAD)"},
+                "ref": {
+                    "type": "string",
+                    "description": "Commit hash, tag, or relative ref like HEAD~2 (default: HEAD)",
+                },
             },
             "required": [],
         },
@@ -193,9 +252,18 @@ READ_ONLY_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "File path relative to repo root"},
-                "start_line": {"type": "integer", "description": "First line to blame (optional)"},
-                "end_line": {"type": "integer", "description": "Last line to blame (optional)"},
+                "path": {
+                    "type": "string",
+                    "description": "File path relative to repo root",
+                },
+                "start_line": {
+                    "type": "integer",
+                    "description": "First line to blame (optional)",
+                },
+                "end_line": {
+                    "type": "integer",
+                    "description": "Last line to blame (optional)",
+                },
             },
             "required": ["path"],
         },
@@ -206,7 +274,10 @@ READ_ONLY_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "File path relative to repo root (.py, .ts, .tsx supported)"},
+                "path": {
+                    "type": "string",
+                    "description": "File path relative to repo root (.py, .ts, .tsx supported)",
+                },
             },
             "required": ["path"],
         },
@@ -225,7 +296,10 @@ CODER_TOOLS = READ_ONLY_TOOLS + [
         "input_schema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "File path relative to the worktree root"},
+                "path": {
+                    "type": "string",
+                    "description": "File path relative to the worktree root",
+                },
                 "old_string": {
                     "type": "string",
                     "description": "Exact text to find and replace. Must appear exactly once in the file.",
@@ -248,8 +322,14 @@ CODER_TOOLS = READ_ONLY_TOOLS + [
         "input_schema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "File path relative to worktree root"},
-                "content": {"type": "string", "description": "Complete file content to write"},
+                "path": {
+                    "type": "string",
+                    "description": "File path relative to worktree root",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Complete file content to write",
+                },
             },
             "required": ["path", "content"],
         },
@@ -260,7 +340,10 @@ CODER_TOOLS = READ_ONLY_TOOLS + [
         "input_schema": {
             "type": "object",
             "properties": {
-                "file": {"type": "string", "description": "Optional: show diff for a specific file only"},
+                "file": {
+                    "type": "string",
+                    "description": "Optional: show diff for a specific file only",
+                },
             },
             "required": [],
         },
@@ -287,7 +370,10 @@ CODER_TOOLS = READ_ONLY_TOOLS + [
                     "items": {"type": "string"},
                     "description": "List of file paths that were created or modified",
                 },
-                "summary": {"type": "string", "description": "One-paragraph summary of what was implemented and verified"},
+                "summary": {
+                    "type": "string",
+                    "description": "One-paragraph summary of what was implemented and verified",
+                },
             },
             "required": ["files_changed", "summary"],
         },
@@ -325,7 +411,16 @@ _SUBMIT_QA_TOOL = {
             "errors": {"type": "array", "items": {"type": "string"}},
             "summary": {"type": "string"},
         },
-        "required": ["status", "tests_run", "tests_passed", "tests_failed", "typecheck_clean", "lint_clean", "errors", "summary"],
+        "required": [
+            "status",
+            "tests_run",
+            "tests_passed",
+            "tests_failed",
+            "typecheck_clean",
+            "lint_clean",
+            "errors",
+            "summary",
+        ],
     },
 }
 
@@ -343,7 +438,10 @@ _SUBMIT_REVIEW_TOOL = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "severity": {"type": "string", "enum": ["blocking", "non-blocking", "suggestion"]},
+                        "severity": {
+                            "type": "string",
+                            "enum": ["blocking", "non-blocking", "suggestion"],
+                        },
                         "file": {"type": "string"},
                         "line": {"type": ["integer", "null"]},
                         "finding": {"type": "string"},
@@ -371,7 +469,10 @@ _DEVOPS_BASH_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "command": {"type": "string", "description": "Read-only health check command"},
+            "command": {
+                "type": "string",
+                "description": "Read-only health check command",
+            },
         },
         "required": ["command"],
     },
@@ -427,6 +528,7 @@ _QA_ALLOWED_PREFIXES = (
 
 # --- Tool handlers ---
 
+
 def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
     base = Path(repo_path)
 
@@ -471,15 +573,30 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
         kind = inp.get("kind", "all")
         patterns: list[str] = []
         if kind in ("function", "all"):
-            patterns += [f"def {name}", f"async def {name}", f"function {name}", f"const {name} ="]
+            patterns += [
+                f"def {name}",
+                f"async def {name}",
+                f"function {name}",
+                f"const {name} =",
+            ]
         if kind in ("class", "all"):
             patterns += [f"class {name}", f"interface {name}", f"type {name} ="]
         results: list[str] = []
         for pat in patterns:
             try:
                 result = subprocess.run(
-                    ["grep", "-rn", "--include=*.py", "--include=*.ts", "--include=*.tsx", pat, str(base)],
-                    capture_output=True, text=True, timeout=10,
+                    [
+                        "grep",
+                        "-rn",
+                        "--include=*.py",
+                        "--include=*.ts",
+                        "--include=*.tsx",
+                        pat,
+                        str(base),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                 )
                 if result.stdout:
                     results.append(result.stdout[:2000])
@@ -494,7 +611,17 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
         start = base / directory if directory else base
         if not start.exists():
             return f"[ERROR] Directory not found: {directory}"
-        _SKIP = {"__pycache__", "node_modules", ".next", ".venv", "venv", ".git", "dist", "build", ".mypy_cache"}
+        _SKIP = {
+            "__pycache__",
+            "node_modules",
+            ".next",
+            ".venv",
+            "venv",
+            ".git",
+            "dist",
+            "build",
+            ".mypy_cache",
+        }
         lines: list[str] = [directory or "."]
 
         def _tree(path: Path, depth: int, prefix: str) -> None:
@@ -504,7 +631,9 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
                 items = sorted(path.iterdir(), key=lambda p: (p.is_file(), p.name))
             except PermissionError:
                 return
-            items = [i for i in items if i.name not in _SKIP and not i.name.startswith(".")]
+            items = [
+                i for i in items if i.name not in _SKIP and not i.name.startswith(".")
+            ]
             for idx, item in enumerate(items):
                 connector = "└── " if idx == len(items) - 1 else "├── "
                 lines.append(f"{prefix}{connector}{item.name}")
@@ -522,7 +651,9 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
         if file_filter:
             cmd.extend(["--", file_filter])
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(base), timeout=15)
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, cwd=str(base), timeout=15
+            )
             if result.returncode != 0:
                 return f"[ERROR] git log failed: {result.stderr[:300]}"
             return result.stdout[:4000] if result.stdout else "(no commits found)"
@@ -558,9 +689,12 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
         if not p.exists():
             return f"[ERROR] Not found: {rel}"
         import datetime
+
         stat = p.stat()
         size = stat.st_size
-        mtime = datetime.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds")
+        mtime = datetime.datetime.fromtimestamp(stat.st_mtime).isoformat(
+            timespec="seconds"
+        )
         kind = "directory" if p.is_dir() else "file"
         lines = ""
         if p.is_file():
@@ -593,10 +727,21 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
         pattern = "|".join(markers)
         try:
             result = subprocess.run(
-                ["grep", "-rn", "-E", f"({pattern}):", str(search_root),
-                 "--include=*.py", "--include=*.ts", "--include=*.tsx",
-                 "--include=*.js", "--include=*.md"],
-                capture_output=True, text=True, timeout=15,
+                [
+                    "grep",
+                    "-rn",
+                    "-E",
+                    f"({pattern}):",
+                    str(search_root),
+                    "--include=*.py",
+                    "--include=*.ts",
+                    "--include=*.tsx",
+                    "--include=*.js",
+                    "--include=*.md",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
             out = result.stdout[:5000]
             return out if out.strip() else "(no TODOs found)"
@@ -606,7 +751,12 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
     def search_imports(inp: dict[str, Any]) -> str:
         module = inp["module"]
         file_pattern = inp.get("file_pattern", "")
-        patterns = [f"import {module}", f"from {module}", f'require("{module}")', f"require('{module}')"]
+        patterns = [
+            f"import {module}",
+            f"from {module}",
+            f'require("{module}")',
+            f"require('{module}')",
+        ]
         results: list[str] = []
         for pat in patterns:
             cmd = ["grep", "-rn"]
@@ -626,7 +776,10 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
         try:
             result = subprocess.run(
                 ["git", "status", "--short", "--branch"],
-                capture_output=True, text=True, cwd=str(base), timeout=10,
+                capture_output=True,
+                text=True,
+                cwd=str(base),
+                timeout=10,
             )
             return result.stdout or "(clean)"
         except Exception as e:
@@ -637,7 +790,10 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
         try:
             result = subprocess.run(
                 ["git", "show", "--stat", "--no-color", ref],
-                capture_output=True, text=True, cwd=str(base), timeout=15,
+                capture_output=True,
+                text=True,
+                cwd=str(base),
+                timeout=15,
             )
             return (result.stdout or result.stderr)[:5000]
         except Exception as e:
@@ -652,7 +808,9 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
             cmd += [f"-L{start},{end}"]
         cmd.append(rel)
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(base), timeout=15)
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, cwd=str(base), timeout=15
+            )
             return (result.stdout or result.stderr)[:5000]
         except Exception as e:
             return f"[ERROR] {e}"
@@ -681,11 +839,23 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
             elif stripped.startswith(("def ", "async def ", "class ")):
                 definitions.append(f"  L{i}: {stripped.rstrip(':')}")
             # TypeScript/JS definitions
-            elif any(stripped.startswith(p) for p in (
-                "export function ", "export async function ", "export class ",
-                "export const ", "export default ", "export interface ", "export type ",
-                "function ", "const ", "class ", "interface ", "type ",
-            )) and ("=" in stripped or "(" in stripped or "{" in stripped):
+            elif any(
+                stripped.startswith(p)
+                for p in (
+                    "export function ",
+                    "export async function ",
+                    "export class ",
+                    "export const ",
+                    "export default ",
+                    "export interface ",
+                    "export type ",
+                    "function ",
+                    "const ",
+                    "class ",
+                    "interface ",
+                    "type ",
+                )
+            ) and ("=" in stripped or "(" in stripped or "{" in stripped):
                 definitions.append(f"  L{i}: {stripped[:100]}")
 
         summary = [f"File: {rel}  ({total} lines)"]
@@ -739,7 +909,12 @@ def make_coder_handlers(worktree_path: str, repo_path: str) -> dict[str, Any]:
             return f"[POLICY DENIED] {policy.reason}"
         try:
             result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, cwd=worktree_path, timeout=60
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=worktree_path,
+                timeout=60,
             )
             out = (result.stdout + result.stderr)[:4000]
             return out if out else "(no output)"
@@ -774,7 +949,9 @@ def make_coder_handlers(worktree_path: str, repo_path: str) -> dict[str, Any]:
         if file_filter:
             cmd += ["--", file_filter]
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, cwd=worktree_path, timeout=15)
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, cwd=worktree_path, timeout=15
+            )
             if result.returncode != 0:
                 return f"[ERROR] git diff: {result.stderr[:300]}"
             return result.stdout[:8000] if result.stdout else "(no changes yet)"
@@ -812,8 +989,13 @@ def make_qa_handlers(worktree_path: str, repo_path: str) -> dict[str, Any]:
             return f"[POLICY DENIED] {policy.reason}"
         try:
             result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True,
-                cwd=worktree_path, env=_env_with_venv, timeout=120,
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=worktree_path,
+                env=_env_with_venv,
+                timeout=120,
             )
             out = (result.stdout + result.stderr)[:6000]
             return out if out else "(no output)"
@@ -859,7 +1041,12 @@ def make_devops_handlers(repo_path: str) -> dict[str, Any]:
             return f"[POLICY DENIED] {policy.reason}"
         try:
             result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=30
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=repo_path,
+                timeout=30,
             )
             out = (result.stdout + result.stderr)[:4000]
             return out if out else "(no output)"
@@ -929,7 +1116,12 @@ _SUBMIT_RESEARCH_TOOL = {
 
 # Research agent: minimal read tools + submit_research only (no AST tools, no web_search placeholder).
 # Kept small to stay within free-tier TPM limits — the agent can read files and search code.
-RESEARCH_TOOLS = [READ_ONLY_TOOLS[0], READ_ONLY_TOOLS[1], READ_ONLY_TOOLS[2], _SUBMIT_RESEARCH_TOOL]
+RESEARCH_TOOLS = [
+    READ_ONLY_TOOLS[0],
+    READ_ONLY_TOOLS[1],
+    READ_ONLY_TOOLS[2],
+    _SUBMIT_RESEARCH_TOOL,
+]
 
 
 def web_search(inp: dict[str, Any]) -> str:
@@ -940,6 +1132,7 @@ def web_search(inp: dict[str, Any]) -> str:
         return "[ERROR] query is required"
     try:
         from duckduckgo_search import DDGS
+
         results = list(DDGS().text(query, max_results=5))
         if not results:
             return f"(no results found for: {query!r})"
@@ -982,7 +1175,10 @@ _SUBMIT_DOCS_TOOL = {
                 "items": {"type": "string"},
                 "description": "Paths of markdown files created or updated",
             },
-            "summary": {"type": "string", "description": "Brief summary of documentation changes"},
+            "summary": {
+                "type": "string",
+                "description": "Brief summary of documentation changes",
+            },
         },
         "required": ["files_written", "summary"],
     },
@@ -1036,8 +1232,14 @@ DOCS_TOOLS = READ_ONLY_TOOLS + [
         "input_schema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "File path relative to the worktree root (must be *.md or docs/**)"},
-                "content": {"type": "string", "description": "Full file content to write"},
+                "path": {
+                    "type": "string",
+                    "description": "File path relative to the worktree root (must be *.md or docs/**)",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Full file content to write",
+                },
             },
             "required": ["path", "content"],
         },
@@ -1059,8 +1261,14 @@ _DELETE_FILE_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path relative to repo root"},
-            "reason": {"type": "string", "description": "Why this file is being deleted"},
+            "path": {
+                "type": "string",
+                "description": "File path relative to repo root",
+            },
+            "reason": {
+                "type": "string",
+                "description": "Why this file is being deleted",
+            },
         },
         "required": ["path", "reason"],
     },
@@ -1076,9 +1284,18 @@ _GIT_PUSH_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "branch": {"type": "string", "description": "Branch to push (defaults to current branch)"},
-            "remote": {"type": "string", "description": "Remote name (default: origin)"},
-            "force": {"type": "boolean", "description": "Force push (default: false — requires extra confirmation)"},
+            "branch": {
+                "type": "string",
+                "description": "Branch to push (defaults to current branch)",
+            },
+            "remote": {
+                "type": "string",
+                "description": "Remote name (default: origin)",
+            },
+            "force": {
+                "type": "boolean",
+                "description": "Force push (default: false — requires extra confirmation)",
+            },
         },
         "required": [],
     },
@@ -1090,9 +1307,18 @@ _CREATE_BRANCH_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "name": {"type": "string", "description": "Branch name (e.g. 'feat/add-login')"},
-            "checkout": {"type": "boolean", "description": "Switch to the new branch after creating it (default: true)"},
-            "from_branch": {"type": "string", "description": "Base branch (default: current HEAD)"},
+            "name": {
+                "type": "string",
+                "description": "Branch name (e.g. 'feat/add-login')",
+            },
+            "checkout": {
+                "type": "boolean",
+                "description": "Switch to the new branch after creating it (default: true)",
+            },
+            "from_branch": {
+                "type": "string",
+                "description": "Base branch (default: current HEAD)",
+            },
         },
         "required": ["name"],
     },
@@ -1110,7 +1336,10 @@ _CHAT_BASH_TOOL = {
         "type": "object",
         "properties": {
             "command": {"type": "string", "description": "Shell command to run"},
-            "cwd": {"type": "string", "description": "Working directory override (default: repo root)"},
+            "cwd": {
+                "type": "string",
+                "description": "Working directory override (default: repo root)",
+            },
         },
         "required": ["command"],
     },
@@ -1122,8 +1351,15 @@ _SUBMIT_RESULT_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "summary": {"type": "string", "description": "What was accomplished, files changed, commands run"},
-            "status": {"type": "string", "enum": ["done", "blocked"], "description": "done = complete, blocked = hit a wall and need help"},
+            "summary": {
+                "type": "string",
+                "description": "What was accomplished, files changed, commands run",
+            },
+            "status": {
+                "type": "string",
+                "enum": ["done", "blocked"],
+                "description": "done = complete, blocked = hit a wall and need help",
+            },
             "files_changed": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -1140,7 +1376,10 @@ _APPEND_FILE_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path relative to repo root"},
+            "path": {
+                "type": "string",
+                "description": "File path relative to repo root",
+            },
             "content": {"type": "string", "description": "Content to append"},
         },
         "required": ["path", "content"],
@@ -1153,8 +1392,14 @@ _RENAME_FILE_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "from_path": {"type": "string", "description": "Current file path relative to repo root"},
-            "to_path": {"type": "string", "description": "New file path relative to repo root"},
+            "from_path": {
+                "type": "string",
+                "description": "Current file path relative to repo root",
+            },
+            "to_path": {
+                "type": "string",
+                "description": "New file path relative to repo root",
+            },
         },
         "required": ["from_path", "to_path"],
     },
@@ -1166,8 +1411,14 @@ _COPY_FILE_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "from_path": {"type": "string", "description": "Source file path relative to repo root"},
-            "to_path": {"type": "string", "description": "Destination file path relative to repo root"},
+            "from_path": {
+                "type": "string",
+                "description": "Source file path relative to repo root",
+            },
+            "to_path": {
+                "type": "string",
+                "description": "Destination file path relative to repo root",
+            },
         },
         "required": ["from_path", "to_path"],
     },
@@ -1179,7 +1430,10 @@ _GIT_COMMIT_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "message": {"type": "string", "description": "Commit message (use conventional commits: feat/fix/docs/refactor: description)"},
+            "message": {
+                "type": "string",
+                "description": "Commit message (use conventional commits: feat/fix/docs/refactor: description)",
+            },
             "files": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -1201,7 +1455,10 @@ _GIT_BRANCH_TOOL = {
                 "enum": ["list", "create", "delete"],
                 "description": "Action to perform (default: list)",
             },
-            "name": {"type": "string", "description": "Branch name (required for create/delete)"},
+            "name": {
+                "type": "string",
+                "description": "Branch name (required for create/delete)",
+            },
         },
         "required": [],
     },
@@ -1213,8 +1470,14 @@ _GIT_CHECKOUT_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "target": {"type": "string", "description": "Branch name or commit hash to checkout"},
-            "file": {"type": "string", "description": "If provided, restore only this file (git checkout -- file)"},
+            "target": {
+                "type": "string",
+                "description": "Branch name or commit hash to checkout",
+            },
+            "file": {
+                "type": "string",
+                "description": "If provided, restore only this file (git checkout -- file)",
+            },
         },
         "required": ["target"],
     },
@@ -1231,7 +1494,10 @@ _GIT_STASH_TOOL = {
                 "enum": ["push", "pop", "list", "drop"],
                 "description": "Stash action (default: push)",
             },
-            "message": {"type": "string", "description": "Optional label for the stash (push only)"},
+            "message": {
+                "type": "string",
+                "description": "Optional label for the stash (push only)",
+            },
         },
         "required": [],
     },
@@ -1243,9 +1509,18 @@ _GIT_PULL_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "remote": {"type": "string", "description": "Remote name (default: origin)"},
-            "branch": {"type": "string", "description": "Branch to pull (default: current branch)"},
-            "rebase": {"type": "boolean", "description": "Use --rebase instead of merge (default: false)"},
+            "remote": {
+                "type": "string",
+                "description": "Remote name (default: origin)",
+            },
+            "branch": {
+                "type": "string",
+                "description": "Branch to pull (default: current branch)",
+            },
+            "rebase": {
+                "type": "boolean",
+                "description": "Use --rebase instead of merge (default: false)",
+            },
         },
         "required": [],
     },
@@ -1257,8 +1532,14 @@ _GIT_FETCH_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "remote": {"type": "string", "description": "Remote name (default: origin)"},
-            "prune": {"type": "boolean", "description": "Remove stale remote-tracking refs (default: false)"},
+            "remote": {
+                "type": "string",
+                "description": "Remote name (default: origin)",
+            },
+            "prune": {
+                "type": "boolean",
+                "description": "Remove stale remote-tracking refs (default: false)",
+            },
         },
         "required": [],
     },
@@ -1270,8 +1551,14 @@ _GIT_RESTORE_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path to restore (relative to repo root)"},
-            "staged": {"type": "boolean", "description": "Unstage staged changes instead of discarding working tree changes (default: false)"},
+            "path": {
+                "type": "string",
+                "description": "File path to restore (relative to repo root)",
+            },
+            "staged": {
+                "type": "boolean",
+                "description": "Unstage staged changes instead of discarding working tree changes (default: false)",
+            },
         },
         "required": ["path"],
     },
@@ -1288,8 +1575,14 @@ _RUN_TESTS_TOOL = {
                 "enum": ["pytest", "npm_test", "tsc"],
                 "description": "Test runner to use (default: pytest)",
             },
-            "path": {"type": "string", "description": "Specific test file or directory to run (optional)"},
-            "flags": {"type": "string", "description": "Extra flags to pass to the test runner (e.g. '-v -x -k test_name')"},
+            "path": {
+                "type": "string",
+                "description": "Specific test file or directory to run (optional)",
+            },
+            "flags": {
+                "type": "string",
+                "description": "Extra flags to pass to the test runner (e.g. '-v -x -k test_name')",
+            },
         },
         "required": [],
     },
@@ -1306,8 +1599,14 @@ _RUN_LINTER_TOOL = {
                 "enum": ["ruff", "mypy", "tsc", "eslint", "black", "all"],
                 "description": "Linter to run (default: all — runs ruff + mypy for Python, tsc for TypeScript)",
             },
-            "path": {"type": "string", "description": "Path to lint (default: backend/ or apps/web/)"},
-            "fix": {"type": "boolean", "description": "Auto-fix issues where possible (ruff only, default: false)"},
+            "path": {
+                "type": "string",
+                "description": "Path to lint (default: backend/ or apps/web/)",
+            },
+            "fix": {
+                "type": "boolean",
+                "description": "Auto-fix issues where possible (ruff only, default: false)",
+            },
         },
         "required": [],
     },
@@ -1327,8 +1626,14 @@ _FIND_FILE_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "name": {"type": "string", "description": "Filename or pattern to find (e.g. 'config.py', '*.json', 'test_*.py')"},
-            "directory": {"type": "string", "description": "Directory to search (default: repo root)"},
+            "name": {
+                "type": "string",
+                "description": "Filename or pattern to find (e.g. 'config.py', '*.json', 'test_*.py')",
+            },
+            "directory": {
+                "type": "string",
+                "description": "Directory to search (default: repo root)",
+            },
         },
         "required": ["name"],
     },
@@ -1340,7 +1645,10 @@ _FORMAT_FILE_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path relative to repo root"},
+            "path": {
+                "type": "string",
+                "description": "File path relative to repo root",
+            },
             "formatter": {
                 "type": "string",
                 "enum": ["auto", "black", "ruff", "prettier"],
@@ -1357,7 +1665,10 @@ _ORGANIZE_IMPORTS_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Python file path relative to repo root"},
+            "path": {
+                "type": "string",
+                "description": "Python file path relative to repo root",
+            },
         },
         "required": ["path"],
     },
@@ -1369,8 +1680,14 @@ _INSERT_AT_LINE_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path relative to repo root"},
-            "line": {"type": "integer", "description": "1-indexed line to insert before. Use 0 to prepend."},
+            "path": {
+                "type": "string",
+                "description": "File path relative to repo root",
+            },
+            "line": {
+                "type": "integer",
+                "description": "1-indexed line to insert before. Use 0 to prepend.",
+            },
             "content": {"type": "string", "description": "Content to insert"},
         },
         "required": ["path", "line", "content"],
@@ -1383,9 +1700,18 @@ _REPLACE_FUNCTION_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Python file path relative to repo root"},
-            "function_name": {"type": "string", "description": "Name of the function or method to replace"},
-            "new_code": {"type": "string", "description": "Complete new function code (def line + body, properly indented)"},
+            "path": {
+                "type": "string",
+                "description": "Python file path relative to repo root",
+            },
+            "function_name": {
+                "type": "string",
+                "description": "Name of the function or method to replace",
+            },
+            "new_code": {
+                "type": "string",
+                "description": "Complete new function code (def line + body, properly indented)",
+            },
         },
         "required": ["path", "function_name", "new_code"],
     },
@@ -1397,9 +1723,18 @@ _DELETE_LINES_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path relative to repo root"},
-            "start_line": {"type": "integer", "description": "First line to delete (1-indexed, inclusive)"},
-            "end_line": {"type": "integer", "description": "Last line to delete (1-indexed, inclusive)"},
+            "path": {
+                "type": "string",
+                "description": "File path relative to repo root",
+            },
+            "start_line": {
+                "type": "integer",
+                "description": "First line to delete (1-indexed, inclusive)",
+            },
+            "end_line": {
+                "type": "integer",
+                "description": "Last line to delete (1-indexed, inclusive)",
+            },
         },
         "required": ["path", "start_line", "end_line"],
     },
@@ -1411,8 +1746,14 @@ _APPLY_PATCH_TOOL_DEF = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "patch": {"type": "string", "description": "Unified diff string (output of git diff or diff -u)"},
-            "strip": {"type": "integer", "description": "Strip N leading path components (like patch -pN, default: 1)"},
+            "patch": {
+                "type": "string",
+                "description": "Unified diff string (output of git diff or diff -u)",
+            },
+            "strip": {
+                "type": "integer",
+                "description": "Strip N leading path components (like patch -pN, default: 1)",
+            },
         },
         "required": ["patch"],
     },
@@ -1424,9 +1765,18 @@ _COMPARE_FILES_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path_a": {"type": "string", "description": "First file path relative to repo root"},
-            "path_b": {"type": "string", "description": "Second file path relative to repo root"},
-            "context": {"type": "integer", "description": "Lines of context around changes (default: 3)"},
+            "path_a": {
+                "type": "string",
+                "description": "First file path relative to repo root",
+            },
+            "path_b": {
+                "type": "string",
+                "description": "Second file path relative to repo root",
+            },
+            "context": {
+                "type": "integer",
+                "description": "Lines of context around changes (default: 3)",
+            },
         },
         "required": ["path_a", "path_b"],
     },
@@ -1442,8 +1792,14 @@ _RUN_BACKGROUND_TOOL_DEF = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "command": {"type": "string", "description": "Shell command to run in background"},
-            "cwd": {"type": "string", "description": "Working directory (default: repo root)"},
+            "command": {
+                "type": "string",
+                "description": "Shell command to run in background",
+            },
+            "cwd": {
+                "type": "string",
+                "description": "Working directory (default: repo root)",
+            },
         },
         "required": ["command"],
     },
@@ -1473,7 +1829,10 @@ _RUN_PYTHON_SNIPPET_TOOL = {
         "type": "object",
         "properties": {
             "code": {"type": "string", "description": "Python code to execute"},
-            "timeout": {"type": "integer", "description": "Timeout in seconds (default: 30)"},
+            "timeout": {
+                "type": "integer",
+                "description": "Timeout in seconds (default: 30)",
+            },
         },
         "required": ["code"],
     },
@@ -1485,8 +1844,14 @@ _RUN_MAKE_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "target": {"type": "string", "description": "Make target to run (e.g. 'test', 'build', 'lint'). Leave empty to list."},
-            "directory": {"type": "string", "description": "Directory containing Makefile (default: repo root)"},
+            "target": {
+                "type": "string",
+                "description": "Make target to run (e.g. 'test', 'build', 'lint'). Leave empty to list.",
+            },
+            "directory": {
+                "type": "string",
+                "description": "Directory containing Makefile (default: repo root)",
+            },
         },
         "required": [],
     },
@@ -1499,7 +1864,10 @@ _FETCH_URL_TOOL = {
         "type": "object",
         "properties": {
             "url": {"type": "string", "description": "URL to fetch"},
-            "timeout": {"type": "integer", "description": "Timeout in seconds (default: 15)"},
+            "timeout": {
+                "type": "integer",
+                "description": "Timeout in seconds (default: 15)",
+            },
         },
         "required": ["url"],
     },
@@ -1515,10 +1883,22 @@ _GIT_MERGE_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "branch": {"type": "string", "description": "Branch name to merge into current branch"},
-            "no_ff": {"type": "boolean", "description": "Create a merge commit even for fast-forwards (default: false)"},
-            "squash": {"type": "boolean", "description": "Squash all commits into one (default: false)"},
-            "message": {"type": "string", "description": "Commit message for the merge (optional)"},
+            "branch": {
+                "type": "string",
+                "description": "Branch name to merge into current branch",
+            },
+            "no_ff": {
+                "type": "boolean",
+                "description": "Create a merge commit even for fast-forwards (default: false)",
+            },
+            "squash": {
+                "type": "boolean",
+                "description": "Squash all commits into one (default: false)",
+            },
+            "message": {
+                "type": "string",
+                "description": "Commit message for the merge (optional)",
+            },
         },
         "required": ["branch"],
     },
@@ -1530,7 +1910,10 @@ _GIT_RESET_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "ref": {"type": "string", "description": "Ref to reset to (e.g. 'HEAD~1', commit hash). Default: HEAD"},
+            "ref": {
+                "type": "string",
+                "description": "Ref to reset to (e.g. 'HEAD~1', commit hash). Default: HEAD",
+            },
             "mode": {
                 "type": "string",
                 "enum": ["soft", "mixed", "hard"],
@@ -1552,8 +1935,14 @@ _GIT_WORKTREE_TOOL = {
                 "enum": ["list", "add", "remove"],
                 "description": "Action to perform (default: list)",
             },
-            "path": {"type": "string", "description": "Path for the new worktree (required for add)"},
-            "branch": {"type": "string", "description": "Branch for the new worktree (required for add)"},
+            "path": {
+                "type": "string",
+                "description": "Path for the new worktree (required for add)",
+            },
+            "branch": {
+                "type": "string",
+                "description": "Branch for the new worktree (required for add)",
+            },
         },
         "required": [],
     },
@@ -1567,8 +1956,14 @@ _CREATE_PR_TOOL = {
         "properties": {
             "title": {"type": "string", "description": "PR title"},
             "body": {"type": "string", "description": "PR description/body"},
-            "base": {"type": "string", "description": "Base branch to merge into (default: main)"},
-            "draft": {"type": "boolean", "description": "Create as draft PR (default: false)"},
+            "base": {
+                "type": "string",
+                "description": "Base branch to merge into (default: main)",
+            },
+            "draft": {
+                "type": "boolean",
+                "description": "Create as draft PR (default: false)",
+            },
         },
         "required": ["title"],
     },
@@ -1580,7 +1975,10 @@ _GENERATE_COMMIT_MSG_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "staged_only": {"type": "boolean", "description": "Use only staged changes (default: true)"},
+            "staged_only": {
+                "type": "boolean",
+                "description": "Use only staged changes (default: true)",
+            },
         },
         "required": [],
     },
@@ -1596,9 +1994,18 @@ _RUN_SINGLE_TEST_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "keyword": {"type": "string", "description": "Test name or keyword to match (-k flag for pytest)"},
-            "file": {"type": "string", "description": "Specific test file to run (optional)"},
-            "verbose": {"type": "boolean", "description": "Show verbose output (default: true)"},
+            "keyword": {
+                "type": "string",
+                "description": "Test name or keyword to match (-k flag for pytest)",
+            },
+            "file": {
+                "type": "string",
+                "description": "Specific test file to run (optional)",
+            },
+            "verbose": {
+                "type": "boolean",
+                "description": "Show verbose output (default: true)",
+            },
         },
         "required": ["keyword"],
     },
@@ -1610,9 +2017,18 @@ _COVERAGE_REPORT_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Path to run tests on (default: backend/tests/)"},
-            "source": {"type": "string", "description": "Source directory to measure coverage for (default: backend/app/)"},
-            "min_coverage": {"type": "integer", "description": "Fail if coverage is below this percentage (optional)"},
+            "path": {
+                "type": "string",
+                "description": "Path to run tests on (default: backend/tests/)",
+            },
+            "source": {
+                "type": "string",
+                "description": "Source directory to measure coverage for (default: backend/app/)",
+            },
+            "min_coverage": {
+                "type": "integer",
+                "description": "Fail if coverage is below this percentage (optional)",
+            },
         },
         "required": [],
     },
@@ -1624,8 +2040,14 @@ _TYPE_CHECK_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Path to check (default: backend/ for Python, apps/web/ for TS)"},
-            "strict": {"type": "boolean", "description": "Use --strict mode for mypy (default: false)"},
+            "path": {
+                "type": "string",
+                "description": "Path to check (default: backend/ for Python, apps/web/ for TS)",
+            },
+            "strict": {
+                "type": "boolean",
+                "description": "Use --strict mode for mypy (default: false)",
+            },
             "language": {
                 "type": "string",
                 "enum": ["python", "typescript", "both"],
@@ -1646,7 +2068,10 @@ _LIST_FUNCTIONS_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path relative to repo root (.py, .ts, .tsx supported)"},
+            "path": {
+                "type": "string",
+                "description": "File path relative to repo root (.py, .ts, .tsx supported)",
+            },
         },
         "required": ["path"],
     },
@@ -1658,7 +2083,10 @@ _LIST_CLASSES_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path relative to repo root (.py, .ts, .tsx supported)"},
+            "path": {
+                "type": "string",
+                "description": "File path relative to repo root (.py, .ts, .tsx supported)",
+            },
         },
         "required": ["path"],
     },
@@ -1670,8 +2098,14 @@ _FIND_FUNCTION_BODY_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path relative to repo root"},
-            "function_name": {"type": "string", "description": "Name of the function or method to extract"},
+            "path": {
+                "type": "string",
+                "description": "File path relative to repo root",
+            },
+            "function_name": {
+                "type": "string",
+                "description": "Name of the function or method to extract",
+            },
         },
         "required": ["path", "function_name"],
     },
@@ -1687,8 +2121,14 @@ _READ_LOGS_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Log file path, or service name (e.g. 'uvicorn', 'postgresql')"},
-            "lines": {"type": "integer", "description": "Number of recent lines to return (default: 50)"},
+            "path": {
+                "type": "string",
+                "description": "Log file path, or service name (e.g. 'uvicorn', 'postgresql')",
+            },
+            "lines": {
+                "type": "integer",
+                "description": "Number of recent lines to return (default: 50)",
+            },
             "level": {
                 "type": "string",
                 "enum": ["all", "ERROR", "WARNING", "INFO"],
@@ -1705,7 +2145,10 @@ _ANALYZE_ERROR_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "error": {"type": "string", "description": "Error message or full traceback to analyze"},
+            "error": {
+                "type": "string",
+                "description": "Error message or full traceback to analyze",
+            },
         },
         "required": ["error"],
     },
@@ -1738,7 +2181,10 @@ _INSPECT_SCHEMA_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "table": {"type": "string", "description": "Specific table name to inspect (default: list all tables)"},
+            "table": {
+                "type": "string",
+                "description": "Specific table name to inspect (default: list all tables)",
+            },
         },
         "required": [],
     },
@@ -1754,7 +2200,10 @@ _DOCKER_PS_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "all": {"type": "boolean", "description": "Show all containers including stopped ones (default: false)"},
+            "all": {
+                "type": "boolean",
+                "description": "Show all containers including stopped ones (default: false)",
+            },
         },
         "required": [],
     },
@@ -1767,7 +2216,10 @@ _DOCKER_LOGS_TOOL = {
         "type": "object",
         "properties": {
             "container": {"type": "string", "description": "Container name or ID"},
-            "lines": {"type": "integer", "description": "Number of recent log lines (default: 50)"},
+            "lines": {
+                "type": "integer",
+                "description": "Number of recent log lines (default: 50)",
+            },
         },
         "required": ["container"],
     },
@@ -1780,7 +2232,10 @@ _DOCKER_EXEC_TOOL = {
         "type": "object",
         "properties": {
             "container": {"type": "string", "description": "Container name or ID"},
-            "command": {"type": "string", "description": "Command to run inside the container"},
+            "command": {
+                "type": "string",
+                "description": "Command to run inside the container",
+            },
         },
         "required": ["container", "command"],
     },
@@ -1802,7 +2257,10 @@ _DOCKER_COMPOSE_TOOL = {
                 "items": {"type": "string"},
                 "description": "Specific services to target (default: all)",
             },
-            "detach": {"type": "boolean", "description": "Run in background for 'up' (default: true)"},
+            "detach": {
+                "type": "boolean",
+                "description": "Run in background for 'up' (default: true)",
+            },
         },
         "required": ["action"],
     },
@@ -1818,7 +2276,10 @@ _SECRETS_SCAN_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "directory": {"type": "string", "description": "Directory to scan (default: entire repo)"},
+            "directory": {
+                "type": "string",
+                "description": "Directory to scan (default: entire repo)",
+            },
         },
         "required": [],
     },
@@ -1839,7 +2300,10 @@ _PARSE_AST_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path relative to repo root (must be .py)"},
+            "path": {
+                "type": "string",
+                "description": "File path relative to repo root (must be .py)",
+            },
         },
         "required": ["path"],
     },
@@ -1851,7 +2315,10 @@ _IMPORT_GRAPH_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Path to the .py file (relative to repo root)"},
+            "path": {
+                "type": "string",
+                "description": "Path to the .py file (relative to repo root)",
+            },
         },
         "required": ["path"],
     },
@@ -1867,7 +2334,10 @@ _CALL_GRAPH_TOOL = {
         "type": "object",
         "properties": {
             "path": {"type": "string", "description": "Path to the .py file"},
-            "function_name": {"type": "string", "description": "Name of function to inspect (empty = all functions)"},
+            "function_name": {
+                "type": "string",
+                "description": "Name of function to inspect (empty = all functions)",
+            },
         },
         "required": ["path"],
     },
@@ -1882,7 +2352,10 @@ _DEAD_CODE_DETECT_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "directory": {"type": "string", "description": "Directory to scan (relative to repo root, default: repo root)"},
+            "directory": {
+                "type": "string",
+                "description": "Directory to scan (relative to repo root, default: repo root)",
+            },
         },
         "required": [],
     },
@@ -1894,7 +2367,10 @@ _CIRCULAR_DEP_DETECT_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "directory": {"type": "string", "description": "Directory to scan (default: repo root)"},
+            "directory": {
+                "type": "string",
+                "description": "Directory to scan (default: repo root)",
+            },
         },
         "required": [],
     },
@@ -1910,10 +2386,22 @@ _RENAME_SYMBOL_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "old_name": {"type": "string", "description": "Current symbol name (must be a valid identifier)"},
-            "new_name": {"type": "string", "description": "New symbol name (must be a valid identifier)"},
-            "directory": {"type": "string", "description": "Root directory to rename within (default: repo root)"},
-            "file_pattern": {"type": "string", "description": "Glob pattern for files (default: *.py)"},
+            "old_name": {
+                "type": "string",
+                "description": "Current symbol name (must be a valid identifier)",
+            },
+            "new_name": {
+                "type": "string",
+                "description": "New symbol name (must be a valid identifier)",
+            },
+            "directory": {
+                "type": "string",
+                "description": "Root directory to rename within (default: repo root)",
+            },
+            "file_pattern": {
+                "type": "string",
+                "description": "Glob pattern for files (default: *.py)",
+            },
         },
         "required": ["old_name", "new_name"],
     },
@@ -1926,7 +2414,10 @@ _GIT_REBASE_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "onto": {"type": "string", "description": "Branch or commit to rebase onto (e.g. 'main', 'HEAD~3')"},
+            "onto": {
+                "type": "string",
+                "description": "Branch or commit to rebase onto (e.g. 'main', 'HEAD~3')",
+            },
         },
         "required": ["onto"],
     },
@@ -1938,8 +2429,14 @@ _GIT_CHERRY_PICK_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "commit_hash": {"type": "string", "description": "SHA or ref of the commit to cherry-pick"},
-            "no_commit": {"type": "boolean", "description": "Stage changes without committing (default: false)"},
+            "commit_hash": {
+                "type": "string",
+                "description": "SHA or ref of the commit to cherry-pick",
+            },
+            "no_commit": {
+                "type": "boolean",
+                "description": "Stage changes without committing (default: false)",
+            },
         },
         "required": ["commit_hash"],
     },
@@ -1952,8 +2449,14 @@ _READ_OUTPUT_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "pid": {"type": "integer", "description": "Process ID returned by run_background"},
-            "lines": {"type": "integer", "description": "Max lines to return (default: 50)"},
+            "pid": {
+                "type": "integer",
+                "description": "Process ID returned by run_background",
+            },
+            "lines": {
+                "type": "integer",
+                "description": "Max lines to return (default: 50)",
+            },
         },
         "required": ["pid"],
     },
@@ -1965,8 +2468,14 @@ _RUN_NODE_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "code": {"type": "string", "description": "JavaScript code to execute via `node -e`"},
-            "timeout": {"type": "integer", "description": "Timeout in seconds (default: 30)"},
+            "code": {
+                "type": "string",
+                "description": "JavaScript code to execute via `node -e`",
+            },
+            "timeout": {
+                "type": "integer",
+                "description": "Timeout in seconds (default: 30)",
+            },
         },
         "required": ["code"],
     },
@@ -1978,8 +2487,14 @@ _RUN_SCRIPT_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Path to the script file (relative to repo root)"},
-            "interpreter": {"type": "string", "description": "Interpreter to use: 'auto', 'python3', 'bash', 'node' (default: auto)"},
+            "path": {
+                "type": "string",
+                "description": "Path to the script file (relative to repo root)",
+            },
+            "interpreter": {
+                "type": "string",
+                "description": "Interpreter to use: 'auto', 'python3', 'bash', 'node' (default: auto)",
+            },
         },
         "required": ["path"],
     },
@@ -1992,8 +2507,14 @@ _DOCKER_BUILD_TOOL = {
         "type": "object",
         "properties": {
             "tag": {"type": "string", "description": "Image tag, e.g. 'myapp:latest'"},
-            "context": {"type": "string", "description": "Build context directory (default: repo root)"},
-            "dockerfile": {"type": "string", "description": "Path to Dockerfile (optional, uses Docker default)"},
+            "context": {
+                "type": "string",
+                "description": "Build context directory (default: repo root)",
+            },
+            "dockerfile": {
+                "type": "string",
+                "description": "Path to Dockerfile (optional, uses Docker default)",
+            },
         },
         "required": ["tag"],
     },
@@ -2021,8 +2542,14 @@ _FIND_ROUTE_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "method": {"type": "string", "description": "HTTP method to filter: GET, POST, PUT, DELETE, PATCH (empty = all)"},
-            "path_pattern": {"type": "string", "description": "URL path string to search for (e.g. '/users', '/api')"},
+            "method": {
+                "type": "string",
+                "description": "HTTP method to filter: GET, POST, PUT, DELETE, PATCH (empty = all)",
+            },
+            "path_pattern": {
+                "type": "string",
+                "description": "URL path string to search for (e.g. '/users', '/api')",
+            },
         },
         "required": [],
     },
@@ -2034,7 +2561,10 @@ _FIND_API_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "name": {"type": "string", "description": "Function or endpoint name to search for (empty = all route handlers)"},
+            "name": {
+                "type": "string",
+                "description": "Function or endpoint name to search for (empty = all route handlers)",
+            },
         },
         "required": [],
     },
@@ -2046,7 +2576,10 @@ _FIND_SQL_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "keyword": {"type": "string", "description": "SQL keyword to search for, e.g. 'SELECT', 'INSERT', 'UPDATE' (empty = all SQL)"},
+            "keyword": {
+                "type": "string",
+                "description": "SQL keyword to search for, e.g. 'SELECT', 'INSERT', 'UPDATE' (empty = all SQL)",
+            },
         },
         "required": [],
     },
@@ -2058,7 +2591,10 @@ _FIND_TEST_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "function_name": {"type": "string", "description": "Name of the function or feature to find tests for"},
+            "function_name": {
+                "type": "string",
+                "description": "Name of the function or feature to find tests for",
+            },
         },
         "required": ["function_name"],
     },
@@ -2070,7 +2606,10 @@ _FIND_CONFIG_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "key": {"type": "string", "description": "Config key to find (e.g. 'DATABASE_URL', 'API_KEY', 'debug')"},
+            "key": {
+                "type": "string",
+                "description": "Config key to find (e.g. 'DATABASE_URL', 'API_KEY', 'debug')",
+            },
         },
         "required": ["key"],
     },
@@ -2103,7 +2642,10 @@ _DISK_USAGE_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Path to check (default: repo root)"},
+            "path": {
+                "type": "string",
+                "description": "Path to check (default: repo root)",
+            },
         },
         "required": [],
     },
@@ -2115,7 +2657,10 @@ _HEALTH_CHECK_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "service": {"type": "string", "description": "Service to check: 'all', 'backend', 'db' (default: all)"},
+            "service": {
+                "type": "string",
+                "description": "Service to check: 'all', 'backend', 'db' (default: all)",
+            },
         },
         "required": [],
     },
@@ -2127,8 +2672,14 @@ _TASK_PROGRESS_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "task_id": {"type": "integer", "description": "Specific task ID (optional; default: last 10 tasks)"},
-            "limit": {"type": "integer", "description": "Max tasks to return (default: 10)"},
+            "task_id": {
+                "type": "integer",
+                "description": "Specific task ID (optional; default: last 10 tasks)",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max tasks to return (default: 10)",
+            },
         },
         "required": [],
     },
@@ -2145,9 +2696,18 @@ _REPLACE_CLASS_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path (relative to repo root)"},
-            "class_name": {"type": "string", "description": "Name of the class to replace"},
-            "new_code": {"type": "string", "description": "Complete new class code (including the class definition line)"},
+            "path": {
+                "type": "string",
+                "description": "File path (relative to repo root)",
+            },
+            "class_name": {
+                "type": "string",
+                "description": "Name of the class to replace",
+            },
+            "new_code": {
+                "type": "string",
+                "description": "Complete new class code (including the class definition line)",
+            },
         },
         "required": ["path", "class_name", "new_code"],
     },
@@ -2162,7 +2722,10 @@ _UNDO_CHANGES_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path to restore (relative to repo root)"},
+            "path": {
+                "type": "string",
+                "description": "File path to restore (relative to repo root)",
+            },
         },
         "required": ["path"],
     },
@@ -2177,9 +2740,18 @@ _GENERATE_PATCH_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "content_a": {"type": "string", "description": "Original file content (the 'before' version)"},
-            "content_b": {"type": "string", "description": "New file content (the 'after' version)"},
-            "filename": {"type": "string", "description": "Filename shown in the patch header (default: 'file')"},
+            "content_a": {
+                "type": "string",
+                "description": "Original file content (the 'before' version)",
+            },
+            "content_b": {
+                "type": "string",
+                "description": "New file content (the 'after' version)",
+            },
+            "filename": {
+                "type": "string",
+                "description": "Filename shown in the patch header (default: 'file')",
+            },
         },
         "required": ["content_a", "content_b"],
     },
@@ -2195,7 +2767,10 @@ _EXPLAIN_QUERY_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "query": {"type": "string", "description": "SQL SELECT query to analyse (no trailing semicolon needed)"},
+            "query": {
+                "type": "string",
+                "description": "SQL SELECT query to analyse (no trailing semicolon needed)",
+            },
         },
         "required": ["query"],
     },
@@ -2210,8 +2785,14 @@ _RUN_MIGRATION_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "direction": {"type": "string", "description": "'upgrade' or 'downgrade' (default: upgrade)"},
-            "revision": {"type": "string", "description": "Target revision (default: head for upgrade, -1 for downgrade)"},
+            "direction": {
+                "type": "string",
+                "description": "'upgrade' or 'downgrade' (default: upgrade)",
+            },
+            "revision": {
+                "type": "string",
+                "description": "Target revision (default: head for upgrade, -1 for downgrade)",
+            },
         },
         "required": [],
     },
@@ -2226,7 +2807,10 @@ _SEED_DATABASE_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "script": {"type": "string", "description": "Path to seed script (relative to repo root, default: backend/scripts/seed.py)"},
+            "script": {
+                "type": "string",
+                "description": "Path to seed script (relative to repo root, default: backend/scripts/seed.py)",
+            },
         },
         "required": [],
     },
@@ -2248,7 +2832,10 @@ _EDIT_FILE_TOOL_SPEC = {
         "type": "object",
         "properties": {
             "path": {"type": "string"},
-            "old_string": {"type": "string", "description": "Exact text to replace (must be unique in file)"},
+            "old_string": {
+                "type": "string",
+                "description": "Exact text to replace (must be unique in file)",
+            },
             "new_string": {"type": "string", "description": "Replacement text"},
         },
         "required": ["path", "old_string", "new_string"],
@@ -2303,7 +2890,10 @@ _SUBMIT_SECURITY_REPORT_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "none"]},
+            "severity": {
+                "type": "string",
+                "enum": ["critical", "high", "medium", "low", "none"],
+            },
             "findings": {"type": "array", "items": {"type": "string"}},
             "recommendations": {"type": "array", "items": {"type": "string"}},
         },
@@ -2317,7 +2907,10 @@ _SUBMIT_ARCH_REVIEW_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "verdict": {"type": "string", "enum": ["approved", "changes_needed", "rejected"]},
+            "verdict": {
+                "type": "string",
+                "enum": ["approved", "changes_needed", "rejected"],
+            },
             "issues": {"type": "array", "items": {"type": "string"}},
             "recommendations": {"type": "array", "items": {"type": "string"}},
             "summary": {"type": "string"},
@@ -2556,6 +3149,7 @@ MONITORING_AGENT_TOOLS = READ_ONLY_TOOLS + [
 
 # --- Day 2 shared sub-factories (reduce duplication) ---
 
+
 def _make_edit_file_handler(root: Path) -> Any:
     def edit_file_h(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
@@ -2573,6 +3167,7 @@ def _make_edit_file_handler(root: Path) -> Any:
             return f"[ERROR] old_string appears {count} times — must be unique"
         target.write_text(text.replace(old_s, new_s, 1), encoding="utf-8")
         return f"Edited {rel}"
+
     return edit_file_h
 
 
@@ -2585,6 +3180,7 @@ def _make_write_file_handler(root: Path) -> Any:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(inp["content"], encoding="utf-8")
         return f"Written {rel}"
+
     return write_file_h
 
 
@@ -2592,17 +3188,22 @@ def _make_git_diff_handler(repo_path: str) -> Any:
     def git_diff_h(inp: dict[str, Any]) -> str:
         r = subprocess.run(
             ["git", "diff", "--no-color"] + ([inp["file"]] if inp.get("file") else []),
-            cwd=repo_path, capture_output=True, text=True,
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
         )
         return r.stdout[:8000] or "No changes."
+
     return git_diff_h
 
 
 # --- Day 2 Handler Factories ---
 
+
 def make_bug_fix_handlers(repo_path: str) -> dict[str, Any]:
     """Bug Fix agent: read-only + AST analysis + direct file writes + submit_bug_fix."""
     from app.repo_tools import ast_engine as _ast
+
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
     bug_fix_result: dict[str, Any] = {}
@@ -2611,17 +3212,27 @@ def make_bug_fix_handlers(repo_path: str) -> dict[str, Any]:
         return _ast.parse_file_ast(str(root / inp["path"]))
 
     def bf_call_graph(inp: dict[str, Any]) -> str:
-        return _ast.build_call_graph(str(root / inp["path"]), inp.get("function_name", ""))
+        return _ast.build_call_graph(
+            str(root / inp["path"]), inp.get("function_name", "")
+        )
 
     def bf_find_function_body(inp: dict[str, Any]) -> str:
         name = str(inp["name"])
-        r = subprocess.run(["grep", "-rn", f"def {name}", str(root)],
-                           capture_output=True, text=True, timeout=10)
+        r = subprocess.run(
+            ["grep", "-rn", f"def {name}", str(root)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         return r.stdout[:4000] if r.stdout else f"(function '{name}' not found)"
 
     def bf_analyze_error(inp: dict[str, Any]) -> str:
         tb = str(inp.get("traceback", ""))
-        lines = [ln for ln in tb.splitlines() if "File" in ln or "Error" in ln or "Exception" in ln]
+        lines = [
+            ln
+            for ln in tb.splitlines()
+            if "File" in ln or "Error" in ln or "Exception" in ln
+        ]
         return "\n".join(lines[:40]) or "(no error markers found)"
 
     def bf_read_logs(inp: dict[str, Any]) -> str:
@@ -2631,7 +3242,9 @@ def make_bug_fix_handlers(repo_path: str) -> dict[str, Any]:
             p = root / log_path
             if not p.exists():
                 return f"[ERROR] Log not found: {log_path}"
-            return "\n".join(p.read_text(encoding="utf-8", errors="replace").splitlines()[-n:])
+            return "\n".join(
+                p.read_text(encoding="utf-8", errors="replace").splitlines()[-n:]
+            )
         except Exception as e:
             return f"[ERROR] {e}"
 
@@ -2655,6 +3268,7 @@ def make_bug_fix_handlers(repo_path: str) -> dict[str, Any]:
 def make_security_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     """Security reviewer: read-only + specialized search + submit_security_report. No writes."""
     import re as _re
+
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
     security_result: dict[str, Any] = {}
@@ -2685,7 +3299,7 @@ def make_security_reviewer_handlers(repo_path: str) -> dict[str, Any]:
             for pat in _SEC_PATTERNS:
                 for m in _re.finditer(pat, text, _re.IGNORECASE):
                     rel = str(fp.relative_to(root))
-                    line_no = text[:m.start()].count("\n") + 1
+                    line_no = text[: m.start()].count("\n") + 1
                     hits.append(f"  {rel}:{line_no}  {m.group()[:80]}")
         if not hits:
             return "✅ No obvious secrets detected."
@@ -2697,36 +3311,69 @@ def make_security_reviewer_handlers(repo_path: str) -> dict[str, Any]:
         if keyword:
             r = subprocess.run(
                 ["grep", "-rn", "-i", "-w", keyword, "--include", fp, str(root)],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
         else:
             r = subprocess.run(
-                ["grep", "-rn", "-i", "-E", "SELECT|INSERT|UPDATE|DELETE|CREATE TABLE|DROP TABLE",
-                 "--include", fp, str(root)],
-                capture_output=True, text=True, timeout=15,
+                [
+                    "grep",
+                    "-rn",
+                    "-i",
+                    "-E",
+                    "SELECT|INSERT|UPDATE|DELETE|CREATE TABLE|DROP TABLE",
+                    "--include",
+                    fp,
+                    str(root),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
         return r.stdout[:6000] if r.stdout else "(no SQL found)"
 
     def sec_find_config(inp: dict[str, Any]) -> str:
         fp = str(inp.get("file_pattern", "*.py"))
         r = subprocess.run(
-            ["grep", "-rn", "-i", "-E",
-             r"(host|port|database|db_url|dsn|connection_string)\s*=",
-             "--include", fp, str(root)],
-            capture_output=True, text=True, timeout=15,
+            [
+                "grep",
+                "-rn",
+                "-i",
+                "-E",
+                r"(host|port|database|db_url|dsn|connection_string)\s*=",
+                "--include",
+                fp,
+                str(root),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
         )
         return r.stdout[:6000] if r.stdout else "(no config patterns found)"
 
     def sec_find_api(inp: dict[str, Any]) -> str:
         name = str(inp.get("name", ""))
         if name:
-            r = subprocess.run(["grep", "-rn", name, "--include=*.py", str(root)],
-                               capture_output=True, text=True, timeout=10)
+            r = subprocess.run(
+                ["grep", "-rn", name, "--include=*.py", str(root)],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
         else:
             r = subprocess.run(
-                ["grep", "-rn", "-E", r"@(app|router)\.(get|post|put|delete|patch)",
-                 "--include=*.py", str(root)],
-                capture_output=True, text=True, timeout=10,
+                [
+                    "grep",
+                    "-rn",
+                    "-E",
+                    r"@(app|router)\.(get|post|put|delete|patch)",
+                    "--include=*.py",
+                    str(root),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
         return r.stdout[:6000] if r.stdout else "(no API handlers found)"
 
@@ -2734,7 +3381,9 @@ def make_security_reviewer_handlers(repo_path: str) -> dict[str, Any]:
         path_pat = str(inp.get("path", ""))
         r = subprocess.run(
             ["grep", "-rn", path_pat or "/api/", "--include=*.py", str(root)],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return r.stdout[:6000] if r.stdout else "(no routes found)"
 
@@ -2755,6 +3404,7 @@ def make_security_reviewer_handlers(repo_path: str) -> dict[str, Any]:
 def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     """Architecture reviewer: read-only + AST analysis + submit_arch_review."""
     from app.repo_tools import ast_engine as _ast
+
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
     arch_result: dict[str, Any] = {}
@@ -2764,7 +3414,9 @@ def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
 
     def ar_circular_dep(inp: dict[str, Any]) -> str:
         directory = str(inp.get("directory", ""))
-        return _ast.detect_circular_imports(str(root / directory) if directory else str(root))
+        return _ast.detect_circular_imports(
+            str(root / directory) if directory else str(root)
+        )
 
     def ar_dead_code(inp: dict[str, Any]) -> str:
         directory = str(inp.get("directory", ""))
@@ -2776,23 +3428,41 @@ def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     def ar_list_functions(inp: dict[str, Any]) -> str:
         fp = str(inp.get("file", ""))
         r = subprocess.run(
-            ["grep", "-rn", "-E", "^(async )?def ", "--include=*.py",
-             str(root / fp) if fp else str(root)],
-            capture_output=True, text=True, timeout=10,
+            [
+                "grep",
+                "-rn",
+                "-E",
+                "^(async )?def ",
+                "--include=*.py",
+                str(root / fp) if fp else str(root),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return r.stdout[:6000] if r.stdout else "(no functions)"
 
     def ar_list_classes(inp: dict[str, Any]) -> str:
         fp = str(inp.get("file", ""))
         r = subprocess.run(
-            ["grep", "-rn", "-E", "^class ", "--include=*.py",
-             str(root / fp) if fp else str(root)],
-            capture_output=True, text=True, timeout=10,
+            [
+                "grep",
+                "-rn",
+                "-E",
+                "^class ",
+                "--include=*.py",
+                str(root / fp) if fp else str(root),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return r.stdout[:6000] if r.stdout else "(no classes)"
 
     def ar_call_graph(inp: dict[str, Any]) -> str:
-        return _ast.build_call_graph(str(root / inp["path"]), inp.get("function_name", ""))
+        return _ast.build_call_graph(
+            str(root / inp["path"]), inp.get("function_name", "")
+        )
 
     def ar_submit(inp: dict[str, Any]) -> str:
         arch_result.update(inp)
@@ -2825,7 +3495,9 @@ def make_sql_agent_handlers(repo_path: str) -> dict[str, Any]:
         try:
             r = subprocess.run(
                 ["psql", str(sq_db_url), "-c", sq_query, "--no-password"],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             return (r.stdout + r.stderr)[:5000] or "(no output)"
         except FileNotFoundError:
@@ -2855,7 +3527,9 @@ def make_sql_agent_handlers(repo_path: str) -> dict[str, Any]:
         try:
             r = subprocess.run(
                 ["psql", str(is_db_url), "-c", is_query, "--no-password"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             return (r.stdout + r.stderr)[:5000] or "(empty)"
         except FileNotFoundError:
@@ -2869,13 +3543,25 @@ def make_sql_agent_handlers(repo_path: str) -> dict[str, Any]:
         if keyword:
             r = subprocess.run(
                 ["grep", "-rn", "-i", "-w", keyword, "--include", fp, str(root)],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
         else:
             r = subprocess.run(
-                ["grep", "-rn", "-i", "-E", "SELECT|INSERT|UPDATE|DELETE|CREATE TABLE",
-                 "--include", fp, str(root)],
-                capture_output=True, text=True, timeout=15,
+                [
+                    "grep",
+                    "-rn",
+                    "-i",
+                    "-E",
+                    "SELECT|INSERT|UPDATE|DELETE|CREATE TABLE",
+                    "--include",
+                    fp,
+                    str(root),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
         return r.stdout[:6000] if r.stdout else "(no SQL found)"
 
@@ -2887,8 +3573,16 @@ def make_sql_agent_handlers(repo_path: str) -> dict[str, Any]:
             return "[ERROR] DATABASE_URL not configured"
         try:
             r = subprocess.run(
-                ["psql", str(eq_db_url), "-c", f"EXPLAIN ANALYZE {eq_query}", "--no-password"],
-                capture_output=True, text=True, timeout=30,
+                [
+                    "psql",
+                    str(eq_db_url),
+                    "-c",
+                    f"EXPLAIN ANALYZE {eq_query}",
+                    "--no-password",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             return (r.stdout + r.stderr)[:5000] or "(no plan)"
         except FileNotFoundError:
@@ -2919,8 +3613,15 @@ def make_docker_agent_handlers(repo_path: str) -> dict[str, Any]:
 
     def dk_docker_ps(inp: dict[str, Any]) -> str:
         r = subprocess.run(
-            ["docker", "ps", "--format", "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Names}}"],
-            capture_output=True, text=True, timeout=10,
+            [
+                "docker",
+                "ps",
+                "--format",
+                "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Names}}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return r.stdout or r.stderr or "(no containers)"
 
@@ -2929,18 +3630,25 @@ def make_docker_agent_handlers(repo_path: str) -> dict[str, Any]:
         dl_n = int(inp.get("lines", 50))
         r = subprocess.run(
             ["docker", "logs", "--tail", str(dl_n), dl_container],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True,
+            text=True,
+            timeout=15,
         )
         return (r.stdout + r.stderr)[:6000] or "(no logs)"
 
     def dk_docker_exec(inp: dict[str, Any]) -> str:
         de_container = str(inp["container"])
         de_cmd = str(inp["command"])
-        if any(d in de_cmd for d in ["rm ", "kill", "stop", "restart", "drop", "delete", "truncate"]):
+        if any(
+            d in de_cmd
+            for d in ["rm ", "kill", "stop", "restart", "drop", "delete", "truncate"]
+        ):
             return f"[POLICY DENIED] Docker exec not allowed: {de_cmd!r}"
         r = subprocess.run(
             ["docker", "exec", de_container] + de_cmd.split(),
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         return (r.stdout + r.stderr)[:4000] or "(no output)"
 
@@ -2951,7 +3659,10 @@ def make_docker_agent_handlers(repo_path: str) -> dict[str, Any]:
             return f"[POLICY DENIED] Only allowed: {sorted(dc_allowed)}. Got: {dc_action!r}"
         r = subprocess.run(
             ["docker", "compose", dc_action],
-            cwd=repo_path, capture_output=True, text=True, timeout=30,
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         return (r.stdout + r.stderr)[:6000] or "(no output)"
 
@@ -2961,15 +3672,22 @@ def make_docker_agent_handlers(repo_path: str) -> dict[str, Any]:
         db_ctx = str(inp.get("context", "."))
         r = subprocess.run(
             ["docker", "build", "-t", db_tag, "-f", db_file, db_ctx],
-            cwd=repo_path, capture_output=True, text=True, timeout=300,
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=300,
         )
         out = (r.stdout + r.stderr)[:8000]
         return f"Build {'succeeded' if r.returncode == 0 else 'FAILED'}:\n{out}"
 
     def dk_docker_restart(inp: dict[str, Any]) -> str:
         dr_container = str(inp["container"])
-        r = subprocess.run(["docker", "restart", dr_container],
-                           capture_output=True, text=True, timeout=30)
+        r = subprocess.run(
+            ["docker", "restart", dr_container],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         return (r.stdout + r.stderr).strip() or f"Restarted {dr_container}"
 
     def dk_submit(inp: dict[str, Any]) -> str:
@@ -2994,7 +3712,16 @@ def make_cicd_agent_handlers(repo_path: str) -> dict[str, Any]:
     root = Path(repo_path)
     cicd_result: dict[str, Any] = {}
 
-    _CICD_ALLOWED = ("git log", "git diff", "git status", "git show", "cat ", "grep ", "echo ", "ls ")
+    _CICD_ALLOWED = (
+        "git log",
+        "git diff",
+        "git status",
+        "git show",
+        "cat ",
+        "grep ",
+        "echo ",
+        "ls ",
+    )
 
     def ci_bash(inp: dict[str, Any]) -> str:
         cmd = inp["command"]
@@ -3002,7 +3729,12 @@ def make_cicd_agent_handlers(repo_path: str) -> dict[str, Any]:
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
         r = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=30,
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            cwd=repo_path,
+            timeout=30,
         )
         return (r.stdout + r.stderr)[:4000] or "(no output)"
 
@@ -3022,6 +3754,7 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
     """Refactor agent: read-only + AST + write + rename + limited bash (test/lint only)."""
     from app.repo_tools import ast_engine as _ast
     import re as _re
+
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
     refactor_result: dict[str, Any] = {}
@@ -3031,32 +3764,54 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
     def rf_list_functions(inp: dict[str, Any]) -> str:
         fp = str(inp.get("file", ""))
         r = subprocess.run(
-            ["grep", "-rn", "-E", "^(async )?def ", "--include=*.py",
-             str(root / fp) if fp else str(root)],
-            capture_output=True, text=True, timeout=10,
+            [
+                "grep",
+                "-rn",
+                "-E",
+                "^(async )?def ",
+                "--include=*.py",
+                str(root / fp) if fp else str(root),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return r.stdout[:6000] if r.stdout else "(no functions)"
 
     def rf_list_classes(inp: dict[str, Any]) -> str:
         fp = str(inp.get("file", ""))
         r = subprocess.run(
-            ["grep", "-rn", "-E", "^class ", "--include=*.py",
-             str(root / fp) if fp else str(root)],
-            capture_output=True, text=True, timeout=10,
+            [
+                "grep",
+                "-rn",
+                "-E",
+                "^class ",
+                "--include=*.py",
+                str(root / fp) if fp else str(root),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return r.stdout[:6000] if r.stdout else "(no classes)"
 
     def rf_find_function_body(inp: dict[str, Any]) -> str:
         name = str(inp["name"])
-        r = subprocess.run(["grep", "-rn", f"def {name}", str(root)],
-                           capture_output=True, text=True, timeout=10)
+        r = subprocess.run(
+            ["grep", "-rn", f"def {name}", str(root)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         return r.stdout[:4000] if r.stdout else f"(function '{name}' not found)"
 
     def rf_parse_ast(inp: dict[str, Any]) -> str:
         return _ast.parse_file_ast(str(root / inp["path"]))
 
     def rf_call_graph(inp: dict[str, Any]) -> str:
-        return _ast.build_call_graph(str(root / inp["path"]), inp.get("function_name", ""))
+        return _ast.build_call_graph(
+            str(root / inp["path"]), inp.get("function_name", "")
+        )
 
     def rf_import_graph(inp: dict[str, Any]) -> str:
         return _ast.build_import_graph(str(root / inp["path"]))
@@ -3064,7 +3819,8 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
     def rf_rename_symbol(inp: dict[str, Any]) -> str:
         directory = str(inp.get("directory", ""))
         return _ast.rename_symbol(
-            inp["old_name"], inp["new_name"],
+            inp["old_name"],
+            inp["new_name"],
             str(root / directory) if directory else str(root),
             str(inp.get("file_pattern", "*.py")),
         )
@@ -3080,13 +3836,17 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
         new_body = str(inp["new_body"])
         text = target.read_text(encoding="utf-8")
         pat = _re.compile(
-            r"(?m)^((?:async )?def " + _re.escape(name) + r"\b.*?)(?=\n(?:async )?def |\Z)",
+            r"(?m)^((?:async )?def "
+            + _re.escape(name)
+            + r"\b.*?)(?=\n(?:async )?def |\Z)",
             _re.DOTALL,
         )
         m = pat.search(text)
         if not m:
             return f"[ERROR] Function '{name}' not found in {rel}"
-        target.write_text(text[:m.start()] + new_body + text[m.end():], encoding="utf-8")
+        target.write_text(
+            text[: m.start()] + new_body + text[m.end() :], encoding="utf-8"
+        )
         return f"Replaced function '{name}' in {rel}"
 
     def rf_bash(inp: dict[str, Any]) -> str:
@@ -3095,7 +3855,12 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
         r = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=60,
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            cwd=repo_path,
+            timeout=60,
         )
         return (r.stdout + r.stderr)[:6000] or "(no output)"
 
@@ -3123,6 +3888,7 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
 def make_readme_agent_handlers(repo_path: str) -> dict[str, Any]:
     """README agent: read-only + AST + write_file (*.md only) + submit_docs."""
     from app.repo_tools import ast_engine as _ast
+
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
     docs_result: dict[str, Any] = {}
@@ -3133,25 +3899,43 @@ def make_readme_agent_handlers(repo_path: str) -> dict[str, Any]:
     def rm_list_functions(inp: dict[str, Any]) -> str:
         fp = str(inp.get("file", ""))
         r = subprocess.run(
-            ["grep", "-rn", "-E", "^(async )?def ", "--include=*.py",
-             str(root / fp) if fp else str(root)],
-            capture_output=True, text=True, timeout=10,
+            [
+                "grep",
+                "-rn",
+                "-E",
+                "^(async )?def ",
+                "--include=*.py",
+                str(root / fp) if fp else str(root),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return r.stdout[:6000] if r.stdout else "(no functions)"
 
     def rm_list_classes(inp: dict[str, Any]) -> str:
         fp = str(inp.get("file", ""))
         r = subprocess.run(
-            ["grep", "-rn", "-E", "^class ", "--include=*.py",
-             str(root / fp) if fp else str(root)],
-            capture_output=True, text=True, timeout=10,
+            [
+                "grep",
+                "-rn",
+                "-E",
+                "^class ",
+                "--include=*.py",
+                str(root / fp) if fp else str(root),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return r.stdout[:6000] if r.stdout else "(no classes)"
 
     def rm_write_file(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
         if not (rel.endswith(".md") or rel.startswith("docs/")):
-            return f"[POLICY DENIED] README agent may only write .md files. Got: {rel!r}"
+            return (
+                f"[POLICY DENIED] README agent may only write .md files. Got: {rel!r}"
+            )
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(inp["content"], encoding="utf-8")
@@ -3173,6 +3957,7 @@ def make_readme_agent_handlers(repo_path: str) -> dict[str, Any]:
 def make_api_docs_agent_handlers(repo_path: str) -> dict[str, Any]:
     """API Docs agent: read-only + route/API finders + AST + write_file (*.md) + submit_docs."""
     from app.repo_tools import ast_engine as _ast
+
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
     docs_result: dict[str, Any] = {}
@@ -3181,20 +3966,34 @@ def make_api_docs_agent_handlers(repo_path: str) -> dict[str, Any]:
         path_pat = str(inp.get("path", ""))
         r = subprocess.run(
             ["grep", "-rn", path_pat or "/api/", "--include=*.py", str(root)],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return r.stdout[:6000] if r.stdout else "(no routes)"
 
     def ad_find_api(inp: dict[str, Any]) -> str:
         name = str(inp.get("name", ""))
         if name:
-            r = subprocess.run(["grep", "-rn", name, "--include=*.py", str(root)],
-                               capture_output=True, text=True, timeout=10)
+            r = subprocess.run(
+                ["grep", "-rn", name, "--include=*.py", str(root)],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
         else:
             r = subprocess.run(
-                ["grep", "-rn", "-E", r"@(app|router)\.(get|post|put|delete|patch)",
-                 "--include=*.py", str(root)],
-                capture_output=True, text=True, timeout=10,
+                [
+                    "grep",
+                    "-rn",
+                    "-E",
+                    r"@(app|router)\.(get|post|put|delete|patch)",
+                    "--include=*.py",
+                    str(root),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
         return r.stdout[:6000] if r.stdout else "(no API handlers)"
 
@@ -3204,16 +4003,26 @@ def make_api_docs_agent_handlers(repo_path: str) -> dict[str, Any]:
     def ad_list_functions(inp: dict[str, Any]) -> str:
         fp = str(inp.get("file", ""))
         r = subprocess.run(
-            ["grep", "-rn", "-E", "^(async )?def ", "--include=*.py",
-             str(root / fp) if fp else str(root)],
-            capture_output=True, text=True, timeout=10,
+            [
+                "grep",
+                "-rn",
+                "-E",
+                "^(async )?def ",
+                "--include=*.py",
+                str(root / fp) if fp else str(root),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return r.stdout[:6000] if r.stdout else "(no functions)"
 
     def ad_write_file(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
         if not (rel.endswith(".md") or rel.startswith("docs/")):
-            return f"[POLICY DENIED] API docs agent may only write .md files. Got: {rel!r}"
+            return (
+                f"[POLICY DENIED] API docs agent may only write .md files. Got: {rel!r}"
+            )
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(inp["content"], encoding="utf-8")
@@ -3240,10 +4049,21 @@ def make_dependency_agent_handlers(repo_path: str) -> dict[str, Any]:
     dep_result: dict[str, Any] = {}
 
     _DEP_ALLOWED = (
-        "pip index versions", "pip show", "pip list", "npm audit",
-        "npm outdated", "npm list", "safety check", "pip-audit",
+        "pip index versions",
+        "pip show",
+        "pip list",
+        "npm audit",
+        "npm outdated",
+        "npm list",
+        "safety check",
+        "pip-audit",
     )
-    _DEP_EDITABLE = {"requirements.txt", "requirements-dev.txt", "package.json", "pyproject.toml"}
+    _DEP_EDITABLE = {
+        "requirements.txt",
+        "requirements-dev.txt",
+        "package.json",
+        "pyproject.toml",
+    }
 
     def dep_bash(inp: dict[str, Any]) -> str:
         cmd = inp["command"]
@@ -3251,7 +4071,12 @@ def make_dependency_agent_handlers(repo_path: str) -> dict[str, Any]:
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
         r = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=60,
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            cwd=repo_path,
+            timeout=60,
         )
         return (r.stdout + r.stderr)[:6000] or "(no output)"
 
@@ -3304,14 +4129,26 @@ def make_monitoring_agent_handlers(repo_path: str) -> dict[str, Any]:
 
     def mon_disk_usage(inp: dict[str, Any]) -> str:
         du_path = str(inp.get("path", "/"))
-        r = subprocess.run(["df", "-h", du_path], capture_output=True, text=True, timeout=5)
+        r = subprocess.run(
+            ["df", "-h", du_path], capture_output=True, text=True, timeout=5
+        )
         return r.stdout.strip() or "[ERROR] Could not read disk"
 
     def mon_health_check(inp: dict[str, Any]) -> str:
         hc_url = str(inp.get("url", "http://localhost:8000/health"))
         r = subprocess.run(
-            ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code} %{time_total}s", hc_url],
-            capture_output=True, text=True, timeout=10,
+            [
+                "curl",
+                "-s",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code} %{time_total}s",
+                hc_url,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return r.stdout.strip() or r.stderr.strip() or "[ERROR] curl failed"
 
@@ -3328,7 +4165,9 @@ def make_monitoring_agent_handlers(repo_path: str) -> dict[str, Any]:
         try:
             r = subprocess.run(
                 ["psql", str(tp_db_url), "-c", query, "--no-password"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             return (r.stdout + r.stderr)[:4000] or "(no tasks)"
         except FileNotFoundError:
@@ -3343,7 +4182,9 @@ def make_monitoring_agent_handlers(repo_path: str) -> dict[str, Any]:
             p = root / rl_path
             if not p.exists():
                 return f"[ERROR] Log not found: {rl_path}"
-            return "\n".join(p.read_text(encoding="utf-8", errors="replace").splitlines()[-rl_n:])
+            return "\n".join(
+                p.read_text(encoding="utf-8", errors="replace").splitlines()[-rl_n:]
+            )
         except Exception as e:
             return f"[ERROR] {e}"
 
@@ -3393,7 +4234,12 @@ _BROWSER_SCREENSHOT_TOOL: dict[str, Any] = {
     "description": "Take a screenshot of the current page. Saves to /tmp and returns the file path.",
     "input_schema": {
         "type": "object",
-        "properties": {"path": {"type": "string", "description": "Optional output path. Auto-generated if omitted."}},
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Optional output path. Auto-generated if omitted.",
+            }
+        },
         "required": [],
     },
 }
@@ -3403,7 +4249,12 @@ _BROWSER_READ_DOM_TOOL: dict[str, Any] = {
     "description": "Read the visible text content of the current page, or a specific selector.",
     "input_schema": {
         "type": "object",
-        "properties": {"selector": {"type": "string", "description": "CSS selector (optional). If omitted, reads entire body."}},
+        "properties": {
+            "selector": {
+                "type": "string",
+                "description": "CSS selector (optional). If omitted, reads entire body.",
+            }
+        },
         "required": [],
     },
 }
@@ -3413,7 +4264,12 @@ _BROWSER_CLICK_TOOL: dict[str, Any] = {
     "description": "Click an element by CSS selector.",
     "input_schema": {
         "type": "object",
-        "properties": {"selector": {"type": "string", "description": "CSS selector of element to click"}},
+        "properties": {
+            "selector": {
+                "type": "string",
+                "description": "CSS selector of element to click",
+            }
+        },
         "required": ["selector"],
     },
 }
@@ -3444,7 +4300,9 @@ _MEMORY_READ_TOOL: dict[str, Any] = {
     "description": "Read a value from the per-repo memory store by key.",
     "input_schema": {
         "type": "object",
-        "properties": {"key": {"type": "string", "description": "Key to read from memory"}},
+        "properties": {
+            "key": {"type": "string", "description": "Key to read from memory"}
+        },
         "required": ["key"],
     },
 }
@@ -3470,7 +4328,10 @@ _DECISION_LOG_APPEND_TOOL: dict[str, Any] = {
         "properties": {
             "decision": {"type": "string", "description": "The decision made"},
             "reason": {"type": "string", "description": "Why this decision was made"},
-            "alternatives": {"type": "string", "description": "What alternatives were considered (optional)"},
+            "alternatives": {
+                "type": "string",
+                "description": "What alternatives were considered (optional)",
+            },
         },
         "required": ["decision", "reason"],
     },
@@ -3482,8 +4343,14 @@ _TASK_HISTORY_QUERY_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "limit": {"type": "integer", "description": "Max records to return (default 20)"},
-            "status": {"type": "string", "description": "Filter by status: completed, failed, blocked (optional)"},
+            "limit": {
+                "type": "integer",
+                "description": "Max records to return (default 20)",
+            },
+            "status": {
+                "type": "string",
+                "description": "Filter by status: completed, failed, blocked (optional)",
+            },
         },
         "required": [],
     },
@@ -3502,7 +4369,10 @@ _KNOWN_ISSUES_WRITE_TOOL: dict[str, Any] = {
         "type": "object",
         "properties": {
             "issue": {"type": "string", "description": "Description of the issue"},
-            "severity": {"type": "string", "description": "critical / high / medium / low"},
+            "severity": {
+                "type": "string",
+                "description": "critical / high / medium / low",
+            },
         },
         "required": ["issue", "severity"],
     },
@@ -3516,8 +4386,15 @@ _ESTIMATE_COMPLEXITY_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "description": {"type": "string", "description": "Task or feature description to estimate"},
-            "context_paths": {"type": "array", "items": {"type": "string"}, "description": "Optional list of files/dirs likely involved"},
+            "description": {
+                "type": "string",
+                "description": "Task or feature description to estimate",
+            },
+            "context_paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional list of files/dirs likely involved",
+            },
         },
         "required": ["description"],
     },
@@ -3529,8 +4406,15 @@ _SUMMARIZE_FOLDER_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Relative folder path to summarize"},
-            "extensions": {"type": "array", "items": {"type": "string"}, "description": "File extensions to include (default: .py, .ts, .tsx)"},
+            "path": {
+                "type": "string",
+                "description": "Relative folder path to summarize",
+            },
+            "extensions": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "File extensions to include (default: .py, .ts, .tsx)",
+            },
         },
         "required": ["path"],
     },
@@ -3541,7 +4425,12 @@ _GENERATE_API_DOCS_TEXT_TOOL: dict[str, Any] = {
     "description": "Parse a FastAPI route file and return a structured markdown template of all endpoints.",
     "input_schema": {
         "type": "object",
-        "properties": {"route_path": {"type": "string", "description": "Relative path to the FastAPI router file"}},
+        "properties": {
+            "route_path": {
+                "type": "string",
+                "description": "Relative path to the FastAPI router file",
+            }
+        },
         "required": ["route_path"],
     },
 }
@@ -3551,7 +4440,12 @@ _MERMAID_FROM_SCHEMA_TOOL: dict[str, Any] = {
     "description": "Convert a database schema inspection into a Mermaid ER diagram string.",
     "input_schema": {
         "type": "object",
-        "properties": {"table": {"type": "string", "description": "Table name to focus on (optional — uses all tables if omitted)"}},
+        "properties": {
+            "table": {
+                "type": "string",
+                "description": "Table name to focus on (optional — uses all tables if omitted)",
+            }
+        },
         "required": [],
     },
 }
@@ -3563,7 +4457,12 @@ _FIND_QUEUE_TOOL: dict[str, Any] = {
     "description": "Search the codebase for Queue / task-queue patterns (asyncio.Queue, BullMQ, RQ, Celery). Returns file:line matches.",
     "input_schema": {
         "type": "object",
-        "properties": {"repo_path": {"type": "string", "description": "Repo root to search (optional, defaults to current repo)"}},
+        "properties": {
+            "repo_path": {
+                "type": "string",
+                "description": "Repo root to search (optional, defaults to current repo)",
+            }
+        },
         "required": [],
     },
 }
@@ -3573,7 +4472,12 @@ _FIND_WORKER_TOOL: dict[str, Any] = {
     "description": "Search the codebase for Worker / consumer patterns (Worker class, @worker, celery worker, RQ worker). Returns file:line matches.",
     "input_schema": {
         "type": "object",
-        "properties": {"repo_path": {"type": "string", "description": "Repo root to search (optional)"}},
+        "properties": {
+            "repo_path": {
+                "type": "string",
+                "description": "Repo root to search (optional)",
+            }
+        },
         "required": [],
     },
 }
@@ -3586,9 +4490,18 @@ _INSERT_BEFORE_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path relative to repo root"},
-            "pattern": {"type": "string", "description": "String or regex pattern to match"},
-            "content": {"type": "string", "description": "Text to insert (can be multi-line)"},
+            "path": {
+                "type": "string",
+                "description": "File path relative to repo root",
+            },
+            "pattern": {
+                "type": "string",
+                "description": "String or regex pattern to match",
+            },
+            "content": {
+                "type": "string",
+                "description": "Text to insert (can be multi-line)",
+            },
         },
         "required": ["path", "pattern", "content"],
     },
@@ -3600,9 +4513,18 @@ _INSERT_AFTER_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path relative to repo root"},
-            "pattern": {"type": "string", "description": "String or regex pattern to match"},
-            "content": {"type": "string", "description": "Text to insert (can be multi-line)"},
+            "path": {
+                "type": "string",
+                "description": "File path relative to repo root",
+            },
+            "pattern": {
+                "type": "string",
+                "description": "String or regex pattern to match",
+            },
+            "content": {
+                "type": "string",
+                "description": "Text to insert (can be multi-line)",
+            },
         },
         "required": ["path", "pattern", "content"],
     },
@@ -3614,9 +4536,18 @@ _DELETE_BLOCK_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path relative to repo root"},
-            "start_pattern": {"type": "string", "description": "Pattern marking the start of the block to delete"},
-            "end_pattern": {"type": "string", "description": "Pattern marking the end of the block to delete"},
+            "path": {
+                "type": "string",
+                "description": "File path relative to repo root",
+            },
+            "start_pattern": {
+                "type": "string",
+                "description": "Pattern marking the start of the block to delete",
+            },
+            "end_pattern": {
+                "type": "string",
+                "description": "Pattern marking the end of the block to delete",
+            },
         },
         "required": ["path", "start_pattern", "end_pattern"],
     },
@@ -3630,8 +4561,14 @@ _GENERATE_CHANGELOG_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "from_ref": {"type": "string", "description": "Starting git ref (tag or commit). Defaults to previous tag."},
-            "to_ref": {"type": "string", "description": "Ending git ref (default: HEAD)"},
+            "from_ref": {
+                "type": "string",
+                "description": "Starting git ref (tag or commit). Defaults to previous tag.",
+            },
+            "to_ref": {
+                "type": "string",
+                "description": "Ending git ref (default: HEAD)",
+            },
             "repo_path": {"type": "string", "description": "Repo root (optional)"},
         },
         "required": [],
@@ -3643,7 +4580,9 @@ _SUMMARIZE_REPO_TOOL: dict[str, Any] = {
     "description": "Generate a high-level summary of the repository: file tree (top 3 levels), line counts, language breakdown, and README excerpt.",
     "input_schema": {
         "type": "object",
-        "properties": {"repo_path": {"type": "string", "description": "Repo root (optional)"}},
+        "properties": {
+            "repo_path": {"type": "string", "description": "Repo root (optional)"}
+        },
         "required": [],
     },
 }
@@ -3654,8 +4593,14 @@ _GENERATE_RELEASE_NOTES_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "version": {"type": "string", "description": "New version number (e.g. v1.2.0)"},
-            "from_ref": {"type": "string", "description": "Previous version tag or commit"},
+            "version": {
+                "type": "string",
+                "description": "New version number (e.g. v1.2.0)",
+            },
+            "from_ref": {
+                "type": "string",
+                "description": "Previous version tag or commit",
+            },
             "repo_path": {"type": "string", "description": "Repo root (optional)"},
         },
         "required": ["version"],
@@ -3671,7 +4616,10 @@ _READ_PDF_TOOL: dict[str, Any] = {
         "type": "object",
         "properties": {
             "path": {"type": "string", "description": "Path to the PDF file"},
-            "max_pages": {"type": "integer", "description": "Maximum pages to extract (default: 20)"},
+            "max_pages": {
+                "type": "integer",
+                "description": "Maximum pages to extract (default: 20)",
+            },
         },
         "required": ["path"],
     },
@@ -3683,7 +4631,10 @@ _READ_IMAGE_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Path to the image file (PNG, JPG, GIF, BMP, WebP)"},
+            "path": {
+                "type": "string",
+                "description": "Path to the image file (PNG, JPG, GIF, BMP, WebP)",
+            },
         },
         "required": ["path"],
     },
@@ -3699,8 +4650,14 @@ _GITHUB_CREATE_PR_TOOL: dict[str, Any] = {
         "properties": {
             "title": {"type": "string", "description": "PR title"},
             "body": {"type": "string", "description": "PR description / body"},
-            "base": {"type": "string", "description": "Target base branch (default: main)"},
-            "draft": {"type": "boolean", "description": "Create as draft PR (default: false)"},
+            "base": {
+                "type": "string",
+                "description": "Target base branch (default: main)",
+            },
+            "draft": {
+                "type": "boolean",
+                "description": "Create as draft PR (default: false)",
+            },
         },
         "required": ["title", "body"],
     },
@@ -3716,7 +4673,11 @@ _GITHUB_CREATE_ISSUE_TOOL: dict[str, Any] = {
         "properties": {
             "title": {"type": "string"},
             "body": {"type": "string"},
-            "labels": {"type": "array", "items": {"type": "string"}, "description": "Optional label names"},
+            "labels": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional label names",
+            },
         },
         "required": ["title", "body"],
     },
@@ -3727,7 +4688,12 @@ _GITHUB_LIST_PRS_TOOL: dict[str, Any] = {
     "description": "List GitHub pull requests using the gh CLI.",
     "input_schema": {
         "type": "object",
-        "properties": {"state": {"type": "string", "description": "open / closed / merged (default: open)"}},
+        "properties": {
+            "state": {
+                "type": "string",
+                "description": "open / closed / merged (default: open)",
+            }
+        },
         "required": [],
     },
 }
@@ -3766,7 +4732,10 @@ _SLACK_SEND_MESSAGE_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "channel": {"type": "string", "description": "Channel name (informational only — webhook targets one channel)"},
+            "channel": {
+                "type": "string",
+                "description": "Channel name (informational only — webhook targets one channel)",
+            },
             "text": {"type": "string", "description": "Message text"},
         },
         "required": ["text"],
@@ -4040,11 +5009,17 @@ def make_performance_reviewer_handlers(repo_path: str) -> dict[str, Any]:
             return "[ERROR] DATABASE_URL not set"
         # Block destructive ops
         low = sql.lower()
-        if any(k in low for k in ("drop ", "delete ", "truncate ", "update ", "insert ")):
+        if any(
+            k in low for k in ("drop ", "delete ", "truncate ", "update ", "insert ")
+        ):
             return "[POLICY DENIED] Performance reviewer is read-only — use SELECT / EXPLAIN only"
         try:
-            r = _sp.run(["psql", db_url, "-c", sql, "--no-psqlrc"],
-                        capture_output=True, text=True, timeout=30)
+            r = _sp.run(
+                ["psql", db_url, "-c", sql, "--no-psqlrc"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
             return (r.stdout + r.stderr).strip() or "(no output)"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -4057,8 +5032,16 @@ def make_performance_reviewer_handlers(repo_path: str) -> dict[str, Any]:
             return "[ERROR] DATABASE_URL not set"
         try:
             r = _sp.run(
-                ["psql", db_url, "-c", f"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {sql};", "--no-psqlrc"],
-                capture_output=True, text=True, timeout=30,
+                [
+                    "psql",
+                    db_url,
+                    "-c",
+                    f"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {sql};",
+                    "--no-psqlrc",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             return (r.stdout + r.stderr).strip() or "(no output)"
         except Exception as e:
@@ -4069,8 +5052,12 @@ def make_performance_reviewer_handlers(repo_path: str) -> dict[str, Any]:
         pr_results: list[str] = []
         for fp in (root / pr_path).rglob("*.py"):
             try:
-                for i, line in enumerate(fp.read_text(encoding="utf-8").splitlines(), 1):
-                    if line.strip().startswith("def ") or line.strip().startswith("async def "):
+                for i, line in enumerate(
+                    fp.read_text(encoding="utf-8").splitlines(), 1
+                ):
+                    if line.strip().startswith("def ") or line.strip().startswith(
+                        "async def "
+                    ):
                         pr_results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
             except Exception:
                 continue
@@ -4102,7 +5089,10 @@ def make_style_reviewer_handlers(repo_path: str) -> dict[str, Any]:
         try:
             r = _sp.run(
                 ["python", "-m", "ruff", "check", sr_path, "--output-format=text"],
-                capture_output=True, text=True, cwd=str(root), timeout=60,
+                capture_output=True,
+                text=True,
+                cwd=str(root),
+                timeout=60,
             )
             return (r.stdout + r.stderr).strip() or "(no linting issues)"
         except Exception as e:
@@ -4113,8 +5103,12 @@ def make_style_reviewer_handlers(repo_path: str) -> dict[str, Any]:
         results: list[str] = []
         for fp in (root / sr_path).rglob("*.py"):
             try:
-                for i, line in enumerate(fp.read_text(encoding="utf-8").splitlines(), 1):
-                    if line.strip().startswith("def ") or line.strip().startswith("async def "):
+                for i, line in enumerate(
+                    fp.read_text(encoding="utf-8").splitlines(), 1
+                ):
+                    if line.strip().startswith("def ") or line.strip().startswith(
+                        "async def "
+                    ):
                         results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
             except Exception:
                 continue
@@ -4125,7 +5119,9 @@ def make_style_reviewer_handlers(repo_path: str) -> dict[str, Any]:
         results: list[str] = []
         for fp in (root / sr_path).rglob("*.py"):
             try:
-                for i, line in enumerate(fp.read_text(encoding="utf-8").splitlines(), 1):
+                for i, line in enumerate(
+                    fp.read_text(encoding="utf-8").splitlines(), 1
+                ):
                     if line.strip().startswith("class "):
                         results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
             except Exception:
@@ -4136,7 +5132,9 @@ def make_style_reviewer_handlers(repo_path: str) -> dict[str, Any]:
         results: list[str] = []
         for fp in root.rglob("*.py"):
             try:
-                for i, line in enumerate(fp.read_text(encoding="utf-8").splitlines(), 1):
+                for i, line in enumerate(
+                    fp.read_text(encoding="utf-8").splitlines(), 1
+                ):
                     if "TODO" in line or "FIXME" in line or "HACK" in line:
                         results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
             except Exception:
@@ -4235,8 +5233,12 @@ def make_migration_agent_handlers(repo_path: str) -> dict[str, Any]:
         if any(k in low for k in ("drop table", "truncate", "delete from")):
             return "[POLICY DENIED] Destructive SQL blocked in migration agent"
         try:
-            r = _sp.run(["psql", db_url, "-c", sql, "--no-psqlrc"],
-                        capture_output=True, text=True, timeout=30)
+            r = _sp.run(
+                ["psql", db_url, "-c", sql, "--no-psqlrc"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
             return (r.stdout + r.stderr).strip() or "(no output)"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -4247,10 +5249,14 @@ def make_migration_agent_handlers(repo_path: str) -> dict[str, Any]:
         if not db_url:
             return "[ERROR] DATABASE_URL not set"
         tbl = inp.get("table")
-        sql = (f"\\d+ {tbl}" if tbl else "\\dt+")
+        sql = f"\\d+ {tbl}" if tbl else "\\dt+"
         try:
-            r = _sp.run(["psql", db_url, "-c", sql, "--no-psqlrc"],
-                        capture_output=True, text=True, timeout=20)
+            r = _sp.run(
+                ["psql", db_url, "-c", sql, "--no-psqlrc"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
             return (r.stdout + r.stderr).strip() or "(no output)"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -4260,8 +5266,14 @@ def make_migration_agent_handlers(repo_path: str) -> dict[str, Any]:
         if _is_protected_path(rel, repo_path):
             return f"[POLICY DENIED] Protected path: {rel}"
         # Migration agent may only write to migrations/ or backend/migrations/
-        if not (rel.startswith("migrations/") or rel.startswith("backend/migrations/") or rel.endswith(".py")):
-            return f"[POLICY DENIED] Migration agent may only write migration files: {rel}"
+        if not (
+            rel.startswith("migrations/")
+            or rel.startswith("backend/migrations/")
+            or rel.endswith(".py")
+        ):
+            return (
+                f"[POLICY DENIED] Migration agent may only write migration files: {rel}"
+            )
         content = str(inp["content"])
         try:
             fp = root / rel
@@ -4277,7 +5289,14 @@ def make_migration_agent_handlers(repo_path: str) -> dict[str, Any]:
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
         try:
-            r = _sp.run(cmd, shell=True, capture_output=True, text=True, cwd=str(root), timeout=60)
+            r = _sp.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=str(root),
+                timeout=60,
+            )
             return (r.stdout + r.stderr).strip() or "(no output)"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -4314,8 +5333,12 @@ def make_schema_agent_handlers(repo_path: str) -> dict[str, Any]:
         if any(k in low for k in ("drop ", "delete ", "truncate ")):
             return "[POLICY DENIED] Schema agent cannot run destructive SQL"
         try:
-            r = _sp.run(["psql", db_url, "-c", sql, "--no-psqlrc"],
-                        capture_output=True, text=True, timeout=30)
+            r = _sp.run(
+                ["psql", db_url, "-c", sql, "--no-psqlrc"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
             return (r.stdout + r.stderr).strip() or "(no output)"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -4326,10 +5349,14 @@ def make_schema_agent_handlers(repo_path: str) -> dict[str, Any]:
         if not db_url:
             return "[ERROR] DATABASE_URL not set"
         tbl = inp.get("table")
-        sql = (f"\\d+ {tbl}" if tbl else "\\dt+")
+        sql = f"\\d+ {tbl}" if tbl else "\\dt+"
         try:
-            r = _sp.run(["psql", db_url, "-c", sql, "--no-psqlrc"],
-                        capture_output=True, text=True, timeout=20)
+            r = _sp.run(
+                ["psql", db_url, "-c", sql, "--no-psqlrc"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
             return (r.stdout + r.stderr).strip() or "(no output)"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -4386,7 +5413,10 @@ def make_ai_engineer_handlers(repo_path: str) -> dict[str, Any]:
         try:
             r = _sp.run(
                 ["python", "-c", code],
-                capture_output=True, text=True, cwd=str(root), timeout=30,
+                capture_output=True,
+                text=True,
+                cwd=str(root),
+                timeout=30,
             )
             return (r.stdout + r.stderr).strip() or "(no output)"
         except Exception as e:
@@ -4398,7 +5428,14 @@ def make_ai_engineer_handlers(repo_path: str) -> dict[str, Any]:
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
         try:
-            r = _sp.run(cmd, shell=True, capture_output=True, text=True, cwd=str(root), timeout=120)
+            r = _sp.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=str(root),
+                timeout=120,
+            )
             return (r.stdout + r.stderr).strip() or "(no output)"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -4418,6 +5455,7 @@ def make_ai_engineer_handlers(repo_path: str) -> dict[str, Any]:
 
     def ae_fetch_url(inp: dict[str, Any]) -> str:
         import urllib.request as _ur
+
         url = str(inp["url"])
         try:
             with _ur.urlopen(url, timeout=10) as resp:
@@ -4463,6 +5501,7 @@ def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
         cu_dir = str(inp.get("directory", "."))
         try:
             from app.repo_tools import ast_engine as _ae
+
             return _ae.detect_dead_code(str(root / cu_dir))
         except Exception as e:
             return f"[ERROR] {e}"
@@ -4471,7 +5510,9 @@ def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
         results: list[str] = []
         for fp in root.rglob("*.py"):
             try:
-                for i, line in enumerate(fp.read_text(encoding="utf-8").splitlines(), 1):
+                for i, line in enumerate(
+                    fp.read_text(encoding="utf-8").splitlines(), 1
+                ):
                     if any(t in line for t in ("TODO", "FIXME", "HACK", "XXX")):
                         results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
             except Exception:
@@ -4485,7 +5526,10 @@ def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
         try:
             r = _sp.run(
                 ["python", "-m", "isort", cu_path, "--diff"],
-                capture_output=True, text=True, cwd=str(root), timeout=30,
+                capture_output=True,
+                text=True,
+                cwd=str(root),
+                timeout=30,
             )
             return (r.stdout + r.stderr).strip() or "(no changes needed)"
         except Exception as e:
@@ -4528,7 +5572,14 @@ def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
         try:
-            r = _sp.run(cmd, shell=True, capture_output=True, text=True, cwd=str(root), timeout=60)
+            r = _sp.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=str(root),
+                timeout=60,
+            )
             return (r.stdout + r.stderr).strip() or "(no output)"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -4561,8 +5612,12 @@ def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
         results: list[str] = []
         for fp in (root / td_path).rglob("*.py"):
             try:
-                for i, line in enumerate(fp.read_text(encoding="utf-8").splitlines(), 1):
-                    if line.strip().startswith("def ") or line.strip().startswith("async def "):
+                for i, line in enumerate(
+                    fp.read_text(encoding="utf-8").splitlines(), 1
+                ):
+                    if line.strip().startswith("def ") or line.strip().startswith(
+                        "async def "
+                    ):
                         results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
             except Exception:
                 continue
@@ -4573,7 +5628,9 @@ def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
         results: list[str] = []
         for fp in (root / td_path).rglob("*.py"):
             try:
-                for i, line in enumerate(fp.read_text(encoding="utf-8").splitlines(), 1):
+                for i, line in enumerate(
+                    fp.read_text(encoding="utf-8").splitlines(), 1
+                ):
                     if line.strip().startswith("class "):
                         results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
             except Exception:
@@ -4584,7 +5641,9 @@ def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
         results: list[str] = []
         for fp in root.rglob("*.py"):
             try:
-                for i, line in enumerate(fp.read_text(encoding="utf-8").splitlines(), 1):
+                for i, line in enumerate(
+                    fp.read_text(encoding="utf-8").splitlines(), 1
+                ):
                     if any(t in line for t in ("TODO", "FIXME", "HACK", "XXX")):
                         results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
             except Exception:
@@ -4596,7 +5655,10 @@ def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
         try:
             r = _sp.run(
                 ["python", "-m", "ruff", "check", td_path, "--output-format=text"],
-                capture_output=True, text=True, cwd=str(root), timeout=60,
+                capture_output=True,
+                text=True,
+                cwd=str(root),
+                timeout=60,
             )
             return (r.stdout + r.stderr).strip() or "(no linting issues)"
         except Exception as e:
@@ -4606,7 +5668,10 @@ def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
         try:
             r = _sp.run(
                 ["python", "-m", "pytest", "--co", "-q", "--no-header"],
-                capture_output=True, text=True, cwd=str(root), timeout=60,
+                capture_output=True,
+                text=True,
+                cwd=str(root),
+                timeout=60,
             )
             return (r.stdout + r.stderr).strip() or "(no output)"
         except Exception as e:
@@ -4637,9 +5702,19 @@ _GIT_TAG_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["list", "create", "delete"], "description": "Tag operation"},
-            "name": {"type": "string", "description": "Tag name (required for create/delete)"},
-            "message": {"type": "string", "description": "Annotated tag message (optional, create only)"},
+            "action": {
+                "type": "string",
+                "enum": ["list", "create", "delete"],
+                "description": "Tag operation",
+            },
+            "name": {
+                "type": "string",
+                "description": "Tag name (required for create/delete)",
+            },
+            "message": {
+                "type": "string",
+                "description": "Annotated tag message (optional, create only)",
+            },
         },
         "required": [],
     },
@@ -4650,8 +5725,14 @@ _GIT_LOG_FILE_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path relative to repo root"},
-            "limit": {"type": "integer", "description": "Max commits to return (default: 10)"},
+            "path": {
+                "type": "string",
+                "description": "File path relative to repo root",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max commits to return (default: 10)",
+            },
         },
         "required": ["path"],
     },
@@ -4662,8 +5743,15 @@ _SEMVER_BUMP_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "part": {"type": "string", "enum": ["patch", "minor", "major"], "description": "Which part to bump"},
-            "file": {"type": "string", "description": "Version file path (auto-detected if omitted)"},
+            "part": {
+                "type": "string",
+                "enum": ["patch", "minor", "major"],
+                "description": "Which part to bump",
+            },
+            "file": {
+                "type": "string",
+                "description": "Version file path (auto-detected if omitted)",
+            },
         },
         "required": ["part"],
     },
@@ -4680,7 +5768,12 @@ _LIST_PROCESSES_TOOL: dict[str, Any] = {
     "description": "List running processes, optionally filtered by name. Returns PID, CPU%, MEM%, command.",
     "input_schema": {
         "type": "object",
-        "properties": {"filter": {"type": "string", "description": "Filter by process name (optional)"}},
+        "properties": {
+            "filter": {
+                "type": "string",
+                "description": "Filter by process name (optional)",
+            }
+        },
         "required": [],
     },
 }
@@ -4697,7 +5790,10 @@ _WAIT_FOR_PORT_TOOL: dict[str, Any] = {
         "properties": {
             "port": {"type": "integer", "description": "TCP port number"},
             "host": {"type": "string", "description": "Hostname (default: localhost)"},
-            "timeout": {"type": "integer", "description": "Max seconds to wait (default: 30)"},
+            "timeout": {
+                "type": "integer",
+                "description": "Max seconds to wait (default: 30)",
+            },
         },
         "required": ["port"],
     },
@@ -4717,8 +5813,14 @@ _CPU_PROFILE_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "command": {"type": "string", "description": "Python command to profile, e.g. 'python -m myapp'"},
-            "top": {"type": "integer", "description": "Number of top functions to return (default: 20)"},
+            "command": {
+                "type": "string",
+                "description": "Python command to profile, e.g. 'python -m myapp'",
+            },
+            "top": {
+                "type": "integer",
+                "description": "Number of top functions to return (default: 20)",
+            },
         },
         "required": ["command"],
     },
@@ -4731,8 +5833,14 @@ _ZIP_FILES_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "source": {"type": "string", "description": "File or directory to zip (relative to repo root)"},
-            "output": {"type": "string", "description": "Output .zip file path (default: source + .zip)"},
+            "source": {
+                "type": "string",
+                "description": "File or directory to zip (relative to repo root)",
+            },
+            "output": {
+                "type": "string",
+                "description": "Output .zip file path (default: source + .zip)",
+            },
         },
         "required": ["source"],
     },
@@ -4743,8 +5851,14 @@ _UNZIP_FILES_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "archive": {"type": "string", "description": ".zip file path (relative to repo root)"},
-            "dest": {"type": "string", "description": "Destination directory (default: archive directory)"},
+            "archive": {
+                "type": "string",
+                "description": ".zip file path (relative to repo root)",
+            },
+            "dest": {
+                "type": "string",
+                "description": "Destination directory (default: archive directory)",
+            },
         },
         "required": ["archive"],
     },
@@ -4755,8 +5869,14 @@ _MOVE_FILE_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "source": {"type": "string", "description": "Source path (relative to repo root)"},
-            "dest": {"type": "string", "description": "Destination path (relative to repo root)"},
+            "source": {
+                "type": "string",
+                "description": "Source path (relative to repo root)",
+            },
+            "dest": {
+                "type": "string",
+                "description": "Destination path (relative to repo root)",
+            },
         },
         "required": ["source", "dest"],
     },
@@ -4766,7 +5886,9 @@ _HASH_FILE_TOOL: dict[str, Any] = {
     "description": "Compute the SHA-256 hash of a file. Useful for integrity checking.",
     "input_schema": {
         "type": "object",
-        "properties": {"path": {"type": "string", "description": "File path relative to repo root"}},
+        "properties": {
+            "path": {"type": "string", "description": "File path relative to repo root"}
+        },
         "required": ["path"],
     },
 }
@@ -4776,8 +5898,14 @@ _COUNT_LINES_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File or directory path (relative to repo root)"},
-            "pattern": {"type": "string", "description": "Glob pattern for directory mode (e.g. '**/*.py')"},
+            "path": {
+                "type": "string",
+                "description": "File or directory path (relative to repo root)",
+            },
+            "pattern": {
+                "type": "string",
+                "description": "Glob pattern for directory mode (e.g. '**/*.py')",
+            },
         },
         "required": ["path"],
     },
@@ -4789,7 +5917,9 @@ _READ_ENV_VAR_TOOL: dict[str, Any] = {
     "description": "Read the value of a specific environment variable from the running process. Returns [NOT SET] if absent.",
     "input_schema": {
         "type": "object",
-        "properties": {"name": {"type": "string", "description": "Environment variable name"}},
+        "properties": {
+            "name": {"type": "string", "description": "Environment variable name"}
+        },
         "required": ["name"],
     },
 }
@@ -4804,8 +5934,14 @@ _ENV_DIFF_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "example": {"type": "string", "description": "Path to example env file (default: .env.example)"},
-            "actual": {"type": "string", "description": "Path to actual env file (default: .env)"},
+            "example": {
+                "type": "string",
+                "description": "Path to example env file (default: .env.example)",
+            },
+            "actual": {
+                "type": "string",
+                "description": "Path to actual env file (default: .env)",
+            },
         },
         "required": [],
     },
@@ -4818,8 +5954,14 @@ _JSON_QUERY_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "JSON file path (relative to repo root)"},
-            "query": {"type": "string", "description": "jq expression, e.g. '.users[].name'"},
+            "path": {
+                "type": "string",
+                "description": "JSON file path (relative to repo root)",
+            },
+            "query": {
+                "type": "string",
+                "description": "jq expression, e.g. '.users[].name'",
+            },
         },
         "required": ["path", "query"],
     },
@@ -4829,7 +5971,12 @@ _YAML_VALIDATE_TOOL: dict[str, Any] = {
     "description": "Validate a YAML file for syntax errors. Returns 'valid' or the parse error with line number.",
     "input_schema": {
         "type": "object",
-        "properties": {"path": {"type": "string", "description": "YAML file path (relative to repo root)"}},
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "YAML file path (relative to repo root)",
+            }
+        },
         "required": ["path"],
     },
 }
@@ -4838,7 +5985,12 @@ _JSON_VALIDATE_TOOL: dict[str, Any] = {
     "description": "Validate a JSON file for syntax errors. Returns 'valid' or the parse error with position.",
     "input_schema": {
         "type": "object",
-        "properties": {"path": {"type": "string", "description": "JSON file path (relative to repo root)"}},
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "JSON file path (relative to repo root)",
+            }
+        },
         "required": ["path"],
     },
 }
@@ -4848,8 +6000,14 @@ _CSV_PREVIEW_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "CSV file path (relative to repo root)"},
-            "rows": {"type": "integer", "description": "Number of rows to preview (default: 5)"},
+            "path": {
+                "type": "string",
+                "description": "CSV file path (relative to repo root)",
+            },
+            "rows": {
+                "type": "integer",
+                "description": "Number of rows to preview (default: 5)",
+            },
         },
         "required": ["path"],
     },
@@ -4862,8 +6020,15 @@ _GENERATE_DIAGRAM_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "description": {"type": "string", "description": "What to diagram — components, flow, or relationships"},
-            "kind": {"type": "string", "enum": ["flowchart", "sequence", "erDiagram", "classDiagram"], "description": "Diagram type (default: flowchart)"},
+            "description": {
+                "type": "string",
+                "description": "What to diagram — components, flow, or relationships",
+            },
+            "kind": {
+                "type": "string",
+                "enum": ["flowchart", "sequence", "erDiagram", "classDiagram"],
+                "description": "Diagram type (default: flowchart)",
+            },
         },
         "required": ["description"],
     },
@@ -4874,8 +6039,14 @@ _EXPORT_MARKDOWN_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Markdown file path (relative to repo root)"},
-            "output": {"type": "string", "description": "Output HTML file path (default: same name + .html)"},
+            "path": {
+                "type": "string",
+                "description": "Markdown file path (relative to repo root)",
+            },
+            "output": {
+                "type": "string",
+                "description": "Output HTML file path (default: same name + .html)",
+            },
         },
         "required": ["path"],
     },
@@ -4886,7 +6057,10 @@ _FIND_UNUSED_IMPORTS_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File or directory to check (default: repo root)"},
+            "path": {
+                "type": "string",
+                "description": "File or directory to check (default: repo root)",
+            },
         },
         "required": [],
     },
@@ -4897,8 +6071,15 @@ _DEPS_OUTDATED_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "manager": {"type": "string", "enum": ["pip", "npm", "auto"], "description": "Package manager (default: auto-detect)"},
-            "directory": {"type": "string", "description": "Directory to check (default: repo root)"},
+            "manager": {
+                "type": "string",
+                "enum": ["pip", "npm", "auto"],
+                "description": "Package manager (default: auto-detect)",
+            },
+            "directory": {
+                "type": "string",
+                "description": "Directory to check (default: repo root)",
+            },
         },
         "required": [],
     },
@@ -4909,7 +6090,10 @@ _LOC_STATS_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "directory": {"type": "string", "description": "Root directory to scan (default: repo root)"},
+            "directory": {
+                "type": "string",
+                "description": "Root directory to scan (default: repo root)",
+            },
         },
         "required": [],
     },
@@ -4922,8 +6106,14 @@ _NPM_INSTALL_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "directory": {"type": "string", "description": "Directory containing package.json (default: repo root)"},
-            "package": {"type": "string", "description": "Optional specific package to install (e.g. 'lodash@4')"},
+            "directory": {
+                "type": "string",
+                "description": "Directory containing package.json (default: repo root)",
+            },
+            "package": {
+                "type": "string",
+                "description": "Optional specific package to install (e.g. 'lodash@4')",
+            },
         },
         "required": [],
     },
@@ -4934,8 +6124,14 @@ _NPM_RUN_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "script": {"type": "string", "description": "Script name from package.json scripts"},
-            "directory": {"type": "string", "description": "Directory containing package.json (default: repo root)"},
+            "script": {
+                "type": "string",
+                "description": "Script name from package.json scripts",
+            },
+            "directory": {
+                "type": "string",
+                "description": "Directory containing package.json (default: repo root)",
+            },
         },
         "required": ["script"],
     },
@@ -4946,7 +6142,10 @@ _PIP_INSTALL_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "package": {"type": "string", "description": "Package name with optional version, e.g. 'requests==2.31.0'"},
+            "package": {
+                "type": "string",
+                "description": "Package name with optional version, e.g. 'requests==2.31.0'",
+            },
         },
         "required": ["package"],
     },
@@ -4957,7 +6156,10 @@ _PIP_LIST_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "filter": {"type": "string", "description": "Filter packages by name prefix (optional)"},
+            "filter": {
+                "type": "string",
+                "description": "Filter packages by name prefix (optional)",
+            },
         },
         "required": [],
     },
@@ -4970,7 +6172,10 @@ _CREATE_DIRECTORY_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Directory path to create (relative to repo root)"},
+            "path": {
+                "type": "string",
+                "description": "Directory path to create (relative to repo root)",
+            },
         },
         "required": ["path"],
     },
@@ -4981,10 +6186,20 @@ _HTTP_REQUEST_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"], "description": "HTTP method"},
+            "method": {
+                "type": "string",
+                "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"],
+                "description": "HTTP method",
+            },
             "url": {"type": "string", "description": "Request URL"},
-            "headers": {"type": "object", "description": "Request headers (key-value pairs)"},
-            "body": {"type": "string", "description": "Request body (JSON string for POST/PUT)"},
+            "headers": {
+                "type": "object",
+                "description": "Request headers (key-value pairs)",
+            },
+            "body": {
+                "type": "string",
+                "description": "Request body (JSON string for POST/PUT)",
+            },
         },
         "required": ["method", "url"],
     },
@@ -4995,9 +6210,18 @@ _BASE64_ENCODE_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "text": {"type": "string", "description": "Text string to encode (mutually exclusive with path)"},
-            "path": {"type": "string", "description": "File path to encode (relative to repo root)"},
-            "decode": {"type": "boolean", "description": "If true, decode base64 instead of encoding (default: false)"},
+            "text": {
+                "type": "string",
+                "description": "Text string to encode (mutually exclusive with path)",
+            },
+            "path": {
+                "type": "string",
+                "description": "File path to encode (relative to repo root)",
+            },
+            "decode": {
+                "type": "boolean",
+                "description": "If true, decode base64 instead of encoding (default: false)",
+            },
         },
         "required": [],
     },
@@ -5008,9 +6232,18 @@ _TEMPLATE_RENDER_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "template": {"type": "string", "description": "Template string (mutually exclusive with path)"},
-            "path": {"type": "string", "description": "Template file path (relative to repo root)"},
-            "vars": {"type": "object", "description": "Variables to inject into the template"},
+            "template": {
+                "type": "string",
+                "description": "Template string (mutually exclusive with path)",
+            },
+            "path": {
+                "type": "string",
+                "description": "Template file path (relative to repo root)",
+            },
+            "vars": {
+                "type": "object",
+                "description": "Variables to inject into the template",
+            },
         },
         "required": [],
     },
@@ -5202,6 +6435,7 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _TEMPLATE_RENDER_TOOL,
 ]
 
+
 def _is_dangerous_command(command: str) -> bool:
     """Delegates to the centralized policy engine denylist."""
     return not check_command(command, strict=False).allowed
@@ -5232,7 +6466,12 @@ def task_history_query(inp: dict[str, Any]) -> str:
         sql += f" WHERE status = '{status_filter}'"
     sql += f" ORDER BY created_at DESC LIMIT {limit};"
     try:
-        r = subprocess.run(["psql", db_url, "-c", sql, "--no-psqlrc"], capture_output=True, text=True, timeout=15)
+        r = subprocess.run(
+            ["psql", db_url, "-c", sql, "--no-psqlrc"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
         return (r.stdout + r.stderr).strip() or "(no output)"
     except Exception as e:
         return f"[ERROR] {e}"
@@ -5293,11 +6532,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         args = ["git", "diff", "--no-color"]
         staged = subprocess.run(
             ["git", "diff", "--cached", "--no-color"],
-            cwd=repo_path, capture_output=True, text=True,
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
         )
         unstaged = subprocess.run(
             args + ([inp["file"]] if inp.get("file") else []),
-            cwd=repo_path, capture_output=True, text=True,
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
         )
         out = ""
         if staged.stdout.strip():
@@ -5359,7 +6602,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 text=True,
                 timeout=120,
             )
-            output = result.stdout + (("\n[stderr]\n" + result.stderr) if result.stderr else "")
+            output = result.stdout + (
+                ("\n[stderr]\n" + result.stderr) if result.stderr else ""
+            )
             if result.returncode != 0:
                 output += f"\n[exit code: {result.returncode}]"
             return output.strip() or "(no output)"
@@ -5432,7 +6677,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             cmd_parts.append("--force")
 
         try:
-            result = subprocess.run(cmd_parts, cwd=repo_path, capture_output=True, text=True, timeout=60)
+            result = subprocess.run(
+                cmd_parts, cwd=repo_path, capture_output=True, text=True, timeout=60
+            )
             out = result.stdout + result.stderr
             return out.strip() or "Push complete."
         except Exception as e:
@@ -5450,7 +6697,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             create_cmd.append(from_branch)
 
         try:
-            result = subprocess.run(create_cmd, cwd=repo_path, capture_output=True, text=True)
+            result = subprocess.run(
+                create_cmd, cwd=repo_path, capture_output=True, text=True
+            )
             if result.returncode != 0:
                 return f"[ERROR] {result.stderr.strip()}"
         except Exception as e:
@@ -5460,10 +6709,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             try:
                 result = subprocess.run(
                     ["git", "checkout", name],
-                    cwd=repo_path, capture_output=True, text=True,
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
                 )
                 if result.returncode != 0:
-                    return f"Branch created but checkout failed: {result.stderr.strip()}"
+                    return (
+                        f"Branch created but checkout failed: {result.stderr.strip()}"
+                    )
             except Exception as e:
                 return f"Branch created but checkout failed: {e}"
             return f"Created and switched to branch: {name}"
@@ -5495,7 +6748,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def rename_file(inp: dict[str, Any]) -> str:
         from_rel = str(inp["from_path"])
         to_rel = str(inp["to_path"])
-        if _is_protected_path(from_rel, repo_path) or _is_protected_path(to_rel, repo_path):
+        if _is_protected_path(from_rel, repo_path) or _is_protected_path(
+            to_rel, repo_path
+        ):
             return "[POLICY DENIED] Protected path involved."
         src = root / from_rel
         dst = root / to_rel
@@ -5511,6 +6766,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # ---- copy_file ----
     def copy_file(inp: dict[str, Any]) -> str:
         import shutil
+
         from_rel = str(inp["from_path"])
         to_rel = str(inp["to_path"])
         if _is_protected_path(to_rel, repo_path):
@@ -5532,13 +6788,22 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         files: list[str] = inp.get("files", [])
         try:
             if files == ["--all"] or files == ["-a"]:
-                subprocess.run(["git", "add", "-A"], cwd=repo_path, check=True, capture_output=True)
+                subprocess.run(
+                    ["git", "add", "-A"], cwd=repo_path, check=True, capture_output=True
+                )
             else:
                 for f in files:
-                    subprocess.run(["git", "add", f], cwd=repo_path, check=True, capture_output=True)
+                    subprocess.run(
+                        ["git", "add", f],
+                        cwd=repo_path,
+                        check=True,
+                        capture_output=True,
+                    )
             result = subprocess.run(
                 ["git", "commit", "-m", message],
-                cwd=repo_path, capture_output=True, text=True,
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
             )
             return (result.stdout + result.stderr).strip()
         except subprocess.CalledProcessError as e:
@@ -5552,17 +6817,32 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         name = inp.get("name", "")
         try:
             if action == "list":
-                r = subprocess.run(["git", "branch", "-a"], cwd=repo_path, capture_output=True, text=True)
+                r = subprocess.run(
+                    ["git", "branch", "-a"],
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                )
                 return r.stdout or "(no branches)"
             elif action == "create":
                 if not name:
                     return "[ERROR] name required for create"
-                r = subprocess.run(["git", "branch", name], cwd=repo_path, capture_output=True, text=True)
+                r = subprocess.run(
+                    ["git", "branch", name],
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                )
                 return r.stdout + r.stderr or f"Branch '{name}' created"
             elif action == "delete":
                 if not name:
                     return "[ERROR] name required for delete"
-                r = subprocess.run(["git", "branch", "-d", name], cwd=repo_path, capture_output=True, text=True)
+                r = subprocess.run(
+                    ["git", "branch", "-d", name],
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                )
                 return r.stdout + r.stderr or f"Branch '{name}' deleted"
             return f"[ERROR] Unknown action: {action}"
         except Exception as e:
@@ -5614,7 +6894,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         if branch:
             cmd.append(branch)
         try:
-            r = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True, timeout=60)
+            r = subprocess.run(
+                cmd, cwd=repo_path, capture_output=True, text=True, timeout=60
+            )
             return (r.stdout + r.stderr).strip() or "Pull complete"
         except subprocess.TimeoutExpired:
             return "[ERROR] git pull timed out after 60s"
@@ -5629,7 +6911,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         if prune:
             cmd.append("--prune")
         try:
-            r = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True, timeout=60)
+            r = subprocess.run(
+                cmd, cwd=repo_path, capture_output=True, text=True, timeout=60
+            )
             return (r.stdout + r.stderr).strip() or "Fetch complete"
         except subprocess.TimeoutExpired:
             return "[ERROR] git fetch timed out"
@@ -5669,7 +6953,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] Unknown runner: {runner}"
 
         try:
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=180)
+            result = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, timeout=180
+            )
             out = (result.stdout + result.stderr)[:5000]
             return out.strip() or "(no output)"
         except subprocess.TimeoutExpired:
@@ -5688,25 +6974,33 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             target = path or f"{repo_path}"
             fix_flag = "--fix" if fix else ""
             cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true && python -m ruff check {target} {fix_flag} 2>&1 | head -50"
-            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+            r = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, timeout=60
+            )
             results.append(f"=== ruff ===\n{(r.stdout + r.stderr)[:2000] or 'clean'}")
 
         if tool in ("mypy", "all"):
             target = path or f"{repo_path}"
             cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true && python -m mypy {target} --ignore-missing-imports 2>&1 | head -50"
-            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=90)
+            r = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, timeout=90
+            )
             results.append(f"=== mypy ===\n{(r.stdout + r.stderr)[:2000] or 'clean'}")
 
         if tool in ("tsc", "all"):
             web = str(root.parent / "apps" / "web")
             cmd = f"cd {web} && npx tsc --noEmit 2>&1 | head -50"
-            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=90)
+            r = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, timeout=90
+            )
             results.append(f"=== tsc ===\n{(r.stdout + r.stderr)[:2000] or 'clean'}")
 
         if tool == "black":
             target = path or f"{repo_path}"
             cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true && python -m black {'--check' if not fix else ''} {target} 2>&1 | head -50"
-            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+            r = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, timeout=60
+            )
             results.append(f"=== black ===\n{(r.stdout + r.stderr)[:2000]}")
 
         return "\n\n".join(results) if results else f"[ERROR] Unknown linter: {tool}"
@@ -5721,12 +7015,27 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         ff_root = root / ff_dir if ff_dir else root
         try:
             r = subprocess.run(
-                ["find", str(ff_root), "-name", name,
-                 "-not", "-path", "*/node_modules/*",
-                 "-not", "-path", "*/__pycache__/*",
-                 "-not", "-path", "*/.git/*",
-                 "-not", "-path", "*/.venv/*"],
-                capture_output=True, text=True, timeout=15,
+                [
+                    "find",
+                    str(ff_root),
+                    "-name",
+                    name,
+                    "-not",
+                    "-path",
+                    "*/node_modules/*",
+                    "-not",
+                    "-path",
+                    "*/__pycache__/*",
+                    "-not",
+                    "-path",
+                    "*/.git/*",
+                    "-not",
+                    "-path",
+                    "*/.venv/*",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
             found = [ln for ln in r.stdout.splitlines() if ln.strip()]
             if not found:
@@ -5758,7 +7067,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             cmd = f"cd {repo_path} && npx prettier --write {str(fmt_target)} 2>&1"
         else:
             return f"[ERROR] Unknown formatter: {formatter}"
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=30)
+        r = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=30
+        )
         return (r.stdout + r.stderr).strip() or f"Formatted {rel}"
 
     def organize_imports(inp: dict[str, Any]) -> str:
@@ -5767,8 +7078,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         if not oi_target.exists():
             return f"[ERROR] File not found: {rel}"
         activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
-        cmd = f"{activate} && python -m ruff check --select I --fix {str(oi_target)} 2>&1"
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=30)
+        cmd = (
+            f"{activate} && python -m ruff check --select I --fix {str(oi_target)} 2>&1"
+        )
+        r = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=30
+        )
         return (r.stdout + r.stderr).strip() or f"Imports organized in {rel}"
 
     def insert_at_line(inp: dict[str, Any]) -> str:
@@ -5781,7 +7096,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         if not ial_target.exists():
             return f"[ERROR] File not found: {rel}"
         try:
-            file_lines = ial_target.read_text(encoding="utf-8").splitlines(keepends=True)
+            file_lines = ial_target.read_text(encoding="utf-8").splitlines(
+                keepends=True
+            )
             insert_at = max(0, line_num - 1) if line_num > 0 else len(file_lines)
             insert_at = min(insert_at, len(file_lines))
             ins_content = content if content.endswith("\n") else content + "\n"
@@ -5806,7 +7123,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             rf_indent = 0
             for rf_i, rf_line in enumerate(rf_lines):
                 rf_stripped = rf_line.strip()
-                if rf_stripped.startswith(f"def {func_name}(") or rf_stripped.startswith(f"async def {func_name}("):
+                if rf_stripped.startswith(
+                    f"def {func_name}("
+                ) or rf_stripped.startswith(f"async def {func_name}("):
                     rf_start = rf_i
                     rf_indent = len(rf_line) - len(rf_line.lstrip())
                     break
@@ -5818,7 +7137,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 if rf_jline.strip() == "":
                     continue
                 rf_jind = len(rf_jline) - len(rf_jline.lstrip())
-                if rf_jind <= rf_indent and rf_jline.strip() and not rf_jline.strip().startswith(("#", "@")):
+                if (
+                    rf_jind <= rf_indent
+                    and rf_jline.strip()
+                    and not rf_jline.strip().startswith(("#", "@"))
+                ):
                     rf_end = rf_j
                     break
             rf_new = new_code if new_code.endswith("\n") else new_code + "\n"
@@ -5847,7 +7170,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             dl_s = dl_start - 1
             dl_e = min(dl_end, total)
             deleted = dl_e - dl_s
-            dl_target.write_text("".join(dl_lines[:dl_s] + dl_lines[dl_e:]), encoding="utf-8")
+            dl_target.write_text(
+                "".join(dl_lines[:dl_s] + dl_lines[dl_e:]), encoding="utf-8"
+            )
             return f"Deleted {deleted} lines ({dl_start}-{dl_end}) from {rel}"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -5855,10 +7180,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def apply_patch(inp: dict[str, Any]) -> str:
         import os as _os
         import tempfile as _tempfile
+
         patch_content = str(inp["patch"])
         strip = int(inp.get("strip", 1))
         try:
-            with _tempfile.NamedTemporaryFile(mode="w", suffix=".patch", delete=False) as pf:
+            with _tempfile.NamedTemporaryFile(
+                mode="w", suffix=".patch", delete=False
+            ) as pf:
                 pf.write(patch_content)
                 pf_name = pf.name
         except Exception as e:
@@ -5866,7 +7194,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         try:
             r = subprocess.run(
                 ["patch", f"-p{strip}", "--input", pf_name],
-                cwd=repo_path, capture_output=True, text=True, timeout=30,
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             return (r.stdout + r.stderr).strip() or "Patch applied"
         except FileNotFoundError:
@@ -5893,7 +7224,8 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] File not found: {rel_b}"
         r = subprocess.run(
             ["diff", f"-U{context}", str(cf_a), str(cf_b)],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         return r.stdout[:8000] or "Files are identical"
 
@@ -5906,8 +7238,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         rb_cwd = str(inp.get("cwd") or repo_path)
         try:
             proc = subprocess.Popen(
-                rb_command, shell=True, cwd=rb_cwd,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                rb_command,
+                shell=True,
+                cwd=rb_cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
             _session_bg_procs[proc.pid] = proc
             return f"Started background process PID {proc.pid}: {rb_command[:80]}"
@@ -5917,9 +7253,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def kill_process(inp: dict[str, Any]) -> str:
         import os as _os
         import signal as _signal
+
         kp_pid = int(inp["pid"])
         kp_sig_name = str(inp.get("signal", "TERM"))
-        sig_map = {"TERM": _signal.SIGTERM, "KILL": _signal.SIGKILL, "INT": _signal.SIGINT}
+        sig_map = {
+            "TERM": _signal.SIGTERM,
+            "KILL": _signal.SIGKILL,
+            "INT": _signal.SIGINT,
+        }
         kp_sig = sig_map.get(kp_sig_name, _signal.SIGTERM)
         _session_bg_procs.pop(kp_pid, None)
         try:
@@ -5932,12 +7273,20 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def run_python_snippet(inp: dict[str, Any]) -> str:
         import shlex as _shlex
+
         code = str(inp["code"])
         ps_timeout = int(inp.get("timeout", 30))
         activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
         cmd = f"{activate} && python3 -c {_shlex.quote(code)} 2>&1"
         try:
-            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=ps_timeout)
+            r = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=repo_path,
+                timeout=ps_timeout,
+            )
             return (r.stdout + r.stderr)[:5000] or "(no output)"
         except subprocess.TimeoutExpired:
             return f"[ERROR] Python snippet timed out after {ps_timeout}s"
@@ -5948,20 +7297,42 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         make_target = str(inp.get("target", ""))
         make_dir_rel = str(inp.get("directory", ""))
         make_dir = (root / make_dir_rel) if make_dir_rel else root
-        makefile_exists = (make_dir / "Makefile").exists() or (make_dir / "makefile").exists()
+        makefile_exists = (make_dir / "Makefile").exists() or (
+            make_dir / "makefile"
+        ).exists()
         if not makefile_exists:
             return f"[ERROR] No Makefile found in {make_dir}"
         if not make_target:
-            r = subprocess.run(["make", "-pRrq"], cwd=str(make_dir), capture_output=True, text=True, timeout=10)
+            r = subprocess.run(
+                ["make", "-pRrq"],
+                cwd=str(make_dir),
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
             tgts: list[str] = []
             for mk_line in r.stdout.splitlines():
-                if mk_line and not mk_line.startswith(("\t", "#", " ")) and ":" in mk_line:
+                if (
+                    mk_line
+                    and not mk_line.startswith(("\t", "#", " "))
+                    and ":" in mk_line
+                ):
                     tgt = mk_line.split(":")[0].strip()
                     if tgt and not tgt.startswith(".") and " " not in tgt:
                         tgts.append(tgt)
-            return "Targets:\n" + "\n".join(sorted(set(tgts[:30]))) if tgts else "Makefile found but targets not parseable"
+            return (
+                "Targets:\n" + "\n".join(sorted(set(tgts[:30])))
+                if tgts
+                else "Makefile found but targets not parseable"
+            )
         try:
-            r = subprocess.run(["make", make_target], cwd=str(make_dir), capture_output=True, text=True, timeout=120)
+            r = subprocess.run(
+                ["make", make_target],
+                cwd=str(make_dir),
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
             return (r.stdout + r.stderr)[:5000] or f"make {make_target} complete"
         except subprocess.TimeoutExpired:
             return f"[ERROR] make {make_target} timed out"
@@ -5973,9 +7344,19 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         fu_timeout = int(inp.get("timeout", 15))
         try:
             r = subprocess.run(
-                ["curl", "-s", "-L", "--max-time", str(fu_timeout),
-                 "--user-agent", "Gridiron-Agent/1.0", fu_url],
-                capture_output=True, text=True, timeout=fu_timeout + 5,
+                [
+                    "curl",
+                    "-s",
+                    "-L",
+                    "--max-time",
+                    str(fu_timeout),
+                    "--user-agent",
+                    "Gridiron-Agent/1.0",
+                    fu_url,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=fu_timeout + 5,
             )
             return r.stdout[:10000] or r.stderr or "[empty response]"
         except subprocess.TimeoutExpired:
@@ -6003,7 +7384,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             gm_cmd += ["-m", gm_msg]
         gm_cmd.append(gm_branch)
         try:
-            r = subprocess.run(gm_cmd, cwd=repo_path, capture_output=True, text=True, timeout=30)
+            r = subprocess.run(
+                gm_cmd, cwd=repo_path, capture_output=True, text=True, timeout=30
+            )
             return (r.stdout + r.stderr).strip() or f"Merged {gm_branch}"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -6018,7 +7401,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             )
         gr_cmd = ["git", "reset", f"--{gr_mode}", gr_ref]
         try:
-            r = subprocess.run(gr_cmd, cwd=repo_path, capture_output=True, text=True, timeout=10)
+            r = subprocess.run(
+                gr_cmd, cwd=repo_path, capture_output=True, text=True, timeout=10
+            )
             return (r.stdout + r.stderr).strip() or f"Reset {gr_mode} to {gr_ref}"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -6029,14 +7414,22 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         gw_branch = str(inp.get("branch", ""))
         try:
             if gw_action == "list":
-                r = subprocess.run(["git", "worktree", "list"], cwd=repo_path, capture_output=True, text=True)
+                r = subprocess.run(
+                    ["git", "worktree", "list"],
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                )
                 return r.stdout or "(no worktrees)"
             elif gw_action == "add":
                 if not gw_path or not gw_branch:
                     return "[ERROR] path and branch required for add"
                 r = subprocess.run(
                     ["git", "worktree", "add", gw_path, gw_branch],
-                    cwd=repo_path, capture_output=True, text=True, timeout=30,
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
                 )
                 return (r.stdout + r.stderr).strip() or f"Created worktree at {gw_path}"
             elif gw_action == "remove":
@@ -6044,7 +7437,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                     return "[ERROR] path required for remove"
                 r = subprocess.run(
                     ["git", "worktree", "remove", gw_path],
-                    cwd=repo_path, capture_output=True, text=True,
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
                 )
                 return (r.stdout + r.stderr).strip() or f"Removed worktree at {gw_path}"
             return f"[ERROR] Unknown action: {gw_action}"
@@ -6062,7 +7457,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         if pr_draft:
             pr_cmd.append("--draft")
         try:
-            r = subprocess.run(pr_cmd, cwd=repo_path, capture_output=True, text=True, timeout=30)
+            r = subprocess.run(
+                pr_cmd, cwd=repo_path, capture_output=True, text=True, timeout=30
+            )
             return (r.stdout + r.stderr).strip() or "PR created"
         except FileNotFoundError:
             return "[ERROR] gh CLI not found — install with: sudo apt install gh"
@@ -6073,8 +7470,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         gcm_staged = bool(inp.get("staged_only", True))
         diff_args = ["diff", "--cached"] if gcm_staged else ["diff"]
         stat_args = diff_args + ["--stat"]
-        r_stat = subprocess.run(["git"] + stat_args, cwd=repo_path, capture_output=True, text=True)
-        r_diff = subprocess.run(["git"] + diff_args, cwd=repo_path, capture_output=True, text=True)
+        r_stat = subprocess.run(
+            ["git"] + stat_args, cwd=repo_path, capture_output=True, text=True
+        )
+        r_diff = subprocess.run(
+            ["git"] + diff_args, cwd=repo_path, capture_output=True, text=True
+        )
         stat = r_stat.stdout.strip()
         diff = r_diff.stdout[:3000]
         if not stat:
@@ -6100,7 +7501,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         rst_path = rst_file if rst_file else "backend/tests/"
         cmd = f"{activate} && python -m pytest {rst_path} -k '{rst_kw}' {rst_vflag} --tb=short 2>&1 | head -100"
         try:
-            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=120)
+            r = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=repo_path,
+                timeout=120,
+            )
             return (r.stdout + r.stderr)[:5000] or "(no output)"
         except subprocess.TimeoutExpired:
             return "[ERROR] Tests timed out after 2 minutes"
@@ -6119,7 +7527,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             f"--tb=no -q 2>&1 | tail -50"
         )
         try:
-            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=180)
+            r = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=repo_path,
+                timeout=180,
+            )
             return (r.stdout + r.stderr)[:5000] or "(no output)"
         except subprocess.TimeoutExpired:
             return "[ERROR] Coverage run timed out"
@@ -6135,13 +7550,26 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         if tc_lang in ("python", "both"):
             py_path = tc_path or "backend/"
             strict_flag = "--strict" if tc_strict else "--ignore-missing-imports"
-            cmd = f"{activate} && python -m mypy {py_path} {strict_flag} 2>&1 | head -60"
-            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=90)
-            tc_results.append(f"=== mypy ===\n{(r.stdout + r.stderr)[:3000] or 'clean'}")
+            cmd = (
+                f"{activate} && python -m mypy {py_path} {strict_flag} 2>&1 | head -60"
+            )
+            r = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=repo_path,
+                timeout=90,
+            )
+            tc_results.append(
+                f"=== mypy ===\n{(r.stdout + r.stderr)[:3000] or 'clean'}"
+            )
         if tc_lang in ("typescript", "both"):
             web = str(root.parent / "apps" / "web")
             cmd = f"cd {web} && npx tsc --noEmit 2>&1 | head -60"
-            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=90)
+            r = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, timeout=90
+            )
             tc_results.append(f"=== tsc ===\n{(r.stdout + r.stderr)[:3000] or 'clean'}")
         return "\n\n".join(tc_results) if tc_results else "[ERROR] No language selected"
 
@@ -6162,9 +7590,16 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             if s.startswith(("def ", "async def ")):
                 sig = s.split(":")[0] if ":" in s else s
                 lf_results.append(f"  L{lf_i}: {sig}")
-            elif s.startswith(("export function ", "export async function ", "function ")) and "(" in s:
+            elif (
+                s.startswith(
+                    ("export function ", "export async function ", "function ")
+                )
+                and "(" in s
+            ):
                 lf_results.append(f"  L{lf_i}: {s[:120]}")
-            elif s.startswith(("export const ", "const ")) and ("=>" in s or "= (" in s or "= async" in s):
+            elif s.startswith(("export const ", "const ")) and (
+                "=>" in s or "= (" in s or "= async" in s
+            ):
                 lf_results.append(f"  L{lf_i}: {s[:120]}")
         if not lf_results:
             return f"(no function definitions found in {rel})"
@@ -6190,9 +7625,19 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             elif lc_current and curr_indent > lc_base_indent:
                 if s.startswith(("def ", "async def ")):
                     lc_results.append(f"    L{lc_i}: {s.split(':')[0]}")
-                elif s.startswith(("public ", "private ", "protected ", "async ", "static ")) and "(" in s:
+                elif (
+                    s.startswith(
+                        ("public ", "private ", "protected ", "async ", "static ")
+                    )
+                    and "(" in s
+                ):
                     lc_results.append(f"    L{lc_i}: {s[:120]}")
-            elif lc_current and lc_line.strip() and curr_indent <= lc_base_indent and not s.startswith(("@", "#", "/")):
+            elif (
+                lc_current
+                and lc_line.strip()
+                and curr_indent <= lc_base_indent
+                and not s.startswith(("@", "#", "/"))
+            ):
                 lc_current = None
         if not lc_results:
             return f"(no class definitions found in {rel})"
@@ -6204,12 +7649,16 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         ffb_fp = root / rel
         if not ffb_fp.exists():
             return f"[ERROR] File not found: {rel}"
-        ffb_lines = ffb_fp.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+        ffb_lines = ffb_fp.read_text(encoding="utf-8", errors="replace").splitlines(
+            keepends=True
+        )
         ffb_start: int | None = None
         ffb_base = 0
         for ffb_i, ffb_line in enumerate(ffb_lines):
             s = ffb_line.strip()
-            if s.startswith(f"def {ffb_name}(") or s.startswith(f"async def {ffb_name}("):
+            if s.startswith(f"def {ffb_name}(") or s.startswith(
+                f"async def {ffb_name}("
+            ):
                 ffb_start = ffb_i
                 ffb_base = len(ffb_line) - len(ffb_line.lstrip())
                 break
@@ -6221,7 +7670,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             if ffb_jline.strip() == "":
                 continue
             ffb_jind = len(ffb_jline) - len(ffb_jline.lstrip())
-            if ffb_jind <= ffb_base and ffb_jline.strip() and not ffb_jline.strip().startswith(("@", "#")):
+            if (
+                ffb_jind <= ffb_base
+                and ffb_jline.strip()
+                and not ffb_jline.strip().startswith(("@", "#"))
+            ):
                 ffb_end = ffb_j
                 break
         body = "".join(ffb_lines[ffb_start:ffb_end])
@@ -6237,16 +7690,24 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         rl_level = str(inp.get("level", "all"))
         out = ""
         if rl_path and ("/" in rl_path or rl_path.endswith(".log")):
-            log_file = root / rl_path if not Path(rl_path).is_absolute() else Path(rl_path)
+            log_file = (
+                root / rl_path if not Path(rl_path).is_absolute() else Path(rl_path)
+            )
             if log_file.exists():
-                r = subprocess.run(["tail", f"-{rl_lines}", str(log_file)], capture_output=True, text=True)
+                r = subprocess.run(
+                    ["tail", f"-{rl_lines}", str(log_file)],
+                    capture_output=True,
+                    text=True,
+                )
                 out = r.stdout
             else:
                 return f"[ERROR] Log file not found: {rl_path}"
         elif rl_path:
             r = subprocess.run(
                 ["journalctl", "-u", rl_path, f"-n{rl_lines}", "--no-pager"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             out = r.stdout or r.stderr
         else:
@@ -6258,10 +7719,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             if not found:
                 return "(no log files found — specify a path or service name)"
             newest = max(found, key=lambda p: p.stat().st_mtime)
-            r = subprocess.run(["tail", f"-{rl_lines}", str(newest)], capture_output=True, text=True)
+            r = subprocess.run(
+                ["tail", f"-{rl_lines}", str(newest)], capture_output=True, text=True
+            )
             out = f"From {newest}:\n" + r.stdout
         if rl_level != "all":
-            filtered = [line for line in out.splitlines() if rl_level.upper() in line.upper()]
+            filtered = [
+                line for line in out.splitlines() if rl_level.upper() in line.upper()
+            ]
             out = "\n".join(filtered)
         return out[:5000] or "(no log entries)"
 
@@ -6270,7 +7735,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         ae_lines = ae_error.strip().splitlines()
         exception_line = ""
         for ae_line in reversed(ae_lines):
-            if any(x in ae_line for x in ("Error:", "Exception:", "Warning:", "Traceback")):
+            if any(
+                x in ae_line for x in ("Error:", "Exception:", "Warning:", "Traceback")
+            ):
                 exception_line = ae_line
                 break
         frames: list[str] = []
@@ -6278,8 +7745,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         while ae_i < len(ae_lines):
             ae_line = ae_lines[ae_i]
             if ae_line.strip().startswith("File ") and "line " in ae_line:
-                if not any(x in ae_line for x in ("site-packages", ".venv", "lib/python")):
-                    code_line = ae_lines[ae_i + 1].strip() if ae_i + 1 < len(ae_lines) else ""
+                if not any(
+                    x in ae_line for x in ("site-packages", ".venv", "lib/python")
+                ):
+                    code_line = (
+                        ae_lines[ae_i + 1].strip() if ae_i + 1 < len(ae_lines) else ""
+                    )
                     frames.append(f"  {ae_line.strip()}\n    → {code_line}")
                 ae_i += 2
             else:
@@ -6293,19 +7764,31 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         ae_low = ae_error.lower()
         suggestions: list[str] = []
         if "modulenotfounderror" in ae_low or "importerror" in ae_low:
-            suggestions.append("→ Missing dependency — run: pip install -r requirements.txt")
+            suggestions.append(
+                "→ Missing dependency — run: pip install -r requirements.txt"
+            )
         elif "attributeerror" in ae_low:
-            suggestions.append("→ Object doesn't have this attribute — check spelling and type")
+            suggestions.append(
+                "→ Object doesn't have this attribute — check spelling and type"
+            )
         elif "typeerror" in ae_low:
             suggestions.append("→ Wrong argument type/count — check function signature")
         elif "keyerror" in ae_low:
-            suggestions.append("→ Dictionary key not found — use .get() or check key exists")
+            suggestions.append(
+                "→ Dictionary key not found — use .get() or check key exists"
+            )
         elif "filenotfounderror" in ae_low:
-            suggestions.append("→ Path doesn't exist — verify path and working directory")
+            suggestions.append(
+                "→ Path doesn't exist — verify path and working directory"
+            )
         elif "connectionrefusederror" in ae_low or "connection refused" in ae_low:
-            suggestions.append("→ Service not running — check if DB/Redis/backend is started")
+            suggestions.append(
+                "→ Service not running — check if DB/Redis/backend is started"
+            )
         elif "syntaxerror" in ae_low:
-            suggestions.append("→ Python syntax error — check brackets, colons, indentation")
+            suggestions.append(
+                "→ Python syntax error — check brackets, colons, indentation"
+            )
         elif "valueerror" in ae_low:
             suggestions.append("→ Invalid value — validate input before passing it")
         if suggestions:
@@ -6329,7 +7812,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         try:
             r = subprocess.run(
                 ["psql", str(rs_db_url), "-c", rs_query, "--no-password"],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             return (r.stdout + r.stderr)[:5000] or "(no output)"
         except FileNotFoundError:
@@ -6360,7 +7845,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         try:
             r = subprocess.run(
                 ["psql", str(is_db_url), "-c", is_query, "--no-password"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             return (r.stdout + r.stderr)[:5000] or "(empty schema)"
         except FileNotFoundError:
@@ -6375,8 +7862,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def docker_ps(inp: dict[str, Any]) -> str:
         show_all = bool(inp.get("all", False))
         docker_cmd = [
-            "docker", "ps",
-            "--format", "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}",
+            "docker",
+            "ps",
+            "--format",
+            "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}",
         ]
         if show_all:
             docker_cmd.append("-a")
@@ -6394,7 +7883,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         try:
             r = subprocess.run(
                 ["docker", "logs", "--tail", str(dl_lines), dl_container],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
             return (r.stdout + r.stderr)[:5000] or "(no logs)"
         except FileNotFoundError:
@@ -6408,7 +7899,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         try:
             r = subprocess.run(
                 ["docker", "exec", de_container, "sh", "-c", de_command],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             return (r.stdout + r.stderr)[:5000] or "(no output)"
         except FileNotFoundError:
@@ -6435,8 +7928,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] Unknown action: {dc_action}"
         dc_cmd.extend(dc_services)
         try:
-            r = subprocess.run(dc_cmd, cwd=repo_path, capture_output=True, text=True, timeout=120)
-            return (r.stdout + r.stderr)[:5000] or f"docker compose {dc_action} complete"
+            r = subprocess.run(
+                dc_cmd, cwd=repo_path, capture_output=True, text=True, timeout=120
+            )
+            return (r.stdout + r.stderr)[
+                :5000
+            ] or f"docker compose {dc_action} complete"
         except FileNotFoundError:
             return "[ERROR] docker not found"
         except subprocess.TimeoutExpired:
@@ -6460,13 +7957,29 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             r"(AKIA[0-9A-Z]{16})",
             r"(ghp_[a-zA-Z0-9]{36})",
         ]
-        ss_exclude = ["node_modules", ".git", ".venv", "venv", "__pycache__", "dist", "build", ".next"]
+        ss_exclude = [
+            "node_modules",
+            ".git",
+            ".venv",
+            "venv",
+            "__pycache__",
+            "dist",
+            "build",
+            ".next",
+        ]
         ss_findings: list[str] = []
         for ss_pat in ss_patterns:
             ss_cmd = ["grep", "-rn", "-E", ss_pat, str(ss_root)]
             for ex in ss_exclude:
                 ss_cmd += ["--exclude-dir", ex]
-            ss_cmd += ["--exclude", "*.env", "--exclude", ".env*", "--exclude", "*.example"]
+            ss_cmd += [
+                "--exclude",
+                "*.env",
+                "--exclude",
+                ".env*",
+                "--exclude",
+                "*.example",
+            ]
             try:
                 r = subprocess.run(ss_cmd, capture_output=True, text=True, timeout=15)
                 if r.stdout.strip():
@@ -6550,28 +8063,36 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def parse_ast_h(inp: dict[str, Any]) -> str:
         from app.repo_tools.ast_engine import parse_file_ast
+
         return parse_file_ast(str(root / str(inp["path"])))
 
     def import_graph_h(inp: dict[str, Any]) -> str:
         from app.repo_tools.ast_engine import build_import_graph
+
         return build_import_graph(str(root / str(inp["path"])))
 
     def call_graph_h(inp: dict[str, Any]) -> str:
         from app.repo_tools.ast_engine import build_call_graph
-        return build_call_graph(str(root / str(inp["path"])), str(inp.get("function_name", "")))
+
+        return build_call_graph(
+            str(root / str(inp["path"])), str(inp.get("function_name", ""))
+        )
 
     def dead_code_detect_h(inp: dict[str, Any]) -> str:
         from app.repo_tools.ast_engine import detect_dead_code
+
         dcd_d = str(inp.get("directory", ""))
         return detect_dead_code(str(root / dcd_d) if dcd_d else repo_path)
 
     def circular_dep_detect_h(inp: dict[str, Any]) -> str:
         from app.repo_tools.ast_engine import detect_circular_imports
+
         cdd_d = str(inp.get("directory", ""))
         return detect_circular_imports(str(root / cdd_d) if cdd_d else repo_path)
 
     def rename_symbol_h(inp: dict[str, Any]) -> str:
         from app.repo_tools.ast_engine import rename_symbol as _rsym
+
         rs_d = str(inp.get("directory", ""))
         return _rsym(
             str(inp["old_name"]),
@@ -6597,7 +8118,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return "[BLOCKED] Interactive rebase requires a TTY. Run 'git rebase -i' manually in a terminal."
         try:
             r = subprocess.run(
-                ["git", "rebase", grb_onto], cwd=repo_path, capture_output=True, text=True, timeout=60,
+                ["git", "rebase", grb_onto],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=60,
             )
             return (r.stdout + r.stderr).strip() or "(no output)"
         except subprocess.TimeoutExpired:
@@ -6612,7 +8137,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             gcp_cmd.append("--no-commit")
         gcp_cmd.append(gcp_hash)
         try:
-            r = subprocess.run(gcp_cmd, cwd=repo_path, capture_output=True, text=True, timeout=30)
+            r = subprocess.run(
+                gcp_cmd, cwd=repo_path, capture_output=True, text=True, timeout=30
+            )
             return (r.stdout + r.stderr).strip() or "(no output)"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -6627,6 +8154,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def read_output_h(inp: dict[str, Any]) -> str:
         import fcntl as _fcntl
         import os as _os
+
         ro_pid = int(inp["pid"])
         ro_max = int(inp.get("lines", 50))
         proc = _session_bg_procs.get(ro_pid)
@@ -6647,21 +8175,32 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                     out_lines.extend(chunk.splitlines())
             except (IOError, BlockingIOError, TypeError):
                 pass
-        return "\n".join(out_lines[-ro_max:]) if out_lines else f"(no output yet from PID {ro_pid})"
+        return (
+            "\n".join(out_lines[-ro_max:])
+            if out_lines
+            else f"(no output yet from PID {ro_pid})"
+        )
 
     def run_node_h(inp: dict[str, Any]) -> str:
         import shlex as _shlex
+
         rnd_code = str(inp["code"])
         rnd_timeout = int(inp.get("timeout", 30))
         node_chk = subprocess.run(["which", "node"], capture_output=True, text=True)
         if node_chk.returncode != 0:
-            node_chk2 = subprocess.run(["which", "nodejs"], capture_output=True, text=True)
+            node_chk2 = subprocess.run(
+                ["which", "nodejs"], capture_output=True, text=True
+            )
             if node_chk2.returncode != 0:
                 return "[ERROR] Node.js not found. Install Node.js first (e.g. nvm install --lts)."
         try:
             r = subprocess.run(
                 f"node -e {_shlex.quote(rnd_code)} 2>&1",
-                shell=True, cwd=repo_path, capture_output=True, text=True, timeout=rnd_timeout,
+                shell=True,
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=rnd_timeout,
             )
             return (r.stdout + r.stderr).strip() or "(no output)"
         except subprocess.TimeoutExpired:
@@ -6678,13 +8217,17 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         if rscr_interp == "auto":
             ext = rscr_fp.suffix
             rscr_interp = (
-                "python3" if ext == ".py"
-                else "node" if ext in (".js", ".mjs", ".cjs")
-                else "bash"
+                "python3"
+                if ext == ".py"
+                else "node" if ext in (".js", ".mjs", ".cjs") else "bash"
             )
         try:
             r = subprocess.run(
-                [rscr_interp, str(rscr_fp)], cwd=repo_path, capture_output=True, text=True, timeout=120,
+                [rscr_interp, str(rscr_fp)],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             result = (r.stdout + r.stderr).strip()
             if r.returncode != 0:
@@ -6705,7 +8248,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             dbld_cmd += ["-f", str(root / str(dbld_df))]
         dbld_cmd.append(dbld_ctx_path)
         try:
-            r = subprocess.run(dbld_cmd, cwd=repo_path, capture_output=True, text=True, timeout=600)
+            r = subprocess.run(
+                dbld_cmd, cwd=repo_path, capture_output=True, text=True, timeout=600
+            )
             result = (r.stdout + r.stderr).strip()
             if r.returncode != 0:
                 result += f"\n[exit {r.returncode}]"
@@ -6719,7 +8264,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         drst_name = str(inp["container"])
         try:
             r = subprocess.run(
-                ["docker", "restart", drst_name], cwd=repo_path, capture_output=True, text=True, timeout=60,
+                ["docker", "restart", drst_name],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=60,
             )
             return (r.stdout + r.stderr).strip() or f"Restarted {drst_name}"
         except Exception as e:
@@ -6742,16 +8291,35 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             pat = rf"@(router|app)\.{frt_method.lower()}\("
         else:
             pat = r"@(router|app)\.(get|post|put|delete|patch|head|options)\("
-        exclude = ["--exclude-dir=node_modules", "--exclude-dir=.venv", "--exclude-dir=__pycache__"]
+        exclude = [
+            "--exclude-dir=node_modules",
+            "--exclude-dir=.venv",
+            "--exclude-dir=__pycache__",
+        ]
         try:
             r = subprocess.run(
-                ["grep", "-rn", "-E", pat, repo_path, "--include=*.py", "--include=*.ts"] + exclude,
-                capture_output=True, text=True, timeout=15,
+                [
+                    "grep",
+                    "-rn",
+                    "-E",
+                    pat,
+                    repo_path,
+                    "--include=*.py",
+                    "--include=*.ts",
+                ]
+                + exclude,
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
             lines = r.stdout
             if frt_path_pat:
                 lines = "\n".join(ln for ln in lines.splitlines() if frt_path_pat in ln)
-            return lines[:5000] if lines.strip() else "No routes found" + (f" for {frt_method}" if frt_method else "")
+            return (
+                lines[:5000]
+                if lines.strip()
+                else "No routes found" + (f" for {frt_method}" if frt_method else "")
+            )
         except Exception as e:
             return f"[ERROR] {e}"
 
@@ -6761,13 +8329,33 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             pat = fapi_name
         else:
             pat = r"@(router|app)\.(get|post|put|delete|patch)\("
-        exclude = ["--exclude-dir=node_modules", "--exclude-dir=.venv", "--exclude-dir=__pycache__"]
+        exclude = [
+            "--exclude-dir=node_modules",
+            "--exclude-dir=.venv",
+            "--exclude-dir=__pycache__",
+        ]
         try:
             r = subprocess.run(
-                ["grep", "-rn", "-E", pat, repo_path, "--include=*.py", "--include=*.ts"] + exclude,
-                capture_output=True, text=True, timeout=15,
+                [
+                    "grep",
+                    "-rn",
+                    "-E",
+                    pat,
+                    repo_path,
+                    "--include=*.py",
+                    "--include=*.ts",
+                ]
+                + exclude,
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
-            return r.stdout[:5000] if r.stdout.strip() else "No API definitions found" + (f" matching '{fapi_name}'" if fapi_name else "")
+            return (
+                r.stdout[:5000]
+                if r.stdout.strip()
+                else "No API definitions found"
+                + (f" matching '{fapi_name}'" if fapi_name else "")
+            )
         except Exception as e:
             return f"[ERROR] {e}"
 
@@ -6780,49 +8368,103 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         else:
             fsql_pat = r"SELECT|INSERT|UPDATE|DELETE|CREATE TABLE|ALTER TABLE"
             fsql_flags = ["-rn", "-i", "-E"]
-        exclude = ["--exclude-dir=node_modules", "--exclude-dir=.venv", "--exclude-dir=__pycache__"]
+        exclude = [
+            "--exclude-dir=node_modules",
+            "--exclude-dir=.venv",
+            "--exclude-dir=__pycache__",
+        ]
         try:
             r = subprocess.run(
-                ["grep"] + fsql_flags + [fsql_pat, repo_path, "--include=*.py", "--include=*.sql", "--include=*.ts"] + exclude,
-                capture_output=True, text=True, timeout=15,
+                ["grep"]
+                + fsql_flags
+                + [
+                    fsql_pat,
+                    repo_path,
+                    "--include=*.py",
+                    "--include=*.sql",
+                    "--include=*.ts",
+                ]
+                + exclude,
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
-            return r.stdout[:5000] if r.stdout.strip() else "No SQL statements found in codebase"
+            return (
+                r.stdout[:5000]
+                if r.stdout.strip()
+                else "No SQL statements found in codebase"
+            )
         except Exception as e:
             return f"[ERROR] {e}"
 
     def find_test_h(inp: dict[str, Any]) -> str:
         ftest_fn = str(inp["function_name"])
-        patterns = [f"def test_{ftest_fn}", f"def test.*{ftest_fn}", f'test.*["\'].*{ftest_fn}']
-        exclude = ["--exclude-dir=node_modules", "--exclude-dir=.venv", "--exclude-dir=__pycache__"]
+        patterns = [
+            f"def test_{ftest_fn}",
+            f"def test.*{ftest_fn}",
+            f"test.*[\"'].*{ftest_fn}",
+        ]
+        exclude = [
+            "--exclude-dir=node_modules",
+            "--exclude-dir=.venv",
+            "--exclude-dir=__pycache__",
+        ]
         ftest_out: list[str] = []
         for pt in patterns:
             try:
                 r = subprocess.run(
-                    ["grep", "-rn", "-E", pt, repo_path, "--include=*.py", "--include=*.ts"] + exclude,
-                    capture_output=True, text=True, timeout=15,
+                    [
+                        "grep",
+                        "-rn",
+                        "-E",
+                        pt,
+                        repo_path,
+                        "--include=*.py",
+                        "--include=*.ts",
+                    ]
+                    + exclude,
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
                 )
                 if r.stdout.strip():
                     ftest_out.append(r.stdout[:2000])
             except Exception:
                 pass
-        return "\n".join(ftest_out)[:5000] if ftest_out else f"No tests found for '{ftest_fn}'"
+        return (
+            "\n".join(ftest_out)[:5000]
+            if ftest_out
+            else f"No tests found for '{ftest_fn}'"
+        )
 
     def find_config_h(inp: dict[str, Any]) -> str:
         fcfg_key = str(inp["key"])
         patterns_to_try = [fcfg_key, fcfg_key.upper(), fcfg_key.lower()]
         include_globs = [
-            "--include=*.env*", "--include=.env*", "--include=*.yaml", "--include=*.yml",
-            "--include=*.toml", "--include=*.cfg", "--include=*.ini",
-            "--include=config.py", "--include=settings.py",
+            "--include=*.env*",
+            "--include=.env*",
+            "--include=*.yaml",
+            "--include=*.yml",
+            "--include=*.toml",
+            "--include=*.cfg",
+            "--include=*.ini",
+            "--include=config.py",
+            "--include=settings.py",
         ]
-        exclude = ["--exclude-dir=node_modules", "--exclude-dir=.venv", "--exclude-dir=__pycache__"]
+        exclude = [
+            "--exclude-dir=node_modules",
+            "--exclude-dir=.venv",
+            "--exclude-dir=__pycache__",
+        ]
         fcfg_out: list[str] = []
         seen: set[str] = set()
         for pt in patterns_to_try:
             try:
                 r = subprocess.run(
                     ["grep", "-rn", pt, repo_path] + include_globs + exclude,
-                    capture_output=True, text=True, timeout=15,
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
                 )
                 for ln in r.stdout.splitlines():
                     if ln not in seen:
@@ -6830,7 +8472,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                         fcfg_out.append(ln)
             except Exception:
                 pass
-        return "\n".join(fcfg_out)[:5000] if fcfg_out else f"'{fcfg_key}' not found in config files"
+        return (
+            "\n".join(fcfg_out)[:5000]
+            if fcfg_out
+            else f"'{fcfg_key}' not found in config files"
+        )
 
     handlers["find_route"] = find_route_h
     handlers["find_api"] = find_api_h
@@ -6854,7 +8500,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                     idle = int(fields[4])
                     used_pct = round((total - idle) / total * 100, 1) if total else 0
                     return f"CPU: {used_pct}% used  (raw: {cpu_line})"
-            r = subprocess.run(["top", "-bn1"], capture_output=True, text=True, timeout=5)
+            r = subprocess.run(
+                ["top", "-bn1"], capture_output=True, text=True, timeout=5
+            )
             for ln in r.stdout.splitlines():
                 if "Cpu" in ln or "cpu" in ln:
                     return f"CPU: {ln.strip()}"
@@ -6868,17 +8516,20 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             if mem_info.exists():
                 rows = mem_info.read_text().splitlines()[:8]
                 return "\n".join(rows)
-            r = subprocess.run(["free", "-h"], capture_output=True, text=True, timeout=5)
+            r = subprocess.run(
+                ["free", "-h"], capture_output=True, text=True, timeout=5
+            )
             return r.stdout.strip() or "(no memory info)"
         except Exception as e:
             return f"[ERROR] {e}"
 
     def disk_usage_h(inp: dict[str, Any]) -> str:
         import shutil as _shu
+
         dsk_path = str(inp.get("path", "")) or repo_path
         try:
             u = _shu.disk_usage(dsk_path)
-            gb = 1024 ** 3
+            gb = 1024**3
             pct = round(u.used / u.total * 100, 1) if u.total else 0
             return (
                 f"Disk usage for {dsk_path}:\n"
@@ -6897,12 +8548,23 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             hc_port = getattr(settings, "port", 8000)
             try:
                 r = subprocess.run(
-                    ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-                     f"http://localhost:{hc_port}/health"],
-                    capture_output=True, text=True, timeout=5,
+                    [
+                        "curl",
+                        "-s",
+                        "-o",
+                        "/dev/null",
+                        "-w",
+                        "%{http_code}",
+                        f"http://localhost:{hc_port}/health",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
                 )
                 code = r.stdout.strip()
-                hc_results.append(f"Backend (:{hc_port}/health): {'✅ UP' if code == '200' else f'⚠️ HTTP {code}'}")
+                hc_results.append(
+                    f"Backend (:{hc_port}/health): {'✅ UP' if code == '200' else f'⚠️ HTTP {code}'}"
+                )
             except Exception:
                 hc_port2 = getattr(settings, "port", 8000)
                 hc_results.append(f"Backend (:{hc_port2}/health): ❌ unreachable")
@@ -6910,8 +8572,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             db_url = getattr(settings, "database_url", "")
             if db_url:
                 try:
-                    r = subprocess.run(["pg_isready", "-d", db_url], capture_output=True, text=True, timeout=5)
-                    hc_results.append(f"Database: {'✅ UP' if r.returncode == 0 else '❌ DOWN'}")
+                    r = subprocess.run(
+                        ["pg_isready", "-d", db_url],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    hc_results.append(
+                        f"Database: {'✅ UP' if r.returncode == 0 else '❌ DOWN'}"
+                    )
                 except Exception:
                     hc_results.append("Database: ❓ pg_isready not available")
             else:
@@ -6932,7 +8601,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         try:
             r = subprocess.run(
                 ["psql", tp_db, "-c", sql, "--no-psqlrc"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             return (r.stdout + r.stderr).strip() or "(no results)"
         except Exception as e:
@@ -6965,9 +8636,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         rcl_base_ind = 0
         for rcl_i, rcl_ln in enumerate(rcl_lines):
             s = rcl_ln.strip()
-            if (s.startswith(f"class {rcl_name}(")
-                    or s.startswith(f"class {rcl_name}:")
-                    or s == f"class {rcl_name}"):
+            if (
+                s.startswith(f"class {rcl_name}(")
+                or s.startswith(f"class {rcl_name}:")
+                or s == f"class {rcl_name}"
+            ):
                 rcl_start = rcl_i
                 rcl_base_ind = len(rcl_ln) - len(rcl_ln.lstrip())
                 break
@@ -6979,7 +8652,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             if rcl_jl.strip() == "":
                 continue
             rcl_ji = len(rcl_jl) - len(rcl_jl.lstrip())
-            if rcl_ji <= rcl_base_ind and rcl_jl.strip() and not rcl_jl.strip().startswith(("@", "#")):
+            if (
+                rcl_ji <= rcl_base_ind
+                and rcl_jl.strip()
+                and not rcl_jl.strip().startswith(("@", "#"))
+            ):
                 rcl_end = rcl_j
                 break
         before = "".join(rcl_lines[:rcl_start])
@@ -7037,7 +8714,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             r = subprocess.run(
                 ["git", "checkout", "--", undo_rel],
                 cwd=repo_path,
-                capture_output=True, text=True, timeout=30,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             out = (r.stdout + r.stderr).strip()
             if r.returncode != 0:
@@ -7048,15 +8727,18 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def generate_patch_h(inp: dict[str, Any]) -> str:
         import difflib
+
         gp_a = str(inp.get("content_a", ""))
         gp_b = str(inp.get("content_b", ""))
         gp_fn = str(inp.get("filename", "file"))
-        diff = list(difflib.unified_diff(
-            gp_a.splitlines(keepends=True),
-            gp_b.splitlines(keepends=True),
-            fromfile=f"a/{gp_fn}",
-            tofile=f"b/{gp_fn}",
-        ))
+        diff = list(
+            difflib.unified_diff(
+                gp_a.splitlines(keepends=True),
+                gp_b.splitlines(keepends=True),
+                fromfile=f"a/{gp_fn}",
+                tofile=f"b/{gp_fn}",
+            )
+        )
         return "".join(diff) if diff else "(no differences)"
 
     handlers["replace_class"] = replace_class_h
@@ -7077,7 +8759,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         try:
             r = subprocess.run(
                 ["psql", expq_db, "-c", full_sql, "--no-psqlrc"],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             return (r.stdout + r.stderr).strip() or "(no output)"
         except Exception as e:
@@ -7098,9 +8782,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             )
 
         direction = str(inp.get("direction", "upgrade")).strip()
-        revision = str(inp.get("revision", "head" if direction == "upgrade" else "-1")).strip()
+        revision = str(
+            inp.get("revision", "head" if direction == "upgrade" else "-1")
+        ).strip()
         if direction not in ("upgrade", "downgrade"):
-            return f"[ERROR] direction must be 'upgrade' or 'downgrade', got {direction!r}"
+            return (
+                f"[ERROR] direction must be 'upgrade' or 'downgrade', got {direction!r}"
+            )
 
         cmd_args = ["alembic", direction, revision]
         cmd_preview = " ".join(cmd_args)
@@ -7136,7 +8824,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             r = subprocess.run(
                 cmd_args,
                 cwd=repo_path,
-                capture_output=True, text=True, timeout=120,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             out = (r.stdout + r.stderr).strip()
             if r.returncode != 0:
@@ -7196,7 +8886,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             r = subprocess.run(
                 ["python", script],
                 cwd=repo_path,
-                capture_output=True, text=True, timeout=120,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             out = (r.stdout + r.stderr).strip()
             if r.returncode != 0:
@@ -7219,6 +8911,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def browser_open_h(inp: dict[str, Any]) -> str:
         try:
             from app.repo_tools import browser_driver as _bd
+
             result = _bd.browser_open(str(inp["url"]), session_id=_browser_sid())
             if result.get("status") == "blocked":
                 return f"[BLOCKED] {result.get('error', 'URL blocked by SSRF guard')}"
@@ -7229,6 +8922,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def browser_navigate_h(inp: dict[str, Any]) -> str:
         try:
             from app.repo_tools import browser_driver as _bd
+
             result = _bd.browser_navigate(str(inp["url"]), session_id=_browser_sid())
             if "error" in result:
                 return f"[BLOCKED] {result['error']}"
@@ -7239,7 +8933,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def browser_screenshot_h(inp: dict[str, Any]) -> str:
         try:
             from app.repo_tools import browser_driver as _bd
-            path_out = _bd.browser_screenshot(inp.get("path"), session_id=_browser_sid())
+
+            path_out = _bd.browser_screenshot(
+                inp.get("path"), session_id=_browser_sid()
+            )
             return f"Screenshot saved: {path_out}"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -7247,6 +8944,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def browser_read_dom_h(inp: dict[str, Any]) -> str:
         try:
             from app.repo_tools import browser_driver as _bd
+
             return _bd.browser_read_dom(inp.get("selector"), session_id=_browser_sid())
         except Exception as e:
             return f"[ERROR] {e}"
@@ -7254,6 +8952,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def browser_click_h(inp: dict[str, Any]) -> str:
         try:
             from app.repo_tools import browser_driver as _bd
+
             return _bd.browser_click(str(inp["selector"]), session_id=_browser_sid())
         except Exception as e:
             return f"[ERROR] {e}"
@@ -7261,13 +8960,17 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def browser_type_h(inp: dict[str, Any]) -> str:
         try:
             from app.repo_tools import browser_driver as _bd
-            return _bd.browser_type(str(inp["selector"]), str(inp["text"]), session_id=_browser_sid())
+
+            return _bd.browser_type(
+                str(inp["selector"]), str(inp["text"]), session_id=_browser_sid()
+            )
         except Exception as e:
             return f"[ERROR] {e}"
 
     def browser_close_h(inp: dict[str, Any]) -> str:
         try:
             from app.repo_tools import browser_driver as _bd
+
             return _bd.browser_close(session_id=_browser_sid())
         except Exception as e:
             return f"[ERROR] {e}"
@@ -7325,6 +9028,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def decision_log_append_h(inp: dict[str, Any]) -> str:
         import datetime as _dt
+
         entry = {
             "timestamp": _dt.datetime.utcnow().isoformat(),
             "decision": str(inp["decision"]),
@@ -7349,9 +9053,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def known_issues_write_h(inp: dict[str, Any]) -> str:
         import datetime as _dt
+
         issue = str(inp["issue"])
         severity = str(inp.get("severity", "medium")).upper()
-        line = f"\n## [{severity}] {_dt.datetime.utcnow().strftime('%Y-%m-%d')}\n{issue}\n"
+        line = (
+            f"\n## [{severity}] {_dt.datetime.utcnow().strftime('%Y-%m-%d')}\n{issue}\n"
+        )
         try:
             with open(_mem_issues_path, "a", encoding="utf-8") as _fh:
                 _fcntl.flock(_fh, _fcntl.LOCK_EX)
@@ -7410,10 +9117,17 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 text = fp.read_text(encoding="utf-8", errors="replace")
                 lines = text.splitlines()
                 n_lines = len(lines)
-                n_funcs = sum(1 for ln in lines if ln.strip().startswith("def ") or ln.strip().startswith("async def "))
+                n_funcs = sum(
+                    1
+                    for ln in lines
+                    if ln.strip().startswith("def ")
+                    or ln.strip().startswith("async def ")
+                )
                 n_classes = sum(1 for ln in lines if ln.strip().startswith("class "))
                 rel = fp.relative_to(root)
-                results.append(f"**{rel}** — {n_lines} lines, {n_funcs} functions, {n_classes} classes")
+                results.append(
+                    f"**{rel}** — {n_lines} lines, {n_funcs} functions, {n_classes} classes"
+                )
             except Exception as e:
                 results.append(f"[ERROR reading {fp.name}] {e}")
             count += 1
@@ -7421,6 +9135,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def generate_api_docs_text_h(inp: dict[str, Any]) -> str:
         import re as _re_docs
+
         route_path = str(inp["route_path"])
         fp = root / route_path
         if not fp.exists():
@@ -7432,18 +9147,22 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         lines = text.splitlines()
         endpoints: list[str] = []
         for i, line in enumerate(lines):
-            m = _re_docs.match(r'\s*@\w+\.(get|post|put|patch|delete|options|head)\s*\("([^"]+)"', line)
+            m = _re_docs.match(
+                r'\s*@\w+\.(get|post|put|patch|delete|options|head)\s*\("([^"]+)"', line
+            )
             if m:
                 method = m.group(1).upper()
                 path_val = m.group(2)
                 # Find the next def line
                 func_name = ""
                 for j in range(i + 1, min(i + 5, len(lines))):
-                    fm = _re_docs.match(r'\s*(?:async\s+)?def\s+(\w+)', lines[j])
+                    fm = _re_docs.match(r"\s*(?:async\s+)?def\s+(\w+)", lines[j])
                     if fm:
                         func_name = fm.group(1)
                         break
-                endpoints.append(f"### {method} {path_val}\n**Function:** `{func_name}`\n\n**Description:** _TODO_\n\n**Request:** _TODO_\n\n**Response:** _TODO_\n")
+                endpoints.append(
+                    f"### {method} {path_val}\n**Function:** `{func_name}`\n\n**Description:** _TODO_\n\n**Request:** _TODO_\n\n**Response:** _TODO_\n"
+                )
         if not endpoints:
             return "(no FastAPI route decorators found)"
         return "\n".join(endpoints)
@@ -7451,15 +9170,20 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def mermaid_from_schema_h(inp: dict[str, Any]) -> str:
         import subprocess as _sp_merm
         from app.config import get_settings as _gs_merm
+
         settings = _gs_merm()
         db_url = getattr(settings, "database_url", "")
         if not db_url:
             return "[ERROR] DATABASE_URL not set"
         tbl = inp.get("table")
-        sql = (f"\\d {tbl}" if tbl else "\\dt+")
+        sql = f"\\d {tbl}" if tbl else "\\dt+"
         try:
-            r = _sp_merm.run(["psql", db_url, "-c", sql, "--no-psqlrc"],
-                             capture_output=True, text=True, timeout=15)
+            r = _sp_merm.run(
+                ["psql", db_url, "-c", sql, "--no-psqlrc"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
             raw = (r.stdout + r.stderr).strip()
         except Exception as e:
             return f"[ERROR] {e}"
@@ -7469,7 +9193,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             parts = row.split("|")
             if len(parts) >= 2:
                 tname = parts[1].strip()
-                if tname and not tname.startswith("-") and tname not in ("Name", "Schema"):
+                if (
+                    tname
+                    and not tname.startswith("-")
+                    and tname not in ("Name", "Schema")
+                ):
                     lines.append(f"    {tname} {{")
                     lines.append("        string id")
                     lines.append("    }")
@@ -7496,7 +9224,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         for lbl in labels:
             cmd += ["--label", lbl]
         try:
-            r = _sp_mcp.run(cmd, capture_output=True, text=True, cwd=str(root), timeout=30)
+            r = _sp_mcp.run(
+                cmd, capture_output=True, text=True, cwd=str(root), timeout=30
+            )
             return (r.stdout + r.stderr).strip() or "(no output)"
         except FileNotFoundError:
             return "[ERROR] gh CLI not found — install GitHub CLI"
@@ -7507,8 +9237,19 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         state = str(inp.get("state", "open"))
         try:
             r = _sp_mcp.run(
-                ["gh", "pr", "list", "--state", state, "--json", "number,title,state,author"],
-                capture_output=True, text=True, cwd=str(root), timeout=30,
+                [
+                    "gh",
+                    "pr",
+                    "list",
+                    "--state",
+                    state,
+                    "--json",
+                    "number,title,state,author",
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(root),
+                timeout=30,
             )
             return (r.stdout + r.stderr).strip() or "(no output)"
         except FileNotFoundError:
@@ -7524,7 +9265,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         try:
             r = _sp_mcp.run(
                 ["gh", subcmd, "comment", str(number), "--body", body],
-                capture_output=True, text=True, cwd=str(root), timeout=30,
+                capture_output=True,
+                text=True,
+                cwd=str(root),
+                timeout=30,
             )
             return (r.stdout + r.stderr).strip() or "Comment posted"
         except FileNotFoundError:
@@ -7535,6 +9279,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def linear_create_issue_h(inp: dict[str, Any]) -> str:
         import urllib.request as _ur_li
         import urllib.error as _ue_li
+
         api_key = _os_mcp.environ.get("LINEAR_API_KEY", "")
         if not api_key:
             return "[ERROR] LINEAR_API_KEY not set"
@@ -7555,10 +9300,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             team_id = next((t["id"] for t in teams if t["key"] == team_key), None)
             if not team_id:
                 return f"[ERROR] Team '{team_key}' not found in Linear"
-            mut = __import__("json").dumps({
-                "query": "mutation($title: String!, $desc: String!, $tid: String!) { issueCreate(input: {title: $title, description: $desc, teamId: $tid}) { issue { id identifier title } } }",
-                "variables": {"title": title, "desc": description, "tid": team_id},
-            })
+            mut = __import__("json").dumps(
+                {
+                    "query": "mutation($title: String!, $desc: String!, $tid: String!) { issueCreate(input: {title: $title, description: $desc, teamId: $tid}) { issue { id identifier title } } }",
+                    "variables": {"title": title, "desc": description, "tid": team_id},
+                }
+            )
             req2 = _ur_li.Request(
                 "https://api.linear.app/graphql",
                 data=mut.encode(),
@@ -7576,13 +9323,16 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def slack_send_message_h(inp: dict[str, Any]) -> str:
         import urllib.request as _ur_sl
         import urllib.error as _ue_sl
+
         webhook_url = _os_mcp.environ.get("SLACK_WEBHOOK_URL", "")
         if not webhook_url:
             return "[ERROR] SLACK_WEBHOOK_URL not set"
         text = str(inp["text"])
         payload = __import__("json").dumps({"text": text}).encode()
         try:
-            req = _ur_sl.Request(webhook_url, data=payload, headers={"Content-Type": "application/json"})
+            req = _ur_sl.Request(
+                webhook_url, data=payload, headers={"Content-Type": "application/json"}
+            )
             with _ur_sl.urlopen(req, timeout=10) as resp:
                 body = resp.read().decode()
             return f"Slack message sent: {body}"
@@ -7609,13 +9359,28 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         ]
         results: list[str] = []
         try:
-            pat = r"asyncio\.Queue|class.*Queue|rq\.Queue|Queue\(|BullMQ|celery|dramatiq"
+            pat = (
+                r"asyncio\.Queue|class.*Queue|rq\.Queue|Queue\(|BullMQ|celery|dramatiq"
+            )
             out = subprocess.run(
-                ["grep", "-rn", "--include=*.py", "--include=*.ts", "--include=*.js", "-E", pat, _rp],
-                capture_output=True, text=True, timeout=15,
+                [
+                    "grep",
+                    "-rn",
+                    "--include=*.py",
+                    "--include=*.ts",
+                    "--include=*.js",
+                    "-E",
+                    pat,
+                    _rp,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
             lines = out.stdout.strip().splitlines()
-            results = [ln for ln in lines if ".venv/" not in ln and "node_modules/" not in ln][:30]
+            results = [
+                ln for ln in lines if ".venv/" not in ln and "node_modules/" not in ln
+            ][:30]
         except Exception as e:
             return f"[ERROR] find_queue: {e}"
         if not results:
@@ -7627,11 +9392,24 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         try:
             pat = r"class.*Worker|@worker|celery\.task|\.delay\(|rq.*worker|dramatiq\.actor|Consumer"
             out = subprocess.run(
-                ["grep", "-rn", "--include=*.py", "--include=*.ts", "--include=*.js", "-E", pat, _rp],
-                capture_output=True, text=True, timeout=15,
+                [
+                    "grep",
+                    "-rn",
+                    "--include=*.py",
+                    "--include=*.ts",
+                    "--include=*.js",
+                    "-E",
+                    pat,
+                    _rp,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
             lines = out.stdout.strip().splitlines()
-            results = [ln for ln in lines if ".venv/" not in ln and "node_modules/" not in ln][:30]
+            results = [
+                ln for ln in lines if ".venv/" not in ln and "node_modules/" not in ln
+            ][:30]
         except Exception as e:
             return f"[ERROR] find_worker: {e}"
         if not results:
@@ -7647,12 +9425,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[BLOCKED] {path} is a protected path"
         try:
             import re as _re_ib
+
             lines = fpath.read_text(encoding="utf-8").splitlines(keepends=True)
             new_lines: list[str] = []
             inserted = False
             for line in lines:
                 if not inserted and _re_ib.search(pattern, line):
-                    new_lines.append(content if content.endswith("\n") else content + "\n")
+                    new_lines.append(
+                        content if content.endswith("\n") else content + "\n"
+                    )
                     inserted = True
                 new_lines.append(line)
             if not inserted:
@@ -7671,13 +9452,16 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[BLOCKED] {path} is a protected path"
         try:
             import re as _re_ia
+
             lines = fpath.read_text(encoding="utf-8").splitlines(keepends=True)
             new_lines: list[str] = []
             inserted = False
             for line in lines:
                 new_lines.append(line)
                 if not inserted and _re_ia.search(pattern, line):
-                    new_lines.append(content if content.endswith("\n") else content + "\n")
+                    new_lines.append(
+                        content if content.endswith("\n") else content + "\n"
+                    )
                     inserted = True
             if not inserted:
                 return f"[WARN] Pattern '{pattern}' not found in {path}"
@@ -7695,6 +9479,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[BLOCKED] {path} is a protected path"
         try:
             import re as _re_db
+
             lines = fpath.read_text(encoding="utf-8").splitlines(keepends=True)
             new_lines: list[str] = []
             in_block = False
@@ -7725,19 +9510,39 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             if not from_ref:
                 tags = subprocess.run(
                     ["git", "-C", _rp, "tag", "--sort=-version:refname"],
-                    capture_output=True, text=True,
+                    capture_output=True,
+                    text=True,
                 )
                 tag_list = [t for t in tags.stdout.strip().splitlines() if t]
-                from_ref = tag_list[1] if len(tag_list) >= 2 else tag_list[0] if tag_list else ""
+                from_ref = (
+                    tag_list[1]
+                    if len(tag_list) >= 2
+                    else tag_list[0] if tag_list else ""
+                )
             ref_range = f"{from_ref}..{to_ref}" if from_ref else to_ref
             log = subprocess.run(
-                ["git", "-C", _rp, "log", ref_range, "--pretty=format:%s (%an)", "--no-merges"],
-                capture_output=True, text=True, timeout=10,
+                [
+                    "git",
+                    "-C",
+                    _rp,
+                    "log",
+                    ref_range,
+                    "--pretty=format:%s (%an)",
+                    "--no-merges",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             commits = log.stdout.strip().splitlines()
             if not commits:
                 return f"No commits found between {from_ref or 'start'} and {to_ref}"
-            sections: dict[str, list[str]] = {"Added": [], "Changed": [], "Fixed": [], "Other": []}
+            sections: dict[str, list[str]] = {
+                "Added": [],
+                "Changed": [],
+                "Fixed": [],
+                "Other": [],
+            }
             for c in commits:
                 cl = c.lower()
                 if cl.startswith(("feat:", "add ", "new ")):
@@ -7749,6 +9554,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 else:
                     sections["Other"].append(f"- {c}")
             import datetime as _dt
+
             lines_out = [
                 f"## [Unreleased] — {_dt.date.today().isoformat()}",
                 f"Changes from {from_ref or 'start'} to {to_ref}",
@@ -7767,10 +9573,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         _rp = str(inp.get("repo_path", repo_path))
         try:
             import os as _os_sr
+
             # File tree (3 levels)
             tree_lines: list[str] = []
             for dirpath, dirnames, filenames in _os_sr.walk(_rp):
-                dirnames[:] = [d for d in sorted(dirnames) if d not in (".git", ".venv", "node_modules", "__pycache__")]
+                dirnames[:] = [
+                    d
+                    for d in sorted(dirnames)
+                    if d not in (".git", ".venv", "node_modules", "__pycache__")
+                ]
                 depth = dirpath.replace(_rp, "").count(_os_sr.sep)
                 if depth > 2:
                     continue
@@ -7784,7 +9595,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             ext_counts: dict[str, int] = {}
             total_files = 0
             for dirpath, dirnames, filenames in _os_sr.walk(_rp):
-                dirnames[:] = [d for d in dirnames if d not in (".git", ".venv", "node_modules", "__pycache__")]
+                dirnames[:] = [
+                    d
+                    for d in dirnames
+                    if d not in (".git", ".venv", "node_modules", "__pycache__")
+                ]
                 for fname in filenames:
                     ext = _os_sr.path.splitext(fname)[1] or "other"
                     ext_counts[ext] = ext_counts.get(ext, 0) + 1
@@ -7824,17 +9639,29 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             if not from_ref:
                 tags = subprocess.run(
                     ["git", "-C", _rp, "tag", "--sort=-version:refname"],
-                    capture_output=True, text=True,
+                    capture_output=True,
+                    text=True,
                 )
                 tag_list = [t for t in tags.stdout.strip().splitlines() if t]
                 from_ref = tag_list[0] if tag_list else ""
             ref_range = f"{from_ref}..HEAD" if from_ref else "HEAD"
             log = subprocess.run(
-                ["git", "-C", _rp, "log", ref_range, "--pretty=format:* %s", "--no-merges"],
-                capture_output=True, text=True, timeout=10,
+                [
+                    "git",
+                    "-C",
+                    _rp,
+                    "log",
+                    ref_range,
+                    "--pretty=format:* %s",
+                    "--no-merges",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             commits = log.stdout.strip()
             import datetime as _dt_rn
+
             notes = [
                 f"# Release Notes — {version}",
                 f"Released: {_dt_rn.date.today().isoformat()}",
@@ -7855,6 +9682,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         fpath = Path(path) if Path(path).is_absolute() else root / path
         try:
             import pdfplumber as _pp
+
             pages_text: list[str] = []
             with _pp.open(str(fpath)) as pdf:
                 for i, page in enumerate(pdf.pages[:max_pages]):
@@ -7865,7 +9693,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 return f"[WARN] No text extracted from {fpath} (may be image-only PDF)"
             return "\n\n".join(pages_text)
         except ImportError:
-            return "[ERROR] pdfplumber not installed. Run: pip install pdfplumber==0.11.10"
+            return (
+                "[ERROR] pdfplumber not installed. Run: pip install pdfplumber==0.11.10"
+            )
         except Exception as e:
             return f"[ERROR] read_pdf: {e}"
 
@@ -7876,6 +9706,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             from PIL import Image as _PilImg
             import base64 as _b64
             import io as _io_img
+
             img = _PilImg.open(str(fpath))
             meta = {
                 "format": img.format,
@@ -7903,10 +9734,22 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         base = str(inp.get("base", "main"))
         draft = bool(inp.get("draft", False))
         try:
-            cmd = ["gh", "pr", "create", "--title", title, "--body", body, "--base", base]
+            cmd = [
+                "gh",
+                "pr",
+                "create",
+                "--title",
+                title,
+                "--body",
+                body,
+                "--base",
+                base,
+            ]
             if draft:
                 cmd.append("--draft")
-            out = subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=repo_path)
+            out = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=30, cwd=repo_path
+            )
             if out.returncode != 0:
                 return f"[ERROR] gh pr create failed: {out.stderr[:400]}"
             return f"PR created: {out.stdout.strip()}"
@@ -7935,15 +9778,41 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         msg = str(inp.get("message", ""))
         try:
             if action == "list":
-                r = subprocess.run(["git", "tag", "--sort=-creatordate"], capture_output=True, text=True, cwd=repo_path, timeout=15)
+                r = subprocess.run(
+                    ["git", "tag", "--sort=-creatordate"],
+                    capture_output=True,
+                    text=True,
+                    cwd=repo_path,
+                    timeout=15,
+                )
                 return r.stdout.strip() or "(no tags)"
             if action == "create":
-                cmd = ["git", "tag", "-a", name, "-m", msg] if msg else ["git", "tag", name]
-                r = subprocess.run(cmd, capture_output=True, text=True, cwd=repo_path, timeout=15)
-                return r.stdout.strip() or f"Tag '{name}' created" if r.returncode == 0 else f"[ERROR] {r.stderr.strip()}"
+                cmd = (
+                    ["git", "tag", "-a", name, "-m", msg]
+                    if msg
+                    else ["git", "tag", name]
+                )
+                r = subprocess.run(
+                    cmd, capture_output=True, text=True, cwd=repo_path, timeout=15
+                )
+                return (
+                    r.stdout.strip() or f"Tag '{name}' created"
+                    if r.returncode == 0
+                    else f"[ERROR] {r.stderr.strip()}"
+                )
             if action == "delete":
-                r = subprocess.run(["git", "tag", "-d", name], capture_output=True, text=True, cwd=repo_path, timeout=15)
-                return r.stdout.strip() or f"Tag '{name}' deleted" if r.returncode == 0 else f"[ERROR] {r.stderr.strip()}"
+                r = subprocess.run(
+                    ["git", "tag", "-d", name],
+                    capture_output=True,
+                    text=True,
+                    cwd=repo_path,
+                    timeout=15,
+                )
+                return (
+                    r.stdout.strip() or f"Tag '{name}' deleted"
+                    if r.returncode == 0
+                    else f"[ERROR] {r.stderr.strip()}"
+                )
             return "[ERROR] Unknown action"
         except Exception as e:
             return f"[ERROR] git_tag: {e}"
@@ -7954,7 +9823,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         try:
             r = subprocess.run(
                 ["git", "log", f"--max-count={limit}", "--oneline", "--", path],
-                capture_output=True, text=True, cwd=repo_path, timeout=15,
+                capture_output=True,
+                text=True,
+                cwd=repo_path,
+                timeout=15,
             )
             return r.stdout.strip() or f"(no commits found for {path})"
         except Exception as e:
@@ -7962,9 +9834,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def semver_bump_h(inp: dict[str, Any]) -> str:
         import re as _re
+
         part = str(inp["part"])
         version_file = str(inp.get("file", ""))
-        candidates = [version_file] if version_file else ["pyproject.toml", "package.json", "VERSION"]
+        candidates = (
+            [version_file]
+            if version_file
+            else ["pyproject.toml", "package.json", "VERSION"]
+        )
         for cand in candidates:
             fp = root / cand if cand else None
             if fp and fp.exists():
@@ -7972,7 +9849,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 pattern = r'(version\s*[=:]\s*["\']?)(\d+)\.(\d+)\.(\d+)(["\']?)'
                 m = _re.search(pattern, text)
                 if m:
-                    major, minor, patch_v = int(m.group(2)), int(m.group(3)), int(m.group(4))
+                    major, minor, patch_v = (
+                        int(m.group(2)),
+                        int(m.group(3)),
+                        int(m.group(4)),
+                    )
                     if part == "major":
                         major, minor, patch_v = major + 1, 0, 0
                     elif part == "minor":
@@ -7980,14 +9861,25 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                     else:
                         patch_v += 1
                     new_ver = f"{major}.{minor}.{patch_v}"
-                    new_text = _re.sub(pattern, lambda x: f"{x.group(1)}{new_ver}{x.group(5)}", text, count=1)
+                    new_text = _re.sub(
+                        pattern,
+                        lambda x: f"{x.group(1)}{new_ver}{x.group(5)}",
+                        text,
+                        count=1,
+                    )
                     fp.write_text(new_text, encoding="utf-8")
                     return f"Bumped version to {new_ver} in {cand}"
         return "[ERROR] No version file found (tried pyproject.toml, package.json, VERSION)"
 
     def git_stash_list_h(inp: dict[str, Any]) -> str:
         try:
-            r = subprocess.run(["git", "stash", "list"], capture_output=True, text=True, cwd=repo_path, timeout=15)
+            r = subprocess.run(
+                ["git", "stash", "list"],
+                capture_output=True,
+                text=True,
+                cwd=repo_path,
+                timeout=15,
+            )
             return r.stdout.strip() or "(no stashes)"
         except Exception as e:
             return f"[ERROR] git_stash_list: {e}"
@@ -7995,19 +9887,29 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def list_processes_h(inp: dict[str, Any]) -> str:
         name_filter = str(inp.get("filter", ""))
         try:
-            r = subprocess.run(["ps", "aux"], capture_output=True, text=True, timeout=10)
+            r = subprocess.run(
+                ["ps", "aux"], capture_output=True, text=True, timeout=10
+            )
             lines = r.stdout.strip().splitlines()
             if name_filter:
-                lines = [ln for ln in lines if name_filter.lower() in ln.lower() or ln.startswith("USER")]
+                lines = [
+                    ln
+                    for ln in lines
+                    if name_filter.lower() in ln.lower() or ln.startswith("USER")
+                ]
             return "\n".join(lines[:50])
         except Exception as e:
             return f"[ERROR] list_processes: {e}"
 
     def list_open_ports_h(inp: dict[str, Any]) -> str:
         try:
-            r = subprocess.run(["ss", "-tlnp"], capture_output=True, text=True, timeout=10)
+            r = subprocess.run(
+                ["ss", "-tlnp"], capture_output=True, text=True, timeout=10
+            )
             if r.returncode != 0:
-                r = subprocess.run(["netstat", "-tlnp"], capture_output=True, text=True, timeout=10)
+                r = subprocess.run(
+                    ["netstat", "-tlnp"], capture_output=True, text=True, timeout=10
+                )
             return r.stdout.strip() or "(no open ports found)"
         except Exception as e:
             return f"[ERROR] list_open_ports: {e}"
@@ -8015,6 +9917,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def wait_for_port_h(inp: dict[str, Any]) -> str:
         import socket as _socket
         import time as _time
+
         port = int(inp["port"])
         host = str(inp.get("host", "localhost"))
         timeout = int(inp.get("timeout", 30))
@@ -8031,6 +9934,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def check_url_status_h(inp: dict[str, Any]) -> str:
         import urllib.request as _req
         import time as _time
+
         url = str(inp["url"])
         try:
             start = _time.time()
@@ -8047,15 +9951,19 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             profiled = f"python -m cProfile -s cumulative -c 'import subprocess; subprocess.run({command!r}.split(), check=True)'"  # noqa: F841
             r = subprocess.run(
                 ["python", "-m", "cProfile", "-s", "cumulative"] + command.split()[1:],
-                capture_output=True, text=True, cwd=repo_path, timeout=60,
+                capture_output=True,
+                text=True,
+                cwd=repo_path,
+                timeout=60,
             )
             lines = (r.stdout + r.stderr).strip().splitlines()
-            return "\n".join(lines[:top + 10])
+            return "\n".join(lines[: top + 10])
         except Exception as e:
             return f"[ERROR] cpu_profile: {e}"
 
     def zip_files_h(inp: dict[str, Any]) -> str:
         import zipfile as _zf
+
         source = str(inp["source"])
         src_path = root / source
         output = str(inp.get("output", source.rstrip("/") + ".zip"))
@@ -8074,6 +9982,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def unzip_files_h(inp: dict[str, Any]) -> str:
         import zipfile as _zf
+
         archive = str(inp["archive"])
         dest = str(inp.get("dest", str((root / archive).parent)))
         arc_path = root / archive
@@ -8087,6 +9996,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def move_file_h(inp: dict[str, Any]) -> str:
         import shutil as _shutil
+
         src = root / str(inp["source"])
         dst = root / str(inp["dest"])
         if _is_protected_path(str(inp["dest"]), repo_path):
@@ -8100,6 +10010,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def hash_file_h(inp: dict[str, Any]) -> str:
         import hashlib as _hl
+
         fpath = root / str(inp["path"])
         try:
             h = _hl.sha256()
@@ -8142,6 +10053,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def env_diff_h(inp: dict[str, Any]) -> str:
         example_path = root / str(inp.get("example", ".env.example"))
         actual_path = root / str(inp.get("actual", ".env"))
+
         def _keys(fp: Path) -> set[str]:
             if not fp.exists():
                 return set()
@@ -8151,6 +10063,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 if line and not line.startswith("#") and "=" in line:
                     keys.add(line.split("=", 1)[0].strip())
             return keys
+
         example_keys = _keys(example_path)
         actual_keys = _keys(actual_path)
         missing = sorted(example_keys - actual_keys)
@@ -8160,7 +10073,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             lines.append(f"Missing in {inp.get('actual', '.env')} ({len(missing)}):")
             lines.extend(f"  - {k}" for k in missing)
         if extra:
-            lines.append(f"Extra in {inp.get('actual', '.env')} (not in example, {len(extra)}):")
+            lines.append(
+                f"Extra in {inp.get('actual', '.env')} (not in example, {len(extra)}):"
+            )
             lines.extend(f"  + {k}" for k in extra)
         if not missing and not extra:
             lines.append("✅ No differences — .env matches .env.example")
@@ -8170,12 +10085,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         fpath = root / str(inp["path"])
         query = str(inp["query"])
         try:
-            r = subprocess.run(["jq", query, str(fpath)], capture_output=True, text=True, timeout=10)
+            r = subprocess.run(
+                ["jq", query, str(fpath)], capture_output=True, text=True, timeout=10
+            )
             if r.returncode != 0:
                 return f"[ERROR] jq: {r.stderr.strip()}"
             return r.stdout.strip()
         except FileNotFoundError:
             import json as _json
+
             data = _json.loads(fpath.read_text(encoding="utf-8"))
             return f"(jq not installed) Raw JSON keys: {list(data.keys()) if isinstance(data, dict) else type(data).__name__}"
         except Exception as e:
@@ -8185,17 +10103,22 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         fpath = root / str(inp["path"])
         try:
             import yaml as _yaml
+
             with open(fpath, encoding="utf-8") as f:
                 _yaml.safe_load(f)
             return f"✅ {inp['path']} is valid YAML"
         except ImportError:
-            subprocess.run(["python", "-c", f"import yaml; yaml.safe_load(open('{fpath}'))"], capture_output=True)
+            subprocess.run(
+                ["python", "-c", f"import yaml; yaml.safe_load(open('{fpath}'))"],
+                capture_output=True,
+            )
             return "(pyyaml not available in this environment)"
         except Exception as e:
             return f"[INVALID YAML] {inp['path']}: {e}"
 
     def json_validate_h(inp: dict[str, Any]) -> str:
         import json as _json
+
         fpath = root / str(inp["path"])
         try:
             _json.loads(fpath.read_text(encoding="utf-8"))
@@ -8205,6 +10128,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def csv_preview_h(inp: dict[str, Any]) -> str:
         import csv as _csv
+
         fpath = root / str(inp["path"])
         rows_n = int(inp.get("rows", 5))
         try:
@@ -8245,10 +10169,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             text = fpath.read_text(encoding="utf-8")
             try:
                 import markdown as _md
+
                 html = _md.markdown(text, extensions=["fenced_code", "tables"])
             except ImportError:
                 html = f"<pre>{text}</pre>"
-            out_path.write_text(f"<!DOCTYPE html><html><body>{html}</body></html>", encoding="utf-8")
+            out_path.write_text(
+                f"<!DOCTYPE html><html><body>{html}</body></html>", encoding="utf-8"
+            )
             return f"Exported to {output_name}"
         except Exception as e:
             return f"[ERROR] export_markdown: {e}"
@@ -8259,7 +10186,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         try:
             r = subprocess.run(
                 ["python", "-m", "ruff", "check", "--select=F401", target],
-                capture_output=True, text=True, cwd=repo_path, timeout=30,
+                capture_output=True,
+                text=True,
+                cwd=repo_path,
+                timeout=30,
             )
             return r.stdout.strip() or "✅ No unused imports found"
         except Exception as e:
@@ -8270,14 +10200,27 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         directory = str(inp.get("directory", "."))
         target_dir = str(root / directory)
         if manager == "auto":
-            has_pip = (root / "requirements.txt").exists() or (root / "pyproject.toml").exists()
+            has_pip = (root / "requirements.txt").exists() or (
+                root / "pyproject.toml"
+            ).exists()
             has_npm = (root / "package.json").exists()  # noqa: F841
             manager = "pip" if has_pip else "npm"
         try:
             if manager == "pip":
-                r = subprocess.run(["pip", "list", "--outdated", "--format=columns"], capture_output=True, text=True, timeout=60)
+                r = subprocess.run(
+                    ["pip", "list", "--outdated", "--format=columns"],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
             else:
-                r = subprocess.run(["npm", "outdated"], capture_output=True, text=True, cwd=target_dir, timeout=60)
+                r = subprocess.run(
+                    ["npm", "outdated"],
+                    capture_output=True,
+                    text=True,
+                    cwd=target_dir,
+                    timeout=60,
+                )
             return r.stdout.strip() or "✅ All dependencies are up to date"
         except Exception as e:
             return f"[ERROR] deps_outdated: {e}"
@@ -8288,7 +10231,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         totals: dict[str, int] = {}
         try:
             for fp in target.rglob("*"):
-                if fp.is_file() and not any(p in str(fp) for p in [".git", "__pycache__", "node_modules", ".venv"]):
+                if fp.is_file() and not any(
+                    p in str(fp)
+                    for p in [".git", "__pycache__", "node_modules", ".venv"]
+                ):
                     ext = fp.suffix or "(no ext)"
                     try:
                         n = sum(1 for _ in fp.open(encoding="utf-8", errors="ignore"))
@@ -8307,7 +10253,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         target_dir = str(root / directory)
         cmd = ["npm", "install"] + ([package] if package else [])
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, cwd=target_dir, timeout=120)
+            r = subprocess.run(
+                cmd, capture_output=True, text=True, cwd=target_dir, timeout=120
+            )
             return (r.stdout + r.stderr).strip()[-2000:] or "npm install complete"
         except Exception as e:
             return f"[ERROR] npm_install: {e}"
@@ -8317,7 +10265,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         directory = str(inp.get("directory", "."))
         target_dir = str(root / directory)
         try:
-            r = subprocess.run(["npm", "run", script], capture_output=True, text=True, cwd=target_dir, timeout=180)
+            r = subprocess.run(
+                ["npm", "run", script],
+                capture_output=True,
+                text=True,
+                cwd=target_dir,
+                timeout=180,
+            )
             return (r.stdout + r.stderr).strip()[-3000:] or f"npm run {script} complete"
         except Exception as e:
             return f"[ERROR] npm_run: {e}"
@@ -8325,7 +10279,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def pip_install_h(inp: dict[str, Any]) -> str:
         package = str(inp["package"])
         try:
-            r = subprocess.run([sys.executable, "-m", "pip", "install", package], capture_output=True, text=True, timeout=120)
+            r = subprocess.run(
+                [sys.executable, "-m", "pip", "install", package],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
             return (r.stdout + r.stderr).strip()[-2000:]
         except Exception as e:
             return f"[ERROR] pip_install: {e}"
@@ -8333,10 +10292,19 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def pip_list_h(inp: dict[str, Any]) -> str:
         name_filter = str(inp.get("filter", ""))
         try:
-            r = subprocess.run([sys.executable, "-m", "pip", "list", "--format=columns"], capture_output=True, text=True, timeout=30)
+            r = subprocess.run(
+                [sys.executable, "-m", "pip", "list", "--format=columns"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
             lines = r.stdout.strip().splitlines()
             if name_filter:
-                lines = [ln for ln in lines if name_filter.lower() in ln.lower() or ln.startswith("Package")]
+                lines = [
+                    ln
+                    for ln in lines
+                    if name_filter.lower() in ln.lower() or ln.startswith("Package")
+                ]
             return "\n".join(lines)
         except Exception as e:
             return f"[ERROR] pip_list: {e}"
@@ -8355,6 +10323,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def http_request_h(inp: dict[str, Any]) -> str:
         import urllib.request as _req
         import urllib.error as _uerr
+
         method = str(inp["method"]).upper()
         url = str(inp["url"])
         headers = dict(inp.get("headers") or {})
@@ -8373,6 +10342,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def base64_encode_h(inp: dict[str, Any]) -> str:
         import base64 as _b64
+
         decode = bool(inp.get("decode", False))
         text = inp.get("text")
         path = inp.get("path")
@@ -8384,7 +10354,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 return _b64.b64encode(raw).decode("ascii")
             if text:
                 if decode:
-                    return _b64.b64decode(str(text).encode("utf-8")).decode("utf-8", errors="replace")
+                    return _b64.b64decode(str(text).encode("utf-8")).decode(
+                        "utf-8", errors="replace"
+                    )
                 return _b64.b64encode(str(text).encode("utf-8")).decode("ascii")
             return "[ERROR] Provide either text or path"
         except Exception as e:
@@ -8396,17 +10368,24 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         variables = dict(inp.get("vars") or {})
         try:
             from jinja2 import Template as _Tpl
+
             if path:
                 template_str = (root / str(path)).read_text(encoding="utf-8")
             if not template_str:
                 return "[ERROR] Provide either template or path"
             return _Tpl(str(template_str)).render(**variables)
         except ImportError:
-            src = str(template_str) if template_str else ((root / str(path)).read_text(encoding="utf-8") if path else "")
+            src = (
+                str(template_str)
+                if template_str
+                else ((root / str(path)).read_text(encoding="utf-8") if path else "")
+            )
             if not src:
                 return "[ERROR] jinja2 not installed and no template provided"
             for k, v in variables.items():
-                src = src.replace("{{" + k + "}}", str(v)).replace("{{ " + k + " }}", str(v))
+                src = src.replace("{{" + k + "}}", str(v)).replace(
+                    "{{ " + k + " }}", str(v)
+                )
             return src
         except Exception as e:
             return f"[ERROR] template_render: {e}"
@@ -8465,6 +10444,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 # memory_curate_write, git_commit_change — stages only the named files, never `-A`.
 # ---------------------------------------------------------------------------
 
+
 def _new_isolated_db_engine() -> Any:
     """A throwaway async engine, NOT the shared app.db.session singleton.
 
@@ -8489,8 +10469,14 @@ _FLEET_METRICS_READ_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "agent_name": {"type": "string", "description": "Agent to inspect. Omit to see the most recent runs across all agents."},
-            "n": {"type": "integer", "description": "Max runs to consider (default 20)."},
+            "agent_name": {
+                "type": "string",
+                "description": "Agent to inspect. Omit to see the most recent runs across all agents.",
+            },
+            "n": {
+                "type": "integer",
+                "description": "Max runs to consider (default 20).",
+            },
         },
         "required": [],
     },
@@ -8508,7 +10494,10 @@ def fleet_metrics_read(inp: dict[str, Any]) -> str:
         runs = collector.recent(n)
         if not runs:
             return "(no runs recorded yet)"
-        lines = [f"{m.agent_name}: status={m.status} time={m.execution_time_ms:.0f}ms tokens_in={m.tokens_in} tokens_out={m.tokens_out}" for m in runs]
+        lines = [
+            f"{m.agent_name}: status={m.status} time={m.execution_time_ms:.0f}ms tokens_in={m.tokens_in} tokens_out={m.tokens_out}"
+            for m in runs
+        ]
         return "\n".join(lines)
 
     runs = collector.by_agent(agent_name, n)
@@ -8523,7 +10512,11 @@ def fleet_metrics_read(inp: dict[str, Any]) -> str:
         f"runs considered: {len(runs)} (failed: {failed})",
         f"p50 latency: {p50:.0f}ms" if p50 is not None else "p50 latency: n/a",
         f"p95 latency: {p95:.0f}ms" if p95 is not None else "p95 latency: n/a",
-        f"avg tool accuracy: {accuracy:.2f}" if accuracy is not None else "avg tool accuracy: n/a",
+        (
+            f"avg tool accuracy: {accuracy:.2f}"
+            if accuracy is not None
+            else "avg tool accuracy: n/a"
+        ),
     ]
     return "\n".join(lines)
 
@@ -8534,8 +10527,14 @@ _AUDIT_LOG_READ_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "agent_name": {"type": "string", "description": "Filter to one agent. Omit for the most recent entries across all agents."},
-            "n": {"type": "integer", "description": "Max entries to return (default 50)."},
+            "agent_name": {
+                "type": "string",
+                "description": "Filter to one agent. Omit for the most recent entries across all agents.",
+            },
+            "n": {
+                "type": "integer",
+                "description": "Max entries to return (default 50).",
+            },
         },
         "required": [],
     },
@@ -8574,10 +10573,26 @@ _SUBMIT_ENHANCEMENT_REQUEST_TOOL: dict[str, Any] = {
         "type": "object",
         "properties": {
             "title": {"type": "string", "description": "Short title, plain language."},
-            "description": {"type": "string", "description": "Full explanation in plain, non-technical-jargon language — this is what the human reads to decide approve/reject."},
-            "category": {"type": "string", "enum": ["performance", "bug", "orchestration", "knowledge", "quality", "security"]},
+            "description": {
+                "type": "string",
+                "description": "Full explanation in plain, non-technical-jargon language — this is what the human reads to decide approve/reject.",
+            },
+            "category": {
+                "type": "string",
+                "enum": [
+                    "performance",
+                    "bug",
+                    "orchestration",
+                    "knowledge",
+                    "quality",
+                    "security",
+                ],
+            },
             "priority": {"type": "string", "enum": ["emergency", "medium", "low"]},
-            "evidence": {"type": "object", "description": "file:line citations, metrics, or other evidence backing this claim."},
+            "evidence": {
+                "type": "object",
+                "description": "file:line citations, metrics, or other evidence backing this claim.",
+            },
         },
         "required": ["title", "description", "category", "priority"],
     },
@@ -8595,7 +10610,9 @@ def make_submit_enhancement_request_handler(agent_name: str, trace_id: str = "")
 
             engine = _new_isolated_db_engine()
             try:
-                async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                async with async_sessionmaker(
+                    engine, expire_on_commit=False
+                )() as session:
                     row = EnhancementRequest(
                         agent_name=agent_name,
                         title=str(inp["title"]),
@@ -8620,15 +10637,18 @@ def make_submit_enhancement_request_handler(agent_name: str, trace_id: str = "")
 
         try:
             from app.services.activity_stream import get_activity_registry
+
             stream = get_activity_registry().get_or_create("fleet-dashboard")
-            stream.push({
-                "type": "new_request",
-                "id": req_id,
-                "agentName": agent_name,
-                "title": str(inp["title"]),
-                "priority": str(inp["priority"]),
-                "category": str(inp["category"]),
-            })
+            stream.push(
+                {
+                    "type": "new_request",
+                    "id": req_id,
+                    "agentName": agent_name,
+                    "title": str(inp["title"]),
+                    "priority": str(inp["priority"]),
+                    "category": str(inp["category"]),
+                }
+            )
         except Exception:
             pass  # dashboard notification is non-fatal — the row is already written
 
@@ -8667,7 +10687,9 @@ def memory_search(inp: dict[str, Any]) -> str:
         engine = _new_isolated_db_engine()
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                return await query_similar_tasks(description=query, db=session, top_k=top_k)
+                return await query_similar_tasks(
+                    description=query, db=session, top_k=top_k
+                )
         finally:
             await engine.dispose()
 
@@ -8690,7 +10712,10 @@ _MEMORY_CURATE_READ_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "category": {"type": "string", "description": "Filter: task | architecture | failure | learning. Omit for all."},
+            "category": {
+                "type": "string",
+                "description": "Filter: task | architecture | failure | learning. Omit for all.",
+            },
             "limit": {"type": "integer", "description": "Max rows (default 20)."},
         },
         "required": [],
@@ -8713,7 +10738,11 @@ def memory_curate_read(inp: dict[str, Any]) -> str:
         engine = _new_isolated_db_engine()
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                q = select(MemoryEmbedding).order_by(MemoryEmbedding.created_at.desc()).limit(limit)
+                q = (
+                    select(MemoryEmbedding)
+                    .order_by(MemoryEmbedding.created_at.desc())
+                    .limit(limit)
+                )
                 if category:
                     q = q.where(MemoryEmbedding.category == category)
                 result = await session.execute(q)
@@ -8751,8 +10780,14 @@ _MEMORY_CURATE_WRITE_TOOL: dict[str, Any] = {
         "type": "object",
         "properties": {
             "id": {"type": "integer", "description": "MemoryEmbedding row id."},
-            "category": {"type": "string", "description": "New category, if recategorizing."},
-            "note": {"type": "string", "description": "Note to append to the summary, e.g. superseded-by info."},
+            "category": {
+                "type": "string",
+                "description": "New category, if recategorizing.",
+            },
+            "note": {
+                "type": "string",
+                "description": "Note to append to the summary, e.g. superseded-by info.",
+            },
         },
         "required": ["id"],
     },
@@ -8803,7 +10838,11 @@ _GIT_COMMIT_CHANGE_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "files": {"type": "array", "items": {"type": "string"}, "description": "Paths (relative to repo root) to stage. Never pass a wildcard — list every file explicitly."},
+            "files": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Paths (relative to repo root) to stage. Never pass a wildcard — list every file explicitly.",
+            },
             "message": {"type": "string", "description": "Commit message."},
         },
         "required": ["files", "message"],
@@ -8827,17 +10866,29 @@ def make_git_commit_change_handler(repo_path: str) -> Any:
 
         try:
             add_result = subprocess.run(
-                ["git", "add", "--"] + files, cwd=repo_path, capture_output=True, text=True, timeout=30,
+                ["git", "add", "--"] + files,
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             if add_result.returncode != 0:
                 return f"[ERROR] git add failed: {add_result.stderr.strip()}"
             commit_result = subprocess.run(
-                ["git", "commit", "-m", message], cwd=repo_path, capture_output=True, text=True, timeout=30,
+                ["git", "commit", "-m", message],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             if commit_result.returncode != 0:
                 return f"[ERROR] git commit failed: {(commit_result.stdout + commit_result.stderr).strip()}"
             sha_result = subprocess.run(
-                ["git", "rev-parse", "HEAD"], cwd=repo_path, capture_output=True, text=True, timeout=10,
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             sha = sha_result.stdout.strip()
             return f"Committed {len(files)} file(s) as {sha[:12]}: {message}"
@@ -8890,7 +10941,9 @@ def make_fleet_apply_handlers(repo_path: str) -> dict[str, Any]:
         flags = str(inp.get("flags", ""))
         cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null; python -m pytest {path} {flags} -q --tb=short 2>&1 | tail -50"
         try:
-            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=180)
+            r = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, timeout=180
+            )
             return r.stdout or r.stderr or "(no output)"
         except subprocess.TimeoutExpired:
             return "[ERROR] tests timed out"
@@ -8904,7 +10957,13 @@ def make_fleet_apply_handlers(repo_path: str) -> dict[str, Any]:
     }
 
 
-FLEET_APPLY_TOOLS = [READ_ONLY_TOOLS[0], _WRITE_FILE_TOOL_SPEC, _EDIT_FILE_TOOL_SPEC, _RUN_TESTS_TOOL, _GIT_COMMIT_CHANGE_TOOL]
+FLEET_APPLY_TOOLS = [
+    READ_ONLY_TOOLS[0],
+    _WRITE_FILE_TOOL_SPEC,
+    _EDIT_FILE_TOOL_SPEC,
+    _RUN_TESTS_TOOL,
+    _GIT_COMMIT_CHANGE_TOOL,
+]
 
 _FLEET_BASH_TOOL: dict[str, Any] = {
     "name": "bash",
@@ -8920,13 +10979,21 @@ _FLEET_BASH_TOOL: dict[str, Any] = {
 def make_scoped_bash_handler(repo_path: str) -> Any:
     """Shared scoped-bash handler for fleet agents — check_command() guardrail,
     same pattern every other bash-using agent already follows."""
+
     def bash_h(inp: dict[str, Any]) -> str:
         cmd = str(inp["command"])
         policy = check_command(cmd)
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
         try:
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=60)
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=repo_path,
+                timeout=60,
+            )
             out = (result.stdout + result.stderr)[:4000]
             return out if out else "(no output)"
         except subprocess.TimeoutExpired:

@@ -4,6 +4,7 @@ Revision ID: 003
 Revises: 002
 Create Date: 2026-07-03
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -27,15 +28,34 @@ def upgrade() -> None:
         sa.Column("cost_estimate", sa.Numeric(10, 4), nullable=True),
         sa.Column("cost_actual", sa.Numeric(10, 4), nullable=True),
         sa.Column("halt_reason", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("epic_id"),
     )
     op.create_index("ix_epics_status", "epics", ["status"])
 
     # epic_id FK on dev_tasks
-    op.add_column("dev_tasks", sa.Column("epic_id", postgresql.UUID(as_uuid=False), nullable=True))
-    op.create_foreign_key("fk_dev_tasks_epic_id", "dev_tasks", "epics", ["epic_id"], ["epic_id"], ondelete="SET NULL")
+    op.add_column(
+        "dev_tasks", sa.Column("epic_id", postgresql.UUID(as_uuid=False), nullable=True)
+    )
+    op.create_foreign_key(
+        "fk_dev_tasks_epic_id",
+        "dev_tasks",
+        "epics",
+        ["epic_id"],
+        ["epic_id"],
+        ondelete="SET NULL",
+    )
     op.create_index("ix_dev_tasks_epic_id", "dev_tasks", ["epic_id"])
 
     # policies — glob-pattern approval rules (Policy Engine v2)
@@ -43,11 +63,20 @@ def upgrade() -> None:
         "policies",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
         sa.Column("name", sa.String(200), nullable=False),
-        sa.Column("trigger_pattern", sa.String(500), nullable=False),  # glob, e.g. **/migrations/**
-        sa.Column("required_approval_role", sa.String(100), nullable=False),  # human | architect | security
+        sa.Column(
+            "trigger_pattern", sa.String(500), nullable=False
+        ),  # glob, e.g. **/migrations/**
+        sa.Column(
+            "required_approval_role", sa.String(100), nullable=False
+        ),  # human | architect | security
         sa.Column("blocking", sa.Boolean(), nullable=False, server_default="true"),
         sa.Column("active", sa.Boolean(), nullable=False, server_default="true"),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_policies_active", "policies", ["active"])
@@ -62,7 +91,12 @@ def upgrade() -> None:
         sa.Column("file_path", sa.Text(), nullable=True),
         sa.Column("approver_role", sa.String(100), nullable=False),
         sa.Column("decision", sa.String(50), nullable=False),  # approved | rejected
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(["policy_id"], ["policies.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
@@ -74,22 +108,27 @@ def upgrade() -> None:
         "user_roles",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
         sa.Column("user_id", sa.String(200), nullable=False),
-        sa.Column("role", sa.String(50), nullable=False, server_default="viewer"),  # viewer | approver
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "role", sa.String(50), nullable=False, server_default="viewer"
+        ),  # viewer | approver
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_user_roles_user_id", "user_roles", ["user_id"], unique=True)
 
     # Seed three canonical policy rules (doc 13 worked examples)
-    op.execute(
-        """
+    op.execute("""
         INSERT INTO policies (name, trigger_pattern, required_approval_role, blocking, active)
         VALUES
             ('Migrations gate',    '**/migrations/**',  'human',     true,  true),
             ('Customer API gate',  'api/customer/**',   'architect', true,  true),
             ('Auth flag',          'auth/**',           'security',  false, true)
-        """
-    )
+        """)
 
 
 def downgrade() -> None:

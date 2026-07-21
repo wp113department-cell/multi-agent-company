@@ -10,6 +10,7 @@ actual verbatim/near-verbatim phrasing from the plan's 9 sections is present in
 `_GLOBAL_STANDARDS.md` — and that every role file still carries its 7 required
 role-specific sections. No prior test covered role-prompt structure at all.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -63,8 +64,12 @@ def test_global_standards_file_exists() -> None:
     assert _GLOBAL_STANDARDS_PATH.exists()
 
 
-@pytest.mark.parametrize("section_name,required_phrase", _REQUIRED_GLOBAL_CONCEPTS.items())
-def test_global_standards_covers_original_9_sections(section_name: str, required_phrase: str) -> None:
+@pytest.mark.parametrize(
+    "section_name,required_phrase", _REQUIRED_GLOBAL_CONCEPTS.items()
+)
+def test_global_standards_covers_original_9_sections(
+    section_name: str, required_phrase: str
+) -> None:
     text = _GLOBAL_STANDARDS_PATH.read_text(encoding="utf-8")
     assert required_phrase in text, (
         f"_GLOBAL_STANDARDS.md is missing the plan's required '{section_name}' "

@@ -1,4 +1,5 @@
 """Python AST analysis utilities — stdlib only, zero extra dependencies."""
+
 from __future__ import annotations
 
 import ast
@@ -27,40 +28,49 @@ def parse_file_ast(path: str) -> str:
 
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            functions.append({
-                "name": node.name,
-                "line": node.lineno,
-                "args": [a.arg for a in node.args.args],
-                "decorators": [ast.unparse(d) for d in node.decorator_list],
-                "is_async": isinstance(node, ast.AsyncFunctionDef),
-            })
+            functions.append(
+                {
+                    "name": node.name,
+                    "line": node.lineno,
+                    "args": [a.arg for a in node.args.args],
+                    "decorators": [ast.unparse(d) for d in node.decorator_list],
+                    "is_async": isinstance(node, ast.AsyncFunctionDef),
+                }
+            )
         elif isinstance(node, ast.ClassDef):
             methods: list[str] = [
-                n.name for n in node.body
+                n.name
+                for n in node.body
                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
             ]
-            classes.append({
-                "name": node.name,
-                "line": node.lineno,
-                "bases": [ast.unparse(b) for b in node.bases],
-                "methods": methods,
-            })
+            classes.append(
+                {
+                    "name": node.name,
+                    "line": node.lineno,
+                    "bases": [ast.unparse(b) for b in node.bases],
+                    "methods": methods,
+                }
+            )
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                imports_list.append({
-                    "type": "import",
-                    "module": alias.name,
-                    "alias": alias.asname,
-                })
+                imports_list.append(
+                    {
+                        "type": "import",
+                        "module": alias.name,
+                        "alias": alias.asname,
+                    }
+                )
         elif isinstance(node, ast.ImportFrom):
             mod = node.module or ""
             for alias in node.names:
-                imports_list.append({
-                    "type": "from",
-                    "module": mod,
-                    "name": alias.name,
-                    "alias": alias.asname,
-                })
+                imports_list.append(
+                    {
+                        "type": "from",
+                        "module": mod,
+                        "name": alias.name,
+                        "alias": alias.asname,
+                    }
+                )
 
     result: dict[str, Any] = {
         "file": str(p),
@@ -127,7 +137,9 @@ def build_call_graph(path: str, function_name: str = "") -> str:
                     found.append(child.func.id)
                 elif isinstance(child.func, ast.Attribute):
                     try:
-                        found.append(f"{ast.unparse(child.func.value)}.{child.func.attr}")
+                        found.append(
+                            f"{ast.unparse(child.func.value)}.{child.func.attr}"
+                        )
                     except Exception:
                         found.append(f"<expr>.{child.func.attr}")
         return found
@@ -160,13 +172,16 @@ def detect_dead_code(directory: str) -> str:
         return f"[ERROR] Directory not found: {directory}"
 
     py_files = [
-        fp for fp in d.rglob("*.py")
-        if ".git" not in fp.parts and "__pycache__" not in fp.parts and ".venv" not in fp.parts
+        fp
+        for fp in d.rglob("*.py")
+        if ".git" not in fp.parts
+        and "__pycache__" not in fp.parts
+        and ".venv" not in fp.parts
     ]
     if not py_files:
         return "(no .py files found)"
 
-    defined: dict[str, str] = {}   # name → "file:line"
+    defined: dict[str, str] = {}  # name → "file:line"
     called: set[str] = set()
 
     for fp in py_files:
@@ -189,7 +204,9 @@ def detect_dead_code(directory: str) -> str:
     dead = {name: loc for name, loc in defined.items() if name not in called}
     if not dead:
         return "✅ No obviously dead functions detected (heuristic scan)."
-    lines = [f"⚠️  {len(dead)} potentially unused public function(s) — may have callers outside this directory:"]
+    lines = [
+        f"⚠️  {len(dead)} potentially unused public function(s) — may have callers outside this directory:"
+    ]
     for name, loc in sorted(dead.items()):
         lines.append(f"  {name}  ← {loc}")
     return "\n".join(lines)
@@ -202,8 +219,11 @@ def detect_circular_imports(directory: str) -> str:
         return f"[ERROR] Directory not found: {directory}"
 
     py_files = [
-        fp for fp in d.rglob("*.py")
-        if ".git" not in fp.parts and "__pycache__" not in fp.parts and ".venv" not in fp.parts
+        fp
+        for fp in d.rglob("*.py")
+        if ".git" not in fp.parts
+        and "__pycache__" not in fp.parts
+        and ".venv" not in fp.parts
     ]
     if not py_files:
         return "(no .py files found)"
@@ -266,7 +286,9 @@ def detect_circular_imports(directory: str) -> str:
     return "\n".join(lines)
 
 
-def rename_symbol(old_name: str, new_name: str, directory: str, file_pattern: str = "*.py") -> str:
+def rename_symbol(
+    old_name: str, new_name: str, directory: str, file_pattern: str = "*.py"
+) -> str:
     """Word-boundary rename old_name → new_name across files matching file_pattern in directory."""
     d = Path(directory)
     if not d.exists():
@@ -282,7 +304,10 @@ def rename_symbol(old_name: str, new_name: str, directory: str, file_pattern: st
     changed: list[str] = []
 
     for fp in d.rglob(file_pattern):
-        if any(part in (".git", "__pycache__", ".venv", "node_modules") for part in fp.parts):
+        if any(
+            part in (".git", "__pycache__", ".venv", "node_modules")
+            for part in fp.parts
+        ):
             continue
         try:
             original = fp.read_text(encoding="utf-8")

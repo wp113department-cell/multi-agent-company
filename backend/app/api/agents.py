@@ -1,4 +1,5 @@
 """Background task launchers — wire agents into FastAPI via BackgroundTasks."""
+
 from __future__ import annotations
 
 import asyncio
@@ -30,12 +31,17 @@ _COST_PER_OUTPUT_TOKEN = 0.000004
 
 
 def _estimate_cost(tokens_in: int, tokens_out: int) -> float:
-    return round(tokens_in * _COST_PER_INPUT_TOKEN + tokens_out * _COST_PER_OUTPUT_TOKEN, 6)
+    return round(
+        tokens_in * _COST_PER_INPUT_TOKEN + tokens_out * _COST_PER_OUTPUT_TOKEN, 6
+    )
 
 
 # ---- Planning pipeline (PM → Architect → Decomposer, with interrupt) ----
 
-async def launch_planning_pipeline(task_id: int, title: str, description: str, repo_path: str | None = None) -> None:
+
+async def launch_planning_pipeline(
+    task_id: int, title: str, description: str, repo_path: str | None = None
+) -> None:
     """
     Fire-and-forget: run PM→Architect→Decomposer and pause at human_review.
     Sets pipeline_state.stage = 'awaiting_approval' — does NOT transition the
@@ -49,9 +55,15 @@ async def launch_planning_pipeline(task_id: int, title: str, description: str, r
     async with factory() as db:
         try:
             await update_pipeline_state(db, task_id, "pm")
-            await append_log(db, task_id, "pipeline", "Planning pipeline started (PM → Architect → Decomposer)")
+            await append_log(
+                db,
+                task_id,
+                "pipeline",
+                "Planning pipeline started (PM → Architect → Decomposer)",
+            )
 
             from app.api.repo import get_active_repo_path
+
             result = await run_planning_pipeline(
                 task_id=task_id,
                 title=title,
@@ -66,7 +78,9 @@ async def launch_planning_pipeline(task_id: int, title: str, description: str, r
             if stage == "blocked":
                 await update_pipeline_state(db, task_id, "blocked")
                 await transition_task(db, task_id, "blocked")
-                await append_log(db, task_id, "pipeline_error", error or "Pipeline blocked")
+                await append_log(
+                    db, task_id, "pipeline_error", error or "Pipeline blocked"
+                )
                 await send_task_alert(task_id, "blocked", error or "Pipeline blocked")
                 return
 
@@ -80,7 +94,9 @@ async def launch_planning_pipeline(task_id: int, title: str, description: str, r
             subtasks = result.get("subtasks", []) or []
 
             await update_pipeline_state(
-                db, task_id, "awaiting_approval",
+                db,
+                task_id,
+                "awaiting_approval",
                 pm_brief=pm_brief,
                 architect_plan=architect_plan,
                 subtasks_json=subtasks,
@@ -94,27 +110,48 @@ async def launch_planning_pipeline(task_id: int, title: str, description: str, r
             # would duplicate on every approve/reject cycle.
             try:
                 from app.fleet.approval_gate import arecord_pending
+
                 await arecord_pending(
-                    thread_id=f"task-{task_id}", action="plan_review",
+                    thread_id=f"task-{task_id}",
+                    action="plan_review",
                     details={
                         "subtasks_count": len(subtasks),
                         "risk_level": architect_plan.get("risk_level", "unknown"),
-                        "technical_approach": str(architect_plan.get("technical_approach", ""))[:500],
+                        "technical_approach": str(
+                            architect_plan.get("technical_approach", "")
+                        )[:500],
                     },
-                    agent_name="decomposer", task_id=task_id,
+                    agent_name="decomposer",
+                    task_id=task_id,
                 )
             except Exception:
-                logger.warning("Failed to record pending approval for task %d", task_id, exc_info=True)
+                logger.warning(
+                    "Failed to record pending approval for task %d",
+                    task_id,
+                    exc_info=True,
+                )
 
             if pm_brief:
-                await save_artifact_async(task_id, "pm_brief", pm_brief, "pm_agent", db=db)
+                await save_artifact_async(
+                    task_id, "pm_brief", pm_brief, "pm_agent", db=db
+                )
             if architect_plan:
-                await save_artifact_async(task_id, "architect_plan", architect_plan, "architect_agent", db=db)
+                await save_artifact_async(
+                    task_id, "architect_plan", architect_plan, "architect_agent", db=db
+                )
             if subtasks:
-                await save_artifact_async(task_id, "subtasks", {"subtasks": subtasks}, "decomposer_agent", db=db)
+                await save_artifact_async(
+                    task_id,
+                    "subtasks",
+                    {"subtasks": subtasks},
+                    "decomposer_agent",
+                    db=db,
+                )
 
             await append_log(
-                db, task_id, "pipeline",
+                db,
+                task_id,
+                "pipeline",
                 f"Planning complete — awaiting human approval. "
                 f"{len(subtasks)} subtasks, "
                 f"risk_level={architect_plan.get('risk_level', 'unknown')}",
@@ -124,10 +161,14 @@ async def launch_planning_pipeline(task_id: int, title: str, description: str, r
             logger.exception("Planning pipeline failed for task %d", task_id)
             async with factory() as db2:
                 await append_log(db2, task_id, "pipeline_error", str(e))
-            await send_task_alert(task_id, "failed", f"Planning pipeline exception: {e}")
+            await send_task_alert(
+                task_id, "failed", f"Planning pipeline exception: {e}"
+            )
 
 
-async def resume_planning_pipeline(task_id: int, approved: bool, repo_path: str | None = None) -> None:
+async def resume_planning_pipeline(
+    task_id: int, approved: bool, repo_path: str | None = None
+) -> None:
     """
     Resume the LangGraph from its interrupt checkpoint.
     approved=True  → launch manager with subtasks (full Dev→QA→Review pipeline).
@@ -144,24 +185,40 @@ async def resume_planning_pipeline(task_id: int, approved: bool, repo_path: str 
 
             try:
                 from app.fleet.approval_gate import arecord_decision
-                await arecord_decision(thread_id=f"task-{task_id}", approved=approved, decided_by="user")
+
+                await arecord_decision(
+                    thread_id=f"task-{task_id}", approved=approved, decided_by="user"
+                )
             except Exception:
-                logger.warning("Failed to record approval decision for task %d", task_id, exc_info=True)
+                logger.warning(
+                    "Failed to record approval decision for task %d",
+                    task_id,
+                    exc_info=True,
+                )
 
             try:
                 from app.fleet.audit_log import get_audit_log
+
                 get_audit_log().record_approval(
-                    agent_name="decomposer", action_type="plan_review",
+                    agent_name="decomposer",
+                    action_type="plan_review",
                     description=f"Plan review for task {task_id}",
-                    approved=approved, task_id=str(task_id),
+                    approved=approved,
+                    task_id=str(task_id),
                 )
             except Exception:
-                logger.warning("Failed to write audit log entry for task %d", task_id, exc_info=True)
+                logger.warning(
+                    "Failed to write audit log entry for task %d",
+                    task_id,
+                    exc_info=True,
+                )
 
             if approved and stage == "done":
                 await update_pipeline_state(db, task_id, "done", approved=True)
                 await transition_task(db, task_id, "ready_for_review")
-                await append_log(db, task_id, "pipeline", "Plan approved — coding agents launching")
+                await append_log(
+                    db, task_id, "pipeline", "Plan approved — coding agents launching"
+                )
                 plan = _build_plan_summary(result)
                 subtasks = result.get("subtasks", [])
                 # Launch multi-agent manager pipeline instead of single coder
@@ -169,7 +226,9 @@ async def resume_planning_pipeline(task_id: int, approved: bool, repo_path: str 
             else:
                 await update_pipeline_state(db, task_id, "rejected")
                 await transition_task(db, task_id, "rejected")
-                await append_log(db, task_id, "pipeline", "Plan rejected by human reviewer")
+                await append_log(
+                    db, task_id, "pipeline", "Plan rejected by human reviewer"
+                )
 
         except Exception as e:
             logger.exception("resume_planning_pipeline failed for task %d", task_id)
@@ -191,11 +250,14 @@ def _build_plan_summary(pipeline_result: Any) -> str:
         lines.append(f"- {f.get('path', '')}: {f.get('reason', '')}")
     lines += ["", "## Implementation Steps"]
     for i, sub in enumerate(subtasks, 1):
-        lines.append(f"{i}. [{sub.get('type', '')}] {sub.get('title', '')}: {sub.get('description', '')}")
+        lines.append(
+            f"{i}. [{sub.get('type', '')}] {sub.get('title', '')}: {sub.get('description', '')}"
+        )
     return "\n".join(lines)
 
 
 # ---- Manager (full multi-agent pipeline) ----
+
 
 async def launch_manager(
     task_id: int,
@@ -223,10 +285,13 @@ async def launch_manager(
 
             def on_status(subtask_id: int, status: str) -> None:
                 asyncio.create_task(
-                    append_log(db, task_id, "pipeline", f"Subtask {subtask_id}: {status}")
+                    append_log(
+                        db, task_id, "pipeline", f"Subtask {subtask_id}: {status}"
+                    )
                 )
 
             from app.api.repo import get_active_repo_path
+
             effective_repo = repo_path or get_active_repo_path()
             result = await run_manager(
                 task_id=task_id,
@@ -244,9 +309,13 @@ async def launch_manager(
             for r in results:
                 if r.get("review_summary"):
                     await save_artifact_async(
-                        task_id, "review_findings",
-                        {"subtask_id": r["subtask_id"], "review_summary": r["review_summary"],
-                         "files_changed": r.get("files_changed", [])},
+                        task_id,
+                        "review_findings",
+                        {
+                            "subtask_id": r["subtask_id"],
+                            "review_summary": r["review_summary"],
+                            "files_changed": r.get("files_changed", []),
+                        },
                         "reviewer",
                         db=db,
                     )
@@ -256,7 +325,9 @@ async def launch_manager(
                 all_files: list[str] = []
                 for r in results:
                     all_files.extend(r.get("files_changed", []))
-                await update_task_diff(db, task_id, diff, list(dict.fromkeys(all_files)))
+                await update_task_diff(
+                    db, task_id, diff, list(dict.fromkeys(all_files))
+                )
                 # Save diff artifact
                 if diff:
                     await save_artifact_async(task_id, "diff", diff, "manager", db=db)
@@ -265,15 +336,26 @@ async def launch_manager(
                 await transition_task(db, task_id, "testing")
                 await transition_task(db, task_id, "ready_for_review")
                 await append_log(
-                    db, task_id, "pipeline",
+                    db,
+                    task_id,
+                    "pipeline",
                     f"All subtasks complete — {len(results)} subtasks, diff ready for review",
                 )
             else:
                 preserve_worktree(task_id)
                 await update_pipeline_state(db, task_id, "blocked")
                 await transition_task(db, task_id, "blocked")
-                await append_log(db, task_id, "pipeline_error", "Manager blocked — max retries exceeded on a subtask")
-                await send_task_alert(task_id, "blocked", "Manager blocked — max retries exceeded on a subtask")
+                await append_log(
+                    db,
+                    task_id,
+                    "pipeline_error",
+                    "Manager blocked — max retries exceeded on a subtask",
+                )
+                await send_task_alert(
+                    task_id,
+                    "blocked",
+                    "Manager blocked — max retries exceeded on a subtask",
+                )
 
         except Exception as e:
             logger.exception("Manager pipeline failed for task %d", task_id)
@@ -285,7 +367,10 @@ async def launch_manager(
 
 # ---- Planner Agent (simple mode: single plan, no LangGraph) ----
 
-async def launch_planner(task_id: int, title: str, description: str, repo_path: str | None = None) -> None:
+
+async def launch_planner(
+    task_id: int, title: str, description: str, repo_path: str | None = None
+) -> None:
     from app.agents.planner import run_planner
 
     settings = get_settings()
@@ -305,6 +390,7 @@ async def launch_planner(task_id: int, title: str, description: str, repo_path: 
 
         try:
             from app.api.repo import get_active_repo_path
+
             plan, error, tokens_in, tokens_out = await asyncio.to_thread(
                 run_planner,
                 task_id=task_id,
@@ -324,25 +410,37 @@ async def launch_planner(task_id: int, title: str, description: str, repo_path: 
 
         if error:
             await finish_agent_run(
-                db, run_id, "failed",
-                tokens_in=tokens_in, tokens_out=tokens_out, cost_estimate=cost, error=error,
+                db,
+                run_id,
+                "failed",
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                cost_estimate=cost,
+                error=error,
             )
             await transition_task(db, task_id, "blocked")
             await append_log(db, task_id, "error", error)
         else:
             await update_task_plan(db, task_id, plan)
             await finish_agent_run(
-                db, run_id, "completed",
-                tokens_in=tokens_in, tokens_out=tokens_out, cost_estimate=cost,
+                db,
+                run_id,
+                "completed",
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                cost_estimate=cost,
             )
             await transition_task(db, task_id, "ready_for_review")
             await append_log(
-                db, task_id, "plan",
+                db,
+                task_id,
+                "plan",
                 f"Plan ready ({len(plan)} chars) — tokens_in={tokens_in} tokens_out={tokens_out} cost=${cost:.4f}",
             )
 
 
 # ---- Coder Agent (simple mode: single coder after planner) ----
+
 
 async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) -> None:
     from app.agents.coder import run_coder
@@ -365,6 +463,7 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
                 asyncio.create_task(heartbeat_agent_run(db, run_id))
 
             from app.api.repo import get_active_repo_path
+
             files_changed, error, tokens_in, tokens_out = await asyncio.to_thread(
                 run_coder,
                 task_id=task_id,
@@ -378,8 +477,13 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
 
             if error:
                 await finish_agent_run(
-                    db, run_id, "failed",
-                    tokens_in=tokens_in, tokens_out=tokens_out, cost_estimate=cost, error=error,
+                    db,
+                    run_id,
+                    "failed",
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    cost_estimate=cost,
+                    error=error,
                 )
                 preserve_worktree(task_id)
                 await transition_task(db, task_id, "blocked")
@@ -390,14 +494,20 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
                 if diff:
                     await save_artifact_async(task_id, "diff", diff, "coder", db=db)
                 await finish_agent_run(
-                    db, run_id, "completed",
-                    tokens_in=tokens_in, tokens_out=tokens_out, cost_estimate=cost,
+                    db,
+                    run_id,
+                    "completed",
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    cost_estimate=cost,
                 )
                 preserve_worktree(task_id)
                 await transition_task(db, task_id, "testing")
                 await transition_task(db, task_id, "ready_for_review")
                 await append_log(
-                    db, task_id, "diff",
+                    db,
+                    task_id,
+                    "diff",
                     f"Diff ready — {len(files_changed)} files changed, tokens_in={tokens_in} cost=${cost:.4f}",
                 )
 

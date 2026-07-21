@@ -4,6 +4,7 @@ Verification contract:
   - git_log_read: set True by generate_changelog tool call
   - changelog_written: set True when write_file writes CHANGELOG.md
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,16 +24,27 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "changelog_agent",
     "description": "Generates and maintains CHANGELOG.md in Keep-a-Changelog format by reading git history and categorizing commits.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "get_file_tree",
-        "git_log", "git_show", "git_status", "read_files", "file_exists",
-        "generate_changelog", "write_file", "submit_changelog",
+        "read_file",
+        "list_files",
+        "search_code",
+        "get_file_tree",
+        "git_log",
+        "git_show",
+        "git_status",
+        "read_files",
+        "file_exists",
+        "generate_changelog",
+        "write_file",
+        "submit_changelog",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
     "side_effects": ["writes CHANGELOG.md"],
     "permissions": ["read_repo", "write_repo"],
     "risk_level": "low",
-    "expected_verification": {"git_log_read": "generate_changelog must run before writing changelog"},
+    "expected_verification": {
+        "git_log_read": "generate_changelog must run before writing changelog"
+    },
     "dependencies": [],
 }
 
@@ -42,8 +54,14 @@ _SUBMIT_CHANGELOG_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "version": {"type": "string", "description": "Version being documented (e.g. 1.3.0)"},
-            "content": {"type": "string", "description": "Full CHANGELOG.md markdown text in Keep-a-Changelog format"},
+            "version": {
+                "type": "string",
+                "description": "Version being documented (e.g. 1.3.0)",
+            },
+            "content": {
+                "type": "string",
+                "description": "Full CHANGELOG.md markdown text in Keep-a-Changelog format",
+            },
             "sections": {
                 "type": "object",
                 "description": "Count of entries per section",
@@ -56,7 +74,10 @@ _SUBMIT_CHANGELOG_TOOL: dict[str, Any] = {
                     "deprecated": {"type": "integer"},
                 },
             },
-            "file_path": {"type": "string", "description": "Path where CHANGELOG.md was written"},
+            "file_path": {
+                "type": "string",
+                "description": "Path where CHANGELOG.md was written",
+            },
         },
         "required": ["version", "content"],
     },
@@ -69,8 +90,14 @@ _CHANGELOG_TOOLS = READ_ONLY_TOOLS + [
         "input_schema": {
             "type": "object",
             "properties": {
-                "from_ref": {"type": "string", "description": "Start git ref (tag or commit)"},
-                "to_ref": {"type": "string", "description": "End git ref (default: HEAD)"},
+                "from_ref": {
+                    "type": "string",
+                    "description": "Start git ref (tag or commit)",
+                },
+                "to_ref": {
+                    "type": "string",
+                    "description": "End git ref (default: HEAD)",
+                },
                 "repo_path": {"type": "string"},
             },
             "required": [],
@@ -167,7 +194,9 @@ def run_changelog_agent(
     return AgentResult(
         summary=f"Changelog v{raw.get('version', '?')}: {total_entries} entries. Written to {raw.get('file_path', 'CHANGELOG.md')}",
         findings=[{"section": k.title(), "count": v} for k, v in sections.items() if v],
-        files_touched=[raw.get("file_path", "CHANGELOG.md")] if raw.get("file_path") else [],
+        files_touched=(
+            [raw.get("file_path", "CHANGELOG.md")] if raw.get("file_path") else []
+        ),
         verified=bool(final_state["verification"].get("git_log_read", False)),
         requires_human_approval=False,
         tokens_in=final_state["tokens_in"],
@@ -181,20 +210,28 @@ def run_changelog_agent(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["changelog_generation", "commit_categorization", "changelog_documentation"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=[
+                    "changelog_generation",
+                    "commit_categorization",
+                    "changelog_documentation",
+                ],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

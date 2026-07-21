@@ -13,6 +13,7 @@ Stream key layout:
 Message fields:
   event_id, event_type, task_id, epic_id, payload (JSON), emitted_by, created_at
 """
+
 from __future__ import annotations
 
 import json
@@ -59,7 +60,9 @@ def _ensure_group() -> None:
             id="$",
             mkstream=True,
         )
-        logger.info("Redis Streams consumer group '%s' created", settings.redis_consumer_group)
+        logger.info(
+            "Redis Streams consumer group '%s' created", settings.redis_consumer_group
+        )
     except Exception as exc:
         if "BUSYGROUP" in str(exc):
             pass  # Group already exists — OK
@@ -88,8 +91,12 @@ def publish_to_stream(event: GridironEvent) -> None:
             "emitted_by": event.emitted_by,
             "created_at": (event.created_at or datetime.now(timezone.utc)).isoformat(),
         }
-        msg_id: str = client.xadd(_STREAM_KEY, payload, maxlen=_MAXLEN, approximate=True)
-        logger.debug("Published %s to Redis Streams msg_id=%s", event.event_type, msg_id)
+        msg_id: str = client.xadd(
+            _STREAM_KEY, payload, maxlen=_MAXLEN, approximate=True
+        )
+        logger.debug(
+            "Published %s to Redis Streams msg_id=%s", event.event_type, msg_id
+        )
     except Exception:
         logger.exception("Failed to publish event %s to Redis Streams", event.event_id)
 

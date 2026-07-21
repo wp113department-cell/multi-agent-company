@@ -5,6 +5,7 @@ Phase 5 upgrade adds epic-level supervision:
 - Epic halt: ≥ MANAGER_MAX_EPIC_FAILURES blocked subtasks → emit epic.halted
 - Batched approval package: all diffs, QA results, review findings assembled at epic completion
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -24,9 +25,20 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "manager",
     "description": "Orchestrates the full Dev → QA → Review pipeline per subtask. Manages epic lifecycle, halt conditions, and assembles the approval package.",
     "allowed_tools": [],
-    "input_types": ["task_id", "subtasks", "worktree_path", "plan", "repo_path", "epic_id"],
+    "input_types": [
+        "task_id",
+        "subtasks",
+        "worktree_path",
+        "plan",
+        "repo_path",
+        "epic_id",
+    ],
     "output_types": ["EpicApprovalPackage"],
-    "side_effects": ["dispatches backend_dev/frontend_dev/qa/reviewer agents", "writes to DB", "publishes events"],
+    "side_effects": [
+        "dispatches backend_dev/frontend_dev/qa/reviewer agents",
+        "writes to DB",
+        "publishes events",
+    ],
     "permissions": ["read_repo", "write_repo", "database_write", "event_bus_publish"],
     "risk_level": "high",
     "expected_verification": {},
@@ -98,7 +110,12 @@ async def run_manager(
         subtask_title = str(subtask.get("title", ""))
         subtask_plan = str(subtask.get("description") or plan)
 
-        logger.info("Manager dispatching subtask %d type=%s for task %d", subtask_id, subtask_type, task_id)
+        logger.info(
+            "Manager dispatching subtask %d type=%s for task %d",
+            subtask_id,
+            subtask_type,
+            task_id,
+        )
 
         # Day 12 Part 4 — hierarchy chain: fleet_manager selects an agent for
         # this capability and agent_bus publishes TaskCreated, alongside (not
@@ -110,19 +127,38 @@ async def run_manager(
             from app.fleet.fleet_events import publish, task_created
             from app.fleet.fleet_manager import get_fleet_manager
 
-            required_capability = "frontend_development" if subtask_type == "frontend" else "backend_development"
-            get_fleet_manager().select(required_capability=required_capability, verify_tool_availability=True)
-            publish(task_created(task_id=str(task_id), title=subtask_title, agent_name="manager", trace_id=""))
+            required_capability = (
+                "frontend_development"
+                if subtask_type == "frontend"
+                else "backend_development"
+            )
+            get_fleet_manager().select(
+                required_capability=required_capability, verify_tool_availability=True
+            )
+            publish(
+                task_created(
+                    task_id=str(task_id),
+                    title=subtask_title,
+                    agent_name="manager",
+                    trace_id="",
+                )
+            )
         except Exception:
             pass
 
-        await publish_event(GridironEvent(
-            event_type="subtask.assigned",
-            task_id=str(task_id),
-            epic_id=epic_id,
-            payload={"subtask_id": subtask_id, "type": subtask_type, "title": subtask_title},
-            emitted_by="manager",
-        ))
+        await publish_event(
+            GridironEvent(
+                event_type="subtask.assigned",
+                task_id=str(task_id),
+                epic_id=epic_id,
+                payload={
+                    "subtask_id": subtask_id,
+                    "type": subtask_type,
+                    "title": subtask_title,
+                },
+                emitted_by="manager",
+            )
+        )
 
         if on_status:
             on_status(subtask_id, "dispatched")
@@ -138,7 +174,10 @@ async def run_manager(
         for attempt in range(max_retries):
             retry_context = ""
             if attempt > 0 and qa_errors:
-                retry_context = f"\n\nPrevious QA/review errors (attempt {attempt}):\n" + "\n".join(qa_errors[:5])
+                retry_context = (
+                    f"\n\nPrevious QA/review errors (attempt {attempt}):\n"
+                    + "\n".join(qa_errors[:5])
+                )
 
             full_plan = subtask_plan + retry_context
 
@@ -163,7 +202,12 @@ async def run_manager(
 
             if dev_error:
                 qa_errors = [f"Dev agent error: {dev_error}"]
-                logger.warning("Dev error attempt %d subtask %d: %s", attempt + 1, subtask_id, dev_error)
+                logger.warning(
+                    "Dev error attempt %d subtask %d: %s",
+                    attempt + 1,
+                    subtask_id,
+                    dev_error,
+                )
                 if attempt == max_retries - 1:
                     break
                 continue
@@ -180,25 +224,31 @@ async def run_manager(
 
             if qa_result.status == "failed":
                 qa_errors = qa_result.errors or [qa_result.summary]
-                await publish_event(GridironEvent(
-                    event_type="qa.failed",
-                    task_id=str(task_id),
-                    epic_id=epic_id,
-                    payload={"subtask_id": subtask_id, "errors": qa_errors[:3]},
-                    emitted_by="qa",
-                ))
-                logger.warning("QA failed attempt %d subtask %d", attempt + 1, subtask_id)
+                await publish_event(
+                    GridironEvent(
+                        event_type="qa.failed",
+                        task_id=str(task_id),
+                        epic_id=epic_id,
+                        payload={"subtask_id": subtask_id, "errors": qa_errors[:3]},
+                        emitted_by="qa",
+                    )
+                )
+                logger.warning(
+                    "QA failed attempt %d subtask %d", attempt + 1, subtask_id
+                )
                 if attempt == max_retries - 1:
                     break
                 continue
 
-            await publish_event(GridironEvent(
-                event_type="qa.passed",
-                task_id=str(task_id),
-                epic_id=epic_id,
-                payload={"subtask_id": subtask_id},
-                emitted_by="qa",
-            ))
+            await publish_event(
+                GridironEvent(
+                    event_type="qa.passed",
+                    task_id=str(task_id),
+                    epic_id=epic_id,
+                    payload={"subtask_id": subtask_id},
+                    emitted_by="qa",
+                )
+            )
 
             subtask_diff = get_diff(task_id, repo)
             review_result = await asyncio.to_thread(
@@ -221,17 +271,19 @@ async def run_manager(
                 for f in review_result.findings
             ]
 
-            await publish_event(GridironEvent(
-                event_type="review.completed",
-                task_id=str(task_id),
-                epic_id=epic_id,
-                payload={
-                    "subtask_id": subtask_id,
-                    "verdict": review_result.verdict,
-                    "blocking_count": review_result.blocking_count,
-                },
-                emitted_by="reviewer",
-            ))
+            await publish_event(
+                GridironEvent(
+                    event_type="review.completed",
+                    task_id=str(task_id),
+                    epic_id=epic_id,
+                    payload={
+                        "subtask_id": subtask_id,
+                        "verdict": review_result.verdict,
+                        "blocking_count": review_result.blocking_count,
+                    },
+                    emitted_by="reviewer",
+                )
+            )
 
             if not review_result.has_blocking:
                 subtask_status = "completed"
@@ -242,37 +294,50 @@ async def run_manager(
                 for f in review_result.findings
                 if f.severity == "blocking"
             ]
-            logger.warning("Reviewer blocking findings attempt %d subtask %d", attempt + 1, subtask_id)
+            logger.warning(
+                "Reviewer blocking findings attempt %d subtask %d",
+                attempt + 1,
+                subtask_id,
+            )
             if attempt == max_retries - 1:
                 break
 
-        results.append({
-            "subtask_id": subtask_id,
-            "type": subtask_type,
-            "status": subtask_status,
-            "files_changed": files_changed,
-            "review_summary": review_summary,
-            "qa_summary": qa_summary,
-            "review_findings": review_findings,
-            "diff": subtask_diff,
-        })
+        results.append(
+            {
+                "subtask_id": subtask_id,
+                "type": subtask_type,
+                "status": subtask_status,
+                "files_changed": files_changed,
+                "review_summary": review_summary,
+                "qa_summary": qa_summary,
+                "review_findings": review_findings,
+                "diff": subtask_diff,
+            }
+        )
 
         if subtask_status == "blocked":
             blocked_count += 1
-            await publish_event(GridironEvent(
-                event_type="task.blocked",
-                task_id=str(task_id),
-                epic_id=epic_id,
-                payload={"subtask_id": subtask_id, "reason": "max retries exceeded"},
-                emitted_by="manager",
-            ))
+            await publish_event(
+                GridironEvent(
+                    event_type="task.blocked",
+                    task_id=str(task_id),
+                    epic_id=epic_id,
+                    payload={
+                        "subtask_id": subtask_id,
+                        "reason": "max retries exceeded",
+                    },
+                    emitted_by="manager",
+                )
+            )
 
             # Halt the epic early if too many subtasks failed
             if blocked_count >= max_epic_failures:
                 overall_status = "halted"
                 logger.error(
                     "Epic halted: %d/%d subtasks failed for task %d",
-                    blocked_count, max_epic_failures, task_id,
+                    blocked_count,
+                    max_epic_failures,
+                    task_id,
                 )
                 # Day 12 — Failure Recovery Ladder: Abort. run_manager()'s own
                 # retry loop (max_retries per subtask, already existed) is the
@@ -280,7 +345,11 @@ async def run_manager(
                 # subtasks exhaust their retries for the whole epic to continue.
                 try:
                     from app.fleet.failure_ladder import abort
-                    abort(str(task_id), f"epic halted — {blocked_count}/{max_epic_failures} subtasks failed")
+
+                    abort(
+                        str(task_id),
+                        f"epic halted — {blocked_count}/{max_epic_failures} subtasks failed",
+                    )
                 except Exception:
                     pass
                 break
@@ -290,8 +359,16 @@ async def run_manager(
             # flag for human review rather than aborting the whole task.
             try:
                 from app.fleet.failure_ladder import escalate, request_human_review
-                escalate("manager", f"subtask {subtask_id} exhausted retries", trace_id="")
-                request_human_review(str(task_id), "manager", f"subtask {subtask_id} blocked after retries", trace_id="")
+
+                escalate(
+                    "manager", f"subtask {subtask_id} exhausted retries", trace_id=""
+                )
+                request_human_review(
+                    str(task_id),
+                    "manager",
+                    f"subtask {subtask_id} blocked after retries",
+                    trace_id="",
+                )
             except Exception:
                 pass
 
@@ -300,7 +377,11 @@ async def run_manager(
             if on_status:
                 on_status(subtask_id, "completed")
 
-    return {"status": overall_status, "results": results, "blocked_count": blocked_count}
+    return {
+        "status": overall_status,
+        "results": results,
+        "blocked_count": blocked_count,
+    }
 
 
 async def run_epic_manager(
@@ -344,18 +425,22 @@ async def run_epic_manager(
 
     if estimate.requires_approval:
         await db.execute(
-            sa_update(Epic).where(Epic.epic_id == epic_id).values(status="pending_cost_approval")
+            sa_update(Epic)
+            .where(Epic.epic_id == epic_id)
+            .values(status="pending_cost_approval")
         )
         await db.commit()
-        await publish_event(GridironEvent(
-            event_type="epic.pending_cost_approval",
-            epic_id=epic_id,
-            payload={
-                "estimated_cost_usd": estimate.estimated_cost_usd,
-                "threshold": settings.cost_approval_threshold,
-            },
-            emitted_by="manager",
-        ))
+        await publish_event(
+            GridironEvent(
+                event_type="epic.pending_cost_approval",
+                epic_id=epic_id,
+                payload={
+                    "estimated_cost_usd": estimate.estimated_cost_usd,
+                    "threshold": settings.cost_approval_threshold,
+                },
+                emitted_by="manager",
+            )
+        )
         return EpicApprovalPackage(
             epic_id=epic_id,
             status="pending_cost_approval",
@@ -369,14 +454,18 @@ async def run_epic_manager(
         )
 
     # --- Step 2: Planning pipeline ---
-    await db.execute(sa_update(Epic).where(Epic.epic_id == epic_id).values(status="planning"))
+    await db.execute(
+        sa_update(Epic).where(Epic.epic_id == epic_id).values(status="planning")
+    )
     await db.commit()
-    await publish_event(GridironEvent(
-        event_type="epic.planning_started",
-        epic_id=epic_id,
-        payload={"goal": goal[:200]},
-        emitted_by="manager",
-    ))
+    await publish_event(
+        GridironEvent(
+            event_type="epic.planning_started",
+            epic_id=epic_id,
+            payload={"goal": goal[:200]},
+            emitted_by="manager",
+        )
+    )
 
     # Create a DevTask for this epic
     task = DevTask(
@@ -418,7 +507,9 @@ async def run_epic_manager(
     await db.commit()
 
     # --- Step 3: Coding pipeline ---
-    await db.execute(sa_update(Epic).where(Epic.epic_id == epic_id).values(status="coding"))
+    await db.execute(
+        sa_update(Epic).where(Epic.epic_id == epic_id).values(status="coding")
+    )
     await db.commit()
 
     worktree_path = str(create_worktree(task_id, repo))
@@ -438,6 +529,7 @@ async def run_epic_manager(
 
     # Collect tokens from agent_runs for cost_actual
     from sqlalchemy import func as sqlfunc
+
     token_result = await db.execute(  # noqa: F841
         select(sqlfunc.sum(DevTask.id))  # placeholder — real token sum via agent_runs
     )
@@ -468,7 +560,9 @@ async def run_epic_manager(
     for r in subtask_result_objs:
         all_files.extend(r.files_changed)
 
-    all_diffs = "\n\n".join(f"# Subtask {r.subtask_id}\n{r.diff}" for r in subtask_result_objs if r.diff)
+    all_diffs = "\n\n".join(
+        f"# Subtask {r.subtask_id}\n{r.diff}" for r in subtask_result_objs if r.diff
+    )
     all_qa = [r.qa_summary for r in subtask_result_objs if r.qa_summary]
     all_findings: list[dict[str, Any]] = []
     for raw in results:
@@ -484,12 +578,14 @@ async def run_epic_manager(
             .values(status="halted", halt_reason=halt_reason)
         )
         await db.commit()
-        await publish_event(GridironEvent(
-            event_type="epic.halted",
-            epic_id=epic_id,
-            payload={"blocked_count": blocked_count, "halt_reason": halt_reason},
-            emitted_by="manager",
-        ))
+        await publish_event(
+            GridironEvent(
+                event_type="epic.halted",
+                epic_id=epic_id,
+                payload={"blocked_count": blocked_count, "halt_reason": halt_reason},
+                emitted_by="manager",
+            )
+        )
         # Store outcome in engineering memory
         await embed_task_outcome(
             task_id=str(task_id),
@@ -512,18 +608,22 @@ async def run_epic_manager(
             halt_reason=halt_reason,
         )
 
-    await db.execute(sa_update(Epic).where(Epic.epic_id == epic_id).values(status="ready_for_review"))
+    await db.execute(
+        sa_update(Epic).where(Epic.epic_id == epic_id).values(status="ready_for_review")
+    )
     await db.commit()
-    await publish_event(GridironEvent(
-        event_type="epic.ready_for_review",
-        epic_id=epic_id,
-        payload={
-            "subtask_count": len(subtasks),
-            "files_changed": len(all_files),
-            "cost_actual_usd": cost_actual,
-        },
-        emitted_by="manager",
-    ))
+    await publish_event(
+        GridironEvent(
+            event_type="epic.ready_for_review",
+            epic_id=epic_id,
+            payload={
+                "subtask_count": len(subtasks),
+                "files_changed": len(all_files),
+                "cost_actual_usd": cost_actual,
+            },
+            emitted_by="manager",
+        )
+    )
 
     # Store outcome in engineering memory
     summary = "; ".join(all_qa[:3]) or f"Epic completed with {len(subtasks)} subtasks"
@@ -553,20 +653,28 @@ async def run_epic_manager(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["task_orchestration", "epic_management", "pipeline_coordination"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=[
+                    "task_orchestration",
+                    "epic_management",
+                    "pipeline_coordination",
+                ],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

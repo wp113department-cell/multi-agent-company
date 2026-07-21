@@ -8,6 +8,7 @@ Revision ID: 014
 Revises: 013
 Create Date: 2026-07-21
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -30,10 +31,22 @@ def upgrade() -> None:
         sa.Column("embedding", Vector(1536), nullable=True),
         sa.Column("version", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("state", sa.String(20), nullable=False, server_default="draft"),
-        sa.Column("supersedes_id", sa.BigInteger(), sa.ForeignKey("versioned_lessons.id"), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "supersedes_id",
+            sa.BigInteger(),
+            sa.ForeignKey("versioned_lessons.id"),
+            nullable=True,
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
     )
-    op.create_index("ix_versioned_lessons_lesson_id", "versioned_lessons", ["lesson_id"])
+    op.create_index(
+        "ix_versioned_lessons_lesson_id", "versioned_lessons", ["lesson_id"]
+    )
     op.create_index("ix_versioned_lessons_topic", "versioned_lessons", ["topic"])
     op.create_index("ix_versioned_lessons_state", "versioned_lessons", ["state"])
 

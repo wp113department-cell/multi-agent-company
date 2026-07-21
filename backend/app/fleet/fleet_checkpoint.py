@@ -14,6 +14,7 @@ Usage:
     # If the tool fails, restore:
     restored = rollback_to(ckpt_id)
 """
+
 from __future__ import annotations
 
 import copy
@@ -22,7 +23,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from threading import Lock
 from typing import Any
-
 
 # Serializable snapshot of AgentRunState (plain dict, deep-copied on save and restore)
 AgentStateSnapshot = dict[str, Any]
@@ -188,6 +188,7 @@ def get_checkpoint_store() -> CheckpointStore:
 # Module-level convenience functions (operate on singleton)
 # ---------------------------------------------------------------------------
 
+
 def save_checkpoint(
     state: AgentStateSnapshot,
     agent_name: str,
@@ -198,8 +199,12 @@ def save_checkpoint(
 ) -> str:
     """Save a checkpoint and return its ID. Uses the process-wide store."""
     return get_checkpoint_store().save(
-        state, agent_name=agent_name, task_id=task_id, label=label,
-        metadata=metadata, trace_id=trace_id,
+        state,
+        agent_name=agent_name,
+        task_id=task_id,
+        label=label,
+        metadata=metadata,
+        trace_id=trace_id,
     )
 
 

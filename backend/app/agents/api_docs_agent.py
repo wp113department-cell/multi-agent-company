@@ -4,6 +4,7 @@ Verification contract:
   - routes_found forced True only when find_route / find_api ran
   - Documented endpoints must come from actual tool reads, not memory
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,11 +24,28 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "api_docs_agent",
     "description": "Documents API endpoints by reading actual route handlers and Pydantic schemas.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "find_route", "find_api", "parse_ast", "list_functions",
-        "write_file", "submit_docs",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "find_route",
+        "find_api",
+        "parse_ast",
+        "list_functions",
+        "write_file",
+        "submit_docs",
     ],
     "input_types": ["task_id", "doc_request", "repo_path"],
     "output_types": ["AgentResult"],
@@ -49,8 +67,13 @@ _VERIFICATION_CFG = VerificationConfig(
     reset_by=(),
     reset_keys=(),
     enforce_in_result={"routes_found": "routes_found"},
-    initial={"routes_found": False, "api_found": False, "ast_ran": False,
-             "files_read": False, "docs_written": False},
+    initial={
+        "routes_found": False,
+        "api_found": False,
+        "ast_ran": False,
+        "files_read": False,
+        "docs_written": False,
+    },
 )
 
 
@@ -99,7 +122,9 @@ def run_api_docs_agent(
 
     raw = final_state["result"]
     return AgentResult(
-        summary=str(raw.get("summary", f"{len(raw.get('endpoints', []))} endpoints documented")),
+        summary=str(
+            raw.get("summary", f"{len(raw.get('endpoints', []))} endpoints documented")
+        ),
         findings=list(raw.get("spec_drift", [])),
         files_touched=list(raw.get("files_written", [])),
         verified=bool(final_state["verification"].get("routes_found", False)),
@@ -115,20 +140,24 @@ def run_api_docs_agent(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["api_documentation", "endpoint_documentation"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["api_documentation", "endpoint_documentation"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

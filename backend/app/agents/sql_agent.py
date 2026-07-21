@@ -5,6 +5,7 @@ Verification contract:
   - is_destructive forced True if DROP/TRUNCATE/DELETE detected in query
   - Destructive ops require human approval
 """
+
 from __future__ import annotations
 
 import logging
@@ -24,11 +25,29 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "sql_agent",
     "description": "Writes and validates SQL queries and migrations against the live database schema.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "run_sql", "inspect_schema", "find_sql", "explain_query",
-        "edit_file", "write_file", "submit_sql_report",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "run_sql",
+        "inspect_schema",
+        "find_sql",
+        "explain_query",
+        "edit_file",
+        "write_file",
+        "submit_sql_report",
     ],
     "input_types": ["task_id", "task_description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -105,14 +124,22 @@ def run_sql_agent(
 
     raw = final_state["result"]
     return AgentResult(
-        summary=str(raw.get("summary", raw.get("query_or_migration", "(no summary)")[:200])),
+        summary=str(
+            raw.get("summary", raw.get("query_or_migration", "(no summary)")[:200])
+        ),
         findings=list(raw.get("warnings", [])),
         files_touched=list(raw.get("files_written", [])),
         verified=bool(final_state["verification"].get("schema_inspected", False)),
-        requires_human_approval=bool(raw.get("_requires_human_approval", requires_approval)),
+        requires_human_approval=bool(
+            raw.get("_requires_human_approval", requires_approval)
+        ),
         tokens_in=final_state["tokens_in"],
         tokens_out=final_state["tokens_out"],
-        status="needs_approval" if requires_approval else ("completed" if final_state["submitted"] else "blocked"),
+        status=(
+            "needs_approval"
+            if requires_approval
+            else ("completed" if final_state["submitted"] else "blocked")
+        ),
         raw=raw,
     )
 
@@ -121,20 +148,28 @@ def run_sql_agent(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["sql_management", "schema_analysis", "query_optimization"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=[
+                    "sql_management",
+                    "schema_analysis",
+                    "query_optimization",
+                ],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

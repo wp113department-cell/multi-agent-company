@@ -3,6 +3,7 @@
 Scopes all file-browser operations to paths inside allowed_workspace_parent.
 Prevents path traversal attacks.
 """
+
 from __future__ import annotations
 
 import os
@@ -13,6 +14,7 @@ from typing import Any
 def _workspace_parent() -> str:
     try:
         from app.config import get_settings
+
         return get_settings().allowed_workspace_parent
     except Exception:
         return "/home"
@@ -38,12 +40,14 @@ def list_directory(path: str) -> list[dict[str, Any]]:
         raise ValueError(f"Not a directory: {path}")
     entries = []
     for child in sorted(p.iterdir()):
-        entries.append({
-            "name": child.name,
-            "path": str(child),
-            "type": "dir" if child.is_dir() else "file",
-            "size": child.stat().st_size if child.is_file() else None,
-        })
+        entries.append(
+            {
+                "name": child.name,
+                "path": str(child),
+                "type": "dir" if child.is_dir() else "file",
+                "size": child.stat().st_size if child.is_file() else None,
+            }
+        )
     return entries
 
 

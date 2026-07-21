@@ -9,11 +9,11 @@ Tests cover:
   - Specialized-agents registry includes every gap agent
   - Role files exist for each agent
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-
 
 # ---------------------------------------------------------------------------
 # Import all 7 gap agent modules — catches syntax errors at collection time
@@ -88,6 +88,7 @@ def _assert_handlers_valid(factory_fn: Any) -> dict[str, Any]:
 # Release Notes Agent
 # ===========================================================================
 
+
 class TestReleaseNotesAgent:
     def test_run_fn_is_callable(self) -> None:
         assert callable(run_release_notes_agent)
@@ -130,7 +131,13 @@ class TestReleaseNotesAgent:
 
     def test_submit_handler_stores_result(self) -> None:
         h = make_release_notes_handlers(_REPO)
-        h["submit_release_notes"]({"version": "v1.0.0", "content": "## v1.0.0\n- initial", "highlights": ["First release"]})
+        h["submit_release_notes"](
+            {
+                "version": "v1.0.0",
+                "content": "## v1.0.0\n- initial",
+                "highlights": ["First release"],
+            }
+        )
         result = h["_release_notes_result"]
         assert result["version"] == "v1.0.0"
 
@@ -145,6 +152,7 @@ class TestReleaseNotesAgent:
 # ===========================================================================
 # Evaluation Agent
 # ===========================================================================
+
 
 class TestEvaluationAgent:
     def test_run_fn_is_callable(self) -> None:
@@ -189,7 +197,9 @@ class TestEvaluationAgent:
 
     def test_submit_handler_stores_result(self) -> None:
         h = make_evaluation_handlers(_REPO)
-        h["submit_eval_result"]({"overall_score": 0.8, "pass_count": 4, "fail_count": 1, "summary": "Good"})
+        h["submit_eval_result"](
+            {"overall_score": 0.8, "pass_count": 4, "fail_count": 1, "summary": "Good"}
+        )
         result = h["_eval_result"]
         assert result["overall_score"] == 0.8
         assert result["pass_count"] == 4
@@ -201,6 +211,7 @@ class TestEvaluationAgent:
 # ===========================================================================
 # RAG Engineer Agent
 # ===========================================================================
+
 
 class TestRagEngineerAgent:
     def test_run_fn_is_callable(self) -> None:
@@ -246,13 +257,15 @@ class TestRagEngineerAgent:
 
     def test_submit_handler_stores_result(self) -> None:
         h = make_rag_engineer_handlers(_REPO)
-        h["submit_rag_design"]({
-            "summary": "Use pgvector with voyage-code-2",
-            "chunking_strategy": "recursive character 512 tokens",
-            "embedding_model": "voyage-code-2",
-            "vector_store": "pgvector",
-            "retrieval_strategy": "cosine top-5",
-        })
+        h["submit_rag_design"](
+            {
+                "summary": "Use pgvector with voyage-code-2",
+                "chunking_strategy": "recursive character 512 tokens",
+                "embedding_model": "voyage-code-2",
+                "vector_store": "pgvector",
+                "retrieval_strategy": "cosine top-5",
+            }
+        )
         result = h["_rag_result"]
         assert result["vector_store"] == "pgvector"
         assert result["embedding_model"] == "voyage-code-2"
@@ -264,6 +277,7 @@ class TestRagEngineerAgent:
 # ===========================================================================
 # Changelog Agent
 # ===========================================================================
+
 
 class TestChangelogAgent:
     def test_run_fn_is_callable(self) -> None:
@@ -308,12 +322,14 @@ class TestChangelogAgent:
 
     def test_submit_handler_stores_result(self) -> None:
         h = make_changelog_handlers(_REPO)
-        h["submit_changelog"]({
-            "version": "1.2.0",
-            "content": "## [1.2.0] ...",
-            "sections": {"added": 3, "fixed": 1},
-            "file_path": "CHANGELOG.md",
-        })
+        h["submit_changelog"](
+            {
+                "version": "1.2.0",
+                "content": "## [1.2.0] ...",
+                "sections": {"added": 3, "fixed": 1},
+                "file_path": "CHANGELOG.md",
+            }
+        )
         result = h["_changelog_result"]
         assert result["version"] == "1.2.0"
         assert result["sections"]["added"] == 3
@@ -325,6 +341,7 @@ class TestChangelogAgent:
 # ===========================================================================
 # User Story Generator
 # ===========================================================================
+
 
 class TestUserStoryGenerator:
     def test_run_fn_is_callable(self) -> None:
@@ -366,14 +383,24 @@ class TestUserStoryGenerator:
 
     def test_submit_handler_stores_result(self) -> None:
         h = make_user_story_handlers(_REPO)
-        h["submit_user_stories"]({
-            "feature": "Task Management",
-            "stories": [
-                {"as_a": "developer", "i_want": "to create tasks", "so_that": "I can track work",
-                 "title": "Create task", "acceptance_criteria": ["Task is saved", "Task appears in list"]},
-            ],
-            "summary": "Core task CRUD stories",
-        })
+        h["submit_user_stories"](
+            {
+                "feature": "Task Management",
+                "stories": [
+                    {
+                        "as_a": "developer",
+                        "i_want": "to create tasks",
+                        "so_that": "I can track work",
+                        "title": "Create task",
+                        "acceptance_criteria": [
+                            "Task is saved",
+                            "Task appears in list",
+                        ],
+                    },
+                ],
+                "summary": "Core task CRUD stories",
+            }
+        )
         result = h["_user_story_result"]
         assert result["feature"] == "Task Management"
         assert len(result["stories"]) == 1
@@ -385,6 +412,7 @@ class TestUserStoryGenerator:
 # ===========================================================================
 # Security Architect
 # ===========================================================================
+
 
 class TestSecurityArchitect:
     def test_run_fn_is_callable(self) -> None:
@@ -426,13 +454,20 @@ class TestSecurityArchitect:
 
     def test_submit_handler_stores_result(self) -> None:
         h = make_security_architect_handlers(_REPO)
-        h["submit_threat_model"]({
-            "summary": "Low risk overall",
-            "threats": [
-                {"category": "A03 Injection", "description": "Potential SQL injection", "severity": "high", "mitigation": "Use parameterised queries"},
-            ],
-            "overall_risk": "high",
-        })
+        h["submit_threat_model"](
+            {
+                "summary": "Low risk overall",
+                "threats": [
+                    {
+                        "category": "A03 Injection",
+                        "description": "Potential SQL injection",
+                        "severity": "high",
+                        "mitigation": "Use parameterised queries",
+                    },
+                ],
+                "overall_risk": "high",
+            }
+        )
         result = h["_security_result"]
         assert result["overall_risk"] == "high"
         assert len(result["threats"]) == 1
@@ -441,6 +476,7 @@ class TestSecurityArchitect:
         # Verify the run function logic: critical/high threats → requires_human_approval=True
         # We test via AgentResult fields, not a live run
         from app.agents.agent_result import AgentResult
+
         # Confirm AgentResult supports requires_human_approval field
         r = AgentResult(
             summary="test",
@@ -462,6 +498,7 @@ class TestSecurityArchitect:
 # ===========================================================================
 # Database Architect
 # ===========================================================================
+
 
 class TestDatabaseArchitect:
     def test_run_fn_is_callable(self) -> None:
@@ -507,11 +544,26 @@ class TestDatabaseArchitect:
 
     def test_submit_handler_stores_result(self) -> None:
         h = make_database_architect_handlers(_REPO)
-        h["submit_db_design"]({
-            "summary": "Add composite index on task_logs",
-            "tables": [{"name": "task_logs", "action": "index", "rationale": "Slow query on task_id+created_at"}],
-            "indexes": [{"table": "task_logs", "columns": ["task_id", "created_at"], "type": "btree", "rationale": "Range scan optimisation"}],
-        })
+        h["submit_db_design"](
+            {
+                "summary": "Add composite index on task_logs",
+                "tables": [
+                    {
+                        "name": "task_logs",
+                        "action": "index",
+                        "rationale": "Slow query on task_id+created_at",
+                    }
+                ],
+                "indexes": [
+                    {
+                        "table": "task_logs",
+                        "columns": ["task_id", "created_at"],
+                        "type": "btree",
+                        "rationale": "Range scan optimisation",
+                    }
+                ],
+            }
+        )
         result = h["_db_result"]
         assert result["tables"][0]["name"] == "task_logs"
         assert len(result["indexes"]) == 1
@@ -524,9 +576,11 @@ class TestDatabaseArchitect:
 # Specialized-agents registry completeness
 # ===========================================================================
 
+
 class TestSpecializedAgentsRegistry:
     def setup_method(self) -> None:
         from app.api.specialized_agents import _REGISTRY
+
         self._registry = _REGISTRY
 
     def test_release_notes_agent_in_registry(self) -> None:
@@ -552,9 +606,14 @@ class TestSpecializedAgentsRegistry:
 
     def test_all_gap_agents_module_paths_are_valid(self) -> None:
         import importlib
+
         gap_agents = [
-            "release_notes_agent", "evaluation_agent", "rag_engineer_agent",
-            "changelog_agent", "user_story_generator", "security_architect",
+            "release_notes_agent",
+            "evaluation_agent",
+            "rag_engineer_agent",
+            "changelog_agent",
+            "user_story_generator",
+            "security_architect",
             "database_architect",
         ]
         for name in gap_agents:
@@ -564,9 +623,14 @@ class TestSpecializedAgentsRegistry:
 
     def test_load_agent_fn_works_for_gap_agents(self) -> None:
         from app.api.specialized_agents import _load_agent_fn
+
         gap_agents = [
-            "release_notes_agent", "evaluation_agent", "rag_engineer_agent",
-            "changelog_agent", "user_story_generator", "security_architect",
+            "release_notes_agent",
+            "evaluation_agent",
+            "rag_engineer_agent",
+            "changelog_agent",
+            "user_story_generator",
+            "security_architect",
             "database_architect",
         ]
         for name in gap_agents:
@@ -575,24 +639,38 @@ class TestSpecializedAgentsRegistry:
 
     def test_total_registry_size_at_least_26(self) -> None:
         # 11 Day2 + 9 Day3 + 7 Gap = 27 minimum
-        assert len(self._registry) >= 26, f"Registry has only {len(self._registry)} agents"
+        assert (
+            len(self._registry) >= 26
+        ), f"Registry has only {len(self._registry)} agents"
 
 
 # ===========================================================================
 # AgentResult schema completeness (applies to all gap agents)
 # ===========================================================================
 
+
 class TestAgentResultSchema:
     def test_all_required_fields_present(self) -> None:
         from app.agents.agent_result import AgentResult
         import dataclasses
+
         field_names = {f.name for f in dataclasses.fields(AgentResult)}
-        for required in ("summary", "findings", "files_touched", "verified",
-                         "requires_human_approval", "tokens_in", "tokens_out", "status", "raw"):
+        for required in (
+            "summary",
+            "findings",
+            "files_touched",
+            "verified",
+            "requires_human_approval",
+            "tokens_in",
+            "tokens_out",
+            "status",
+            "raw",
+        ):
             assert required in field_names, f"AgentResult missing field: {required}"
 
     def test_agent_result_defaults_are_sane(self) -> None:
         from app.agents.agent_result import AgentResult
+
         r = AgentResult(
             summary="ok",
             findings=["a"],

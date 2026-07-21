@@ -1,4 +1,5 @@
 """LLMProvider ABC — provider-agnostic interface used by model_router."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

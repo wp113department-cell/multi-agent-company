@@ -14,6 +14,7 @@ record_pending() must be called by the code that invokes the graph, exactly
 once, after invoke() confirms a real pause — never from inside the paused
 node itself.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -64,7 +65,11 @@ def _new_isolated_db_engine() -> Any:
 
 
 async def _record_pending(
-    thread_id: str, action: str, details: dict[str, Any], agent_name: str, task_id: int | None
+    thread_id: str,
+    action: str,
+    details: dict[str, Any],
+    agent_name: str,
+    task_id: int | None,
 ) -> Any:
     from sqlalchemy import update
     from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -81,12 +86,19 @@ async def _record_pending(
             # stale duplicate entry no decision could ever reach again.
             await session.execute(
                 update(PendingApproval)
-                .where(PendingApproval.thread_id == thread_id, PendingApproval.status == "pending")
+                .where(
+                    PendingApproval.thread_id == thread_id,
+                    PendingApproval.status == "pending",
+                )
                 .values(status="superseded")
             )
             row = PendingApproval(
-                thread_id=thread_id, task_id=task_id, agent_name=agent_name,
-                action=action, details=details, status="pending",
+                thread_id=thread_id,
+                task_id=task_id,
+                agent_name=agent_name,
+                action=action,
+                details=details,
+                status="pending",
             )
             session.add(row)
             await session.commit()
@@ -106,12 +118,16 @@ async def _list_pending() -> list[Any]:
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             rows = (
-                await session.execute(
-                    select(PendingApproval)
-                    .where(PendingApproval.status == "pending")
-                    .order_by(PendingApproval.created_at.desc())
+                (
+                    await session.execute(
+                        select(PendingApproval)
+                        .where(PendingApproval.status == "pending")
+                        .order_by(PendingApproval.created_at.desc())
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             return list(rows)
     finally:
         await engine.dispose()
@@ -150,7 +166,10 @@ async def _record_decision(thread_id: str, approved: bool, decided_by: str) -> A
             row = (
                 await session.execute(
                     select(PendingApproval)
-                    .where(PendingApproval.thread_id == thread_id, PendingApproval.status == "pending")
+                    .where(
+                        PendingApproval.thread_id == thread_id,
+                        PendingApproval.status == "pending",
+                    )
                     .order_by(PendingApproval.created_at.desc())
                     .limit(1)
                 )
@@ -183,11 +202,17 @@ async def _record_decision(thread_id: str, approved: bool, decided_by: str) -> A
 # (caught by a broad except Exception at the call site) until fixed.
 # ---------------------------------------------------------------------------
 
+
 def record_pending(
-    thread_id: str, action: str, details: dict[str, Any] | None = None,
-    agent_name: str = "", task_id: int | None = None,
+    thread_id: str,
+    action: str,
+    details: dict[str, Any] | None = None,
+    agent_name: str = "",
+    task_id: int | None = None,
 ) -> PendingApprovalRecord:
-    row = asyncio.run(_record_pending(thread_id, action, details or {}, agent_name, task_id))
+    row = asyncio.run(
+        _record_pending(thread_id, action, details or {}, agent_name, task_id)
+    )
     return _to_record(row)
 
 
@@ -201,7 +226,9 @@ def get_pending(thread_id: str) -> PendingApprovalRecord | None:
     return _to_record(row) if row is not None else None
 
 
-def record_decision(thread_id: str, approved: bool, decided_by: str = "user") -> PendingApprovalRecord | None:
+def record_decision(
+    thread_id: str, approved: bool, decided_by: str = "user"
+) -> PendingApprovalRecord | None:
     row = asyncio.run(_record_decision(thread_id, approved, decided_by))
     return _to_record(row) if row is not None else None
 
@@ -210,9 +237,13 @@ def record_decision(thread_id: str, approved: bool, decided_by: str = "user") ->
 # Async facades — for callers already running inside an event loop
 # ---------------------------------------------------------------------------
 
+
 async def arecord_pending(
-    thread_id: str, action: str, details: dict[str, Any] | None = None,
-    agent_name: str = "", task_id: int | None = None,
+    thread_id: str,
+    action: str,
+    details: dict[str, Any] | None = None,
+    agent_name: str = "",
+    task_id: int | None = None,
 ) -> PendingApprovalRecord:
     row = await _record_pending(thread_id, action, details or {}, agent_name, task_id)
     return _to_record(row)
@@ -228,6 +259,8 @@ async def aget_pending(thread_id: str) -> PendingApprovalRecord | None:
     return _to_record(row) if row is not None else None
 
 
-async def arecord_decision(thread_id: str, approved: bool, decided_by: str = "user") -> PendingApprovalRecord | None:
+async def arecord_decision(
+    thread_id: str, approved: bool, decided_by: str = "user"
+) -> PendingApprovalRecord | None:
     row = await _record_decision(thread_id, approved, decided_by)
     return _to_record(row) if row is not None else None

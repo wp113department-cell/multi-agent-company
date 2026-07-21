@@ -6,6 +6,7 @@ All configuration reads from Settings — no literals in this module.
 When JWT_AUTH_ENABLED=false (default), the RBAC middleware falls back to
 the legacy X-User-Role header so existing integrations keep working.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -35,10 +36,14 @@ def create_access_token(data: dict[str, Any]) -> str:
         raise ValueError("JWT_SECRET_KEY must be set when JWT_AUTH_ENABLED=true")
 
     payload = dict(data)
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_access_token_expire_minutes)
+    expire = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.jwt_access_token_expire_minutes
+    )
     payload["exp"] = expire
     payload["iat"] = datetime.now(timezone.utc)
-    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return jwt.encode(
+        payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm
+    )
 
 
 def decode_access_token(token: str) -> dict[str, Any]:

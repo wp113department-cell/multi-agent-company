@@ -1,4 +1,5 @@
 """incident_responder_agent — triages incidents, identifies mitigation steps, and produces runbooks."""
+
 from __future__ import annotations
 
 import logging
@@ -15,19 +16,34 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "incident_responder_agent",
     "description": "Triages active incidents: reads logs and configs to identify blast radius, produces executable mitigation steps completable in under 5 minutes, and drafts a post-mortem outline.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "get_file_tree",
-        "search_symbols", "find_references", "list_functions", "parse_ast",
-        "analyze_file", "read_files", "file_exists", "file_info",
-        "git_log", "git_diff", "git_status",
-        "find_todos", "search_imports",
-        "write_file", "submit_incident_responder_agent",
+        "read_file",
+        "list_files",
+        "search_code",
+        "get_file_tree",
+        "search_symbols",
+        "find_references",
+        "list_functions",
+        "parse_ast",
+        "analyze_file",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "git_log",
+        "git_diff",
+        "git_status",
+        "find_todos",
+        "search_imports",
+        "write_file",
+        "submit_incident_responder_agent",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
     "side_effects": ["writes incident triage reports"],
     "permissions": ["read_repo", "write_docs"],
     "risk_level": "low",
-    "expected_verification": {"read": "read_file or git_log must run to inspect incident context"},
+    "expected_verification": {
+        "read": "read_file or git_log must run to inspect incident context"
+    },
     "dependencies": [],
 }
 
@@ -56,7 +72,12 @@ _WRITE = {
 _TOOLS = READ_ONLY_TOOLS + [_WRITE, _SUBMIT]
 
 _CFG = VerificationConfig(
-    set_by={"read_file": "read", "search_code": "read", "git_log": "read", "git_diff": "read"},
+    set_by={
+        "read_file": "read",
+        "search_code": "read",
+        "git_log": "read",
+        "git_diff": "read",
+    },
     reset_by=(),
     reset_keys=(),
     enforce_in_result={"read": "read"},
@@ -136,16 +157,19 @@ def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["incident_triage"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["incident_triage"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry unavailable: %s", exc)

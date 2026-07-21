@@ -14,6 +14,7 @@ tool_use_failed recovery:
   We parse that field and synthesize a proper tool-use response so the agent
   loop can continue without the caller seeing an error.
 """
+
 from __future__ import annotations
 
 import json
@@ -33,6 +34,7 @@ def _register() -> None:
     docs/FLEET_ENHANCEMENT_PLAN.md Day 6 note)."""
     try:
         from app.fleet.agent_registry import get_agent_registry
+
         get_agent_registry().register("groq_adapter", kind="infra_utility")
     except Exception as exc:
         logger.debug("Fleet registry unavailable: %s", exc)
@@ -65,15 +67,19 @@ def _to_groq_tools(
     """Convert Anthropic tool defs to OpenAI/Groq function tool format."""
     groq_tools = []
     for t in tools:
-        groq_tools.append({
-            "type": "function",
-            "function": {
-                "name": t["name"],
-                "description": t.get("description", ""),
-                # Anthropic calls it input_schema; OpenAI/Groq calls it parameters
-                "parameters": t.get("input_schema", {"type": "object", "properties": {}}),
-            },
-        })
+        groq_tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t.get("description", ""),
+                    # Anthropic calls it input_schema; OpenAI/Groq calls it parameters
+                    "parameters": t.get(
+                        "input_schema", {"type": "object", "properties": {}}
+                    ),
+                },
+            }
+        )
     return groq_tools
 
 
@@ -102,26 +108,30 @@ def _build_groq_messages(
                         if block.type == "text" and block.text:
                             text_parts.append(block.text)
                         elif block.type == "tool_use":
-                            tool_calls.append({
-                                "id": block.id,
-                                "type": "function",
-                                "function": {
-                                    "name": block.name,
-                                    "arguments": json.dumps(dict(block.input)),
-                                },
-                            })
+                            tool_calls.append(
+                                {
+                                    "id": block.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": block.name,
+                                        "arguments": json.dumps(dict(block.input)),
+                                    },
+                                }
+                            )
                     elif isinstance(block, dict):
                         if block.get("type") == "text":
                             text_parts.append(block.get("text", ""))
                         elif block.get("type") == "tool_use":
-                            tool_calls.append({
-                                "id": block["id"],
-                                "type": "function",
-                                "function": {
-                                    "name": block["name"],
-                                    "arguments": json.dumps(block.get("input", {})),
-                                },
-                            })
+                            tool_calls.append(
+                                {
+                                    "id": block["id"],
+                                    "type": "function",
+                                    "function": {
+                                        "name": block["name"],
+                                        "arguments": json.dumps(block.get("input", {})),
+                                    },
+                                }
+                            )
 
                 assistant_msg: dict[str, Any] = {
                     "role": "assistant",
@@ -139,13 +149,17 @@ def _build_groq_messages(
                 # May contain tool_result blocks
                 for block in content:
                     if isinstance(block, dict) and block.get("type") == "tool_result":
-                        groq_msgs.append({
-                            "role": "tool",
-                            "tool_call_id": block["tool_use_id"],
-                            "content": str(block.get("content", "")),
-                        })
+                        groq_msgs.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": block["tool_use_id"],
+                                "content": str(block.get("content", "")),
+                            }
+                        )
                     elif isinstance(block, dict) and block.get("type") == "text":
-                        groq_msgs.append({"role": "user", "content": block.get("text", "")})
+                        groq_msgs.append(
+                            {"role": "user", "content": block.get("text", "")}
+                        )
             else:
                 groq_msgs.append({"role": "user", "content": str(content)})
 
@@ -209,6 +223,7 @@ class _GroqUsage:
 # tool_use_failed recovery helpers
 # ---------------------------------------------------------------------------
 
+
 def _parse_failed_generation(failed_gen: str) -> tuple[str, dict[str, Any]] | None:
     """Parse Groq's failed_generation string to recover function name + args.
 
@@ -254,7 +269,8 @@ def _synthesize_tool_call_response(
     )
     logger.info(
         "tool_use_failed recovery: synthesised tool call %s with %d args",
-        fn_name, len(args),
+        fn_name,
+        len(args),
     )
     return _GroqResponse(fake_choice, tokens_in, tokens_out)
 
@@ -298,6 +314,7 @@ def run_groq(
         kwargs["tool_choice"] = "auto"
 
     from app.config import get_settings
+
     max_retries = get_settings().groq_max_retries
     for attempt in range(max_retries):
         try:
@@ -308,7 +325,10 @@ def run_groq(
                 wait = 30 * (attempt + 1)
                 logger.warning(
                     "Groq rate limit (attempt %d/%d) — sleeping %ds: %s",
-                    attempt + 1, max_retries, wait, exc,
+                    attempt + 1,
+                    max_retries,
+                    wait,
+                    exc,
                 )
                 time.sleep(wait)
             else:
@@ -337,6 +357,9 @@ def run_groq(
 
     logger.debug(
         "Groq call: model=%s tokens_in=%d tokens_out=%d stop=%s",
-        groq_model, tokens_in, tokens_out, choice.finish_reason,
+        groq_model,
+        tokens_in,
+        tokens_out,
+        choice.finish_reason,
     )
     return _GroqResponse(choice, tokens_in, tokens_out)

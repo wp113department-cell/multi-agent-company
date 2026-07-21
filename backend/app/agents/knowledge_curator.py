@@ -7,6 +7,7 @@ and well-categorized. The concrete mechanism by which this helps agents
 "understand what's needed and go the right way": that memory is what gets
 injected into every agent's context before it starts work.
 """
+
 from __future__ import annotations
 
 import logging
@@ -32,15 +33,27 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "knowledge_curator",
     "description": "Curates the fleet's persistent engineering memory (memory_embeddings) — dedupes, recategorizes, and quality-checks entries so future agent runs get accurate context. Never writes code; its apply phase only touches memory rows and, occasionally, role prompts.",
     "allowed_tools": [
-        "read_file", "memory_search", "memory_curate_read", "submit_enhancement_request",
-        "memory_curate_write", "write_file", "edit_file", "git_commit_change", "submit_fix",
+        "read_file",
+        "memory_search",
+        "memory_curate_read",
+        "submit_enhancement_request",
+        "memory_curate_write",
+        "write_file",
+        "edit_file",
+        "git_commit_change",
+        "submit_fix",
     ],
     "input_types": ["scan_trigger", "enhancement_request_id"],
     "output_types": ["AgentResult"],
-    "side_effects": ["files enhancement requests (scan)", "updates memory rows and/or role prompts (apply, post-approval only)"],
+    "side_effects": [
+        "files enhancement requests (scan)",
+        "updates memory rows and/or role prompts (apply, post-approval only)",
+    ],
     "permissions": ["read_repo", "write_memory"],
     "risk_level": "medium",
-    "expected_verification": {"memory_searched": "memory_search or memory_curate_read must run before filing a request"},
+    "expected_verification": {
+        "memory_searched": "memory_search or memory_curate_read must run before filing a request"
+    },
     "dependencies": [],
 }
 
@@ -83,7 +96,17 @@ _SUBMIT_ENHANCEMENT_TOOL_SPEC = {
         "properties": {
             "title": {"type": "string"},
             "description": {"type": "string"},
-            "category": {"type": "string", "enum": ["performance", "bug", "orchestration", "knowledge", "quality", "security"]},
+            "category": {
+                "type": "string",
+                "enum": [
+                    "performance",
+                    "bug",
+                    "orchestration",
+                    "knowledge",
+                    "quality",
+                    "security",
+                ],
+            },
             "priority": {"type": "string", "enum": ["emergency", "medium", "low"]},
             "evidence": {"type": "object"},
         },
@@ -93,15 +116,36 @@ _SUBMIT_ENHANCEMENT_TOOL_SPEC = {
 _SUBMIT_FIX_TOOL_SPEC = {
     "name": "submit_fix",
     "description": "Signal the curation action is complete.",
-    "input_schema": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]},
+    "input_schema": {
+        "type": "object",
+        "properties": {"summary": {"type": "string"}},
+        "required": ["summary"],
+    },
 }
 
-SCAN_TOOLS = [READ_ONLY_TOOLS[0], _MEMORY_SEARCH_TOOL_SPEC, _MEMORY_CURATE_READ_TOOL_SPEC, _SUBMIT_ENHANCEMENT_TOOL_SPEC]
-_WRITE_FILE_SPEC, _EDIT_FILE_SPEC, _RUN_TESTS_SPEC, _GIT_COMMIT_SPEC = FLEET_APPLY_TOOLS[1:]
-APPLY_TOOLS = [READ_ONLY_TOOLS[0], _MEMORY_CURATE_WRITE_TOOL_SPEC, _WRITE_FILE_SPEC, _EDIT_FILE_SPEC, _GIT_COMMIT_SPEC, _SUBMIT_FIX_TOOL_SPEC]
+SCAN_TOOLS = [
+    READ_ONLY_TOOLS[0],
+    _MEMORY_SEARCH_TOOL_SPEC,
+    _MEMORY_CURATE_READ_TOOL_SPEC,
+    _SUBMIT_ENHANCEMENT_TOOL_SPEC,
+]
+_WRITE_FILE_SPEC, _EDIT_FILE_SPEC, _RUN_TESTS_SPEC, _GIT_COMMIT_SPEC = (
+    FLEET_APPLY_TOOLS[1:]
+)
+APPLY_TOOLS = [
+    READ_ONLY_TOOLS[0],
+    _MEMORY_CURATE_WRITE_TOOL_SPEC,
+    _WRITE_FILE_SPEC,
+    _EDIT_FILE_SPEC,
+    _GIT_COMMIT_SPEC,
+    _SUBMIT_FIX_TOOL_SPEC,
+]
 
 _SCAN_CFG = VerificationConfig(
-    set_by={"memory_search": "memory_searched", "memory_curate_read": "memory_searched"},
+    set_by={
+        "memory_search": "memory_searched",
+        "memory_curate_read": "memory_searched",
+    },
     reset_by=(),
     reset_keys=(),
     enforce_in_result={"memory_searched": "memory_searched"},
@@ -169,10 +213,15 @@ def run_knowledge_curator_scan(trace_id: str = "") -> AgentResult:
     )
 
     return AgentResult(
-        summary="Curation scan complete" if final_state["submitted"] else "Curation scan complete — memory looks clean",
+        summary=(
+            "Curation scan complete"
+            if final_state["submitted"]
+            else "Curation scan complete — memory looks clean"
+        ),
         findings=[],
         files_touched=[],
-        verified=bool(final_state["verification"].get("memory_searched")) or not final_state["submitted"],
+        verified=bool(final_state["verification"].get("memory_searched"))
+        or not final_state["submitted"],
         requires_human_approval=False,
         tokens_in=final_state["tokens_in"],
         tokens_out=final_state["tokens_out"],
@@ -181,7 +230,9 @@ def run_knowledge_curator_scan(trace_id: str = "") -> AgentResult:
     )
 
 
-def run_knowledge_curator_apply(request_id: int, description: str, trace_id: str = "") -> AgentResult:
+def run_knowledge_curator_apply(
+    request_id: int, description: str, trace_id: str = ""
+) -> AgentResult:
     """APPLY phase — only ever called after a human approves `request_id`.
 
     Most approved requests only touch memory rows via memory_curate_write (no git commit
@@ -193,6 +244,7 @@ def run_knowledge_curator_apply(request_id: int, description: str, trace_id: str
 
     def submit_h(inp: dict[str, Any]) -> str:
         return "done"
+
     handlers["submit_fix"] = submit_h
 
     msg = (
@@ -238,16 +290,19 @@ def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["knowledge_curation"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["knowledge_curation"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry unavailable: %s", exc)

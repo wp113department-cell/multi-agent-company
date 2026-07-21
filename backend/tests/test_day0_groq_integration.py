@@ -12,6 +12,7 @@ SKIP CATEGORIES:
 TO REMOVE (once you have Anthropic API key):
   Delete this file and tests/groq_compat.py. Done.
 """
+
 from __future__ import annotations
 
 import json
@@ -23,7 +24,10 @@ import pytest
 # Load .env so GROQ_API_KEY and USE_GROQ are available
 try:
     from dotenv import load_dotenv
-    load_dotenv(dotenv_path=str(__file__).replace("tests/test_day0_groq_integration.py", ".env"))
+
+    load_dotenv(
+        dotenv_path=str(__file__).replace("tests/test_day0_groq_integration.py", ".env")
+    )
 except ImportError:
     pass
 
@@ -56,17 +60,28 @@ SUBMIT_TOOL: dict[str, Any] = {
 # [GROQ-OK] planner_node — real LLM produces valid JSON plan
 # ---------------------------------------------------------------------------
 
+
 class TestPlannerNodeRealLLM:
-    def test_planner_produces_json_with_steps(self, groq_llm_patch: Any) -> None:  # noqa: F811
+    def test_planner_produces_json_with_steps(
+        self, groq_llm_patch: Any  # noqa: F811
+    ) -> None:
         """planner_node calls Groq and returns parseable plan JSON with steps list."""
         from app.agents.base_graph import _make_planner_node, AgentRunState
 
-        planner = _make_planner_node("llama-3.1-8b-instant", "write a hello world function in Python")
+        planner = _make_planner_node(
+            "llama-3.1-8b-instant", "write a hello world function in Python"
+        )
         state: AgentRunState = {
-            "messages": [{"role": "user", "content": "write a hello world function in Python"}],
-            "verification": {}, "result": {}, "turns": 0,
-            "submitted": False, "requires_human_approval": False,
-            "tokens_in": 0, "tokens_out": 0,
+            "messages": [
+                {"role": "user", "content": "write a hello world function in Python"}
+            ],
+            "verification": {},
+            "result": {},
+            "turns": 0,
+            "submitted": False,
+            "requires_human_approval": False,
+            "tokens_in": 0,
+            "tokens_out": 0,
         }
         out = planner(state)
 
@@ -84,21 +99,29 @@ class TestPlannerNodeRealLLM:
         # Either steps key exists OR plan text is non-empty (model returned something)
         assert out["plan"] != "{}" or plan_data.get("steps") is not None
 
-    def test_planner_sets_status_running(self, groq_llm_patch: Any) -> None:  # noqa: F811
+    def test_planner_sets_status_running(
+        self, groq_llm_patch: Any  # noqa: F811
+    ) -> None:
         """planner_node always sets status=running in output."""
         from app.agents.base_graph import _make_planner_node, AgentRunState
 
         planner = _make_planner_node("llama-3.1-8b-instant", "add unit tests")
         state: AgentRunState = {
             "messages": [{"role": "user", "content": "add unit tests"}],
-            "verification": {}, "result": {}, "turns": 0,
-            "submitted": False, "requires_human_approval": False,
-            "tokens_in": 0, "tokens_out": 0,
+            "verification": {},
+            "result": {},
+            "turns": 0,
+            "submitted": False,
+            "requires_human_approval": False,
+            "tokens_in": 0,
+            "tokens_out": 0,
         }
         out = planner(state)
         assert out.get("status") == "running"
 
-    def test_planner_survives_bad_model_response(self, groq_llm_patch: Any) -> None:  # noqa: F811
+    def test_planner_survives_bad_model_response(
+        self, groq_llm_patch: Any  # noqa: F811
+    ) -> None:
         """planner_node must not raise even when LLM returns non-JSON text."""
         from app.agents.base_graph import _make_planner_node, AgentRunState
 
@@ -106,9 +129,13 @@ class TestPlannerNodeRealLLM:
         planner = _make_planner_node("llama-3.1-8b-instant", "x" * 5)
         state: AgentRunState = {
             "messages": [{"role": "user", "content": "x"}],
-            "verification": {}, "result": {}, "turns": 0,
-            "submitted": False, "requires_human_approval": False,
-            "tokens_in": 0, "tokens_out": 0,
+            "verification": {},
+            "result": {},
+            "turns": 0,
+            "submitted": False,
+            "requires_human_approval": False,
+            "tokens_in": 0,
+            "tokens_out": 0,
         }
         out = planner(state)  # must not raise
         assert "confidence" in out  # always returns a confidence value
@@ -118,8 +145,11 @@ class TestPlannerNodeRealLLM:
 # [GROQ-OK] reflection_node — real LLM produces valid JSON {satisfied, issues}
 # ---------------------------------------------------------------------------
 
+
 class TestReflectionNodeRealLLM:
-    def test_reflection_returns_satisfied_field(self, groq_llm_patch: Any) -> None:  # noqa: F811
+    def test_reflection_returns_satisfied_field(
+        self, groq_llm_patch: Any  # noqa: F811
+    ) -> None:
         """reflection_node produces a JSON response with a 'satisfied' boolean."""
         from app.agents.base_graph import _make_reflection_node, AgentRunState
 
@@ -127,11 +157,20 @@ class TestReflectionNodeRealLLM:
         state: AgentRunState = {
             "messages": [
                 {"role": "user", "content": "write a hello world function"},
-                {"role": "assistant", "content": [{"type": "text", "text": "def hello(): print('hello world')"}]},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "def hello(): print('hello world')"}
+                    ],
+                },
             ],
-            "verification": {}, "result": {}, "turns": 1,
-            "submitted": False, "requires_human_approval": False,
-            "tokens_in": 100, "tokens_out": 30,
+            "verification": {},
+            "result": {},
+            "turns": 1,
+            "submitted": False,
+            "requires_human_approval": False,
+            "tokens_in": 100,
+            "tokens_out": 30,
         }
         out = node(state)
         # Either empty dict (satisfied=True) or has a messages key (not satisfied)
@@ -140,16 +179,22 @@ class TestReflectionNodeRealLLM:
             last = out["messages"][-1]
             assert "[Self-review]" in last.get("content", "")
 
-    def test_reflection_is_non_fatal_on_partial_json(self, groq_llm_patch: Any) -> None:  # noqa: F811
+    def test_reflection_is_non_fatal_on_partial_json(
+        self, groq_llm_patch: Any  # noqa: F811
+    ) -> None:
         """reflection_node must not raise when LLM returns partial or non-JSON."""
         from app.agents.base_graph import _make_reflection_node, AgentRunState
 
         node = _make_reflection_node("llama-3.1-8b-instant")
         state: AgentRunState = {
             "messages": [{"role": "user", "content": "quick task"}],
-            "verification": {}, "result": {}, "turns": 0,
-            "submitted": False, "requires_human_approval": False,
-            "tokens_in": 0, "tokens_out": 0,
+            "verification": {},
+            "result": {},
+            "turns": 0,
+            "submitted": False,
+            "requires_human_approval": False,
+            "tokens_in": 0,
+            "tokens_out": 0,
         }
         out = node(state)  # must not raise
         assert isinstance(out, dict)
@@ -159,39 +204,74 @@ class TestReflectionNodeRealLLM:
 # [GROQ-OK] lesson extraction — real LLM extracts a reusable lesson
 # ---------------------------------------------------------------------------
 
+
 class TestLessonExtractionRealLLM:
-    def test_lesson_extracted_and_stored(self, groq_llm_patch: Any) -> None:  # noqa: F811
+    def test_lesson_extracted_and_stored(
+        self, groq_llm_patch: Any  # noqa: F811
+    ) -> None:
         """_extract_and_store_lesson uses Groq to extract a real lesson and stores it."""
-        from app.agents.base_graph import _extract_and_store_lesson, get_lesson_store, AgentRunState
+        from app.agents.base_graph import (
+            _extract_and_store_lesson,
+            get_lesson_store,
+            AgentRunState,
+        )
 
         store = get_lesson_store()
         before = store.total
 
         state: AgentRunState = {
-            "messages": [{"role": "user", "content": "fix the bug where tests fail on import"}],
+            "messages": [
+                {"role": "user", "content": "fix the bug where tests fail on import"}
+            ],
             "verification": {"tests_passed": True},
-            "result": {"summary": "Added missing __init__.py file — tests now import correctly"},
-            "turns": 3, "submitted": True, "requires_human_approval": False,
-            "tokens_in": 200, "tokens_out": 80,
+            "result": {
+                "summary": "Added missing __init__.py file — tests now import correctly"
+            },
+            "turns": 3,
+            "submitted": True,
+            "requires_human_approval": False,
+            "tokens_in": 200,
+            "tokens_out": 80,
         }
-        _extract_and_store_lesson(state, "coder", "llama-3.1-8b-instant", trace_id="groq-test-001")
+        _extract_and_store_lesson(
+            state, "coder", "llama-3.1-8b-instant", trace_id="groq-test-001"
+        )
 
         assert store.total == before + 1, "lesson must be stored after a successful run"
         last = store._lessons[-1]
         assert last.agent_name == "coder"
         assert len(last.lesson) > 10, "lesson text must be non-trivial"
-        assert last.category in ("testing", "security", "refactor", "debugging", "planning", "docs", "general")
+        assert last.category in (
+            "testing",
+            "security",
+            "refactor",
+            "debugging",
+            "planning",
+            "docs",
+            "general",
+        )
 
-    def test_lesson_retrieval_finds_stored_lesson(self, groq_llm_patch: Any) -> None:  # noqa: F811
+    def test_lesson_retrieval_finds_stored_lesson(
+        self, groq_llm_patch: Any  # noqa: F811
+    ) -> None:
         """After storing a lesson, retrieve it by keyword overlap."""
-        from app.agents.base_graph import _extract_and_store_lesson, get_lesson_store, AgentRunState
+        from app.agents.base_graph import (
+            _extract_and_store_lesson,
+            get_lesson_store,
+            AgentRunState,
+        )
 
         state: AgentRunState = {
             "messages": [{"role": "user", "content": "add type hints to the module"}],
             "verification": {},
-            "result": {"summary": "Added strict type annotations to all public functions"},
-            "turns": 2, "submitted": True, "requires_human_approval": False,
-            "tokens_in": 150, "tokens_out": 60,
+            "result": {
+                "summary": "Added strict type annotations to all public functions"
+            },
+            "turns": 2,
+            "submitted": True,
+            "requires_human_approval": False,
+            "tokens_in": 150,
+            "tokens_out": 60,
         }
         _extract_and_store_lesson(state, "architect", "llama-3.1-8b-instant")
 
@@ -207,6 +287,7 @@ class TestLessonExtractionRealLLM:
 # [GROQ-OK] Full mini-graph run — planner → call_llm → submit → lesson
 # ---------------------------------------------------------------------------
 
+
 class TestFullGraphRunGroq:
     def test_mini_task_runs_end_to_end(self, groq_llm_patch: Any) -> None:  # noqa: F811
         """Run a real mini-task through the graph with Groq. Agent must call submit_result."""
@@ -216,7 +297,9 @@ class TestFullGraphRunGroq:
             role_name="coder",
             model="qwen/qwen3-32b",
             tools=[SUBMIT_TOOL],
-            tool_handlers={"submit_result": lambda inp: f"submitted: {inp.get('summary', '')}"},
+            tool_handlers={
+                "submit_result": lambda inp: f"submitted: {inp.get('summary', '')}"
+            },
             verification_cfg=VerificationConfig(),
             initial_message=(
                 "Write a one-line Python function called `add(a, b)` that returns a+b. "
@@ -226,7 +309,7 @@ class TestFullGraphRunGroq:
             model_haiku="llama-3.1-8b-instant",
             max_turns=8,
             enable_planning=True,
-            enable_memory=False,   # skip repo context (no repo in test)
+            enable_memory=False,  # skip repo context (no repo in test)
             enable_reflection=False,  # save tokens
             enable_lesson=True,
         )
@@ -265,14 +348,13 @@ class TestFullGraphRunGroq:
 # These are saved in memory as: pending_anthropic_tests
 # ---------------------------------------------------------------------------
 
-ANTHROPIC_AVAILABLE = (
-    bool(os.environ.get("ANTHROPIC_API_KEY"))
-    and os.environ.get("ANTHROPIC_API_KEY", "").startswith("sk-ant")
-)
+ANTHROPIC_AVAILABLE = bool(os.environ.get("ANTHROPIC_API_KEY")) and os.environ.get(
+    "ANTHROPIC_API_KEY", ""
+).startswith("sk-ant")
 
 anthropic_only = pytest.mark.skipif(
     not ANTHROPIC_AVAILABLE,
-    reason="[ANTHROPIC-ONLY] Requires real ANTHROPIC_API_KEY — run after key is obtained"
+    reason="[ANTHROPIC-ONLY] Requires real ANTHROPIC_API_KEY — run after key is obtained",
 )
 
 

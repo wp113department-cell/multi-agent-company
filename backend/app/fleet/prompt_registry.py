@@ -11,6 +11,7 @@ app.agents.base.load_role() reads backend/roles/{role_name}.md fresh from disk
 on every call — deploy()/rollback() write directly to that same file, so
 load_role() needs zero changes.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -39,7 +40,9 @@ class InvalidTransition(Exception):
         self.version_id = version_id
         self.from_status = from_status
         self.to_status = to_status
-        super().__init__(f"Version {version_id}: illegal transition {from_status!r} -> {to_status!r}")
+        super().__init__(
+            f"Version {version_id}: illegal transition {from_status!r} -> {to_status!r}"
+        )
 
 
 @dataclass
@@ -93,7 +96,10 @@ def _role_file_path(role_name: str) -> Path:
     doesn't deny roles/ today."""
     candidate = (_ROLES_DIR / f"{role_name}.md").resolve()
     roles_dir_resolved = _ROLES_DIR.resolve()
-    if not (candidate == roles_dir_resolved / f"{role_name}.md" and candidate.parent == roles_dir_resolved):
+    if not (
+        candidate == roles_dir_resolved / f"{role_name}.md"
+        and candidate.parent == roles_dir_resolved
+    ):
         raise ValueError(f"role_name {role_name!r} resolves outside backend/roles/")
     result = check_path(str(candidate))
     if not result.allowed:
@@ -113,7 +119,10 @@ async def _get_deployed(role_name: str) -> PromptVersionRecord | None:
             row = (
                 await session.execute(
                     select(PromptVersion)
-                    .where(PromptVersion.role_name == role_name, PromptVersion.status == "deployed")
+                    .where(
+                        PromptVersion.role_name == role_name,
+                        PromptVersion.status == "deployed",
+                    )
                     .order_by(PromptVersion.version_number.desc())
                     .limit(1)
                 )
@@ -123,7 +132,9 @@ async def _get_deployed(role_name: str) -> PromptVersionRecord | None:
         await engine.dispose()
 
 
-async def _propose(role_name: str, content: str, proposed_by: str | None) -> PromptVersionRecord:
+async def _propose(
+    role_name: str, content: str, proposed_by: str | None
+) -> PromptVersionRecord:
     from sqlalchemy import func, select
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -134,13 +145,18 @@ async def _propose(role_name: str, content: str, proposed_by: str | None) -> Pro
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             max_version = (
                 await session.execute(
-                    select(func.max(PromptVersion.version_number)).where(PromptVersion.role_name == role_name)
+                    select(func.max(PromptVersion.version_number)).where(
+                        PromptVersion.role_name == role_name
+                    )
                 )
             ).scalar_one()
             deployed_row = (
                 await session.execute(
                     select(PromptVersion)
-                    .where(PromptVersion.role_name == role_name, PromptVersion.status == "deployed")
+                    .where(
+                        PromptVersion.role_name == role_name,
+                        PromptVersion.status == "deployed",
+                    )
                     .order_by(PromptVersion.version_number.desc())
                     .limit(1)
                 )
@@ -148,7 +164,9 @@ async def _propose(role_name: str, content: str, proposed_by: str | None) -> Pro
 
             hash_ = _content_hash(content)
             if deployed_row is not None and deployed_row.content_hash == hash_:
-                return _to_record(deployed_row)  # no-op: identical to what's already deployed
+                return _to_record(
+                    deployed_row
+                )  # no-op: identical to what's already deployed
 
             row = PromptVersion(
                 role_name=role_name,
@@ -177,13 +195,17 @@ async def _get_by_id(version_id: int) -> Any:
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             return (
-                await session.execute(select(PromptVersion).where(PromptVersion.id == version_id))
+                await session.execute(
+                    select(PromptVersion).where(PromptVersion.id == version_id)
+                )
             ).scalar_one_or_none()
     finally:
         await engine.dispose()
 
 
-async def _transition(version_id: int, to_status: str, *, approved_by: str | None = None) -> PromptVersionRecord:
+async def _transition(
+    version_id: int, to_status: str, *, approved_by: str | None = None
+) -> PromptVersionRecord:
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from app.db.models import PromptVersion
@@ -241,12 +263,16 @@ async def _get_history(role_name: str) -> list[PromptVersionRecord]:
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             rows = (
-                await session.execute(
-                    select(PromptVersion)
-                    .where(PromptVersion.role_name == role_name)
-                    .order_by(PromptVersion.version_number.asc())
+                (
+                    await session.execute(
+                        select(PromptVersion)
+                        .where(PromptVersion.role_name == role_name)
+                        .order_by(PromptVersion.version_number.asc())
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             return [_to_record(r) for r in rows]
     finally:
         await engine.dispose()
@@ -264,7 +290,10 @@ async def _most_recent_superseded(role_name: str) -> PromptVersionRecord | None:
             row = (
                 await session.execute(
                     select(PromptVersion)
-                    .where(PromptVersion.role_name == role_name, PromptVersion.status == "superseded")
+                    .where(
+                        PromptVersion.role_name == role_name,
+                        PromptVersion.status == "superseded",
+                    )
                     .order_by(PromptVersion.version_number.desc())
                     .limit(1)
                 )
@@ -275,7 +304,9 @@ async def _most_recent_superseded(role_name: str) -> PromptVersionRecord | None:
 
 
 class PromptRegistry:
-    def propose(self, role_name: str, content: str, proposed_by: str | None = None) -> PromptVersionRecord:
+    def propose(
+        self, role_name: str, content: str, proposed_by: str | None = None
+    ) -> PromptVersionRecord:
         return asyncio.run(_propose(role_name, content, proposed_by))
 
     def submit_for_review(self, version_id: int) -> PromptVersionRecord:
@@ -298,7 +329,9 @@ class PromptRegistry:
 
         from app.fleet.regression_detector import get_regression_detector
 
-        get_regression_detector().gate_deploy(row.role_name)  # raises DeploymentBlocked if regressed
+        get_regression_detector().gate_deploy(
+            row.role_name
+        )  # raises DeploymentBlocked if regressed
 
         deployed = asyncio.run(_transition(version_id, "deployed"))
         asyncio.run(_supersede_current_deployed(row.role_name, except_id=version_id))
@@ -310,7 +343,9 @@ class PromptRegistry:
         the approval gate since it was already approved and deployed once."""
         prior = asyncio.run(_most_recent_superseded(role_name))
         if prior is None:
-            raise ValueError(f"No superseded version to roll back to for role_name={role_name!r}")
+            raise ValueError(
+                f"No superseded version to roll back to for role_name={role_name!r}"
+            )
 
         current = asyncio.run(_get_deployed(role_name))
         restored = asyncio.run(_transition(prior.id, "deployed"))

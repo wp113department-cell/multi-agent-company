@@ -1,4 +1,5 @@
 """Repository scanner — walks repo, parses files with tree-sitter, extracts symbols and imports."""
+
 from __future__ import annotations
 
 import fnmatch
@@ -23,8 +24,18 @@ _LANG_MAP: dict[str, Language] = {
 }
 
 _IGNORE_DIRS = {
-    ".git", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache",
-    "dist", "build", ".next", "TX", ".pytest_cache", "migrations",
+    ".git",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".mypy_cache",
+    "dist",
+    "build",
+    ".next",
+    "TX",
+    ".pytest_cache",
+    "migrations",
 }
 
 _IGNORE_PATTERNS = ["*.min.js", "*.map", "*.lock", "pnpm-lock.yaml"]
@@ -40,7 +51,7 @@ class SymbolInfo:
 
 @dataclass
 class FileIndex:
-    path: str        # relative to repo root
+    path: str  # relative to repo root
     language: str
     content_hash: str
     symbols: list[SymbolInfo] = field(default_factory=list)
@@ -65,7 +76,14 @@ def _extract_python_symbols(root: Node) -> list[SymbolInfo]:
             name_node = node.child_by_field_name("name")
             if name_node:
                 name = name_node.text.decode() if name_node.text else "?"
-                symbols.append(SymbolInfo(name=name, kind="class", line_start=node.start_point[0], line_end=node.end_point[0]))
+                symbols.append(
+                    SymbolInfo(
+                        name=name,
+                        kind="class",
+                        line_start=node.start_point[0],
+                        line_end=node.end_point[0],
+                    )
+                )
                 for child in node.children:
                     walk(child, class_name=name)
             return
@@ -74,7 +92,14 @@ def _extract_python_symbols(root: Node) -> list[SymbolInfo]:
             if name_node:
                 name = name_node.text.decode() if name_node.text else "?"
                 kind = "method" if class_name else "function"
-                symbols.append(SymbolInfo(name=name, kind=kind, line_start=node.start_point[0], line_end=node.end_point[0]))
+                symbols.append(
+                    SymbolInfo(
+                        name=name,
+                        kind=kind,
+                        line_start=node.start_point[0],
+                        line_end=node.end_point[0],
+                    )
+                )
             return
         for child in node.children:
             walk(child, class_name)
@@ -87,7 +112,9 @@ def _extract_python_imports(root: Node, content: bytes) -> list[str]:
     imports: list[str] = []
     for node in root.children:
         if node.type in ("import_statement", "import_from_statement"):
-            imports.append(content[node.start_byte:node.end_byte].decode(errors="replace"))
+            imports.append(
+                content[node.start_byte : node.end_byte].decode(errors="replace")
+            )
     return imports
 
 
@@ -99,12 +126,26 @@ def _extract_js_symbols(root: Node) -> list[SymbolInfo]:
             name_node = node.child_by_field_name("name")
             if name_node:
                 name = name_node.text.decode() if name_node.text else "?"
-                symbols.append(SymbolInfo(name=name, kind="function", line_start=node.start_point[0], line_end=node.end_point[0]))
+                symbols.append(
+                    SymbolInfo(
+                        name=name,
+                        kind="function",
+                        line_start=node.start_point[0],
+                        line_end=node.end_point[0],
+                    )
+                )
         elif node.type == "class_declaration":
             name_node = node.child_by_field_name("name")
             if name_node:
                 name = name_node.text.decode() if name_node.text else "?"
-                symbols.append(SymbolInfo(name=name, kind="class", line_start=node.start_point[0], line_end=node.end_point[0]))
+                symbols.append(
+                    SymbolInfo(
+                        name=name,
+                        kind="class",
+                        line_start=node.start_point[0],
+                        line_end=node.end_point[0],
+                    )
+                )
         for child in node.children:
             walk(child)
 
@@ -112,7 +153,9 @@ def _extract_js_symbols(root: Node) -> list[SymbolInfo]:
     return symbols
 
 
-def _parse_file(path: Path, lang: Language, ext: str) -> tuple[list[SymbolInfo], list[str]]:
+def _parse_file(
+    path: Path, lang: Language, ext: str
+) -> tuple[list[SymbolInfo], list[str]]:
     content = path.read_bytes()
     parser = Parser(lang)
     tree = parser.parse(content)

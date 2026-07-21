@@ -1,4 +1,5 @@
 """Voyage AI embedding pipeline — generates and searches code embeddings."""
+
 from __future__ import annotations
 
 import logging
@@ -14,12 +15,15 @@ _BATCH_SIZE = 20
 
 def _get_client(api_key: str) -> Any:
     import importlib
+
     voyage = importlib.import_module("voyageai")
     return voyage.Client(api_key=api_key)
 
 
 def _file_summary(rel_path: str, symbols: list[str]) -> str:
-    return f"File: {rel_path}\nSymbols: {', '.join(symbols[:20]) if symbols else 'none'}"
+    return (
+        f"File: {rel_path}\nSymbols: {', '.join(symbols[:20]) if symbols else 'none'}"
+    )
 
 
 def generate_embeddings(index: RepoIndex) -> list[dict[str, object]]:
@@ -44,20 +48,26 @@ def generate_embeddings(index: RepoIndex) -> list[dict[str, object]]:
             for rel_path, fi in batch
         ]
         try:
-            response = client.embed(texts=texts, model=settings.voyage_model, input_type="document")
+            response = client.embed(
+                texts=texts, model=settings.voyage_model, input_type="document"
+            )
             for j, (rel_path, fi) in enumerate(batch):
-                results.append({
-                    "file_path": rel_path,
-                    "content_hash": fi.content_hash,
-                    "embedding": response.embeddings[j],
-                })
+                results.append(
+                    {
+                        "file_path": rel_path,
+                        "content_hash": fi.content_hash,
+                        "embedding": response.embeddings[j],
+                    }
+                )
         except Exception:
             logger.exception("Voyage AI embedding failed for batch starting at %d", i)
 
     return results
 
 
-def semantic_search(query: str, embeddings: list[dict[str, object]], top_k: int = 10) -> list[str]:
+def semantic_search(
+    query: str, embeddings: list[dict[str, object]], top_k: int = 10
+) -> list[str]:
     """
     Cosine-similarity search over pre-generated embeddings.
     Returns top_k file paths most relevant to the query.
@@ -68,7 +78,9 @@ def semantic_search(query: str, embeddings: list[dict[str, object]], top_k: int 
 
     client = _get_client(settings.voyage_api_key)
     try:
-        response = client.embed(texts=[query], model=settings.voyage_model, input_type="query")
+        response = client.embed(
+            texts=[query], model=settings.voyage_model, input_type="query"
+        )
         query_vec: list[float] = response.embeddings[0]
     except Exception:
         logger.exception("Voyage AI query embedding failed")
@@ -85,7 +97,9 @@ def semantic_search(query: str, embeddings: list[dict[str, object]], top_k: int 
     scored: list[tuple[float, str]] = []
     for emb in embeddings:
         raw = emb.get("embedding", [])
-        vec: list[float] = [float(v) for v in raw] if isinstance(raw, (list, tuple)) else []
+        vec: list[float] = (
+            [float(v) for v in raw] if isinstance(raw, (list, tuple)) else []
+        )
         scored.append((cosine(query_vec, vec), str(emb["file_path"])))
     scored.sort(key=lambda x: x[0], reverse=True)
     return [path for _, path in scored[:top_k]]

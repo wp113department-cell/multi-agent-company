@@ -7,6 +7,7 @@ When a DB session factory is available, messages are also written to the
 DB persistence is opt-in per-call: pass `db_factory` to `create_session()`
 or call `load_history_from_db()` / `save_message_to_db()` explicitly.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -31,16 +32,20 @@ class ChatSession:
     async def push(self, event: dict[str, Any]) -> None:
         await self._queue.put(event)
 
-    async def request_confirmation(self, action_id: str, description: str, details: str) -> bool:
+    async def request_confirmation(
+        self, action_id: str, description: str, details: str
+    ) -> bool:
         """Pause the agent and ask the user to approve/deny an action."""
         ev = asyncio.Event()
         self._pending[action_id] = ev
-        await self.push({
-            "type": "confirmation_required",
-            "actionId": action_id,
-            "description": description,
-            "details": details,
-        })
+        await self.push(
+            {
+                "type": "confirmation_required",
+                "actionId": action_id,
+                "description": description,
+                "details": details,
+            }
+        )
         await ev.wait()
         return self._results.get(action_id, False)
 
@@ -74,6 +79,7 @@ def delete_session(session_id: str) -> None:
 # DB persistence helpers
 # ---------------------------------------------------------------------------
 
+
 async def save_message_to_db(
     session_id: str,
     repo_path: str,
@@ -84,6 +90,7 @@ async def save_message_to_db(
     """Append one message to the chat_messages table. Never raises."""
     try:
         from sqlalchemy import text
+
         await db.execute(
             text(
                 "INSERT INTO chat_messages (session_id, repo_path, role, content) "
@@ -93,13 +100,16 @@ async def save_message_to_db(
         )
         await db.commit()
     except Exception as exc:
-        logger.warning("Failed to persist chat message for session %s: %s", session_id, exc)
+        logger.warning(
+            "Failed to persist chat message for session %s: %s", session_id, exc
+        )
 
 
 async def load_history_from_db(session_id: str, db: Any) -> list[dict[str, Any]]:
     """Load message history for a session from the DB. Returns [] on error."""
     try:
         from sqlalchemy import text
+
         rows = await db.execute(
             text(
                 "SELECT role, content FROM chat_messages "
@@ -107,13 +117,20 @@ async def load_history_from_db(session_id: str, db: Any) -> list[dict[str, Any]]
             ),
             {"sid": session_id},
         )
-        return [{"role": str(r["role"]), "content": str(r["content"])} for r in rows.mappings().all()]
+        return [
+            {"role": str(r["role"]), "content": str(r["content"])}
+            for r in rows.mappings().all()
+        ]
     except Exception as exc:
-        logger.warning("Failed to load chat history for session %s: %s", session_id, exc)
+        logger.warning(
+            "Failed to load chat history for session %s: %s", session_id, exc
+        )
         return []
 
 
-async def get_or_restore_session(session_id: str, repo_path: str, db: Any) -> ChatSession:
+async def get_or_restore_session(
+    session_id: str, repo_path: str, db: Any
+) -> ChatSession:
     """Return an in-memory session, restoring history from DB if the session was lost."""
     session = get_session(session_id)
     if session is None:

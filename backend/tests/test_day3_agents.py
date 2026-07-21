@@ -8,6 +8,7 @@ Tests cover:
   - AgentResult schema (all required fields present)
   - Specialized agents router: registry completeness, load_agent_fn, endpoint schema
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -67,6 +68,7 @@ _REPO = str(Path(__file__).parent.parent.parent)  # repo root for handler tests
 # Performance Reviewer
 # ===========================================================================
 
+
 class TestPerformanceReviewerTools:
     def test_includes_read_only_tools(self) -> None:
         names = _tool_names(PERFORMANCE_REVIEWER_TOOLS)
@@ -122,6 +124,7 @@ class TestPerformanceReviewerHandlers:
 # Style Reviewer
 # ===========================================================================
 
+
 class TestStyleReviewerTools:
     def test_includes_read_only_tools(self) -> None:
         assert READ_ONLY_NAMES.issubset(_tool_names(STYLE_REVIEWER_TOOLS))
@@ -156,6 +159,7 @@ class TestStyleReviewerHandlers:
 # Sprint Planner
 # ===========================================================================
 
+
 class TestSprintPlannerTools:
     def test_includes_read_only_tools(self) -> None:
         assert READ_ONLY_NAMES.issubset(_tool_names(SPRINT_PLANNER_TOOLS))
@@ -185,12 +189,26 @@ class TestSprintPlannerHandlers:
         # estimate_complexity returns a string or dict describing the estimate
         assert result is not None
         result_str = str(result).lower()
-        assert any(kw in result_str for kw in ("complexity", "estimate", "xs", "s", "m", "l", "xl", "points", "score"))
+        assert any(
+            kw in result_str
+            for kw in (
+                "complexity",
+                "estimate",
+                "xs",
+                "s",
+                "m",
+                "l",
+                "xl",
+                "points",
+                "score",
+            )
+        )
 
 
 # ===========================================================================
 # Business Analyst
 # ===========================================================================
+
 
 class TestBusinessAnalystTools:
     def test_includes_read_only_tools(self) -> None:
@@ -211,6 +229,7 @@ class TestBusinessAnalystHandlers:
 # ===========================================================================
 # Migration Agent
 # ===========================================================================
+
 
 class TestMigrationAgentTools:
     def test_includes_read_only_tools(self) -> None:
@@ -245,6 +264,7 @@ class TestMigrationAgentHandlers:
 # Schema Agent
 # ===========================================================================
 
+
 class TestSchemaAgentTools:
     def test_includes_read_only_tools(self) -> None:
         assert READ_ONLY_NAMES.issubset(_tool_names(SCHEMA_AGENT_TOOLS))
@@ -278,6 +298,7 @@ class TestSchemaAgentHandlers:
 # ===========================================================================
 # AI Engineer
 # ===========================================================================
+
 
 class TestAIEngineerTools:
     def test_includes_read_only_tools(self) -> None:
@@ -323,6 +344,7 @@ class TestAIEngineerHandlers:
 # Cleanup Agent
 # ===========================================================================
 
+
 class TestCleanupAgentTools:
     def test_includes_read_only_tools(self) -> None:
         assert READ_ONLY_NAMES.issubset(_tool_names(CLEANUP_AGENT_TOOLS))
@@ -365,6 +387,7 @@ class TestCleanupAgentHandlers:
 # Tech Debt Agent
 # ===========================================================================
 
+
 class TestTechDebtAgentTools:
     def test_includes_read_only_tools(self) -> None:
         assert READ_ONLY_NAMES.issubset(_tool_names(TECH_DEBT_AGENT_TOOLS))
@@ -398,6 +421,7 @@ class TestTechDebtAgentHandlers:
 # ===========================================================================
 # AgentResult schema contract
 # ===========================================================================
+
 
 class TestAgentResultSchema:
     def test_required_fields_exist(self) -> None:
@@ -450,59 +474,87 @@ class TestAgentResultSchema:
 # Specialized agents router
 # ===========================================================================
 
+
 class TestSpecializedAgentsRouter:
     def test_registry_contains_all_day3_agents(self) -> None:
         from app.api.specialized_agents import _REGISTRY
+
         day3 = [
-            "performance_reviewer", "style_reviewer", "sprint_planner",
-            "business_analyst", "migration_agent", "schema_agent",
-            "ai_engineer", "cleanup_agent", "tech_debt_agent",
+            "performance_reviewer",
+            "style_reviewer",
+            "sprint_planner",
+            "business_analyst",
+            "migration_agent",
+            "schema_agent",
+            "ai_engineer",
+            "cleanup_agent",
+            "tech_debt_agent",
         ]
         for name in day3:
-            assert name in _REGISTRY, f"'{name}' missing from specialized agent registry"
+            assert (
+                name in _REGISTRY
+            ), f"'{name}' missing from specialized agent registry"
 
     def test_registry_contains_all_day2_agents(self) -> None:
         from app.api.specialized_agents import _REGISTRY
+
         day2 = [
-            "bug_fix", "security_reviewer", "arch_reviewer", "sql_agent",
-            "docker_agent", "cicd_agent", "refactor_agent", "readme_agent",
-            "api_docs_agent", "dependency_agent", "monitoring_agent",
+            "bug_fix",
+            "security_reviewer",
+            "arch_reviewer",
+            "sql_agent",
+            "docker_agent",
+            "cicd_agent",
+            "refactor_agent",
+            "readme_agent",
+            "api_docs_agent",
+            "dependency_agent",
+            "monitoring_agent",
         ]
         for name in day2:
-            assert name in _REGISTRY, f"'{name}' missing from specialized agent registry"
+            assert (
+                name in _REGISTRY
+            ), f"'{name}' missing from specialized agent registry"
 
     def test_total_registry_count(self) -> None:
         from app.api.specialized_agents import _REGISTRY
+
         assert len(_REGISTRY) >= 20, f"Expected ≥20 agents, got {len(_REGISTRY)}"
 
     def test_load_agent_fn_returns_callable(self) -> None:
         from app.api.specialized_agents import _load_agent_fn
+
         fn = _load_agent_fn("performance_reviewer")
         assert callable(fn)
 
     def test_load_agent_fn_all_agents_importable(self) -> None:
         from app.api.specialized_agents import _load_agent_fn, SUPPORTED_AGENTS
+
         for name in SUPPORTED_AGENTS:
             fn = _load_agent_fn(name)
             assert callable(fn), f"Agent '{name}' function not callable"
 
     def test_load_agent_fn_raises_for_unknown(self) -> None:
         from app.api.specialized_agents import _load_agent_fn
+
         with pytest.raises(ValueError, match="Unknown agent"):
             _load_agent_fn("does_not_exist_xyz")
 
     def test_router_has_list_endpoint(self) -> None:
         from app.api.specialized_agents import router
+
         paths = [r.path for r in router.routes]
         assert "/api/specialized-agents/agents" in paths
 
     def test_router_has_run_endpoint(self) -> None:
         from app.api.specialized_agents import router
+
         paths = [r.path for r in router.routes]
         assert any("{agent_name}" in p and "/run" in p for p in paths)
 
     def test_router_has_run_sync_endpoint(self) -> None:
         from app.api.specialized_agents import router
+
         paths = [r.path for r in router.routes]
         assert any("{agent_name}" in p and "run-sync" in p for p in paths)
 
@@ -511,16 +563,20 @@ class TestSpecializedAgentsRouter:
 # Alert service
 # ===========================================================================
 
+
 class TestAlertService:
     @pytest.mark.asyncio
     async def test_noop_when_no_webhook_url(self) -> None:
         """Should not raise when ALERT_WEBHOOK_URL is empty."""
         from app.services.alert import send_task_alert
+
         # config has alert_webhook_url="" by default — should complete silently
         await send_task_alert(task_id=1, event="blocked", detail="test")
 
     @pytest.mark.asyncio
-    async def test_alert_payload_structure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_alert_payload_structure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Verify the payload structure sent to the webhook."""
         import app.services.alert as alert_mod
         from app.config import get_settings
@@ -564,25 +620,30 @@ class TestAlertService:
 # Memory store — new categories
 # ===========================================================================
 
+
 class TestMemoryStoreCategories:
     def test_embed_architecture_note_importable(self) -> None:
         from app.memory.store import embed_architecture_note
         import inspect
+
         assert inspect.iscoroutinefunction(embed_architecture_note)
 
     def test_embed_failure_importable(self) -> None:
         from app.memory.store import embed_failure
         import inspect
+
         assert inspect.iscoroutinefunction(embed_failure)
 
     def test_query_architecture_notes_importable(self) -> None:
         from app.memory.store import query_architecture_notes
         import inspect
+
         assert inspect.iscoroutinefunction(query_architecture_notes)
 
     def test_query_failures_importable(self) -> None:
         from app.memory.store import query_failures
         import inspect
+
         assert inspect.iscoroutinefunction(query_failures)
 
 
@@ -590,15 +651,18 @@ class TestMemoryStoreCategories:
 # Retention service
 # ===========================================================================
 
+
 class TestRetentionService:
     def test_retention_module_importable(self) -> None:
         from app.services.retention import start_retention_loop, _run_cleanup
         import inspect
+
         assert inspect.iscoroutinefunction(start_retention_loop)
         assert inspect.iscoroutinefunction(_run_cleanup)
 
     def test_cleanup_interval_is_24h(self) -> None:
         import app.services.retention as ret_mod
+
         assert ret_mod._CLEANUP_INTERVAL_SECONDS == 24 * 3600
 
 
@@ -606,28 +670,34 @@ class TestRetentionService:
 # Config — new fields
 # ===========================================================================
 
+
 class TestConfigNewFields:
     def test_sentry_dsn_default_empty(self) -> None:
         from app.config import get_settings
+
         settings = get_settings()
         assert settings.sentry_dsn == ""
 
     def test_alert_webhook_url_default_empty(self) -> None:
         from app.config import get_settings
+
         settings = get_settings()
         assert settings.alert_webhook_url == ""
 
     def test_log_retention_days_default(self) -> None:
         from app.config import get_settings
+
         settings = get_settings()
         assert settings.log_retention_days == 90
 
     def test_alert_on_blocked_default_true(self) -> None:
         from app.config import get_settings
+
         settings = get_settings()
         assert settings.alert_on_blocked is True
 
     def test_sentry_traces_sample_rate_valid(self) -> None:
         from app.config import get_settings
+
         settings = get_settings()
         assert 0.0 <= settings.sentry_traces_sample_rate <= 1.0

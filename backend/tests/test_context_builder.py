@@ -1,4 +1,5 @@
 """Context builder tests — keyword scoring and relevance."""
+
 import pytest
 from pathlib import Path
 
@@ -11,9 +12,7 @@ def api_repo(tmp_path: Path) -> Path:
     (tmp_path / "routes.py").write_text(
         "def get_tasks(): pass\ndef create_task(): pass\ndef delete_task(): pass\n"
     )
-    (tmp_path / "models.py").write_text(
-        "class Task:\n    id: int\n    title: str\n"
-    )
+    (tmp_path / "models.py").write_text("class Task:\n    id: int\n    title: str\n")
     (tmp_path / "utils.py").write_text(
         "def format_date(d): return str(d)\ndef log(msg): print(msg)\n"
     )

@@ -8,6 +8,7 @@ Key tests:
 - mutations to restored state do not affect the stored snapshot (deep-copy isolation)
 - process singleton is stable across imports
 """
+
 from __future__ import annotations
 
 import pytest
@@ -20,10 +21,10 @@ from app.fleet.fleet_checkpoint import (
     save_checkpoint,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _state(turns: int = 0, messages: list | None = None) -> dict:
     return {
@@ -46,10 +47,13 @@ def _fresh(capacity: int = 100) -> CheckpointStore:
 # AgentCheckpoint
 # ---------------------------------------------------------------------------
 
+
 class TestAgentCheckpoint:
     def test_to_dict_has_all_fields(self) -> None:
         store = _fresh()
-        ckpt_id = store.save(_state(turns=3), agent_name="coder", task_id="task-1", label="before_edit")
+        ckpt_id = store.save(
+            _state(turns=3), agent_name="coder", task_id="task-1", label="before_edit"
+        )
         cp = store.get(ckpt_id)
         assert cp is not None
         d = cp.to_dict()
@@ -74,6 +78,7 @@ class TestAgentCheckpoint:
 # ---------------------------------------------------------------------------
 # Save → Restore
 # ---------------------------------------------------------------------------
+
 
 class TestSaveRestore:
     def test_restore_returns_identical_state(self) -> None:
@@ -117,6 +122,7 @@ class TestSaveRestore:
 # Rollback
 # ---------------------------------------------------------------------------
 
+
 class TestRollback:
     def test_rollback_returns_snapshot(self) -> None:
         store = _fresh()
@@ -141,6 +147,7 @@ class TestRollback:
 # ---------------------------------------------------------------------------
 # List + Filter
 # ---------------------------------------------------------------------------
+
 
 class TestListFilter:
     def test_list_all(self) -> None:
@@ -169,7 +176,9 @@ class TestListFilter:
 
     def test_latest_for_returns_most_recent(self) -> None:
         store = _fresh()
-        id1 = store.save(_state(turns=1), agent_name="coder", task_id="t1")  # noqa: F841
+        id1 = store.save(  # noqa: F841
+            _state(turns=1), agent_name="coder", task_id="t1"
+        )
         id2 = store.save(_state(turns=2), agent_name="coder", task_id="t1")
         latest = store.latest_for("coder", "t1")
         assert latest is not None
@@ -179,6 +188,7 @@ class TestListFilter:
 # ---------------------------------------------------------------------------
 # Ring Buffer Eviction
 # ---------------------------------------------------------------------------
+
 
 class TestRingBuffer:
     def test_evicts_oldest_when_at_capacity(self) -> None:
@@ -209,6 +219,7 @@ class TestRingBuffer:
 # Metrics
 # ---------------------------------------------------------------------------
 
+
 class TestMetrics:
     def test_total_saved_increments(self) -> None:
         store = _fresh()
@@ -228,6 +239,7 @@ class TestMetrics:
 # Module-level convenience functions
 # ---------------------------------------------------------------------------
 
+
 class TestModuleFunctions:
     def test_save_and_restore_via_module_functions(self) -> None:
         s = _state(turns=4)
@@ -243,6 +255,7 @@ class TestModuleFunctions:
 # ---------------------------------------------------------------------------
 # Singleton
 # ---------------------------------------------------------------------------
+
 
 class TestSingleton:
     def test_get_checkpoint_store_returns_same_instance(self) -> None:
@@ -260,6 +273,7 @@ class TestSingleton:
 # ---------------------------------------------------------------------------
 # Day 0 exit criterion: one complete save → restore → rollback cycle
 # ---------------------------------------------------------------------------
+
 
 def test_day0_complete_checkpoint_rollback_cycle() -> None:
     """§20 Day 0 exit criterion: demonstrate a real save → restore → rollback cycle.

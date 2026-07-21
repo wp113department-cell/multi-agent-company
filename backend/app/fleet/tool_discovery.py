@@ -6,6 +6,7 @@ uses). This module does not re-scan agent source files; every fact it reports
 is derived from those two registries plus a small in-process overlay for
 runtime tool registration.
 """
+
 from __future__ import annotations
 
 import threading
@@ -19,9 +20,13 @@ from app.fleet.tool_manifest import TOOL_MANIFEST, is_high_risk
 class ToolSpec:
     name: str
     description: str
-    permission_level: str  # ToolManifestEntry.risk_level, or "unknown" if not in the manifest
+    permission_level: (
+        str  # ToolManifestEntry.risk_level, or "unknown" if not in the manifest
+    )
     permissions: list[str] = field(default_factory=list)
-    handler_path: str = "app.agents.tools"  # best-effort — nearly every tool handler lives here
+    handler_path: str = (
+        "app.agents.tools"  # best-effort — nearly every tool handler lives here
+    )
 
 
 def _spec_from_manifest(tool_name: str) -> ToolSpec | None:

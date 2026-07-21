@@ -9,6 +9,7 @@ Session 2 migration (2026-07-16):
 Pattern from: swe-agent RetryAgent (preserve external interface, swap internal runner).
 Static-check retry loop kept because tsc --noEmit runs OUTSIDE the LLM graph.
 """
+
 from __future__ import annotations
 
 import logging
@@ -29,10 +30,27 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "frontend_dev",
     "description": "Implements TypeScript/Next.js UI changes in an isolated worktree.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "edit_file", "write_file", "git_diff", "bash", "submit_patch",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "edit_file",
+        "write_file",
+        "git_diff",
+        "bash",
+        "submit_patch",
     ],
     "input_types": ["task_id", "subtask_id", "plan", "worktree_path", "repo_path"],
     "output_types": ["files_changed"],
@@ -59,6 +77,7 @@ _VERIFICATION_CFG = VerificationConfig(
 # Static checks — run OUTSIDE the LLM graph after submission
 # ---------------------------------------------------------------------------
 
+
 def _run_frontend_checks(worktree_path: str) -> str | None:
     """Run tsc --noEmit in the apps/web directory. Returns error output or None on success."""
     web_dir = f"{worktree_path}/apps/web"
@@ -77,6 +96,7 @@ def _run_frontend_checks(worktree_path: str) -> str | None:
 # ---------------------------------------------------------------------------
 # Public runner — external interface unchanged
 # ---------------------------------------------------------------------------
+
 
 def run_frontend_dev(
     task_id: int,
@@ -131,7 +151,11 @@ def run_frontend_dev(
                 max_turns=30,
             )
         except Exception as exc:
-            logger.exception("Frontend dev agent failed on attempt %d for subtask %d", attempt + 1, subtask_id)
+            logger.exception(
+                "Frontend dev agent failed on attempt %d for subtask %d",
+                attempt + 1,
+                subtask_id,
+            )
             if attempt == max_retries - 1:
                 return [], f"Frontend dev agent error: {exc}"
             continue
@@ -149,14 +173,24 @@ def run_frontend_dev(
         if check_error is None:
             logger.info(
                 "Frontend dev done — subtask %d, attempt %d, %d files, in=%d out=%d",
-                subtask_id, attempt + 1, len(files_changed),
-                final_state.get("tokens_in", 0), final_state.get("tokens_out", 0),
+                subtask_id,
+                attempt + 1,
+                len(files_changed),
+                final_state.get("tokens_in", 0),
+                final_state.get("tokens_out", 0),
             )
             return files_changed, None
 
-        logger.warning("Frontend dev typecheck failed on attempt %d: %s", attempt + 1, check_error[:200])
+        logger.warning(
+            "Frontend dev typecheck failed on attempt %d: %s",
+            attempt + 1,
+            check_error[:200],
+        )
         if attempt == max_retries - 1:
-            return [], f"TypeScript errors persist after {max_retries} attempts:\n{check_error}"
+            return (
+                [],
+                f"TypeScript errors persist after {max_retries} attempts:\n{check_error}",
+            )
 
     return [], f"Frontend dev blocked after {max_retries} attempts"
 
@@ -165,20 +199,24 @@ def run_frontend_dev(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["frontend_development", "typescript_coding"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["frontend_development", "typescript_coding"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register("frontend_dev")
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

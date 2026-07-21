@@ -1,4 +1,5 @@
 """env_checker_agent — audits environment variable configuration for gaps and misuse."""
+
 from __future__ import annotations
 
 import logging
@@ -15,18 +16,31 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "env_checker_agent",
     "description": "Audits environment variable usage: finds undocumented vars, hardcoded secrets, missing .env.example entries, and misconfigured defaults.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "get_file_tree",
-        "search_symbols", "find_references", "list_functions", "parse_ast",
-        "analyze_file", "read_files", "file_exists", "file_info",
-        "find_todos", "search_imports",
-        "write_file", "submit_env_checker_agent",
+        "read_file",
+        "list_files",
+        "search_code",
+        "get_file_tree",
+        "search_symbols",
+        "find_references",
+        "list_functions",
+        "parse_ast",
+        "analyze_file",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_todos",
+        "search_imports",
+        "write_file",
+        "submit_env_checker_agent",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
     "side_effects": ["writes env audit reports"],
     "permissions": ["read_repo", "write_docs"],
     "risk_level": "low",
-    "expected_verification": {"read": "read_file must run to inspect .env.example and config.py"},
+    "expected_verification": {
+        "read": "read_file must run to inspect .env.example and config.py"
+    },
     "dependencies": [],
 }
 
@@ -133,16 +147,19 @@ def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["environment_config_audit"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["environment_config_audit"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry unavailable: %s", exc)

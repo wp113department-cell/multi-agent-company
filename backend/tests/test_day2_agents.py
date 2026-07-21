@@ -1,4 +1,5 @@
 """Day 2 agents — structural and handler tests (no real LLM calls)."""
+
 from __future__ import annotations
 
 import pytest
@@ -56,6 +57,7 @@ READ_ONLY_NAMES = _tool_names(READ_ONLY_TOOLS)
 # Tool list structure tests
 # ===========================================================================
 
+
 class TestBugFixTools:
     def test_includes_read_only_tools(self) -> None:
         names = _tool_names(BUG_FIX_TOOLS)
@@ -63,7 +65,13 @@ class TestBugFixTools:
 
     def test_includes_analysis_tools(self) -> None:
         names = _tool_names(BUG_FIX_TOOLS)
-        for expected in ("parse_ast", "call_graph", "find_function_body", "analyze_error", "read_logs"):
+        for expected in (
+            "parse_ast",
+            "call_graph",
+            "find_function_body",
+            "analyze_error",
+            "read_logs",
+        ):
             assert expected in names, f"BUG_FIX_TOOLS missing {expected}"
 
     def test_includes_write_tools(self) -> None:
@@ -84,7 +92,13 @@ class TestSecurityReviewerTools:
 
     def test_includes_security_tools(self) -> None:
         names = _tool_names(SECURITY_REVIEWER_TOOLS)
-        for expected in ("secrets_scan", "find_sql", "find_config", "find_api", "find_route"):
+        for expected in (
+            "secrets_scan",
+            "find_sql",
+            "find_config",
+            "find_api",
+            "find_route",
+        ):
             assert expected in names, f"SECURITY_REVIEWER_TOOLS missing {expected}"
 
     def test_no_write_tools(self) -> None:
@@ -103,7 +117,12 @@ class TestArchReviewerTools:
 
     def test_includes_ast_tools(self) -> None:
         names = _tool_names(ARCH_REVIEWER_TOOLS)
-        for expected in ("import_graph", "circular_dep_detect", "dead_code_detect", "parse_ast"):
+        for expected in (
+            "import_graph",
+            "circular_dep_detect",
+            "dead_code_detect",
+            "parse_ast",
+        ):
             assert expected in names, f"ARCH_REVIEWER_TOOLS missing {expected}"
 
     def test_no_write_tools(self) -> None:
@@ -118,7 +137,14 @@ class TestArchReviewerTools:
 class TestMonitoringAgentTools:
     def test_includes_monitoring_tools(self) -> None:
         names = _tool_names(MONITORING_AGENT_TOOLS)
-        for expected in ("cpu_usage", "memory_usage", "disk_usage", "health_check", "task_progress", "read_logs"):
+        for expected in (
+            "cpu_usage",
+            "memory_usage",
+            "disk_usage",
+            "health_check",
+            "task_progress",
+            "read_logs",
+        ):
             assert expected in names, f"MONITORING_AGENT_TOOLS missing {expected}"
 
     def test_no_write_tools(self) -> None:
@@ -133,7 +159,13 @@ class TestMonitoringAgentTools:
 class TestRefactorAgentTools:
     def test_includes_ast_tools(self) -> None:
         names = _tool_names(REFACTOR_AGENT_TOOLS)
-        for expected in ("list_functions", "list_classes", "parse_ast", "call_graph", "import_graph"):
+        for expected in (
+            "list_functions",
+            "list_classes",
+            "parse_ast",
+            "call_graph",
+            "import_graph",
+        ):
             assert expected in names
 
     def test_includes_write_and_rename(self) -> None:
@@ -153,6 +185,7 @@ class TestRefactorAgentTools:
 # Handler factory tests
 # ===========================================================================
 
+
 @pytest.fixture
 def tmp_repo(tmp_path: Path) -> Path:
     (tmp_path / "src").mkdir()
@@ -166,8 +199,17 @@ def tmp_repo(tmp_path: Path) -> Path:
 class TestBugFixHandlers:
     def test_handlers_created(self, tmp_repo: Path) -> None:
         h = make_bug_fix_handlers(str(tmp_repo))
-        for key in ("parse_ast", "call_graph", "find_function_body", "analyze_error",
-                    "read_logs", "edit_file", "write_file", "git_diff", "submit_bug_fix"):
+        for key in (
+            "parse_ast",
+            "call_graph",
+            "find_function_body",
+            "analyze_error",
+            "read_logs",
+            "edit_file",
+            "write_file",
+            "git_diff",
+            "submit_bug_fix",
+        ):
             assert key in h, f"make_bug_fix_handlers missing {key}"
 
     def test_parse_ast_returns_json(self, tmp_repo: Path) -> None:
@@ -189,7 +231,9 @@ class TestBugFixHandlers:
 
     def test_submit_stores_result(self, tmp_repo: Path) -> None:
         h = make_bug_fix_handlers(str(tmp_repo))
-        h["submit_bug_fix"]({"root_cause": "rc", "fix_summary": "fs", "files_changed": ["a.py"]})
+        h["submit_bug_fix"](
+            {"root_cause": "rc", "fix_summary": "fs", "files_changed": ["a.py"]}
+        )
         assert h["_bug_fix_result"]["root_cause"] == "rc"
 
     def test_write_file_blocked_on_protected(self, tmp_repo: Path) -> None:
@@ -199,15 +243,23 @@ class TestBugFixHandlers:
 
     def test_edit_file_missing_file(self, tmp_repo: Path) -> None:
         h = make_bug_fix_handlers(str(tmp_repo))
-        result = h["edit_file"]({"path": "nonexistent.py", "old_string": "x", "new_string": "y"})
+        result = h["edit_file"](
+            {"path": "nonexistent.py", "old_string": "x", "new_string": "y"}
+        )
         assert "ERROR" in result
 
 
 class TestSecurityReviewerHandlers:
     def test_handlers_created(self, tmp_repo: Path) -> None:
         h = make_security_reviewer_handlers(str(tmp_repo))
-        for key in ("secrets_scan", "find_sql", "find_config", "find_api", "find_route",
-                    "submit_security_report"):
+        for key in (
+            "secrets_scan",
+            "find_sql",
+            "find_config",
+            "find_api",
+            "find_route",
+            "submit_security_report",
+        ):
             assert key in h
 
     def test_secrets_scan_clean_repo(self, tmp_repo: Path) -> None:
@@ -216,14 +268,18 @@ class TestSecurityReviewerHandlers:
         assert "✅" in result or "No obvious" in result
 
     def test_secrets_scan_detects_hardcoded(self, tmp_repo: Path) -> None:
-        (tmp_repo / "src" / "bad.py").write_text("api_key = 'sk-abc123longerthan8chars'\n")
+        (tmp_repo / "src" / "bad.py").write_text(
+            "api_key = 'sk-abc123longerthan8chars'\n"
+        )
         h = make_security_reviewer_handlers(str(tmp_repo))
         result = h["secrets_scan"]({})
         assert "⚠️" in result or "potential" in result
 
     def test_submit_stores_result(self, tmp_repo: Path) -> None:
         h = make_security_reviewer_handlers(str(tmp_repo))
-        h["submit_security_report"]({"severity": "low", "findings": ["x"], "recommendations": ["y"]})
+        h["submit_security_report"](
+            {"severity": "low", "findings": ["x"], "recommendations": ["y"]}
+        )
         assert h["_security_result"]["severity"] == "low"
 
     def test_no_write_handler(self, tmp_repo: Path) -> None:
@@ -235,12 +291,22 @@ class TestSecurityReviewerHandlers:
 class TestArchReviewerHandlers:
     def test_handlers_created(self, tmp_repo: Path) -> None:
         h = make_arch_reviewer_handlers(str(tmp_repo))
-        for key in ("import_graph", "circular_dep_detect", "dead_code_detect", "parse_ast",
-                    "list_functions", "list_classes", "call_graph", "submit_arch_review"):
+        for key in (
+            "import_graph",
+            "circular_dep_detect",
+            "dead_code_detect",
+            "parse_ast",
+            "list_functions",
+            "list_classes",
+            "call_graph",
+            "submit_arch_review",
+        ):
             assert key in h
 
     def test_import_graph_on_python_file(self, tmp_repo: Path) -> None:
-        (tmp_repo / "src" / "mod.py").write_text("from pathlib import Path\nimport os\n")
+        (tmp_repo / "src" / "mod.py").write_text(
+            "from pathlib import Path\nimport os\n"
+        )
         h = make_arch_reviewer_handlers(str(tmp_repo))
         result = h["import_graph"]({"path": "src/mod.py"})
         assert "pathlib" in result or "os" in result
@@ -252,15 +318,29 @@ class TestArchReviewerHandlers:
 
     def test_submit_stores_result(self, tmp_repo: Path) -> None:
         h = make_arch_reviewer_handlers(str(tmp_repo))
-        h["submit_arch_review"]({"verdict": "approved", "issues": [], "recommendations": [], "summary": "ok"})
+        h["submit_arch_review"](
+            {
+                "verdict": "approved",
+                "issues": [],
+                "recommendations": [],
+                "summary": "ok",
+            }
+        )
         assert h["_arch_result"]["verdict"] == "approved"
 
 
 class TestMonitoringHandlers:
     def test_handlers_created(self, tmp_repo: Path) -> None:
         h = make_monitoring_agent_handlers(str(tmp_repo))
-        for key in ("cpu_usage", "memory_usage", "disk_usage", "health_check",
-                    "task_progress", "read_logs", "submit_monitoring_report"):
+        for key in (
+            "cpu_usage",
+            "memory_usage",
+            "disk_usage",
+            "health_check",
+            "task_progress",
+            "read_logs",
+            "submit_monitoring_report",
+        ):
             assert key in h
 
     def test_memory_usage_returns_string(self, tmp_repo: Path) -> None:
@@ -294,9 +374,21 @@ class TestMonitoringHandlers:
 class TestRefactorHandlers:
     def test_handlers_created(self, tmp_repo: Path) -> None:
         h = make_refactor_agent_handlers(str(tmp_repo))
-        for key in ("list_functions", "list_classes", "find_function_body", "parse_ast",
-                    "call_graph", "import_graph", "rename_symbol", "replace_function",
-                    "edit_file", "write_file", "git_diff", "bash", "submit_refactor_report"):
+        for key in (
+            "list_functions",
+            "list_classes",
+            "find_function_body",
+            "parse_ast",
+            "call_graph",
+            "import_graph",
+            "rename_symbol",
+            "replace_function",
+            "edit_file",
+            "write_file",
+            "git_diff",
+            "bash",
+            "submit_refactor_report",
+        ):
             assert key in h
 
     def test_bash_policy_denies_arbitrary(self, tmp_repo: Path) -> None:
@@ -355,29 +447,41 @@ class TestDependencyHandlers:
 
     def test_edit_file_restricted_to_requirements(self, tmp_repo: Path) -> None:
         h = make_dependency_agent_handlers(str(tmp_repo))
-        result = h["edit_file"]({"path": "src/sample.py", "old_string": "x", "new_string": "y"})
+        result = h["edit_file"](
+            {"path": "src/sample.py", "old_string": "x", "new_string": "y"}
+        )
         assert "POLICY DENIED" in result
 
     def test_edit_file_allows_requirements(self, tmp_repo: Path) -> None:
         h = make_dependency_agent_handlers(str(tmp_repo))
-        result = h["edit_file"]({
-            "path": "requirements.txt",
-            "old_string": "fastapi==0.111.0",
-            "new_string": "fastapi==0.112.0",
-        })
+        result = h["edit_file"](
+            {
+                "path": "requirements.txt",
+                "old_string": "fastapi==0.111.0",
+                "new_string": "fastapi==0.112.0",
+            }
+        )
         assert "POLICY DENIED" not in result
         assert "Edited" in result
 
     def test_submit_stores_result(self, tmp_repo: Path) -> None:
         h = make_dependency_agent_handlers(str(tmp_repo))
-        h["submit_dependency_report"]({"outdated": ["fastapi: 0.111 → 0.112"], "upgraded": []})
+        h["submit_dependency_report"](
+            {"outdated": ["fastapi: 0.111 → 0.112"], "upgraded": []}
+        )
         assert len(h["_dependency_result"]["outdated"]) == 1
 
 
 class TestReadmeHandlers:
     def test_handlers_created(self, tmp_repo: Path) -> None:
         h = make_readme_agent_handlers(str(tmp_repo))
-        for key in ("parse_ast", "list_functions", "list_classes", "write_file", "submit_docs"):
+        for key in (
+            "parse_ast",
+            "list_functions",
+            "list_classes",
+            "write_file",
+            "submit_docs",
+        ):
             assert key in h
 
     def test_write_file_allows_md(self, tmp_repo: Path) -> None:
@@ -400,7 +504,14 @@ class TestReadmeHandlers:
 class TestApiDocsHandlers:
     def test_handlers_created(self, tmp_repo: Path) -> None:
         h = make_api_docs_agent_handlers(str(tmp_repo))
-        for key in ("find_route", "find_api", "parse_ast", "list_functions", "write_file", "submit_docs"):
+        for key in (
+            "find_route",
+            "find_api",
+            "parse_ast",
+            "list_functions",
+            "write_file",
+            "submit_docs",
+        ):
             assert key in h
 
     def test_write_file_allows_md(self, tmp_repo: Path) -> None:
@@ -422,12 +533,20 @@ class TestApiDocsHandlers:
 class TestSqlAgentHandlers:
     def test_handlers_created(self, tmp_repo: Path) -> None:
         h = make_sql_agent_handlers(str(tmp_repo))
-        for key in ("run_sql", "inspect_schema", "find_sql", "explain_query",
-                    "edit_file", "write_file", "submit_sql_report"):
+        for key in (
+            "run_sql",
+            "inspect_schema",
+            "find_sql",
+            "explain_query",
+            "edit_file",
+            "write_file",
+            "submit_sql_report",
+        ):
             assert key in h
 
     def test_run_sql_no_db_url(self, tmp_repo: Path) -> None:
         from unittest.mock import patch, MagicMock
+
         mock_settings = MagicMock()
         mock_settings.database_url = None
         with patch("app.agents.tools.get_settings", return_value=mock_settings):
@@ -444,8 +563,16 @@ class TestSqlAgentHandlers:
 class TestDockerAgentHandlers:
     def test_handlers_created(self, tmp_repo: Path) -> None:
         h = make_docker_agent_handlers(str(tmp_repo))
-        for key in ("docker_ps", "docker_logs", "docker_exec", "docker_compose",
-                    "docker_build", "docker_restart", "write_file", "submit_docker_report"):
+        for key in (
+            "docker_ps",
+            "docker_logs",
+            "docker_exec",
+            "docker_compose",
+            "docker_build",
+            "docker_restart",
+            "write_file",
+            "submit_docker_report",
+        ):
             assert key in h
 
     def test_docker_exec_blocks_rm(self, tmp_repo: Path) -> None:
@@ -467,6 +594,7 @@ class TestDockerAgentHandlers:
 # ===========================================================================
 # AgentResult dataclass defaults
 # ===========================================================================
+
 
 class TestAgentResult:
     def test_defaults(self) -> None:

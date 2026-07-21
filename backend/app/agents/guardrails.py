@@ -2,6 +2,7 @@
 
 Single audited implementation used by ALL agents. Never duplicated per agent.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -55,7 +56,9 @@ def check_command(command: str) -> GuardResult:
     low = command.lower()
     for blocked in _ALWAYS_BLOCKED_COMMANDS:
         if blocked.lower() in low:
-            return GuardResult(allowed=False, reason=f"Command blocked by policy: {blocked}")
+            return GuardResult(
+                allowed=False, reason=f"Command blocked by policy: {blocked}"
+            )
     return GuardResult(allowed=True)
 
 
@@ -64,4 +67,6 @@ def check_bash_allowlist(command: str, allowlist: tuple[str, ...]) -> GuardResul
     cmd = command.strip()
     if any(cmd.startswith(prefix) for prefix in allowlist):
         return check_command(cmd)  # still check always-blocked patterns
-    return GuardResult(allowed=False, reason=f"Command not in agent's bash allowlist: {cmd[:80]}")
+    return GuardResult(
+        allowed=False, reason=f"Command not in agent's bash allowlist: {cmd[:80]}"
+    )

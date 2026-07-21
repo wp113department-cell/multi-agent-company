@@ -10,6 +10,7 @@ Session 4 migration (2026-07-16):
 
 Pattern from: swe-agent RetryAgent (preserve external interface, swap internal runner).
 """
+
 from __future__ import annotations
 
 import logging
@@ -30,7 +31,10 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "research",
     "description": "Reads repo files and searches the web to gather technical context before implementation.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "submit_research",
+        "read_file",
+        "list_files",
+        "search_code",
+        "submit_research",
     ],
     "input_types": ["task_description", "repo_path"],
     "output_types": ["ResearchReport"],
@@ -57,6 +61,7 @@ _VERIFICATION_CFG = VerificationConfig(
 # Result dataclass — unchanged from original
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ResearchReport:
     findings: list[str]
@@ -69,6 +74,7 @@ class ResearchReport:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _last_assistant_text(messages: list[dict[str, Any]]) -> str:
     """Extract the last text response from the assistant messages."""
@@ -87,6 +93,7 @@ def _last_assistant_text(messages: list[dict[str, Any]]) -> str:
 # ---------------------------------------------------------------------------
 # Public runner — external interface unchanged
 # ---------------------------------------------------------------------------
+
 
 def run_research(
     task_description: str,
@@ -119,8 +126,11 @@ def run_research(
     except Exception as exc:
         logger.warning("Research agent failed (non-fatal): %s", exc)
         fallback = ResearchReport(
-            findings=[], relevant_libraries=[], recommended_approach="",
-            risks=[], raw_text=str(exc),
+            findings=[],
+            relevant_libraries=[],
+            recommended_approach="",
+            risks=[],
+            raw_text=str(exc),
         )
         return fallback, f"Research agent error: {exc}", 0, 0
 
@@ -140,8 +150,11 @@ def run_research(
         return report, None, tokens_in, tokens_out
 
     report = ResearchReport(
-        findings=[], relevant_libraries=[], recommended_approach="",
-        risks=[], raw_text=final_text or "Research agent did not submit a report.",
+        findings=[],
+        relevant_libraries=[],
+        recommended_approach="",
+        risks=[],
+        raw_text=final_text or "Research agent did not submit a report.",
     )
     return report, "Research agent did not call submit_research", tokens_in, tokens_out
 
@@ -150,20 +163,24 @@ def run_research(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["research", "web_search", "technical_research"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["research", "web_search", "technical_research"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register("research")
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

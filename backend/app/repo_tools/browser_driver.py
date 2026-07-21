@@ -15,6 +15,7 @@ Fixes vs. previous version:
      private/link-local/loopback IPs unless ALLOW_INTERNAL_BROWSER_URLS=1.
   4. Added browser_close_all() and a max page count to avoid unbounded growth.
 """
+
 from __future__ import annotations
 
 import ipaddress
@@ -58,7 +59,13 @@ def _check_url_safety(url: str) -> str | None:
         ip = ipaddress.ip_address(resolved)
     except (socket.gaierror, ValueError):
         return None
-    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+    if (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+    ):
         return f"Refusing to navigate to internal/private address: {host} -> {ip}"
     return None
 
@@ -125,7 +132,9 @@ def _do_navigate(url: str, session_id: str) -> dict[str, str]:
 def _do_screenshot(path: str | None, session_id: str) -> str:
     page = _get_page(session_id)
     if path is None:
-        path = os.path.join(tempfile.gettempdir(), f"screenshot_{uuid.uuid4().hex[:8]}.png")
+        path = os.path.join(
+            tempfile.gettempdir(), f"screenshot_{uuid.uuid4().hex[:8]}.png"
+        )
     page.screenshot(path=path)
     return path
 
@@ -201,11 +210,15 @@ def browser_navigate(url: str, session_id: str = _DEFAULT_SESSION) -> dict[str, 
     return _run(_do_navigate, url, session_id)
 
 
-def browser_screenshot(path: str | None = None, session_id: str = _DEFAULT_SESSION) -> str:
+def browser_screenshot(
+    path: str | None = None, session_id: str = _DEFAULT_SESSION
+) -> str:
     return _run(_do_screenshot, path, session_id)
 
 
-def browser_read_dom(selector: str | None = None, session_id: str = _DEFAULT_SESSION) -> str:
+def browser_read_dom(
+    selector: str | None = None, session_id: str = _DEFAULT_SESSION
+) -> str:
     return _run(_do_read_dom, selector, session_id)
 
 

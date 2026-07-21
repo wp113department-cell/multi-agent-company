@@ -10,6 +10,7 @@ Session 2 migration (2026-07-16):
 Pattern from: swe-agent RetryAgent (preserve external interface, swap internal runner).
 Static-check retry loop kept because mypy/ruff run OUTSIDE the LLM graph.
 """
+
 from __future__ import annotations
 
 import logging
@@ -31,10 +32,27 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "coder",
     "description": "Implements an approved plan in a git worktree — generic backend/frontend capable.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "edit_file", "write_file", "git_diff", "bash", "submit_patch",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "edit_file",
+        "write_file",
+        "git_diff",
+        "bash",
+        "submit_patch",
     ],
     "input_types": ["task_id", "plan", "worktree_path", "repo_path"],
     "output_types": ["files_changed", "tokens_in", "tokens_out"],
@@ -61,6 +79,7 @@ _VERIFICATION_CFG = VerificationConfig(
 # Static checks — run OUTSIDE the LLM graph after submission
 # ---------------------------------------------------------------------------
 
+
 def _run_checks(worktree_path: str) -> str | None:
     """Run mypy + ruff in the worktree. Returns error output or None on success."""
     python = sys.executable
@@ -69,7 +88,9 @@ def _run_checks(worktree_path: str) -> str | None:
         [python, "-m", "ruff", "check", "."],
     ]
     for cmd in checks:
-        result = subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(
+            cmd, cwd=worktree_path, capture_output=True, text=True, timeout=60
+        )
         if result.returncode != 0:
             return (result.stdout + result.stderr)[:3000]
     return None
@@ -78,6 +99,7 @@ def _run_checks(worktree_path: str) -> str | None:
 # ---------------------------------------------------------------------------
 # Public runner — external interface unchanged
 # ---------------------------------------------------------------------------
+
 
 def run_coder(
     task_id: int,
@@ -155,13 +177,23 @@ def run_coder(
         if check_error is None:
             logger.info(
                 "Coder done — attempt %d, %d files changed, tokens_in=%d tokens_out=%d",
-                attempt + 1, len(files_changed), total_in, total_out,
+                attempt + 1,
+                len(files_changed),
+                total_in,
+                total_out,
             )
             return files_changed, None, total_in, total_out
 
-        logger.warning("Checks failed on attempt %d: %s", attempt + 1, check_error[:200])
+        logger.warning(
+            "Checks failed on attempt %d: %s", attempt + 1, check_error[:200]
+        )
         if attempt == max_retries - 1:
-            return [], f"Checks still failing after {max_retries} attempts:\n{check_error}", total_in, total_out
+            return (
+                [],
+                f"Checks still failing after {max_retries} attempts:\n{check_error}",
+                total_in,
+                total_out,
+            )
 
     return [], f"Coder blocked after {max_retries} attempts", total_in, total_out
 
@@ -170,20 +202,24 @@ def run_coder(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["code_implementation", "generic_coding"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["code_implementation", "generic_coding"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register("coder")
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

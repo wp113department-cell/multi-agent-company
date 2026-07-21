@@ -5,7 +5,18 @@ from decimal import Decimal
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -52,18 +63,34 @@ class DevTask(Base):
     plan: Mapped[str | None] = mapped_column(Text, nullable=True)
     diff: Mapped[str | None] = mapped_column(Text, nullable=True)
     files_touched: Mapped[Any] = mapped_column(ARRAY(Text), nullable=True)
-    epic_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("epics.epic_id", ondelete="SET NULL"), nullable=True)
-    repo_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("repos.id", ondelete="SET NULL"), nullable=True)
+    epic_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("epics.epic_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("repos.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), onupdate=func.now()
+    )
 
-    logs: Mapped[list[TaskLog]] = relationship(back_populates="task", cascade="all, delete-orphan")
-    agent_runs: Mapped[list[AgentRun]] = relationship(back_populates="task", cascade="all, delete-orphan")
-    subtasks: Mapped[list[Subtask]] = relationship(back_populates="task", cascade="all, delete-orphan")
+    logs: Mapped[list[TaskLog]] = relationship(
+        back_populates="task", cascade="all, delete-orphan"
+    )
+    agent_runs: Mapped[list[AgentRun]] = relationship(
+        back_populates="task", cascade="all, delete-orphan"
+    )
+    subtasks: Mapped[list[Subtask]] = relationship(
+        back_populates="task", cascade="all, delete-orphan"
+    )
     pipeline_state: Mapped[PipelineState | None] = relationship(
         back_populates="task", uselist=False, cascade="all, delete-orphan"
     )
-    epic: Mapped["Epic | None"] = relationship("Epic", back_populates="tasks", foreign_keys=[epic_id])
+    epic: Mapped["Epic | None"] = relationship(
+        "Epic", back_populates="tasks", foreign_keys=[epic_id]
+    )
     repo: Mapped["Repo | None"] = relationship("Repo", foreign_keys=[repo_id])
 
 
@@ -71,7 +98,9 @@ class TaskLog(Base):
     __tablename__ = "task_logs"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    task_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("dev_tasks.id", ondelete="CASCADE"))
+    task_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("dev_tasks.id", ondelete="CASCADE")
+    )
     category: Mapped[str] = mapped_column(String(100))
     message: Mapped[str] = mapped_column(Text)
     extra_data: Mapped[Any] = mapped_column(JSONB, nullable=True)
@@ -84,7 +113,9 @@ class AgentRun(Base):
     __tablename__ = "agent_runs"
 
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    task_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("dev_tasks.id", ondelete="CASCADE"))
+    task_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("dev_tasks.id", ondelete="CASCADE")
+    )
     agent_type: Mapped[str] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(String(50), default="running")
     model_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -105,7 +136,9 @@ class Subtask(Base):
     __tablename__ = "subtasks"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    task_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("dev_tasks.id", ondelete="CASCADE"))
+    task_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("dev_tasks.id", ondelete="CASCADE")
+    )
     type: Mapped[str] = mapped_column(String(50))
     title: Mapped[str] = mapped_column(String(500))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -121,14 +154,18 @@ class PipelineState(Base):
     __tablename__ = "pipeline_state"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    task_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("dev_tasks.id", ondelete="CASCADE"), unique=True)
+    task_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("dev_tasks.id", ondelete="CASCADE"), unique=True
+    )
     stage: Mapped[str] = mapped_column(String(50), default="pm")
     pm_brief: Mapped[Any] = mapped_column(JSONB, nullable=True)
     architect_plan: Mapped[Any] = mapped_column(JSONB, nullable=True)
     subtasks_json: Mapped[Any] = mapped_column(JSONB, nullable=True)
     approved: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), onupdate=func.now()
+    )
 
     task: Mapped[DevTask] = relationship(back_populates="pipeline_state")
 
@@ -143,14 +180,18 @@ class IndexedFile(Base):
     content_hash: Mapped[str] = mapped_column(String(64))
     last_indexed_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
-    symbols: Mapped[list[Symbol]] = relationship(back_populates="file", cascade="all, delete-orphan")
+    symbols: Mapped[list[Symbol]] = relationship(
+        back_populates="file", cascade="all, delete-orphan"
+    )
 
 
 class Symbol(Base):
     __tablename__ = "symbols"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    file_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("indexed_files.id", ondelete="CASCADE"))
+    file_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("indexed_files.id", ondelete="CASCADE")
+    )
     name: Mapped[str] = mapped_column(String(500))
     kind: Mapped[str] = mapped_column(String(50))
     line_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -173,8 +214,10 @@ class CallEdge(Base):
 
 # ---- Phase 4 tables ----
 
+
 class Event(Base):
     """Persisted event bus events. Every publish goes here before delivery."""
+
     __tablename__ = "events"
 
     event_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
@@ -188,6 +231,7 @@ class Event(Base):
 
 class FailedEvent(Base):
     """Events that exhausted retries — lightweight dead-letter log."""
+
     __tablename__ = "failed_events"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -203,6 +247,7 @@ class FailedEvent(Base):
 
 class Artifact(Base):
     """Versioned pipeline output artifacts (plan, diff, test_results, review_findings)."""
+
     __tablename__ = "artifacts"
 
     artifact_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
@@ -216,8 +261,10 @@ class Artifact(Base):
 
 # ---- Phase 5 tables ----
 
+
 class Epic(Base):
     """High-level goals that span multiple dev_tasks."""
+
     __tablename__ = "epics"
 
     epic_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
@@ -228,13 +275,16 @@ class Epic(Base):
     cost_actual: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
     halt_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), onupdate=func.now()
+    )
 
     tasks: Mapped[list["DevTask"]] = relationship("DevTask", back_populates="epic")
 
 
 class Policy(Base):
     """Glob-pattern approval rules (Policy Engine v2)."""
+
     __tablename__ = "policies"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -245,15 +295,20 @@ class Policy(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
-    approvals: Mapped[list["PolicyApproval"]] = relationship(back_populates="policy", cascade="all, delete-orphan")
+    approvals: Mapped[list["PolicyApproval"]] = relationship(
+        back_populates="policy", cascade="all, delete-orphan"
+    )
 
 
 class PolicyApproval(Base):
     """Audit log: who approved which policy gate, when."""
+
     __tablename__ = "policy_approvals"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    policy_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("policies.id", ondelete="CASCADE"))
+    policy_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("policies.id", ondelete="CASCADE")
+    )
     task_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     epic_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     file_path: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -266,6 +321,7 @@ class PolicyApproval(Base):
 
 class UserRole(Base):
     """Per-user role: viewer (default) or approver."""
+
     __tablename__ = "user_roles"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -276,13 +332,17 @@ class UserRole(Base):
 
 # ---- Phase 6 tables ----
 
+
 class Agent(Base):
     """Registry of all available agents with capability tags and performance metrics."""
+
     __tablename__ = "agents"
 
     agent_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
     name: Mapped[str] = mapped_column(String(100), unique=True)
-    capability_tags: Mapped[Any] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    capability_tags: Mapped[Any] = mapped_column(
+        ARRAY(Text), nullable=False, default=list
+    )
     tool_list: Mapped[Any] = mapped_column(JSONB, nullable=False, default=list)
     prompt_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     version: Mapped[str] = mapped_column(String(50), default="1.0")
@@ -294,6 +354,7 @@ class Agent(Base):
 
 class Goal(Base):
     """Plain-language goal from a stakeholder — maps to one or more epics."""
+
     __tablename__ = "goals"
 
     goal_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
@@ -302,18 +363,23 @@ class Goal(Base):
     epic_ids: Mapped[Any] = mapped_column(ARRAY(Text), nullable=False, default=list)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), onupdate=func.now()
+    )
 
 
 class Repo(Base):
     """GitHub repos that have been cloned for agents to work on."""
+
     __tablename__ = "repos"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     github_url: Mapped[str] = mapped_column(Text, unique=True)
     name: Mapped[str] = mapped_column(String(200))
     local_path: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(50), default="cloning")  # cloning | ready | error
+    status: Mapped[str] = mapped_column(
+        String(50), default="cloning"
+    )  # cloning | ready | error
     error_msg: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
     cloned_at: Mapped[datetime | None] = mapped_column(nullable=True)
@@ -322,25 +388,35 @@ class Repo(Base):
 
 class SystemSetting(Base):
     """Key-value store for runtime-configurable settings (e.g. API keys entered via UI)."""
+
     __tablename__ = "system_settings"
 
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
-    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), onupdate=func.now()
+    )
 
 
 class MemoryEmbedding(Base):
     """pgvector store: task outcome embeddings for engineering memory."""
+
     __tablename__ = "memory_embeddings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     task_id: Mapped[str] = mapped_column(String(100), index=True)
     epic_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    outcome: Mapped[str] = mapped_column(String(50))  # completed | blocked | architecture | failure
-    category: Mapped[str] = mapped_column(String(50), default="task")  # task | architecture | failure | learning
+    outcome: Mapped[str] = mapped_column(
+        String(50)
+    )  # completed | blocked | architecture | failure
+    category: Mapped[str] = mapped_column(
+        String(50), default="task"
+    )  # task | architecture | failure | learning
     description: Mapped[str] = mapped_column(Text)
     summary: Mapped[str] = mapped_column(Text)
-    files_changed: Mapped[Any] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    files_changed: Mapped[Any] = mapped_column(
+        ARRAY(Text), nullable=False, default=list
+    )
     embedding: Mapped[Any] = mapped_column(Vector(1536), nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
@@ -352,25 +428,42 @@ class EnhancementRequest(Base):
     Nothing acts on a row until a human approves it from the dashboard; APPLY phase
     (write-capable) only ever runs against an approved row.
     """
+
     __tablename__ = "enhancement_requests"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     agent_name: Mapped[str] = mapped_column(String(100), index=True)
     title: Mapped[str] = mapped_column(Text)
     description: Mapped[str] = mapped_column(Text)
-    category: Mapped[str] = mapped_column(String(50))  # performance | bug | orchestration | knowledge | quality | security
-    priority: Mapped[str] = mapped_column(String(20), index=True)  # emergency | medium | low
-    evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)  # pending|approved|rejected|in_progress|completed|failed
-    files_touched: Mapped[Any] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    category: Mapped[str] = mapped_column(
+        String(50)
+    )  # performance | bug | orchestration | knowledge | quality | security
+    priority: Mapped[str] = mapped_column(
+        String(20), index=True
+    )  # emergency | medium | low
+    evidence: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), default="pending", index=True
+    )  # pending|approved|rejected|in_progress|completed|failed
+    files_touched: Mapped[Any] = mapped_column(
+        ARRAY(Text), nullable=False, default=list
+    )
     commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
     restart_required: Mapped[bool] = mapped_column(Boolean, default=False)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     decided_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class AgentBenchmark(Base):
@@ -380,13 +473,18 @@ class AgentBenchmark(Base):
     rows are what compare_to_baseline() diffs new runs against; storing a new
     baseline never deletes the old one — history is append-only for audit.
     """
+
     __tablename__ = "agent_benchmarks"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     agent_name: Mapped[str] = mapped_column(String(100), index=True)
-    objectives: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    objectives: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
     is_baseline: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class PromptVersion(Base):
@@ -398,6 +496,7 @@ class PromptVersion(Base):
     writes .content to backend/roles/{role_name}.md; rollback() restores a prior
     superseded row's content the same way.
     """
+
     __tablename__ = "prompt_versions"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -405,12 +504,20 @@ class PromptVersion(Base):
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    status: Mapped[str] = mapped_column(String(20), default="draft", index=True)  # draft|in_review|approved|deployed|superseded|rejected
-    parent_version_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("prompt_versions.id"), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), default="draft", index=True
+    )  # draft|in_review|approved|deployed|superseded|rejected
+    parent_version_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("prompt_versions.id"), nullable=True
+    )
     proposed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     approved_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    deployed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    deployed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class VersionedLesson(Base):
@@ -421,17 +528,26 @@ class VersionedLesson(Base):
     versioned lifecycle layer: DRAFT -> PUBLISHED -> SUPERSEDED / MERGED_INTO ->
     ARCHIVED. supersedes_id gives lineage when a merge happens.
     """
+
     __tablename__ = "versioned_lessons"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    lesson_id: Mapped[str] = mapped_column(String(64), index=True)  # stable across versions of "the same lesson"
+    lesson_id: Mapped[str] = mapped_column(
+        String(64), index=True
+    )  # stable across versions of "the same lesson"
     topic: Mapped[str] = mapped_column(String(200), index=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     embedding: Mapped[Any] = mapped_column(Vector(1536), nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    state: Mapped[str] = mapped_column(String(20), default="draft", index=True)  # draft|published|superseded|merged_into|archived
-    supersedes_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("versioned_lessons.id"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    state: Mapped[str] = mapped_column(
+        String(20), default="draft", index=True
+    )  # draft|published|superseded|merged_into|archived
+    supersedes_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("versioned_lessons.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class PendingApproval(Base):
@@ -446,6 +562,7 @@ class PendingApproval(Base):
     paused node itself, since LangGraph re-runs the whole node body on
     resume (verified empirically before writing this model).
     """
+
     __tablename__ = "pending_approvals"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -454,7 +571,13 @@ class PendingApproval(Base):
     agent_name: Mapped[str] = mapped_column(String(100), default="")
     action: Mapped[str] = mapped_column(String(50))  # e.g. "plan_review"
     details: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)  # pending|approved|rejected
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), default="pending", index=True
+    )  # pending|approved|rejected
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     decided_by: Mapped[str | None] = mapped_column(String(100), nullable=True)

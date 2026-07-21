@@ -9,6 +9,7 @@ Revision ID: 015
 Revises: 014
 Create Date: 2026-07-21
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -31,11 +32,18 @@ def upgrade() -> None:
         sa.Column("action", sa.String(50), nullable=False),
         sa.Column("details", JSONB(), nullable=False, server_default="{}"),
         sa.Column("status", sa.String(20), nullable=False, server_default="pending"),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.Column("decided_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("decided_by", sa.String(100), nullable=True),
     )
-    op.create_index("ix_pending_approvals_thread_id", "pending_approvals", ["thread_id"])
+    op.create_index(
+        "ix_pending_approvals_thread_id", "pending_approvals", ["thread_id"]
+    )
     op.create_index("ix_pending_approvals_task_id", "pending_approvals", ["task_id"])
     op.create_index("ix_pending_approvals_status", "pending_approvals", ["status"])
 

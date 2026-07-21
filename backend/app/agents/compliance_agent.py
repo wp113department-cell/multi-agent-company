@@ -1,4 +1,5 @@
 """compliance_agent — audits code and processes for regulatory compliance."""
+
 from __future__ import annotations
 
 import logging
@@ -15,10 +16,20 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "compliance_agent",
     "description": "Audits code, configs, and processes for regulatory compliance (GDPR, SOC2, HIPAA, PCI-DSS).",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "get_file_tree",
-        "search_symbols", "find_references", "read_files", "file_exists",
-        "file_info", "analyze_file", "find_todos", "search_imports",
-        "write_file", "submit_compliance_agent",
+        "read_file",
+        "list_files",
+        "search_code",
+        "get_file_tree",
+        "search_symbols",
+        "find_references",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "analyze_file",
+        "find_todos",
+        "search_imports",
+        "write_file",
+        "submit_compliance_agent",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -132,16 +143,19 @@ def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["compliance_audit"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["compliance_audit"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry unavailable: %s", exc)

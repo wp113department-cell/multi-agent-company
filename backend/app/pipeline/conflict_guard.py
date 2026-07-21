@@ -4,6 +4,7 @@ Called before dispatching a coder/backend-dev/frontend-dev subtask.
 Reads impacted_files from pipeline_state.architect_plan for all running epics
 and returns an error string if there is overlap with the candidate file set.
 """
+
 from __future__ import annotations
 
 import logging
@@ -59,9 +60,9 @@ async def _get_epic_files(epic_id: str, db: AsyncSession) -> set[str]:
     from app.db.models import DevTask
 
     result = await db.execute(
-        select(PipelineState).join(
-            DevTask, DevTask.id == PipelineState.task_id
-        ).where(DevTask.epic_id == epic_id)
+        select(PipelineState)
+        .join(DevTask, DevTask.id == PipelineState.task_id)
+        .where(DevTask.epic_id == epic_id)
     )
     states = result.scalars().all()
 

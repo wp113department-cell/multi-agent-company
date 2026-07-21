@@ -1,4 +1,5 @@
 """Chat API — SSE streaming endpoints for the interactive chat interface."""
+
 from __future__ import annotations
 
 import asyncio
@@ -30,6 +31,7 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 # Request / response schemas
 # ---------------------------------------------------------------------------
 
+
 class CreateSessionRequest(BaseModel):
     repo_path: str
 
@@ -50,6 +52,7 @@ class ConfirmActionRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _require_session(session_id: str) -> ChatSession:
     session = get_session(session_id)
@@ -84,6 +87,7 @@ async def _event_stream(session: ChatSession) -> AsyncGenerator[str, None]:
 # Routes
 # ---------------------------------------------------------------------------
 
+
 @router.post("/sessions", response_model=CreateSessionResponse)
 async def create_chat_session(body: CreateSessionRequest) -> CreateSessionResponse:
     """Create a new chat session for a repository."""
@@ -115,7 +119,10 @@ async def send_message(
 
     session = _require_session(session_id)
     if session.active:
-        raise HTTPException(status_code=409, detail="Session already has an active message being processed")
+        raise HTTPException(
+            status_code=409,
+            detail="Session already has an active message being processed",
+        )
 
     session.active = True
 
@@ -135,7 +142,9 @@ async def send_message(
     )
 
 
-async def _run_agent(agent: Any, message: str, session: ChatSession, db_factory: Any) -> None:
+async def _run_agent(
+    agent: Any, message: str, session: ChatSession, db_factory: Any
+) -> None:
     """Background task: run the agent, then persist user message + assistant reply to DB."""
     history_len_before = len(session.history)
     try:
@@ -155,9 +164,15 @@ async def _run_agent(agent: Any, message: str, session: ChatSession, db_factory:
                     role = str(msg.get("role", ""))
                     content = msg.get("content", "")
                     text = content if isinstance(content, str) else json.dumps(content)
-                    await save_message_to_db(session.session_id, session.repo_path, role, text, db)
+                    await save_message_to_db(
+                        session.session_id, session.repo_path, role, text, db
+                    )
         except Exception as exc:
-            logger.warning("Chat history persistence failed for session %s: %s", session.session_id, exc)
+            logger.warning(
+                "Chat history persistence failed for session %s: %s",
+                session.session_id,
+                exc,
+            )
 
 
 @router.post("/sessions/{session_id}/confirm")

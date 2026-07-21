@@ -1,4 +1,5 @@
 """Tests for DevOps Agent — tool scoping and bash allowlist enforcement."""
+
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -8,8 +9,8 @@ from app.agents.tools import (
     make_devops_handlers,
 )
 
-
 # ---- Tool list structural tests ----
+
 
 def test_devops_tools_has_bash() -> None:
     names = {t["name"] for t in DEVOPS_TOOLS}
@@ -39,6 +40,7 @@ def test_devops_tools_has_no_submit_patch() -> None:
 
 
 # ---- Bash allowlist tests ----
+
 
 def test_devops_bash_allows_git_status(tmp_path: object) -> None:
     with patch("app.agents.tools.get_settings") as mock_settings:
@@ -86,11 +88,13 @@ def test_devops_health_report_stored(tmp_path: object) -> None:
     with patch("app.agents.tools.get_settings") as mock_settings:
         mock_settings.return_value.devops_bash_allowlist = "git status"
         handlers = make_devops_handlers(str(tmp_path))
-    result = handlers["submit_health_report"]({
-        "status": "healthy",
-        "checks": [{"name": "disk", "status": "ok", "detail": "50% used"}],
-        "summary": "All systems operational",
-    })
+    result = handlers["submit_health_report"](
+        {
+            "status": "healthy",
+            "checks": [{"name": "disk", "status": "ok", "detail": "50% used"}],
+            "summary": "All systems operational",
+        }
+    )
     assert result == "Health report submitted"
     assert handlers["_health_result"]["status"] == "healthy"
     assert len(handlers["_health_result"]["checks"]) == 1

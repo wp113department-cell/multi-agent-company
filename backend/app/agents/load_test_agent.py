@@ -1,4 +1,5 @@
 """load_test_agent — generates k6 or Locust load test scripts from existing API routes."""
+
 from __future__ import annotations
 
 import logging
@@ -15,18 +16,31 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "load_test_agent",
     "description": "Generates k6 or Locust load test scripts for APIs. Reads actual routes and Pydantic schemas to produce realistic scenarios with explicit pass/fail latency and error-rate thresholds.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "get_file_tree",
-        "search_symbols", "find_references", "list_functions", "parse_ast",
-        "analyze_file", "read_files", "file_exists", "file_info",
-        "find_todos", "search_imports",
-        "write_file", "submit_load_test_agent",
+        "read_file",
+        "list_files",
+        "search_code",
+        "get_file_tree",
+        "search_symbols",
+        "find_references",
+        "list_functions",
+        "parse_ast",
+        "analyze_file",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_todos",
+        "search_imports",
+        "write_file",
+        "submit_load_test_agent",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
     "side_effects": ["writes load test scripts"],
     "permissions": ["read_repo", "write_docs"],
     "risk_level": "low",
-    "expected_verification": {"read": "read_file must run to inspect API routes and schemas"},
+    "expected_verification": {
+        "read": "read_file must run to inspect API routes and schemas"
+    },
     "dependencies": [],
 }
 
@@ -134,16 +148,19 @@ def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["load_test_generation"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["load_test_generation"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry unavailable: %s", exc)

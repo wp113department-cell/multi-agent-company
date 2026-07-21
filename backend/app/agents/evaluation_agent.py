@@ -3,6 +3,7 @@
 Verification contract:
   - eval_run: set True only when run_python_snippet actually executes test code
 """
+
 from __future__ import annotations
 
 import logging
@@ -22,16 +23,26 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "evaluation_agent",
     "description": "Runs LLM output evaluation suites, scores test cases, and reports overall pass/fail metrics.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info",
-        "run_python_snippet", "run_tests", "submit_eval_result",
+        "read_file",
+        "list_files",
+        "search_code",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "run_python_snippet",
+        "run_tests",
+        "submit_eval_result",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
     "side_effects": ["executes Python code"],
     "permissions": ["read_repo", "execute_code"],
     "risk_level": "medium",
-    "expected_verification": {"eval_run": "run_python_snippet or run_tests must execute before submit"},
+    "expected_verification": {
+        "eval_run": "run_python_snippet or run_tests must execute before submit"
+    },
     "dependencies": [],
 }
 
@@ -68,7 +79,9 @@ _EVAL_TOOLS = READ_ONLY_TOOLS + [
         "description": "Execute a Python snippet and capture stdout/stderr. Use this to run eval cases.",
         "input_schema": {
             "type": "object",
-            "properties": {"code": {"type": "string", "description": "Python code to execute"}},
+            "properties": {
+                "code": {"type": "string", "description": "Python code to execute"}
+            },
             "required": ["code"],
         },
     },
@@ -155,7 +168,14 @@ def run_evaluation_agent(
     score = raw.get("overall_score", 0.0)
     return AgentResult(
         summary=f"Eval: score={score:.2f} ({raw.get('pass_count', 0)}/{raw.get('pass_count', 0) + raw.get('fail_count', 0)} passed). {raw.get('summary', '')}",
-        findings=[{"case": c.get("name", "?"), "passed": c.get("passed", False), "reason": c.get("reason", "")} for c in cases],
+        findings=[
+            {
+                "case": c.get("name", "?"),
+                "passed": c.get("passed", False),
+                "reason": c.get("reason", ""),
+            }
+            for c in cases
+        ],
         files_touched=[],
         verified=bool(final_state["verification"].get("eval_run", False)),
         requires_human_approval=False,
@@ -170,20 +190,28 @@ def run_evaluation_agent(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["llm_evaluation", "eval_suite_execution", "output_scoring"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=[
+                    "llm_evaluation",
+                    "eval_suite_execution",
+                    "output_scoring",
+                ],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

@@ -4,6 +4,7 @@ Verification contract:
   - git_log_read: set True by generate_release_notes tool call
   - notes_written: set True when write_file is called with RELEASE_NOTES
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,9 +24,18 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "release_notes_agent",
     "description": "Reads git log between version tags and generates structured RELEASE_NOTES.md with highlights, features, fixes, and breaking changes.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "get_file_tree",
-        "git_log", "git_show", "git_status", "read_files", "file_exists",
-        "generate_release_notes", "generate_changelog", "write_file",
+        "read_file",
+        "list_files",
+        "search_code",
+        "get_file_tree",
+        "git_log",
+        "git_show",
+        "git_status",
+        "read_files",
+        "file_exists",
+        "generate_release_notes",
+        "generate_changelog",
+        "write_file",
         "submit_release_notes",
     ],
     "input_types": ["task_id", "description", "repo_path"],
@@ -33,7 +43,9 @@ AGENT_CONTRACT: dict[str, Any] = {
     "side_effects": ["writes RELEASE_NOTES.md"],
     "permissions": ["read_repo", "write_repo"],
     "risk_level": "low",
-    "expected_verification": {"git_log_read": "generate_release_notes or generate_changelog must run before submit"},
+    "expected_verification": {
+        "git_log_read": "generate_release_notes or generate_changelog must run before submit"
+    },
     "dependencies": [],
 }
 
@@ -43,10 +55,24 @@ _SUBMIT_RELEASE_NOTES_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "version": {"type": "string", "description": "Release version (e.g. v1.2.0)"},
-            "content": {"type": "string", "description": "Full release notes markdown text"},
-            "highlights": {"type": "array", "items": {"type": "string"}, "description": "Top 3-5 highlights"},
-            "breaking_changes": {"type": "array", "items": {"type": "string"}, "description": "Breaking changes if any"},
+            "version": {
+                "type": "string",
+                "description": "Release version (e.g. v1.2.0)",
+            },
+            "content": {
+                "type": "string",
+                "description": "Full release notes markdown text",
+            },
+            "highlights": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Top 3-5 highlights",
+            },
+            "breaking_changes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Breaking changes if any",
+            },
         },
         "required": ["version", "content", "highlights"],
     },
@@ -71,7 +97,11 @@ _RELEASE_NOTES_TOOLS = READ_ONLY_TOOLS + [
         "description": "Generate a changelog from git history.",
         "input_schema": {
             "type": "object",
-            "properties": {"from_ref": {"type": "string"}, "to_ref": {"type": "string"}, "repo_path": {"type": "string"}},
+            "properties": {
+                "from_ref": {"type": "string"},
+                "to_ref": {"type": "string"},
+                "repo_path": {"type": "string"},
+            },
             "required": [],
         },
     },
@@ -79,7 +109,10 @@ _RELEASE_NOTES_TOOLS = READ_ONLY_TOOLS + [
 ]
 
 _VERIFICATION_CFG = VerificationConfig(
-    set_by={"generate_release_notes": "git_log_read", "generate_changelog": "git_log_read"},
+    set_by={
+        "generate_release_notes": "git_log_read",
+        "generate_changelog": "git_log_read",
+    },
     reset_by=(),
     reset_keys=(),
     enforce_in_result={"git_log_read": "git_log_read"},
@@ -157,20 +190,28 @@ def run_release_notes_agent(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["release_notes_generation", "git_history_summarization", "version_documentation"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=[
+                    "release_notes_generation",
+                    "git_history_summarization",
+                    "version_documentation",
+                ],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

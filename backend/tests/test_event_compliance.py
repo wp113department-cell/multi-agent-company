@@ -15,6 +15,7 @@ constructors with zero call sites anywhere in the codebase right now — Day
 would be scope creep unrelated to what this test exists to catch: someone
 inventing a 9th, undocumented event type).
 """
+
 from __future__ import annotations
 
 import ast
@@ -41,10 +42,7 @@ _CANONICAL_EVENT_TYPES = {e.value for e in FleetEventType}
 
 
 def _iter_python_files() -> list[Path]:
-    return [
-        p for p in _APP_DIR.rglob("*.py")
-        if "__pycache__" not in p.parts
-    ]
+    return [p for p in _APP_DIR.rglob("*.py") if "__pycache__" not in p.parts]
 
 
 def _find_publish_event_types(source: str) -> set[str]:
@@ -68,7 +66,10 @@ def _find_publish_event_types(source: str) -> set[str]:
         if not isinstance(inner, ast.Call):
             continue
         inner_func = inner.func
-        if isinstance(inner_func, ast.Name) and inner_func.id in _CONSTRUCTOR_TO_EVENT_TYPE:
+        if (
+            isinstance(inner_func, ast.Name)
+            and inner_func.id in _CONSTRUCTOR_TO_EVENT_TYPE
+        ):
             found.add(_CONSTRUCTOR_TO_EVENT_TYPE[inner_func.id])
 
     return found
@@ -81,7 +82,9 @@ def test_every_publish_call_uses_a_canonical_event_constructor() -> None:
         source = path.read_text(encoding="utf-8")
         event_types = _find_publish_event_types(source)
         for et in event_types:
-            all_observed.setdefault(et, []).append(str(path.relative_to(_APP_DIR.parent)))
+            all_observed.setdefault(et, []).append(
+                str(path.relative_to(_APP_DIR.parent))
+            )
 
     observed_set = set(all_observed.keys())
     unexpected = observed_set - _CANONICAL_EVENT_TYPES
@@ -99,13 +102,19 @@ def test_at_least_some_canonical_events_are_actually_emitted() -> None:
     for path in _iter_python_files():
         all_observed |= _find_publish_event_types(path.read_text(encoding="utf-8"))
 
-    assert len(all_observed) >= 4, (
-        f"Expected several canonical event types to be in active use, found only: {all_observed}"
-    )
+    assert (
+        len(all_observed) >= 4
+    ), f"Expected several canonical event types to be in active use, found only: {all_observed}"
 
 
 def test_fleet_event_type_enum_has_exactly_the_8_canonical_values() -> None:
     assert _CANONICAL_EVENT_TYPES == {
-        "TaskCreated", "TaskStarted", "TaskCompleted", "TaskFailed",
-        "ReviewRequested", "LessonPublished", "HealthUpdated", "MemoryCreated",
+        "TaskCreated",
+        "TaskStarted",
+        "TaskCompleted",
+        "TaskFailed",
+        "ReviewRequested",
+        "LessonPublished",
+        "HealthUpdated",
+        "MemoryCreated",
     }

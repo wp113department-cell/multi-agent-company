@@ -5,6 +5,7 @@ Security rules enforced here (not in the API layer):
 - Workspace scoping: paths must start with ALLOWED_WORKSPACE_PARENT
 - Caller must pass workspace_root so we can scope all operations
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -22,6 +23,7 @@ def _get_allowed_hosts() -> list[str]:
     """Load allowed git remote hostnames from config (non-fatal)."""
     try:
         from app.config import get_settings
+
         raw = get_settings().git_allowed_hosts
         return [h.strip() for h in raw.split(",") if h.strip()]
     except Exception:
@@ -45,6 +47,7 @@ def _validate_workspace(path: str) -> None:
     """Raise ValueError if path is outside allowed workspace parent."""
     try:
         from app.config import get_settings
+
         parent = get_settings().allowed_workspace_parent
     except Exception:
         parent = "/home"
@@ -55,7 +58,9 @@ def _validate_workspace(path: str) -> None:
         )
 
 
-async def _run_git(args: list[str], cwd: str | None = None, timeout: float = 120.0) -> tuple[int, str, str]:
+async def _run_git(
+    args: list[str], cwd: str | None = None, timeout: float = 120.0
+) -> tuple[int, str, str]:
     """Run a git command. Returns (returncode, stdout, stderr). No shell=True."""
     cmd = ["git"] + args
     logger.debug("git %s (cwd=%s)", " ".join(args), cwd)
@@ -71,14 +76,21 @@ async def _run_git(args: list[str], cwd: str | None = None, timeout: float = 120
         proc.kill()
         await proc.communicate()
         return -1, "", f"git {args[0]} timed out after {timeout}s"
-    return proc.returncode or 0, stdout_b.decode(errors="replace"), stderr_b.decode(errors="replace")
+    return (
+        proc.returncode or 0,
+        stdout_b.decode(errors="replace"),
+        stderr_b.decode(errors="replace"),
+    )
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-async def git_clone(url: str, dest_path: str, branch: str | None = None) -> dict[str, Any]:
+
+async def git_clone(
+    url: str, dest_path: str, branch: str | None = None
+) -> dict[str, Any]:
     """Clone a remote repo to dest_path.
 
     dest_path must be inside allowed_workspace_parent. url must be on allowlist.
@@ -110,6 +122,7 @@ async def git_clone_with_token(
 
     # Inject token into HTTPS URL
     from urllib.parse import urlparse, urlunparse
+
     parsed = urlparse(url)
     if not parsed.netloc:
         raise ValueError(f"Could not parse URL: {url!r}")
@@ -147,10 +160,15 @@ async def git_log(repo_path: str, limit: int = 20) -> dict[str, Any]:
     for line in stdout.strip().splitlines():
         parts = line.split("|", 4)
         if len(parts) == 5:
-            commits.append({
-                "sha": parts[0], "author": parts[1], "email": parts[2],
-                "date": parts[3], "message": parts[4],
-            })
+            commits.append(
+                {
+                    "sha": parts[0],
+                    "author": parts[1],
+                    "email": parts[2],
+                    "date": parts[3],
+                    "message": parts[4],
+                }
+            )
     return {"ok": rc == 0, "commits": commits, "stderr": stderr}
 
 
@@ -177,7 +195,9 @@ async def git_add(repo_path: str, paths: list[str]) -> dict[str, Any]:
     return {"ok": rc == 0, "stdout": stdout, "stderr": stderr}
 
 
-async def git_commit(repo_path: str, message: str, author_name: str = "", author_email: str = "") -> dict[str, Any]:
+async def git_commit(
+    repo_path: str, message: str, author_name: str = "", author_email: str = ""
+) -> dict[str, Any]:
     """Create a commit."""
     _validate_workspace(repo_path)
     if not message.strip():
@@ -190,16 +210,27 @@ async def git_commit(repo_path: str, message: str, author_name: str = "", author
         env["GIT_AUTHOR_EMAIL"] = author_email
         env["GIT_COMMITTER_EMAIL"] = author_email
     proc = await asyncio.create_subprocess_exec(
-        "git", "commit", "-m", message,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        cwd=repo_path, env=env,
+        "git",
+        "commit",
+        "-m",
+        message,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=repo_path,
+        env=env,
     )
     stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=30.0)
     rc = proc.returncode or 0
-    return {"ok": rc == 0, "stdout": stdout_b.decode(errors="replace"), "stderr": stderr_b.decode(errors="replace")}
+    return {
+        "ok": rc == 0,
+        "stdout": stdout_b.decode(errors="replace"),
+        "stderr": stderr_b.decode(errors="replace"),
+    }
 
 
-async def git_push(repo_path: str, remote: str = "origin", branch: str = "") -> dict[str, Any]:
+async def git_push(
+    repo_path: str, remote: str = "origin", branch: str = ""
+) -> dict[str, Any]:
     """Push to remote. Remote URL must be on allowlist (checked via git remote get-url)."""
     _validate_workspace(repo_path)
     # Verify remote URL is on allowlist before pushing
@@ -216,16 +247,24 @@ async def git_push(repo_path: str, remote: str = "origin", branch: str = "") -> 
 async def git_branch_list(repo_path: str) -> dict[str, Any]:
     """List all local branches."""
     _validate_workspace(repo_path)
-    rc, stdout, stderr = await _run_git(["branch", "-a", "--format=%(refname:short)"], cwd=repo_path)
+    rc, stdout, stderr = await _run_git(
+        ["branch", "-a", "--format=%(refname:short)"], cwd=repo_path
+    )
     branches = [b.strip() for b in stdout.strip().splitlines() if b.strip()]
     return {"ok": rc == 0, "branches": branches, "stderr": stderr}
 
 
-async def git_checkout(repo_path: str, branch: str, create: bool = False) -> dict[str, Any]:
+async def git_checkout(
+    repo_path: str, branch: str, create: bool = False
+) -> dict[str, Any]:
     """Checkout or create a branch."""
     _validate_workspace(repo_path)
     # Validate branch name — no path traversal (..) or absolute paths
-    if ".." in branch or branch.startswith("/") or not re.match(r"^[a-zA-Z0-9._/\-]+$", branch):
+    if (
+        ".." in branch
+        or branch.startswith("/")
+        or not re.match(r"^[a-zA-Z0-9._/\-]+$", branch)
+    ):
         raise ValueError(f"Invalid branch name: {branch!r}")
     args = ["checkout"]
     if create:

@@ -4,6 +4,7 @@ Semaphores are module-level singletons (one per process). They are re-created
 on Settings change only if the module is reloaded; in production the process
 starts fresh so this is fine.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -47,7 +48,9 @@ async def epic_slot() -> AsyncIterator[None]:
     """Acquire the global epic concurrency slot before starting an epic run."""
     sem = _get_epic_sem()
     async with sem:
-        logger.debug("Epic slot acquired")  # _value is internal; omit to keep mypy clean
+        logger.debug(
+            "Epic slot acquired"
+        )  # _value is internal; omit to keep mypy clean
         yield
 
 

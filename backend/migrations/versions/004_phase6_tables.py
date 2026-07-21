@@ -4,6 +4,7 @@ Revision ID: 004
 Revises: 003
 Create Date: 2026-07-03
 """
+
 from typing import Any, Sequence, Union
 
 import sqlalchemy as sa
@@ -60,7 +61,12 @@ def upgrade() -> None:
         sa.Column("outcome", sa.String(50), nullable=False),  # completed | blocked
         sa.Column("description", sa.Text(), nullable=False),
         sa.Column("summary", sa.Text(), nullable=False),
-        sa.Column("files_changed", postgresql.ARRAY(sa.Text()), nullable=False, server_default="{}"),
+        sa.Column(
+            "files_changed",
+            postgresql.ARRAY(sa.Text()),
+            nullable=False,
+            server_default="{}",
+        ),
         # 1536-dim vector (Voyage AI voyage-code-2)
         sa.Column(
             "embedding",
@@ -93,16 +99,76 @@ def _seed_agents(op: Any) -> None:
     # Use raw SQL with explicit ::uuid cast — asyncpg requires UUID columns
     # receive actual UUIDs, not strings, when using parameterised inserts.
     rows = [
-        ("00000000-0000-0000-0000-000000000001", "planner",      '{"plan","decompose","read_only"}',              '["read_file","list_files","submit_plan"]',          "roles/planner.md"),
-        ("00000000-0000-0000-0000-000000000002", "pm",           '{"plan","manage","read_only"}',                 '["read_file","list_files","submit_plan"]',          "roles/pm.md"),
-        ("00000000-0000-0000-0000-000000000003", "architect",    '{"design","architecture","read_only"}',         '["read_file","list_files","submit_plan"]',          "roles/architect.md"),
-        ("00000000-0000-0000-0000-000000000004", "decomposer",   '{"decompose","plan","read_only"}',              '["read_file","list_files","submit_subtasks"]',      "roles/decomposer.md"),
-        ("00000000-0000-0000-0000-000000000005", "backend_dev",  '{"code","backend","python","sql","git"}',       '["read_file","write_file","list_files","run_bash","submit_patch"]', "roles/coder.md"),
-        ("00000000-0000-0000-0000-000000000006", "frontend_dev", '{"code","frontend","typescript","react","git"}','["read_file","write_file","list_files","run_bash","submit_patch"]', "roles/coder.md"),
-        ("00000000-0000-0000-0000-000000000007", "qa",           '{"test","quality","read_only"}',                '["read_file","list_files","run_bash","submit_qa_result"]',          "roles/qa.md"),
-        ("00000000-0000-0000-0000-000000000008", "reviewer",     '{"review","code_review","read_only"}',          '["read_file","list_files","submit_review"]',                        "roles/reviewer.md"),
-        ("00000000-0000-0000-0000-000000000009", "devops",       '{"devops","monitoring","read_only","git"}',     '["read_file","list_files","run_bash","submit_health_report"]',      "roles/devops.md"),
-        ("00000000-0000-0000-0000-000000000010", "manager",      '{"manage","orchestrate","plan"}',               '["read_file","list_files"]',                                        "roles/manager.md"),
+        (
+            "00000000-0000-0000-0000-000000000001",
+            "planner",
+            '{"plan","decompose","read_only"}',
+            '["read_file","list_files","submit_plan"]',
+            "roles/planner.md",
+        ),
+        (
+            "00000000-0000-0000-0000-000000000002",
+            "pm",
+            '{"plan","manage","read_only"}',
+            '["read_file","list_files","submit_plan"]',
+            "roles/pm.md",
+        ),
+        (
+            "00000000-0000-0000-0000-000000000003",
+            "architect",
+            '{"design","architecture","read_only"}',
+            '["read_file","list_files","submit_plan"]',
+            "roles/architect.md",
+        ),
+        (
+            "00000000-0000-0000-0000-000000000004",
+            "decomposer",
+            '{"decompose","plan","read_only"}',
+            '["read_file","list_files","submit_subtasks"]',
+            "roles/decomposer.md",
+        ),
+        (
+            "00000000-0000-0000-0000-000000000005",
+            "backend_dev",
+            '{"code","backend","python","sql","git"}',
+            '["read_file","write_file","list_files","run_bash","submit_patch"]',
+            "roles/coder.md",
+        ),
+        (
+            "00000000-0000-0000-0000-000000000006",
+            "frontend_dev",
+            '{"code","frontend","typescript","react","git"}',
+            '["read_file","write_file","list_files","run_bash","submit_patch"]',
+            "roles/coder.md",
+        ),
+        (
+            "00000000-0000-0000-0000-000000000007",
+            "qa",
+            '{"test","quality","read_only"}',
+            '["read_file","list_files","run_bash","submit_qa_result"]',
+            "roles/qa.md",
+        ),
+        (
+            "00000000-0000-0000-0000-000000000008",
+            "reviewer",
+            '{"review","code_review","read_only"}',
+            '["read_file","list_files","submit_review"]',
+            "roles/reviewer.md",
+        ),
+        (
+            "00000000-0000-0000-0000-000000000009",
+            "devops",
+            '{"devops","monitoring","read_only","git"}',
+            '["read_file","list_files","run_bash","submit_health_report"]',
+            "roles/devops.md",
+        ),
+        (
+            "00000000-0000-0000-0000-000000000010",
+            "manager",
+            '{"manage","orchestrate","plan"}',
+            '["read_file","list_files"]',
+            "roles/manager.md",
+        ),
     ]
     for agent_id, name, tags, tools, prompt_ref in rows:
         op.execute(

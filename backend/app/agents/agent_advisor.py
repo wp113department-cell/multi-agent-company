@@ -5,6 +5,7 @@ task, was anything over-provisioned or missing. Purely advisory — never
 writes code itself. Its output is a request the user can approve to have
 some other agent (or a manual pipeline-config change) implement.
 """
+
 from __future__ import annotations
 
 import logging
@@ -28,15 +29,21 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "agent_advisor",
     "description": "Reviews orchestration correctness across the fleet — did the right agent(s) run for a task, was anything over-provisioned or missing — and files advisory enhancement requests. Purely read-only; never writes code.",
     "allowed_tools": [
-        "read_file", "search_code", "task_history_query",
-        "fleet_metrics_read", "audit_log_read", "submit_enhancement_request",
+        "read_file",
+        "search_code",
+        "task_history_query",
+        "fleet_metrics_read",
+        "audit_log_read",
+        "submit_enhancement_request",
     ],
     "input_types": ["scan_trigger"],
     "output_types": ["AgentResult"],
     "side_effects": [],
     "permissions": ["read_repo"],
     "risk_level": "low",
-    "expected_verification": {"history_read": "task_history_query must run before filing a request"},
+    "expected_verification": {
+        "history_read": "task_history_query must run before filing a request"
+    },
     "dependencies": [],
 }
 
@@ -47,7 +54,10 @@ _TASK_HISTORY_QUERY_TOOL_SPEC = {
         "type": "object",
         "properties": {
             "limit": {"type": "integer", "description": "Max records (default 20)"},
-            "status": {"type": "string", "description": "Filter: completed, failed, blocked"},
+            "status": {
+                "type": "string",
+                "description": "Filter: completed, failed, blocked",
+            },
         },
         "required": [],
     },
@@ -78,7 +88,17 @@ _SUBMIT_ENHANCEMENT_TOOL_SPEC = {
         "properties": {
             "title": {"type": "string"},
             "description": {"type": "string"},
-            "category": {"type": "string", "enum": ["performance", "bug", "orchestration", "knowledge", "quality", "security"]},
+            "category": {
+                "type": "string",
+                "enum": [
+                    "performance",
+                    "bug",
+                    "orchestration",
+                    "knowledge",
+                    "quality",
+                    "security",
+                ],
+            },
             "priority": {"type": "string", "enum": ["emergency", "medium", "low"]},
             "evidence": {"type": "object"},
         },
@@ -86,7 +106,14 @@ _SUBMIT_ENHANCEMENT_TOOL_SPEC = {
     },
 }
 
-SCAN_TOOLS = [READ_ONLY_TOOLS[0], READ_ONLY_TOOLS[2], _TASK_HISTORY_QUERY_TOOL_SPEC, _FLEET_METRICS_TOOL_SPEC, _AUDIT_LOG_READ_TOOL_SPEC, _SUBMIT_ENHANCEMENT_TOOL_SPEC]
+SCAN_TOOLS = [
+    READ_ONLY_TOOLS[0],
+    READ_ONLY_TOOLS[2],
+    _TASK_HISTORY_QUERY_TOOL_SPEC,
+    _FLEET_METRICS_TOOL_SPEC,
+    _AUDIT_LOG_READ_TOOL_SPEC,
+    _SUBMIT_ENHANCEMENT_TOOL_SPEC,
+]
 
 _SCAN_CFG = VerificationConfig(
     set_by={"task_history_query": "history_read", "audit_log_read": "history_read"},
@@ -148,10 +175,15 @@ def run_agent_advisor_scan(trace_id: str = "") -> AgentResult:
     )
 
     return AgentResult(
-        summary="Orchestration scan complete" if final_state["submitted"] else "Orchestration scan complete — nothing to advise",
+        summary=(
+            "Orchestration scan complete"
+            if final_state["submitted"]
+            else "Orchestration scan complete — nothing to advise"
+        ),
         findings=[],
         files_touched=[],
-        verified=bool(final_state["verification"].get("history_read")) or not final_state["submitted"],
+        verified=bool(final_state["verification"].get("history_read"))
+        or not final_state["submitted"],
         requires_human_approval=False,
         tokens_in=final_state["tokens_in"],
         tokens_out=final_state["tokens_out"],
@@ -164,16 +196,19 @@ def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["orchestration_advisory"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["orchestration_advisory"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry unavailable: %s", exc)

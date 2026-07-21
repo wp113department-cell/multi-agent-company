@@ -4,6 +4,7 @@ Swap backends by setting QUEUE_BACKEND=bullmq (requires Redis).
 The BullMQQueueAdapter stub documents the interface; replace the body
 with redis+bullmq client calls when Redis becomes available.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -67,6 +68,7 @@ class AsyncioQueueAdapter(QueueAdapter):
     async def enqueue(self, job_fn: JobFn, **kwargs: Any) -> str:
         await self._start()
         import uuid
+
         job_id = str(uuid.uuid4())
         self._statuses[job_id] = "pending"
         await self._queue.put((job_id, job_fn, kwargs))
@@ -106,6 +108,7 @@ class BullMQQueueAdapter(QueueAdapter):
 def get_queue_adapter() -> QueueAdapter:
     """Return the configured queue adapter singleton."""
     from app.config import get_settings
+
     backend = get_settings().queue_backend.lower()
     if backend == "bullmq":
         return BullMQQueueAdapter()

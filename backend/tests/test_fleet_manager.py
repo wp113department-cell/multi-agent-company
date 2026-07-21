@@ -2,6 +2,7 @@
 
 Key assertion: fleet_manager selects agents via registry lookup, NOT by hardcoded name.
 """
+
 from __future__ import annotations
 
 
@@ -19,7 +20,12 @@ def _setup(capabilities: list[AgentCapability]) -> FleetManager:
     return FleetManager(capability_registry=caps, agent_registry=agents)
 
 
-def _cap(name: str, capabilities: list[str], success_rate: float = 1.0, risk_level: str = "low") -> AgentCapability:
+def _cap(
+    name: str,
+    capabilities: list[str],
+    success_rate: float = 1.0,
+    risk_level: str = "low",
+) -> AgentCapability:
     return AgentCapability(
         name=name,
         description=f"Test agent {name}",
@@ -53,19 +59,23 @@ class TestRegistryLookup:
 
 class TestScoring:
     def test_prefers_higher_success_rate(self) -> None:
-        fm = _setup([
-            _cap("good", ["coding"], success_rate=0.95),
-            _cap("bad", ["coding"], success_rate=0.50),
-        ])
+        fm = _setup(
+            [
+                _cap("good", ["coding"], success_rate=0.95),
+                _cap("bad", ["coding"], success_rate=0.50),
+            ]
+        )
         plan = fm.select("coding")
         assert plan is not None
         assert plan.agent_name == "good"
 
     def test_prefers_healthy_over_degraded(self) -> None:
-        fm = _setup([
-            _cap("agent_a", ["coding"]),
-            _cap("agent_b", ["coding"]),
-        ])
+        fm = _setup(
+            [
+                _cap("agent_a", ["coding"]),
+                _cap("agent_b", ["coding"]),
+            ]
+        )
         fm._agents.get("agent_a").health = "degraded"
         plan = fm.select("coding")
         assert plan is not None
@@ -78,10 +88,12 @@ class TestScoring:
         assert plan is None
 
     def test_prefer_low_risk_filters_high_risk(self) -> None:
-        fm = _setup([
-            _cap("safe", ["deploy"], risk_level="low"),
-            _cap("risky", ["deploy"], risk_level="high"),
-        ])
+        fm = _setup(
+            [
+                _cap("safe", ["deploy"], risk_level="low"),
+                _cap("risky", ["deploy"], risk_level="high"),
+            ]
+        )
         plan = fm.select("deploy", prefer_low_risk=True)
         assert plan is not None
         assert plan.agent_name == "safe"
@@ -118,10 +130,12 @@ class TestDispatch:
 
 class TestStatus:
     def test_status_reflects_registry_state(self) -> None:
-        fm = _setup([
-            _cap("a", ["cap1"]),
-            _cap("b", ["cap2"]),
-        ])
+        fm = _setup(
+            [
+                _cap("a", ["cap1"]),
+                _cap("b", ["cap2"]),
+            ]
+        )
         status = fm.status()
         assert status["registered_capabilities"] == 2
         assert status["agent_instances"] == 2
@@ -132,6 +146,7 @@ class TestStatus:
 class TestReferenceAgents:
     def test_reference_fleet_manager_can_select_pm(self) -> None:
         from app.fleet.fleet_manager import get_fleet_manager
+
         fm = get_fleet_manager()
         plan = fm.select("planning")
         assert plan is not None
@@ -139,6 +154,7 @@ class TestReferenceAgents:
 
     def test_reference_fleet_manager_can_select_bug_fix(self) -> None:
         from app.fleet.fleet_manager import get_fleet_manager
+
         fm = get_fleet_manager()
         plan = fm.select("bug_fix")
         assert plan is not None
@@ -146,6 +162,7 @@ class TestReferenceAgents:
 
     def test_reference_fleet_manager_can_select_qa(self) -> None:
         from app.fleet.fleet_manager import get_fleet_manager
+
         fm = get_fleet_manager()
         plan = fm.select("qa_verification")
         assert plan is not None

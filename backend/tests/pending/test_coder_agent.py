@@ -1,4 +1,5 @@
 """Coder Agent live tests — require ANTHROPIC_API_KEY."""
+
 from __future__ import annotations
 
 import os
@@ -57,9 +58,9 @@ class TestCoderAgent:
 
         assert error is None, f"Coder failed: {error}"
         assert len(files_changed) >= 1, "Coder did not report any files changed"
-        assert os.path.exists(os.path.join(worktree, "mypackage", "hello.py")), (
-            "Coder did not create mypackage/hello.py"
-        )
+        assert os.path.exists(
+            os.path.join(worktree, "mypackage", "hello.py")
+        ), "Coder did not create mypackage/hello.py"
 
     def test_coder_output_passes_ruff(self, tmp_path: pytest.TempPathFactory) -> None:
         """Code written by the Coder Agent passes ruff lint."""
@@ -80,7 +81,9 @@ class TestCoderAgent:
             Import and call add(1, 2) == 3.
         """)
 
-        _, error, *_ = run_coder(task_id=41, plan=plan, worktree_path=worktree, repo_path=_THIS_REPO)
+        _, error, *_ = run_coder(
+            task_id=41, plan=plan, worktree_path=worktree, repo_path=_THIS_REPO
+        )
         assert error is None, f"Coder failed: {error}"
 
         result = subprocess.run(
@@ -89,9 +92,13 @@ class TestCoderAgent:
             capture_output=True,
             text=True,
         )
-        assert result.returncode == 0, f"ruff found issues:\n{result.stdout}{result.stderr}"
+        assert (
+            result.returncode == 0
+        ), f"ruff found issues:\n{result.stdout}{result.stderr}"
 
-    def test_coder_blocked_on_policy_violation(self, tmp_path: pytest.TempPathFactory) -> None:
+    def test_coder_blocked_on_policy_violation(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
         """Coder is blocked when the plan asks it to write to .env (policy deny)."""
         from app.agents.coder import run_coder
 
@@ -113,9 +120,11 @@ class TestCoderAgent:
         # The coder may still "succeed" from its own perspective (submit_patch),
         # but policy denials must appear in the logs. At minimum: coder should not
         # actually write to .env.
-        _, _, *_ = run_coder(task_id=42, plan=plan, worktree_path=worktree, repo_path=_THIS_REPO)
+        _, _, *_ = run_coder(
+            task_id=42, plan=plan, worktree_path=worktree, repo_path=_THIS_REPO
+        )
 
         dotenv_path = os.path.join(worktree, ".env")
-        assert not os.path.exists(dotenv_path), (
-            "CRITICAL: Policy engine allowed Coder to write to .env — policy is broken"
-        )
+        assert not os.path.exists(
+            dotenv_path
+        ), "CRITICAL: Policy engine allowed Coder to write to .env — policy is broken"

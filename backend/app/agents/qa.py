@@ -9,6 +9,7 @@ Session 3 migration (2026-07-16):
 
 Pattern from: swe-agent RetryAgent (preserve external interface, swap internal runner).
 """
+
 from __future__ import annotations
 
 import logging
@@ -29,12 +30,32 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "qa",
     "description": "Runs pytest, mypy, and ruff in a worktree. Read + bash (test commands only). No writes.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "bash", "submit_qa_result",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "bash",
+        "submit_qa_result",
     ],
-    "input_types": ["task_id", "subtask_id", "files_changed", "worktree_path", "repo_path"],
+    "input_types": [
+        "task_id",
+        "subtask_id",
+        "files_changed",
+        "worktree_path",
+        "repo_path",
+    ],
     "output_types": ["QAResult"],
     "side_effects": ["execute_bash"],
     "permissions": ["read_repo", "execute_tests"],
@@ -59,6 +80,7 @@ _VERIFICATION_CFG = VerificationConfig(
 # Result dataclass — unchanged from original
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class QAResult:
     status: str  # "passed" | "failed"
@@ -74,6 +96,7 @@ class QAResult:
 # ---------------------------------------------------------------------------
 # Public runner — external interface unchanged
 # ---------------------------------------------------------------------------
+
 
 def run_qa(
     task_id: int,
@@ -139,7 +162,8 @@ def run_qa(
     raw = handlers.get("_qa_result", {})
     logger.info(
         "QA result — subtask %d, status=%s",
-        subtask_id, raw.get("status", "unknown"),
+        subtask_id,
+        raw.get("status", "unknown"),
     )
 
     return QAResult(
@@ -158,23 +182,34 @@ def run_qa(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            # Include legacy tags from capability_registry.py built-in entry so existing
-            # tests that query "qa_verification" / "test_execution" still resolve.
-            capabilities=["testing", "qa_validation", "lint_check",
-                           "test_execution", "typecheck", "lint", "qa_verification"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                # Include legacy tags from capability_registry.py built-in entry so existing
+                # tests that query "qa_verification" / "test_execution" still resolve.
+                capabilities=[
+                    "testing",
+                    "qa_validation",
+                    "lint_check",
+                    "test_execution",
+                    "typecheck",
+                    "lint",
+                    "qa_verification",
+                ],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register("qa")
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

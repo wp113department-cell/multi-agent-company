@@ -5,6 +5,7 @@ All tests run against real temp directories, no mocks.
 Covers: AST Engine, Git extras, Terminal extras, Smart search,
         Monitoring, Editing extras, DB extras.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -27,6 +28,7 @@ from app.repo_tools.ast_engine import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 def _tool_names(tool_list: list[dict[str, Any]]) -> set[str]:
     return {str(t["name"]) for t in tool_list}
 
@@ -34,8 +36,14 @@ def _tool_names(tool_list: list[dict[str, Any]]) -> set[str]:
 @pytest.fixture()
 def tmp_repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "init"], cwd=str(tmp_path), capture_output=True)
-    subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=str(tmp_path), capture_output=True)
-    subprocess.run(["git", "config", "user.name", "T"], cwd=str(tmp_path), capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@t.com"],
+        cwd=str(tmp_path),
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "T"], cwd=str(tmp_path), capture_output=True
+    )
     return tmp_path
 
 
@@ -49,20 +57,43 @@ def handlers(tmp_repo: Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 DAY1_TOOLS = [
-    "parse_ast", "import_graph", "call_graph", "dead_code_detect",
-    "circular_dep_detect", "rename_symbol",
-    "git_rebase", "git_cherry_pick",
-    "read_output", "run_node", "run_script", "docker_build", "docker_restart",
-    "find_route", "find_api", "find_sql", "find_test", "find_config",
-    "cpu_usage", "memory_usage", "disk_usage", "health_check", "task_progress",
-    "replace_class", "undo_changes", "generate_patch",
-    "explain_query", "run_migration", "seed_database",
+    "parse_ast",
+    "import_graph",
+    "call_graph",
+    "dead_code_detect",
+    "circular_dep_detect",
+    "rename_symbol",
+    "git_rebase",
+    "git_cherry_pick",
+    "read_output",
+    "run_node",
+    "run_script",
+    "docker_build",
+    "docker_restart",
+    "find_route",
+    "find_api",
+    "find_sql",
+    "find_test",
+    "find_config",
+    "cpu_usage",
+    "memory_usage",
+    "disk_usage",
+    "health_check",
+    "task_progress",
+    "replace_class",
+    "undo_changes",
+    "generate_patch",
+    "explain_query",
+    "run_migration",
+    "seed_database",
 ]
 
 
 @pytest.mark.parametrize("tool_name", DAY1_TOOLS)
 def test_day1_tool_in_chat_tools(tool_name: str) -> None:
-    assert tool_name in _tool_names(CHAT_TOOLS), f"{tool_name!r} missing from CHAT_TOOLS"
+    assert tool_name in _tool_names(
+        CHAT_TOOLS
+    ), f"{tool_name!r} missing from CHAT_TOOLS"
 
 
 @pytest.mark.parametrize("tool_name", DAY1_TOOLS)
@@ -85,10 +116,13 @@ def test_no_duplicate_tool_names() -> None:
 # Batch 10 — AST Engine (unit-tests against ast_engine module directly)
 # ---------------------------------------------------------------------------
 
+
 class TestParseAst:
     def test_parses_functions(self, tmp_path: Path) -> None:
         f = tmp_path / "mod.py"
-        f.write_text("def hello(x, y):\n    return x + y\n\nasync def world():\n    pass\n")
+        f.write_text(
+            "def hello(x, y):\n    return x + y\n\nasync def world():\n    pass\n"
+        )
         result = parse_file_ast(str(f))
         assert '"name": "hello"' in result
         assert '"name": "world"' in result
@@ -212,7 +246,9 @@ class TestDeadCodeDetect:
         assert "[ERROR]" in result
 
     def test_handler(self, handlers: dict[str, Any], tmp_repo: Path) -> None:
-        (tmp_repo / "dead.py").write_text("def orphan():\n    pass\n\ndef live():\n    pass\n\nlive()\n")
+        (tmp_repo / "dead.py").write_text(
+            "def orphan():\n    pass\n\ndef live():\n    pass\n\nlive()\n"
+        )
         result = handlers["dead_code_detect"]({})
         assert isinstance(result, str)
         assert len(result) > 0
@@ -278,7 +314,9 @@ class TestRenameSymbol:
 
     def test_handler(self, handlers: dict[str, Any], tmp_repo: Path) -> None:
         (tmp_repo / "h.py").write_text("def my_func():\n    my_func()\n")
-        result = handlers["rename_symbol"]({"old_name": "my_func", "new_name": "renamed_func"})
+        result = handlers["rename_symbol"](
+            {"old_name": "my_func", "new_name": "renamed_func"}
+        )
         assert "renamed_func" in result or "1 file" in result
 
 
@@ -286,16 +324,21 @@ class TestRenameSymbol:
 # Batch 11 — Git extras
 # ---------------------------------------------------------------------------
 
+
 class TestGitRebase:
     def test_blocks_interactive(self, handlers: dict[str, Any]) -> None:
         result = handlers["git_rebase"]({"onto": "main", "interactive": True})
         assert "BLOCKED" in result or "TTY" in result
 
-    def test_error_on_invalid_branch(self, handlers: dict[str, Any], tmp_repo: Path) -> None:
+    def test_error_on_invalid_branch(
+        self, handlers: dict[str, Any], tmp_repo: Path
+    ) -> None:
         # Make an initial commit so git is valid
         (tmp_repo / "init.txt").write_text("init")
         subprocess.run(["git", "add", "."], cwd=str(tmp_repo), capture_output=True)
-        subprocess.run(["git", "commit", "-m", "init"], cwd=str(tmp_repo), capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "init"], cwd=str(tmp_repo), capture_output=True
+        )
         result = handlers["git_rebase"]({"onto": "nonexistent_branch_xyzzy"})
         # Should return some kind of error message from git
         assert isinstance(result, str)
@@ -303,10 +346,14 @@ class TestGitRebase:
 
 
 class TestGitCherryPick:
-    def test_error_on_invalid_hash(self, handlers: dict[str, Any], tmp_repo: Path) -> None:
+    def test_error_on_invalid_hash(
+        self, handlers: dict[str, Any], tmp_repo: Path
+    ) -> None:
         (tmp_repo / "init.txt").write_text("init")
         subprocess.run(["git", "add", "."], cwd=str(tmp_repo), capture_output=True)
-        subprocess.run(["git", "commit", "-m", "init"], cwd=str(tmp_repo), capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "init"], cwd=str(tmp_repo), capture_output=True
+        )
         result = handlers["git_cherry_pick"]({"commit_hash": "deadbeef1234567890"})
         assert isinstance(result, str)
         assert len(result) > 0
@@ -315,6 +362,7 @@ class TestGitCherryPick:
 # ---------------------------------------------------------------------------
 # Batch 12 — Terminal extras
 # ---------------------------------------------------------------------------
+
 
 class TestReadOutput:
     def test_unknown_pid(self, handlers: dict[str, Any]) -> None:
@@ -364,7 +412,9 @@ class TestRunScript:
 
 
 class TestDockerBuild:
-    def test_missing_dockerfile_context(self, handlers: dict[str, Any], tmp_repo: Path) -> None:
+    def test_missing_dockerfile_context(
+        self, handlers: dict[str, Any], tmp_repo: Path
+    ) -> None:
         # No Dockerfile exists — should get docker error (docker CLI not crashing our code)
         result = handlers["docker_build"]({"tag": "test-img:latest"})
         # Either docker not available, or error from docker, but our code should not crash
@@ -383,8 +433,11 @@ class TestDockerRestart:
 # Batch 13 — Smart search
 # ---------------------------------------------------------------------------
 
+
 class TestFindRoute:
-    def test_finds_fastapi_routes(self, handlers: dict[str, Any], tmp_repo: Path) -> None:
+    def test_finds_fastapi_routes(
+        self, handlers: dict[str, Any], tmp_repo: Path
+    ) -> None:
         (tmp_repo / "routes.py").write_text(
             'from fastapi import APIRouter\nrouter = APIRouter()\n\n@router.get("/users")\ndef list_users():\n    pass\n'
         )
@@ -412,7 +465,9 @@ class TestFindApi:
         result = handlers["find_api"]({"name": "health_check"})
         assert "health_check" in result
 
-    def test_empty_name_returns_all(self, handlers: dict[str, Any], tmp_repo: Path) -> None:
+    def test_empty_name_returns_all(
+        self, handlers: dict[str, Any], tmp_repo: Path
+    ) -> None:
         (tmp_repo / "ep.py").write_text("@router.get('/test')\ndef do_test(): pass\n")
         result = handlers["find_api"]({})
         assert isinstance(result, str)
@@ -433,8 +488,12 @@ class TestFindSql:
 
 
 class TestFindTest:
-    def test_finds_test_function(self, handlers: dict[str, Any], tmp_repo: Path) -> None:
-        (tmp_repo / "test_foo.py").write_text("def test_my_function():\n    assert True\n")
+    def test_finds_test_function(
+        self, handlers: dict[str, Any], tmp_repo: Path
+    ) -> None:
+        (tmp_repo / "test_foo.py").write_text(
+            "def test_my_function():\n    assert True\n"
+        )
         result = handlers["find_test"]({"function_name": "my_function"})
         assert "test_my_function" in result or "test_foo.py" in result
 
@@ -446,7 +505,9 @@ class TestFindTest:
 
 class TestFindConfig:
     def test_finds_env_key(self, handlers: dict[str, Any], tmp_repo: Path) -> None:
-        (tmp_repo / ".env.example").write_text("DATABASE_URL=postgresql://localhost/mydb\nAPI_KEY=your_key_here\n")
+        (tmp_repo / ".env.example").write_text(
+            "DATABASE_URL=postgresql://localhost/mydb\nAPI_KEY=your_key_here\n"
+        )
         result = handlers["find_config"]({"key": "DATABASE_URL"})
         assert "DATABASE_URL" in result
 
@@ -459,6 +520,7 @@ class TestFindConfig:
 # ---------------------------------------------------------------------------
 # Batch 14 — Monitoring
 # ---------------------------------------------------------------------------
+
 
 class TestCpuUsage:
     def test_returns_value(self, handlers: dict[str, Any]) -> None:
@@ -493,7 +555,11 @@ class TestHealthCheck:
         result = handlers["health_check"]({"service": "backend"})
         assert isinstance(result, str)
         # Should not crash — backend may be down
-        assert "backend" in result.lower() or "unreachable" in result.lower() or "✅" in result
+        assert (
+            "backend" in result.lower()
+            or "unreachable" in result.lower()
+            or "✅" in result
+        )
 
     def test_db_check(self, handlers: dict[str, Any]) -> None:
         result = handlers["health_check"]({"service": "db"})
@@ -518,14 +584,18 @@ class TestTaskProgress:
 # Batch 15 — Editing extras
 # ---------------------------------------------------------------------------
 
+
 class TestReplaceClass:
     def test_replaces_class(self, handlers: dict[str, Any], tmp_repo: Path) -> None:
         (tmp_repo / "cls.py").write_text(
             "class Old:\n    def method(self):\n        pass\n\ndef standalone(): pass\n"
         )
         result = handlers["replace_class"](
-            {"path": "cls.py", "class_name": "Old",
-             "new_code": "class Old:\n    def method(self):\n        return 42\n"}
+            {
+                "path": "cls.py",
+                "class_name": "Old",
+                "new_code": "class Old:\n    def method(self):\n        return 42\n",
+            }
         )
         assert "Replaced" in result or "[ERROR]" not in result
         content = (tmp_repo / "cls.py").read_text()
@@ -535,7 +605,11 @@ class TestReplaceClass:
     def test_class_not_found(self, handlers: dict[str, Any], tmp_repo: Path) -> None:
         (tmp_repo / "no_cls.py").write_text("x = 1\n")
         result = handlers["replace_class"](
-            {"path": "no_cls.py", "class_name": "Ghost", "new_code": "class Ghost: pass"}
+            {
+                "path": "no_cls.py",
+                "class_name": "Ghost",
+                "new_code": "class Ghost: pass",
+            }
         )
         assert "[ERROR]" in result
 
@@ -559,27 +633,34 @@ class TestUndoChanges:
 
 class TestGeneratePatch:
     def test_produces_unified_diff(self, handlers: dict[str, Any]) -> None:
-        result = handlers["generate_patch"]({
-            "content_a": "line 1\nline 2\nline 3\n",
-            "content_b": "line 1\nchanged line\nline 3\n",
-            "filename": "test.py",
-        })
+        result = handlers["generate_patch"](
+            {
+                "content_a": "line 1\nline 2\nline 3\n",
+                "content_b": "line 1\nchanged line\nline 3\n",
+                "filename": "test.py",
+            }
+        )
         assert "---" in result and "+++" in result
         assert "changed line" in result
 
     def test_no_diff(self, handlers: dict[str, Any]) -> None:
         content = "same content\n"
-        result = handlers["generate_patch"]({"content_a": content, "content_b": content})
+        result = handlers["generate_patch"](
+            {"content_a": content, "content_b": content}
+        )
         assert "no differences" in result.lower()
 
     def test_empty_inputs(self, handlers: dict[str, Any]) -> None:
-        result = handlers["generate_patch"]({"content_a": "", "content_b": "new line\n"})
+        result = handlers["generate_patch"](
+            {"content_a": "", "content_b": "new line\n"}
+        )
         assert "+++" in result or "new line" in result
 
 
 # ---------------------------------------------------------------------------
 # Batch 16 — DB extras
 # ---------------------------------------------------------------------------
+
 
 class TestExplainQuery:
     def test_no_db_url_graceful(self, handlers: dict[str, Any]) -> None:

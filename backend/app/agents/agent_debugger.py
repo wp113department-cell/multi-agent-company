@@ -6,6 +6,7 @@ after a human approves a specific request — then gets the full write toolset
 (this is the one Day 9 agent the user explicitly asked to have "all main
 tools" for its apply phase, since it's doing real repair work).
 """
+
 from __future__ import annotations
 
 import logging
@@ -32,16 +33,35 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "agent_debugger",
     "description": "Detects failing agents and platform bugs from real audit-trail and metrics evidence, diagnoses root cause, and files enhancement requests. Gets the full write toolset for its apply phase once a human approves a specific fix.",
     "allowed_tools": [
-        "read_file", "search_code", "get_file_tree", "bash",
-        "audit_log_read", "fleet_metrics_read", "submit_enhancement_request",
-        "write_file", "edit_file", "run_tests", "git_commit_change", "submit_fix",
+        "read_file",
+        "search_code",
+        "get_file_tree",
+        "bash",
+        "audit_log_read",
+        "fleet_metrics_read",
+        "submit_enhancement_request",
+        "write_file",
+        "edit_file",
+        "run_tests",
+        "git_commit_change",
+        "submit_fix",
     ],
     "input_types": ["scan_trigger", "enhancement_request_id"],
     "output_types": ["AgentResult"],
-    "side_effects": ["files enhancement requests (scan)", "writes + commits code (apply, post-approval only)"],
-    "permissions": ["read_repo", "read_audit_log", "bash_scoped", "write_repo_on_approval"],
+    "side_effects": [
+        "files enhancement requests (scan)",
+        "writes + commits code (apply, post-approval only)",
+    ],
+    "permissions": [
+        "read_repo",
+        "read_audit_log",
+        "bash_scoped",
+        "write_repo_on_approval",
+    ],
     "risk_level": "medium",
-    "expected_verification": {"diagnosed": "audit_log_read must run before filing a request"},
+    "expected_verification": {
+        "diagnosed": "audit_log_read must run before filing a request"
+    },
     "dependencies": [],
 }
 
@@ -71,7 +91,17 @@ _SUBMIT_ENHANCEMENT_TOOL_SPEC = {
         "properties": {
             "title": {"type": "string"},
             "description": {"type": "string"},
-            "category": {"type": "string", "enum": ["performance", "bug", "orchestration", "knowledge", "quality", "security"]},
+            "category": {
+                "type": "string",
+                "enum": [
+                    "performance",
+                    "bug",
+                    "orchestration",
+                    "knowledge",
+                    "quality",
+                    "security",
+                ],
+            },
             "priority": {"type": "string", "enum": ["emergency", "medium", "low"]},
             "evidence": {"type": "object"},
         },
@@ -81,10 +111,22 @@ _SUBMIT_ENHANCEMENT_TOOL_SPEC = {
 _SUBMIT_FIX_TOOL_SPEC = {
     "name": "submit_fix",
     "description": "Signal the fix is complete, tested, and committed.",
-    "input_schema": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]},
+    "input_schema": {
+        "type": "object",
+        "properties": {"summary": {"type": "string"}},
+        "required": ["summary"],
+    },
 }
 
-SCAN_TOOLS = [READ_ONLY_TOOLS[0], READ_ONLY_TOOLS[2], READ_ONLY_TOOLS[4], _FLEET_BASH_TOOL, _AUDIT_LOG_READ_TOOL_SPEC, _FLEET_METRICS_TOOL_SPEC, _SUBMIT_ENHANCEMENT_TOOL_SPEC]
+SCAN_TOOLS = [
+    READ_ONLY_TOOLS[0],
+    READ_ONLY_TOOLS[2],
+    READ_ONLY_TOOLS[4],
+    _FLEET_BASH_TOOL,
+    _AUDIT_LOG_READ_TOOL_SPEC,
+    _FLEET_METRICS_TOOL_SPEC,
+    _SUBMIT_ENHANCEMENT_TOOL_SPEC,
+]
 APPLY_TOOLS = FLEET_APPLY_TOOLS + [_FLEET_BASH_TOOL, _SUBMIT_FIX_TOOL_SPEC]
 
 _SCAN_CFG = VerificationConfig(
@@ -149,10 +191,15 @@ def run_agent_debugger_scan(trace_id: str = "") -> AgentResult:
     )
 
     return AgentResult(
-        summary="Debug scan complete" if final_state["submitted"] else "Debug scan complete — no issues found",
+        summary=(
+            "Debug scan complete"
+            if final_state["submitted"]
+            else "Debug scan complete — no issues found"
+        ),
         findings=[],
         files_touched=[],
-        verified=bool(final_state["verification"].get("diagnosed")) or not final_state["submitted"],
+        verified=bool(final_state["verification"].get("diagnosed"))
+        or not final_state["submitted"],
         requires_human_approval=False,
         tokens_in=final_state["tokens_in"],
         tokens_out=final_state["tokens_out"],
@@ -161,7 +208,9 @@ def run_agent_debugger_scan(trace_id: str = "") -> AgentResult:
     )
 
 
-def run_agent_debugger_apply(request_id: int, description: str, trace_id: str = "") -> AgentResult:
+def run_agent_debugger_apply(
+    request_id: int, description: str, trace_id: str = ""
+) -> AgentResult:
     """APPLY phase — full write toolset, only ever called after a human approves `request_id`."""
     settings = get_settings()
     repo = settings.fleet_self_repo_path
@@ -170,6 +219,7 @@ def run_agent_debugger_apply(request_id: int, description: str, trace_id: str = 
 
     def submit_h(inp: dict[str, Any]) -> str:
         return "done"
+
     handlers["submit_fix"] = submit_h
 
     msg = (
@@ -206,7 +256,9 @@ def run_agent_debugger_apply(request_id: int, description: str, trace_id: str = 
         requires_human_approval=False,
         tokens_in=final_state["tokens_in"],
         tokens_out=final_state["tokens_out"],
-        status="completed" if final_state["verification"].get("committed") else "blocked",
+        status=(
+            "completed" if final_state["verification"].get("committed") else "blocked"
+        ),
         raw=final_state.get("result", {}),
     )
 
@@ -215,16 +267,19 @@ def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["agent_debugging"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["agent_debugging"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry unavailable: %s", exc)

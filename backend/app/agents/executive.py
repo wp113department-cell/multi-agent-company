@@ -13,6 +13,7 @@ Session 4 migration (2026-07-16):
 
 Pattern from: swe-agent RetryAgent (preserve external interface, swap internal runner).
 """
+
 from __future__ import annotations
 
 import json
@@ -61,6 +62,7 @@ _VERIFICATION_CFG = VerificationConfig(
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _last_assistant_text(messages: list[dict[str, Any]]) -> str:
     """Extract the last text response from the assistant messages."""
     for msg in reversed(messages):
@@ -78,6 +80,7 @@ def _last_assistant_text(messages: list[dict[str, Any]]) -> str:
 def _load_role_with_max(max_epics: int) -> str:
     """Load executive role markdown with max_epics substituted (kept for compat)."""
     from app.agents.base import load_role
+
     text = load_role("executive")
     return text.replace("{max_epics}", str(max_epics))
 
@@ -96,6 +99,7 @@ def _parse_json(text: str) -> dict[str, Any]:
 # Public runner — external interface unchanged (async)
 # ---------------------------------------------------------------------------
 
+
 async def run_executive(
     goal_text: str,
     db: AsyncSession,
@@ -110,10 +114,7 @@ async def run_executive(
 
     # {max_epics} in the role file is unsubstituted by run_agent_graph; include
     # the constraint explicitly in the user message so the LLM honours it.
-    initial_message = (
-        f"Goal: {goal_text}\n\n"
-        f"Generate at most {max_epics} epics."
-    )
+    initial_message = f"Goal: {goal_text}\n\n" f"Generate at most {max_epics} epics."
 
     try:
         final_state = run_agent_graph(
@@ -179,7 +180,10 @@ async def run_executive(
 
     logger.info(
         "Executive created goal %s with %d epics (%d tokens in, %d out)",
-        goal_id, len(epic_ids), tokens_in, tokens_out,
+        goal_id,
+        len(epic_ids),
+        tokens_in,
+        tokens_out,
     )
     return goal_id, epic_ids, None
 
@@ -188,20 +192,28 @@ async def run_executive(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["goal_decomposition", "epic_generation", "executive_planning"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=[
+                    "goal_decomposition",
+                    "epic_generation",
+                    "executive_planning",
+                ],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register("executive")
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

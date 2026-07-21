@@ -1,4 +1,5 @@
 """spike_agent — conducts a time-boxed research spike and returns a concrete recommendation."""
+
 from __future__ import annotations
 
 import logging
@@ -15,18 +16,31 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "spike_agent",
     "description": "Conducts a time-boxed research spike: investigates a specific technical question, reads relevant code and packages, and returns a concrete recommendation — not a survey of all options.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "get_file_tree",
-        "search_symbols", "find_references", "list_functions", "parse_ast",
-        "analyze_file", "read_files", "file_exists", "file_info",
-        "find_todos", "search_imports",
-        "write_file", "submit_spike_agent",
+        "read_file",
+        "list_files",
+        "search_code",
+        "get_file_tree",
+        "search_symbols",
+        "find_references",
+        "list_functions",
+        "parse_ast",
+        "analyze_file",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_todos",
+        "search_imports",
+        "write_file",
+        "submit_spike_agent",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
     "side_effects": ["writes spike research reports"],
     "permissions": ["read_repo", "write_docs"],
     "risk_level": "low",
-    "expected_verification": {"read": "read_file must run to verify findings against actual installed versions"},
+    "expected_verification": {
+        "read": "read_file must run to verify findings against actual installed versions"
+    },
     "dependencies": [],
 }
 
@@ -135,16 +149,19 @@ def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["research_spike"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["research_spike"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry unavailable: %s", exc)

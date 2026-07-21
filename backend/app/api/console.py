@@ -7,6 +7,7 @@ GET  /api/console/repos/{rpath}/status — git status
 
 Each "repo" is identified by a URL-encoded path (rpath path parameter accepts slashes).
 """
+
 from __future__ import annotations
 
 import logging
@@ -25,6 +26,7 @@ router = APIRouter(prefix="/api/console", tags=["console"])
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
+
 
 class BrowseRequest(BaseModel):
     path: str
@@ -63,13 +65,14 @@ class MkdirRequest(BaseModel):
 class ClonePrivateRequest(BaseModel):
     url: str
     dest_path: str
-    token: str        # GitHub PAT or other HTTPS token
+    token: str  # GitHub PAT or other HTTPS token
     branch: str = ""
 
 
 # ---------------------------------------------------------------------------
 # Shared helper
 # ---------------------------------------------------------------------------
+
 
 def _decode_path(encoded: str) -> str:
     """URL-decode the repo path and validate it's inside the workspace.
@@ -92,6 +95,7 @@ def _decode_path(encoded: str) -> str:
 # Workspace endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.post("/workspace/browse")
 async def browse_workspace(req: BrowseRequest) -> dict[str, Any]:
     """List directory contents inside the allowed workspace."""
@@ -107,6 +111,7 @@ async def browse_workspace(req: BrowseRequest) -> dict[str, Any]:
 async def make_directory(req: MkdirRequest) -> dict[str, Any]:
     """Create a new directory inside the allowed workspace."""
     import os
+
     try:
         workspace_service.assert_in_workspace(req.path)
     except ValueError as exc:
@@ -115,7 +120,9 @@ async def make_directory(req: MkdirRequest) -> dict[str, Any]:
         os.makedirs(req.path, exist_ok=True)
         return {"ok": True, "path": req.path}
     except OSError as exc:
-        raise HTTPException(status_code=400, detail=f"Could not create directory: {exc}")
+        raise HTTPException(
+            status_code=400, detail=f"Could not create directory: {exc}"
+        )
 
 
 @router.post("/repos/clone-private")
@@ -126,7 +133,9 @@ async def clone_private_repo(req: ClonePrivateRequest) -> dict[str, Any]:
             req.url, req.dest_path, req.token, req.branch or None
         )
         if not result["ok"]:
-            raise HTTPException(status_code=422, detail=result.get("stderr", "git clone failed"))
+            raise HTTPException(
+                status_code=422, detail=result.get("stderr", "git clone failed")
+            )
         return {"ok": True, "path": req.dest_path, "stderr": result.get("stderr", "")}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -137,13 +146,16 @@ async def clone_private_repo(req: ClonePrivateRequest) -> dict[str, Any]:
 # rpath uses {rpath:path} so it accepts slashes in the URL-encoded path
 # ---------------------------------------------------------------------------
 
+
 @router.post("/repos/clone")
 async def clone_repo(req: CloneRequest) -> dict[str, Any]:
     """Clone a remote repo to a local folder in the workspace."""
     try:
         result = await git_service.git_clone(req.url, req.dest_path, req.branch or None)
         if not result["ok"]:
-            raise HTTPException(status_code=422, detail=result.get("stderr", "git clone failed"))
+            raise HTTPException(
+                status_code=422, detail=result.get("stderr", "git clone failed")
+            )
         return {"ok": True, "path": req.dest_path, "stderr": result.get("stderr", "")}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

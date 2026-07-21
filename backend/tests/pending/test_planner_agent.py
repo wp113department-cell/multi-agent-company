@@ -1,4 +1,5 @@
 """Planner Agent live tests — require ANTHROPIC_API_KEY or Groq."""
+
 from __future__ import annotations
 
 import os
@@ -70,7 +71,9 @@ class TestPlannerAgent:
         validation_error = _validate_plan(plan)
         assert validation_error is None, f"Plan failed validation: {validation_error}"
 
-    def test_planner_plan_contains_required_sections(self, tmp_path: pytest.TempPathFactory) -> None:
+    def test_planner_plan_contains_required_sections(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
         """Plan output contains required markdown sections."""
         from app.agents.planner import run_planner
 
@@ -84,9 +87,13 @@ class TestPlannerAgent:
 
         assert error is None
         for section in _REQUIRED_PLAN_SECTIONS:
-            assert section in plan, f"Plan missing required section: '{section}'\nPlan:\n{plan[:500]}"
+            assert (
+                section in plan
+            ), f"Plan missing required section: '{section}'\nPlan:\n{plan[:500]}"
 
-    def test_planner_files_to_inspect_are_real(self, tmp_path: pytest.TempPathFactory) -> None:
+    def test_planner_files_to_inspect_are_real(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
         """Every .py file in 'Files To Inspect' must exist inside the minimal repo."""
         from app.agents.planner import run_planner
 
@@ -114,11 +121,13 @@ class TestPlannerAgent:
                     if not os.path.exists(full):
                         hallucinated.append(rel)
 
-        assert not hallucinated, (
-            f"Planner hallucinated non-existent files in 'Files To Inspect': {hallucinated}"
-        )
+        assert (
+            not hallucinated
+        ), f"Planner hallucinated non-existent files in 'Files To Inspect': {hallucinated}"
 
-    def test_planner_plan_minimum_length(self, tmp_path: pytest.TempPathFactory) -> None:
+    def test_planner_plan_minimum_length(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
         """Plan is at least 100 characters."""
         from app.agents.planner import run_planner
 

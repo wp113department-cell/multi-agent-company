@@ -4,6 +4,7 @@ Revision ID: 007
 Revises: 006
 Create Date: 2026-07-09
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -18,7 +19,12 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.add_column(
         "dev_tasks",
-        sa.Column("repo_id", sa.BigInteger(), sa.ForeignKey("repos.id", ondelete="SET NULL"), nullable=True),
+        sa.Column(
+            "repo_id",
+            sa.BigInteger(),
+            sa.ForeignKey("repos.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
     )
     op.create_index("ix_dev_tasks_repo_id", "dev_tasks", ["repo_id"])
 

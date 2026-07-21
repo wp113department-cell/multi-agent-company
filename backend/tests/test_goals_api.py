@@ -1,4 +1,5 @@
 """Tests for Goals API (POST /api/goals, GET /api/goals, GET /api/goals/{id})."""
+
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
@@ -82,7 +83,9 @@ class TestCreateGoal:
         assert "LLM exploded" in resp.json()["detail"]
 
     @patch("app.api.goals.run_executive")
-    def test_goal_not_found_after_creation_returns_500(self, mock_exec: MagicMock) -> None:
+    def test_goal_not_found_after_creation_returns_500(
+        self, mock_exec: MagicMock
+    ) -> None:
         """If db.get returns None after flush, route returns 500."""
         db = AsyncMock()
         db.commit = AsyncMock()
@@ -104,7 +107,10 @@ class TestListGoals:
     def test_returns_list(self) -> None:
         db = AsyncMock()
         result = MagicMock()
-        result.scalars.return_value.all.return_value = [_make_goal("g-1"), _make_goal("g-2")]
+        result.scalars.return_value.all.return_value = [
+            _make_goal("g-1"),
+            _make_goal("g-2"),
+        ]
         db.execute = AsyncMock(return_value=result)
 
         app = _make_test_app(db)
@@ -151,7 +157,6 @@ class TestGetGoal:
         app = _make_test_app(db)
         with TestClient(app) as client:
             resp = client.get("/api/goals/g-abc")
-
 
         assert resp.status_code == 200
         assert resp.json()["goal_id"] == "g-abc"

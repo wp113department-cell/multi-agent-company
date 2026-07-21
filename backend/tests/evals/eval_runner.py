@@ -15,6 +15,7 @@ Usage:
 
 Exit codes: 0 = all passed, 1 = some failed, 2 = error loading eval tasks.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,24 +36,28 @@ _TASKS_FILE = Path(__file__).parent / "tasks.json"
 # ──────────────────────────────────────────────────────────────────────────────
 
 _AGENT_MAP: dict[str, tuple[str, str]] = {
-    "sprint_planner":       ("app.agents.sprint_planner",       "run_sprint_planner"),
-    "business_analyst":     ("app.agents.business_analyst",     "run_business_analyst"),
-    "style_reviewer":       ("app.agents.style_reviewer",       "run_style_reviewer"),
-    "tech_debt_agent":      ("app.agents.tech_debt_agent",      "run_tech_debt_agent"),
-    "performance_reviewer": ("app.agents.performance_reviewer", "run_performance_reviewer"),
-    "cleanup_agent":        ("app.agents.cleanup_agent",        "run_cleanup_agent"),
-    "schema_agent":         ("app.agents.schema_agent",         "run_schema_agent"),
-    "migration_agent":      ("app.agents.migration_agent",      "run_migration_agent"),
-    "ai_engineer":          ("app.agents.ai_engineer",          "run_ai_engineer"),
+    "sprint_planner": ("app.agents.sprint_planner", "run_sprint_planner"),
+    "business_analyst": ("app.agents.business_analyst", "run_business_analyst"),
+    "style_reviewer": ("app.agents.style_reviewer", "run_style_reviewer"),
+    "tech_debt_agent": ("app.agents.tech_debt_agent", "run_tech_debt_agent"),
+    "performance_reviewer": (
+        "app.agents.performance_reviewer",
+        "run_performance_reviewer",
+    ),
+    "cleanup_agent": ("app.agents.cleanup_agent", "run_cleanup_agent"),
+    "schema_agent": ("app.agents.schema_agent", "run_schema_agent"),
+    "migration_agent": ("app.agents.migration_agent", "run_migration_agent"),
+    "ai_engineer": ("app.agents.ai_engineer", "run_ai_engineer"),
     # Day 2
-    "bug_fix":              ("app.agents.bug_fix",              "run_bug_fix"),
-    "security_reviewer":    ("app.agents.security_reviewer",    "run_security_review"),
-    "arch_reviewer":        ("app.agents.architecture_reviewer","run_arch_review"),
+    "bug_fix": ("app.agents.bug_fix", "run_bug_fix"),
+    "security_reviewer": ("app.agents.security_reviewer", "run_security_review"),
+    "arch_reviewer": ("app.agents.architecture_reviewer", "run_arch_review"),
 }
 
 
 def _run_agent(agent_name: str, task_id: int, description: str, repo_path: str) -> "AgentResult":  # type: ignore[name-defined]  # noqa: F821
     import importlib
+
     entry = _AGENT_MAP.get(agent_name)
     if entry is None:
         raise ValueError(f"Unknown agent: {agent_name}")
@@ -65,6 +70,7 @@ def _run_agent(agent_name: str, task_id: int, description: str, repo_path: str) 
 # ──────────────────────────────────────────────────────────────────────────────
 # Scoring
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 @dataclass
 class EvalResult:
@@ -114,7 +120,9 @@ def _score_result(task: dict[str, Any], result: Any) -> EvalResult:
     if result.verified:
         checks_passed += 1
     else:
-        failures.append("verified=False (submit tool was not called with correct verifications)")
+        failures.append(
+            "verified=False (submit tool was not called with correct verifications)"
+        )
 
     # 4. Check expected_fields appear in the raw output or summary
     raw_text = json.dumps(result.raw) if result.raw else result.summary
@@ -135,7 +143,9 @@ def _score_result(task: dict[str, Any], result: Any) -> EvalResult:
             if min_stories <= count <= (max_stories or count):
                 checks_passed += 1
             else:
-                failures.append(f"Story count {count} not in [{min_stories}, {max_stories}]")
+                failures.append(
+                    f"Story count {count} not in [{min_stories}, {max_stories}]"
+                )
         except Exception:
             failures.append("Could not count stories")
 
@@ -161,6 +171,7 @@ def _score_result(task: dict[str, Any], result: Any) -> EvalResult:
 # ──────────────────────────────────────────────────────────────────────────────
 # Main runner
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def load_tasks(task_id_filter: str | None = None) -> list[dict[str, Any]]:
     try:
@@ -266,8 +277,12 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Gridiron agent evaluation runner")
     parser.add_argument("--id", metavar="EVAL_ID", help="Run a single eval by ID")
-    parser.add_argument("--repo", metavar="REPO_PATH", default=".", help="Path to repo for agents")
-    parser.add_argument("--json-out", metavar="FILE", help="Write results as JSON to file")
+    parser.add_argument(
+        "--repo", metavar="REPO_PATH", default=".", help="Path to repo for agents"
+    )
+    parser.add_argument(
+        "--json-out", metavar="FILE", help="Write results as JSON to file"
+    )
     args = parser.parse_args()
 
     tasks = load_tasks(args.id)
@@ -278,6 +293,7 @@ def main() -> None:
 
     if args.json_out:
         import dataclasses
+
         with open(args.json_out, "w") as f:
             json.dump([dataclasses.asdict(r) for r in results], f, indent=2)
         print(f"\nResults written to {args.json_out}")

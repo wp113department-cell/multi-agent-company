@@ -20,6 +20,7 @@ Scoring:
     Each criterion is a callable check(AgentResult) → bool. A case passes when
     all criteria pass. Final score = passed_cases / total_cases.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,9 +41,11 @@ RESULTS_DIR = Path(__file__).parent / "results"
 # Data types
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class EvalCase:
     """One fixed evaluation task."""
+
     name: str
     description: str
     agent_slug: str
@@ -55,6 +58,7 @@ class EvalCase:
 @dataclass
 class EvalResult:
     """Outcome of running one EvalCase."""
+
     case_name: str
     agent_slug: str
     passed: bool
@@ -69,6 +73,7 @@ class EvalResult:
 @dataclass
 class EvalReport:
     """Aggregated results for one suite run."""
+
     agent_slug: str
     total: int
     passed: int
@@ -106,6 +111,7 @@ class EvalReport:
 # ---------------------------------------------------------------------------
 # Core runner
 # ---------------------------------------------------------------------------
+
 
 def run_eval_case(case: EvalCase) -> EvalResult:
     """Run one eval case against the real agent and score it."""
@@ -196,12 +202,19 @@ def save_report(report: EvalReport, output_path: Path | None = None) -> Path:
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Gridiron Agent Evaluation Runner")
     group = p.add_mutually_exclusive_group(required=True)
-    group.add_argument("--agent", metavar="SLUG", help="Run the eval suite for one agent slug")
-    group.add_argument("--all", action="store_true", help="Run all registered eval suites")
-    p.add_argument("--output", metavar="PATH", help="Write report to this JSON file path")
+    group.add_argument(
+        "--agent", metavar="SLUG", help="Run the eval suite for one agent slug"
+    )
+    group.add_argument(
+        "--all", action="store_true", help="Run all registered eval suites"
+    )
+    p.add_argument(
+        "--output", metavar="PATH", help="Write report to this JSON file path"
+    )
     p.add_argument("--verbose", action="store_true", help="Set log level to DEBUG")
     return p
 
@@ -219,7 +232,9 @@ def main() -> None:
             logger.info("=== Suite: %s (%d cases) ===", slug, len(cases))
             report = run_suite(cases)
             path = save_report(report, output)
-            print(f"{slug}: {report.passed}/{report.total} passed ({report.score:.0%}) — {path}")
+            print(
+                f"{slug}: {report.passed}/{report.total} passed ({report.score:.0%}) — {path}"
+            )
     else:
         slug = args.agent
         if slug not in SUITES:
@@ -228,7 +243,9 @@ def main() -> None:
         cases = SUITES[slug]
         report = run_suite(cases)
         path = save_report(report, output)
-        print(f"{slug}: {report.passed}/{report.total} passed ({report.score:.0%}) — {path}")
+        print(
+            f"{slug}: {report.passed}/{report.total} passed ({report.score:.0%}) — {path}"
+        )
         if report.failed > 0:
             raise SystemExit(1)
 

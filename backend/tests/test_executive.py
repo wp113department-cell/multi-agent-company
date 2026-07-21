@@ -1,4 +1,5 @@
 """Tests for Executive Agent."""
+
 from __future__ import annotations
 
 import json
@@ -11,7 +12,9 @@ import pytest
 from app.agents.executive import _parse_json, run_executive
 
 
-def _make_final_state(text: str, tokens_in: int = 100, tokens_out: int = 50) -> dict[str, Any]:
+def _make_final_state(
+    text: str, tokens_in: int = 100, tokens_out: int = 50
+) -> dict[str, Any]:
     """Build a fake AgentRunState with the given assistant text in messages."""
     return {
         "messages": [{"role": "assistant", "content": text}],
@@ -70,8 +73,10 @@ class TestRunExecutive:
         )
         mock_run.return_value = _make_final_state(
             self._make_agent_response(
-                [{"title": "Epic A", "description": "desc A"},
-                 {"title": "Epic B", "description": "desc B"}],
+                [
+                    {"title": "Epic A", "description": "desc A"},
+                    {"title": "Epic B", "description": "desc B"},
+                ],
                 "Two things to build.",
             )
         )

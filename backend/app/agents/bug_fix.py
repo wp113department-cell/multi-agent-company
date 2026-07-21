@@ -5,6 +5,7 @@ Verification contract:
   - edit_file / write_file reset tests_passed to False
   - run_tests sets tests_passed to True only if it exits without [ERROR]
 """
+
 from __future__ import annotations
 
 import logging
@@ -24,10 +25,27 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "bug_fix",
     "description": "Diagnoses and fixes bugs in the codebase with verified test coverage.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "edit_file", "write_file", "git_diff", "bash", "submit_patch",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "edit_file",
+        "write_file",
+        "git_diff",
+        "bash",
+        "submit_patch",
     ],
     "input_types": ["task_id", "error_description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -95,7 +113,12 @@ def run_bug_fix(
     raw = final_state["result"]
     return AgentResult(
         summary=str(raw.get("fix_summary", raw.get("root_cause", "(no summary)"))),
-        findings=[{"root_cause": raw.get("root_cause", ""), "fix_summary": raw.get("fix_summary", "")}],
+        findings=[
+            {
+                "root_cause": raw.get("root_cause", ""),
+                "fix_summary": raw.get("fix_summary", ""),
+            }
+        ],
         files_touched=list(raw.get("files_changed", [])),
         verified=bool(final_state["verification"].get("tests_passed", False)),
         requires_human_approval=False,
@@ -110,21 +133,30 @@ def run_bug_fix(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["bug_fix", "bug_fixing", "code_repair", "fix_regression_check"],
-            requires_worktree=True,
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=[
+                    "bug_fix",
+                    "bug_fixing",
+                    "code_repair",
+                    "fix_regression_check",
+                ],
+                requires_worktree=True,
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

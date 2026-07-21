@@ -1,4 +1,5 @@
 """Tests for the central ModelRouter (Day 5A)."""
+
 from __future__ import annotations
 
 import json
@@ -7,12 +8,17 @@ from pathlib import Path
 
 import pytest
 
-from app.fleet.model_router import ModelRouter, RouteConfig, get_model_router, reset_model_router
-
+from app.fleet.model_router import (
+    ModelRouter,
+    RouteConfig,
+    get_model_router,
+    reset_model_router,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(autouse=True)
 def _reset_singleton():
@@ -30,11 +36,17 @@ def _make_json(path: Path, data: dict) -> None:
 # RouteConfig
 # ---------------------------------------------------------------------------
 
+
 class TestRouteConfig:
     def test_token_kwargs_no_thinking(self):
         rc = RouteConfig(
-            agent_name="coder", provider="anthropic", model="claude-sonnet-4-20250514",
-            tier="sonnet", max_tokens=4096, thinking_budget=None, temperature=1.0,
+            agent_name="coder",
+            provider="anthropic",
+            model="claude-sonnet-4-20250514",
+            tier="sonnet",
+            max_tokens=4096,
+            thinking_budget=None,
+            temperature=1.0,
         )
         kw = rc.token_kwargs()
         assert kw["max_tokens"] == 4096
@@ -42,8 +54,13 @@ class TestRouteConfig:
 
     def test_token_kwargs_with_thinking(self):
         rc = RouteConfig(
-            agent_name="architect", provider="anthropic", model="claude-opus-4-20250514",
-            tier="opus", max_tokens=8192, thinking_budget=2048, temperature=1.0,
+            agent_name="architect",
+            provider="anthropic",
+            model="claude-opus-4-20250514",
+            tier="opus",
+            max_tokens=8192,
+            thinking_budget=2048,
+            temperature=1.0,
         )
         kw = rc.token_kwargs()
         assert kw["max_tokens"] == 8192
@@ -53,6 +70,7 @@ class TestRouteConfig:
 # ---------------------------------------------------------------------------
 # ModelRouter
 # ---------------------------------------------------------------------------
+
 
 class TestModelRouter:
     def test_loads_production_json(self):
@@ -116,13 +134,24 @@ class TestModelRouter:
     def test_custom_json_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             p = Path(tmpdir) / "custom.json"
-            _make_json(p, {
-                "_tiers": {
-                    "testier": {"max_tokens": 999, "thinking_budget": None, "temperature": 0.5}
+            _make_json(
+                p,
+                {
+                    "_tiers": {
+                        "testier": {
+                            "max_tokens": 999,
+                            "thinking_budget": None,
+                            "temperature": 0.5,
+                        }
+                    },
+                    "DEFAULT": {"provider": "openai", "model": "gpt-4o", "tier": "gpt"},
+                    "my_agent": {
+                        "provider": "openai",
+                        "model": "gpt-4o",
+                        "tier": "testier",
+                    },
                 },
-                "DEFAULT": {"provider": "openai", "model": "gpt-4o", "tier": "gpt"},
-                "my_agent": {"provider": "openai", "model": "gpt-4o", "tier": "testier"},
-            })
+            )
             router = ModelRouter(json_path=str(p))
             assert "my_agent" in router.all_agents()
             cfg = router.route("my_agent")
@@ -138,21 +167,59 @@ class TestModelRouter:
     def test_hot_reload(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             p = Path(tmpdir) / "r.json"
-            _make_json(p, {
-                "_tiers": {"sonnet": {"max_tokens": 4096, "thinking_budget": None, "temperature": 1.0}},
-                "DEFAULT": {"provider": "anthropic", "model": "claude-sonnet-4-20250514", "tier": "sonnet"},
-                "agent_a": {"provider": "anthropic", "model": "claude-sonnet-4-20250514", "tier": "sonnet"},
-            })
+            _make_json(
+                p,
+                {
+                    "_tiers": {
+                        "sonnet": {
+                            "max_tokens": 4096,
+                            "thinking_budget": None,
+                            "temperature": 1.0,
+                        }
+                    },
+                    "DEFAULT": {
+                        "provider": "anthropic",
+                        "model": "claude-sonnet-4-20250514",
+                        "tier": "sonnet",
+                    },
+                    "agent_a": {
+                        "provider": "anthropic",
+                        "model": "claude-sonnet-4-20250514",
+                        "tier": "sonnet",
+                    },
+                },
+            )
             router = ModelRouter(json_path=str(p))
             assert "agent_a" in router.all_agents()
 
             # Update JSON and reload
-            _make_json(p, {
-                "_tiers": {"sonnet": {"max_tokens": 4096, "thinking_budget": None, "temperature": 1.0}},
-                "DEFAULT": {"provider": "anthropic", "model": "claude-sonnet-4-20250514", "tier": "sonnet"},
-                "agent_a": {"provider": "anthropic", "model": "claude-sonnet-4-20250514", "tier": "sonnet"},
-                "agent_b": {"provider": "anthropic", "model": "claude-sonnet-4-20250514", "tier": "sonnet"},
-            })
+            _make_json(
+                p,
+                {
+                    "_tiers": {
+                        "sonnet": {
+                            "max_tokens": 4096,
+                            "thinking_budget": None,
+                            "temperature": 1.0,
+                        }
+                    },
+                    "DEFAULT": {
+                        "provider": "anthropic",
+                        "model": "claude-sonnet-4-20250514",
+                        "tier": "sonnet",
+                    },
+                    "agent_a": {
+                        "provider": "anthropic",
+                        "model": "claude-sonnet-4-20250514",
+                        "tier": "sonnet",
+                    },
+                    "agent_b": {
+                        "provider": "anthropic",
+                        "model": "claude-sonnet-4-20250514",
+                        "tier": "sonnet",
+                    },
+                },
+            )
             router.reload(json_path=str(p))
             assert "agent_b" in router.all_agents()
 
@@ -160,6 +227,7 @@ class TestModelRouter:
 # ---------------------------------------------------------------------------
 # Singleton
 # ---------------------------------------------------------------------------
+
 
 class TestGetModelRouter:
     def test_returns_same_instance(self):
@@ -175,10 +243,23 @@ class TestGetModelRouter:
 
     def test_env_var_override(self, monkeypatch, tmp_path):
         p = tmp_path / "override.json"
-        _make_json(p, {
-            "_tiers": {"sonnet": {"max_tokens": 1111, "thinking_budget": None, "temperature": 1.0}},
-            "DEFAULT": {"provider": "anthropic", "model": "claude-override", "tier": "sonnet"},
-        })
+        _make_json(
+            p,
+            {
+                "_tiers": {
+                    "sonnet": {
+                        "max_tokens": 1111,
+                        "thinking_budget": None,
+                        "temperature": 1.0,
+                    }
+                },
+                "DEFAULT": {
+                    "provider": "anthropic",
+                    "model": "claude-override",
+                    "tier": "sonnet",
+                },
+            },
+        )
         monkeypatch.setenv("AGENT_MODELS_PATH", str(p))
         router = get_model_router()
         cfg = router.route("any_agent")

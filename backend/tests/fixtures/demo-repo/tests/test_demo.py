@@ -1,4 +1,5 @@
 """Tests for demo_module — used by specialist-agent fixture tests."""
+
 import sys
 from pathlib import Path
 

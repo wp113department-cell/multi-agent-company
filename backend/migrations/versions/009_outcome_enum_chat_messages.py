@@ -7,6 +7,7 @@ Revision ID: 009
 Revises: 008
 Create Date: 2026-07-15
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -31,11 +32,15 @@ def upgrade() -> None:
         sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
         sa.Column("session_id", sa.String(100), nullable=False, index=True),
         sa.Column("repo_path", sa.Text(), nullable=False),
-        sa.Column("role", sa.String(20), nullable=False),   # 'user' | 'assistant'
+        sa.Column("role", sa.String(20), nullable=False),  # 'user' | 'assistant'
         sa.Column("content", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(), server_default=sa.func.now()),
     )
-    op.create_index("ix_chat_messages_session_created", "chat_messages", ["session_id", "created_at"])
+    op.create_index(
+        "ix_chat_messages_session_created",
+        "chat_messages",
+        ["session_id", "created_at"],
+    )
 
 
 def downgrade() -> None:

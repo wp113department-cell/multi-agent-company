@@ -4,6 +4,7 @@ Verification contract:
   - code_tested is forced to state["verification"]["code_tested"]
   - run_python_snippet or bash sets code_tested; write_file resets it
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,10 +24,26 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "ai_engineer",
     "description": "Implements and integrates AI/ML models: training pipelines, inference code, eval scripts, embeddings.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "run_python_snippet", "bash", "write_file", "fetch_url",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "run_python_snippet",
+        "bash",
+        "write_file",
+        "fetch_url",
         "submit_ai_result",
     ],
     "input_types": ["task_id", "description", "repo_path"],
@@ -34,7 +51,9 @@ AGENT_CONTRACT: dict[str, Any] = {
     "side_effects": ["writes model/pipeline files", "executes Python code"],
     "permissions": ["read_repo", "write_repo", "execute_code"],
     "risk_level": "medium",
-    "expected_verification": {"code_tested": "run_python_snippet or bash must run after write_file"},
+    "expected_verification": {
+        "code_tested": "run_python_snippet or bash must run after write_file"
+    },
     "dependencies": [],
 }
 
@@ -95,7 +114,12 @@ def run_ai_engineer(
     raw = final_state["result"]
     return AgentResult(
         summary=str(raw.get("summary", "(no summary)")),
-        findings=[{"eval_results": raw.get("eval_results", {}), "next_steps": raw.get("next_steps", [])}],
+        findings=[
+            {
+                "eval_results": raw.get("eval_results", {}),
+                "next_steps": raw.get("next_steps", []),
+            }
+        ],
         files_touched=list(raw.get("files_created", [])),
         verified=bool(final_state["verification"].get("code_tested", False)),
         requires_human_approval=False,
@@ -110,20 +134,28 @@ def run_ai_engineer(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["ai_ml_engineering", "model_integration", "python_execution"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=[
+                    "ai_ml_engineering",
+                    "model_integration",
+                    "python_execution",
+                ],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

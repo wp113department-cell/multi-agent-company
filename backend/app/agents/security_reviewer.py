@@ -1,4 +1,5 @@
 """Security Reviewer Agent — LangGraph StateGraph, read-only, verification contract."""
+
 from __future__ import annotations
 
 import logging
@@ -18,11 +19,28 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "security_reviewer",
     "description": "Performs read-only security audit: secrets scan, SQL injection, auth, config vulnerabilities.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "secrets_scan", "find_sql", "find_config", "find_api",
-        "find_route", "submit_security_report",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "secrets_scan",
+        "find_sql",
+        "find_config",
+        "find_api",
+        "find_route",
+        "submit_security_report",
     ],
     "input_types": ["task_id", "focus", "repo_path"],
     "output_types": ["AgentResult"],
@@ -46,8 +64,12 @@ _VERIFICATION_CFG = VerificationConfig(
     reset_keys=(),
     enforce_in_result={"scan_ran": "scan_ran"},
     initial={
-        "scan_ran": False, "search_ran": False, "sql_checked": False,
-        "api_checked": False, "routes_checked": False, "config_checked": False,
+        "scan_ran": False,
+        "search_ran": False,
+        "sql_checked": False,
+        "api_checked": False,
+        "routes_checked": False,
+        "config_checked": False,
     },
 )
 
@@ -112,20 +134,28 @@ def run_security_review(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["security_review", "vulnerability_detection", "secrets_scanning"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=[
+                    "security_review",
+                    "vulnerability_detection",
+                    "secrets_scanning",
+                ],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

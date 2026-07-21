@@ -1,4 +1,5 @@
 """Tests for Engineering Memory v1 — embedding, storage, similarity query."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -14,11 +15,13 @@ from app.memory.store import (
     query_similar_tasks,
 )
 
-
 # ---- Text building ----
 
+
 def test_build_outcome_text_includes_outcome() -> None:
-    text = _build_outcome_text("add button", "button added", "completed", ["frontend/button.tsx"])
+    text = _build_outcome_text(
+        "add button", "button added", "completed", ["frontend/button.tsx"]
+    )
     assert "completed" in text
     assert "add button" in text
     assert "button added" in text
@@ -35,6 +38,7 @@ def test_build_outcome_text_caps_files_at_20() -> None:
 
 # ---- Zero vector fallback ----
 
+
 def test_zero_vector_is_1536_dims() -> None:
     assert len(_ZERO_VECTOR_1536) == 1536
     assert all(v == 0.0 for v in _ZERO_VECTOR_1536)
@@ -46,13 +50,16 @@ async def test_embed_returns_zero_vector_when_no_api_key() -> None:
     from app.memory.store import _embed
 
     with patch("app.memory.store.get_settings") as mock_settings:
-        mock_settings.return_value = MagicMock(voyage_api_key="", voyage_model="voyage-code-2")
+        mock_settings.return_value = MagicMock(
+            voyage_api_key="", voyage_model="voyage-code-2"
+        )
         vector = await _embed("some description")
 
     assert vector == _ZERO_VECTOR_1536
 
 
 # ---- embed_task_outcome ----
+
 
 @pytest.mark.asyncio
 async def test_embed_task_outcome_inserts_row() -> None:
@@ -70,9 +77,12 @@ async def test_embed_task_outcome_inserts_row() -> None:
     mock_db.commit = AsyncMock()
     mock_db.rollback = AsyncMock()
 
-    with patch("app.memory.store.get_settings") as ms, \
-         patch("app.memory.store._embed") as mock_embed:
-        ms.return_value = MagicMock(memory_enabled=True, voyage_api_key="", voyage_model="m")
+    with patch("app.memory.store.get_settings") as ms, patch(
+        "app.memory.store._embed"
+    ) as mock_embed:
+        ms.return_value = MagicMock(
+            memory_enabled=True, voyage_api_key="", voyage_model="m"
+        )
         mock_embed.return_value = _ZERO_VECTOR_1536
 
         result = await embed_task_outcome(  # noqa: F841
@@ -116,9 +126,12 @@ async def test_embed_task_outcome_db_error_returns_none() -> None:
     mock_db.commit = AsyncMock(side_effect=RuntimeError("DB is down"))
     mock_db.rollback = AsyncMock()
 
-    with patch("app.memory.store.get_settings") as ms, \
-         patch("app.memory.store._embed") as mock_embed:
-        ms.return_value = MagicMock(memory_enabled=True, voyage_api_key="", voyage_model="m")
+    with patch("app.memory.store.get_settings") as ms, patch(
+        "app.memory.store._embed"
+    ) as mock_embed:
+        ms.return_value = MagicMock(
+            memory_enabled=True, voyage_api_key="", voyage_model="m"
+        )
         mock_embed.return_value = _ZERO_VECTOR_1536
 
         result = await embed_task_outcome(
@@ -136,6 +149,7 @@ async def test_embed_task_outcome_db_error_returns_none() -> None:
 
 # ---- query_similar_tasks ----
 
+
 @pytest.mark.asyncio
 async def test_query_similar_tasks_disabled_returns_empty() -> None:
     """When MEMORY_ENABLED=false, query_similar_tasks returns []."""
@@ -150,9 +164,12 @@ async def test_query_similar_tasks_disabled_returns_empty() -> None:
 async def test_query_similar_tasks_no_api_key_returns_empty() -> None:
     """Without VOYAGE_API_KEY, query returns [] (zero vector, skip DB query)."""
     mock_db = AsyncMock()
-    with patch("app.memory.store.get_settings") as ms, \
-         patch("app.memory.store._embed") as mock_embed:
-        ms.return_value = MagicMock(memory_enabled=True, memory_top_k=3, voyage_api_key="")
+    with patch("app.memory.store.get_settings") as ms, patch(
+        "app.memory.store._embed"
+    ) as mock_embed:
+        ms.return_value = MagicMock(
+            memory_enabled=True, memory_top_k=3, voyage_api_key=""
+        )
         mock_embed.return_value = _ZERO_VECTOR_1536
 
         results = await query_similar_tasks("fix auth bug", mock_db)
@@ -181,8 +198,9 @@ async def test_query_similar_tasks_returns_formatted_rows() -> None:
 
     non_zero = [0.1] * 1536
 
-    with patch("app.memory.store.get_settings") as ms, \
-         patch("app.memory.store._embed") as mock_embed:
+    with patch("app.memory.store.get_settings") as ms, patch(
+        "app.memory.store._embed"
+    ) as mock_embed:
         ms.return_value = MagicMock(
             memory_enabled=True,
             memory_top_k=3,
@@ -199,6 +217,7 @@ async def test_query_similar_tasks_returns_formatted_rows() -> None:
 
 
 # ---- format_memory_context ----
+
 
 def test_format_memory_context_empty_list() -> None:
     assert format_memory_context([]) == ""
@@ -225,8 +244,15 @@ def test_format_memory_context_includes_task_info() -> None:
 
 def test_format_memory_context_multiple_tasks() -> None:
     tasks = [
-        {"task_id": f"t-{i}", "epic_id": None, "outcome": "completed",
-         "description": "task", "summary": "done", "files_changed": [], "similarity": 0.9}
+        {
+            "task_id": f"t-{i}",
+            "epic_id": None,
+            "outcome": "completed",
+            "description": "task",
+            "summary": "done",
+            "files_changed": [],
+            "similarity": 0.9,
+        }
         for i in range(3)
     ]
     ctx = format_memory_context(tasks)

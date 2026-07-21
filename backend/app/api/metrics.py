@@ -3,6 +3,7 @@
 GET /api/metrics         — aggregate system metrics
 GET /api/metrics/epics   — per-epic cost breakdown
 """
+
 from __future__ import annotations
 
 import logging
@@ -81,7 +82,11 @@ async def get_system_metrics(db: AsyncSession = Depends(get_db)) -> Any:
     )
     row = run_agg.one()
     total_runs, total_in, total_out, total_cache_read, total_cache_creation = (
-        int(row[0]), int(row[1]), int(row[2]), int(row[3]), int(row[4])
+        int(row[0]),
+        int(row[1]),
+        int(row[2]),
+        int(row[3]),
+        int(row[4]),
     )
 
     cache_hit_rate = _hit_rate(total_cache_read, total_cache_creation)
@@ -123,7 +128,9 @@ async def get_system_metrics(db: AsyncSession = Depends(get_db)) -> Any:
     )
 
 
-@router.get("/epics", response_model=list[EpicCostSummary], response_model_by_alias=True)
+@router.get(
+    "/epics", response_model=list[EpicCostSummary], response_model_by_alias=True
+)
 async def get_epic_cost_breakdown(db: AsyncSession = Depends(get_db)) -> Any:
     epics_result = await db.execute(select(Epic).order_by(Epic.created_at.desc()))
     epics = epics_result.scalars().all()
@@ -132,15 +139,16 @@ async def get_epic_cost_breakdown(db: AsyncSession = Depends(get_db)) -> Any:
     for epic in epics:
         # Sum agent_runs for tasks belonging to this epic
         from app.db.models import DevTask
+
         run_agg = await db.execute(
             select(
                 func.coalesce(func.sum(AgentRun.tokens_in), 0),
                 func.coalesce(func.sum(AgentRun.tokens_out), 0),
                 func.coalesce(func.sum(AgentRun.cache_read_tokens), 0),
                 func.coalesce(func.sum(AgentRun.cache_creation_tokens), 0),
-            ).join(DevTask, DevTask.id == AgentRun.task_id).where(
-                DevTask.epic_id == epic.epic_id
             )
+            .join(DevTask, DevTask.id == AgentRun.task_id)
+            .where(DevTask.epic_id == epic.epic_id)
         )
         r = run_agg.one()
         cr, cc = int(r[2]), int(r[3])

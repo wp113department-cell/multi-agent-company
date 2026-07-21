@@ -3,6 +3,7 @@
 Verification contract:
   - codebase_read: set True when read_file or search_code used to inspect actual code
 """
+
 from __future__ import annotations
 
 import logging
@@ -22,9 +23,19 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "security_architect",
     "description": "Performs STRIDE threat modelling and OWASP Top 10 review. Read-only analysis producing a threat model with severities and mitigations.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "search_imports", "git_status", "git_show",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "search_imports",
+        "git_status",
+        "git_show",
         "submit_threat_model",
     ],
     "input_types": ["task_id", "description", "repo_path"],
@@ -32,7 +43,9 @@ AGENT_CONTRACT: dict[str, Any] = {
     "side_effects": [],
     "permissions": ["read_repo"],
     "risk_level": "low",
-    "expected_verification": {"codebase_read": "must inspect actual code before performing threat modelling"},
+    "expected_verification": {
+        "codebase_read": "must inspect actual code before performing threat modelling"
+    },
     "dependencies": [],
 }
 
@@ -42,16 +55,25 @@ _SUBMIT_THREAT_MODEL_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "summary": {"type": "string", "description": "Executive summary of security posture"},
+            "summary": {
+                "type": "string",
+                "description": "Executive summary of security posture",
+            },
             "threats": {
                 "type": "array",
                 "description": "Identified threats",
                 "items": {
                     "type": "object",
                     "properties": {
-                        "category": {"type": "string", "description": "STRIDE category or OWASP Top 10 ref"},
+                        "category": {
+                            "type": "string",
+                            "description": "STRIDE category or OWASP Top 10 ref",
+                        },
                         "description": {"type": "string"},
-                        "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "info"]},
+                        "severity": {
+                            "type": "string",
+                            "enum": ["critical", "high", "medium", "low", "info"],
+                        },
                         "affected_component": {"type": "string"},
                         "mitigation": {"type": "string"},
                     },
@@ -64,7 +86,10 @@ _SUBMIT_THREAT_MODEL_TOOL: dict[str, Any] = {
                 "description": "OWASP Top 10 items observed",
             },
             "recommendations": {"type": "array", "items": {"type": "string"}},
-            "overall_risk": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+            "overall_risk": {
+                "type": "string",
+                "enum": ["critical", "high", "medium", "low"],
+            },
         },
         "required": ["summary", "threats", "overall_risk"],
     },
@@ -154,7 +179,15 @@ def run_security_architect(
     critical = sum(1 for t in threats if t.get("severity") in ("critical", "high"))
     return AgentResult(
         summary=f"Security review: {len(threats)} threats ({critical} high/critical), overall risk = {raw.get('overall_risk', '?')}. {raw.get('summary', '')}",
-        findings=[{"severity": t.get("severity", "?"), "category": t.get("category", "?"), "description": t.get("description", ""), "mitigation": t.get("mitigation", "")} for t in threats],
+        findings=[
+            {
+                "severity": t.get("severity", "?"),
+                "category": t.get("category", "?"),
+                "description": t.get("description", ""),
+                "mitigation": t.get("mitigation", ""),
+            }
+            for t in threats
+        ],
         files_touched=[],
         verified=bool(final_state["verification"].get("codebase_read", False)),
         requires_human_approval=critical > 0,
@@ -169,20 +202,28 @@ def run_security_architect(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["threat_modelling", "owasp_review", "security_architecture_analysis"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=[
+                    "threat_modelling",
+                    "owasp_review",
+                    "security_architecture_analysis",
+                ],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

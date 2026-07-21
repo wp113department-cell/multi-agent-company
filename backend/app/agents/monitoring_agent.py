@@ -4,6 +4,7 @@ Verification contract:
   - metrics_collected forced True only when cpu_usage/memory_usage/disk_usage ran
   - health_verified forced True only when health_check ran successfully
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,18 +24,38 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "monitoring_agent",
     "description": "Collects real system metrics and health status from live tools; read-only.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "cpu_usage", "memory_usage", "disk_usage",
-        "health_check", "task_progress", "read_logs", "submit_monitoring_report",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "cpu_usage",
+        "memory_usage",
+        "disk_usage",
+        "health_check",
+        "task_progress",
+        "read_logs",
+        "submit_monitoring_report",
     ],
     "input_types": ["task_id", "task_description", "repo_path"],
     "output_types": ["AgentResult"],
     "side_effects": [],
     "permissions": ["read_repo", "read_system_metrics"],
     "risk_level": "low",
-    "expected_verification": {"metrics_collected": "cpu_usage/memory_usage/disk_usage must run"},
+    "expected_verification": {
+        "metrics_collected": "cpu_usage/memory_usage/disk_usage must run"
+    },
     "dependencies": [],
 }
 
@@ -51,8 +72,10 @@ _VERIFICATION_CFG = VerificationConfig(
     reset_keys=(),
     enforce_in_result={"metrics_collected": "metrics_collected"},
     initial={
-        "metrics_collected": False, "health_verified": False,
-        "pipeline_checked": False, "logs_read": False,
+        "metrics_collected": False,
+        "health_verified": False,
+        "pipeline_checked": False,
+        "logs_read": False,
     },
 )
 
@@ -116,20 +139,28 @@ def run_monitoring_agent(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["infrastructure_monitoring", "health_checking", "metrics_collection"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=[
+                    "infrastructure_monitoring",
+                    "health_checking",
+                    "metrics_collection",
+                ],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

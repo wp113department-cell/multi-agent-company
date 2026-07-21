@@ -18,6 +18,7 @@ Design notes:
 - Connection is a single Redis connection per process (singleton).
 - No monkey-patching — the adapter is accessed explicitly.
 """
+
 from __future__ import annotations
 
 import logging

@@ -1,4 +1,5 @@
 """Full LangGraph pipeline E2E tests — require ANTHROPIC_API_KEY."""
+
 from __future__ import annotations
 
 import asyncio
@@ -27,7 +28,9 @@ class TestPipelineE2E:
             )
         )
 
-        assert result.get("stage") != "blocked", f"Pipeline blocked: {result.get('error')}"
+        assert (
+            result.get("stage") != "blocked"
+        ), f"Pipeline blocked: {result.get('error')}"
         assert "pm_brief" in result, "Pipeline missing pm_brief"
         assert "architect_plan" in result, "Pipeline missing architect_plan"
         assert "subtasks" in result, "Pipeline missing subtasks"
@@ -70,9 +73,9 @@ class TestPipelineE2E:
         for item in result["architect_plan"]["impacted_files"]:
             path = item["path"]
             full = os.path.join(_THIS_REPO, path)
-            assert os.path.exists(full), (
-                f"Architect hallucinated non-existent file: {path}"
-            )
+            assert os.path.exists(
+                full
+            ), f"Architect hallucinated non-existent file: {path}"
 
     def test_pipeline_subtasks_have_required_fields(self) -> None:
         """Every subtask from Decomposer has title, description, and type."""
@@ -119,6 +122,6 @@ class TestPipelineE2E:
         # Tasks must be independent — subtasks for task A should not appear in task B's results
         assert result_a.get("task_id") == 54
         assert result_b.get("task_id") == 55
-        assert result_a.get("subtasks") != result_b.get("subtasks"), (
-            "Two separate tasks returned identical subtasks — possible state bleed"
-        )
+        assert result_a.get("subtasks") != result_b.get(
+            "subtasks"
+        ), "Two separate tasks returned identical subtasks — possible state bleed"

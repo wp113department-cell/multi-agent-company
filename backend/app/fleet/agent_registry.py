@@ -13,6 +13,7 @@ Design decisions:
 - AgentState.SLEEP is the canonical "available, waiting for work" state; IDLE is
   transient between task completion and explicit sleep() call.
 """
+
 from __future__ import annotations
 
 import threading
@@ -47,7 +48,10 @@ class AgentInstance:
 
     @property
     def is_available(self) -> bool:
-        return self.state in (AgentState.SLEEP, AgentState.IDLE) and self.health != "unhealthy"
+        return (
+            self.state in (AgentState.SLEEP, AgentState.IDLE)
+            and self.health != "unhealthy"
+        )
 
     def start(self, task_id: str) -> None:
         self.state = AgentState.RUNNING
@@ -102,7 +106,9 @@ class AgentRegistry:
 
     def running(self) -> list[AgentInstance]:
         with self._lock:
-            return [i for i in self._instances.values() if i.state == AgentState.RUNNING]
+            return [
+                i for i in self._instances.values() if i.state == AgentState.RUNNING
+            ]
 
     def all(self) -> list[AgentInstance]:
         with self._lock:

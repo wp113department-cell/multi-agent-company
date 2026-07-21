@@ -13,13 +13,12 @@ Tests prove:
 - _validate_plan logic still works (planner backward compat)
 - fleet_manager can select each agent by capability
 """
+
 from __future__ import annotations
 
 import inspect
 from typing import Any
 from unittest.mock import patch
-
-
 
 # ---------------------------------------------------------------------------
 # Import the 3 migrated agents (triggers _register() at module level)
@@ -31,17 +30,27 @@ import app.agents.planner as plan_mod
 
 from app.agents.architect import AGENT_CONTRACT as ARCH_CONTRACT, architect_node
 from app.agents.decomposer import AGENT_CONTRACT as DEC_CONTRACT, decomposer_node
-from app.agents.planner import AGENT_CONTRACT as PLAN_CONTRACT, run_planner, _validate_plan
-
+from app.agents.planner import (
+    AGENT_CONTRACT as PLAN_CONTRACT,
+    run_planner,
+    _validate_plan,
+)
 
 # ---------------------------------------------------------------------------
 # AGENT_CONTRACT structure
 # ---------------------------------------------------------------------------
 
 REQUIRED_CONTRACT_KEYS = {
-    "name", "description", "allowed_tools", "input_types",
-    "output_types", "side_effects", "permissions", "risk_level",
+    "name",
+    "description",
+    "allowed_tools",
+    "input_types",
+    "output_types",
+    "side_effects",
+    "permissions",
+    "risk_level",
 }
+
 
 class TestArchitectContract:
     def test_contract_has_all_required_keys(self) -> None:
@@ -125,12 +134,14 @@ class TestPlannerContract:
 # Migration complete — no longer uses run_agent from base
 # ---------------------------------------------------------------------------
 
+
 class TestMigrationComplete:
     def _has_run_agent_import(self, mod: Any) -> bool:
         """True if module actually imports run_agent (not run_agent_graph)."""
         import ast
         import inspect
         import textwrap
+
         src = textwrap.dedent(inspect.getsource(mod))
         try:
             tree = ast.parse(src)
@@ -140,34 +151,43 @@ class TestMigrationComplete:
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 if isinstance(node, ast.ImportFrom):
                     for alias in node.names:
-                        if alias.name == "run_agent" and alias.asname != "run_agent_graph":
+                        if (
+                            alias.name == "run_agent"
+                            and alias.asname != "run_agent_graph"
+                        ):
                             return True
         return False
 
     def test_architect_does_not_import_run_agent(self) -> None:
-        assert not self._has_run_agent_import(arch_mod), \
-            "architect.py imports bare run_agent — migration incomplete"
+        assert not self._has_run_agent_import(
+            arch_mod
+        ), "architect.py imports bare run_agent — migration incomplete"
 
     def test_decomposer_does_not_import_run_agent(self) -> None:
-        assert not self._has_run_agent_import(dec_mod), \
-            "decomposer.py imports bare run_agent — migration incomplete"
+        assert not self._has_run_agent_import(
+            dec_mod
+        ), "decomposer.py imports bare run_agent — migration incomplete"
 
     def test_planner_does_not_import_run_agent(self) -> None:
-        assert not self._has_run_agent_import(plan_mod), \
-            "planner.py imports bare run_agent — migration incomplete"
+        assert not self._has_run_agent_import(
+            plan_mod
+        ), "planner.py imports bare run_agent — migration incomplete"
 
     def test_architect_uses_run_agent_graph(self) -> None:
         import inspect
+
         src = inspect.getsource(arch_mod)
         assert "run_agent_graph" in src
 
     def test_decomposer_uses_run_agent_graph(self) -> None:
         import inspect
+
         src = inspect.getsource(dec_mod)
         assert "run_agent_graph" in src
 
     def test_planner_uses_run_agent_graph(self) -> None:
         import inspect
+
         src = inspect.getsource(plan_mod)
         assert "run_agent_graph" in src
 
@@ -175,6 +195,7 @@ class TestMigrationComplete:
 # ---------------------------------------------------------------------------
 # External interface unchanged
 # ---------------------------------------------------------------------------
+
 
 class TestExternalInterfaceUnchanged:
     def test_architect_node_takes_pipeline_state(self) -> None:
@@ -200,36 +221,43 @@ class TestExternalInterfaceUnchanged:
 # Capability registry auto-registration
 # ---------------------------------------------------------------------------
 
+
 class TestCapabilityRegistryRegistration:
     def test_architect_in_capability_registry(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         r = get_capability_registry()
         assert r.get("architect") is not None
 
     def test_decomposer_in_capability_registry(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         r = get_capability_registry()
         assert r.get("decomposer") is not None
 
     def test_planner_in_capability_registry(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         r = get_capability_registry()
         assert r.get("planner") is not None
 
     def test_architect_capability_tags(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         cap = get_capability_registry().get("architect")
         assert cap is not None
         assert "architecture_design" in cap.capabilities
 
     def test_decomposer_capability_tags(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         cap = get_capability_registry().get("decomposer")
         assert cap is not None
         assert "task_decomposition" in cap.capabilities
 
     def test_planner_capability_tags(self) -> None:
         from app.fleet.capability_registry import get_capability_registry
+
         cap = get_capability_registry().get("planner")
         assert cap is not None
         assert "implementation_planning" in cap.capabilities
@@ -239,19 +267,23 @@ class TestCapabilityRegistryRegistration:
 # Agent registry auto-registration
 # ---------------------------------------------------------------------------
 
+
 class TestAgentRegistryRegistration:
     def test_architect_in_agent_registry(self) -> None:
         from app.fleet.agent_registry import get_agent_registry
+
         inst = get_agent_registry().get("architect")
         assert inst is not None
 
     def test_decomposer_in_agent_registry(self) -> None:
         from app.fleet.agent_registry import get_agent_registry
+
         inst = get_agent_registry().get("decomposer")
         assert inst is not None
 
     def test_planner_in_agent_registry(self) -> None:
         from app.fleet.agent_registry import get_agent_registry
+
         inst = get_agent_registry().get("planner")
         assert inst is not None
 
@@ -260,11 +292,13 @@ class TestAgentRegistryRegistration:
 # Fleet manager can select by capability
 # ---------------------------------------------------------------------------
 
+
 class TestFleetManagerSelection:
     def test_fleet_manager_selects_architect_by_capability(self) -> None:
         from app.fleet.fleet_manager import FleetManager
         from app.fleet.capability_registry import get_capability_registry
         from app.fleet.agent_registry import get_agent_registry
+
         fm = FleetManager(
             capability_registry=get_capability_registry(),
             agent_registry=get_agent_registry(),
@@ -277,6 +311,7 @@ class TestFleetManagerSelection:
         from app.fleet.fleet_manager import FleetManager
         from app.fleet.capability_registry import get_capability_registry
         from app.fleet.agent_registry import get_agent_registry
+
         fm = FleetManager(
             capability_registry=get_capability_registry(),
             agent_registry=get_agent_registry(),
@@ -289,6 +324,7 @@ class TestFleetManagerSelection:
         from app.fleet.fleet_manager import FleetManager
         from app.fleet.capability_registry import get_capability_registry
         from app.fleet.agent_registry import get_agent_registry
+
         fm = FleetManager(
             capability_registry=get_capability_registry(),
             agent_registry=get_agent_registry(),
@@ -302,6 +338,7 @@ class TestFleetManagerSelection:
 # Tool manifest compliance
 # ---------------------------------------------------------------------------
 
+
 class TestToolManifestCompliance:
     # Submit tools are agent-private (dynamically registered per-agent, not shared across agents)
     # so they are not in the global TOOL_MANIFEST. Only shared tools are checked.
@@ -312,37 +349,53 @@ class TestToolManifestCompliance:
 
     def test_all_architect_shared_tools_in_manifest(self) -> None:
         from app.fleet.tool_manifest import TOOL_MANIFEST
+
         for tool in self._shared_tools(ARCH_CONTRACT):
-            assert tool in TOOL_MANIFEST, f"architect uses {tool!r} — not in TOOL_MANIFEST"
+            assert (
+                tool in TOOL_MANIFEST
+            ), f"architect uses {tool!r} — not in TOOL_MANIFEST"
 
     def test_all_decomposer_shared_tools_in_manifest(self) -> None:
         from app.fleet.tool_manifest import TOOL_MANIFEST
+
         for tool in self._shared_tools(DEC_CONTRACT):
-            assert tool in TOOL_MANIFEST, f"decomposer uses {tool!r} — not in TOOL_MANIFEST"
+            assert (
+                tool in TOOL_MANIFEST
+            ), f"decomposer uses {tool!r} — not in TOOL_MANIFEST"
 
     def test_all_planner_shared_tools_in_manifest(self) -> None:
         from app.fleet.tool_manifest import TOOL_MANIFEST
+
         for tool in self._shared_tools(PLAN_CONTRACT):
-            assert tool in TOOL_MANIFEST, f"planner uses {tool!r} — not in TOOL_MANIFEST"
+            assert (
+                tool in TOOL_MANIFEST
+            ), f"planner uses {tool!r} — not in TOOL_MANIFEST"
 
     def test_verify_agent_contract_no_violations(self) -> None:
         from app.fleet.tool_manifest import verify_agent_contract
+
         for contract in [ARCH_CONTRACT, DEC_CONTRACT, PLAN_CONTRACT]:
             violations = verify_agent_contract(
                 contract["name"],
                 tool_list=contract["allowed_tools"],
                 contract_allowed_tools=contract["allowed_tools"],
             )
-            assert violations == [], f"{contract['name']} has contract violations: {violations}"
+            assert (
+                violations == []
+            ), f"{contract['name']} has contract violations: {violations}"
 
 
 # ---------------------------------------------------------------------------
 # Planner _validate_plan logic (backward compat)
 # ---------------------------------------------------------------------------
 
+
 class TestValidatePlan:
     def test_valid_plan_returns_none(self) -> None:
-        plan = "## Overview\n\nImplementation Steps:\n1. Do X\n\nFiles To Inspect:\n- src/main.py\n" * 3
+        plan = (
+            "## Overview\n\nImplementation Steps:\n1. Do X\n\nFiles To Inspect:\n- src/main.py\n"
+            * 3
+        )
         assert _validate_plan(plan) is None
 
     def test_too_short_returns_error(self) -> None:
@@ -359,6 +412,7 @@ class TestValidatePlan:
 # architect_node returns blocked when run_agent_graph raises
 # ---------------------------------------------------------------------------
 
+
 class TestArchitectNodeErrorHandling:
     @patch("app.agents.architect.run_agent_graph", side_effect=RuntimeError("API down"))
     def test_returns_blocked_on_exception(self, mock_graph: Any) -> None:
@@ -374,9 +428,14 @@ class TestArchitectNodeErrorHandling:
     @patch("app.agents.architect.run_agent_graph")
     def test_returns_blocked_when_not_submitted(self, mock_graph: Any) -> None:
         mock_graph.return_value = {
-            "messages": [], "verification": {}, "result": {},
-            "turns": 1, "submitted": False, "requires_human_approval": False,
-            "tokens_in": 100, "tokens_out": 50,
+            "messages": [],
+            "verification": {},
+            "result": {},
+            "turns": 1,
+            "submitted": False,
+            "requires_human_approval": False,
+            "tokens_in": 100,
+            "tokens_out": 50,
         }
         state = {"task_title": "Test", "pm_brief": {}, "repo_path": "/tmp/test"}
         result = architect_node(state)  # type: ignore[arg-type]
@@ -385,19 +444,26 @@ class TestArchitectNodeErrorHandling:
     @patch("app.agents.architect.run_agent_graph")
     def test_returns_architect_plan_on_success(self, mock_graph: Any) -> None:
         mock_graph.return_value = {
-            "messages": [], "verification": {}, "result": {
+            "messages": [],
+            "verification": {},
+            "result": {
                 "technical_approach": "Use dependency injection",
                 "impacted_files": [{"path": "src/auth.py", "reason": "main module"}],
                 "risks": [{"severity": "low", "description": "minor refactor"}],
                 "risk_level": "low",
             },
-            "turns": 3, "submitted": True, "requires_human_approval": False,
-            "tokens_in": 1000, "tokens_out": 200,
+            "turns": 3,
+            "submitted": True,
+            "requires_human_approval": False,
+            "tokens_in": 1000,
+            "tokens_out": 200,
         }
         state = {"task_title": "Test", "pm_brief": {}, "repo_path": "/tmp/test"}
         result = architect_node(state)  # type: ignore[arg-type]
         assert result["stage"] == "decomposer"
-        assert result["architect_plan"]["technical_approach"] == "Use dependency injection"
+        assert (
+            result["architect_plan"]["technical_approach"] == "Use dependency injection"
+        )
         assert "_requires_human_approval" not in result["architect_plan"]
 
 
@@ -405,18 +471,32 @@ class TestArchitectNodeErrorHandling:
 # decomposer_node error handling
 # ---------------------------------------------------------------------------
 
+
 class TestDecomposerNodeErrorHandling:
     @patch("app.agents.decomposer.run_agent_graph")
     def test_returns_subtasks_on_success(self, mock_graph: Any) -> None:
         mock_graph.return_value = {
-            "messages": [], "verification": {}, "result": {
+            "messages": [],
+            "verification": {},
+            "result": {
                 "subtasks": [
-                    {"type": "backend", "title": "Add auth route", "description": "POST /auth/login"},
-                    {"type": "test", "title": "Test auth", "description": "pytest tests"},
+                    {
+                        "type": "backend",
+                        "title": "Add auth route",
+                        "description": "POST /auth/login",
+                    },
+                    {
+                        "type": "test",
+                        "title": "Test auth",
+                        "description": "pytest tests",
+                    },
                 ],
             },
-            "turns": 2, "submitted": True, "requires_human_approval": False,
-            "tokens_in": 800, "tokens_out": 150,
+            "turns": 2,
+            "submitted": True,
+            "requires_human_approval": False,
+            "tokens_in": 800,
+            "tokens_out": 150,
         }
         state = {
             "task_title": "Add auth",
@@ -432,10 +512,20 @@ class TestDecomposerNodeErrorHandling:
     @patch("app.agents.decomposer.run_agent_graph")
     def test_returns_blocked_on_empty_subtasks(self, mock_graph: Any) -> None:
         mock_graph.return_value = {
-            "messages": [], "verification": {}, "result": {"subtasks": []},
-            "turns": 2, "submitted": True, "requires_human_approval": False,
-            "tokens_in": 500, "tokens_out": 100,
+            "messages": [],
+            "verification": {},
+            "result": {"subtasks": []},
+            "turns": 2,
+            "submitted": True,
+            "requires_human_approval": False,
+            "tokens_in": 500,
+            "tokens_out": 100,
         }
-        state = {"task_title": "Test", "pm_brief": {}, "architect_plan": {}, "repo_path": "/tmp"}
+        state = {
+            "task_title": "Test",
+            "pm_brief": {},
+            "architect_plan": {},
+            "repo_path": "/tmp",
+        }
         result = decomposer_node(state)  # type: ignore[arg-type]
         assert result["stage"] == "blocked"

@@ -5,6 +5,7 @@ across the whole Gridiron platform — other agents AND the app itself (backend
 + frontend) — and files enhancement requests for human review. Never writes
 anything until a specific request is approved on the Fleet Dashboard.
 """
+
 from __future__ import annotations
 
 import logging
@@ -29,16 +30,31 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "agent_performance_reviewer",
     "description": "Reviews real runtime performance data (agent metrics + backend/frontend signals) for the whole Gridiron platform and files enhancement requests. Never writes code until a specific request is approved.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "fleet_metrics_read", "web_search", "submit_enhancement_request",
-        "write_file", "edit_file", "run_tests", "git_commit_change", "submit_fix",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "fleet_metrics_read",
+        "web_search",
+        "submit_enhancement_request",
+        "write_file",
+        "edit_file",
+        "run_tests",
+        "git_commit_change",
+        "submit_fix",
     ],
     "input_types": ["scan_trigger", "enhancement_request_id"],
     "output_types": ["AgentResult"],
-    "side_effects": ["files enhancement requests (scan)", "writes + commits code (apply, post-approval only)"],
+    "side_effects": [
+        "files enhancement requests (scan)",
+        "writes + commits code (apply, post-approval only)",
+    ],
     "permissions": ["read_repo", "read_metrics", "write_repo_on_approval"],
     "risk_level": "medium",
-    "expected_verification": {"metrics_read": "fleet_metrics_read must run before filing a request"},
+    "expected_verification": {
+        "metrics_read": "fleet_metrics_read must run before filing a request"
+    },
     "dependencies": [],
 }
 
@@ -68,7 +84,17 @@ _SUBMIT_ENHANCEMENT_TOOL_SPEC = {
         "properties": {
             "title": {"type": "string"},
             "description": {"type": "string"},
-            "category": {"type": "string", "enum": ["performance", "bug", "orchestration", "knowledge", "quality", "security"]},
+            "category": {
+                "type": "string",
+                "enum": [
+                    "performance",
+                    "bug",
+                    "orchestration",
+                    "knowledge",
+                    "quality",
+                    "security",
+                ],
+            },
             "priority": {"type": "string", "enum": ["emergency", "medium", "low"]},
             "evidence": {"type": "object"},
         },
@@ -78,10 +104,18 @@ _SUBMIT_ENHANCEMENT_TOOL_SPEC = {
 _SUBMIT_FIX_TOOL_SPEC = {
     "name": "submit_fix",
     "description": "Signal the fix is complete and committed.",
-    "input_schema": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]},
+    "input_schema": {
+        "type": "object",
+        "properties": {"summary": {"type": "string"}},
+        "required": ["summary"],
+    },
 }
 
-SCAN_TOOLS = READ_ONLY_TOOLS[:5] + [_FLEET_METRICS_TOOL_SPEC, _WEB_SEARCH_TOOL_SPEC, _SUBMIT_ENHANCEMENT_TOOL_SPEC]
+SCAN_TOOLS = READ_ONLY_TOOLS[:5] + [
+    _FLEET_METRICS_TOOL_SPEC,
+    _WEB_SEARCH_TOOL_SPEC,
+    _SUBMIT_ENHANCEMENT_TOOL_SPEC,
+]
 APPLY_TOOLS = FLEET_APPLY_TOOLS + [_SUBMIT_FIX_TOOL_SPEC]
 
 _SCAN_CFG = VerificationConfig(
@@ -146,10 +180,15 @@ def run_agent_performance_reviewer_scan(trace_id: str = "") -> AgentResult:
     )
 
     return AgentResult(
-        summary="Performance scan complete" if final_state["submitted"] else "Performance scan complete — nothing to flag",
+        summary=(
+            "Performance scan complete"
+            if final_state["submitted"]
+            else "Performance scan complete — nothing to flag"
+        ),
         findings=[],
         files_touched=[],
-        verified=bool(final_state["verification"].get("metrics_read")) or not final_state["submitted"],
+        verified=bool(final_state["verification"].get("metrics_read"))
+        or not final_state["submitted"],
         requires_human_approval=False,
         tokens_in=final_state["tokens_in"],
         tokens_out=final_state["tokens_out"],
@@ -158,7 +197,9 @@ def run_agent_performance_reviewer_scan(trace_id: str = "") -> AgentResult:
     )
 
 
-def run_agent_performance_reviewer_apply(request_id: int, description: str, trace_id: str = "") -> AgentResult:
+def run_agent_performance_reviewer_apply(
+    request_id: int, description: str, trace_id: str = ""
+) -> AgentResult:
     """APPLY phase — write-capable, only ever called after a human approves `request_id`."""
     settings = get_settings()
     repo = settings.fleet_self_repo_path
@@ -166,6 +207,7 @@ def run_agent_performance_reviewer_apply(request_id: int, description: str, trac
 
     def submit_h(inp: dict[str, Any]) -> str:
         return "done"
+
     handlers["submit_fix"] = submit_h
 
     msg = (
@@ -201,7 +243,9 @@ def run_agent_performance_reviewer_apply(request_id: int, description: str, trac
         requires_human_approval=False,
         tokens_in=final_state["tokens_in"],
         tokens_out=final_state["tokens_out"],
-        status="completed" if final_state["verification"].get("committed") else "blocked",
+        status=(
+            "completed" if final_state["verification"].get("committed") else "blocked"
+        ),
         raw=final_state.get("result", {}),
     )
 
@@ -210,16 +254,19 @@ def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["agent_performance_review"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["agent_performance_review"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register(AGENT_CONTRACT["name"])
     except Exception as exc:
         logger.debug("Fleet registry unavailable: %s", exc)

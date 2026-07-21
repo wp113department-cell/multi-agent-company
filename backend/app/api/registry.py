@@ -1,4 +1,5 @@
 """Agent Registry API — GET /api/agents, GET /api/agents/:name, PATCH /api/agents/:name/metrics."""
+
 from __future__ import annotations
 
 import uuid
@@ -17,6 +18,7 @@ router = APIRouter(prefix="/api/agents", tags=["registry"])
 
 
 # ---- Schemas ----
+
 
 class AgentResponse(BaseModel):
     agent_id: str
@@ -50,6 +52,7 @@ class MetricsResponse(BaseModel):
 
 # ---- Helpers ----
 
+
 def _agent_to_response(a: Agent) -> dict[str, Any]:
     return {
         "agentId": a.agent_id,
@@ -66,6 +69,7 @@ def _agent_to_response(a: Agent) -> dict[str, Any]:
 
 
 # ---- Routes ----
+
 
 @router.get("")
 async def list_agents(
@@ -105,9 +109,7 @@ async def get_agent_metrics(
         raise HTTPException(status_code=404, detail=f"Agent '{name}' not found")
 
     # Count runs from agent_runs for this agent type
-    runs_result = await db.execute(
-        select(AgentRun).where(AgentRun.agent_type == name)
-    )
+    runs_result = await db.execute(select(AgentRun).where(AgentRun.agent_type == name))
     runs = list(runs_result.scalars().all())
     total_runs = len(runs)
 

@@ -1,4 +1,5 @@
 """Epics API — POST /api/epics, GET /api/epics/:id, POST /api/epics/:id/approve|reject."""
+
 from __future__ import annotations
 
 import asyncio
@@ -25,6 +26,7 @@ router = APIRouter(prefix="/api/epics", tags=["epics"])
 
 
 # ---- Request / Response schemas ----
+
 
 class CreateEpicRequest(BaseModel):
     title: str
@@ -53,6 +55,7 @@ class EpicResponse(BaseModel):
 
 # ---- Helper ----
 
+
 def _epic_to_response(epic: Epic, tasks: list[DevTask]) -> dict[str, Any]:
     return {
         "epicId": epic.epic_id,
@@ -77,6 +80,7 @@ def _epic_to_response(epic: Epic, tasks: list[DevTask]) -> dict[str, Any]:
 
 
 # ---- Routes ----
+
 
 @router.post("")
 async def create_epic(
@@ -170,12 +174,14 @@ async def approve_epic(
     epic.status = "approved"
     await db.commit()
 
-    await publish_event(GridironEvent(
-        event_type="epic.approved",
-        epic_id=epic_id,
-        payload={"approved_by": user_id},
-        emitted_by="api",
-    ))
+    await publish_event(
+        GridironEvent(
+            event_type="epic.approved",
+            epic_id=epic_id,
+            payload={"approved_by": user_id},
+            emitted_by="api",
+        )
+    )
 
     return {"epicId": epic_id, "status": "approved", "approvedBy": user_id}
 
@@ -201,12 +207,14 @@ async def reject_epic(
     epic.status = "rejected"
     await db.commit()
 
-    await publish_event(GridironEvent(
-        event_type="epic.rejected",
-        epic_id=epic_id,
-        payload={"rejected_by": user_id},
-        emitted_by="api",
-    ))
+    await publish_event(
+        GridironEvent(
+            event_type="epic.rejected",
+            epic_id=epic_id,
+            payload={"rejected_by": user_id},
+            emitted_by="api",
+        )
+    )
 
     return {"epicId": epic_id, "status": "rejected", "rejectedBy": user_id}
 
@@ -235,7 +243,11 @@ async def approve_epic_cost(
     # Re-launch the manager with cost approval granted
     asyncio.create_task(_launch_epic_manager(epic_id, epic.description))
 
-    return {"epicId": epic_id, "status": "pending", "message": "Cost approved. Manager pipeline restarting."}
+    return {
+        "epicId": epic_id,
+        "status": "pending",
+        "message": "Cost approved. Manager pipeline restarting.",
+    }
 
 
 @router.post("/{epic_id}/policy-approval")
@@ -299,7 +311,8 @@ async def batch_review(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
                 "haltReason": e.halt_reason,
                 "age": (
                     __import__("datetime").datetime.utcnow() - e.created_at
-                ).total_seconds() / 3600,
+                ).total_seconds()
+                / 3600,
                 "createdAt": e.created_at.isoformat(),
             }
             for e in epics
@@ -313,7 +326,8 @@ async def batch_review(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
                 "epicId": t.epic_id,
                 "age": (
                     __import__("datetime").datetime.utcnow() - t.created_at
-                ).total_seconds() / 3600,
+                ).total_seconds()
+                / 3600,
                 "createdAt": t.created_at.isoformat(),
             }
             for t in tasks
@@ -323,6 +337,7 @@ async def batch_review(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
 
 
 # ---- Background task ----
+
 
 async def _launch_epic_manager(epic_id: str, goal: str) -> None:
     """Fire-and-forget: run the epic manager pipeline."""

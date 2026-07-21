@@ -1,4 +1,5 @@
 """MCP server unit tests — JSON-RPC handling without stdio."""
+
 import json
 import os
 import pytest
@@ -13,6 +14,7 @@ def _patch_env() -> None:
         "TARGET_REPO_PATH": ".",
     }
     import app.config as cfg
+
     cfg._settings = None
     with patch.dict(os.environ, env, clear=False):
         yield
@@ -21,6 +23,7 @@ def _patch_env() -> None:
 
 def _call(method: str, params: dict) -> dict:
     from app.mcp.server import _handle
+
     return _handle(method, params)
 
 
@@ -41,7 +44,10 @@ def test_tools_list_returns_known_tools() -> None:
 
 def test_index_repository_returns_counts(tmp_path) -> None:
     (tmp_path / "hello.py").write_text("def hello(): pass\n")
-    result = _call("tools/call", {"name": "index_repository", "arguments": {"repo_path": str(tmp_path)}})
+    result = _call(
+        "tools/call",
+        {"name": "index_repository", "arguments": {"repo_path": str(tmp_path)}},
+    )
     data = json.loads(result["content"][0]["text"])
     assert data["files"] == 1
     assert data["symbols"] >= 1
@@ -49,7 +55,13 @@ def test_index_repository_returns_counts(tmp_path) -> None:
 
 def test_search_symbols_finds_function(tmp_path) -> None:
     (tmp_path / "math.py").write_text("def calculate(x): return x * 2\n")
-    result = _call("tools/call", {"name": "search_symbols", "arguments": {"query": "calculate", "repo_path": str(tmp_path)}})
+    result = _call(
+        "tools/call",
+        {
+            "name": "search_symbols",
+            "arguments": {"query": "calculate", "repo_path": str(tmp_path)},
+        },
+    )
     matches = json.loads(result["content"][0]["text"])
     assert any(m["name"] == "calculate" for m in matches)
 

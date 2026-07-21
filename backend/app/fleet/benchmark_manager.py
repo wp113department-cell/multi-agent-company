@@ -11,6 +11,7 @@ defeating the point. Fixture-repos-per-agent-type are explicitly deferred:
 this measures real production runs, not synthetic scenarios, until enough
 real data exists to justify fixtures.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -66,10 +67,17 @@ async def _write_baseline(agent_name: str, objectives: dict[str, float]) -> None
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             await session.execute(
                 update(AgentBenchmark)
-                .where(AgentBenchmark.agent_name == agent_name, AgentBenchmark.is_baseline.is_(True))
+                .where(
+                    AgentBenchmark.agent_name == agent_name,
+                    AgentBenchmark.is_baseline.is_(True),
+                )
                 .values(is_baseline=False)
             )
-            session.add(AgentBenchmark(agent_name=agent_name, objectives=objectives, is_baseline=True))
+            session.add(
+                AgentBenchmark(
+                    agent_name=agent_name, objectives=objectives, is_baseline=True
+                )
+            )
             await session.commit()
     finally:
         await engine.dispose()
@@ -87,7 +95,10 @@ async def _read_baseline(agent_name: str) -> BenchmarkResult | None:
             row = (
                 await session.execute(
                     select(AgentBenchmark)
-                    .where(AgentBenchmark.agent_name == agent_name, AgentBenchmark.is_baseline.is_(True))
+                    .where(
+                        AgentBenchmark.agent_name == agent_name,
+                        AgentBenchmark.is_baseline.is_(True),
+                    )
                     .order_by(AgentBenchmark.created_at.desc())
                     .limit(1)
                 )
@@ -119,13 +130,17 @@ class BenchmarkManager:
             return 0.0
         return 1.0 - (p50_ms - target) / target
 
-    def _compute_objectives(self, agent_name: str, runs: list[RunMetrics]) -> dict[str, float]:
+    def _compute_objectives(
+        self, agent_name: str, runs: list[RunMetrics]
+    ) -> dict[str, float]:
         s = get_settings()
 
         p50 = self._collector.p50_latency_ms(agent_name)
         tool_accuracy = self._collector.avg_tool_accuracy(agent_name)
         if tool_accuracy is None:
-            tool_accuracy = 1.0  # no tool calls recorded — nothing to be inaccurate about
+            tool_accuracy = (
+                1.0  # no tool calls recorded — nothing to be inaccurate about
+            )
 
         verification_coverage = (
             sum(m.verification_pct for m in runs) / len(runs) if runs else 1.0
@@ -138,7 +153,9 @@ class BenchmarkManager:
             else 1.0  # no retries needed — vacuously successful
         )
 
-        compile_calls = [tc for m in runs for tc in m.tool_calls if tc.tool_name in _COMPILE_TOOLS]
+        compile_calls = [
+            tc for m in runs for tc in m.tool_calls if tc.tool_name in _COMPILE_TOOLS
+        ]
         compile_success = (
             sum(1 for tc in compile_calls if tc.success) / len(compile_calls)
             if compile_calls
@@ -149,7 +166,9 @@ class BenchmarkManager:
         # reflection_node judged its own tool output unsatisfactory at least
         # once. Approximation, not ground truth — documented in DAY10_PLAN.md.
         hallucination_rate = (
-            sum(1 for m in runs if m.reflection_unsatisfied > 0) / len(runs) if runs else 0.0
+            sum(1 for m in runs if m.reflection_unsatisfied > 0) / len(runs)
+            if runs
+            else 0.0
         )
 
         latency_score = self._latency_score(p50)

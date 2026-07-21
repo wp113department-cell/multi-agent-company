@@ -1,4 +1,5 @@
 """Tests for Fleet OS capability_registry.py — Phase F1."""
+
 from __future__ import annotations
 
 
@@ -36,14 +37,26 @@ def test_get_missing_returns_none() -> None:
 
 def test_find_by_capability() -> None:
     r = CapabilityRegistry()
-    r.register(AgentCapability(
-        name="a1", description="", tools=[], input_types=[], output_types=[],
-        capabilities=["bug_fix", "code_edit"],
-    ))
-    r.register(AgentCapability(
-        name="a2", description="", tools=[], input_types=[], output_types=[],
-        capabilities=["qa_verification"],
-    ))
+    r.register(
+        AgentCapability(
+            name="a1",
+            description="",
+            tools=[],
+            input_types=[],
+            output_types=[],
+            capabilities=["bug_fix", "code_edit"],
+        )
+    )
+    r.register(
+        AgentCapability(
+            name="a2",
+            description="",
+            tools=[],
+            input_types=[],
+            output_types=[],
+            capabilities=["qa_verification"],
+        )
+    )
     bug_fixers = r.find_by_capability("bug_fix")
     assert len(bug_fixers) == 1
     assert bug_fixers[0].name == "a1"
@@ -59,28 +72,47 @@ def test_find_by_capability_returns_empty_for_unknown() -> None:
 def test_all_returns_all_entries() -> None:
     r = CapabilityRegistry()
     for i in range(3):
-        r.register(AgentCapability(
-            name=f"agent_{i}", description="", tools=[], input_types=[], output_types=[],
-            capabilities=[],
-        ))
+        r.register(
+            AgentCapability(
+                name=f"agent_{i}",
+                description="",
+                tools=[],
+                input_types=[],
+                output_types=[],
+                capabilities=[],
+            )
+        )
     assert r.count() == 3
 
 
 def test_register_updates_existing() -> None:
     r = CapabilityRegistry()
-    r.register(AgentCapability(
-        name="same", description="v1", tools=[], input_types=[], output_types=[],
-        capabilities=[],
-    ))
-    r.register(AgentCapability(
-        name="same", description="v2", tools=[], input_types=[], output_types=[],
-        capabilities=[],
-    ))
+    r.register(
+        AgentCapability(
+            name="same",
+            description="v1",
+            tools=[],
+            input_types=[],
+            output_types=[],
+            capabilities=[],
+        )
+    )
+    r.register(
+        AgentCapability(
+            name="same",
+            description="v2",
+            tools=[],
+            input_types=[],
+            output_types=[],
+            capabilities=[],
+        )
+    )
     assert r.count() == 1
     assert r.get("same").description == "v2"
 
 
 # ---- Reference agent registrations (Day 0 contract) ----
+
 
 def test_reference_agents_registered_at_import() -> None:
     r = get_capability_registry()

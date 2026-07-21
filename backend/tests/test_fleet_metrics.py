@@ -1,4 +1,5 @@
 """Tests for Fleet OS metrics.py — §18 trace_id + observability."""
+
 from __future__ import annotations
 
 import time
@@ -57,11 +58,24 @@ class TestRunMetrics:
         d = m.to_dict()
 
         required_keys = {
-            "trace_id", "agent_name", "task_id", "started_at", "finished_at",
-            "execution_time_ms", "tokens_in", "tokens_out", "cost_estimate_usd",
-            "retries", "failures", "tool_calls", "tool_accuracy",
-            "verification_pct", "memory_retrieved", "memory_written",
-            "confidence", "status",
+            "trace_id",
+            "agent_name",
+            "task_id",
+            "started_at",
+            "finished_at",
+            "execution_time_ms",
+            "tokens_in",
+            "tokens_out",
+            "cost_estimate_usd",
+            "retries",
+            "failures",
+            "tool_calls",
+            "tool_accuracy",
+            "verification_pct",
+            "memory_retrieved",
+            "memory_written",
+            "confidence",
+            "status",
         }
         assert required_keys.issubset(d.keys())
 
@@ -160,16 +174,19 @@ class TestRunSpan:
 
 # ---- Day 0 exit criterion: 7 measurable objectives computable from real data ----
 
+
 def test_seven_measurable_objectives_computable() -> None:
     """§20 exit criterion: 7 measurable objectives computable for at least one agent."""
     c = MetricsCollector()
 
-    for i, (ms, tokens_in, tokens_out, tool_success) in enumerate([
-        (120.0, 1000, 150, True),
-        (250.0, 1200, 200, True),
-        (180.0, 900, 120, False),
-        (310.0, 1500, 250, True),
-    ]):
+    for i, (ms, tokens_in, tokens_out, tool_success) in enumerate(
+        [
+            (120.0, 1000, 150, True),
+            (250.0, 1200, 200, True),
+            (180.0, 900, 120, False),
+            (310.0, 1500, 250, True),
+        ]
+    ):
         m = c.start_run("bug_fix", task_id=f"task-{i}", trace_id=f"trace-{i}")
         m.record_tokens(tokens_in, tokens_out)
         m.record_tool("edit_file", tool_success, 30.0)
@@ -192,7 +209,9 @@ def test_seven_measurable_objectives_computable() -> None:
 
     # 4. verification_coverage (verification_pct on any run)
     runs = c.by_agent("bug_fix")
-    assert any(r.verification_pct > 0 for r in runs), "verification_coverage not measurable"
+    assert any(
+        r.verification_pct > 0 for r in runs
+    ), "verification_coverage not measurable"
 
     # 5. tokens consumed (proxy for cost)
     total_tokens = sum(r.tokens_in + r.tokens_out for r in runs)

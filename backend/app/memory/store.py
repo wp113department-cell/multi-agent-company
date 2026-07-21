@@ -8,6 +8,7 @@ Falls back gracefully when:
 - MEMORY_ENABLED is false (all operations are no-ops)
 - pgvector extension is not installed (DB error caught, logged, not raised)
 """
+
 from __future__ import annotations
 
 import logging
@@ -42,6 +43,7 @@ async def _embed(text_to_embed: str) -> list[float]:
 
     try:
         import importlib
+
         voyageai = importlib.import_module("voyageai")
 
         client = voyageai.Client(api_key=settings.voyage_api_key)
@@ -179,6 +181,7 @@ def format_memory_context(similar_tasks: list[dict[str, Any]]) -> str:
 # Architecture Notes — store architectural decisions for context injection
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 async def embed_architecture_note(
     task_id: str,
     content: str,
@@ -212,7 +215,9 @@ async def embed_architecture_note(
         logger.info("Memory: stored architecture note for task %s", task_id)
         return row
     except Exception as exc:
-        logger.warning("Memory: failed to store architecture note for task %s: %s", task_id, exc)
+        logger.warning(
+            "Memory: failed to store architecture note for task %s: %s", task_id, exc
+        )
         await db.rollback()
         return None
 
@@ -267,6 +272,7 @@ async def query_architecture_notes(
 # ──────────────────────────────────────────────────────────────────────────────
 # Failure Records — capture failure modes for future context injection
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 async def embed_failure(
     task_id: str,

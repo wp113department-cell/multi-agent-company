@@ -25,6 +25,7 @@ pattern): forward_with_handling()'s bounded per-step requery
 bounded decision function, not an unbounded loop. Reuses the existing
 settings.max_retries field rather than adding a duplicate config value.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -51,6 +52,7 @@ rollback = rollback_to
 # from Rollback (which implies reverting to an earlier, presumably-good point)
 # ---------------------------------------------------------------------------
 
+
 def resume(checkpoint_id: str) -> AgentStateSnapshot:
     snapshot = restore_checkpoint(checkpoint_id)
     if snapshot is None:
@@ -62,6 +64,7 @@ def resume(checkpoint_id: str) -> AgentStateSnapshot:
 # Retry — bounded decision function (swe-agent's forward_with_handling pattern)
 # ---------------------------------------------------------------------------
 
+
 def should_retry(retry_count: int, max_retries: int | None = None) -> bool:
     limit = max_retries if max_retries is not None else get_settings().max_retries
     return retry_count < limit
@@ -72,6 +75,7 @@ def should_retry(retry_count: int, max_retries: int | None = None) -> bool:
 # explicit, nameable ladder rung, plus a health_updated event for observability
 # ---------------------------------------------------------------------------
 
+
 def escalate(agent_name: str, reason: str, trace_id: str = "") -> None:
     from app.fleet.agent_registry import get_agent_registry
     from app.fleet.fleet_events import health_updated, publish
@@ -81,7 +85,11 @@ def escalate(agent_name: str, reason: str, trace_id: str = "") -> None:
     except Exception:
         pass
     try:
-        publish(health_updated(agent_name, health="degraded", state=reason[:200], trace_id=trace_id))
+        publish(
+            health_updated(
+                agent_name, health="degraded", state=reason[:200], trace_id=trace_id
+            )
+        )
     except Exception:
         pass
 
@@ -93,6 +101,7 @@ def escalate(agent_name: str, reason: str, trace_id: str = "") -> None:
 # across multiple asyncio.run() calls in the same process raises "attached
 # to a different loop".
 # ---------------------------------------------------------------------------
+
 
 def _new_isolated_db_engine() -> Any:
     from sqlalchemy.ext.asyncio import create_async_engine
@@ -131,13 +140,22 @@ def abort(task_id: str | None, reason: str, trace_id: str = "") -> bool:
         except (ValueError, TypeError):
             transitioned = False
     try:
-        publish(task_failed(task_id=task_id or "", agent_name="", reason=reason[:200], trace_id=trace_id))
+        publish(
+            task_failed(
+                task_id=task_id or "",
+                agent_name="",
+                reason=reason[:200],
+                trace_id=trace_id,
+            )
+        )
     except Exception:
         pass
     return transitioned
 
 
-def request_human_review(task_id: str | None, agent_name: str, reason: str, trace_id: str = "") -> bool:
+def request_human_review(
+    task_id: str | None, agent_name: str, reason: str, trace_id: str = ""
+) -> bool:
     """Flag for human attention — reuses the existing "blocked" transition
     (recoverable: a human can unblock and re-run) plus review_requested().
     NOT a LangGraph interrupt()-based pause; full approval-UI wiring is
@@ -151,7 +169,14 @@ def request_human_review(task_id: str | None, agent_name: str, reason: str, trac
         except (ValueError, TypeError):
             transitioned = False
     try:
-        publish(review_requested(task_id=task_id or "", agent_name=agent_name, review_type=reason[:100], trace_id=trace_id))
+        publish(
+            review_requested(
+                task_id=task_id or "",
+                agent_name=agent_name,
+                review_type=reason[:100],
+                trace_id=trace_id,
+            )
+        )
     except Exception:
         pass
     return transitioned

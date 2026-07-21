@@ -9,6 +9,7 @@ Session 3 migration (2026-07-16):
 
 Pattern from: swe-agent RetryAgent (preserve external interface, swap internal runner).
 """
+
 from __future__ import annotations
 
 import logging
@@ -29,10 +30,24 @@ AGENT_CONTRACT: dict[str, Any] = {
     "name": "devops",
     "description": "Runs allowlisted health-check commands and reports system status. No deploy, no writes.",
     "allowed_tools": [
-        "read_file", "list_files", "search_code", "search_symbols", "get_file_tree",
-        "git_log", "read_files", "file_exists", "file_info", "find_references",
-        "find_todos", "search_imports", "git_status", "git_show", "git_blame",
-        "analyze_file", "bash", "submit_health_report",
+        "read_file",
+        "list_files",
+        "search_code",
+        "search_symbols",
+        "get_file_tree",
+        "git_log",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_references",
+        "find_todos",
+        "search_imports",
+        "git_status",
+        "git_show",
+        "git_blame",
+        "analyze_file",
+        "bash",
+        "submit_health_report",
     ],
     "input_types": ["repo_path", "task_description"],
     "output_types": ["HealthReport"],
@@ -59,6 +74,7 @@ _VERIFICATION_CFG = VerificationConfig(
 # Result dataclass — unchanged from original
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class HealthReport:
     status: str  # healthy | degraded | unhealthy
@@ -69,6 +85,7 @@ class HealthReport:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _last_assistant_text(messages: list[dict[str, Any]]) -> str:
     """Extract the last text response from the assistant's messages."""
@@ -87,6 +104,7 @@ def _last_assistant_text(messages: list[dict[str, Any]]) -> str:
 # ---------------------------------------------------------------------------
 # Public runner — external interface unchanged
 # ---------------------------------------------------------------------------
+
 
 def run_devops(
     repo_path: str | None = None,
@@ -149,20 +167,24 @@ def run_devops(
 # Capability registry registration
 # ---------------------------------------------------------------------------
 
+
 def _register() -> None:
     try:
         from app.fleet.capability_registry import AgentCapability, register
         from app.fleet.agent_registry import get_agent_registry
-        register(AgentCapability(
-            name=AGENT_CONTRACT["name"],
-            description=AGENT_CONTRACT["description"],
-            tools=AGENT_CONTRACT["allowed_tools"],
-            input_types=AGENT_CONTRACT["input_types"],
-            output_types=AGENT_CONTRACT["output_types"],
-            capabilities=["health_check", "system_monitoring", "devops_validation"],
-            risk_level=AGENT_CONTRACT["risk_level"],
-            dependencies=AGENT_CONTRACT["dependencies"],
-        ))
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["health_check", "system_monitoring", "devops_validation"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
         get_agent_registry().register("devops")
     except Exception as exc:
         logger.debug("Fleet registry not available: %s", exc)

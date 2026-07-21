@@ -1,4 +1,5 @@
 """Shared agent runner — every LangGraph agent node calls run_agent()."""
+
 from __future__ import annotations
 
 import logging
@@ -201,11 +202,13 @@ def _run_via_anthropic(
             if on_tool_call:
                 on_tool_call(tu.name, dict(tu.input), result_content)
 
-            tool_results.append({
-                "type": "tool_result",
-                "tool_use_id": tu.id,
-                "content": str(result_content),
-            })
+            tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tu.id,
+                    "content": str(result_content),
+                }
+            )
 
         current_messages.append({"role": "user", "content": tool_results})
         if _submitted:
@@ -266,12 +269,15 @@ def _run_via_groq(
             _nudge_count += 1
             logger.warning(
                 "Groq returned no tool calls (stop=%s, nudge %d/2) — retrying",
-                response.stop_reason, _nudge_count,
+                response.stop_reason,
+                _nudge_count,
             )
-            current_messages.append({
-                "role": "user",
-                "content": "You must call one of the provided tools to complete this task. Do not respond with text — call the appropriate tool now.",
-            })
+            current_messages.append(
+                {
+                    "role": "user",
+                    "content": "You must call one of the provided tools to complete this task. Do not respond with text — call the appropriate tool now.",
+                }
+            )
             continue
 
         _nudge_count = 0  # reset on successful tool call
@@ -303,11 +309,13 @@ def _run_via_groq(
             if on_tool_call:
                 on_tool_call(tu.name, dict(tu.input), result_content)
 
-            tool_results.append({
-                "type": "tool_result",
-                "tool_use_id": tu.id,
-                "content": str(result_content),
-            })
+            tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tu.id,
+                    "content": str(result_content),
+                }
+            )
 
         current_messages.append({"role": "user", "content": tool_results})
         if _submitted:

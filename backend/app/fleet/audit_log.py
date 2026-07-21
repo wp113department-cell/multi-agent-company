@@ -22,6 +22,7 @@ Why Existing Architecture Was Insufficient: no immutable action log; human-
 Dependencies: optional asyncio + SQLAlchemy for durable persistence.
 Future Owner: Fleet OS / compliance team.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -41,14 +42,23 @@ _RING_CAPACITY = 2000
 # Entry schema
 # ---------------------------------------------------------------------------
 
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 class AuditEntry:
     __slots__ = (
-        "entry_id", "trace_id", "timestamp", "action_type", "agent_name",
-        "task_id", "description", "details", "outcome", "requires_human_approval",
+        "entry_id",
+        "trace_id",
+        "timestamp",
+        "action_type",
+        "agent_name",
+        "task_id",
+        "description",
+        "details",
+        "outcome",
+        "requires_human_approval",
         "approved_by",
     )
 
@@ -102,6 +112,7 @@ class AuditEntry:
 # ---------------------------------------------------------------------------
 # Append-only log
 # ---------------------------------------------------------------------------
+
 
 class AuditLog:
     def __init__(self, capacity: int = _RING_CAPACITY) -> None:

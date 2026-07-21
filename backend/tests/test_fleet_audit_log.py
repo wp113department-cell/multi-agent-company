@@ -1,4 +1,5 @@
 """Tests for Fleet OS audit_log.py — Phase F5."""
+
 from __future__ import annotations
 
 
@@ -11,8 +12,12 @@ def _fresh() -> AuditLog:
 
 class TestAuditEntry:
     def test_entry_has_unique_id(self) -> None:
-        e1 = AuditEntry(action_type="file_write", agent_name="coder", description="wrote main.py")
-        e2 = AuditEntry(action_type="file_write", agent_name="coder", description="wrote main.py")
+        e1 = AuditEntry(
+            action_type="file_write", agent_name="coder", description="wrote main.py"
+        )
+        e2 = AuditEntry(
+            action_type="file_write", agent_name="coder", description="wrote main.py"
+        )
         assert e1.entry_id != e2.entry_id
 
     def test_entry_to_dict_has_all_fields(self) -> None:
@@ -118,7 +123,9 @@ class TestAuditLog:
         log = _fresh()
         log.append("dispatch", "fleet", "task started", trace_id="trace-XYZ")
         log.append("file_write", "coder", "wrote main.py", trace_id="trace-XYZ")
-        log.record_approval("coder", "git_push", "push main", approved=True, trace_id="trace-XYZ")
+        log.record_approval(
+            "coder", "git_push", "push main", approved=True, trace_id="trace-XYZ"
+        )
         timeline = log.by_trace("trace-XYZ")
         assert len(timeline) == 3
         types = [e.action_type for e in timeline]
@@ -135,6 +142,7 @@ class TestGlobalAudit:
 
 
 # ---- Day 0 exit criterion: real human-approval entry ----
+
 
 def test_real_human_approval_entry() -> None:
     """Day 0 criterion §20: audit_log has a real entry for a real human-approval decision."""
