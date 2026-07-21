@@ -1,5 +1,5 @@
 # Project Control Center — Live State
-Last updated: 2026-07-21 (Day 10: budget_manager, benchmark_manager, tool_discovery)
+Last updated: 2026-07-21 (Day 11: prompt_registry, regression_detector, versioned_memory)
 
 ---
 
@@ -106,10 +106,10 @@ COMPLETE — see 2026-07-21 session in PROJECT.md.**
 | **RunMetrics real-data wiring** | ✅ Day 10 complete | Found `_span.__enter__()` return value discarded since Day 0 — no run had ever populated tokens/cost/verification/tool_calls. Fixed in `base_graph.py`; verified with `test_metrics_wiring.py` |
 | **Budget manager** | ✅ Day 10 complete | `app/fleet/budget_manager.py` — two-tier per-run + daily cumulative enforcement, wired into `run_agent_graph()` post-graph section |
 | **Benchmark manager** | ✅ Day 10 complete | `app/fleet/benchmark_manager.py` — 7 objectives, Postgres-backed baselines (`agent_benchmarks` table, migration 012), regression detection |
-| Prompt registry | ❌ Not built | Day 11 |
-| Regression detector | ❌ Not built | Day 11 |
+| **Prompt registry** | ✅ Day 11 complete | `app/fleet/prompt_registry.py` — versioned role prompts (`prompt_versions` table, migration 013), draft→in_review→approved→deployed→superseded, regression-gated deploy, disk-writes to `backend/roles/*.md` |
+| **Regression detector** | ✅ Day 11 complete | `app/fleet/regression_detector.py` — thin deploy-time gate wrapping Day 10's `benchmark_manager.compare_to_baseline()` |
 | **Tool discovery** | ✅ Day 10 complete | `app/fleet/tool_discovery.py` — thin index over `tool_manifest.py` + `capability_registry.py` |
-| Versioned memory | ❌ Not built | Day 11 |
+| **Versioned memory** | ✅ Day 11 complete | `app/fleet/versioned_memory.py` — `versioned_lessons` table (migration 014), merge-on-conflict lesson lifecycle (DRAFT→PUBLISHED→SUPERSEDED/MERGED_INTO→ARCHIVED) |
 
 ---
 
@@ -138,7 +138,7 @@ COMPLETE — see 2026-07-21 session in PROJECT.md.**
 | Role prompt 9-section verification + durable test coverage (Day 8) | ✅ CLOSED | Day 8 — 2026-07-20 |
 | 5 new fleet agents + Fleet Enhancement Dashboard (Day 9) | ✅ CLOSED | Day 9 — 2026-07-21 |
 | budget_manager + benchmark_manager + tool_discovery | ✅ CLOSED | Day 10 — 2026-07-21 |
-| prompt_registry + regression_detector + versioned_memory | ❌ OPEN | Day 11 |
+| prompt_registry + regression_detector + versioned_memory | ✅ CLOSED | Day 11 — 2026-07-21 |
 | End-to-end pipeline smoke test | ❌ OPEN | Day 12 |
 
 ---
@@ -171,3 +171,4 @@ COMPLETE — see 2026-07-21 session in PROJECT.md.**
 | **Day 8 — Role Prompt Verification** | **2026-07-20** | **2399/2399** | Read roo-code's prompt-section pattern first (REPO-FIRST); verified all 9 plan-required sections present (verbatim/near-verbatim) in `_GLOBAL_STANDARDS.md`; wrote 145 new durable tests (`test_day8_role_prompts.py`) — 0 prior test coverage existed for role-prompt structure |
 | **Day 9 — Fleet Enhancement Dashboard** | **2026-07-21** | **2479/2479** | 5 self-improvement agents (scan/apply two-phase) + `enhancement_requests` DB table + approve/reject API + background scan loop + `/fleet` dashboard page. Found + fixed 5 real bugs (2 pre-existing: `MemoryEmbedding.created_at` missing from ORM despite being a real column; 3 self-introduced: duplicate field caught by mypy, a timezone-column mismatch, and a repeat of the Day 7 asyncio-loop-reuse bug in new tools). Verified end-to-end against the real backend+frontend+Postgres stack, not just mocks |
 | **Day 10 — budget_manager + benchmark_manager + tool_discovery** | **2026-07-21** | **2517/2517** | Found + fixed the foundational bug first: `RunMetrics` had never been populated by any run since Day 0 (`_span.__enter__()` return value discarded in `base_graph.py`). Then built `tool_discovery.py` (index over existing registries), `budget_manager.py` (two-tier per-run + daily enforcement, wired into `run_agent_graph()`), `benchmark_manager.py` (7 objectives, Postgres-backed baselines via new `agent_benchmarks` table/migration 012, regression detection). Added a real `reflection_unsatisfied_count` signal to close the hallucination_rate objective properly rather than stub it. 0 new mypy errors |
+| **Day 11 — prompt_registry + regression_detector + versioned_memory** | **2026-07-21** | **2544/2544** | REPO-FIRST research first (roo-code, langgraph, swe-agent, autogen, open-hands, aider) found all 3 modules are novel designs — no repo has an approval-gate prompt lifecycle, baseline-regression blocking, or merge-on-conflict memory. `regression_detector.py` wraps Day 10's `benchmark_manager` instead of reimplementing comparison logic. `prompt_registry.py` (new `prompt_versions` table, migration 013) writes approved versions straight to `backend/roles/*.md` — zero changes needed to `load_role()`. `versioned_memory.py` (new `versioned_lessons` table, migration 014) reuses `app.memory.store._embed()` for conflict detection and does a real LLM merge call on conflict. Corrected a wrong plan-doc assumption (no `lessons` DB table existed) before building. Found + fixed a real bug in `rollback()` returning stale pre-flip state. 0 new mypy errors |

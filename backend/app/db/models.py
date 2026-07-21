@@ -376,3 +376,48 @@ class AgentBenchmark(Base):
     objectives: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     is_baseline: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PromptVersion(Base):
+    """Day 11 — Fleet OS prompt_registry.py.
+
+    Every role prompt change is a new immutable version row, never an in-place
+    edit — mirrors roo-code's shadow-git-commit checkpoint pattern. parent_version_id
+    gives LangGraph-style lineage (which version this one supersedes). deploy()
+    writes .content to backend/roles/{role_name}.md; rollback() restores a prior
+    superseded row's content the same way.
+    """
+    __tablename__ = "prompt_versions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    role_name: Mapped[str] = mapped_column(String(100), index=True)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="draft", index=True)  # draft|in_review|approved|deployed|superseded|rejected
+    parent_version_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("prompt_versions.id"), nullable=True)
+    proposed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    deployed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class VersionedLesson(Base):
+    """Day 11 — Fleet OS versioned_memory.py.
+
+    Replaces nothing existing (LessonStore in base_graph.py stays as the
+    in-process fast-read cache for prompt injection) — this is the durable,
+    versioned lifecycle layer: DRAFT -> PUBLISHED -> SUPERSEDED / MERGED_INTO ->
+    ARCHIVED. supersedes_id gives lineage when a merge happens.
+    """
+    __tablename__ = "versioned_lessons"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    lesson_id: Mapped[str] = mapped_column(String(64), index=True)  # stable across versions of "the same lesson"
+    topic: Mapped[str] = mapped_column(String(200), index=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[Any] = mapped_column(Vector(1536), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    state: Mapped[str] = mapped_column(String(20), default="draft", index=True)  # draft|published|superseded|merged_into|archived
+    supersedes_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("versioned_lessons.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

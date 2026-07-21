@@ -124,6 +124,10 @@ class Settings(BaseSettings):
     benchmark_weight_hallucination: float = Field(default=0.15, description="Composite benchmark_score weight for (1 - hallucination_rate).")
     benchmark_regression_threshold: float = Field(default=0.10, description="Fractional drop in benchmark_score vs. baseline that flags a regression (0.10 = 10%).")
 
+    # Day 11 — Fleet OS Versioned Memory (merge-on-conflict lesson lifecycle)
+    memory_merge_similarity_threshold: float = Field(default=0.85, description="Cosine similarity above which a newly published lesson on the same topic triggers a merge instead of a plain new version.")
+    lesson_retention_days: int = Field(default=180, description="Days to keep SUPERSEDED/MERGED_INTO versioned_lessons rows before archive_expired() marks them ARCHIVED. 0 disables.")
+
     # Groq (optional — enables Groq as LLM backend when ANTHROPIC_API_KEY is unavailable)
     groq_api_key: str = Field(default="", description="Groq API key (gsk_...). When set and USE_GROQ=true, all agent calls use Groq instead of Anthropic.")
     use_groq: bool = Field(default=False, description="Route all agent calls to Groq instead of Anthropic. Useful when ANTHROPIC_API_KEY is unavailable.")
