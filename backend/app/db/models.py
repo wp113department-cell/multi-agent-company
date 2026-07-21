@@ -15,13 +15,17 @@ class Base(DeclarativeBase):
 
 
 VALID_TRANSITIONS: dict[str, list[str]] = {
-    "pending": ["planning", "blocked"],
-    "planning": ["ready_for_review", "blocked"],
-    "ready_for_review": ["coding", "blocked", "rejected"],
-    "coding": ["testing", "blocked"],
-    "testing": ["ready_for_review", "blocked"],
+    # "failed" added to every in-progress state (Day 12 — Failure Recovery
+    # Ladder's Abort rung, app/fleet/failure_ladder.py). Previously nothing
+    # ever transitioned into "failed" despite it being a defined terminal
+    # status — confirmed by inspection before this change, not assumed.
+    "pending": ["planning", "blocked", "failed"],
+    "planning": ["ready_for_review", "blocked", "failed"],
+    "ready_for_review": ["coding", "blocked", "rejected", "failed"],
+    "coding": ["testing", "blocked", "failed"],
+    "testing": ["ready_for_review", "blocked", "failed"],
     "rejected": ["planning"],
-    "blocked": ["planning"],
+    "blocked": ["planning", "failed"],
     "completed": [],
     "failed": [],
 }

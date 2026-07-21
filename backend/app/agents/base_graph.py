@@ -1013,6 +1013,21 @@ def run_agent_graph(
             except Exception:
                 pass
 
+        # Day 12 — Failure Recovery Ladder: stall path. The router already
+        # stops the graph naturally when n_stalls >= max_stalls (no exception
+        # is raised), so this is the only place that condition is still
+        # observable. Per the ladder's own design for stalls: escalate then
+        # request human review — retrying from the same node with no new
+        # information is unlikely to help, so retry/abort are skipped here.
+        if not final_state.get("submitted") and final_state.get("n_stalls", 0) >= max_stalls:
+            try:
+                from app.fleet.failure_ladder import escalate, request_human_review
+                escalate(role_name, f"stalled after {final_state['n_stalls']} turns without tool calls", trace_id=tid)
+                request_human_review(task_id or None, role_name, "agent stalled — no tool calls", trace_id=tid)
+                final_state["status"] = "blocked"
+            except Exception:
+                pass
+
         # Push done or stopped event to activity stream (non-fatal)
         if task_id:
             try:

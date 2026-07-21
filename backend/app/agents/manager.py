@@ -100,6 +100,22 @@ async def run_manager(
 
         logger.info("Manager dispatching subtask %d type=%s for task %d", subtask_id, subtask_type, task_id)
 
+        # Day 12 Part 4 — hierarchy chain: fleet_manager selects an agent for
+        # this capability and agent_bus publishes TaskCreated, alongside (not
+        # replacing) the existing direct dispatch below. capability_registry/
+        # fleet_manager/agent_bus already existed and were unit-tested in
+        # isolation but nothing in the live task-flow ever called them —
+        # additive instrumentation only, does not change which function runs.
+        try:
+            from app.fleet.fleet_events import publish, task_created
+            from app.fleet.fleet_manager import get_fleet_manager
+
+            required_capability = "frontend_development" if subtask_type == "frontend" else "backend_development"
+            get_fleet_manager().select(required_capability=required_capability)
+            publish(task_created(task_id=str(task_id), title=subtask_title, agent_name="manager", trace_id=""))
+        except Exception:
+            pass
+
         await publish_event(GridironEvent(
             event_type="subtask.assigned",
             task_id=str(task_id),
@@ -258,7 +274,26 @@ async def run_manager(
                     "Epic halted: %d/%d subtasks failed for task %d",
                     blocked_count, max_epic_failures, task_id,
                 )
+                # Day 12 — Failure Recovery Ladder: Abort. run_manager()'s own
+                # retry loop (max_retries per subtask, already existed) is the
+                # real Retry rung; this is what it escalates to once too many
+                # subtasks exhaust their retries for the whole epic to continue.
+                try:
+                    from app.fleet.failure_ladder import abort
+                    abort(str(task_id), f"epic halted — {blocked_count}/{max_epic_failures} subtasks failed")
+                except Exception:
+                    pass
                 break
+
+            # A single subtask exhausted its retries but the epic continues —
+            # recoverable, not terminal: escalate (mark manager degraded) and
+            # flag for human review rather than aborting the whole task.
+            try:
+                from app.fleet.failure_ladder import escalate, request_human_review
+                escalate("manager", f"subtask {subtask_id} exhausted retries", trace_id="")
+                request_human_review(str(task_id), "manager", f"subtask {subtask_id} blocked after retries", trace_id="")
+            except Exception:
+                pass
 
             overall_status = "blocked"
         else:
