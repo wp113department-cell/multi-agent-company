@@ -48,6 +48,7 @@ const NAV_LINKS = [
   { href: "/goals", label: "Goals" },
   { href: "/console", label: "Console" },
   { href: "/fleet", label: "Fleet" },
+  { href: "/approvals", label: "Approvals" },
   { href: "/metrics", label: "KPIs" },
   { href: "/settings", label: "Settings" },
 ];
@@ -89,10 +90,40 @@ function useFleetPendingCount(): number {
   return count;
 }
 
+function useApprovalsPendingCount(): number {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refresh() {
+      try {
+        const res = await fetch("/api/approvals/pending");
+        if (!res.ok) return;
+        const data = (await res.json()) as { approvals: unknown[] };
+        if (!cancelled) setCount(data.approvals.length);
+      } catch {
+        // non-fatal — badge just stays at its last known value
+      }
+    }
+
+    void refresh();
+    const interval = setInterval(() => void refresh(), 5000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  return count;
+}
+
 export function NavBar() {
   const [authed, setAuthed] = useState(false);
   const pathname = usePathname();
   const fleetPending = useFleetPendingCount();
+  const approvalsPending = useApprovalsPendingCount();
 
   useEffect(() => {
     setAuthed(isAuthenticated());
@@ -123,6 +154,11 @@ export function NavBar() {
             {href === "/fleet" && fleetPending > 0 && (
               <span className="ml-1.5 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">
                 {fleetPending}
+              </span>
+            )}
+            {href === "/approvals" && approvalsPending > 0 && (
+              <span className="ml-1.5 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">
+                {approvalsPending}
               </span>
             )}
           </a>

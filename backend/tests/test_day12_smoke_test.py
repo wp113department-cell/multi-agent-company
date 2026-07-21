@@ -97,13 +97,16 @@ def _delete_task(task_id: int) -> None:
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from app.config import get_settings
-    from app.db.models import DevTask
+    from app.db.models import DevTask, PendingApproval
 
     async def _run() -> None:
         engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
                 await session.execute(delete(DevTask).where(DevTask.id == task_id))
+                # pending_approvals has no FK/cascade to dev_tasks (loosely
+                # coupled index table, Day 13) — clean it up explicitly too.
+                await session.execute(delete(PendingApproval).where(PendingApproval.task_id == task_id))
                 await session.commit()
         finally:
             await engine.dispose()

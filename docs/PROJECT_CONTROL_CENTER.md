@@ -1,5 +1,5 @@
 # Project Control Center — Live State
-Last updated: 2026-07-21 (Day 12: E2E smoke test, failure recovery ladder, event compliance, hierarchy chain)
+Last updated: 2026-07-21 (Day 13: Human Approval UI — approval_gate.py, /api/approvals/*, frontend page)
 
 ---
 
@@ -114,6 +114,7 @@ COMPLETE — see 2026-07-21 session in PROJECT.md.**
 | **Failure Recovery Ladder** | ✅ Day 12 complete | `app/fleet/failure_ladder.py` — all 7 states runnable; wired into `run_manager()`'s existing retry loop + `base_graph.py`'s stall path |
 | **Event compliance** | ✅ Day 12 complete | `tests/test_event_compliance.py` — static AST scan, only the 8 canonical `FleetEventType`s ever emitted |
 | **Hierarchy chain (partial)** | ✅ Day 12 complete | `fleet_manager.select()` + `agent_bus.publish(task_created)` now actually called from `run_manager()` — previously registered-but-unused; "knowledge_graph" step doesn't exist as a module, excluded |
+| **Human Approval UI** | ✅ Day 13 complete | `app/fleet/approval_gate.py` + `pending_approvals` table (migration 015) + `/api/approvals/*` + `apps/web/app/approvals/page.tsx` — generic layer wired to `pipeline/graph.py`'s real interrupt(); found + fixed a Day-0 bug where plan rejection was never a valid status transition |
 
 ---
 
@@ -144,6 +145,7 @@ COMPLETE — see 2026-07-21 session in PROJECT.md.**
 | budget_manager + benchmark_manager + tool_discovery | ✅ CLOSED | Day 10 — 2026-07-21 |
 | prompt_registry + regression_detector + versioned_memory | ✅ CLOSED | Day 11 — 2026-07-21 |
 | End-to-end pipeline smoke test + failure recovery ladder + event compliance + hierarchy chain | ✅ CLOSED | Day 12 — 2026-07-21 |
+| Human Approval UI | ✅ CLOSED | Day 13 — 2026-07-21 |
 
 ---
 
@@ -177,3 +179,4 @@ COMPLETE — see 2026-07-21 session in PROJECT.md.**
 | **Day 10 — budget_manager + benchmark_manager + tool_discovery** | **2026-07-21** | **2517/2517** | Found + fixed the foundational bug first: `RunMetrics` had never been populated by any run since Day 0 (`_span.__enter__()` return value discarded in `base_graph.py`). Then built `tool_discovery.py` (index over existing registries), `budget_manager.py` (two-tier per-run + daily enforcement, wired into `run_agent_graph()`), `benchmark_manager.py` (7 objectives, Postgres-backed baselines via new `agent_benchmarks` table/migration 012, regression detection). Added a real `reflection_unsatisfied_count` signal to close the hallucination_rate objective properly rather than stub it. 0 new mypy errors |
 | **Day 11 — prompt_registry + regression_detector + versioned_memory** | **2026-07-21** | **2544/2544** | REPO-FIRST research first (roo-code, langgraph, swe-agent, autogen, open-hands, aider) found all 3 modules are novel designs — no repo has an approval-gate prompt lifecycle, baseline-regression blocking, or merge-on-conflict memory. `regression_detector.py` wraps Day 10's `benchmark_manager` instead of reimplementing comparison logic. `prompt_registry.py` (new `prompt_versions` table, migration 013) writes approved versions straight to `backend/roles/*.md` — zero changes needed to `load_role()`. `versioned_memory.py` (new `versioned_lessons` table, migration 014) reuses `app.memory.store._embed()` for conflict detection and does a real LLM merge call on conflict. Corrected a wrong plan-doc assumption (no `lessons` DB table existed) before building. Found + fixed a real bug in `rollback()` returning stale pre-flip state. 0 new mypy errors |
 | **Day 12 — E2E Smoke Test + Failure Ladder + Event Compliance + Hierarchy Chain** | **2026-07-21** | **2569/2569** | Found the real pipeline flow (`POST /tasks→run→approve→launch_manager`) had zero test coverage anywhere, despite being fully wired — closed with `test_day12_smoke_test.py`. Found `fleet_manager`/`capability_registry`/`agent_bus` were registered-but-never-called from the live path — added additive `fleet_manager.select()` + `publish(task_created(...))` calls into `run_manager()`. Built `failure_ladder.py` (all 7 recovery states): closed a real gap where `VALID_TRANSITIONS` had an unreachable `"failed"` status; wired retry-exhaustion into `run_manager()`'s existing bounded retry loop rather than adding a second, riskier one inside `base_graph.py`'s hot path. Static AST event-compliance scan + hierarchy-chain integration test (6 real steps verified against 2 real integration points, not 1 imagined chain). 0 new mypy errors |
+| **Day 13 — Human Approval UI** | **2026-07-21** | **2583/2583** | Verified LangGraph 1.2.7's real interrupt()/resume semantics empirically (node bodies re-run from the top on resume) before designing anything. Built a generic approvals system (`pending_approvals` table/migration 015, `approval_gate.py`, `/api/approvals/*`, frontend page) wired to the one real, resumable-from-cold interrupt() call site (`pipeline/graph.py`) rather than retrofitting the 72-agent `base_graph.py` hot path. Found + fixed two real bugs: (1) sync `asyncio.run()` facades called from already-async pipeline code failed silently — added async variants; (2) a genuine Day-0 bug where rejecting a plan during the approval pause has always raised `TransitionError` (`"planning"→"rejected"` was never valid) — found by the first test that ever exercised the reject path. Verified frontend with a real production build + live backend/frontend dev servers. 0 new mypy errors |
