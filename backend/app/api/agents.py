@@ -366,7 +366,15 @@ async def launch_manager(
     async with factory() as db:
         wt_path: str | None = None
         try:
-            wt = create_worktree(task_id)
+            from app.api.repo import get_active_repo_path
+
+            effective_repo = repo_path or get_active_repo_path()
+
+            # Gap-closure (Days 11-15 audit, 2026-07-22): create_worktree() was
+            # called with no repo_path, silently defaulting to
+            # settings.target_repo_path instead of this task's actual assigned
+            # repo — broken for any task not on the global default repo.
+            wt = create_worktree(task_id, effective_repo)
             wt_path = str(wt)
             await append_log(db, task_id, "worktree", f"Worktree created: {wt_path}")
             await update_pipeline_state(db, task_id, "dev_running")
@@ -379,9 +387,6 @@ async def launch_manager(
                     )
                 )
 
-            from app.api.repo import get_active_repo_path
-
-            effective_repo = repo_path or get_active_repo_path()
             result = await run_manager(
                 task_id=task_id,
                 subtasks=subtasks,
@@ -546,21 +551,49 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
 
         wt_path = None
         try:
-            wt = create_worktree(task_id)
+            from app.api.repo import get_active_repo_path
+
+            effective_repo = repo_path or get_active_repo_path()
+
+            # Day 15 — Blank Repo Bootstrap. "Simple" pipeline mode never goes
+            # through launch_planning_pipeline() (where bootstrap is normally
+            # wired) — it needs its own check here, since create_worktree()
+            # below fails outright ("invalid reference: HEAD") against a
+            # zero-commit repo.
+            from app.pipeline.bootstrap import bootstrap, is_blank_repo
+
+            if is_blank_repo(effective_repo):
+                await append_log(
+                    db, task_id, "pipeline", "Blank repo detected — bootstrapping before coding"
+                )
+                bootstrap_result = await bootstrap(task_id, effective_repo, plan, db=db)
+                if bootstrap_result.bootstrapped:
+                    await append_log(
+                        db,
+                        task_id,
+                        "pipeline",
+                        f"Repo bootstrapped ({bootstrap_result.project_type}) — "
+                        f"{len(bootstrap_result.files_created)} files, "
+                        f"commit {bootstrap_result.commit_sha}",
+                    )
+                elif bootstrap_result.error:
+                    await append_log(
+                        db, task_id, "pipeline", f"Bootstrap skipped: {bootstrap_result.error}"
+                    )
+
+            wt = create_worktree(task_id, effective_repo)
             wt_path = str(wt)
             await append_log(db, task_id, "worktree", f"Worktree created: {wt_path}")
 
             def heartbeat() -> None:
                 asyncio.create_task(heartbeat_agent_run(db, run_id))
 
-            from app.api.repo import get_active_repo_path
-
             files_changed, error, tokens_in, tokens_out = await asyncio.to_thread(
                 run_coder,
                 task_id=task_id,
                 plan=plan,
                 worktree_path=wt_path,
-                repo_path=repo_path or get_active_repo_path(),
+                repo_path=effective_repo,
                 on_heartbeat=heartbeat,
             )
 
@@ -580,7 +613,7 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
                 await transition_task(db, task_id, "blocked")
                 await append_log(db, task_id, "error", error)
             else:
-                diff = get_diff(task_id)
+                diff = get_diff(task_id, effective_repo)
                 await update_task_diff(db, task_id, diff, files_changed)
                 if diff:
                     await save_artifact_async(task_id, "diff", diff, "coder", db=db)
@@ -606,4 +639,5 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
             logger.exception("Coder failed for task %d", task_id)
             async with factory() as db2:
                 await finish_agent_run(db2, run_id, "failed", error=str(e))
+                await transition_task(db2, task_id, "blocked")
                 await append_log(db2, task_id, "error", str(e))

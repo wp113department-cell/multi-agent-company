@@ -28,6 +28,7 @@ interface PendingApproval {
 
 const ACTION_LABELS: Record<string, string> = {
   plan_review: "Plan Review",
+  git_push: "Git Push",
 };
 
 async function apiFetch<T>(path: string, method = "GET"): Promise<T> {

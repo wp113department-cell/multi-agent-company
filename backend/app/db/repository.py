@@ -161,7 +161,7 @@ async def heartbeat_agent_run(db: AsyncSession, run_id: str) -> None:
     await db.execute(
         update(AgentRun)
         .where(AgentRun.id == run_id)
-        .values(last_heartbeat_at=datetime.now(timezone.utc))
+        .values(last_heartbeat_at=datetime.now(timezone.utc).replace(tzinfo=None))
     )
     await db.commit()
 
@@ -184,7 +184,7 @@ async def finish_agent_run(
             tokens_out=tokens_out,
             cost_estimate=cost_estimate,
             error=error,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(timezone.utc).replace(tzinfo=None),
         )
     )
     await db.commit()
