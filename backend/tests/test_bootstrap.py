@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.pipeline.bootstrap import BootstrapResult, is_blank_repo
+from app.pipeline.bootstrap import is_blank_repo
 
 
 @pytest.fixture(autouse=True)
@@ -88,7 +88,11 @@ class TestDetectProjectType:
             mock_response = type(
                 "R",
                 (),
-                {"content": [type("B", (), {"type": "text", "text": "unknown-thing"})()]},
+                {
+                    "content": [
+                        type("B", (), {"type": "text", "text": "unknown-thing"})()
+                    ]
+                },
             )()
             mock_anthropic.return_value.messages.create.return_value = mock_response
             result = await detect_project_type("???", "haiku")
@@ -142,8 +146,13 @@ class TestBootstrap:
             new=AsyncMock(return_value="cli"),
         ), patch(
             "app.pipeline.bootstrap.run_scaffold_planning",
-            return_value={"technical_approach": "minimal CLI", "files": [{"path": "main.py", "reason": "entry point"}]},
-        ), patch("app.agents.coder.run_coder", side_effect=_fake_coder):
+            return_value={
+                "technical_approach": "minimal CLI",
+                "files": [{"path": "main.py", "reason": "entry point"}],
+            },
+        ), patch(
+            "app.agents.coder.run_coder", side_effect=_fake_coder
+        ):
             result = await bootstrap(1, str(repo), "Build a CLI tool")
 
         assert result.bootstrapped is True
@@ -224,7 +233,9 @@ class TestBootstrap:
         ), patch(
             "app.pipeline.bootstrap.run_scaffold_planning",
             return_value={"technical_approach": "x", "files": []},
-        ), patch("app.agents.coder.run_coder", return_value=([], None, 0, 0)):
+        ), patch(
+            "app.agents.coder.run_coder", return_value=([], None, 0, 0)
+        ):
             result = await bootstrap(1, str(repo), "Build a pipeline")
 
         assert result.bootstrapped is False
@@ -250,7 +261,9 @@ class TestBootstrap:
             "app.pipeline.bootstrap.run_scaffold_planning",
             return_value={"technical_approach": "x", "files": []},
         ), patch("app.agents.coder.run_coder", side_effect=_fake_coder):
-            result = await bootstrap(1, str(repo), "Build a site", project_type="web-app")
+            result = await bootstrap(
+                1, str(repo), "Build a site", project_type="web-app"
+            )
 
         mock_detect.assert_not_called()
         assert result.bootstrapped is True

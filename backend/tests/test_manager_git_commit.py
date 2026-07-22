@@ -6,12 +6,12 @@ own diff review has been reviewing an empty diff since Day 0. This tests
 run_manager()'s new commit step against a REAL git repo + worktree — not
 mocked — so the fix is verified against real git behavior, not an assumption.
 """
+
 from __future__ import annotations
 
 import asyncio
 import subprocess
 from pathlib import Path
-from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -62,15 +62,27 @@ def test_run_manager_commits_dev_agent_changes_to_real_worktree_branch(
     ):
         mock_backend_dev.return_value = (["feature.py"], None)
         mock_qa.return_value = QAResult(
-            status="passed", tests_run=1, tests_passed=1, tests_failed=0,
-            typecheck_clean=True, lint_clean=True, summary="ok",
+            status="passed",
+            tests_run=1,
+            tests_passed=1,
+            tests_failed=0,
+            typecheck_clean=True,
+            lint_clean=True,
+            summary="ok",
         )
         mock_reviewer.return_value = ReviewResult(verdict="approved", summary="ok")
 
         result = asyncio.run(
             run_manager(
                 task_id=task_id,
-                subtasks=[{"id": 1, "type": "backend", "title": "Add feature", "description": "..."}],
+                subtasks=[
+                    {
+                        "id": 1,
+                        "type": "backend",
+                        "title": "Add feature",
+                        "description": "...",
+                    }
+                ],
                 worktree_path=str(worktree),
                 plan="Add a feature",
                 repo_path=str(repo),
@@ -82,15 +94,23 @@ def test_run_manager_commits_dev_agent_changes_to_real_worktree_branch(
     # The real assertion: the branch must have actually advanced with a real commit.
     log = subprocess.run(
         ["git", "log", f"agent/task-{task_id}", "--oneline"],
-        cwd=repo, capture_output=True, text=True,
+        cwd=repo,
+        capture_output=True,
+        text=True,
     )
-    assert "backend: Add feature" in log.stdout, f"no commit landed on the branch: {log.stdout!r}"
+    assert (
+        "backend: Add feature" in log.stdout
+    ), f"no commit landed on the branch: {log.stdout!r}"
 
     diff = subprocess.run(
         ["git", "diff", f"HEAD...agent/task-{task_id}"],
-        cwd=repo, capture_output=True, text=True,
+        cwd=repo,
+        capture_output=True,
+        text=True,
     )
-    assert "feature.py" in diff.stdout, "get_diff()'s real query would still see an empty diff"
+    assert (
+        "feature.py" in diff.stdout
+    ), "get_diff()'s real query would still see an empty diff"
     assert "new feature" in diff.stdout
 
 
@@ -118,15 +138,22 @@ def test_run_manager_continues_when_commit_fails(
     ):
         mock_backend_dev.return_value = (["nonexistent_file.py"], None)
         mock_qa.return_value = QAResult(
-            status="passed", tests_run=1, tests_passed=1, tests_failed=0,
-            typecheck_clean=True, lint_clean=True, summary="ok",
+            status="passed",
+            tests_run=1,
+            tests_passed=1,
+            tests_failed=0,
+            typecheck_clean=True,
+            lint_clean=True,
+            summary="ok",
         )
         mock_reviewer.return_value = ReviewResult(verdict="approved", summary="ok")
 
         result = asyncio.run(
             run_manager(
                 task_id=task_id,
-                subtasks=[{"id": 1, "type": "backend", "title": "x", "description": "y"}],
+                subtasks=[
+                    {"id": 1, "type": "backend", "title": "x", "description": "y"}
+                ],
                 worktree_path=str(worktree),
                 plan="plan",
                 repo_path=str(repo),
