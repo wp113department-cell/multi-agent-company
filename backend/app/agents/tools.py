@@ -887,7 +887,14 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
     }
 
 
-def make_coder_handlers(worktree_path: str, repo_path: str) -> dict[str, Any]:
+def make_coder_handlers(
+    worktree_path: str, repo_path: str, extra_env: dict[str, str] | None = None
+) -> dict[str, Any]:
+    """extra_env (Day 17 — Credential Vault): custom secrets merged into the
+    bash tool's subprocess env — e.g. a third-party API key a task's code
+    integrates with. Never database/deploy credentials — see
+    docs/DAY17_PLAN.md. Values never appear in tool output or logs; only the
+    subprocess itself sees them."""
     handlers = make_read_only_handlers(repo_path)
     wt = Path(worktree_path)
     patch_result: dict[str, Any] = {}
@@ -907,6 +914,7 @@ def make_coder_handlers(worktree_path: str, repo_path: str) -> dict[str, Any]:
         policy = check_command(cmd)
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
+        env = {**os.environ, **extra_env} if extra_env else None
         try:
             result = subprocess.run(
                 cmd,
@@ -915,6 +923,7 @@ def make_coder_handlers(worktree_path: str, repo_path: str) -> dict[str, Any]:
                 text=True,
                 cwd=worktree_path,
                 timeout=60,
+                env=env,
             )
             out = (result.stdout + result.stderr)[:4000]
             return out if out else "(no output)"

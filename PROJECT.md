@@ -3067,3 +3067,73 @@ Frontend: tsc --noEmit (clean), eslint (clean), npm run build (succeeds)
 
 ### Verdict
 ✅ GREEN FLAG — DAY 16 COMPLETE. Ready for Day 17 (Credential Vault).
+
+## 2026-07-22 — Day 17 Complete: Credential Vault
+
+Plan: `docs/DAY17_PLAN.md`, grounded in REPO-FIRST research before any design. Full report:
+`docs/reports/FLEET_DAY17_TEST_REPORT.md`.
+
+### Research
+`repos/open-hands/openhands/app_server/secrets/secrets_models.py`'s `Secrets` model — confirmed
+the real mechanism behind "SecretStr never serialized without expose_secrets=True": an explicit
+`field_serializer` + `SerializationInfo.context` gate. Verified empirically first (installed
+`pydantic==2.13.4`) that `SecretStr` already masks by default in repr/str/model_dump — built the
+same explicit gate anyway, as deliberate defense-in-depth matching the plan's literal rule. Verified
+the real `cryptography.fernet.Fernet` API directly before coding against it.
+
+### Plan/reality corrections
+1. **No "project" entity exists.** Credentials are already globally-scoped via `SystemSetting`
+   (Days 9/14) — Day 14's own comment literally anticipated this exact day ("No credential vault
+   exists yet (Day 17 doesn't either) — SystemSetting is already the real mechanism"). Built the
+   vault wrapping `get_setting()`/`set_setting()` (the one real choke point, confirmed by grep)
+   rather than a parallel per-project table.
+2. **`database_url` excluded** from vault-manageable credentials — CLAUDE.md's own "no agent gets
+   deploy credentials" rule makes an injectable DB URL exactly the wrong shape of credential to
+   expose this way.
+3. **Policy engine `.env*` blocking already exists and is already tested** — confirmed by reading
+   `app/policy/engine.py` and `tests/test_policy.py` before assuming this was new work. Cited, not
+   duplicated.
+4. **Encryption key optional-but-recommended**, matching the established `jwt_secret_key`/
+   `jwt_auth_enabled` conditional-required pattern — avoids breaking every existing
+   test/deployment. Plaintext + a startup warning when unset, never a silently hardcoded key.
+
+### What was built
+- `cryptography==49.0.0` pinned as an explicit dependency (already installed transitively).
+- `credential_encryption_key` config field + a validator rejecting an invalid (but not absent) key.
+- `get_setting()`/`set_setting()` gained transparent encrypt/decrypt via a versioned-prefix scheme
+  (`"enc:v1:..."`) — legacy plaintext rows keep working unchanged if encryption is enabled later.
+- `app/security/credential_vault.py`: `ProjectCredentials` (frozen SecretStr model, explicit
+  `expose_secrets` gate, `get_env_vars()` as the sole extraction point) + `CredentialVault`
+  (load/store/inject_into_env, every access audit-logged via the existing `audit_log.py`).
+- `make_coder_handlers()`'s `bash` tool gained `extra_env` for custom-secret injection — threaded
+  through `run_coder()`/`run_backend_dev()`/`run_frontend_dev()` and BOTH real pipeline entry
+  points (`launch_manager()` full mode AND `launch_coder()` simple mode), explicitly checking both
+  from the start per the Days 11-15 gap-closure's own lesson. GitHub token and Anthropic key are
+  never injected into the generic bash env — only genuinely-custom secrets.
+- `POST/GET/DELETE /api/settings/custom-secrets(/{name})`.
+
+### Testing
+20 new tests: encryption round-trip (real + passthrough-when-unconfigured), legacy-plaintext
+backward compatibility, invalid-key rejection, SecretStr masking (default masked, exposed reveals),
+frozen-model immutability, a real log-capture test proving a secret value never appears in any log
+line, audit-log entries carrying key names only, the bash tool actually receiving an injected
+secret, and the full custom-secrets API lifecycle via `TestClient`.
+
+### Real-caller verification
+All new functions traced to real callers — `extra_env` reaches both pipeline modes, `4th clean day
+in a row`, and the first day to proactively wire multiple entry points from the start rather than
+discovering the gap afterward.
+
+### Test Results
+```
+pytest tests/ -q
+→ 2684 passed, 0 failed, 55 skipped, 17 deselected, 22 warnings in 91.26s (20 new tests)
+
+mypy app/ --strict
+→ 0 errors
+
+Frontend: tsc --noEmit (clean — Day 17's own plan has no frontend section)
+```
+
+### Verdict
+✅ GREEN FLAG — DAY 17 COMPLETE. Ready for Day 18 (Real-Time Streaming to Frontend).

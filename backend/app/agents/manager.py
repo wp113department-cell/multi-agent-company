@@ -83,6 +83,7 @@ async def run_manager(
     on_status: Any = None,
     epic_id: str | None = None,
     images: list[dict[str, str]] | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Orchestrate Dev → QA → Review per subtask.
 
@@ -92,6 +93,8 @@ async def run_manager(
     screenshot) — passed to run_frontend_dev (UI implementation) and
     run_reviewer (visual comparison). Not passed to run_backend_dev, matching
     the plan's own agent list.
+    extra_env (Day 17): custom secrets merged into both backend_dev's and
+    frontend_dev's bash tool subprocess env.
     """
     from app.agents.backend_dev import run_backend_dev
     from app.agents.frontend_dev import run_frontend_dev
@@ -196,6 +199,7 @@ async def run_manager(
                     worktree_path=worktree_path,
                     repo_path=repo,
                     images=images,
+                    extra_env=extra_env,
                 )
             else:
                 files_changed, dev_error = await asyncio.to_thread(
@@ -205,6 +209,7 @@ async def run_manager(
                     plan=full_plan,
                     worktree_path=worktree_path,
                     repo_path=repo,
+                    extra_env=extra_env,
                 )
 
             if dev_error:
