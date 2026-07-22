@@ -190,6 +190,18 @@ async def run_manager(
 
             full_plan = subtask_plan + retry_context
 
+            # Day 18 — Real-Time Streaming.
+            try:
+                from app.services.activity_stream import push_agent_switch
+
+                push_agent_switch(
+                    str(task_id),
+                    "frontend_dev" if subtask_type == "frontend" else "backend_dev",
+                    f"subtask {subtask_id}",
+                )
+            except Exception:
+                pass
+
             if subtask_type == "frontend":
                 files_changed, dev_error = await asyncio.to_thread(
                     run_frontend_dev,
@@ -259,6 +271,13 @@ async def run_manager(
                         add_result["stderr"][:300],
                     )
 
+            try:
+                from app.services.activity_stream import push_agent_switch
+
+                push_agent_switch(str(task_id), "qa", f"subtask {subtask_id}")
+            except Exception:
+                pass
+
             qa_result = await asyncio.to_thread(
                 run_qa,
                 task_id=task_id,
@@ -298,6 +317,13 @@ async def run_manager(
             )
 
             subtask_diff = get_diff(task_id, repo)
+            try:
+                from app.services.activity_stream import push_agent_switch
+
+                push_agent_switch(str(task_id), "reviewer", f"subtask {subtask_id}")
+            except Exception:
+                pass
+
             review_result = await asyncio.to_thread(
                 run_reviewer,
                 task_id=task_id,

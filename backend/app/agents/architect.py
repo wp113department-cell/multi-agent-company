@@ -124,6 +124,15 @@ def architect_node(state: PipelineState) -> PipelineState:
     handlers = make_read_only_handlers(repo)
     handlers["submit_architect_plan"] = lambda inp: "Architect plan submitted"
 
+    # Day 18 — Real-Time Streaming.
+    stream_task_id = str(state.get("task_id", ""))
+    try:
+        from app.services.activity_stream import push_agent_switch
+
+        push_agent_switch(stream_task_id, "architect", "planning")
+    except Exception:
+        pass
+
     pm_brief = json.dumps(state.get("pm_brief", {}), indent=2)
     memory_context = state.get("memory_context", "")
     memory_block = f"\n\n{memory_context}" if memory_context else ""
@@ -163,6 +172,7 @@ def architect_node(state: PipelineState) -> PipelineState:
             human_approval_required=False,
             images=images,
             max_turns=15,
+            task_id=stream_task_id,
         )
         logger.info(
             "Architect Agent done — tokens_in=%d tokens_out=%d submitted=%s",

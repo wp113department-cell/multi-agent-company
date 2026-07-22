@@ -171,6 +171,16 @@ async def launch_planning_pipeline(
                     exc_info=True,
                 )
 
+            # Day 18 — Real-Time Streaming. Separate try/except from the
+            # recording above so a stream-push hiccup is never misattributed
+            # as an approval-recording failure in the log.
+            try:
+                from app.services.activity_stream import push_approval_required
+
+                push_approval_required(str(task_id), f"task-{task_id}", "plan_review")
+            except Exception:
+                pass
+
             if pm_brief:
                 await save_artifact_async(
                     task_id, "pm_brief", pm_brief, "pm_agent", db=db
@@ -339,6 +349,13 @@ async def _record_git_push_approval(
                 agent_name="manager",
                 task_id=task_id,
             )
+            # Day 18 — Real-Time Streaming.
+            try:
+                from app.services.activity_stream import push_approval_required
+
+                push_approval_required(str(task_id), f"task-{task_id}-push", "git_push")
+            except Exception:
+                pass
         else:
             logger.debug(
                 "No GitHub-cloned repo found for task %d (path=%s) — skipping push approval",

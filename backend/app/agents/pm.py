@@ -101,6 +101,17 @@ def pm_node(state: PipelineState) -> PipelineState:
     handlers = make_read_only_handlers(repo)
     handlers["submit_brief"] = lambda inp: "Brief submitted"
 
+    # Day 18 — Real-Time Streaming. task_id was never threaded into
+    # run_agent_graph() from any pipeline node, so the activity stream (fully
+    # built, already working) never received real pipeline events.
+    stream_task_id = str(state.get("task_id", ""))
+    try:
+        from app.services.activity_stream import push_agent_switch
+
+        push_agent_switch(stream_task_id, "pm", "planning")
+    except Exception:
+        pass
+
     memory_context = state.get("memory_context", "")
     memory_block = f"\n\n{memory_context}" if memory_context else ""
 
@@ -138,6 +149,7 @@ def pm_node(state: PipelineState) -> PipelineState:
             enable_lesson=True,
             max_turns=10,
             images=images,
+            task_id=stream_task_id,
         )
         logger.info(
             "PM Agent done — tokens_in=%d tokens_out=%d submitted=%s",

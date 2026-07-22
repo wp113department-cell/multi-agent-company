@@ -115,6 +115,15 @@ def decomposer_node(state: PipelineState) -> PipelineState:
         lambda inp: f"Submitted {len(inp.get('subtasks', []))} subtasks"
     )
 
+    # Day 18 — Real-Time Streaming.
+    stream_task_id = str(state.get("task_id", ""))
+    try:
+        from app.services.activity_stream import push_agent_switch
+
+        push_agent_switch(stream_task_id, "decomposer", "planning")
+    except Exception:
+        pass
+
     pm_brief = json.dumps(state.get("pm_brief", {}), indent=2)
     architect_plan = json.dumps(state.get("architect_plan", {}), indent=2)
 
@@ -143,6 +152,7 @@ def decomposer_node(state: PipelineState) -> PipelineState:
             enable_lesson=True,
             human_approval_required=False,
             max_turns=10,
+            task_id=stream_task_id,
         )
         logger.info(
             "Decomposer Agent done — tokens_in=%d tokens_out=%d submitted=%s",

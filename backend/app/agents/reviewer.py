@@ -156,6 +156,7 @@ def run_reviewer(
             enable_lesson=True,
             max_turns=15,
             images=images,
+            task_id=str(task_id),
         )
         logger.info(
             "Review done — subtask %d, in=%d out=%d submitted=%s",

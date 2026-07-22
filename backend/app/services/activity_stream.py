@@ -273,3 +273,33 @@ def push_error(task_id: str | int, message: str, recoverable: bool = False) -> N
             "recoverable": recoverable,
         },
     )
+
+
+def push_agent_switch(task_id: str | int, agent: str, phase: str = "") -> None:
+    """Day 18 — documented in this module's own docstring since it was
+    written ("agent_switch — role_name changed mid-pipeline") but never
+    implemented until now. Called at real pipeline node transitions
+    (pm -> architect -> decomposer, and dev -> qa -> review in manager.py)."""
+    get_activity_registry().push_event(
+        task_id,
+        {
+            "type": "agent_switch",
+            "agent": agent,
+            "phase": phase,
+        },
+    )
+
+
+def push_approval_required(task_id: str | int, thread_id: str, action: str) -> None:
+    """Day 18 — fired right after Day 13/14's approval_gate.py records a new
+    pending_approvals row, so the frontend activity feed can show it as a
+    live, interactive card instead of only being discoverable on the
+    separate /approvals page."""
+    get_activity_registry().push_event(
+        task_id,
+        {
+            "type": "approval_required",
+            "thread_id": thread_id,
+            "action": action,
+        },
+    )

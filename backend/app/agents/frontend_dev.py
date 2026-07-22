@@ -164,6 +164,7 @@ def run_frontend_dev(
                 enable_lesson=True,
                 max_turns=30,
                 images=images,
+                task_id=str(task_id),
             )
         except Exception as exc:
             logger.exception(

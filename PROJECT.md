@@ -3137,3 +3137,84 @@ Frontend: tsc --noEmit (clean — Day 17's own plan has no frontend section)
 
 ### Verdict
 ✅ GREEN FLAG — DAY 17 COMPLETE. Ready for Day 18 (Real-Time Streaming to Frontend).
+
+## 2026-07-22 — Day 17 Addendum: Credential Vault Frontend UI (user follow-up)
+
+Day 17's own plan has no frontend section (unlike Day 16). User asked for one afterward. REPO-FIRST
+research: open-hands's `secrets-settings.tsx`/`secret-form.tsx` — table of secrets + add-new form,
+adapted to this project's simpler create/list/delete-only backend (no description field, no
+editing an existing secret's value). Placed on the existing `/settings` tab (no new tab needed) —
+found and fixed a real pre-existing gap while there: Day 14's GitHub token endpoint had never had
+any frontend UI at all. Generalized the existing `ApiKeyCard` component with a `skipVerify` flag
+(GitHub tokens have no server-side verify-key support) and added a new `CustomSecretsSection`.
+`tsc`/`eslint`/`build` clean; verified the real create/list/delete round trip against the live
+backend via curl through the Next.js proxy (no headless browser available in this environment for
+a visual screenshot — noted explicitly rather than claiming full visual verification). Committed
+separately from the Day 17 backend commit.
+
+## 2026-07-22 — Day 18 Complete: Real-Time Streaming to Frontend
+
+Plan: `docs/DAY18_PLAN.md`, grounded in REPO-FIRST research before any design. Full report:
+`docs/reports/FLEET_DAY18_TEST_REPORT.md`.
+
+### Research
+`repos/opencode/packages/server/src/handlers/event.ts` — confirmed the plan's own SSE constants
+(256-capacity queue, 15s heartbeat, `Cache-Control`/`X-Accel-Buffering` headers) are real values
+from a real project.
+
+### The central finding
+The plan's own note said "Chat agent already has SSE streaming. This day wires the same SSE to the
+pipeline agents." Investigated before designing anything: `app/services/activity_stream.py` and
+`GET /api/tasks/{id}/stream` (**already the exact endpoint URL the plan asks for**) already
+existed, fully built. `apps/web/app/stream/[taskId]/page.tsx` — a **complete, already-built
+~400-line activity feed UI** — already existed too. `base_graph.py`'s `run_agent_graph()` (shared
+core for all 72+ agents) already calls every `push_*` function, gated on `if task_id:`.
+
+**The real gap**: `task_id` was never passed to `run_agent_graph()` from any of the 8 real agent
+runners (`pm_node`/`architect_node`/`decomposer_node` + the 5 dev-agent runners) — confirmed by
+grep, not assumed. The fully-built stream and fully-built frontend feed had never received a
+single real pipeline event since either was built.
+
+### What was built
+- Threaded `task_id=str(...)` into all 8 `run_agent_graph()` calls.
+- `activity_stream.py` gained `push_agent_switch()` (documented in the module's own docstring
+  since it was written, never implemented until now) and `push_approval_required()` (entirely
+  new — the plan's "approval gate shows as interactive card" criterion had nothing pushing it).
+  Both wired into real transition points: the three pipeline nodes + `manager.py`'s dispatch loop
+  for the first; Day 13/14's two real `arecord_pending()` call sites for the second.
+- Fixed a real heartbeat-interval bug: `activity.py`'s `timeout=30.0` → `15.0` — the plan's own
+  "heartbeat tested with 16s wait" success criterion could never observe one in time at 30s.
+- Frontend: the existing activity feed gained rendering for the two new event types; the task
+  detail page gained a "View live activity →" link to it (reusing the existing, already-tested
+  component rather than duplicating it — the plan's own pseudocode path doesn't even match this
+  project's real `apps/web/components/` convention).
+
+### A real asyncio shared-engine hazard hit while testing
+The first version of the `approval_required` test drove `launch_planning_pipeline()` via a bare
+`asyncio.run()` — passed in isolation, failed only in the full suite, the documented "shared
+`get_session_factory()` singleton" hazard (variant #3). Fixed per the established playbook:
+rewrote through a real `TestClient` instead.
+
+### Testing
+`test_activity_stream.py` extended (new event-type unit tests + a fast heartbeat test + a direct
+assertion the real endpoint uses `timeout=15.0`). New `test_day18_streaming_wiring.py` (11 tests):
+each of the 8 agent runners verified to actually pass `task_id`; `pm_node` verified to call
+`push_agent_switch`; `run_manager()`'s dispatch loop verified to announce transitions; the real
+`plan_review` approval path verified to produce a real event in a real stream.
+
+### Real-caller verification
+All new functions and the 8 `task_id=` sites traced to real callers — 5th clean day in a row.
+
+### Test Results
+```
+pytest tests/ -q
+→ 2699 passed, 0 failed, 55 skipped, 17 deselected, 24 warnings in 90.48s
+
+mypy app/ --strict
+→ 0 errors
+
+Frontend: tsc --noEmit (clean), eslint (clean), npm run build (succeeds)
+```
+
+### Verdict
+✅ GREEN FLAG — DAY 18 COMPLETE. Ready for Day 19 (Cloud Deployment).

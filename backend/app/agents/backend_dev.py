@@ -155,6 +155,7 @@ def run_backend_dev(
                 enable_reflection=True,
                 enable_lesson=True,
                 max_turns=30,
+                task_id=str(task_id),
             )
         except Exception as exc:
             logger.exception(

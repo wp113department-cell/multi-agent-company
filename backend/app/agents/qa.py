@@ -138,6 +138,7 @@ def run_qa(
             enable_reflection=True,
             enable_lesson=True,
             max_turns=20,
+            task_id=str(task_id),
         )
         logger.info(
             "QA done — subtask %d, in=%d out=%d submitted=%s",

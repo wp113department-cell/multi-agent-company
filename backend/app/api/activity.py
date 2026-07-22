@@ -38,7 +38,11 @@ async def stream_task_events(task_id: str) -> StreamingResponse:
     stream = registry.get_or_create(task_id)
 
     async def _generate() -> AsyncIterator[str]:
-        async for event in stream.subscribe(timeout=30.0):
+        # Day 18 — 15s matches the plan's own heartbeat interval (and
+        # OpenCode's real constant); the previous 30s meant the plan's own
+        # "heartbeat tested with 16s wait" success criterion could never
+        # observe one in time.
+        async for event in stream.subscribe(timeout=15.0):
             payload = json.dumps(event, default=str)
             yield f"data: {payload}\n\n"
 

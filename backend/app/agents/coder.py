@@ -156,6 +156,7 @@ def run_coder(
                 enable_reflection=True,
                 enable_lesson=True,
                 max_turns=30,
+                task_id=str(task_id),
             )
             total_in += final_state.get("tokens_in", 0)
             total_out += final_state.get("tokens_out", 0)

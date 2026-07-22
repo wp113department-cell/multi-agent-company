@@ -17,6 +17,8 @@ from app.services.activity_stream import (
     push_done,
     push_stopped,
     push_error,
+    push_agent_switch,
+    push_approval_required,
 )
 
 # ---------------------------------------------------------------------------
@@ -207,3 +209,53 @@ class TestConvenienceHelpers:
         evs = self._drain("h1")
         assert evs[0]["type"] == "error"
         assert "wrong" in evs[0]["message"]
+
+    def test_push_agent_switch(self):
+        """Day 18 — documented in this module's own docstring since it was
+        written ("agent_switch — role_name changed mid-pipeline") but never
+        implemented until now."""
+        push_agent_switch("h1", "architect", "planning")
+        evs = self._drain("h1")
+        assert evs[0]["type"] == "agent_switch"
+        assert evs[0]["agent"] == "architect"
+        assert evs[0]["phase"] == "planning"
+
+    def test_push_approval_required(self):
+        push_approval_required("h1", "task-1", "plan_review")
+        evs = self._drain("h1")
+        assert evs[0]["type"] == "approval_required"
+        assert evs[0]["thread_id"] == "task-1"
+        assert evs[0]["action"] == "plan_review"
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat interval (Day 18 — plan's own success criterion: "heartbeat
+# tested with 16s wait"). Uses a short custom timeout rather than a real 16s
+# sleep to keep the suite fast, proving the ping mechanism itself works —
+# the actual 15.0 interval used in production is asserted directly against
+# app/api/activity.py's source below.
+# ---------------------------------------------------------------------------
+
+
+class TestHeartbeat:
+    @pytest.mark.asyncio
+    async def test_ping_fires_after_timeout_when_queue_empty(self):
+        stream = TaskStream("hb1")
+        events = []
+        async for ev in stream.subscribe(timeout=0.05):
+            events.append(ev)
+            if len(events) == 2:
+                break
+        assert all(e["type"] == "ping" for e in events)
+
+    def test_stream_endpoint_uses_15_second_heartbeat(self):
+        """Day 18 — the plan's own success criterion ("heartbeat tested with
+        16s wait") requires an interval <= 16s; the previous 30s meant a 16s
+        wait could never observe one. Asserts the real production value,
+        not a re-implementation of it."""
+        import inspect
+
+        from app.api import activity
+
+        source = inspect.getsource(activity.stream_task_events)
+        assert "timeout=15.0" in source

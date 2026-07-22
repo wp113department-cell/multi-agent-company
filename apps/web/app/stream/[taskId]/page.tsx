@@ -13,6 +13,8 @@
  *  stopped     → checkpoint badge + resume input
  *  done        → success banner
  *  error       → error banner
+ *  agent_switch      → node-transition divider (Day 18 — pipeline streaming)
+ *  approval_required → interactive "review needed" card (Day 18)
  *  ping        → ignored (keep-alive)
  */
 
@@ -33,6 +35,8 @@ type ActivityEvent =
   | { type: "stopped"; checkpoint_id: string; tokens_in: number; tokens_out: number; ts: number }
   | { type: "done"; summary: string; tokens_in: number; tokens_out: number; cost_usd: number; ts: number }
   | { type: "error"; message: string; recoverable: boolean; ts: number }
+  | { type: "agent_switch"; agent: string; phase: string; ts: number }
+  | { type: "approval_required"; thread_id: string; action: string; ts: number }
   | { type: "ping"; ts: number };
 
 // ---------------------------------------------------------------------------
@@ -119,6 +123,34 @@ function ErrorBlock({ event }: { event: Extract<ActivityEvent, { type: "error" }
     <div className="event-block error-block">
       <span className="event-icon">🔴</span>
       <strong>Error:</strong> {event.message}
+    </div>
+  );
+}
+
+function AgentSwitchBlock({ event }: { event: Extract<ActivityEvent, { type: "agent_switch" }> }) {
+  return (
+    <div className="agent-switch-divider">
+      <span className="event-icon">➡️</span>
+      <span>
+        <strong>{event.agent}</strong>
+        {event.phase ? ` — ${event.phase}` : ""}
+      </span>
+    </div>
+  );
+}
+
+function ApprovalRequiredBlock({
+  event,
+}: {
+  event: Extract<ActivityEvent, { type: "approval_required" }>;
+}) {
+  return (
+    <div className="event-block approval-block">
+      <span className="event-icon">⏳</span>
+      <span className="event-label">Approval needed — {event.action.replace("_", " ")}</span>
+      <a className="approval-link" href="/approvals">
+        Review in Approvals →
+      </a>
     </div>
   );
 }
@@ -243,6 +275,8 @@ export default function ActivityFeedPage() {
       case "terminal":    return <TerminalBlock key={idx} event={ev} />;
       case "done":        return <DoneBlock key={idx} event={ev} />;
       case "error":       return <ErrorBlock key={idx} event={ev} />;
+      case "agent_switch":      return <AgentSwitchBlock key={idx} event={ev} />;
+      case "approval_required": return <ApprovalRequiredBlock key={idx} event={ev} />;
       default:            return null;
     }
   };
@@ -283,6 +317,12 @@ export default function ActivityFeedPage() {
         .done-block  { background: #f0fdf4; border-color: #86efac; display: flex;
                        align-items: center; gap: 10px; flex-wrap: wrap; }
         .error-block { background: #fef2f2; border-color: #fca5a5; }
+        .agent-switch-divider { display: flex; align-items: center; gap: 8px; padding: 4px 2px;
+                                 font-size: 12px; color: #6b7280; }
+        .approval-block { background: #fffbeb; border-color: #fbbf24; display: flex;
+                           align-items: center; gap: 10px; flex-wrap: wrap; }
+        .approval-link { margin-left: auto; font-size: 12px; font-weight: 600; color: #b45309;
+                          text-decoration: underline; }
         .event-icon  { font-size: 16px; flex-shrink: 0; }
         .event-label { font-weight: 500; }
         .event-body  { margin: 8px 0 0; font-family: monospace; font-size: 11px;
@@ -320,6 +360,9 @@ export default function ActivityFeedPage() {
           .file-edit-block { background: #0c1a2e; border-color: #1d4ed8; }
           .done-block { background: #022c22; border-color: #15803d; }
           .error-block { background: #450a0a; border-color: #dc2626; }
+          .agent-switch-divider { color: #9ca3af; }
+          .approval-block { background: #292524; border-color: #d97706; }
+          .approval-link { color: #fbbf24; }
           .event-body { background: rgba(255,255,255,0.06); }
           .sidebar-card { background: #111827; border-color: #374151; }
           .resume-section { background: #292524; border-color: #d97706; }
