@@ -142,6 +142,14 @@ async def git_clone_with_token(
     return {"ok": rc == 0, "stdout": stdout, "stderr": safe_stderr, "returncode": rc}
 
 
+async def git_init(repo_path: str) -> dict[str, Any]:
+    """Initialize a new git repository at repo_path (must already exist as a directory)."""
+    _validate_workspace(repo_path)
+    Path(repo_path).mkdir(parents=True, exist_ok=True)
+    rc, stdout, stderr = await _run_git(["init"], cwd=repo_path)
+    return {"ok": rc == 0, "stdout": stdout, "stderr": stderr}
+
+
 async def git_status(repo_path: str) -> dict[str, Any]:
     """Return git status --short output."""
     _validate_workspace(repo_path)

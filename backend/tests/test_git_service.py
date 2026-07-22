@@ -207,3 +207,25 @@ class TestGitServiceWrite:
 
         with pytest.raises(ValueError, match="empty"):
             await git_commit(str(tmp_path), "   ")
+
+    async def test_git_init_creates_real_repo(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ALLOWED_WORKSPACE_PARENT", str(tmp_path))
+        from app.config import reset_settings_cache
+
+        reset_settings_cache()  # noqa: E702
+        from app.services.git_service import git_init
+
+        target = tmp_path / "new-repo"
+        result = await git_init(str(target))
+        assert result["ok"] is True
+        assert (target / ".git").is_dir()
+
+    async def test_git_init_outside_workspace_denied(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ALLOWED_WORKSPACE_PARENT", str(tmp_path))
+        from app.config import reset_settings_cache
+
+        reset_settings_cache()  # noqa: E702
+        from app.services.git_service import git_init
+
+        with pytest.raises(ValueError, match="outside allowed"):
+            await git_init("/etc/definitely-not-allowed")

@@ -65,11 +65,50 @@ async def launch_planning_pipeline(
 
             from app.api.repo import get_active_repo_path
 
+            effective_repo_path = repo_path or get_active_repo_path()
+
+            # Day 15 — Blank Repo Bootstrap. Must run (and commit) BEFORE any
+            # worktree is ever created for this repo: create_worktree() runs
+            # `git worktree add -b branch`, which requires an existing commit
+            # to branch from and fails outright against a zero-commit repo.
+            from app.pipeline.bootstrap import bootstrap, is_blank_repo
+
+            if is_blank_repo(effective_repo_path):
+                from app.fleet.fleet_events import publish, task_started, task_completed
+
+                publish(task_started(str(task_id), agent_name="bootstrap"))
+                bootstrap_result = await bootstrap(
+                    task_id, effective_repo_path, description, db=db
+                )
+                if bootstrap_result.bootstrapped:
+                    await append_log(
+                        db,
+                        task_id,
+                        "pipeline",
+                        f"Repo bootstrapped ({bootstrap_result.project_type}) — "
+                        f"{len(bootstrap_result.files_created)} files, "
+                        f"commit {bootstrap_result.commit_sha}",
+                    )
+                    publish(
+                        task_completed(
+                            str(task_id),
+                            agent_name="bootstrap",
+                            summary=f"Scaffolded {bootstrap_result.project_type} project",
+                        )
+                    )
+                elif bootstrap_result.error:
+                    await append_log(
+                        db,
+                        task_id,
+                        "pipeline",
+                        f"Bootstrap skipped: {bootstrap_result.error}",
+                    )
+
             result = await run_planning_pipeline(
                 task_id=task_id,
                 title=title,
                 description=description,
-                repo_path=repo_path or get_active_repo_path(),
+                repo_path=effective_repo_path,
                 db=db,
             )
 

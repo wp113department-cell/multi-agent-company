@@ -2856,3 +2856,80 @@ step in `run_manager()`.
 
 ### Verdict
 ✅ GREEN FLAG — DAY 14 COMPLETE. Ready for Day 15.
+
+## 2026-07-22 — Day 15 Complete: Blank Repo Bootstrap
+
+Plan: `docs/DAY15_PLAN.md`, grounded in REPO-FIRST research before any design. Full report:
+`docs/reports/FLEET_DAY15_TEST_REPORT.md`.
+
+### Research
+`repos/open-hands/openhands/app_server/app_conversation/app_conversation_service_base.py`'s
+`run_setup_scripts()`/`clone_or_init_git_repo()` — a fixed sequence of setup phases with
+observable status, run before the agent's normal tools have anything to work with. The reusable
+core taken from it: detect "nothing real exists yet" first, run a small fixed phase sequence, then
+hand off to the normal flow. The remote-sandbox/Azure-DevOps/skill-loading machinery in that file
+is infrastructure this project doesn't have and doesn't need.
+
+### A real, load-bearing constraint found empirically, not assumed
+`repo_tools/worktree.py`'s `create_worktree()` runs `git worktree add -b branch path`. Verified
+against a real empty `git init`-only repo: this fails with `fatal: invalid reference: HEAD` when
+there's no commit yet. **Bootstrap must therefore commit directly to the bare repo before any
+task's worktree can ever be created for it** — a hard ordering requirement, not a stylistic
+choice, and it's why bootstrap writes scaffold files straight into `repo_path` rather than a
+worktree (none can exist yet).
+
+### What was built
+- `git_service.git_init(repo_path)` — new, same pattern as every other function in that file.
+- `app/pipeline/bootstrap.py` (new module): `is_blank_repo()` (cheap `git log` check covering both
+  "no `.git` at all" and "`.git` with zero commits" — the real shape after cloning a genuinely
+  empty GitHub repo), `detect_project_type()` (one Haiku call, deterministic fallback, mirrors Day
+  14's `generate_commit_message()`), `run_scaffold_planning()` (reuses the architect agent's
+  identity — `role_name="architect"`, `roles/architect.md`, `settings.model_planner` — with a
+  scaffold-specific instruction and a local submit tool), and the `bootstrap()` orchestrator
+  (git init → scaffold planning → scaffold write, reusing `app/agents/coder.py`'s `run_coder()`
+  completely UNCHANGED by passing `repo_path` as both `worktree_path` and `repo_path` → commit).
+  Every phase logged via `append_log`; any failure is non-fatal (`bootstrapped=False, error=...`)
+  rather than raising.
+- Wired into `launch_planning_pipeline()` (`api/agents.py`): calls `bootstrap()` before
+  `run_planning_pipeline()` whenever `is_blank_repo(effective_repo_path)` is true.
+
+### Plan/reality corrections (same class of finding as Days 12-14)
+1. **"Emit `RepoBootstrapped` event"** — Day 12 hardened `fleet_events.py` to exactly 8 canonical
+   event types with a static AST scan enforcing it. A 9th type would break that real invariant.
+   Used the closest fitting real events (`task_started`/`task_completed`, `agent_name="bootstrap"`)
+   plus `append_log` for phase-by-phase status instead.
+2. **"Ask the user (via `interrupt()`) OR detect from task description"** — an explicit either/or
+   in the plan's own wording. A third `interrupt()`-based approval type for a one-shot, low-risk
+   classification is disproportionate next to an already-fallback-safe Haiku call. Took the
+   detection branch — documented, not silently dropped.
+
+### Testing
+Real temp git repos throughout, not mocks, for anything git-shaped: `is_blank_repo()` against a
+bare dir, a `git init`-only repo, and a repo with a real commit; `bootstrap()`'s full success path
+verified to produce an actual commit with the exact expected message via `git log`; non-fatal
+failure paths (scaffold planning raises, coder errors, coder produces no files) all verified to
+leave the repo still blank. `run_scaffold_planning`/`run_coder`/`detect_project_type` mocked at
+their `bootstrap.py` import site (each already independently covered by architect.py's/coder.py's
+own test suites — this is about bootstrap's orchestration and git mechanics, not re-testing agent
+internals). Wiring tested via a real `TestClient` (`POST /api/tasks/{id}/run`), per the documented
+Day 14 asyncio shared-engine hazard (`launch_planning_pipeline()` uses the shared
+`get_session_factory()` singleton by design).
+
+### Real-caller verification
+`bootstrap()`, `is_blank_repo()`, and `git_init()` all grepped for real, non-test callers before
+closing the day — all three trace cleanly to `launch_planning_pipeline()`. Second day in a row
+(after Day 14) with zero orphaned modules.
+
+### Test Results
+```
+pytest tests/ -q
+→ 2651 passed, 0 failed, 55 skipped, 17 deselected, 16 warnings in 85.75s (18 new tests)
+
+mypy app/ --strict
+→ 0 errors
+
+Frontend: tsc --noEmit (clean — Day 15's own plan has no frontend section)
+```
+
+### Verdict
+✅ GREEN FLAG — DAY 15 COMPLETE. Ready for Day 16 (Image Input Pipeline).
