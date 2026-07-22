@@ -212,6 +212,37 @@ async def run_manager(
                     break
                 continue
 
+            # Gap-closure (2026-07-22, Day 14 prep) — nothing in the dev-agent
+            # path ever committed changes to the worktree's branch (confirmed
+            # by grep before writing this: submit_patch only ever recorded
+            # files_changed in a local dict). Since get_diff() compares
+            # HEAD...branch, this meant the Reviewer agent's own diff review
+            # has been reviewing an empty diff since Day 0. Commit here, before
+            # QA/review, using git_service.py's existing attributed-commit
+            # mechanism (same GIT_AUTHOR_NAME/GIT_COMMITTER_NAME env-var
+            # pattern aider's GitRepo.commit() uses).
+            if files_changed:
+                from app.services.git_service import git_add, git_commit
+
+                add_result = await git_add(worktree_path, files_changed)
+                if add_result["ok"]:
+                    commit_result = await git_commit(
+                        worktree_path,
+                        f"{subtask_type}: {subtask_title}",
+                        author_name="Gridiron Agent",
+                        author_email="agent@gridiron.local",
+                    )
+                    if not commit_result["ok"]:
+                        logger.warning(
+                            "Commit failed for subtask %d (attempt %d): %s",
+                            subtask_id, attempt + 1, commit_result["stderr"][:300],
+                        )
+                else:
+                    logger.warning(
+                        "git add failed for subtask %d (attempt %d): %s",
+                        subtask_id, attempt + 1, add_result["stderr"][:300],
+                    )
+
             qa_result = await asyncio.to_thread(
                 run_qa,
                 task_id=task_id,

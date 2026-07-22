@@ -240,6 +240,19 @@ class Settings(BaseSettings):
         description="Comma-separated list of git remote hostnames allowed for clone/push in Repo Console.",
     )
 
+    # Day 14 — Git Push Workflow. No credential vault exists yet (Day 17
+    # doesn't either) — this env var is the fallback; the DB-stored value via
+    # POST /api/settings/github-token (SystemSetting, same pattern as the
+    # Anthropic/OpenAI keys) takes precedence when set.
+    github_token: str = Field(
+        default="",
+        description="GitHub personal access token for creating PRs via the REST API. Prefer setting via the UI (stored in the DB) over this env var.",
+    )
+    github_api_base_url: str = Field(
+        default="https://api.github.com",
+        description="GitHub REST API base URL — override for GitHub Enterprise.",
+    )
+
     # Day 10 — Fleet OS Budget Manager (live enforcement, per-run + daily cumulative)
     max_tokens_per_agent_run: int = Field(
         default=100_000,

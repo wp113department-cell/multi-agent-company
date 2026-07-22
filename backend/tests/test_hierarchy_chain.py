@@ -154,8 +154,12 @@ def test_step3_agent_bus_publishes_task_created_from_run_manager() -> None:
         "app.agents.reviewer.run_reviewer"
     ) as mock_reviewer, patch(
         "app.repo_tools.worktree.get_diff", return_value=""
-    ):
+    ), patch("app.services.git_service.git_add") as mock_git_add, patch(
+        "app.services.git_service.git_commit"
+    ) as mock_git_commit:
         mock_backend_dev.return_value = (["app/api/hello.py"], None)
+        mock_git_add.return_value = {"ok": True, "stdout": "", "stderr": ""}
+        mock_git_commit.return_value = {"ok": True, "stdout": "", "stderr": ""}
         mock_qa.return_value = QAResult(
             status="passed",
             tests_run=1,

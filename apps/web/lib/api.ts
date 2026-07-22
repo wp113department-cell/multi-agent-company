@@ -61,6 +61,13 @@ export interface PipelineStateClient {
   approved: boolean;
 }
 
+// Day 14 — Git Push Workflow
+export interface TaskPr {
+  branchName: string | null;
+  prUrl: string | null;
+  prStatus: "none" | "pending" | "pushed" | "failed";
+}
+
 export interface ArtifactRecord {
   artifactId: string;
   taskId: string;
@@ -168,6 +175,18 @@ export async function approvePipeline(taskId: string): Promise<{ approved: boole
 // Reject the plan — resumes LangGraph with approved=false
 export async function rejectPipeline(taskId: string): Promise<{ rejected: boolean }> {
   const res = await fetch(`/api/tasks/${taskId}/pipeline/reject`, { method: "POST" });
+  return handleResponse(res);
+}
+
+// Day 14 — Git Push Workflow
+export async function fetchTaskPr(taskId: string): Promise<TaskPr> {
+  const res = await fetch(`/api/tasks/${taskId}/pr`, { cache: "no-store" });
+  return handleResponse<TaskPr>(res);
+}
+
+// Manual retry — re-runs push+PR creation for a previously-approved push that failed
+export async function retryTaskPush(taskId: string): Promise<{ triggered: boolean }> {
+  const res = await fetch(`/api/tasks/${taskId}/push`, { method: "POST" });
   return handleResponse(res);
 }
 

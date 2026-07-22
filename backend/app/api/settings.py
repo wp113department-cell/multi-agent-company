@@ -16,6 +16,7 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 _ANTHROPIC_KEY = "anthropic_api_key"
 _OPENAI_KEY = "openai_api_key"
+_GITHUB_TOKEN_KEY = "github_token"
 
 
 class ApiKeyRequest(BaseModel):
@@ -44,6 +45,9 @@ async def get_settings_view(db: AsyncSession = Depends(get_db)) -> dict[str, Any
     db_openai = await get_setting(db, _OPENAI_KEY)
     eff_openai = db_openai or settings.openai_api_key
 
+    db_github = await get_setting(db, _GITHUB_TOKEN_KEY)
+    eff_github = db_github or settings.github_token
+
     return {
         "anthropicKeySet": bool(eff_anthropic),
         "anthropicKeyMasked": _mask(eff_anthropic),
@@ -56,6 +60,11 @@ async def get_settings_view(db: AsyncSession = Depends(get_db)) -> dict[str, Any
         "openaiKeyMasked": _mask(eff_openai),
         "openaiKeySource": (
             "database" if db_openai else ("env" if settings.openai_api_key else "none")
+        ),
+        "githubTokenSet": bool(eff_github),
+        "githubTokenMasked": _mask(eff_github),
+        "githubTokenSource": (
+            "database" if db_github else ("env" if settings.github_token else "none")
         ),
         "usingGroq": settings.use_groq,
         "modelPlanner": settings.model_planner,
@@ -119,6 +128,32 @@ async def delete_openai_key(db: AsyncSession = Depends(get_db)) -> dict[str, Any
     """Remove the DB-stored OpenAI API key."""
     await set_setting(db, _OPENAI_KEY, "")
     return {"deleted": True, "provider": "openai"}
+
+
+# ---------------------------------------------------------------------------
+# GitHub token (Day 14 — Git Push Workflow). No credential vault exists yet
+# (Day 17 doesn't either) — SystemSetting is already the real, established
+# mechanism for this (same table backing the Anthropic/OpenAI keys above).
+# ---------------------------------------------------------------------------
+
+
+@router.post("/github-token")
+async def save_github_token(
+    body: ApiKeyRequest, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Save or update the GitHub PAT in the database."""
+    token = body.api_key.strip()
+    if len(token) < 10:
+        raise HTTPException(status_code=400, detail="GitHub token looks too short to be valid")
+    await set_setting(db, _GITHUB_TOKEN_KEY, token)
+    return {"saved": True, "provider": "github"}
+
+
+@router.delete("/github-token")
+async def delete_github_token(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Remove the DB-stored GitHub token (falls back to GITHUB_TOKEN env var)."""
+    await set_setting(db, _GITHUB_TOKEN_KEY, "")
+    return {"deleted": True, "provider": "github"}
 
 
 # ---------------------------------------------------------------------------

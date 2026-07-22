@@ -11,8 +11,10 @@ import {
   fetchArtifacts,
   fetchPipelineState,
   fetchTask,
+  fetchTaskPr,
   rejectPipeline,
   restartTask,
+  retryTaskPush,
   triggerAgentRun,
   triggerPipeline,
   updateTaskStatus,
@@ -42,6 +44,13 @@ export default function TaskDetailPage() {
     enabled: !!task,
   });
 
+  const { data: taskPr } = useQuery({
+    queryKey: ["taskPr", params.id],
+    queryFn: () => fetchTaskPr(params.id),
+    refetchInterval: 5000,
+    enabled: !!task,
+  });
+
   const runMutation = useMutation({
     mutationFn: () => triggerAgentRun(params.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["task", params.id] }),
@@ -66,6 +75,11 @@ export default function TaskDetailPage() {
   const rejectPipelineMutation = useMutation({
     mutationFn: () => rejectPipeline(params.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["pipeline", params.id] }),
+  });
+
+  const retryPushMutation = useMutation({
+    mutationFn: () => retryTaskPush(params.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["taskPr", params.id] }),
   });
 
   const approveDiffMutation = useMutation({
@@ -283,6 +297,53 @@ export default function TaskDetailPage() {
               <li key={f} className="font-mono text-xs text-slate-700">{f}</li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* Git Push / Pull Request (Day 14) */}
+      {taskPr && taskPr.branchName && (
+        <div className="rounded-lg border border-slate-200 bg-white p-5">
+          <h2 className="mb-2 text-sm font-semibold text-slate-700">Git branch &amp; pull request</h2>
+          <p className="mb-2 font-mono text-xs text-slate-700">{taskPr.branchName}</p>
+          <div className="flex items-center gap-3">
+            <span
+              className={
+                "rounded px-2 py-0.5 text-xs font-medium " +
+                (taskPr.prStatus === "pushed"
+                  ? "bg-green-100 text-green-800"
+                  : taskPr.prStatus === "failed"
+                  ? "bg-red-100 text-red-800"
+                  : taskPr.prStatus === "pending"
+                  ? "bg-amber-100 text-amber-800"
+                  : "bg-slate-100 text-slate-600")
+              }
+            >
+              {taskPr.prStatus}
+            </span>
+            {taskPr.prUrl && (
+              <a
+                href={taskPr.prUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-blue-600 underline"
+              >
+                View pull request
+              </a>
+            )}
+            {taskPr.prStatus === "failed" && (
+              <button
+                type="button"
+                onClick={() => retryPushMutation.mutate()}
+                disabled={retryPushMutation.isPending}
+                className="rounded border border-slate-300 px-2 py-0.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {retryPushMutation.isPending ? "Retrying…" : "Retry push"}
+              </button>
+            )}
+          </div>
+          {retryPushMutation.isError && (
+            <p className="mt-2 text-xs text-red-600">{(retryPushMutation.error as Error).message}</p>
+          )}
         </div>
       )}
 

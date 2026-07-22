@@ -389,6 +389,34 @@ async def get_diff(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str
     return {"diff": task.diff, "filesTouched": task.files_touched or []}
 
 
+@router.get("/{task_id}/pr")
+async def get_pr(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Day 14 — Git Push Workflow."""
+    task = await get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"branchName": task.branch_name, "prUrl": task.pr_url, "prStatus": task.pr_status}
+
+
+@router.post("/{task_id}/push")
+async def push_task(
+    task_id: int, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Day 14 — Git Push Workflow. Manual retry: re-runs push+PR creation
+    directly, bypassing the approval gate since approval already happened
+    once for a previously-approved push that failed transiently."""
+    from app.api.approvals import dispatch_git_push_decision
+
+    task = await get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.branch_name is None:
+        raise HTTPException(status_code=400, detail="Task has no branch to push — has coding completed yet?")
+
+    background_tasks.add_task(dispatch_git_push_decision, task_id, True)
+    return {"triggered": True, "taskId": task_id}
+
+
 # ---------------------------------------------------------------------------
 # PDF attachment extraction — POST /api/tasks/extract-pdfs
 # Up to 5 PDF files; returns extracted text from each.
