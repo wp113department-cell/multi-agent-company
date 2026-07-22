@@ -2,7 +2,15 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { fetchAppSettings, saveApiKey, type AppSettings } from "../../lib/api";
+import {
+  deleteCustomSecret,
+  fetchAppSettings,
+  fetchCustomSecrets,
+  saveApiKey,
+  saveCustomSecret,
+  saveGithubToken,
+  type AppSettings,
+} from "../../lib/api";
 
 // ---------------------------------------------------------------------------
 // API helpers
@@ -50,7 +58,7 @@ function ApiKeyCard({
   onSave,
   isSaving,
 }: {
-  provider: "anthropic" | "openai";
+  provider: "anthropic" | "openai" | "github";
   label: string;
   hint: string;
   placeholder: string;
@@ -59,13 +67,33 @@ function ApiKeyCard({
   onSave: (key: string) => Promise<void>;
   isSaving: boolean;
 }) {
+  // GitHub tokens have no server-side verify-key support (only Anthropic/
+  // OpenAI do) — that provider skips straight from input to save.
+  const skipVerify = provider === "github";
+
   const [input, setInput] = useState("");
-  const [phase, setPhase] = useState<Phase>("idle");
+  const [phase, setPhase] = useState<Phase>(skipVerify ? "verified" : "idle");
   const [errorMsg, setErrorMsg] = useState("");
 
   async function handleAction() {
     const key = input.trim();
     if (!key) return;
+
+    if (skipVerify) {
+      setPhase("saving");
+      try {
+        await onSave(key);
+        setPhase("saved");
+        setInput("");
+        setTimeout(() => setPhase("verified"), 3000);
+      } catch (e) {
+        setErrorMsg(e instanceof Error ? e.message : "Save failed");
+        setPhase("verified");
+      }
+      return;
+    }
+
+    if (provider !== "anthropic" && provider !== "openai") return;
 
     if (phase === "idle" || phase === "saved") {
       setErrorMsg("");
@@ -98,7 +126,7 @@ function ApiKeyCard({
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     setInput(e.target.value);
-    if (phase === "verified" || phase === "saved") setPhase("idle");
+    if (!skipVerify && (phase === "verified" || phase === "saved")) setPhase("idle");
     setErrorMsg("");
   }
 
@@ -158,7 +186,7 @@ function ApiKeyCard({
           </button>
         </div>
 
-        {phase === "verified" && (
+        {!skipVerify && phase === "verified" && (
           <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400">
             <span>✓</span>
             <span>Key verified — click Save to store it.</span>
@@ -177,6 +205,126 @@ function ApiKeyCard({
           </div>
         )}
       </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Custom secrets (Day 17 — Credential Vault). Arbitrary named secrets
+// injected into the coding agents' bash tool env — never database/deploy
+// credentials (see docs/DAY17_PLAN.md). List + add form + delete, adapted
+// from open-hands's secrets-settings screen to this project's simpler
+// backend (create/list/delete only — no description field, no editing an
+// existing secret's value, matching what POST/GET/DELETE
+// /api/settings/custom-secrets actually supports).
+// ---------------------------------------------------------------------------
+
+function CustomSecretsSection() {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState("");
+  const [value, setValue] = useState("");
+  const [formError, setFormError] = useState("");
+
+  const { data: names, isLoading } = useQuery({
+    queryKey: ["custom-secrets"],
+    queryFn: fetchCustomSecrets,
+  });
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["custom-secrets"] });
+
+  const createMutation = useMutation({
+    mutationFn: () => saveCustomSecret(name.trim(), value.trim()),
+    onSuccess: () => {
+      setName("");
+      setValue("");
+      setFormError("");
+      invalidate();
+    },
+    onError: (e) => setFormError(e instanceof Error ? e.message : "Save failed"),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (secretName: string) => deleteCustomSecret(secretName),
+    onSuccess: invalidate,
+  });
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!name.trim() || !value.trim()) return;
+    createMutation.mutate();
+  }
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900 space-y-4">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Custom Secrets</h2>
+        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+          Named secrets (e.g. a third-party API key) injected into the coding agents&apos; shell
+          environment. Never database credentials or deploy secrets — those are never handed to
+          agents.
+        </p>
+      </div>
+
+      {isLoading ? (
+        <p className="text-sm text-slate-400">Loading…</p>
+      ) : names && names.length > 0 ? (
+        <ul className="divide-y divide-slate-100 rounded-lg border border-slate-100 dark:divide-slate-800 dark:border-slate-800">
+          {names.map((secretName) => (
+            <li
+              key={secretName}
+              className="flex items-center justify-between gap-3 px-4 py-2.5"
+            >
+              <span className="font-mono text-sm text-slate-700 dark:text-slate-300">{secretName}</span>
+              <button
+                onClick={() => deleteMutation.mutate(secretName)}
+                disabled={deleteMutation.isPending}
+                className="text-xs font-medium text-red-500 hover:text-red-700 disabled:opacity-50 dark:text-red-400"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+          No custom secrets set.
+        </p>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value.toUpperCase())}
+            placeholder="NPM_TOKEN"
+            className="w-1/3 rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+          />
+          <input
+            type="password"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="Secret value"
+            className="flex-1 rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+          />
+          <button
+            type="submit"
+            disabled={!name.trim() || !value.trim() || createMutation.isPending}
+            className="shrink-0 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {createMutation.isPending ? "Adding…" : "Add"}
+          </button>
+        </div>
+        <p className="text-xs text-slate-400">
+          Name must be a valid env var identifier (letters, digits, underscore).
+        </p>
+        {formError && (
+          <div className="flex items-start gap-2 text-sm text-red-600 dark:text-red-400">
+            <span>✗</span>
+            <span>{formError}</span>
+          </div>
+        )}
+      </form>
     </section>
   );
 }
@@ -203,10 +351,10 @@ export default function SettingsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["app-settings"] }),
   });
 
-  const extSettings = settings as (AppSettings & {
-    openaiKeySet?: boolean;
-    openaiKeyMasked?: string;
-  }) | undefined;
+  const saveGithubMutation = useMutation({
+    mutationFn: (token: string) => saveGithubToken(token),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["app-settings"] }),
+  });
 
   return (
     <div className="mx-auto max-w-lg space-y-8">
@@ -237,11 +385,24 @@ export default function SettingsPage() {
             label="OpenAI API Key"
             hint="Required for GPT-based tools and embeddings used by some agents. Stored locally."
             placeholder="sk-..."
-            isSet={extSettings?.openaiKeySet ?? false}
-            masked={extSettings?.openaiKeyMasked ?? ""}
+            isSet={settings?.openaiKeySet ?? false}
+            masked={settings?.openaiKeyMasked ?? ""}
             onSave={(key) => saveOpenAiMutation.mutateAsync(key)}
             isSaving={saveOpenAiMutation.isPending}
           />
+
+          <ApiKeyCard
+            provider="github"
+            label="GitHub Token"
+            hint="Personal access token used to create pull requests once agents finish a task. Stored locally."
+            placeholder="ghp_..."
+            isSet={settings?.githubTokenSet ?? false}
+            masked={settings?.githubTokenMasked ?? ""}
+            onSave={(key) => saveGithubMutation.mutateAsync(key).then(() => {})}
+            isSaving={saveGithubMutation.isPending}
+          />
+
+          <CustomSecretsSection />
 
           {/* Model config (read-only) */}
           {settings && (

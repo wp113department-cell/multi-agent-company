@@ -452,6 +452,12 @@ export interface AppSettings {
   anthropicKeySet: boolean;
   anthropicKeyMasked: string;
   anthropicKeySource: "database" | "env" | "none";
+  openaiKeySet: boolean;
+  openaiKeyMasked: string;
+  openaiKeySource: "database" | "env" | "none";
+  githubTokenSet: boolean;
+  githubTokenMasked: string;
+  githubTokenSource: "database" | "env" | "none";
   usingGroq: boolean;
   modelPlanner: string;
   modelCoder: string;
@@ -473,6 +479,44 @@ export async function saveApiKey(apiKey: string): Promise<{ saved: boolean }> {
 
 export async function deleteApiKey(): Promise<{ deleted: boolean }> {
   const res = await fetch("/api/settings/api-key", { method: "DELETE" });
+  return handleResponse(res);
+}
+
+// Day 14 — GitHub token (no verify-key support server-side, unlike Anthropic/OpenAI)
+export async function saveGithubToken(token: string): Promise<{ saved: boolean }> {
+  const res = await fetch("/api/settings/github-token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ api_key: token }),
+  });
+  return handleResponse(res);
+}
+
+export async function deleteGithubToken(): Promise<{ deleted: boolean }> {
+  const res = await fetch("/api/settings/github-token", { method: "DELETE" });
+  return handleResponse(res);
+}
+
+// Day 17 — Credential Vault custom secrets
+export async function fetchCustomSecrets(): Promise<string[]> {
+  const res = await fetch("/api/settings/custom-secrets", { cache: "no-store" });
+  const data = await handleResponse<{ names: string[] }>(res);
+  return data.names;
+}
+
+export async function saveCustomSecret(name: string, value: string): Promise<{ saved: boolean; name: string }> {
+  const res = await fetch("/api/settings/custom-secrets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, value }),
+  });
+  return handleResponse(res);
+}
+
+export async function deleteCustomSecret(name: string): Promise<{ deleted: boolean; name: string }> {
+  const res = await fetch(`/api/settings/custom-secrets/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
   return handleResponse(res);
 }
 

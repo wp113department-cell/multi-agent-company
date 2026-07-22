@@ -112,3 +112,35 @@ Frontend: tsc --noEmit (clean — Day 17's own plan has no frontend section, unl
 
 ## Verdict
 ✅ GREEN FLAG — DAY 17 COMPLETE. Ready for Day 18 (Real-Time Streaming to Frontend).
+
+## Addendum — Frontend UI (user follow-up request, same session)
+
+Day 17's own plan has no frontend section (unlike Day 16), so the backend closed without one.
+User then explicitly asked for a UI. REPO-FIRST research first: open-hands's
+`frontend/src/routes/secrets-settings.tsx` + `secret-form.tsx` — a table of secrets (name +
+actions) with an add-new form, adapted to this project's simpler backend (create/list/delete only
+— no description field, no editing an existing secret's value, since
+`POST/GET/DELETE /api/settings/custom-secrets` doesn't support those).
+
+**Where it belongs**: the existing `/settings` tab (already in `NavBar.tsx`, already the home for
+the Anthropic/OpenAI key cards) — no new tab needed. Found a real, pre-existing gap while there:
+the GitHub token endpoint (`POST/DELETE /api/settings/github-token`, built in Day 14) had **never
+had any frontend UI at all** — added it in the same pass, reusing the existing `ApiKeyCard`
+component (generalized with a `skipVerify` flag, since GitHub tokens have no server-side
+verify-key support unlike Anthropic/OpenAI).
+
+**What was built**: `lib/api.ts` gained proper `githubTokenSet`/`githubTokenMasked`/
+`openaiKeySet`/`openaiKeyMasked` fields on `AppSettings` (previously only informally cast inline,
+fixed to match what the backend already returns) plus `saveGithubToken`/`deleteGithubToken`/
+`fetchCustomSecrets`/`saveCustomSecret`/`deleteCustomSecret`. `app/settings/page.tsx` gained a
+GitHub Token card and a new `CustomSecretsSection` (list with remove buttons + name/value add
+form, env-var-identifier validation matching the backend's own regex).
+
+**Verification**: `tsc --noEmit`, `eslint`, `npm run build` all clean. Started the real backend +
+frontend dev servers and verified via `curl` against the live `/api/settings` and
+`/api/settings/custom-secrets` endpoints (through the Next.js proxy) — full create → list → delete
+round trip confirmed working against the real database. **Could not get a visual screenshot**:
+`chromium-cli` is not available in this environment, so the actual rendered UI (layout, button
+states) was not visually inspected — only confirmed to serve HTTP 200 with no Next.js error
+boundary triggered and the correct data flowing through. Flagging this limitation explicitly
+rather than claiming full visual verification.
