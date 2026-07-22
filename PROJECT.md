@@ -2933,3 +2933,70 @@ Frontend: tsc --noEmit (clean — Day 15's own plan has no frontend section)
 
 ### Verdict
 ✅ GREEN FLAG — DAY 15 COMPLETE. Ready for Day 16 (Image Input Pipeline).
+
+## 2026-07-22 — Days 11-15 Gap-Closure Audit
+
+Per user request, before starting Day 16: "check first plan 11 to 15 is there anything is missing
+if yes so fill it first then implement plan 16." Full report:
+`docs/reports/GAP_CLOSURE_DAY11_15_REPORT.md`.
+
+### Method
+Re-verified Days 11-14's previously-closed gap-closure findings are still closed (no regressions).
+Confirmed `prompt_registry.deploy()` having zero callers is correctly out of scope (Day 11's own
+plan never committed to wiring it — pure infrastructure, matching the prior audit's own
+distinguishing criterion). The real check: traced every real entry point that can reach
+`create_worktree()`, since Day 15 only wired `bootstrap()` into ONE of the codebase's several
+task-lifecycle entry points.
+
+### Findings (all fixed)
+1. **`launch_coder()` ("simple" pipeline mode) never checked for a blank repo** — Day 15 only wired
+   bootstrap into `launch_planning_pipeline()` ("full" mode). The older "simple" mode
+   (`launch_planner` → `launch_coder`) completely bypassed it; verified `create_worktree()` really
+   does raise `RuntimeError` against a zero-commit repo. Fixed by adding the same
+   `is_blank_repo()`/`bootstrap()` check to `launch_coder()`.
+2. **`launch_coder()`'s exception handler never transitioned the task to "blocked"** — found while
+   fixing #1. Unlike `launch_manager()`'s equivalent handler, a task hitting this path was left
+   stuck in "coding" with no valid API-reachable transition forward. Fixed to match
+   `launch_manager()`'s pattern.
+3. **`finish_agent_run()`/`heartbeat_agent_run()` — a real, pre-existing datetime bug**, exposed by
+   writing the first-ever real test for `launch_coder()` (zero prior coverage existed). Both wrote
+   timezone-aware `datetime.now(timezone.utc)` into naive `TIMESTAMP WITHOUT TIME ZONE` columns —
+   asyncpg raises `DataError` on this, and `launch_coder()`'s broad exception handler had been
+   silently swallowing it, logging a generic "Coder failed" that hid the real cause. Fixed both
+   with `.replace(tzinfo=None)`, matching the existing convention already used in `app/api/repo.py`.
+4. **`create_worktree()` called with no `repo_path` in BOTH `launch_coder()` and
+   `launch_manager()`** — silently defaulted to the single global default repo, ignoring the task's
+   actually-assigned repo (`task.repo_id`), even though both functions correctly resolved and used
+   the right repo immediately afterward for `run_coder()`/`run_manager()`/`get_diff()`. A real,
+   load-bearing bug for this project's own multi-repo Repo Console feature — and directly relevant
+   to Day 15, since it would have silently undermined bootstrap's own repo targeting. Fixed both
+   call sites.
+5. **`POST /{task_id}/approve` never resolved the task's assigned repo** — the root cause behind
+   #4 being reachable at all for simple-mode tasks. Unlike `run_task()`, `restart_task()`, and
+   `pipeline_approve()`, this endpoint never looked up `task.repo_id` → `Repo.local_path` before
+   calling `launch_coder()`. Fixed with the same resolution block the other three endpoints
+   already use.
+6. **Frontend cosmetic**: `git_push` approvals rendered as the raw string `"git_push"` in the
+   approvals UI (details themselves rendered fine — `DetailsPreview` is fully generic). Added a
+   friendly `ACTION_LABELS` entry.
+
+### Testing
+`tests/test_launch_coder_bootstrap.py` (2 new tests, real `TestClient`) — the first tests ever
+written for `launch_coder()`'s `/approve` → `create_worktree` → `run_coder` → `finish_agent_run`
+chain against a real DB. Verifies bootstrap fires correctly on a blank repo and the task lands in
+"blocked" (not stuck) when the downstream step still fails; verifies the full happy path reaches
+"ready_for_review" on a non-blank repo.
+
+### Test Results
+```
+pytest tests/ -q
+→ 2653 passed, 0 failed, 55 skipped, 17 deselected, 16 warnings in 85.49s
+
+mypy app/ --strict
+→ 0 errors
+
+Frontend: tsc --noEmit (clean)
+```
+
+### Verdict
+✅ GREEN FLAG — GAP-CLOSURE (DAYS 11-15) COMPLETE. Ready for Day 16 (Image Input Pipeline).

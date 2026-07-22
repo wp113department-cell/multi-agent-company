@@ -253,6 +253,8 @@ async def approve_task(
 ) -> dict[str, Any]:
     """Approve diff after coding — start coder or mark completed."""
     from app.api.agents import launch_coder
+    from app.db.models import Repo
+    from sqlalchemy import select
 
     task = await get_task(db, task_id)
     if not task:
@@ -263,11 +265,22 @@ async def approve_task(
             detail=f"Task must be ready_for_review, got {task.status!r}",
         )
 
+    # Gap-closure (Days 11-15 audit, 2026-07-22): this endpoint never resolved
+    # the task's assigned repo (task.repo_id), unlike /run, /restart, and
+    # /pipeline/approve — launch_coder silently fell back to the single
+    # global active repo, ignoring per-task repo selection entirely.
+    repo_path: str | None = None
+    if task.repo_id:
+        result = await db.execute(select(Repo).where(Repo.id == task.repo_id))
+        repo_obj = result.scalar_one_or_none()
+        if repo_obj and repo_obj.status == "ready":
+            repo_path = repo_obj.local_path
+
     plan = str(task.plan or "")
     task = await transition_task(db, task_id, "coding")
     await append_log(db, task_id, "approval", "Plan approved — coding agent starting")
 
-    background_tasks.add_task(launch_coder, task_id, plan)
+    background_tasks.add_task(launch_coder, task_id, plan, repo_path)
     return {"approved": True, "task": _task_to_dict(task)}
 
 
