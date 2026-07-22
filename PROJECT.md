@@ -2768,3 +2768,91 @@ populated with real data).
 
 ### Verdict
 ✅ GREEN FLAG — GAP-CLOSURE COMPLETE. Ready for Day 14 (Git Push Workflow).
+
+## 2026-07-22 — Day 14 Complete: Git Push Workflow
+
+Per user instruction: "check repos and get idea then implement all things one by one." Plan:
+`docs/DAY14_PLAN.md`, grounded in REPO-FIRST research before any design. Full report:
+`docs/reports/FLEET_DAY14_TEST_REPORT.md`.
+
+### Research
+- `repos/open-hands/openhands/app_server/integrations/github/service/prs.py`
+  (`GitHubPRsMixin.create_pr()`) — real GitHub REST API PR-creation call shape.
+- `repos/aider/aider/repo.py` (`GitRepo.commit()`) — real commit-attribution mechanism
+  (`GIT_AUTHOR_NAME`/`GIT_COMMITTER_NAME`).
+- Confirmed the codebase already has everything needed: `app/services/git_service.py` (Day 5A,
+  full async git-ops layer, host-allowlisted, workspace-scoped) and `app/fleet/approval_gate.py`
+  (Day 13, generic `pending_approvals` system) — both reused directly rather than building
+  parallel systems, exactly as Day 13's own closing note anticipated.
+
+### A real, pre-existing bug found during research, not assumed away
+Nothing in the dev-agent path (`submit_patch` handler) ever committed file changes to the
+worktree's branch — meaning `worktree.get_diff()` has returned empty since Day 0, meaning **the
+Reviewer agent's own diff review has been reviewing nothing, every single run**. Verified
+empirically against a real temp git repo (branch HEAD unchanged after `submit_patch`) before
+writing any code. Fixed by adding a `git_add`+`git_commit` step to `run_manager()`'s per-subtask
+retry loop, right after `run_backend_dev`/`run_frontend_dev` succeeds and before `run_qa` — reusing
+Day 5A's real `git_service.py`, non-fatal on failure (logged, retry loop continues). This was a
+necessary prerequisite: with no commits, there is nothing to push.
+
+### What was built
+- Migration 016 + `DevTask.branch_name`/`pr_url`/`pr_status` (`none|pending|pushed|failed`).
+- `app/tools/git_push_tool.py` (new package): `parse_repo_full_name()`, `generate_commit_message()`
+  (one Haiku call, deterministic fallback, never raises), `create_github_pr()` (real
+  `httpx.AsyncClient` call to the GitHub REST API, reusing the established outbound-HTTP pattern
+  from `app/services/alert.py`), `push_and_create_pr()` (orchestrates `git_service.git_push` +
+  `create_github_pr`).
+- GitHub token storage via the existing `SystemSetting` table (no credential vault exists yet —
+  that's Day 17); new `POST`/`DELETE /api/settings/github-token`, mirroring `/api-key` exactly.
+- On task completion, `launch_manager()` registers a `git_push` pending approval into Day 13's
+  generic `pending_approvals` system — the SAME table/API, not a parallel mechanism. Extracted as
+  a standalone `_record_git_push_approval()` function for direct testability.
+- `app/api/approvals.py`'s `_dispatch_decision()` gained a `git_push` branch → the new
+  `dispatch_git_push_decision()` (reject marks `pr_status="failed"`; approve pushes the
+  already-committed `agent/task-{id}` branch and creates the PR).
+- `GET /api/tasks/{id}/pr` + `POST /api/tasks/{id}/push` (manual retry, bypasses the approval gate).
+- Frontend: `TaskPr` type + `fetchTaskPr`/`retryTaskPush` in `lib/api.ts`; a "Git branch & pull
+  request" section on the task detail page — branch name, colored status badge, PR link, and a
+  "Retry push" button shown only when `prStatus === "failed"`.
+
+### Plan/reality mismatch corrected (same class of finding as Days 12–13)
+The plan's literal pipeline-integration snippet assumed a `qa_node` inside `pipeline/graph.py`
+(the real LangGraph `StateGraph`). Confirmed via direct reads that QA/review actually happens in
+`manager.py`'s plain-`async def` `run_manager()`/`launch_manager()`, with no LangGraph involvement
+— wired the push-approval recording into `launch_manager()` instead, the correct completion point
+with DB access.
+
+### A new asyncio shared-engine hazard variant found and fixed
+Two new functions (`_record_git_push_approval()`, `dispatch_git_push_decision()`) are production
+code that, by design, run inside FastAPI's `BackgroundTasks` on the app's own already-running
+event loop, so they correctly use the shared `get_session_factory()` singleton — but calling them
+via a bare `asyncio.run()` from sync test code fails ("attached to a different loop"), a third
+distinct variant of the recurring asyncio hazard already in project memory. Fixed two ways: (1)
+`_record_git_push_approval()` tested directly against a fresh isolated engine (its logic doesn't
+depend on the shared engine's lifecycle); (2) `dispatch_git_push_decision()` genuinely needs the
+shared engine, so its tests drive it entirely through a real `TestClient` instead (one continuous
+event loop for the whole test).
+
+### A real mypy bug found and fixed (new code)
+`generate_commit_message()`'s original list comprehension (`getattr(b, "type", "") == "text"`)
+defeated mypy's discriminated-union narrowing on the Anthropic SDK's `ContentBlock` union — 11
+errors. Fixed by rewriting as an explicit `for`/`if` loop matching the existing pattern in
+`app/agents/base.py`. 0 errors remaining.
+
+### Test Results
+```
+pytest tests/ -q
+→ 2633 passed, 0 failed, 55 skipped, 17 deselected, 15 warnings in 81.64s
+
+mypy app/ --strict
+→ 0 errors (11 new errors found and fixed during this day)
+
+Frontend: tsc --noEmit (clean), eslint (clean), npm run build (succeeds, only 2 pre-existing
+unrelated warnings)
+```
+
+37 new backend tests across 5 new test files, plus 5 existing tests updated for the new commit
+step in `run_manager()`.
+
+### Verdict
+✅ GREEN FLAG — DAY 14 COMPLETE. Ready for Day 15.

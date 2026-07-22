@@ -229,8 +229,12 @@ def test_run_manager_calls_escalate_and_human_review_when_subtask_blocked() -> N
         "app.agents.qa.run_qa"
     ) as mock_qa, patch("app.fleet.failure_ladder.escalate") as mock_escalate, patch(
         "app.fleet.failure_ladder.request_human_review"
-    ) as mock_human_review:
+    ) as mock_human_review, patch(
+        "app.services.git_service.git_add"
+    ) as mock_git_add, patch("app.services.git_service.git_commit") as mock_git_commit:
         mock_backend_dev.return_value = (["app/api/hello.py"], None)
+        mock_git_add.return_value = {"ok": True, "stdout": "", "stderr": ""}
+        mock_git_commit.return_value = {"ok": True, "stdout": "", "stderr": ""}
         mock_qa.return_value = QAResult(
             status="failed",
             tests_run=3,
@@ -277,8 +281,12 @@ def test_run_manager_calls_abort_when_epic_halted() -> None:
 
     with patch("app.agents.backend_dev.run_backend_dev") as mock_backend_dev, patch(
         "app.agents.qa.run_qa"
-    ) as mock_qa, patch("app.fleet.failure_ladder.abort") as mock_abort:
+    ) as mock_qa, patch("app.fleet.failure_ladder.abort") as mock_abort, patch(
+        "app.services.git_service.git_add"
+    ) as mock_git_add, patch("app.services.git_service.git_commit") as mock_git_commit:
         mock_backend_dev.return_value = (["app/api/hello.py"], None)
+        mock_git_add.return_value = {"ok": True, "stdout": "", "stderr": ""}
+        mock_git_commit.return_value = {"ok": True, "stdout": "", "stderr": ""}
         mock_qa.return_value = QAResult(
             status="failed",
             tests_run=1,

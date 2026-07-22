@@ -220,8 +220,12 @@ def test_run_manager_orchestrates_one_subtask_to_completion() -> None:
         "app.agents.qa.run_qa"
     ) as mock_qa, patch("app.agents.reviewer.run_reviewer") as mock_reviewer, patch(
         "app.repo_tools.worktree.get_diff", return_value="diff --git a/x b/x"
-    ):
+    ), patch("app.services.git_service.git_add") as mock_git_add, patch(
+        "app.services.git_service.git_commit"
+    ) as mock_git_commit:
         mock_backend_dev.return_value = (["app/api/hello.py"], None)
+        mock_git_add.return_value = {"ok": True, "stdout": "", "stderr": ""}
+        mock_git_commit.return_value = {"ok": True, "stdout": "", "stderr": ""}
         mock_qa.return_value = QAResult(
             status="passed",
             tests_run=3,
@@ -294,8 +298,12 @@ def test_run_manager_retries_after_qa_failure_then_succeeds() -> None:
         "app.agents.qa.run_qa"
     ) as mock_qa, patch("app.agents.reviewer.run_reviewer") as mock_reviewer, patch(
         "app.repo_tools.worktree.get_diff", return_value=""
-    ):
+    ), patch("app.services.git_service.git_add") as mock_git_add, patch(
+        "app.services.git_service.git_commit"
+    ) as mock_git_commit:
         mock_backend_dev.return_value = (["app/api/hello.py"], None)
+        mock_git_add.return_value = {"ok": True, "stdout": "", "stderr": ""}
+        mock_git_commit.return_value = {"ok": True, "stdout": "", "stderr": ""}
         mock_qa.side_effect = lambda *a, **kw: next(qa_responses)
         mock_reviewer.return_value = ReviewResult(
             verdict="approved", summary="looks good"

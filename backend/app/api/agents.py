@@ -6,6 +6,7 @@ import asyncio
 import logging
 from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db.repository import (
@@ -259,6 +260,55 @@ def _build_plan_summary(pipeline_result: Any) -> str:
 # ---- Manager (full multi-agent pipeline) ----
 
 
+async def _record_git_push_approval(
+    db: AsyncSession,
+    task_id: int,
+    effective_repo: str,
+    all_files: list[str],
+    diff: str,
+    subtask_count: int,
+) -> None:
+    """Day 14 — Git Push Workflow. Registers into Day 13's generic approvals
+    system (same table/API the plan-review pause already uses) rather than
+    inventing a parallel one. Distinct thread_id from the plan-review pause
+    (f"task-{id}") since this is a second, later decision point for the same
+    task. Extracted as its own function (not inlined in launch_manager) so it
+    can be tested directly against a real, isolated DB session without
+    needing to drive the full pipeline+fire-and-forget-task machinery."""
+    try:
+        from sqlalchemy import select
+
+        from app.db.models import Repo
+        from app.db.repository import update_task_branch_name
+        from app.fleet.approval_gate import arecord_pending
+
+        branch_name = f"agent/task-{task_id}"
+        await update_task_branch_name(db, task_id, branch_name)
+        repo_row = (
+            await db.execute(select(Repo).where(Repo.local_path == effective_repo))
+        ).scalar_one_or_none()
+        if repo_row is not None and repo_row.github_url:
+            await arecord_pending(
+                thread_id=f"task-{task_id}-push",
+                action="git_push",
+                details={
+                    "branch": branch_name,
+                    "files_changed": list(dict.fromkeys(all_files))[:20],
+                    "subtask_count": subtask_count,
+                    "diff_preview": diff[:500],
+                },
+                agent_name="manager",
+                task_id=task_id,
+            )
+        else:
+            logger.debug(
+                "No GitHub-cloned repo found for task %d (path=%s) — skipping push approval",
+                task_id, effective_repo,
+            )
+    except Exception:
+        logger.warning("Failed to record git-push pending approval for task %d", task_id, exc_info=True)
+
+
 async def launch_manager(
     task_id: int,
     subtasks: list[dict[str, Any]],
@@ -341,6 +391,8 @@ async def launch_manager(
                     "pipeline",
                     f"All subtasks complete — {len(results)} subtasks, diff ready for review",
                 )
+
+                await _record_git_push_approval(db, task_id, effective_repo, all_files, diff, len(results))
             else:
                 preserve_worktree(task_id)
                 await update_pipeline_state(db, task_id, "blocked")

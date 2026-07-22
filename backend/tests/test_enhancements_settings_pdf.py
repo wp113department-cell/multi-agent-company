@@ -55,6 +55,76 @@ class TestSettingsOpenAiKey:
 
 
 # ---------------------------------------------------------------------------
+# Settings API — GitHub token (Day 14 — Git Push Workflow)
+# ---------------------------------------------------------------------------
+
+
+class TestSettingsGitHubToken:
+    def test_save_github_token_valid(self) -> None:
+        import asyncio
+
+        from app.api.settings import ApiKeyRequest, save_github_token
+
+        async def run() -> dict[str, object]:
+            mock_db = AsyncMock()
+            with patch("app.api.settings.set_setting", new_callable=AsyncMock) as mock_set:
+                result = await save_github_token(
+                    ApiKeyRequest(api_key="ghp_1234567890abcdef"), db=mock_db
+                )
+                mock_set.assert_called_once_with(mock_db, "github_token", "ghp_1234567890abcdef")
+                return result
+
+        result = asyncio.run(run())
+        assert result == {"saved": True, "provider": "github"}
+
+    def test_save_github_token_rejects_too_short(self) -> None:
+        import asyncio
+
+        from fastapi import HTTPException
+
+        from app.api.settings import ApiKeyRequest, save_github_token
+
+        async def run() -> bool:
+            mock_db = AsyncMock()
+            with patch("app.api.settings.set_setting", new_callable=AsyncMock):
+                try:
+                    await save_github_token(ApiKeyRequest(api_key="short"), db=mock_db)
+                    return False
+                except HTTPException as exc:
+                    return exc.status_code == 400
+
+        assert asyncio.run(run())
+
+    def test_delete_github_token_clears_db_value(self) -> None:
+        import asyncio
+
+        from app.api.settings import delete_github_token
+
+        async def run() -> dict[str, object]:
+            mock_db = AsyncMock()
+            with patch("app.api.settings.set_setting", new_callable=AsyncMock) as mock_set:
+                result = await delete_github_token(db=mock_db)
+                mock_set.assert_called_once_with(mock_db, "github_token", "")
+                return result
+
+        result = asyncio.run(run())
+        assert result == {"deleted": True, "provider": "github"}
+
+    def test_github_token_stripped_of_whitespace(self) -> None:
+        import asyncio
+
+        from app.api.settings import ApiKeyRequest, save_github_token
+
+        async def run() -> None:
+            mock_db = AsyncMock()
+            with patch("app.api.settings.set_setting", new_callable=AsyncMock) as mock_set:
+                await save_github_token(ApiKeyRequest(api_key="  ghp_abcdefghij  "), db=mock_db)
+                mock_set.assert_called_once_with(mock_db, "github_token", "ghp_abcdefghij")
+
+        asyncio.run(run())
+
+
+# ---------------------------------------------------------------------------
 # Settings API — verify endpoint helpers
 # ---------------------------------------------------------------------------
 
