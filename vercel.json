@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "buildCommand": "cd apps/web && npm run build",
+  "buildCommand": "pnpm --filter @gridiron/web run build",
   "outputDirectory": "apps/web/.next",
-  "installCommand": "cd apps/web && npm ci",
+  "installCommand": "pnpm install --frozen-lockfile",
   "framework": "nextjs",
   "regions": ["iad1"],
   "env": {

@@ -3218,3 +3218,90 @@ Frontend: tsc --noEmit (clean), eslint (clean), npm run build (succeeds)
 
 ### Verdict
 ✅ GREEN FLAG — DAY 18 COMPLETE. Ready for Day 19 (Cloud Deployment).
+
+## 2026-07-22 — Gap-Closure (Days 0-18 Full Re-Audit) + Day 19 Production-Readiness Prep
+
+Per user request, before Day 19: re-check the ENTIRE plan (Days 0-18, not just recent days) for
+anything missing, AND make the project production-ready for Day 19 while explicitly skipping the
+actual deployment (no real Vercel/Supabase/Railway accounts touched). Full report:
+`docs/reports/GAP_CLOSURE_DAY0_18_REPORT.md`. This is the deepest gap-closure round yet — it
+covers the full history back to Day 0, not just the last few days.
+
+### Method
+Two parallel `Explore` agents audited (a) model_router/budget_manager/tool_discovery wiring and
+Day 0-6 completeness, (b) capability_registry completeness against Day 0's exit criteria and every
+fleet-event/trace_id call site. All findings independently confirmed by direct grep/read before
+fixing. Confirmed clean, no action taken: model_router (72/72), capability_registry tags (72/72,
+0 duplicates), VerificationConfig (spot-checked 10 agents), budget_manager (real caller, reactive
+enforcement accepted as a legitimate design limit — LLM cost can't be predicted pre-flight),
+tool_discovery (matches the established `prompt_registry.deploy()` precedent — legitimately unused
+standalone infrastructure with no natural consumer beyond the one opt-in check already wired in
+the Days 11-13 gap-closure).
+
+### Real gaps found and fixed
+1. **A systemic `task_id` vs `trace_id` bug in `base_graph.py`'s `run_agent_graph()` (4 sites)** —
+   `agent_registry.start_task()` and the `TaskStarted`/`TaskCompleted`/`TaskFailed` events all used
+   the per-RUN `tid` correlation id where the real `task_id` was needed. Every one of these events
+   and `agent_registry`'s `current_task_id` field has recorded a random trace hex string instead of
+   the real task id since this code was written — breaking any downstream consumer correlating
+   events by task (directly relevant to Day 18's activity stream). Fixed all 4 sites.
+2. **Gap 7's exit criteria half-satisfied**: `HealthUpdated` was only published on the success
+   path, never on error. Added it to the exception handler.
+3. **`fleet_checkpoint.py`'s `save_checkpoint()`/`rollback_to()` had zero real callers** despite
+   being fully built since Day 12 — the 7th occurrence of the "built but never called" pattern.
+   Wired into `base_graph.py`'s stall-path and exception-handler escalate blocks, and
+   `manager.py`'s epic-abort block.
+4. **Gap 10 (trace_id correlation)** still had several hardcoded `trace_id=""` sites in
+   `manager.py` (task_created/escalate/abort) and `api/agents.py` (bootstrap events,
+   `record_approval()`). Fixed with the existing `f"task-{task_id}[-suffix]"` convention.
+5. **Most of the 72 real agent modules were only imported lazily** — before this fix,
+   `capability_registry` held as few as ~6/72 agents for most of a fresh process's lifetime (only
+   pm/architect/decomposer are imported eagerly via `pipeline/graph.py`). Added
+   `ensure_all_agents_registered()` (dynamic scan + import of every `app/agents/*.py` module),
+   called at `main.py`'s `lifespan()` startup — verified live, 72/72 registered immediately.
+
+New `tests/test_gap_closure_days0_18.py` (8 tests) captures real `FleetEvent` objects to assert
+`task_id`/`trace_id` directly, not just "no exception." Found + fixed a second, self-caused issue
+while testing: 3 new tests deliberately fail `role_name="pm"` against the real, process-wide
+`agent_registry`, which after 3 failures marks it permanently `"unhealthy"` (plain `complete_task()`
+doesn't reset that) — broke 2 previously-passing tests in `test_session4_migration.py` (only in the
+full suite, not isolation). Fixed with an autouse `.recover()` teardown fixture.
+
+### Day 19 production-readiness prep (deployment itself skipped)
+Already existed, no changes needed: `.github/workflows/ci.yml` (backend/frontend/security jobs, no
+deploy job — correctly absent), `Procfile` (web/worker), `next.config.mjs`'s already env-driven
+backend URL, and the now-fixed `/health` agent count.
+
+Found and fixed:
+- **`vercel.json` would have failed on a real build** — `npm ci` in `apps/web/`, which has no
+  `package-lock.json` of its own (pnpm workspace, root `pnpm-lock.yaml`). Fixed to
+  `pnpm install --frozen-lockfile` / `pnpm --filter @gridiron/web run build`, matching CI exactly.
+- **`backend/.env.example` was missing 18 of 93 real `Settings` fields** (verified by diffing
+  against `Settings.model_fields` programmatically, not by inspection) — OpenAI/Groq vars,
+  Opus tuning, workspace/git security boundaries, Sentry, alerting, log retention, admin password.
+  All added; now documents all 93 fields exactly (0 missing, 0 extra).
+- **Root `.env.example` was stale TypeScript-era boilerplate** referencing a Zod schema that
+  hasn't existed since the Python migration, documenting only 21/93 real vars, with one stale
+  renamed variable. Replaced with a short accurate pointer to the two real env files.
+- **`apps/web/.env.example` didn't exist.** Added.
+- **`docs/DEPLOYMENT.md` didn't exist.** Added — Supabase/pgvector/migrations (with an asyncpg/
+  pgbouncer pooler caution), Railway/Render env vars, Vercel setup, the CI gate, health check
+  contract, and the manual production smoke test. States explicitly nothing in it was executed
+  this session.
+
+### Test Results
+```
+pytest tests/ -q
+→ 2707 passed, 0 failed, 55 skipped, 17 deselected, 23 warnings in 93.70s
+
+mypy app/ --strict
+→ Success: no issues found in 173 source files
+
+Frontend: pnpm typecheck (clean), pnpm lint (0 errors, 3 pre-existing unrelated warnings),
+          pnpm build (succeeds, 18/18 pages)
+```
+
+### Verdict
+✅ GREEN FLAG — GAP-CLOSURE (DAYS 0-18) + DAY 19 PRODUCTION-READINESS PREP COMPLETE. Deployment
+itself intentionally not performed — see `docs/DEPLOYMENT.md` for the remaining manual account-
+setup steps.

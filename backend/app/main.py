@@ -212,6 +212,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Sentry — must happen before any request processing
     _init_sentry(settings)
 
+    # Day 19 — Cloud Deployment prep. Every real agent's _register() only
+    # fires once its module is imported; before this, only pm/architect/
+    # decomposer were imported eagerly (via pipeline/graph.py), leaving
+    # capability_registry/agent_registry populated with as few as ~6 of the
+    # 72 real agents for most of a fresh process's lifetime — a real gap for
+    # /health's agent count and for fleet_manager.select() calls made shortly
+    # after startup, before any task has touched every agent type.
+    try:
+        from app.fleet.capability_registry import ensure_all_agents_registered
+
+        imported = ensure_all_agents_registered()
+        logger.info("Fleet agent registry bootstrap: %d agent modules imported", imported)
+    except Exception as exc:
+        logger.warning("Fleet agent registry bootstrap failed (non-fatal): %s", exc)
+
     await init_active_repo()
     await init_checkpointer(settings.database_url)
 
@@ -397,5 +412,15 @@ async def health() -> dict[str, object]:
         except Exception as exc:
             checks["s3"] = f"error: {exc}"
 
+    # Day 19 — Cloud Deployment prep. Agent count, so a deployment's own
+    # health check can confirm the fleet actually loaded (not just that the
+    # process is up), matching the plan's success criterion.
+    try:
+        from app.fleet.capability_registry import get_capability_registry
+
+        agent_count = len(get_capability_registry().all())
+    except Exception:
+        agent_count = 0
+
     overall = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
-    return {"status": overall, "checks": checks}
+    return {"status": overall, "checks": checks, "db": checks.get("db", "unknown"), "agents": agent_count}
