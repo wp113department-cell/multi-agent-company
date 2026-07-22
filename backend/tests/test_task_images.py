@@ -75,7 +75,9 @@ class TestUploadTaskImages:
             with TestClient(app) as client:
                 resp = client.post(
                     f"/api/tasks/{task_id}/images",
-                    files=[("files", ("shot.png", io.BytesIO(_MINIMAL_PNG), "image/png"))],
+                    files=[
+                        ("files", ("shot.png", io.BytesIO(_MINIMAL_PNG), "image/png"))
+                    ],
                 )
                 assert resp.status_code == 200, resp.text
                 created = resp.json()["created"]
@@ -112,7 +114,12 @@ class TestUploadTaskImages:
             with TestClient(app) as client:
                 resp = client.post(
                     f"/api/tasks/{task_id}/images",
-                    files=[("files", ("doc.svg", io.BytesIO(b"<svg></svg>"), "image/svg+xml"))],
+                    files=[
+                        (
+                            "files",
+                            ("doc.svg", io.BytesIO(b"<svg></svg>"), "image/svg+xml"),
+                        )
+                    ],
                 )
                 assert resp.status_code == 400
                 assert "supported image format" in resp.json()["error"]["message"]
@@ -166,7 +173,9 @@ class TestUploadTaskImages:
             with TestClient(app) as client:
                 resp = client.post(
                     f"/api/tasks/{task_id}/images",
-                    files=[("files", ("shot.png", io.BytesIO(_MINIMAL_PNG), "image/png"))],
+                    files=[
+                        ("files", ("shot.png", io.BytesIO(_MINIMAL_PNG), "image/png"))
+                    ],
                 )
                 image_id = resp.json()["created"][0]["id"]
 
@@ -206,7 +215,11 @@ class TestRunAgentGraphImages:
                 tools=[],
                 tool_handlers={},
                 verification_cfg=VerificationConfig(
-                    set_by={}, reset_by=(), reset_keys=(), enforce_in_result={}, initial={}
+                    set_by={},
+                    reset_by=(),
+                    reset_keys=(),
+                    enforce_in_result={},
+                    initial={},
                 ),
                 initial_message="Scaffold a landing page matching this design.",
                 enable_planning=False,
@@ -256,7 +269,11 @@ class TestRunAgentGraphImages:
                 tools=[],
                 tool_handlers={},
                 verification_cfg=VerificationConfig(
-                    set_by={}, reset_by=(), reset_keys=(), enforce_in_result={}, initial={}
+                    set_by={},
+                    reset_by=(),
+                    reset_keys=(),
+                    enforce_in_result={},
+                    initial={},
                 ),
                 initial_message="Plain text task, no images.",
                 enable_planning=False,
@@ -289,7 +306,7 @@ class TestImagesForwardedToDevAgents:
     wiring itself (not agent internals, already covered elsewhere)."""
 
     def test_run_frontend_dev_forwards_images(self) -> None:
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from app.agents.frontend_dev import run_frontend_dev
 
@@ -299,9 +316,15 @@ class TestImagesForwardedToDevAgents:
             "app.agents.frontend_dev.run_agent_graph", return_value=_SUBMITTED_STATE
         ) as mock_graph, patch(
             "app.agents.frontend_dev.make_coder_handlers",
-            return_value={"_patch_result": {"files_changed": ["apps/web/app/page.tsx"]}},
-        ), patch("app.agents.frontend_dev._run_frontend_checks", return_value=None):
-            files, error = run_frontend_dev(1, 1, "Build the page", "/tmp/wt", images=images)
+            return_value={
+                "_patch_result": {"files_changed": ["apps/web/app/page.tsx"]}
+            },
+        ), patch(
+            "app.agents.frontend_dev._run_frontend_checks", return_value=None
+        ):
+            files, error = run_frontend_dev(
+                1, 1, "Build the page", "/tmp/wt", images=images
+            )
 
         assert error is None
         assert files == ["apps/web/app/page.tsx"]
@@ -357,7 +380,9 @@ class TestPlanningPipelineImageFetch:
                     fake_graph = MagicMock()
                     fake_graph.ainvoke = AsyncMock(side_effect=_fake_ainvoke)
 
-                    with patch.object(graph_module, "get_graph", return_value=fake_graph):
+                    with patch.object(
+                        graph_module, "get_graph", return_value=fake_graph
+                    ):
                         await graph_module.run_planning_pipeline(
                             task_id=task.id,
                             title="img pipeline test",
