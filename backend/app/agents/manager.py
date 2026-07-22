@@ -109,6 +109,13 @@ async def run_manager(
     max_epic_failures = settings.manager_max_epic_failures
     repo = repo_path or settings.target_repo_path
 
+    # Gap-closure (Days 0-18 audit): every fleet-event publish in this
+    # function passed trace_id="" — Gap 10's own exit criteria wants a real
+    # trace_id "in every log line, bus event, audit entry, checkpoint" so a
+    # single id reconstructs a run's full timeline. Stable per manager run
+    # (not per-subtask) so all of a task's subtask events share one trace.
+    manager_trace_id = f"task-{task_id}-manager"
+
     results: list[dict[str, Any]] = []
     overall_status = "completed"
     blocked_count = 0
@@ -149,7 +156,7 @@ async def run_manager(
                     task_id=str(task_id),
                     title=subtask_title,
                     agent_name="manager",
-                    trace_id="",
+                    trace_id=manager_trace_id,
                 )
             )
         except Exception:
@@ -419,10 +426,23 @@ async def run_manager(
                 # subtasks exhaust their retries for the whole epic to continue.
                 try:
                     from app.fleet.failure_ladder import abort
+                    from app.fleet.failure_ladder import checkpoint as _checkpoint
 
+                    # Gap-closure (Days 0-18 audit): save_checkpoint() had zero
+                    # real callers anywhere despite being fully built and
+                    # tested since Day 12 — snapshot the subtask results
+                    # accumulated so far before the epic aborts.
+                    _checkpoint(
+                        {"results": results, "blocked_count": blocked_count},
+                        agent_name="manager",
+                        task_id=str(task_id),
+                        label="epic_halted",
+                        trace_id=manager_trace_id,
+                    )
                     abort(
                         str(task_id),
                         f"epic halted — {blocked_count}/{max_epic_failures} subtasks failed",
+                        trace_id=manager_trace_id,
                     )
                 except Exception:
                     pass
@@ -435,13 +455,15 @@ async def run_manager(
                 from app.fleet.failure_ladder import escalate, request_human_review
 
                 escalate(
-                    "manager", f"subtask {subtask_id} exhausted retries", trace_id=""
+                    "manager",
+                    f"subtask {subtask_id} exhausted retries",
+                    trace_id=manager_trace_id,
                 )
                 request_human_review(
                     str(task_id),
                     "manager",
                     f"subtask {subtask_id} blocked after retries",
-                    trace_id="",
+                    trace_id=manager_trace_id,
                 )
             except Exception:
                 pass

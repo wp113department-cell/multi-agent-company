@@ -1007,10 +1007,15 @@ def run_agent_graph(
         from app.fleet.agent_registry import get_agent_registry
         from app.fleet.fleet_events import publish, task_started
 
+        # Gap-closure (Days 0-18 audit): task_id=tid was a real bug in both
+        # calls below — tid is the per-run TRACE id, not the actual task's
+        # id. agent_registry's current_task_id and every TaskStarted event
+        # have been showing a random trace hex string instead of the real
+        # task id since this was written.
         _reg = get_agent_registry()
         if _reg.get(role_name) is not None:
-            _reg.start_task(role_name, task_id=tid)
-        publish(task_started(task_id=tid, agent_name=role_name, trace_id=tid))
+            _reg.start_task(role_name, task_id=task_id)
+        publish(task_started(task_id=task_id, agent_name=role_name, trace_id=tid))
     except Exception:
         pass
 
@@ -1201,8 +1206,21 @@ def run_agent_graph(
             and final_state.get("n_stalls", 0) >= max_stalls
         ):
             try:
+                from app.fleet.failure_ladder import checkpoint as _checkpoint
                 from app.fleet.failure_ladder import escalate, request_human_review
 
+                # Gap-closure (Days 0-18 audit): save_checkpoint() had zero
+                # real callers anywhere despite being fully built and tested
+                # since Day 12 — the ladder's own Rollback/Resume rungs had
+                # nothing real to act on. This is the ladder's real stall
+                # rung, so it's the natural first real caller.
+                _checkpoint(
+                    dict(final_state),
+                    agent_name=role_name,
+                    task_id=task_id,
+                    label="stalled",
+                    trace_id=tid,
+                )
                 escalate(
                     role_name,
                     f"stalled after {final_state['n_stalls']} turns without tool calls",
@@ -1242,7 +1260,7 @@ def run_agent_graph(
             _reg = get_agent_registry()
             if _reg.get(role_name) is not None:
                 _reg.complete_task(role_name)  # → AgentState.SLEEP
-            publish(task_completed(task_id=tid, agent_name=role_name, trace_id=tid))
+            publish(task_completed(task_id=task_id, agent_name=role_name, trace_id=tid))
             publish(
                 health_updated(role_name, health="healthy", state="sleep", trace_id=tid)
             )
@@ -1261,21 +1279,51 @@ def run_agent_graph(
             except Exception:
                 pass
 
-        # Lifecycle: agent transitions to ERROR on unhandled exception (Gap 7)
+        # Lifecycle: agent transitions to ERROR on unhandled exception (Gap 7).
+        # Gap-closure (Days 0-18 audit): (1) task_id=tid was a real bug here —
+        # tid is the per-run TRACE id, not the actual task's id, corrupting
+        # every TaskFailed event's task_id field for real production runs.
+        # (2) the exit criteria explicitly wants a HealthUpdated event on
+        # "success OR error" — only the success path ever emitted one before.
         try:
             from app.fleet.agent_registry import get_agent_registry
-            from app.fleet.fleet_events import publish, task_failed
+            from app.fleet.fleet_events import publish, task_failed, health_updated
 
             _reg = get_agent_registry()
             if _reg.get(role_name) is not None:
                 _reg.fail_task(role_name, reason=str(exc))
             publish(
                 task_failed(
-                    task_id=tid,
+                    task_id=task_id,
                     agent_name=role_name,
                     reason=str(exc)[:200],
                     trace_id=tid,
                 )
+            )
+            publish(
+                health_updated(
+                    role_name, health="error", state=str(exc)[:200], trace_id=tid
+                )
+            )
+        except Exception:
+            pass
+
+        # Day 12 Failure Recovery Ladder — Checkpoint rung. Gap-closure found
+        # save_checkpoint()/rollback_to() had zero real callers anywhere
+        # despite being fully built and tested since Day 12 — Rollback/Resume
+        # had nothing real to act on. Checkpoints the last known state before
+        # the exception (initial_state, if it was built successfully) so a
+        # human/future run has something real to restore from.
+        try:
+            from app.fleet.failure_ladder import checkpoint as _checkpoint
+
+            _checkpoint(
+                dict(initial_state),
+                agent_name=role_name,
+                task_id=task_id,
+                label="unhandled_exception",
+                metadata={"error": str(exc)[:200]},
+                trace_id=tid,
             )
         except Exception:
             pass

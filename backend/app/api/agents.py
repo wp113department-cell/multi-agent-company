@@ -76,7 +76,16 @@ async def launch_planning_pipeline(
             if is_blank_repo(effective_repo_path):
                 from app.fleet.fleet_events import publish, task_started, task_completed
 
-                publish(task_started(str(task_id), agent_name="bootstrap"))
+                # Gap-closure (Days 0-18 audit): Gap 10's own exit criteria
+                # wants a real trace_id on every bus event — stable per task
+                # (matches the convention already used for thread_id
+                # elsewhere, e.g. f"task-{task_id}" for approval recording).
+                bootstrap_trace_id = f"task-{task_id}"
+                publish(
+                    task_started(
+                        str(task_id), agent_name="bootstrap", trace_id=bootstrap_trace_id
+                    )
+                )
                 bootstrap_result = await bootstrap(
                     task_id, effective_repo_path, description, db=db
                 )
@@ -94,6 +103,7 @@ async def launch_planning_pipeline(
                             str(task_id),
                             agent_name="bootstrap",
                             summary=f"Scaffolded {bootstrap_result.project_type} project",
+                            trace_id=bootstrap_trace_id,
                         )
                     )
                 elif bootstrap_result.error:
@@ -255,6 +265,7 @@ async def resume_planning_pipeline(
                     description=f"Plan review for task {task_id}",
                     approved=approved,
                     task_id=str(task_id),
+                    trace_id=f"task-{task_id}",
                 )
             except Exception:
                 logger.warning(

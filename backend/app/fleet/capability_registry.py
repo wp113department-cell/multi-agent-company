@@ -97,6 +97,53 @@ def register(entry: AgentCapability) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Day 19 — Cloud Deployment prep. Every real agent's _register() only runs
+# once its module is actually imported — confirmed by grep that only pm/
+# architect/decomposer get imported eagerly (via pipeline/graph.py); every
+# other agent module is imported lazily, on first real dispatch. This means
+# capability_registry (and agent_registry) were incompletely populated for
+# most of a fresh process's lifetime — a real gap for a production /health
+# check or fleet_manager.select() call made shortly after startup, before any
+# task has touched every agent type. Scans app/agents/ at runtime (not a
+# hardcoded name list, so new agents are picked up automatically) and
+# imports every real agent module so its _register() hook fires.
+# ---------------------------------------------------------------------------
+
+_NON_AGENT_MODULES = {
+    "__init__",
+    "base",
+    "base_graph",
+    "tools",
+    "guardrails",
+    "agent_result",
+}
+
+
+def ensure_all_agents_registered() -> int:
+    """Import every real agent module under app/agents/ so its _register()
+    hook fires. Idempotent (register() is write-once-per-name). Returns the
+    number of agent modules successfully imported. Never raises — a single
+    broken module must not prevent the rest from registering."""
+    import importlib
+    import logging
+    from pathlib import Path
+
+    logger = logging.getLogger(__name__)
+    agents_dir = Path(__file__).resolve().parent.parent / "agents"
+    imported = 0
+    for path in sorted(agents_dir.glob("*.py")):
+        stem = path.stem
+        if stem in _NON_AGENT_MODULES:
+            continue
+        try:
+            importlib.import_module(f"app.agents.{stem}")
+            imported += 1
+        except Exception:
+            logger.warning("Failed to import agent module app.agents.%s", stem, exc_info=True)
+    return imported
+
+
+# ---------------------------------------------------------------------------
 # Reference agent registrations (Day 0 — 3 agents)
 # Validate architecture before fleet-wide rollout.
 # ---------------------------------------------------------------------------
