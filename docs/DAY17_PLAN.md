@@ -3,6 +3,8 @@
 Per `docs/FLEET_ENHANCEMENT_PLAN.md` lines 1144-1193. Goal: user-provided credentials (GitHub
 token, Anthropic key, custom secrets) stored securely, injected into agents, never logged.
 
+
+
 ## Research (REPO-FIRST)
 
 `repos/open-hands/openhands/app_server/secrets/`:
