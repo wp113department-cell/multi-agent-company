@@ -54,6 +54,7 @@ def _restore_pm_agent_health():
     if instance is not None:
         instance.recover()
 
+
 _SUBMITTED_ANTHROPIC_RESPONSE = type(
     "R",
     (),
@@ -104,7 +105,12 @@ class TestTaskIdVsTraceIdBugFix:
             run_agent_graph(
                 role_name="pm",
                 model="claude-haiku",
-                tools=[{"name": "submit_brief", "input_schema": {"type": "object", "properties": {}}}],
+                tools=[
+                    {
+                        "name": "submit_brief",
+                        "input_schema": {"type": "object", "properties": {}},
+                    }
+                ],
                 tool_handlers={"submit_brief": lambda inp: "ok"},
                 verification_cfg=VerificationConfig(
                     set_by={"submit_brief": "brief_submitted"},
@@ -123,7 +129,11 @@ class TestTaskIdVsTraceIdBugFix:
                 trace_id="some-completely-different-trace-hex",
             )
 
-        task_events = [e for e in captured_events if e.event_type.value in ("TaskStarted", "TaskCompleted")]
+        task_events = [
+            e
+            for e in captured_events
+            if e.event_type.value in ("TaskStarted", "TaskCompleted")
+        ]
         assert task_events, "expected at least a TaskStarted or TaskCompleted event"
         for event in task_events:
             assert event.task_id == "99999", (
@@ -150,7 +160,11 @@ class TestTaskIdVsTraceIdBugFix:
                     tools=[],
                     tool_handlers={},
                     verification_cfg=VerificationConfig(
-                        set_by={}, reset_by=(), reset_keys=(), enforce_in_result={}, initial={}
+                        set_by={},
+                        reset_by=(),
+                        reset_keys=(),
+                        enforce_in_result={},
+                        initial={},
                     ),
                     initial_message="do the thing",
                     enable_planning=False,
@@ -162,7 +176,9 @@ class TestTaskIdVsTraceIdBugFix:
                     trace_id="another-trace-hex",
                 )
 
-        failed_events = [e for e in captured_events if e.event_type.value == "TaskFailed"]
+        failed_events = [
+            e for e in captured_events if e.event_type.value == "TaskFailed"
+        ]
         assert failed_events, "expected a TaskFailed event on exception"
         assert failed_events[0].task_id == "88888"
         assert failed_events[0].trace_id == "another-trace-hex"
@@ -178,7 +194,12 @@ class TestTaskIdVsTraceIdBugFix:
             run_agent_graph(
                 role_name="pm",
                 model="claude-haiku",
-                tools=[{"name": "submit_brief", "input_schema": {"type": "object", "properties": {}}}],
+                tools=[
+                    {
+                        "name": "submit_brief",
+                        "input_schema": {"type": "object", "properties": {}},
+                    }
+                ],
                 tool_handlers={"submit_brief": lambda inp: "ok"},
                 verification_cfg=VerificationConfig(
                     set_by={"submit_brief": "brief_submitted"},
@@ -227,7 +248,11 @@ class TestHealthUpdatedOnErrorPath:
                     tools=[],
                     tool_handlers={},
                     verification_cfg=VerificationConfig(
-                        set_by={}, reset_by=(), reset_keys=(), enforce_in_result={}, initial={}
+                        set_by={},
+                        reset_by=(),
+                        reset_keys=(),
+                        enforce_in_result={},
+                        initial={},
                     ),
                     initial_message="do the thing",
                     enable_planning=False,
@@ -238,7 +263,9 @@ class TestHealthUpdatedOnErrorPath:
                     task_id="66666",
                 )
 
-        health_events = [e for e in captured_events if e.event_type.value == "HealthUpdated"]
+        health_events = [
+            e for e in captured_events if e.event_type.value == "HealthUpdated"
+        ]
         assert health_events, "expected a HealthUpdated event on the exception path"
         assert health_events[-1].payload["health"] == "error"
 
@@ -259,7 +286,11 @@ class TestCheckpointWiringOnExceptionPath:
                     tools=[],
                     tool_handlers={},
                     verification_cfg=VerificationConfig(
-                        set_by={}, reset_by=(), reset_keys=(), enforce_in_result={}, initial={}
+                        set_by={},
+                        reset_by=(),
+                        reset_keys=(),
+                        enforce_in_result={},
+                        initial={},
                     ),
                     initial_message="do the thing",
                     enable_planning=False,

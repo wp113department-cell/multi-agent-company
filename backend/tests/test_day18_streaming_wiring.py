@@ -18,7 +18,12 @@ from unittest.mock import MagicMock, patch
 _SUBMITTED_STATE = {
     "messages": [],
     "verification": {},
-    "result": {"technical_approach": "x", "impacted_files": [], "risks": [], "risk_level": "low"},
+    "result": {
+        "technical_approach": "x",
+        "impacted_files": [],
+        "risks": [],
+        "risk_level": "low",
+    },
     "turns": 1,
     "submitted": True,
     "requires_human_approval": False,
@@ -42,7 +47,9 @@ class TestPipelineNodesThreadTaskId:
             "task_description": "d",
             "repo_path": "/tmp",
         }
-        with patch("app.agents.pm.run_agent_graph", return_value=_SUBMITTED_STATE) as mock_graph:
+        with patch(
+            "app.agents.pm.run_agent_graph", return_value=_SUBMITTED_STATE
+        ) as mock_graph:
             pm_node(state)  # type: ignore[arg-type]
         assert mock_graph.call_args.kwargs["task_id"] == "42"
 
@@ -73,10 +80,13 @@ class TestPipelineNodesThreadTaskId:
         }
         submitted_with_subtasks = {
             **_SUBMITTED_STATE,
-            "result": {"subtasks": [{"type": "backend", "title": "x", "description": "y"}]},
+            "result": {
+                "subtasks": [{"type": "backend", "title": "x", "description": "y"}]
+            },
         }
         with patch(
-            "app.agents.decomposer.run_agent_graph", return_value=submitted_with_subtasks
+            "app.agents.decomposer.run_agent_graph",
+            return_value=submitted_with_subtasks,
         ) as mock_graph:
             decomposer_node(state)  # type: ignore[arg-type]
         assert mock_graph.call_args.kwargs["task_id"] == "44"
@@ -94,7 +104,9 @@ class TestDevAgentsThreadTaskId:
         ) as mock_graph, patch(
             "app.agents.backend_dev.make_coder_handlers",
             return_value={"_patch_result": {"files_changed": ["a.py"]}},
-        ), patch("app.agents.backend_dev._run_backend_checks", return_value=None):
+        ), patch(
+            "app.agents.backend_dev._run_backend_checks", return_value=None
+        ):
             run_backend_dev(task_id=51, subtask_id=1, plan="p", worktree_path="/tmp/wt")
         assert mock_graph.call_args.kwargs["task_id"] == "51"
 
@@ -106,8 +118,12 @@ class TestDevAgentsThreadTaskId:
         ) as mock_graph, patch(
             "app.agents.frontend_dev.make_coder_handlers",
             return_value={"_patch_result": {"files_changed": ["a.tsx"]}},
-        ), patch("app.agents.frontend_dev._run_frontend_checks", return_value=None):
-            run_frontend_dev(task_id=52, subtask_id=1, plan="p", worktree_path="/tmp/wt")
+        ), patch(
+            "app.agents.frontend_dev._run_frontend_checks", return_value=None
+        ):
+            run_frontend_dev(
+                task_id=52, subtask_id=1, plan="p", worktree_path="/tmp/wt"
+            )
         assert mock_graph.call_args.kwargs["task_id"] == "52"
 
     def test_run_coder_passes_task_id(self) -> None:
@@ -118,7 +134,9 @@ class TestDevAgentsThreadTaskId:
         ) as mock_graph, patch(
             "app.agents.coder.make_coder_handlers",
             return_value={"_patch_result": {"files_changed": ["a.py"]}},
-        ), patch("app.agents.coder._run_checks", return_value=None):
+        ), patch(
+            "app.agents.coder._run_checks", return_value=None
+        ):
             run_coder(task_id=53, plan="p", worktree_path="/tmp/wt")
         assert mock_graph.call_args.kwargs["task_id"] == "53"
 
@@ -126,10 +144,15 @@ class TestDevAgentsThreadTaskId:
         from app.agents.qa import run_qa
 
         qa_state = {**_SUBMITTED_STATE, "result": {"status": "passed", "summary": "ok"}}
-        with patch("app.agents.qa.run_agent_graph", return_value=qa_state) as mock_graph, patch(
-            "app.agents.qa.make_qa_handlers", return_value={}
-        ):
-            run_qa(task_id=54, subtask_id=1, files_changed=["a.py"], worktree_path="/tmp/wt")
+        with patch(
+            "app.agents.qa.run_agent_graph", return_value=qa_state
+        ) as mock_graph, patch("app.agents.qa.make_qa_handlers", return_value={}):
+            run_qa(
+                task_id=54,
+                subtask_id=1,
+                files_changed=["a.py"],
+                worktree_path="/tmp/wt",
+            )
         assert mock_graph.call_args.kwargs["task_id"] == "54"
 
     def test_run_reviewer_passes_task_id(self) -> None:
@@ -138,7 +161,9 @@ class TestDevAgentsThreadTaskId:
         review_state = {**_SUBMITTED_STATE, "result": {"findings": []}}
         with patch(
             "app.agents.reviewer.run_agent_graph", return_value=review_state
-        ) as mock_graph, patch("app.agents.reviewer.make_reviewer_handlers", return_value={}):
+        ) as mock_graph, patch(
+            "app.agents.reviewer.make_reviewer_handlers", return_value={}
+        ):
             run_reviewer(task_id=55, subtask_id=1, diff="d", plan="p")
         assert mock_graph.call_args.kwargs["task_id"] == "55"
 
@@ -147,10 +172,15 @@ class TestAgentSwitchWiredAtRealTransitions:
     def test_pm_node_pushes_agent_switch(self) -> None:
         from app.agents.pm import pm_node
 
-        state = {"task_id": 60, "task_title": "t", "task_description": "d", "repo_path": "/tmp"}
-        with patch("app.agents.pm.run_agent_graph", return_value=_SUBMITTED_STATE), patch(
-            "app.services.activity_stream.push_agent_switch"
-        ) as mock_switch:
+        state = {
+            "task_id": 60,
+            "task_title": "t",
+            "task_description": "d",
+            "repo_path": "/tmp",
+        }
+        with patch(
+            "app.agents.pm.run_agent_graph", return_value=_SUBMITTED_STATE
+        ), patch("app.services.activity_stream.push_agent_switch") as mock_switch:
             pm_node(state)  # type: ignore[arg-type]
         mock_switch.assert_called_once_with("60", "pm", "planning")
 
@@ -178,22 +208,30 @@ class TestAgentSwitchWiredAtRealTransitions:
             return result
 
         with patch(
-            "app.agents.backend_dev.run_backend_dev", side_effect=lambda **kw: (["a.py"], None)
+            "app.agents.backend_dev.run_backend_dev",
+            side_effect=lambda **kw: (["a.py"], None),
         ), patch(
             "app.agents.qa.run_qa",
-            side_effect=lambda **kw: MagicMock(status="passed", summary="ok", errors=[]),
+            side_effect=lambda **kw: MagicMock(
+                status="passed", summary="ok", errors=[]
+            ),
         ), patch(
             "app.agents.reviewer.run_reviewer",
             side_effect=lambda **kw: MagicMock(
                 summary="ok", findings=[], has_blocking=False
             ),
-        ), patch("app.repo_tools.worktree.get_diff", return_value=""), patch(
+        ), patch(
+            "app.repo_tools.worktree.get_diff", return_value=""
+        ), patch(
             "app.event_bus.bus.publish_event"
         ), patch(
             "app.services.git_service.git_add", return_value={"ok": True, "stderr": ""}
         ), patch(
-            "app.services.git_service.git_commit", return_value={"ok": True, "stderr": ""}
-        ), patch("app.services.activity_stream.push_agent_switch") as mock_switch:
+            "app.services.git_service.git_commit",
+            return_value={"ok": True, "stderr": ""},
+        ), patch(
+            "app.services.activity_stream.push_agent_switch"
+        ) as mock_switch:
             asyncio.run(
                 run_manager(
                     task_id=61,
@@ -249,7 +287,9 @@ def _cleanup_task(task_id: int) -> None:
         engine = _new_isolated_db_engine()
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as db:  # type: ignore[arg-type]
-                await db.execute(delete(PendingApproval).where(PendingApproval.task_id == task_id))
+                await db.execute(
+                    delete(PendingApproval).where(PendingApproval.task_id == task_id)
+                )
                 await db.execute(delete(DevTask).where(DevTask.id == task_id))
                 await db.commit()
         finally:
@@ -292,7 +332,9 @@ class TestApprovalRequiredWiredAtRealRecordingPoints:
                 side_effect=_fake_run_planning_pipeline,
             ):
                 with TestClient(app) as client:
-                    resp = client.post(f"/api/tasks/{task_id}/run", json={"mode": "full"})
+                    resp = client.post(
+                        f"/api/tasks/{task_id}/run", json={"mode": "full"}
+                    )
                 assert resp.status_code == 200, resp.text
 
             stream = registry.get(str(task_id))
@@ -301,7 +343,9 @@ class TestApprovalRequiredWiredAtRealRecordingPoints:
             while not stream._queue.empty():
                 events.append(stream._queue.get_nowait())
             approval_events = [e for e in events if e["type"] == "approval_required"]
-            assert approval_events, f"expected an approval_required event, got: {events}"
+            assert (
+                approval_events
+            ), f"expected an approval_required event, got: {events}"
             assert approval_events[0]["action"] == "plan_review"
 
             registry.remove(str(task_id))

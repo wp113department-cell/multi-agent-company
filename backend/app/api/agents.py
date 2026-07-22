@@ -83,7 +83,9 @@ async def launch_planning_pipeline(
                 bootstrap_trace_id = f"task-{task_id}"
                 publish(
                     task_started(
-                        str(task_id), agent_name="bootstrap", trace_id=bootstrap_trace_id
+                        str(task_id),
+                        agent_name="bootstrap",
+                        trace_id=bootstrap_trace_id,
                     )
                 )
                 bootstrap_result = await bootstrap(

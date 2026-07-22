@@ -139,7 +139,9 @@ def ensure_all_agents_registered() -> int:
             importlib.import_module(f"app.agents.{stem}")
             imported += 1
         except Exception:
-            logger.warning("Failed to import agent module app.agents.%s", stem, exc_info=True)
+            logger.warning(
+                "Failed to import agent module app.agents.%s", stem, exc_info=True
+            )
     return imported
 
 

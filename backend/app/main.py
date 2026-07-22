@@ -223,7 +223,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from app.fleet.capability_registry import ensure_all_agents_registered
 
         imported = ensure_all_agents_registered()
-        logger.info("Fleet agent registry bootstrap: %d agent modules imported", imported)
+        logger.info(
+            "Fleet agent registry bootstrap: %d agent modules imported", imported
+        )
     except Exception as exc:
         logger.warning("Fleet agent registry bootstrap failed (non-fatal): %s", exc)
 
@@ -423,4 +425,9 @@ async def health() -> dict[str, object]:
         agent_count = 0
 
     overall = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
-    return {"status": overall, "checks": checks, "db": checks.get("db", "unknown"), "agents": agent_count}
+    return {
+        "status": overall,
+        "checks": checks,
+        "db": checks.get("db", "unknown"),
+        "agents": agent_count,
+    }
