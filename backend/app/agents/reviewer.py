@@ -110,18 +110,30 @@ def run_reviewer(
     repo_path: str | None = None,
     on_heartbeat: Any = None,  # kept for backward compat — no-op
     on_tool_call: Any = None,  # kept for backward compat — no-op
+    images: list[dict[str, str]] | None = None,
 ) -> ReviewResult:
-    """Run code review agent. Returns ReviewResult (never raises — errors become blocking findings)."""
+    """Run code review agent. Returns ReviewResult (never raises — errors become blocking findings).
+
+    images (Day 16): optional reference images (e.g. a website design
+    screenshot) — used for visual comparison against the diff.
+    """
     settings = get_settings()
     repo = repo_path or settings.target_repo_path
     handlers = make_reviewer_handlers(repo)
 
     diff_preview = diff[:4000] if diff else "(no diff available)"
+    image_note = (
+        f"\n\n{len(images)} reference image(s) are attached below — compare the "
+        "implementation against them visually."
+        if images
+        else ""
+    )
 
     initial_message = (
         f"Task ID: {task_id}, Subtask ID: {subtask_id}\n\n"
         f"Approved Implementation Plan:\n{plan}\n\n"
-        f"Code Diff (first 4000 chars):\n{diff_preview}\n\n"
+        f"Code Diff (first 4000 chars):\n{diff_preview}"
+        f"{image_note}\n\n"
         "Review this implementation. Read any files you need to understand the context.\n"
         "Produce structured findings categorized as blocking, non-blocking, or suggestion.\n"
         "Call submit_review when done with all findings."
@@ -143,6 +155,7 @@ def run_reviewer(
             enable_reflection=True,
             enable_lesson=True,
             max_turns=15,
+            images=images,
         )
         logger.info(
             "Review done — subtask %d, in=%d out=%d submitted=%s",

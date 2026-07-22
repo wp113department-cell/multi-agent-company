@@ -82,10 +82,16 @@ async def run_manager(
     repo_path: str | None = None,
     on_status: Any = None,
     epic_id: str | None = None,
+    images: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Orchestrate Dev → QA → Review per subtask.
 
     Returns {"status": "completed"|"blocked"|"halted", "results": [...], "blocked_count": N}
+
+    images (Day 16): optional reference images (e.g. a website design
+    screenshot) — passed to run_frontend_dev (UI implementation) and
+    run_reviewer (visual comparison). Not passed to run_backend_dev, matching
+    the plan's own agent list.
     """
     from app.agents.backend_dev import run_backend_dev
     from app.agents.frontend_dev import run_frontend_dev
@@ -189,6 +195,7 @@ async def run_manager(
                     plan=full_plan,
                     worktree_path=worktree_path,
                     repo_path=repo,
+                    images=images,
                 )
             else:
                 files_changed, dev_error = await asyncio.to_thread(
@@ -289,6 +296,7 @@ async def run_manager(
                 diff=subtask_diff,
                 plan=subtask_plan,
                 repo_path=repo,
+                images=images,
             )
             review_summary = review_result.summary
             review_findings = [

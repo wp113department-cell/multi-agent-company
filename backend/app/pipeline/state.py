@@ -23,6 +23,11 @@ class PipelineState(TypedDict, total=False):
     # Engineering memory context (pre-fetched before pipeline runs)
     memory_context: str
 
+    # Day 16 — Image Input Pipeline. Reference images (e.g. a website design
+    # screenshot), pre-fetched before the pipeline runs. Each entry:
+    # {"media_type": ..., "data": <base64>}.
+    images: list[dict[str, str]]
+
     # Control flow
     stage: str  # pm | architect | decomposer | done | blocked
     error: str

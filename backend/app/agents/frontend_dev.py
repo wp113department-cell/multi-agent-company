@@ -106,22 +106,33 @@ def run_frontend_dev(
     repo_path: str | None = None,
     on_heartbeat: Any = None,  # kept for backward compat — no-op
     on_tool_call: Any = None,  # kept for backward compat — no-op
+    images: list[dict[str, str]] | None = None,
 ) -> tuple[list[str], str | None]:
     """Run frontend developer agent with static-check retry loop.
 
     Returns (files_changed, error). error is None on success.
+
+    images (Day 16): optional reference images (e.g. a website design
+    screenshot) — build the UI to match what they show.
     """
     settings = get_settings()
     repo = repo_path or settings.target_repo_path
     max_retries = settings.max_retries
     check_error: str | None = None
+    image_note = (
+        f"\n\n{len(images)} reference image(s) are attached below — build the "
+        "UI to match what they show exactly."
+        if images
+        else ""
+    )
 
     for attempt in range(max_retries):
         handlers = make_coder_handlers(worktree_path, repo)
 
         base_msg = (
             f"Task ID: {task_id}, Subtask ID: {subtask_id}\n\n"
-            f"Frontend Implementation Plan:\n{plan}\n\n"
+            f"Frontend Implementation Plan:\n{plan}"
+            f"{image_note}\n\n"
             "You are a frontend developer. Implement the plan in apps/web/.\n"
             "Use TypeScript strict mode. API calls go through apps/web/lib/api.ts.\n"
             "When done, call submit_patch with the list of files changed."
@@ -149,6 +160,7 @@ def run_frontend_dev(
                 enable_reflection=True,
                 enable_lesson=True,
                 max_turns=30,
+                images=images,
             )
         except Exception as exc:
             logger.exception(

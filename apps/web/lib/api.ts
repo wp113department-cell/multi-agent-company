@@ -120,6 +120,33 @@ export async function extractPdfs(files: File[]): Promise<PdfFileResult[]> {
   return data.files;
 }
 
+// Day 16 — Image Input Pipeline
+export interface TaskImageMeta {
+  id: number;
+  mimeType: string;
+  order: number;
+  createdAt: string;
+}
+
+export async function uploadTaskImages(taskId: number, files: File[]): Promise<TaskImageMeta[]> {
+  const form = new FormData();
+  for (const f of files) form.append("files", f);
+  const res = await fetch(`/api/tasks/${taskId}/images`, { method: "POST", body: form });
+  const data = await handleResponse<{ created: TaskImageMeta[] }>(res);
+  return data.created;
+}
+
+export async function fetchTaskImages(taskId: string): Promise<TaskImageMeta[]> {
+  const res = await fetch(`/api/tasks/${taskId}/images`, { cache: "no-store" });
+  const data = await handleResponse<{ images: TaskImageMeta[] }>(res);
+  return data.images;
+}
+
+export async function deleteTaskImage(taskId: string, imageId: number): Promise<{ deleted: boolean }> {
+  const res = await fetch(`/api/tasks/${taskId}/images/${imageId}`, { method: "DELETE" });
+  return handleResponse(res);
+}
+
 export async function restartTask(taskId: string): Promise<{ restarted: boolean; taskId: number }> {
   const res = await fetch(`/api/tasks/${taskId}/restart`, { method: "POST" });
   return handleResponse(res);

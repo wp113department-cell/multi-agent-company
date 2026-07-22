@@ -1,10 +1,18 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
-import { createTask, extractPdfs, listRepos, type PdfFileResult } from "../lib/api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  createTask,
+  extractPdfs,
+  listRepos,
+  uploadTaskImages,
+  type PdfFileResult,
+} from "../lib/api";
 
 const MAX_PDFS = 5;
+const MAX_IMAGES = 20;
+const IMAGE_ACCEPT = "image/png,image/jpeg,image/gif,image/webp";
 // Allow up to 500k chars (~125k tokens) — fits both Anthropic and OpenAI limits
 const MAX_DESC_CHARS = 500_000;
 
@@ -21,6 +29,11 @@ export function NewTaskForm() {
   const [extracting, setExtracting] = useState(false);
   const [pdfError, setPdfError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Image state (Day 16 — Image Input Pipeline)
+  const [images, setImages] = useState<File[]>([]);
+  const [imageError, setImageError] = useState("");
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const queryClient = useQueryClient();
 
@@ -44,8 +57,15 @@ export function NewTaskForm() {
   }
 
   const mutation = useMutation({
-    mutationFn: () =>
-      createTask({ title, description: buildFinalDescription(), repoId }),
+    mutationFn: async () => {
+      const task = await createTask({ title, description: buildFinalDescription(), repoId });
+      if (images.length > 0) {
+        // Images are stored against a real task_id (unlike PDFs, which just
+        // extract text client-side) — upload happens after task creation.
+        await uploadTaskImages(task.id, images);
+      }
+      return task;
+    },
     onSuccess: () => {
       setTitle("");
       setDescription("");
@@ -53,10 +73,35 @@ export function NewTaskForm() {
       setPdfs([]);
       setPdfResults([]);
       setPdfError("");
+      setImages([]);
+      setImageError("");
       setExpanded(false);
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
     },
   });
+
+  function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    const newFiles = [...images, ...files].slice(0, MAX_IMAGES);
+    if (files.length + images.length > MAX_IMAGES) {
+      setImageError(`Maximum ${MAX_IMAGES} images allowed.`);
+    } else {
+      setImageError("");
+    }
+    setImages(newFiles);
+    if (imageInputRef.current) imageInputRef.current.value = "";
+  }
+
+  function removeImage(idx: number) {
+    setImages(images.filter((_, i) => i !== idx));
+  }
+
+  const imagePreviews = useMemo(() => images.map((f) => URL.createObjectURL(f)), [images]);
+  useEffect(() => {
+    return () => {
+      imagePreviews.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [imagePreviews]);
 
   async function handlePdfChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -199,6 +244,54 @@ export function NewTaskForm() {
           </ul>
         )}
         {pdfError && <p className="mt-1 text-xs text-red-600">{pdfError}</p>}
+      </div>
+
+      {/* Reference images (Day 16 — Image Input Pipeline) */}
+      <div>
+        <div className="mb-1.5 flex items-center gap-2">
+          <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+            Reference images ({images.length}/{MAX_IMAGES})
+          </span>
+          <button
+            type="button"
+            onClick={() => imageInputRef.current?.click()}
+            disabled={images.length >= MAX_IMAGES}
+            className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400"
+          >
+            + Add image
+          </button>
+        </div>
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept={IMAGE_ACCEPT}
+          multiple
+          onChange={handleImageChange}
+          className="hidden"
+        />
+        {images.length > 0 && (
+          <ul className="flex flex-wrap gap-2">
+            {images.map((f, i) => (
+              <li key={i} className="relative">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={imagePreviews[i]}
+                  alt={f.name}
+                  className="h-16 w-16 rounded border border-slate-300 object-cover dark:border-slate-600"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeImage(i)}
+                  className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] text-white hover:bg-red-600"
+                  aria-label={`Remove ${f.name}`}
+                >
+                  ✕
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {imageError && <p className="mt-1 text-xs text-red-600">{imageError}</p>}
       </div>
 
       {/* Controls row */}

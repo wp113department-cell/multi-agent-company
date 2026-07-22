@@ -115,6 +115,25 @@ class TaskLog(Base):
     task: Mapped[DevTask] = relationship(back_populates="logs")
 
 
+class TaskImage(Base):
+    """Day 16 — Image Input Pipeline. Reference images (e.g. a website design
+    screenshot) attached to a task, injected as Anthropic ImageBlockParam
+    content blocks into pm/architect/frontend_dev/reviewer's initial calls."""
+
+    __tablename__ = "task_images"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    task_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("dev_tasks.id", ondelete="CASCADE")
+    )
+    base64_data: Mapped[str] = mapped_column(Text)
+    mime_type: Mapped[str] = mapped_column(String(50))
+    display_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+    task: Mapped[DevTask] = relationship()
+
+
 class AgentRun(Base):
     __tablename__ = "agent_runs"
 

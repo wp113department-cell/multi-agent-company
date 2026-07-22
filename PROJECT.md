@@ -3000,3 +3000,70 @@ Frontend: tsc --noEmit (clean)
 
 ### Verdict
 ✅ GREEN FLAG — GAP-CLOSURE (DAYS 11-15) COMPLETE. Ready for Day 16 (Image Input Pipeline).
+
+## 2026-07-22 — Day 16 Complete: Image Input Pipeline
+
+Plan: `docs/DAY16_PLAN.md`, grounded in REPO-FIRST research before any design. Full report:
+`docs/reports/FLEET_DAY16_TEST_REPORT.md`.
+
+### Research
+- `repos/cline/apps/vscode/src/core/prompts/responses.ts:351` `formatImagesIntoBlocks()` —
+  confirmed the exact Anthropic `ImageBlockParam` shape, matching the plan's own pseudocode.
+- `repos/roo-code/src/core/mentions/resolveImageMentions.ts` + `imageHelpers.ts` — confirmed the
+  plan's 5MB/20MB/20-image limits are real constants in a real project. Used a **narrower** format
+  allowlist than roo-code's (png/jpg/jpeg/gif/webp only): the Anthropic Messages API's vision
+  support only accepts those 4 media types — a wider list would let files through the endpoint the
+  API itself would reject.
+- `POST /api/tasks/extract-pdfs` and `NewTaskForm.tsx`'s PDF picker were exact precedents for the
+  upload endpoint and frontend UI shape, reused directly. One real difference handled: images must
+  persist against a real `task_id` (unlike PDFs' client-side text extraction), so the New Task
+  form's submit flow became two-phase — create the task, then upload images against its new id.
+
+### What was built
+- Migration 017 + `TaskImage` model (adapted from the plan's UUID/`tasks(id)` pseudocode schema to
+  this project's real `BigInteger`/`dev_tasks` convention).
+- `POST/GET/DELETE /api/tasks/{id}/images` (+ `GET .../images/{id}` for raw bytes with the correct
+  `Content-Type`, avoiding base64 blobs in polled JSON list responses).
+- `run_agent_graph()` gained `images: list[dict[str, str]] | None = None` — builds a real
+  multimodal content block list (verified safe by reading `call_llm()`'s message-passing path
+  first: no string-only assumptions in the main call path).
+- Wired into `pipeline/graph.py` (`run_planning_pipeline()` fetches images once, mirrors the
+  existing `memory_context` pre-fetch pattern; `pm_node`/`architect_node` forward them) and
+  `manager.py`'s subtask loop (`launch_manager()` fetches once, threads through `run_manager()` →
+  `run_frontend_dev()`/`run_reviewer()` — NOT `run_backend_dev`, matching the plan's exact 4-agent
+  list).
+- Frontend: image picker on `NewTaskForm.tsx` (thumbnails via `URL.createObjectURL`) and a
+  reference-image gallery on the task detail page — real frontend work this time, not skipped
+  (unlike Days 14-15, whose own plans had no frontend section).
+
+### Days 11-15 gap-closure lesson applied
+Explicitly checked whether the plan's 4-agent list has a second real entry point the way Day 15's
+bootstrap missed "simple" pipeline mode. Confirmed it doesn't — pm/architect/frontend_dev/reviewer
+only exist in the "full" pipeline path; "simple" mode uses different agent identities (`planner`,
+`coder`) outside this day's scope. No gap found.
+
+### Testing
+11 new tests (`test_task_images.py`): real DB round trip (upload → list → get bytes → delete),
+rejection of unsupported formats/oversized files/over-count uploads, 404 handling,
+`run_agent_graph()`'s multimodal content-block construction (with AND without images, locking in
+backward compatibility for every existing caller), `run_frontend_dev()`/`run_reviewer()` image
+forwarding, `run_planning_pipeline()`'s DB image fetch.
+
+### Real-caller verification
+All 4 new repository functions and the `images=` forwarding chain traced to real callers (API
+endpoints, `launch_manager()`, `pipeline/graph.py`) — 3rd clean day in a row, zero orphaned
+modules.
+
+### Test Results
+```
+pytest tests/ -q
+→ 2664 passed, 0 failed, 55 skipped, 17 deselected, 20 warnings in 90.60s (11 new tests)
+
+mypy app/ --strict
+→ 0 errors
+
+Frontend: tsc --noEmit (clean), eslint (clean), npm run build (succeeds)
+```
+
+### Verdict
+✅ GREEN FLAG — DAY 16 COMPLETE. Ready for Day 17 (Credential Vault).

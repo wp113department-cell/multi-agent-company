@@ -128,10 +128,19 @@ def architect_node(state: PipelineState) -> PipelineState:
     memory_context = state.get("memory_context", "")
     memory_block = f"\n\n{memory_context}" if memory_context else ""
 
+    # Day 16 — Image Input Pipeline.
+    images = state.get("images", [])
+    image_block = (
+        f"\n\n{len(images)} reference image(s) are attached below — base the "
+        "component structure and impacted files on what they show."
+        if images
+        else ""
+    )
+
     initial_message = (
         f"Task: {state['task_title']}\n\n"
         f"PM Brief:\n{pm_brief}"
-        f"{memory_block}\n\n"
+        f"{memory_block}{image_block}\n\n"
         "Use read_file and list_files to explore the codebase, then submit your technical plan "
         "using the submit_architect_plan tool."
     )
@@ -152,6 +161,7 @@ def architect_node(state: PipelineState) -> PipelineState:
             enable_reflection=True,
             enable_lesson=True,
             human_approval_required=False,
+            images=images,
             max_turns=15,
         )
         logger.info(

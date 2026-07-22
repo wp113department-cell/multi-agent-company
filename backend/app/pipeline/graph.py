@@ -166,6 +166,20 @@ async def run_planning_pipeline(
         except Exception as exc:
             logger.warning("Memory query failed before planning: %s", exc)
 
+    # Day 16 — Image Input Pipeline. Pre-fetch reference images (e.g. a
+    # website design screenshot) the same way memory_context is pre-fetched
+    # above — once, before the graph runs, so pm_node/architect_node can just
+    # read state["images"] rather than each needing db access themselves.
+    images: list[dict[str, str]] = []
+    if db is not None:
+        try:
+            from app.db.repository import list_task_images
+
+            rows = await list_task_images(db, task_id)
+            images = [{"media_type": r.mime_type, "data": r.base64_data} for r in rows]
+        except Exception as exc:
+            logger.warning("Image fetch failed before planning: %s", exc)
+
     graph = get_graph()
     config = {"configurable": {"thread_id": f"task-{task_id}"}}
 
@@ -176,6 +190,7 @@ async def run_planning_pipeline(
         "repo_path": repo_path,
         "stage": "pm",
         "memory_context": memory_context,
+        "images": images,
     }
 
     result: PipelineState = await graph.ainvoke(initial_state, config=config)

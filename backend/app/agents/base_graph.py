@@ -921,8 +921,14 @@ def run_agent_graph(
     max_stalls: int = 3,
     trace_id: str = "",
     task_id: str = "",
+    images: list[dict[str, str]] | None = None,
 ) -> AgentRunState:
     """Build + run the agent graph, return the final state.
+
+    images (Day 16): optional list of {"media_type": ..., "data": <base64>}
+    reference images (e.g. a website design screenshot). When present, the
+    first user message becomes a real Anthropic multimodal content block list
+    (text + images) instead of a plain string.
 
     All Fleet OS flags default to True. Callers can pass False to opt out.
     Settings-based defaults for model_haiku and repo_path when not provided.
@@ -930,6 +936,23 @@ def run_agent_graph(
     import uuid as _uuid
 
     tid = trace_id or _uuid.uuid4().hex[:12]
+
+    # Day 16 — Image Input Pipeline. A list of real Anthropic content blocks
+    # when images are present, otherwise the plain string exactly as before
+    # (both are valid `content` values for the Anthropic SDK).
+    initial_content: Any = initial_message
+    if images:
+        initial_content = [{"type": "text", "text": initial_message}] + [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": img["media_type"],
+                    "data": img["data"],
+                },
+            }
+            for img in images
+        ]
 
     # Day 5A: ModelRouter wins over passed-in model — router is source of truth.
     # Agents pass model=settings.model_coder as a fallback; router overrides per role_name.
@@ -1028,7 +1051,7 @@ def run_agent_graph(
                         tool_handlers[_hname] = _make_wrapper(_orig_h)
 
                 _msgs: list[dict[str, Any]] = [
-                    {"role": "user", "content": initial_message}
+                    {"role": "user", "content": initial_content}
                 ]
                 _text, _in, _out, _cr, _cc = _run_agent(
                     role_name=role_name,
@@ -1089,7 +1112,7 @@ def run_agent_graph(
 
         initial_state: AgentRunState = {
             # Original 8 required fields
-            "messages": [{"role": "user", "content": initial_message}],
+            "messages": [{"role": "user", "content": initial_content}],
             "verification": dict(verification_cfg.initial),
             "result": {},
             "turns": 0,

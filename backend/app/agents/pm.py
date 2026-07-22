@@ -104,10 +104,20 @@ def pm_node(state: PipelineState) -> PipelineState:
     memory_context = state.get("memory_context", "")
     memory_block = f"\n\n{memory_context}" if memory_context else ""
 
+    # Day 16 — Image Input Pipeline. Reference images (e.g. a website design
+    # screenshot) informing what the user actually wants built.
+    images = state.get("images", [])
+    image_block = (
+        f"\n\n{len(images)} reference image(s) are attached below — use them to "
+        "understand the user's design intent."
+        if images
+        else ""
+    )
+
     initial_message = (
         f"Task title: {state['task_title']}\n\n"
         f"Task description:\n{state['task_description']}"
-        f"{memory_block}\n\n"
+        f"{memory_block}{image_block}\n\n"
         "Produce the PM brief using the submit_brief tool."
     )
 
@@ -127,6 +137,7 @@ def pm_node(state: PipelineState) -> PipelineState:
             enable_reflection=True,
             enable_lesson=True,
             max_turns=10,
+            images=images,
         )
         logger.info(
             "PM Agent done — tokens_in=%d tokens_out=%d submitted=%s",

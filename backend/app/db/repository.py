@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -16,6 +16,7 @@ from app.db.models import (
     PipelineState,
     Subtask,
     SystemSetting,
+    TaskImage,
     TaskLog,
     can_transition,
 )
@@ -116,6 +117,49 @@ async def update_task_pr(
         update(DevTask).where(DevTask.id == task_id).values(pr_url=pr_url, pr_status=pr_status)
     )
     await db.commit()
+
+
+async def create_task_image(
+    db: AsyncSession,
+    task_id: int,
+    base64_data: str,
+    mime_type: str,
+    display_order: int = 0,
+) -> TaskImage:
+    """Day 16 — Image Input Pipeline."""
+    image = TaskImage(
+        task_id=task_id,
+        base64_data=base64_data,
+        mime_type=mime_type,
+        display_order=display_order,
+    )
+    db.add(image)
+    await db.commit()
+    await db.refresh(image)
+    return image
+
+
+async def list_task_images(db: AsyncSession, task_id: int) -> list[TaskImage]:
+    """Day 16 — ordered ascending by display_order, then id. Callers that only
+    need metadata (id/mimeType/order) should not read .base64_data off these
+    rows into an API response — use get_task_image() for the raw-bytes route."""
+    result = await db.execute(
+        select(TaskImage)
+        .where(TaskImage.task_id == task_id)
+        .order_by(TaskImage.display_order, TaskImage.id)
+    )
+    return list(result.scalars().all())
+
+
+async def get_task_image(db: AsyncSession, image_id: int) -> TaskImage | None:
+    return await db.get(TaskImage, image_id)
+
+
+async def delete_task_image(db: AsyncSession, image_id: int) -> bool:
+    result = await db.execute(delete(TaskImage).where(TaskImage.id == image_id))
+    await db.commit()
+    count: int = getattr(result, "rowcount", 0)  # rowcount available on CursorResult
+    return count > 0
 
 
 async def append_log(

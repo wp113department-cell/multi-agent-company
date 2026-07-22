@@ -11,6 +11,7 @@ import {
   fetchArtifacts,
   fetchPipelineState,
   fetchTask,
+  fetchTaskImages,
   fetchTaskPr,
   rejectPipeline,
   restartTask,
@@ -48,6 +49,12 @@ export default function TaskDetailPage() {
     queryKey: ["taskPr", params.id],
     queryFn: () => fetchTaskPr(params.id),
     refetchInterval: 5000,
+    enabled: !!task,
+  });
+
+  const { data: taskImages } = useQuery({
+    queryKey: ["taskImages", params.id],
+    queryFn: () => fetchTaskImages(params.id),
     enabled: !!task,
   });
 
@@ -260,6 +267,25 @@ export default function TaskDetailPage() {
           </p>
         )}
       </div>
+
+      {/* Reference images (Day 16 — Image Input Pipeline) */}
+      {taskImages && taskImages.length > 0 && (
+        <div className="rounded-lg border border-slate-200 bg-white p-5">
+          <h2 className="mb-3 text-sm font-semibold text-slate-700">Reference images</h2>
+          <ul className="flex flex-wrap gap-3">
+            {taskImages.map((img) => (
+              <li key={img.id}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={`/api/tasks/${params.id}/images/${img.id}`}
+                  alt={`Reference image ${img.id}`}
+                  className="h-28 w-28 rounded border border-slate-200 object-cover"
+                />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Planning Pipeline View (Phase 3) */}
       {pipeline && (

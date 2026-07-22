@@ -6,6 +6,7 @@ from fastapi import (
     File,
     HTTPException,
     Query,
+    Response,
     UploadFile,
 )
 from pydantic import BaseModel
@@ -16,10 +17,14 @@ from app.db.repository import (
     TransitionError,
     append_log,
     create_task,
+    create_task_image,
+    delete_task_image,
     get_task,
+    get_task_image,
     get_pipeline_state,
     list_logs,
     list_subtasks,
+    list_task_images,
     list_tasks,
     transition_task,
     get_or_create_pipeline_state,
@@ -485,3 +490,146 @@ def _extract_pdf_text(raw: bytes, fname: str) -> str:
             return "\n\n".join(pages)
     except Exception as exc:
         return f"[Could not extract text from '{fname}': {exc}]"
+
+
+# ---------------------------------------------------------------------------
+# Day 16 — Image Input Pipeline. Reference images (e.g. a website design
+# screenshot), injected as Anthropic ImageBlockParam content blocks into
+# pm/architect/frontend_dev/reviewer's initial calls. Limits per REPO-FIRST
+# research (roo-code's DEFAULT_MAX_IMAGE_FILE_SIZE_MB/DEFAULT_MAX_TOTAL_IMAGE_SIZE_MB/
+# MAX_IMAGES_PER_MESSAGE) — same shape as the extract-pdfs section above.
+# Format allowlist matches the Anthropic Messages API's actual supported
+# vision media types exactly (not a superset like roo-code's local-file list,
+# which also covers formats the API itself would reject).
+# ---------------------------------------------------------------------------
+
+MAX_IMAGES_PER_TASK = 20
+MAX_IMAGE_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB per file
+MAX_TOTAL_IMAGE_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB total per task
+
+_IMAGE_EXT_TO_MEDIA_TYPE = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
+
+
+def _image_media_type(filename: str) -> str | None:
+    import os
+
+    ext = os.path.splitext(filename.lower())[1]
+    return _IMAGE_EXT_TO_MEDIA_TYPE.get(ext)
+
+
+@router.post("/{task_id}/images")
+async def upload_task_images(
+    task_id: int,
+    files: list[UploadFile] = File(...),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Upload reference images for a task (e.g. a website design screenshot).
+    Multipart, same shape as /extract-pdfs. Per-file 5MB limit, 20MB total
+    across the task's existing + new images, max 20 images per task."""
+    import base64
+
+    task = await get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    existing = await list_task_images(db, task_id)
+    if len(existing) + len(files) > MAX_IMAGES_PER_TASK:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum {MAX_IMAGES_PER_TASK} images per task "
+            f"(already have {len(existing)}, uploading {len(files)}).",
+        )
+
+    total_bytes = sum(
+        len(base64.b64decode(img.base64_data)) for img in existing
+    )
+    next_order = max((img.display_order for img in existing), default=-1) + 1
+
+    created = []
+    for upload in files:
+        fname = upload.filename or "image"
+        media_type = _image_media_type(fname)
+        if media_type is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{fname}' is not a supported image format "
+                "(png, jpg, jpeg, gif, webp).",
+            )
+
+        raw = await upload.read()
+        if len(raw) > MAX_IMAGE_FILE_SIZE_BYTES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{fname}' exceeds 5 MB limit ({len(raw) // 1024 // 1024} MB).",
+            )
+        total_bytes += len(raw)
+        if total_bytes > MAX_TOTAL_IMAGE_SIZE_BYTES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Total image size exceeds 20 MB limit at '{fname}'.",
+            )
+
+        b64 = base64.b64encode(raw).decode("ascii")
+        image = await create_task_image(db, task_id, b64, media_type, next_order)
+        next_order += 1
+        created.append(
+            {"id": image.id, "mimeType": image.mime_type, "order": image.display_order}
+        )
+
+    return {"created": created}
+
+
+@router.get("/{task_id}/images")
+async def get_task_images(
+    task_id: int, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Metadata only (id/mimeType/order) — never the base64 blob, to keep this
+    poll-friendly. Use GET /{task_id}/images/{image_id} for the raw bytes."""
+    task = await get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    images = await list_task_images(db, task_id)
+    return {
+        "images": [
+            {
+                "id": img.id,
+                "mimeType": img.mime_type,
+                "order": img.display_order,
+                "createdAt": img.created_at.isoformat(),
+            }
+            for img in images
+        ]
+    }
+
+
+@router.get("/{task_id}/images/{image_id}")
+async def get_task_image_bytes(
+    task_id: int, image_id: int, db: AsyncSession = Depends(get_db)
+) -> Response:
+    """Raw image bytes with the correct Content-Type — for <img src=...>."""
+    import base64
+
+    image = await get_task_image(db, image_id)
+    if not image or image.task_id != task_id:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    return Response(content=base64.b64decode(image.base64_data), media_type=image.mime_type)
+
+
+@router.delete("/{task_id}/images/{image_id}")
+async def remove_task_image(
+    task_id: int, image_id: int, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    image = await get_task_image(db, image_id)
+    if not image or image.task_id != task_id:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    deleted = await delete_task_image(db, image_id)
+    return {"deleted": deleted}

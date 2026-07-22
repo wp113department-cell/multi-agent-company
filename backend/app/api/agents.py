@@ -387,6 +387,16 @@ async def launch_manager(
                     )
                 )
 
+            # Day 16 — Image Input Pipeline. Fetch once here (launch_manager
+            # has db access; run_manager()/run_frontend_dev()/run_reviewer()
+            # don't) and thread through.
+            from app.db.repository import list_task_images
+
+            image_rows = await list_task_images(db, task_id)
+            task_images = [
+                {"media_type": r.mime_type, "data": r.base64_data} for r in image_rows
+            ]
+
             result = await run_manager(
                 task_id=task_id,
                 subtasks=subtasks,
@@ -394,6 +404,7 @@ async def launch_manager(
                 plan=plan,
                 repo_path=effective_repo,
                 on_status=on_status,
+                images=task_images,
             )
 
             overall_status = result.get("status", "blocked")
