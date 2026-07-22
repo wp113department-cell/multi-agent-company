@@ -29,3 +29,4 @@ python-jose[cryptography]==3.5.0
 bcrypt==5.0.0
 openai==1.109.1
 python-multipart==0.0.20
+cryptography==49.0.0

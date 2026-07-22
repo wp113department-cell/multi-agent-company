@@ -397,6 +397,14 @@ async def launch_manager(
                 {"media_type": r.mime_type, "data": r.base64_data} for r in image_rows
             ]
 
+            # Day 17 — Credential Vault. Custom secrets, if any, injected
+            # into the coding agents' bash tool env.
+            from app.security.credential_vault import get_credential_vault
+
+            custom_secrets_env = (await get_credential_vault().load(db)).get_env_vars()
+            custom_secrets_env.pop("GITHUB_TOKEN", None)
+            custom_secrets_env.pop("ANTHROPIC_API_KEY", None)
+
             result = await run_manager(
                 task_id=task_id,
                 subtasks=subtasks,
@@ -405,6 +413,7 @@ async def launch_manager(
                 repo_path=effective_repo,
                 on_status=on_status,
                 images=task_images,
+                extra_env=custom_secrets_env or None,
             )
 
             overall_status = result.get("status", "blocked")
@@ -599,6 +608,13 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
             def heartbeat() -> None:
                 asyncio.create_task(heartbeat_agent_run(db, run_id))
 
+            # Day 17 — Credential Vault. Custom secrets, if any.
+            from app.security.credential_vault import get_credential_vault
+
+            custom_secrets_env = (await get_credential_vault().load(db)).get_env_vars()
+            custom_secrets_env.pop("GITHUB_TOKEN", None)
+            custom_secrets_env.pop("ANTHROPIC_API_KEY", None)
+
             files_changed, error, tokens_in, tokens_out = await asyncio.to_thread(
                 run_coder,
                 task_id=task_id,
@@ -606,6 +622,7 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
                 worktree_path=wt_path,
                 repo_path=effective_repo,
                 on_heartbeat=heartbeat,
+                extra_env=custom_secrets_env or None,
             )
 
             cost = _estimate_cost(tokens_in, tokens_out)

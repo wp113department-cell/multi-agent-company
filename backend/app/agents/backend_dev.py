@@ -108,10 +108,14 @@ def run_backend_dev(
     repo_path: str | None = None,
     on_heartbeat: Any = None,  # kept for backward compat — no-op
     on_tool_call: Any = None,  # kept for backward compat — no-op
+    extra_env: dict[str, str] | None = None,
 ) -> tuple[list[str], str | None]:
     """Run backend developer agent with static-check retry loop.
 
     Returns (files_changed, error). error is None on success.
+
+    extra_env (Day 17): custom secrets merged into the bash tool's
+    subprocess env.
     """
     settings = get_settings()
     repo = repo_path or settings.target_repo_path
@@ -119,7 +123,7 @@ def run_backend_dev(
     check_error: str | None = None
 
     for attempt in range(max_retries):
-        handlers = make_coder_handlers(worktree_path, repo)
+        handlers = make_coder_handlers(worktree_path, repo, extra_env=extra_env)
 
         base_msg = (
             f"Task ID: {task_id}, Subtask ID: {subtask_id}\n\n"

@@ -291,19 +291,49 @@ async def update_pipeline_state(
 
 
 # ---- System settings ----
+# Day 17 — Credential Vault. This is the one real choke point for
+# SystemSetting-backed credentials (confirmed by grep: nothing else in the
+# codebase touches SystemSetting directly), so encryption-at-rest is wired in
+# transparently here rather than at each of the many call sites (settings.py's
+# Anthropic/OpenAI/GitHub key endpoints, approvals.py's github_token read,
+# credential_vault.py's custom secrets).
 
 
 async def get_setting(db: AsyncSession, key: str) -> str | None:
+    from app.security.credential_vault import decrypt_value
+
     result = await db.execute(select(SystemSetting).where(SystemSetting.key == key))
     row = result.scalar_one_or_none()
-    return row.value if row else None
+    if row is None:
+        return None
+    return decrypt_value(row.value)
 
 
 async def set_setting(db: AsyncSession, key: str, value: str) -> None:
+    from app.security.credential_vault import encrypt_value
+
+    stored_value = encrypt_value(value)
     existing = await db.execute(select(SystemSetting).where(SystemSetting.key == key))
     row = existing.scalar_one_or_none()
     if row:
-        row.value = value
+        row.value = stored_value
     else:
-        db.add(SystemSetting(key=key, value=value))
+        db.add(SystemSetting(key=key, value=stored_value))
     await db.commit()
+
+
+async def delete_setting(db: AsyncSession, key: str) -> bool:
+    """Day 17 — real row deletion (unlike the existing 'blank the value'
+    convention used by the fixed Anthropic/OpenAI/GitHub key slots), correct
+    for a dynamically-named set of custom secrets that can grow/shrink."""
+    result = await db.execute(delete(SystemSetting).where(SystemSetting.key == key))
+    await db.commit()
+    count: int = getattr(result, "rowcount", 0)  # rowcount available on CursorResult
+    return count > 0
+
+
+async def list_setting_keys(db: AsyncSession, prefix: str) -> list[str]:
+    result = await db.execute(
+        select(SystemSetting.key).where(SystemSetting.key.like(f"{prefix}%"))
+    )
+    return list(result.scalars().all())

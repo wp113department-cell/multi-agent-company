@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,13 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import get_db
-from app.db.repository import get_setting, set_setting
+from app.db.repository import delete_setting, get_setting, list_setting_keys, set_setting
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 _ANTHROPIC_KEY = "anthropic_api_key"
 _OPENAI_KEY = "openai_api_key"
 _GITHUB_TOKEN_KEY = "github_token"
+_CUSTOM_SECRET_PREFIX = "custom_secret:"
 
 
 class ApiKeyRequest(BaseModel):
@@ -154,6 +156,58 @@ async def delete_github_token(db: AsyncSession = Depends(get_db)) -> dict[str, A
     """Remove the DB-stored GitHub token (falls back to GITHUB_TOKEN env var)."""
     await set_setting(db, _GITHUB_TOKEN_KEY, "")
     return {"deleted": True, "provider": "github"}
+
+
+# ---------------------------------------------------------------------------
+# Custom secrets (Day 17 — Credential Vault). Arbitrary named secrets an
+# agent's bash tool calls may need (e.g. a third-party API key a task's code
+# integrates with) — never database/deploy credentials, see
+# docs/DAY17_PLAN.md's plan/reality correction. Names must be valid env var
+# identifiers since they're injected directly as env vars.
+# ---------------------------------------------------------------------------
+
+_SECRET_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+class CustomSecretRequest(BaseModel):
+    name: str
+    value: str
+
+
+@router.get("/custom-secrets")
+async def list_custom_secrets(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Names only — never values."""
+    keys = await list_setting_keys(db, _CUSTOM_SECRET_PREFIX)
+    names = sorted(k[len(_CUSTOM_SECRET_PREFIX):] for k in keys)
+    return {"names": names}
+
+
+@router.post("/custom-secrets")
+async def save_custom_secret(
+    body: CustomSecretRequest, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    name = body.name.strip()
+    if not _SECRET_NAME_RE.match(name):
+        raise HTTPException(
+            status_code=400,
+            detail="Secret name must be a valid env var identifier "
+            "(letters, digits, underscore; cannot start with a digit).",
+        )
+    value = body.value.strip()
+    if not value:
+        raise HTTPException(status_code=400, detail="Secret value cannot be empty.")
+    await set_setting(db, _CUSTOM_SECRET_PREFIX + name, value)
+    return {"saved": True, "name": name}
+
+
+@router.delete("/custom-secrets/{name}")
+async def delete_custom_secret(
+    name: str, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    deleted = await delete_setting(db, _CUSTOM_SECRET_PREFIX + name)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"No custom secret named {name!r}")
+    return {"deleted": True, "name": name}
 
 
 # ---------------------------------------------------------------------------

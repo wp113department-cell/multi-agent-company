@@ -240,10 +240,10 @@ class Settings(BaseSettings):
         description="Comma-separated list of git remote hostnames allowed for clone/push in Repo Console.",
     )
 
-    # Day 14 — Git Push Workflow. No credential vault exists yet (Day 17
-    # doesn't either) — this env var is the fallback; the DB-stored value via
-    # POST /api/settings/github-token (SystemSetting, same pattern as the
-    # Anthropic/OpenAI keys) takes precedence when set.
+    # Day 14 — Git Push Workflow. The credential vault (Day 17) now exists —
+    # this env var remains the fallback; the DB-stored value via
+    # POST /api/settings/github-token (SystemSetting, encrypted-at-rest when
+    # CREDENTIAL_ENCRYPTION_KEY is set) takes precedence when set.
     github_token: str = Field(
         default="",
         description="GitHub personal access token for creating PRs via the REST API. Prefer setting via the UI (stored in the DB) over this env var.",
@@ -251,6 +251,17 @@ class Settings(BaseSettings):
     github_api_base_url: str = Field(
         default="https://api.github.com",
         description="GitHub REST API base URL — override for GitHub Enterprise.",
+    )
+
+    # Day 17 — Credential Vault. Optional-but-strongly-recommended: when unset,
+    # SystemSetting-backed credentials (Anthropic/OpenAI/GitHub keys, custom
+    # secrets) are stored in plaintext — the same status quo as before this
+    # day — and a startup warning is logged. Never a silently hardcoded
+    # fallback key. Generate with: python -c "from cryptography.fernet import
+    # Fernet; print(Fernet.generate_key().decode())"
+    credential_encryption_key: str = Field(
+        default="",
+        description="Fernet key encrypting SystemSetting-backed credentials at rest. Strongly recommended in production; falls back to plaintext (with a startup warning) when unset.",
     )
 
     # Day 10 — Fleet OS Budget Manager (live enforcement, per-run + daily cumulative)
@@ -360,6 +371,24 @@ class Settings(BaseSettings):
                     "(short/guessable secrets allow token forgery). "
                     "Generate one with: openssl rand -hex 32"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_credential_encryption_key(self) -> "Settings":
+        # Optional (see credential_encryption_key's own docstring for why this
+        # isn't hard-required) — but if SET, it must actually be a valid
+        # Fernet key, not a typo silently accepted then failing at first use.
+        if self.credential_encryption_key:
+            from cryptography.fernet import Fernet
+
+            try:
+                Fernet(self.credential_encryption_key.encode())
+            except Exception as exc:
+                raise ValueError(
+                    "CREDENTIAL_ENCRYPTION_KEY is set but is not a valid Fernet key. "
+                    "Generate one with: python -c \"from cryptography.fernet import "
+                    f'Fernet; print(Fernet.generate_key().decode())"  ({exc})'
+                ) from exc
         return self
 
     @model_validator(mode="after")
