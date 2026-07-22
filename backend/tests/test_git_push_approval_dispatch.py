@@ -16,6 +16,7 @@ it through a real TestClient request instead, matching the established Day
 12/13 pattern: TestClient's BackgroundTasks execute synchronously as part of
 the request/response cycle, on the one continuous event loop that block owns.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -63,7 +64,9 @@ def _create_task_and_repo(with_github_url: bool = True) -> tuple[int, int | None
                 values: dict[str, object] = {"branch_name": f"agent/task-{task.id}"}
                 if repo_id is not None:
                     values["repo_id"] = repo_id
-                await session.execute(update(DevTask).where(DevTask.id == task.id).values(**values))
+                await session.execute(
+                    update(DevTask).where(DevTask.id == task.id).values(**values)
+                )
                 await session.commit()
                 return task.id, repo_id
         finally:
@@ -82,7 +85,9 @@ def _cleanup(task_id: int, repo_id: int | None) -> None:
         engine = _new_isolated_db_engine()
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:  # type: ignore[arg-type]
-                await session.execute(delete(PendingApproval).where(PendingApproval.task_id == task_id))
+                await session.execute(
+                    delete(PendingApproval).where(PendingApproval.task_id == task_id)
+                )
                 await session.execute(delete(DevTask).where(DevTask.id == task_id))
                 if repo_id is not None:
                     await session.execute(delete(Repo).where(Repo.id == repo_id))
@@ -115,7 +120,13 @@ def _record_git_push_pending(task_id: int) -> str:
     from app.fleet import approval_gate as ag
 
     thread_id = f"task-{task_id}-push"
-    ag.record_pending(thread_id, "git_push", {"branch": f"agent/task-{task_id}"}, agent_name="manager", task_id=task_id)
+    ag.record_pending(
+        thread_id,
+        "git_push",
+        {"branch": f"agent/task-{task_id}"},
+        agent_name="manager",
+        task_id=task_id,
+    )
     return thread_id
 
 
@@ -125,7 +136,9 @@ class TestDispatchGitPushDecision:
         try:
             with patch("app.tools.git_push_tool.push_and_create_pr") as mock_push:
                 mock_push.return_value = PushResult(
-                    pushed=True, pr_url="https://github.com/td-owner/td-repo2/pull/9", pr_number=9,
+                    pushed=True,
+                    pr_url="https://github.com/td-owner/td-repo2/pull/9",
+                    pr_number=9,
                 )
                 with TestClient(app) as client:
                     resp = client.post(f"/api/tasks/{task_id}/push")
@@ -141,7 +154,9 @@ class TestDispatchGitPushDecision:
         task_id, repo_id = _create_task_and_repo(with_github_url=True)
         try:
             with patch("app.tools.git_push_tool.push_and_create_pr") as mock_push:
-                mock_push.return_value = PushResult(pushed=False, pr_url=None, pr_number=None, error="remote rejected")
+                mock_push.return_value = PushResult(
+                    pushed=False, pr_url=None, pr_number=None, error="remote rejected"
+                )
                 with TestClient(app) as client:
                     resp = client.post(f"/api/tasks/{task_id}/push")
                 assert resp.status_code == 200

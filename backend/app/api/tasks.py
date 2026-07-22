@@ -413,7 +413,11 @@ async def get_pr(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, 
     task = await get_task(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    return {"branchName": task.branch_name, "prUrl": task.pr_url, "prStatus": task.pr_status}
+    return {
+        "branchName": task.branch_name,
+        "prUrl": task.pr_url,
+        "prStatus": task.pr_status,
+    }
 
 
 @router.post("/{task_id}/push")
@@ -429,7 +433,10 @@ async def push_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.branch_name is None:
-        raise HTTPException(status_code=400, detail="Task has no branch to push — has coding completed yet?")
+        raise HTTPException(
+            status_code=400,
+            detail="Task has no branch to push — has coding completed yet?",
+        )
 
     background_tasks.add_task(dispatch_git_push_decision, task_id, True)
     return {"triggered": True, "taskId": task_id}
@@ -546,9 +553,7 @@ async def upload_task_images(
             f"(already have {len(existing)}, uploading {len(files)}).",
         )
 
-    total_bytes = sum(
-        len(base64.b64decode(img.base64_data)) for img in existing
-    )
+    total_bytes = sum(len(base64.b64decode(img.base64_data)) for img in existing)
     next_order = max((img.display_order for img in existing), default=-1) + 1
 
     created = []
@@ -620,7 +625,9 @@ async def get_task_image_bytes(
     if not image or image.task_id != task_id:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    return Response(content=base64.b64decode(image.base64_data), media_type=image.mime_type)
+    return Response(
+        content=base64.b64decode(image.base64_data), media_type=image.mime_type
+    )
 
 
 @router.delete("/{task_id}/images/{image_id}")

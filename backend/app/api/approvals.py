@@ -88,7 +88,9 @@ async def dispatch_git_push_decision(task_id: int, approved: bool) -> None:
             return
 
         if task.repo is None or not task.repo.github_url:
-            logger.warning("git_push dispatch: task %d has no GitHub-linked repo", task_id)
+            logger.warning(
+                "git_push dispatch: task %d has no GitHub-linked repo", task_id
+            )
             await update_task_pr(db, task_id, None, "failed")
             return
 
@@ -104,7 +106,9 @@ async def dispatch_git_push_decision(task_id: int, approved: bool) -> None:
             github_url=task.repo.github_url,
             token=token,
         )
-        await update_task_pr(db, task_id, result.pr_url, "pushed" if result.pushed else "failed")
+        await update_task_pr(
+            db, task_id, result.pr_url, "pushed" if result.pushed else "failed"
+        )
 
 
 @router.post("/{thread_id}/approve")

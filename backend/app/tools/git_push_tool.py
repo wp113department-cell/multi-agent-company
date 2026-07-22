@@ -18,6 +18,7 @@ creation via the REST API (the existing app/agents/tools.py git_push/
 create_pr/github_create_pr are interactive chat-agent tools that shell out to
 the gh CLI — a different, non-automatable-in-a-backend-service mechanism).
 """
+
 from __future__ import annotations
 
 import logging
@@ -74,15 +75,21 @@ async def generate_commit_message(task_title: str, diff: str, model: str) -> str
     )
     try:
         client = anthropic.Anthropic(api_key=get_effective_api_key())
-        r = client.messages.create(model=model, max_tokens=100, messages=[{"role": "user", "content": prompt}])
+        r = client.messages.create(
+            model=model, max_tokens=100, messages=[{"role": "user", "content": prompt}]
+        )
         text_blocks = []
         for b in r.content:
             if b.type == "text":
                 text_blocks.append(b.text)
-        message = " ".join(text_blocks).strip().splitlines()[0].strip() if text_blocks else ""
+        message = (
+            " ".join(text_blocks).strip().splitlines()[0].strip() if text_blocks else ""
+        )
         return message or f"feat: {task_title[:60]}"
     except Exception as exc:
-        logger.warning("generate_commit_message failed (non-fatal), using fallback: %s", exc)
+        logger.warning(
+            "generate_commit_message failed (non-fatal), using fallback: %s", exc
+        )
         return f"feat: {task_title[:60]}"
 
 
@@ -102,8 +109,17 @@ async def create_github_pr(
 
     settings = get_settings()
     url = f"{settings.github_api_base_url}/repos/{repo_full_name}/pulls"
-    payload = {"title": title, "head": source_branch, "base": target_branch, "body": body, "draft": draft}
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+    payload = {
+        "title": title,
+        "head": source_branch,
+        "base": target_branch,
+        "body": body,
+        "draft": draft,
+    }
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+    }
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(url, json=payload, headers=headers)
@@ -116,7 +132,11 @@ async def create_github_pr(
         raise GitHubAPIError(resp.status_code, detail)
 
     data = resp.json()
-    return {"html_url": data["html_url"], "number": data["number"], "state": data.get("state", "open")}
+    return {
+        "html_url": data["html_url"],
+        "number": data["number"],
+        "state": data.get("state", "open"),
+    }
 
 
 async def push_and_create_pr(
@@ -140,10 +160,14 @@ async def push_and_create_pr(
 
     push_result = await git_push(repo_path, remote="origin", branch=branch)
     if not push_result["ok"]:
-        return PushResult(pushed=False, pr_url=None, pr_number=None, error=push_result["stderr"][:500])
+        return PushResult(
+            pushed=False, pr_url=None, pr_number=None, error=push_result["stderr"][:500]
+        )
 
     diff = get_diff(task_id, repo_path)
-    commit_message = await generate_commit_message(task_title, diff, settings.model_router)
+    commit_message = await generate_commit_message(
+        task_title, diff, settings.model_router
+    )
 
     try:
         repo_full_name = parse_repo_full_name(github_url)

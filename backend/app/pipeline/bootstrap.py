@@ -113,7 +113,9 @@ async def detect_project_type(task_description: str, model: str) -> str:
                 return pt
         return _DEFAULT_PROJECT_TYPE
     except Exception as exc:
-        logger.warning("detect_project_type failed (non-fatal), using fallback: %s", exc)
+        logger.warning(
+            "detect_project_type failed (non-fatal), using fallback: %s", exc
+        )
         return _DEFAULT_PROJECT_TYPE
 
 
@@ -188,7 +190,9 @@ async def bootstrap(
             try:
                 await append_log(db, task_id, "bootstrap", message)
             except Exception:
-                logger.debug("append_log failed during bootstrap (non-fatal)", exc_info=True)
+                logger.debug(
+                    "append_log failed during bootstrap (non-fatal)", exc_info=True
+                )
 
     if not is_blank_repo(repo_path):
         return BootstrapResult(bootstrapped=False)
@@ -231,7 +235,9 @@ async def bootstrap(
     )
     if coder_error:
         await _log(f"Scaffold write failed: {coder_error}")
-        return BootstrapResult(bootstrapped=False, project_type=ptype, error=coder_error)
+        return BootstrapResult(
+            bootstrapped=False, project_type=ptype, error=coder_error
+        )
     if not files_changed:
         err = "Scaffold write produced no files"
         await _log(err)
@@ -242,7 +248,10 @@ async def bootstrap(
         err = f"git add failed: {add_result['stderr'][:300]}"
         await _log(err)
         return BootstrapResult(
-            bootstrapped=False, project_type=ptype, files_created=files_changed, error=err
+            bootstrapped=False,
+            project_type=ptype,
+            files_created=files_changed,
+            error=err,
         )
 
     commit_result = await git_commit(
@@ -255,7 +264,10 @@ async def bootstrap(
         err = f"git commit failed: {commit_result['stderr'][:300]}"
         await _log(err)
         return BootstrapResult(
-            bootstrapped=False, project_type=ptype, files_created=files_changed, error=err
+            bootstrapped=False,
+            project_type=ptype,
+            files_created=files_changed,
+            error=err,
         )
 
     log_result = await git_log(repo_path, limit=1)

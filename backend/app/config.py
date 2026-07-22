@@ -386,7 +386,7 @@ class Settings(BaseSettings):
             except Exception as exc:
                 raise ValueError(
                     "CREDENTIAL_ENCRYPTION_KEY is set but is not a valid Fernet key. "
-                    "Generate one with: python -c \"from cryptography.fernet import "
+                    'Generate one with: python -c "from cryptography.fernet import '
                     f'Fernet; print(Fernet.generate_key().decode())"  ({exc})'
                 ) from exc
         return self

@@ -76,7 +76,9 @@ class DevTask(Base):
     # get set — Day 14 only adds committing to it + pushing + PR creation).
     branch_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     pr_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    pr_status: Mapped[str] = mapped_column(String(20), default="none")  # none|pending|pushed|failed
+    pr_status: Mapped[str] = mapped_column(
+        String(20), default="none"
+    )  # none|pending|pushed|failed
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         server_default=func.now(), onupdate=func.now()

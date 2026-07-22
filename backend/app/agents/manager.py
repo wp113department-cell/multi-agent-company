@@ -247,12 +247,16 @@ async def run_manager(
                     if not commit_result["ok"]:
                         logger.warning(
                             "Commit failed for subtask %d (attempt %d): %s",
-                            subtask_id, attempt + 1, commit_result["stderr"][:300],
+                            subtask_id,
+                            attempt + 1,
+                            commit_result["stderr"][:300],
                         )
                 else:
                     logger.warning(
                         "git add failed for subtask %d (attempt %d): %s",
-                        subtask_id, attempt + 1, add_result["stderr"][:300],
+                        subtask_id,
+                        attempt + 1,
+                        add_result["stderr"][:300],
                     )
 
             qa_result = await asyncio.to_thread(

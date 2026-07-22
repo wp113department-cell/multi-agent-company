@@ -342,10 +342,15 @@ async def _record_git_push_approval(
         else:
             logger.debug(
                 "No GitHub-cloned repo found for task %d (path=%s) — skipping push approval",
-                task_id, effective_repo,
+                task_id,
+                effective_repo,
             )
     except Exception:
-        logger.warning("Failed to record git-push pending approval for task %d", task_id, exc_info=True)
+        logger.warning(
+            "Failed to record git-push pending approval for task %d",
+            task_id,
+            exc_info=True,
+        )
 
 
 async def launch_manager(
@@ -456,7 +461,9 @@ async def launch_manager(
                     f"All subtasks complete — {len(results)} subtasks, diff ready for review",
                 )
 
-                await _record_git_push_approval(db, task_id, effective_repo, all_files, diff, len(results))
+                await _record_git_push_approval(
+                    db, task_id, effective_repo, all_files, diff, len(results)
+                )
             else:
                 preserve_worktree(task_id)
                 await update_pipeline_state(db, task_id, "blocked")
@@ -584,7 +591,10 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
 
             if is_blank_repo(effective_repo):
                 await append_log(
-                    db, task_id, "pipeline", "Blank repo detected — bootstrapping before coding"
+                    db,
+                    task_id,
+                    "pipeline",
+                    "Blank repo detected — bootstrapping before coding",
                 )
                 bootstrap_result = await bootstrap(task_id, effective_repo, plan, db=db)
                 if bootstrap_result.bootstrapped:
@@ -598,7 +608,10 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
                     )
                 elif bootstrap_result.error:
                     await append_log(
-                        db, task_id, "pipeline", f"Bootstrap skipped: {bootstrap_result.error}"
+                        db,
+                        task_id,
+                        "pipeline",
+                        f"Bootstrap skipped: {bootstrap_result.error}",
                     )
 
             wt = create_worktree(task_id, effective_repo)

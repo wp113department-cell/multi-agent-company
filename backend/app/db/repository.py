@@ -102,10 +102,14 @@ async def update_task_diff(
     await db.commit()
 
 
-async def update_task_branch_name(db: AsyncSession, task_id: int, branch_name: str) -> None:
+async def update_task_branch_name(
+    db: AsyncSession, task_id: int, branch_name: str
+) -> None:
     """Day 14 — Git Push Workflow. Records the worktree branch (already
     created by worktree.create_worktree(); this just persists the name)."""
-    await db.execute(update(DevTask).where(DevTask.id == task_id).values(branch_name=branch_name))
+    await db.execute(
+        update(DevTask).where(DevTask.id == task_id).values(branch_name=branch_name)
+    )
     await db.commit()
 
 
@@ -114,7 +118,9 @@ async def update_task_pr(
 ) -> None:
     """Day 14 — Git Push Workflow. pr_status: none|pending|pushed|failed."""
     await db.execute(
-        update(DevTask).where(DevTask.id == task_id).values(pr_url=pr_url, pr_status=pr_status)
+        update(DevTask)
+        .where(DevTask.id == task_id)
+        .values(pr_url=pr_url, pr_status=pr_status)
     )
     await db.commit()
 

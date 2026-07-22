@@ -113,7 +113,9 @@ def _cleanup(task_id: int, repo_id: int) -> None:
     asyncio.run(_run())
 
 
-def test_bootstrap_called_and_task_ends_blocked_not_stuck_when_repo_blank(tmp_path) -> None:
+def test_bootstrap_called_and_task_ends_blocked_not_stuck_when_repo_blank(
+    tmp_path,
+) -> None:
     """The primary gap: blank repo + simple mode used to hard-crash via an
     unhandled create_worktree() RuntimeError with no state recovery. Now:
     bootstrap() is at least attempted, and even when create_worktree() still
@@ -148,7 +150,9 @@ def test_bootstrap_skipped_when_repo_not_blank(tmp_path) -> None:
     real_repo = tmp_path / "real"
     real_repo.mkdir()
     subprocess.run(["git", "init", str(real_repo)], check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=real_repo, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@t.com"], cwd=real_repo, check=True
+    )
     subprocess.run(["git", "config", "user.name", "t"], cwd=real_repo, check=True)
     (real_repo / "README.md").write_text("existing project")
     subprocess.run(["git", "add", "."], cwd=real_repo, check=True)
@@ -156,11 +160,17 @@ def test_bootstrap_skipped_when_repo_not_blank(tmp_path) -> None:
 
     task_id, repo_id = _create_ready_task_with_repo(str(real_repo))
     try:
-        with patch("app.pipeline.bootstrap.bootstrap", new=AsyncMock()) as mock_bootstrap, patch(
+        with patch(
+            "app.pipeline.bootstrap.bootstrap", new=AsyncMock()
+        ) as mock_bootstrap, patch(
             "app.api.agents.create_worktree", return_value=real_repo / "worktree"
-        ), patch("app.agents.coder.run_coder", return_value=([], None, 10, 10)), patch(
+        ), patch(
+            "app.agents.coder.run_coder", return_value=([], None, 10, 10)
+        ), patch(
             "app.api.agents.get_diff", return_value=""
-        ), patch("app.api.agents.preserve_worktree"):
+        ), patch(
+            "app.api.agents.preserve_worktree"
+        ):
             with TestClient(app) as client:
                 resp = client.post(f"/api/tasks/{task_id}/approve")
             assert resp.status_code == 200, resp.text

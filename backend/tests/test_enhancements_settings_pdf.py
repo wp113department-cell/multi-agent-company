@@ -67,11 +67,15 @@ class TestSettingsGitHubToken:
 
         async def run() -> dict[str, object]:
             mock_db = AsyncMock()
-            with patch("app.api.settings.set_setting", new_callable=AsyncMock) as mock_set:
+            with patch(
+                "app.api.settings.set_setting", new_callable=AsyncMock
+            ) as mock_set:
                 result = await save_github_token(
                     ApiKeyRequest(api_key="ghp_1234567890abcdef"), db=mock_db
                 )
-                mock_set.assert_called_once_with(mock_db, "github_token", "ghp_1234567890abcdef")
+                mock_set.assert_called_once_with(
+                    mock_db, "github_token", "ghp_1234567890abcdef"
+                )
                 return result
 
         result = asyncio.run(run())
@@ -102,7 +106,9 @@ class TestSettingsGitHubToken:
 
         async def run() -> dict[str, object]:
             mock_db = AsyncMock()
-            with patch("app.api.settings.set_setting", new_callable=AsyncMock) as mock_set:
+            with patch(
+                "app.api.settings.set_setting", new_callable=AsyncMock
+            ) as mock_set:
                 result = await delete_github_token(db=mock_db)
                 mock_set.assert_called_once_with(mock_db, "github_token", "")
                 return result
@@ -117,9 +123,15 @@ class TestSettingsGitHubToken:
 
         async def run() -> None:
             mock_db = AsyncMock()
-            with patch("app.api.settings.set_setting", new_callable=AsyncMock) as mock_set:
-                await save_github_token(ApiKeyRequest(api_key="  ghp_abcdefghij  "), db=mock_db)
-                mock_set.assert_called_once_with(mock_db, "github_token", "ghp_abcdefghij")
+            with patch(
+                "app.api.settings.set_setting", new_callable=AsyncMock
+            ) as mock_set:
+                await save_github_token(
+                    ApiKeyRequest(api_key="  ghp_abcdefghij  "), db=mock_db
+                )
+                mock_set.assert_called_once_with(
+                    mock_db, "github_token", "ghp_abcdefghij"
+                )
 
         asyncio.run(run())
 

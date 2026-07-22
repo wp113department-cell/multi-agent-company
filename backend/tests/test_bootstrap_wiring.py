@@ -92,10 +92,19 @@ def test_bootstrap_called_when_repo_is_blank(tmp_path) -> None:
     try:
         with patch(
             "app.pipeline.bootstrap.bootstrap",
-            new=AsyncMock(return_value=BootstrapResult(bootstrapped=True, project_type="cli", files_created=["main.py"], commit_sha="deadbeef")),
+            new=AsyncMock(
+                return_value=BootstrapResult(
+                    bootstrapped=True,
+                    project_type="cli",
+                    files_created=["main.py"],
+                    commit_sha="deadbeef",
+                )
+            ),
         ) as mock_bootstrap, patch(
             "app.pipeline.graph.run_planning_pipeline",
-            new=AsyncMock(return_value={"stage": "blocked", "error": "test short-circuit"}),
+            new=AsyncMock(
+                return_value={"stage": "blocked", "error": "test short-circuit"}
+            ),
         ):
             with TestClient(app) as client:
                 resp = client.post(f"/api/tasks/{task_id}/run", json={"mode": "full"})
@@ -127,7 +136,9 @@ def test_bootstrap_skipped_when_repo_not_blank(tmp_path) -> None:
             "app.pipeline.bootstrap.bootstrap", new=AsyncMock()
         ) as mock_bootstrap, patch(
             "app.pipeline.graph.run_planning_pipeline",
-            new=AsyncMock(return_value={"stage": "blocked", "error": "test short-circuit"}),
+            new=AsyncMock(
+                return_value={"stage": "blocked", "error": "test short-circuit"}
+            ),
         ):
             with TestClient(app) as client:
                 resp = client.post(f"/api/tasks/{task_id}/run", json={"mode": "full"})

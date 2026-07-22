@@ -11,7 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import get_db
-from app.db.repository import delete_setting, get_setting, list_setting_keys, set_setting
+from app.db.repository import (
+    delete_setting,
+    get_setting,
+    list_setting_keys,
+    set_setting,
+)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -146,7 +151,9 @@ async def save_github_token(
     """Save or update the GitHub PAT in the database."""
     token = body.api_key.strip()
     if len(token) < 10:
-        raise HTTPException(status_code=400, detail="GitHub token looks too short to be valid")
+        raise HTTPException(
+            status_code=400, detail="GitHub token looks too short to be valid"
+        )
     await set_setting(db, _GITHUB_TOKEN_KEY, token)
     return {"saved": True, "provider": "github"}
 
@@ -178,7 +185,7 @@ class CustomSecretRequest(BaseModel):
 async def list_custom_secrets(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Names only — never values."""
     keys = await list_setting_keys(db, _CUSTOM_SECRET_PREFIX)
-    names = sorted(k[len(_CUSTOM_SECRET_PREFIX):] for k in keys)
+    names = sorted(k[len(_CUSTOM_SECRET_PREFIX) :] for k in keys)
     return {"names": names}
 
 

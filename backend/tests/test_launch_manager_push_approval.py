@@ -14,6 +14,7 @@ forget scheduled deep inside resume_planning_pipeline() — brittle for what
 this test needs to prove. Extracting the function was the actual fix; testing
 it in isolation is the correct, robust way to verify it.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -55,7 +56,12 @@ def _create_task_and_repo(with_github_url: bool) -> tuple[int, int | None]:
                 task = await create_task(session, "td push approval task", "desc")
                 if repo_id is not None:
                     from sqlalchemy import update
-                    await session.execute(update(DevTask).where(DevTask.id == task.id).values(repo_id=repo_id))
+
+                    await session.execute(
+                        update(DevTask)
+                        .where(DevTask.id == task.id)
+                        .values(repo_id=repo_id)
+                    )
                     await session.commit()
                 return task.id, repo_id
         finally:
@@ -74,7 +80,9 @@ def _cleanup(task_id: int, repo_id: int | None) -> None:
         engine = _new_isolated_db_engine()
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:  # type: ignore[arg-type]
-                await session.execute(delete(PendingApproval).where(PendingApproval.task_id == task_id))
+                await session.execute(
+                    delete(PendingApproval).where(PendingApproval.task_id == task_id)
+                )
                 await session.execute(delete(DevTask).where(DevTask.id == task_id))
                 if repo_id is not None:
                     await session.execute(delete(Repo).where(Repo.id == repo_id))
@@ -86,7 +94,11 @@ def _cleanup(task_id: int, repo_id: int | None) -> None:
 
 
 def _call_record_git_push_approval(
-    task_id: int, effective_repo: str, all_files: list[str], diff: str, subtask_count: int
+    task_id: int,
+    effective_repo: str,
+    all_files: list[str],
+    diff: str,
+    subtask_count: int,
 ) -> None:
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -96,7 +108,9 @@ def _call_record_git_push_approval(
         engine = _new_isolated_db_engine()
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:  # type: ignore[arg-type]
-                await _record_git_push_approval(session, task_id, effective_repo, all_files, diff, subtask_count)
+                await _record_git_push_approval(
+                    session, task_id, effective_repo, all_files, diff, subtask_count
+                )
         finally:
             await engine.dispose()  # type: ignore[attr-defined]
 
@@ -107,7 +121,11 @@ def test_records_git_push_approval_when_repo_has_github_url() -> None:
     task_id, repo_id = _create_task_and_repo(with_github_url=True)
     try:
         _call_record_git_push_approval(
-            task_id, "/tmp/td-launch-manager-push-test-repo", ["a.py", "b.py"], "diff --git a/a.py", 2
+            task_id,
+            "/tmp/td-launch-manager-push-test-repo",
+            ["a.py", "b.py"],
+            "diff --git a/a.py",
+            2,
         )
 
         thread_id = f"task-{task_id}-push"
@@ -125,7 +143,9 @@ def test_records_git_push_approval_when_repo_has_github_url() -> None:
 def test_skips_push_approval_when_no_github_repo() -> None:
     task_id, repo_id = _create_task_and_repo(with_github_url=False)
     try:
-        _call_record_git_push_approval(task_id, "/tmp/td-no-such-repo-path", ["a.py"], "diff", 1)
+        _call_record_git_push_approval(
+            task_id, "/tmp/td-no-such-repo-path", ["a.py"], "diff", 1
+        )
 
         thread_id = f"task-{task_id}-push"
         assert ag.get_pending(thread_id) is None
@@ -168,7 +188,9 @@ def test_is_non_fatal_when_repo_lookup_raises(monkeypatch: object) -> None:
         # nonexistent task_id would make update_task_branch_name a no-op
         # (UPDATE matching zero rows), not raise — confirm graceful handling
         # even when nothing matches.
-        _call_record_git_push_approval(999_999_999, "/tmp/does-not-matter", ["a.py"], "diff", 1)
+        _call_record_git_push_approval(
+            999_999_999, "/tmp/does-not-matter", ["a.py"], "diff", 1
+        )
         assert ag.get_pending("task-999999999-push") is None
     finally:
         _cleanup(task_id, repo_id)

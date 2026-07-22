@@ -90,7 +90,7 @@ def decrypt_value(value: str) -> str:
             "Cannot decrypt a credential — this value was encrypted but "
             "CREDENTIAL_ENCRYPTION_KEY is not currently set."
         )
-    token = value[len(_ENC_PREFIX):]
+    token = value[len(_ENC_PREFIX) :]
     decrypted: str = fernet.decrypt(token.encode()).decode()
     return decrypted
 
@@ -158,11 +158,15 @@ class CredentialVault:
         anthropic_api_key = await get_setting(db, "anthropic_api_key")
         custom_secrets = await self._load_custom_secrets(db)
 
-        self._audit("load", list(custom_secrets.keys()) + ["github_token", "anthropic_api_key"])
+        self._audit(
+            "load", list(custom_secrets.keys()) + ["github_token", "anthropic_api_key"]
+        )
 
         return ProjectCredentials(
             github_token=SecretStr(github_token) if github_token else None,
-            anthropic_api_key=SecretStr(anthropic_api_key) if anthropic_api_key else None,
+            anthropic_api_key=(
+                SecretStr(anthropic_api_key) if anthropic_api_key else None
+            ),
             custom_secrets={k: SecretStr(v) for k, v in custom_secrets.items()},
         )
 
@@ -176,7 +180,9 @@ class CredentialVault:
                 db, "anthropic_api_key", creds.anthropic_api_key.get_secret_value()
             )
         for name, secret in creds.custom_secrets.items():
-            await set_setting(db, _CUSTOM_SECRET_PREFIX + name, secret.get_secret_value())
+            await set_setting(
+                db, _CUSTOM_SECRET_PREFIX + name, secret.get_secret_value()
+            )
 
         self._audit(
             "store",
@@ -196,7 +202,7 @@ class CredentialVault:
         for full_key in names:
             value = await get_setting(db, full_key)
             if value:
-                result[full_key[len(_CUSTOM_SECRET_PREFIX):]] = value
+                result[full_key[len(_CUSTOM_SECRET_PREFIX) :]] = value
         return result
 
     def _audit(self, action: str, key_names: list[str]) -> None:

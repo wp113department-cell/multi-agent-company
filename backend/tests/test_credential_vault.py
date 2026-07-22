@@ -109,7 +109,9 @@ class TestEncryptDecrypt:
 
 
 class TestSettingEncryptionAtRest:
-    def test_stored_value_is_encrypted_but_reads_back_decrypted(self, monkeypatch) -> None:
+    def test_stored_value_is_encrypted_but_reads_back_decrypted(
+        self, monkeypatch
+    ) -> None:
         from cryptography.fernet import Fernet
 
         monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", Fernet.generate_key().decode())
@@ -130,7 +132,9 @@ class TestSettingEncryptionAtRest:
                     await set_setting(db, "td_vault_enc_key", "top-secret-123")
                     row = (
                         await db.execute(
-                            select(SystemSetting).where(SystemSetting.key == "td_vault_enc_key")
+                            select(SystemSetting).where(
+                                SystemSetting.key == "td_vault_enc_key"
+                            )
                         )
                     ).scalar_one()
                     assert "top-secret-123" not in row.value
@@ -218,7 +222,10 @@ class TestCredentialVault:
                     loaded = await vault.load(db)
                     assert loaded.github_token is not None
                     assert loaded.github_token.get_secret_value() == "ghp_faketoken"
-                    assert loaded.custom_secrets["NPM_TOKEN"].get_secret_value() == "npm_fake"
+                    assert (
+                        loaded.custom_secrets["NPM_TOKEN"].get_secret_value()
+                        == "npm_fake"
+                    )
 
                     env = await vault.inject_into_env(db)
                     assert env["GITHUB_TOKEN"] == "ghp_faketoken"
@@ -248,7 +255,10 @@ class TestCredentialVault:
                     vault = get_credential_vault()
                     with caplog.at_level(logging.DEBUG):
                         await vault.store(
-                            db, ProjectCredentials(github_token=SecretStr("ghp_should_never_log"))
+                            db,
+                            ProjectCredentials(
+                                github_token=SecretStr("ghp_should_never_log")
+                            ),
                         )
                         await vault.load(db)
                     await delete_setting(db, "github_token")
@@ -271,11 +281,18 @@ class TestCredentialVault:
                 async with async_sessionmaker(engine, expire_on_commit=False)() as db:  # type: ignore[arg-type]
                     vault = get_credential_vault()
                     await vault.store(
-                        db, ProjectCredentials(github_token=SecretStr("ghp_audit_test_value"))
+                        db,
+                        ProjectCredentials(
+                            github_token=SecretStr("ghp_audit_test_value")
+                        ),
                     )
                     entries = get_audit_log().recent(20)
-                    store_entries = [e for e in entries if e.action_type == "credential_store"]
-                    assert store_entries, "expected at least one credential_store audit entry"
+                    store_entries = [
+                        e for e in entries if e.action_type == "credential_store"
+                    ]
+                    assert (
+                        store_entries
+                    ), "expected at least one credential_store audit entry"
                     latest = store_entries[-1]
                     assert "github_token" in latest.description
                     assert "ghp_audit_test_value" not in latest.description
@@ -296,12 +313,16 @@ class TestBashToolExtraEnv:
         from app.agents.tools import make_coder_handlers
 
         handlers = make_coder_handlers(
-            str(tmp_path), str(tmp_path), extra_env={"MY_CUSTOM_SECRET": "injected-value-123"}
+            str(tmp_path),
+            str(tmp_path),
+            extra_env={"MY_CUSTOM_SECRET": "injected-value-123"},
         )
         result = handlers["bash"]({"command": "echo $MY_CUSTOM_SECRET"})
         assert "injected-value-123" in result
 
-    def test_bash_tool_without_extra_env_does_not_see_unset_var(self, tmp_path, monkeypatch) -> None:
+    def test_bash_tool_without_extra_env_does_not_see_unset_var(
+        self, tmp_path, monkeypatch
+    ) -> None:
         monkeypatch.delenv("MY_CUSTOM_SECRET", raising=False)
         from app.agents.tools import make_coder_handlers
 
