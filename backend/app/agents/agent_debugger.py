@@ -221,7 +221,7 @@ def run_agent_debugger_apply(
         return "done"
 
     handlers["submit_fix"] = submit_h
-    
+
     msg = (
         f"Approved bug fix #{request_id}: {description}\n\n"
         "Implement this specific, scoped fix. Read the relevant files and confirm the root "
