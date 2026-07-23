@@ -38,6 +38,8 @@ class CreateTaskRequest(BaseModel):
     title: str
     description: str
     repo_id: int | None = None
+    priority: str = "medium"
+    project: str | None = None
 
 
 class TransitionRequest(BaseModel):
@@ -81,10 +83,10 @@ def _task_to_dict(task: Any, logs: list[Any] | None = None) -> dict[str, Any]:
         "plan": task.plan,
         "diff": task.diff,
         "filesTouched": task.files_touched or [],
-        "project": None,
-        "priority": "medium",
-        "assignedAgent": None,
-        "finalSummary": None,
+        "project": task.project,
+        "priority": task.priority,
+        "assignedAgent": task.assigned_agent,
+        "finalSummary": task.final_summary,
         "repoId": task.repo_id,
         "repoName": repo.name if repo else None,
         "createdAt": task.created_at.isoformat() if task.created_at else None,
@@ -97,7 +99,14 @@ def _task_to_dict(task: Any, logs: list[Any] | None = None) -> dict[str, Any]:
 async def create(
     body: CreateTaskRequest, db: AsyncSession = Depends(get_db)
 ) -> dict[str, Any]:
-    task = await create_task(db, body.title, body.description, repo_id=body.repo_id)
+    task = await create_task(
+        db,
+        body.title,
+        body.description,
+        repo_id=body.repo_id,
+        priority=body.priority,
+        project=body.project,
+    )
     return _task_to_dict(task)
 
 
@@ -146,8 +155,12 @@ async def add_log(
 
 
 @router.get("/{task_id}/logs")
-async def get_logs(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    logs = await list_logs(db, task_id)
+async def get_logs(
+    task_id: int,
+    include_archived: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    logs = await list_logs(db, task_id, include_archived=include_archived)
     return {"logs": [_log_to_dict(lg) for lg in logs]}
 
 

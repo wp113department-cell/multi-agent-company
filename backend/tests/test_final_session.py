@@ -243,7 +243,12 @@ async def test_enforce_retention_disabled_returns_zero() -> None:
 
 
 @pytest.mark.asyncio
-async def test_enforce_retention_executes_delete() -> None:
+async def test_enforce_retention_archives_across_all_three_tables() -> None:
+    """Gap-closure (2026-07-23): retention now archives (UPDATE ... SET
+    archived=true) rather than hard-deletes, and covers agent_runs/artifacts
+    in addition to task_logs (previously the only table with any retention
+    logic at all). One archive pass per table — 3 rows "archived" each,
+    3 tables, total 9."""
     import sys
 
     sys.path.insert(0, "backend")  # noqa: E702
@@ -264,7 +269,13 @@ async def test_enforce_retention_executes_delete() -> None:
         from app.services.retention import enforce_retention_policy
 
         count = await enforce_retention_policy()
-    assert count == 3
+    assert count == 9  # 3 rows x 3 tables (task_logs, agent_runs, artifacts)
+    # Every execute call must be an UPDATE (archive), never a DELETE.
+    for call in mock_session.execute.call_args_list:
+        sql = str(call.args[0])
+        assert "UPDATE" in sql
+        assert "DELETE" not in sql
+        assert "archived = true" in sql
 
 
 # ---- Frontend files exist ----
