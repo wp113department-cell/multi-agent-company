@@ -16,7 +16,7 @@ from slowapi.util import get_remote_address
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.tasks import router as tasks_router
-from app.api.repo import router as repo_router, init_active_repo, get_active_repo_path
+from app.api.repo import router as repo_router, init_active_repo
 from app.api.artifacts import router as artifacts_router
 from app.api.auth import router as auth_router
 from app.api.epics import router as epics_router
@@ -69,18 +69,29 @@ def _init_sentry(settings: "Settings") -> None:  # type: ignore[name-defined]  #
         logger.warning("Sentry init failed: %s", exc)
 
 
-async def _weekly_reindex_loop(repo_path: str) -> None:
-    """Reindex the target repo every 7 days so context stays fresh."""
-    from app.repo_tools.scanner import index_repository
-    from app.repo_tools.context_builder import invalidate_context_cache
+async def _weekly_reindex_loop() -> None:
+    """Reindex the active repo every 7 days so context/repo-intelligence
+    persistence stays fresh.
+
+    Gap-closure (2026-07-23): delegates to api.repo._do_reindex() (the same
+    routine POST /api/repo/reindex uses) instead of running its own separate
+    index_repository() scan. That separate scan had two real bugs: (a) its
+    result was discarded entirely — no persistence, no _cached_index update,
+    so the new indexed_files/symbols/call_edges tables never got the weekly
+    loop's benefit; (b) it always reindexed whichever repo_path was active
+    at process startup (captured once as an argument), never a repo the user
+    switched to afterward via POST /api/repo/{id}/activate. Delegating to
+    _do_reindex() (which calls get_active_repo_path() fresh every time)
+    fixes both for free.
+    """
+    from app.api.repo import _do_reindex
 
     _SEVEN_DAYS = 7 * 24 * 60 * 60
     while True:
         await asyncio.sleep(_SEVEN_DAYS)
         try:
-            index_repository(repo_path)
-            invalidate_context_cache(repo_path)
-            logger.info("Weekly auto-reindex complete for %s", repo_path)
+            await _do_reindex()
+            logger.info("Weekly auto-reindex complete")
         except Exception as exc:
             logger.warning("Weekly reindex failed: %s", exc)
 
@@ -285,7 +296,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as exc:
             logger.warning("Could not sync admin user: %s", exc)
 
-    reindex_task = asyncio.create_task(_weekly_reindex_loop(get_active_repo_path()))
+    reindex_task = asyncio.create_task(_weekly_reindex_loop())
     retention_task = asyncio.create_task(start_retention_loop())
     fleet_scan_task = asyncio.create_task(_fleet_agents_scan_loop())
     lesson_archive_task = asyncio.create_task(_versioned_lesson_archive_loop())

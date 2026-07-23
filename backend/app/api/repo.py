@@ -15,7 +15,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
@@ -25,6 +25,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db.models import Repo
 from app.db.session import get_async_session, get_db
+
+if TYPE_CHECKING:
+    # Deferred at runtime like every other scanner import in this file —
+    # app.repo_tools.scanner loads tree-sitter grammars at module import
+    # time, so real imports of it stay lazy/in-function; this is type-only.
+    from app.repo_tools.scanner import RepoIndex
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/repo", tags=["repo"])
@@ -39,6 +45,18 @@ _active_repo_path: str | None = None
 _indexed_at: str | None = None
 _file_count: int = 0
 _known_hashes: dict[str, str] = {}
+# Gap-closure (2026-07-23): the full, merged RepoIndex from the last reindex.
+# Previously _do_reindex()/get_context() only cached _known_hashes and fed
+# it straight back into index_repository() as the next call's skip-filter —
+# but index_repository() with known_hashes set returns ONLY the files that
+# changed (unchanged ones are skipped and never added to the result), and
+# scanner.merge_indexes() (which exists specifically to reunite them) had
+# zero real callers anywhere. After the very first reindex, _known_hashes/
+# _file_count and every /api/repo/context call silently degraded to only
+# ever seeing recently-changed files — found while wiring the new repo-
+# intelligence persistence layer, which would otherwise have persisted the
+# same broken partial data.
+_cached_index: RepoIndex | None = None
 
 
 def get_active_repo_path() -> str:
@@ -327,19 +345,42 @@ async def activate_repo(
 
 
 async def _do_reindex() -> None:
-    global _indexed_at, _file_count, _known_hashes
+    global _indexed_at, _file_count, _known_hashes, _cached_index
 
-    from app.repo_tools.scanner import index_repository
+    from app.repo_tools.scanner import index_repository, merge_indexes
     from app.repo_tools.context_builder import invalidate_context_cache
 
     repo_path = get_active_repo_path()
-    full_index = index_repository(
+    partial_index = index_repository(
         repo_path, known_hashes=_known_hashes if _known_hashes else None
     )
+    # Gap-closure (2026-07-23): index_repository() with known_hashes set
+    # returns ONLY the files that changed — scanner.merge_indexes() exists
+    # specifically to reunite that partial result with the previous full
+    # index, but had zero real callers until now. See _cached_index's
+    # declaration comment above for the bug this was silently causing.
+    full_index = (
+        merge_indexes(_cached_index, partial_index)
+        if _cached_index is not None
+        else partial_index
+    )
+    _cached_index = full_index
     _known_hashes = {rel: fi.content_hash for rel, fi in full_index.files.items()}
     _indexed_at = datetime.now(timezone.utc).isoformat()
     _file_count = len(full_index.files)
     invalidate_context_cache(repo_path)
+
+    # Gap-closure: persist indexed_files/symbols/call_edges — previously
+    # migrated (migration 001) but never actually written anywhere.
+    try:
+        from app.repo_tools.cross_file_graph import build_cross_file_graph
+        from app.repo_tools.persistence import persist_repo_index
+
+        graph_result = build_cross_file_graph(full_index)
+        async with get_async_session() as db:
+            await persist_repo_index(repo_path, full_index, graph_result, db)
+    except Exception:
+        logger.exception("Failed to persist repo index for %s", repo_path)
 
 
 @router.post("/reindex")
@@ -355,13 +396,22 @@ async def reindex_status() -> dict[str, object]:
 
 @router.get("/context")
 async def get_context(task_description: str) -> dict[str, object]:
-    from app.repo_tools.scanner import index_repository
     from app.repo_tools.context_builder import build_context
 
     repo_path = get_active_repo_path()
-    idx = index_repository(
-        repo_path, known_hashes=_known_hashes if _known_hashes else None
-    )
+    # Gap-closure (2026-07-23): previously re-derived a partial index here
+    # via index_repository(repo_path, known_hashes=_known_hashes) — after the
+    # first reindex ever ran, that returns ONLY changed files (see
+    # _cached_index's declaration comment), silently starving context
+    # building of most of the repo on every call. Reuse the maintained full
+    # index instead; only fall back to a full scan if nothing has indexed
+    # this repo yet.
+    if _cached_index is not None:
+        idx = _cached_index
+    else:
+        from app.repo_tools.scanner import index_repository
+
+        idx = index_repository(repo_path)
     ctx = build_context(task_description, idx)
     return {
         "relevantFiles": ctx.relevant_files,

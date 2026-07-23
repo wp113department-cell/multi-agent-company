@@ -288,16 +288,12 @@ async def test_run_apply_phase_records_learning_signal_on_success() -> None:
     session_cm.commit = AsyncMock()
     session_cm.add = MagicMock()  # sync, matching real Session.add()
 
-    with patch(
-        "app.db.session.get_async_session", return_value=session_cm
-    ), patch(
+    with patch("app.db.session.get_async_session", return_value=session_cm), patch(
         "app.api.fleet_dashboard._apply_dispatch",
         return_value={
             "agent_performance_reviewer": MagicMock(return_value=fake_result)
         },
-    ), patch(
-        "app.memory.store.embed_learning_signal", new=AsyncMock()
-    ) as mock_embed:
+    ), patch("app.memory.store.embed_learning_signal", new=AsyncMock()) as mock_embed:
         await _run_apply_phase(
             1, "agent_performance_reviewer", "Reduce false positives", "trace-1"
         )
@@ -316,7 +312,9 @@ async def test_run_apply_phase_does_not_record_learning_signal_on_failure() -> N
     from app.agents.agent_result import AgentResult
     from app.api.fleet_dashboard import _run_apply_phase
 
-    fake_result = AgentResult(summary="Could not verify", verified=False, status="blocked")
+    fake_result = AgentResult(
+        summary="Could not verify", verified=False, status="blocked"
+    )
     fake_row = _make_row(status="in_progress")
 
     session_cm = AsyncMock()
@@ -326,14 +324,10 @@ async def test_run_apply_phase_does_not_record_learning_signal_on_failure() -> N
     session_cm.commit = AsyncMock()
     session_cm.add = MagicMock()
 
-    with patch(
-        "app.db.session.get_async_session", return_value=session_cm
-    ), patch(
+    with patch("app.db.session.get_async_session", return_value=session_cm), patch(
         "app.api.fleet_dashboard._apply_dispatch",
         return_value={"agent_debugger": MagicMock(return_value=fake_result)},
-    ), patch(
-        "app.memory.store.embed_learning_signal", new=AsyncMock()
-    ) as mock_embed:
+    ), patch("app.memory.store.embed_learning_signal", new=AsyncMock()) as mock_embed:
         await _run_apply_phase(1, "agent_debugger", "desc", "trace-1")
 
     assert fake_row.status == "failed"
@@ -341,7 +335,9 @@ async def test_run_apply_phase_does_not_record_learning_signal_on_failure() -> N
 
 
 @pytest.mark.asyncio
-async def test_run_apply_phase_learning_signal_failure_does_not_fail_the_request() -> None:
+async def test_run_apply_phase_learning_signal_failure_does_not_fail_the_request() -> (
+    None
+):
     """A memory-write hiccup must never turn an otherwise-successful apply
     into a reported failure — best-effort, matching the same standard
     already applied to Redis Streams/alerting elsewhere in this codebase."""
@@ -358,9 +354,7 @@ async def test_run_apply_phase_learning_signal_failure_does_not_fail_the_request
     session_cm.commit = AsyncMock()
     session_cm.add = MagicMock()
 
-    with patch(
-        "app.db.session.get_async_session", return_value=session_cm
-    ), patch(
+    with patch("app.db.session.get_async_session", return_value=session_cm), patch(
         "app.api.fleet_dashboard._apply_dispatch",
         return_value={"knowledge_curator": MagicMock(return_value=fake_result)},
     ), patch(
