@@ -79,6 +79,18 @@ class DevTask(Base):
     pr_status: Mapped[str] = mapped_column(
         String(20), default="none"
     )  # none|pending|pushed|failed
+    # Gap-closure (2026-07-23): these 4 were previously faked as hardcoded
+    # placeholder values in api/tasks.py's _task_to_dict() — no real columns
+    # existed. priority is free-text (low|medium|high, not DB-enforced,
+    # matching status's own existing convention). assigned_agent is the
+    # current top-level orchestrating identity (pm|planner|coder|manager —
+    # the same strings already passed to create_agent_run/AGENT_CONTRACT
+    # names), not per-subtask granularity. final_summary is set once, at the
+    # real success point (transition to ready_for_review).
+    priority: Mapped[str] = mapped_column(String(20), default="medium")
+    assigned_agent: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    project: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    final_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         server_default=func.now(), onupdate=func.now()
@@ -113,6 +125,10 @@ class TaskLog(Base):
     message: Mapped[str] = mapped_column(Text)
     extra_data: Mapped[Any] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    # Gap-closure (2026-07-23): retention now archives (flags) rather than
+    # hard-deletes — see app/services/retention.py.
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     task: Mapped[DevTask] = relationship(back_populates="logs")
 
@@ -155,6 +171,8 @@ class AgentRun(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime] = mapped_column(server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     task: Mapped[DevTask] = relationship(back_populates="agent_runs")
 
@@ -284,6 +302,8 @@ class Artifact(Base):
     storage_path: Mapped[str] = mapped_column(Text)
     created_by_agent: Mapped[str] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 # ---- Phase 5 tables ----

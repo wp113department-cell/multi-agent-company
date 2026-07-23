@@ -357,3 +357,94 @@ async def query_failures(
     except Exception as exc:
         logger.warning("Memory: failure query failed: %s", exc)
         return []
+
+
+async def embed_learning_signal(
+    agent_name: str,
+    description: str,
+    outcome_summary: str,
+    db: AsyncSession,
+) -> MemoryEmbedding | None:
+    """Store a fleet self-improvement learning signal — Doc 11's 4th memory
+    category ("which prompts/tool combos correlated with retries/failures"),
+    distinct from the per-task task/architecture/failure records above.
+
+    Not per-task: written when one of the fleet-governance agents
+    (agent_performance_reviewer, agent_debugger, knowledge_curator,
+    quality_auditor) completes an APPLY phase — i.e. a human approved a
+    concrete, data-driven fleet improvement and it was successfully carried
+    out. task_id is a synthetic "fleet-{agent_name}" marker since this isn't
+    tied to a real DevTask.
+    """
+    settings = get_settings()
+    if not settings.memory_enabled:
+        return None
+
+    content = f"Agent: {agent_name}\nAction: {description}\nOutcome: {outcome_summary}"
+    vector = await _embed(content)
+
+    try:
+        row = MemoryEmbedding(
+            task_id=f"fleet-{agent_name}",
+            outcome="learning",
+            category="learning",
+            description=description[:500],
+            summary=outcome_summary[:300],
+            files_changed=[],
+            embedding=vector,
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+        logger.info("Memory: stored learning signal from %s", agent_name)
+        return row
+    except Exception as exc:
+        logger.warning(
+            "Memory: failed to store learning signal from %s: %s", agent_name, exc
+        )
+        await db.rollback()
+        return None
+
+
+async def query_learning_signals(
+    description: str,
+    db: AsyncSession,
+    top_k: int = 3,
+) -> list[dict[str, Any]]:
+    """Find past fleet learning signals similar to the given description."""
+    settings = get_settings()
+    if not settings.memory_enabled:
+        return []
+
+    vector = await _embed(description)
+    if vector == _ZERO_VECTOR_1536:
+        return []
+
+    try:
+        sql = text("""
+            SELECT
+                task_id,
+                description,
+                summary,
+                1 - (embedding <=> CAST(:vec AS vector)) AS similarity
+            FROM memory_embeddings
+            WHERE category = 'learning'
+              AND embedding IS NOT NULL
+            ORDER BY embedding <=> CAST(:vec AS vector)
+            LIMIT :k
+        """)
+        vec_str = "[" + ",".join(str(v) for v in vector) + "]"
+        result = await db.execute(sql, {"vec": vec_str, "k": top_k})
+        rows = result.fetchall()
+        return [
+            {
+                "agent_name": str(row.task_id).removeprefix("fleet-"),
+                "action": row.description,
+                "outcome": row.summary,
+                "similarity": float(row.similarity),
+            }
+            for row in rows
+        ]
+    except Exception as exc:
+        logger.warning("Memory: learning-signal query failed: %s", exc)
+        return []

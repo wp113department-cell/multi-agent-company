@@ -34,37 +34,26 @@ _TASKS_FILE = Path(__file__).parent / "tasks.json"
 # ──────────────────────────────────────────────────────────────────────────────
 # Agent dispatcher
 # ──────────────────────────────────────────────────────────────────────────────
-
-_AGENT_MAP: dict[str, tuple[str, str]] = {
-    "sprint_planner": ("app.agents.sprint_planner", "run_sprint_planner"),
-    "business_analyst": ("app.agents.business_analyst", "run_business_analyst"),
-    "style_reviewer": ("app.agents.style_reviewer", "run_style_reviewer"),
-    "tech_debt_agent": ("app.agents.tech_debt_agent", "run_tech_debt_agent"),
-    "performance_reviewer": (
-        "app.agents.performance_reviewer",
-        "run_performance_reviewer",
-    ),
-    "cleanup_agent": ("app.agents.cleanup_agent", "run_cleanup_agent"),
-    "schema_agent": ("app.agents.schema_agent", "run_schema_agent"),
-    "migration_agent": ("app.agents.migration_agent", "run_migration_agent"),
-    "ai_engineer": ("app.agents.ai_engineer", "run_ai_engineer"),
-    # Day 2
-    "bug_fix": ("app.agents.bug_fix", "run_bug_fix"),
-    "security_reviewer": ("app.agents.security_reviewer", "run_security_review"),
-    "arch_reviewer": ("app.agents.architecture_reviewer", "run_arch_review"),
-}
+#
+# Gap-closure (files/GAPS_ALL_FILES_REPORT.md, 2026-07-23) — consolidating
+# the two previously-redundant eval systems (this pytest-wired one and the
+# standalone backend/evals/ CLI, now retired). This module used to keep its
+# own separate, hardcoded _AGENT_MAP (only 12 of the 60 real specialized
+# agents) — app/api/specialized_agents.py's _REGISTRY is the actual,
+# comprehensive, real dispatch table (60 entries) already used by the real
+# /api/agents/{name}/run endpoint, and test_evals.py's own
+# test_all_agent_names_in_registry already asserted every eval task's agent
+# exists there — so the standalone CLI's _load_agent_fn()-based dispatch
+# (reading the same real registry) was the better of the two mechanisms.
+# Reusing it here closes that gap rather than keeping a second, narrower,
+# hand-maintained table that could silently drift out of sync.
 
 
 def _run_agent(agent_name: str, task_id: int, description: str, repo_path: str) -> "AgentResult":  # type: ignore[name-defined]  # noqa: F821
-    import importlib
+    from app.api.specialized_agents import _load_agent_fn
 
-    entry = _AGENT_MAP.get(agent_name)
-    if entry is None:
-        raise ValueError(f"Unknown agent: {agent_name}")
-    mod_path, fn_name = entry
-    module = importlib.import_module(mod_path)
-    fn = getattr(module, fn_name)
-    return fn(task_id=task_id, description=description, repo_path=repo_path)  # type: ignore[return-value]
+    fn = _load_agent_fn(agent_name)
+    return fn(task_id=task_id, description=description, repo_path=repo_path)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

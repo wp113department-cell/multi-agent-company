@@ -27,10 +27,20 @@ class TransitionError(ValueError):
 
 
 async def create_task(
-    db: AsyncSession, title: str, description: str, repo_id: int | None = None
+    db: AsyncSession,
+    title: str,
+    description: str,
+    repo_id: int | None = None,
+    priority: str = "medium",
+    project: str | None = None,
 ) -> DevTask:
     task = DevTask(
-        title=title, description=description, status="pending", repo_id=repo_id
+        title=title,
+        description=description,
+        status="pending",
+        repo_id=repo_id,
+        priority=priority,
+        project=project,
     )
     db.add(task)
     await db.commit()
@@ -125,6 +135,29 @@ async def update_task_pr(
     await db.commit()
 
 
+async def update_task_assigned_agent(
+    db: AsyncSession, task_id: int, assigned_agent: str
+) -> None:
+    """The current top-level orchestrating agent identity (pm|planner|coder|
+    manager) — updated at each real dispatch point, not per-subtask."""
+    await db.execute(
+        update(DevTask)
+        .where(DevTask.id == task_id)
+        .values(assigned_agent=assigned_agent)
+    )
+    await db.commit()
+
+
+async def update_task_final_summary(
+    db: AsyncSession, task_id: int, final_summary: str
+) -> None:
+    """Set once, at the real success point (transition to ready_for_review)."""
+    await db.execute(
+        update(DevTask).where(DevTask.id == task_id).values(final_summary=final_summary)
+    )
+    await db.commit()
+
+
 async def create_task_image(
     db: AsyncSession,
     task_id: int,
@@ -184,10 +217,13 @@ async def append_log(
     return log
 
 
-async def list_logs(db: AsyncSession, task_id: int) -> list[TaskLog]:
-    result = await db.execute(
-        select(TaskLog).where(TaskLog.task_id == task_id).order_by(TaskLog.created_at)
-    )
+async def list_logs(
+    db: AsyncSession, task_id: int, include_archived: bool = False
+) -> list[TaskLog]:
+    q = select(TaskLog).where(TaskLog.task_id == task_id)
+    if not include_archived:
+        q = q.where(TaskLog.archived.is_(False))
+    result = await db.execute(q.order_by(TaskLog.created_at))
     return list(result.scalars())
 
 

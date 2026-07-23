@@ -8,6 +8,9 @@ Architecture:
   and a NOTIFY is sent on channel "gridiron_events".
 - Consumer failure triggers retry (up to 3×) then writes to failed_events.
 - get_unprocessed_events() supports replay on restart.
+- Every publish also fans out to the Redis Streams transport (redis_streams.py)
+  unconditionally — that module no-ops internally when redis_streams_enabled
+  is False, so this call site never branches on the flag itself.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Callable, Awaitable
 
+from app.event_bus import redis_streams
 from app.event_bus.models import GridironEvent
 
 logger = logging.getLogger(__name__)
@@ -171,6 +175,12 @@ async def publish_event(event: GridironEvent, db: Any = None) -> None:
 
     # Persist first so the event is recorded even if handlers fail
     await _persist_event(event, db)
+
+    # Fan out to the Redis Streams transport alongside the Postgres bus above.
+    # publish_to_stream() is sync (redis-py) and already no-ops + swallows its
+    # own errors when disabled/unreachable, so this is a fire-and-forget call
+    # off the event loop, never a new failure mode for publish_event() itself.
+    await asyncio.to_thread(redis_streams.publish_to_stream, event)
 
     handlers = list(_subscribers.get(event.event_type, []))
     for handler in handlers:

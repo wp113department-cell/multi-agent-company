@@ -165,6 +165,30 @@ async def _run_apply_phase(
                 else "Apply phase did not verify successfully"
             ),
         )
+        if status == "completed":
+            # Gap-closure (2026-07-23): a human-approved, data-driven fleet
+            # improvement was just successfully carried out — a genuine
+            # "Learning Signal" (Doc 11's 4th memory category, previously
+            # never written anywhere). Best-effort: a memory-write hiccup
+            # must never turn an otherwise-successful apply into a reported
+            # failure.
+            try:
+                from app.memory.store import embed_learning_signal
+
+                async with get_async_session() as session:
+                    await embed_learning_signal(
+                        agent_name,
+                        description,
+                        result.summary,
+                        session,
+                    )
+            except Exception:
+                logger.warning(
+                    "Failed to record learning signal for request #%s (%s)",
+                    request_id,
+                    agent_name,
+                    exc_info=True,
+                )
     except Exception as exc:
         logger.exception(
             "APPLY phase failed for request #%s (%s)", request_id, agent_name

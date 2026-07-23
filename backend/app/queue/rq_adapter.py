@@ -110,6 +110,12 @@ class RQQueueAdapter:
         except Exception:
             return False
 
+    @property
+    def connection(self) -> Any:
+        """The underlying redis-py connection — needed by callers that fetch
+        a Job by id directly (rq.job.Job.fetch()), which isn't queue-scoped."""
+        return self._conn
+
 
 def get_rq_adapter() -> RQQueueAdapter:
     """Return the singleton RQQueueAdapter, creating it on first call."""
