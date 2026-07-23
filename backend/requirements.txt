@@ -31,4 +31,4 @@ openai==1.109.1
 python-multipart==0.0.20
 cryptography==49.0.0
 networkx==3.6.1
-scipy==1.18.0
+scipy==1.17.1
