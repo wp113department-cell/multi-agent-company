@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-import pytest
 from sqlalchemy import delete, select
 
 from app.db.models import CallEdge, IndexedFile, Symbol

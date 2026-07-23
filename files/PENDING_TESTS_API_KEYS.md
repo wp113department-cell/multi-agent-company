@@ -152,33 +152,22 @@ optional-extras group) and it will run in CI like everything else — no API key
 
 ---
 
-## E. A second, entirely separate eval system — not wired into pytest/CI at all
+## E. (Retired 2026-07-23) The second, standalone eval system was consolidated
 
-`backend/evals/` (note: **not** `backend/tests/evals/` — a different, older, standalone system) —
-`suites.py` defines 8 hand-written `EvalCase`s, one per agent, run via CLI, never via `pytest`:
-
-| Agent | Eval case |
-|---|---|
-| `bug_fix` | Diagnose a FastAPI 500 caused by an unchecked optional field |
-| `security_reviewer` | OWASP Top 10 review of `backend/app/api/` |
-| `security_architect` | STRIDE threat model of the pm→architect→decomposer pipeline |
-| `database_architect` | Schema design for a new `comments` feature |
-| `tech_debt_agent` | Top-3 tech debt items in `tools.py` |
-| `performance_reviewer` | N+1 query / missing-index analysis |
-| `user_story_generator` | Gherkin stories for the `/api/chat` SSE endpoint |
-| `evaluation_agent` | Judge whether `bug_fix` correctly diagnosed a missing-`await` bug |
-
-**To run once you have a key** (never gated by `RUN_PENDING_TESTS` — it's a standalone CLI, not a
-pytest suite at all):
-```bash
-cd backend
-python -m evals.eval_runner --all          # needs a real ANTHROPIC_API_KEY or USE_GROQ+GROQ_API_KEY
-python -m evals.eval_runner --agent bug_fix --output results/bug_fix_run.json
-```
-This system and `tests/evals/` (section B2 above) are **redundant with each other** — both are
-"agent eval" concepts, built at different times, neither superseding the other. Worth consolidating
-into one system once real API access makes it possible to actually validate scores end-to-end — but
-that's a design decision, not a test-writing task, so it's flagged here rather than done unasked.
+**Update:** `backend/evals/` (the standalone CLI this section used to describe) has been retired —
+consolidated into `backend/tests/evals/` (section B2), the pytest-wired system, as part of gap-
+closure Batch 6 (`files/GAPS_ALL_FILES_REPORT.md`). Its 8 `EvalCase`s covered 8 agents; 2
+(`tech_debt_agent`, `performance_reviewer`) already had equivalent coverage in
+`tests/evals/tasks.json`, so only the 6 genuinely new ones were ported (`bug_fix`,
+`security_reviewer`, `security_architect`, `database_architect`, `user_story_generator`,
+`evaluation_agent` — now `eval_006` through `eval_011` in `tasks.json`, 11 tasks total, up from 5).
+While consolidating, `tests/evals/eval_runner.py`'s own agent dispatch was also fixed: it used to
+keep a separate, hardcoded 12-agent map instead of `app.api.specialized_agents`'s real, comprehensive
+60-agent registry (the same one the actual `/api/agents/{name}/run` endpoint uses) — now it dispatches
+through that real registry instead, closing a second small "could silently drift out of sync" gap.
+No new pending-test count changes here — `test_all_evals_pass_threshold` (section B2) already
+iterates every task in `tasks.json`, so the 6 new cases are exercised by an existing pytest method,
+not a new one.
 
 ---
 
@@ -188,19 +177,17 @@ that's a design decision, not a test-writing task, so it's flagged here rather t
 |---|---|---|
 | A — Anthropic-only (stubs, need writing too) | 4 | Real `ANTHROPIC_API_KEY` |
 | B1 — Groq integration tests | 9 | Real `GROQ_API_KEY` (or swap to Anthropic once available) |
-| B2 — Groq eval tests | 4 | Real `GROQ_API_KEY` |
+| B2 — Groq eval tests (now covering 11 tasks in `tasks.json`, up from 5) | 4 | Real `GROQ_API_KEY` |
 | C — `tests/pending/` full directory | 54 | Real LLM key (Anthropic or Groq) + some need DB/Voyage too |
 | D — Unrelated (missing pip package) | 1 | `pip install reportlab` — not an API-key issue |
-| E — Standalone `evals/` CLI suite | 8 | Real LLM key — not part of the 72 pytest-collected tests above; separate CLI |
 | **Total pytest-collected, blocked on real credentials** | **71** (55 skipped + 17 deselected − 1 reportlab) | |
-| **Total including the standalone CLI eval suite** | **79** | |
 
 **Bottom line:** every one of these is real, written code — nothing here is a stub pretending to be
 a test (except the 4 in section A, which are honest TODO stubs, not disguised ones). Once you have
 a real `ANTHROPIC_API_KEY` (recommended — unlocks everything, including the 4 Anthropic-only tests
 Groq can never satisfy), the path is: set the env vars from section C, run
 `RUN_PENDING_TESTS=1 pytest tests/pending/ -v`, then `pytest tests/test_day0_groq_integration.py
-tests/evals/test_evals.py -v -m slow` if you also want the Groq-path tests exercised, then fix the
-one `test_research_agent.py` skip-condition inconsistency in section C before trusting its "clean
-skip" behavior, then write real assertions for the 4 stubs in section A, then optionally run the
-standalone `evals/` CLI suite in section E.
+tests/evals/test_evals.py -v -m slow` if you also want the Groq-path tests exercised (now 11 real
+agents' worth, not 5), then fix the one `test_research_agent.py` skip-condition inconsistency in
+section C before trusting its "clean skip" behavior, then write real assertions for the 4 stubs in
+section A.

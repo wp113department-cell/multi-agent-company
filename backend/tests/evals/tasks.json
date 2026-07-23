@@ -59,5 +59,71 @@
       "recommendations should be specific and actionable",
       "severity should categorize issues"
     ]
+  },
+  {
+    "id": "eval_006",
+    "agent": "bug_fix",
+    "task_id": 9006,
+    "description": "A FastAPI route is returning 500 when a request body field is optional but the handler accesses it without a None check. Diagnose and propose a fix.",
+    "expected_fields": [],
+    "quality_checks": [
+      "diagnosis should identify the missing None check",
+      "summary should describe the proposed fix"
+    ]
+  },
+  {
+    "id": "eval_007",
+    "agent": "security_reviewer",
+    "task_id": 9007,
+    "description": "Review the backend/app/api/ directory for OWASP Top 10 vulnerabilities. Focus on injection and authentication gaps.",
+    "expected_fields": [],
+    "quality_checks": [
+      "findings should reference real files under backend/app/api/",
+      "summary should be non-empty"
+    ]
+  },
+  {
+    "id": "eval_008",
+    "agent": "security_architect",
+    "task_id": 9008,
+    "description": "Perform a STRIDE threat model analysis on the pipeline that runs PM → Architect → Decomposer agents. List threats and mitigations.",
+    "expected_fields": [],
+    "quality_checks": [
+      "findings should cover STRIDE categories",
+      "summary should be non-empty"
+    ]
+  },
+  {
+    "id": "eval_009",
+    "agent": "database_architect",
+    "task_id": 9009,
+    "description": "Propose a schema design for a new 'comments' feature on dev_tasks. Include indexes and foreign key decisions.",
+    "expected_fields": [],
+    "quality_checks": [
+      "findings should propose real columns/indexes",
+      "summary should be non-empty"
+    ]
+  },
+  {
+    "id": "eval_010",
+    "agent": "user_story_generator",
+    "task_id": 9010,
+    "description": "Generate Gherkin user stories for the /api/chat SSE endpoint. Include happy path, session not found, and concurrent message scenarios.",
+    "expected_fields": [],
+    "quality_checks": [
+      "findings should include the 3 named scenarios",
+      "summary should be non-empty"
+    ]
+  },
+  {
+    "id": "eval_011",
+    "agent": "evaluation_agent",
+    "task_id": 9011,
+    "description": "Evaluate whether the bug_fix agent correctly diagnoses a bug where a missing await keyword causes an async function to return a coroutine instead of its value.",
+    "expected_fields": [],
+    "quality_checks": [
+      "findings should assess the bug_fix agent's diagnosis",
+      "summary should be non-empty"
+    ]
   }
 ]
