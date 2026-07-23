@@ -134,9 +134,7 @@ class TestRQAdapterBridge:
     existing style of testing behavior without real infrastructure."""
 
     def _make_bridge(self, mock_rq_adapter: MagicMock) -> RQAdapterBridge:
-        with patch(
-            "app.queue.rq_adapter.get_rq_adapter", return_value=mock_rq_adapter
-        ):
+        with patch("app.queue.rq_adapter.get_rq_adapter", return_value=mock_rq_adapter):
             return RQAdapterBridge()
 
     async def test_enqueue_delegates_to_rq_adapter_and_returns_job_id(self) -> None:

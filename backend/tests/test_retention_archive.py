@@ -39,9 +39,7 @@ def _make_task_with_old_log() -> tuple[int, int]:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:  # type: ignore[arg-type]
                 task = await create_task(session, "td retention task", "desc")
 
-                old_log = TaskLog(
-                    task_id=task.id, category="test", message="old entry"
-                )
+                old_log = TaskLog(task_id=task.id, category="test", message="old entry")
                 fresh_log = TaskLog(
                     task_id=task.id, category="test", message="fresh entry"
                 )
