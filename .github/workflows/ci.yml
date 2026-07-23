@@ -112,6 +112,9 @@ jobs:
       - name: Lint (eslint)
         run: pnpm --filter @gridiron/web run lint || true
 
+      - name: Test (vitest)
+        run: pnpm --filter @gridiron/web run test
+
       - name: Build
         run: pnpm --filter @gridiron/web run build
         env:
