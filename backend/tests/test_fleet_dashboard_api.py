@@ -265,3 +265,102 @@ async def test_run_apply_phase_marks_failed_on_exception() -> None:
     assert fake_row.status == "failed"
     assert fake_row.error is not None
     assert "boom" in fake_row.error
+
+
+@pytest.mark.asyncio
+async def test_run_apply_phase_records_learning_signal_on_success() -> None:
+    """Gap-closure (2026-07-23): a successful APPLY phase is a genuine fleet
+    Learning Signal (Doc 11's 4th memory category, previously never written
+    anywhere) — must be recorded, with the real agent name/description/
+    result summary, not just marked completed on the request row."""
+    from app.agents.agent_result import AgentResult
+    from app.api.fleet_dashboard import _run_apply_phase
+
+    fake_result = AgentResult(
+        summary="Tightened reviewer prompt", verified=True, status="completed"
+    )
+    fake_row = _make_row(status="in_progress")
+
+    session_cm = AsyncMock()
+    session_cm.__aenter__ = AsyncMock(return_value=session_cm)
+    session_cm.__aexit__ = AsyncMock(return_value=False)
+    session_cm.get = AsyncMock(return_value=fake_row)
+    session_cm.commit = AsyncMock()
+    session_cm.add = MagicMock()  # sync, matching real Session.add()
+
+    with patch("app.db.session.get_async_session", return_value=session_cm), patch(
+        "app.api.fleet_dashboard._apply_dispatch",
+        return_value={
+            "agent_performance_reviewer": MagicMock(return_value=fake_result)
+        },
+    ), patch("app.memory.store.embed_learning_signal", new=AsyncMock()) as mock_embed:
+        await _run_apply_phase(
+            1, "agent_performance_reviewer", "Reduce false positives", "trace-1"
+        )
+
+    assert fake_row.status == "completed"
+    mock_embed.assert_called_once_with(
+        "agent_performance_reviewer",
+        "Reduce false positives",
+        "Tightened reviewer prompt",
+        session_cm,
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_apply_phase_does_not_record_learning_signal_on_failure() -> None:
+    from app.agents.agent_result import AgentResult
+    from app.api.fleet_dashboard import _run_apply_phase
+
+    fake_result = AgentResult(
+        summary="Could not verify", verified=False, status="blocked"
+    )
+    fake_row = _make_row(status="in_progress")
+
+    session_cm = AsyncMock()
+    session_cm.__aenter__ = AsyncMock(return_value=session_cm)
+    session_cm.__aexit__ = AsyncMock(return_value=False)
+    session_cm.get = AsyncMock(return_value=fake_row)
+    session_cm.commit = AsyncMock()
+    session_cm.add = MagicMock()
+
+    with patch("app.db.session.get_async_session", return_value=session_cm), patch(
+        "app.api.fleet_dashboard._apply_dispatch",
+        return_value={"agent_debugger": MagicMock(return_value=fake_result)},
+    ), patch("app.memory.store.embed_learning_signal", new=AsyncMock()) as mock_embed:
+        await _run_apply_phase(1, "agent_debugger", "desc", "trace-1")
+
+    assert fake_row.status == "failed"
+    mock_embed.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_apply_phase_learning_signal_failure_does_not_fail_the_request() -> (
+    None
+):
+    """A memory-write hiccup must never turn an otherwise-successful apply
+    into a reported failure — best-effort, matching the same standard
+    already applied to Redis Streams/alerting elsewhere in this codebase."""
+    from app.agents.agent_result import AgentResult
+    from app.api.fleet_dashboard import _run_apply_phase
+
+    fake_result = AgentResult(summary="done", verified=True, status="completed")
+    fake_row = _make_row(status="in_progress")
+
+    session_cm = AsyncMock()
+    session_cm.__aenter__ = AsyncMock(return_value=session_cm)
+    session_cm.__aexit__ = AsyncMock(return_value=False)
+    session_cm.get = AsyncMock(return_value=fake_row)
+    session_cm.commit = AsyncMock()
+    session_cm.add = MagicMock()
+
+    with patch("app.db.session.get_async_session", return_value=session_cm), patch(
+        "app.api.fleet_dashboard._apply_dispatch",
+        return_value={"knowledge_curator": MagicMock(return_value=fake_result)},
+    ), patch(
+        "app.memory.store.embed_learning_signal",
+        new=AsyncMock(side_effect=RuntimeError("voyage api down")),
+    ):
+        await _run_apply_phase(1, "knowledge_curator", "desc", "trace-1")
+
+    assert fake_row.status == "completed"

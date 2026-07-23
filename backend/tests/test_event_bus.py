@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from app.event_bus.bus import publish_event, subscribe, unsubscribe, _subscribers
@@ -226,6 +228,22 @@ async def test_failing_handler_does_not_block_other_handlers() -> None:
     await publish_event(task_created("2", "Should reach good handler"), db=None)
 
     assert len(success_received) == 1
+
+
+# ---- Redis Streams fan-out ----
+# Gap-closure: publish_to_stream() was fully built (real xadd/xreadgroup/xack)
+# but never called from the real publish path — every event only ever reached
+# the Postgres bus. Verifies the fan-out call itself, not redis_streams.py's
+# own internals (already covered by test_gap_day4.py::TestRedisStreamsAdapter).
+
+
+@pytest.mark.asyncio
+async def test_publish_event_fans_out_to_redis_streams() -> None:
+    evt = task_created("77", "Fan-out target")
+    with patch("app.event_bus.bus.redis_streams.publish_to_stream") as mock_publish:
+        await publish_event(evt, db=None)
+
+    mock_publish.assert_called_once_with(evt)
 
 
 # ---- Sync handler support ----

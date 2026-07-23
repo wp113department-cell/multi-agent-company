@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
-SKIP = not os.environ.get("RUN_PENDING_TESTS")
-pytestmark = pytest.mark.skipif(
-    SKIP, reason="Requires RUN_PENDING_TESTS=1 + ANTHROPIC_API_KEY"
-)
+from tests.pending.conftest import requires_anthropic
+
+# Was previously gated on RUN_PENDING_TESTS alone (not an actual key check) —
+# unlike every other file in this directory, that meant setting
+# RUN_PENDING_TESTS=1 without a real key would attempt a live API call and
+# fail instead of skipping cleanly. requires_anthropic checks _has_llm (a
+# real, well-formed ANTHROPIC_API_KEY or USE_GROQ+GROQ_API_KEY), matching
+# test_architect_agent.py / test_pm_agent.py / etc.
+pytestmark = requires_anthropic
 
 
 @pytest.mark.asyncio

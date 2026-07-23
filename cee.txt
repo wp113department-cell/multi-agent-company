@@ -89,3 +89,11 @@ Overall Cross-File Observations
 The 72-agent/AGENT_CONTRACT/ensure_all_agents_registered() claims in the task prompt are all independently confirmed correct via direct code reads, not just filenames.
 The most consistent pattern of "looks done, isn't wired" across these five specs is the Repository-Intelligence DB persistence layer (indexed_files/symbols/call_edges tables — real schema, zero writers) and the API-layer field faking in dev_tasks (priority/project/assigned_agent/final_summary returned as static placeholders, not real columns).
 The MCP principle in spec 07 is the largest philosophical gap: the actual system uses custom in-process tool handlers everywhere except the one genuinely-custom Repository Intelligence MCP server, rather than "use existing MCP servers directly" as spec 07 prescribes.
+
+
+
+
+
+
+
+

@@ -1,8 +1,11 @@
 """Queue adapter interface — abstract base + AsyncioQueueAdapter (default).
 
-Swap backends by setting QUEUE_BACKEND=bullmq (requires Redis).
-The BullMQQueueAdapter stub documents the interface; replace the body
-with redis+bullmq client calls when Redis becomes available.
+Swap backends via QUEUE_BACKEND:
+- asyncio (default) — in-process, zero external dependencies.
+- rq — real Redis Queue, bridged onto this async interface by RQAdapterBridge
+  (wraps app.queue.rq_adapter.RQQueueAdapter, which is real, tested code).
+- bullmq — still an intentional stub; requires a bullmq-python client that
+  doesn't exist yet. Set QUEUE_BACKEND=asyncio or rq instead.
 """
 
 from __future__ import annotations
@@ -86,6 +89,68 @@ class AsyncioQueueAdapter(QueueAdapter):
         self._started = False
 
 
+def _run_coroutine_job(job_fn: JobFn, kwargs: dict[str, Any]) -> Any:
+    """RQ worker entrypoint. RQ workers run in separate processes and only
+    know how to call plain sync functions by pickled reference — they cannot
+    invoke an async job_fn directly (calling it would just return an
+    un-awaited coroutine object). This module-level function is what RQ
+    actually pickles/dispatches; job_fn and kwargs travel as its arguments
+    and get awaited here, inside the worker, via asyncio.run()."""
+    return asyncio.run(job_fn(**kwargs))
+
+
+class RQAdapterBridge(QueueAdapter):
+    """Adapts app.queue.rq_adapter.RQQueueAdapter (real, Redis-backed RQ) to
+    this module's async QueueAdapter interface. The RQ adapter itself is
+    unmodified — this bridge only translates calling convention and job
+    status vocabulary so QUEUE_BACKEND=rq is actually reachable from
+    get_queue_adapter() below (previously it silently fell through to
+    AsyncioQueueAdapter no matter what QUEUE_BACKEND was set to, since this
+    function never checked for "rq")."""
+
+    _STATUS_MAP: dict[str, str] = {
+        "created": "pending",
+        "queued": "pending",
+        "deferred": "pending",
+        "scheduled": "pending",
+        "started": "running",
+        "finished": "completed",
+        "failed": "failed",
+        "stopped": "failed",
+        "canceled": "failed",
+    }
+
+    def __init__(self) -> None:
+        from app.queue.rq_adapter import get_rq_adapter
+
+        self._adapter = get_rq_adapter()
+
+    async def enqueue(self, job_fn: JobFn, **kwargs: Any) -> str:
+        job = await asyncio.to_thread(
+            self._adapter.enqueue, _run_coroutine_job, job_fn, kwargs
+        )
+        return str(job.id)
+
+    async def get_status(self, job_id: str) -> str:
+        def _fetch_status() -> str:
+            from rq.exceptions import NoSuchJobError
+            from rq.job import Job
+
+            try:
+                job = Job.fetch(job_id, connection=self._adapter.connection)
+            except NoSuchJobError:
+                return "unknown"
+            return self._STATUS_MAP.get(job.get_status(refresh=True).value, "unknown")
+
+        return await asyncio.to_thread(_fetch_status)
+
+    async def shutdown(self) -> None:
+        # RQ workers are separate, externally-managed processes (started via
+        # `rq worker gridiron-high gridiron-default`, per rq_adapter.py's own
+        # docstring) — there is no in-process worker pool here to drain.
+        pass
+
+
 class BullMQQueueAdapter(QueueAdapter):
     """Stub — replace with bullmq-python client when Redis is available.
 
@@ -110,6 +175,8 @@ def get_queue_adapter() -> QueueAdapter:
     from app.config import get_settings
 
     backend = get_settings().queue_backend.lower()
+    if backend == "rq":
+        return RQAdapterBridge()
     if backend == "bullmq":
         return BullMQQueueAdapter()
     return AsyncioQueueAdapter()

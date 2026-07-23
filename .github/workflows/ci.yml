@@ -112,10 +112,57 @@ jobs:
       - name: Lint (eslint)
         run: pnpm --filter @gridiron/web run lint || true
 
+      - name: Test (vitest)
+        run: pnpm --filter @gridiron/web run test
+
       - name: Build
         run: pnpm --filter @gridiron/web run build
         env:
           NEXT_PUBLIC_API_URL: http://localhost:8000
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Playwright E2E — separate job so a flaky browser run never blocks the
+  # fast typecheck/build gate above. All specs mock the backend via
+  # page.route() fixtures (apps/web/e2e/fixtures.ts) — no live Postgres/
+  # agent fleet needed, matching this project's deterministic-CI design.
+  # ──────────────────────────────────────────────────────────────────────
+  frontend-e2e:
+    name: Frontend E2E (Playwright)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+
+      - name: Run E2E tests
+        run: pnpm --filter @gridiron/web run test:e2e
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
 
   # ──────────────────────────────────────────────────────────────────────
   # Security scan — pip-audit

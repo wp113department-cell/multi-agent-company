@@ -75,6 +75,24 @@ class ModelRouter:
         self._default: dict[str, Any] = {}
         self._load(json_path)
 
+    def _fallback_default(self) -> dict[str, Any]:
+        """Last-resort default when agent_models.json is missing/unreadable —
+        sourced from config.py's model_coder (the same single source of
+        truth every other model reference in this codebase uses), not a
+        second, independently-hardcoded literal that can silently drift out
+        of sync with it (gap-closure 2026-07-23: this file's own fallback
+        had drifted to a different, stale model string than config.py's
+        real default, a direct violation of CLAUDE.md's zero-hardcoding
+        rule — "Model names live in config... so we can swap models without
+        code changes")."""
+        from app.config import get_settings
+
+        return {
+            "provider": "anthropic",
+            "model": get_settings().model_coder,
+            "tier": "sonnet",
+        }
+
     def _load(self, json_path: str | Path | None) -> None:
         if json_path is None:
             # Resolve relative to this file's location
@@ -85,23 +103,12 @@ class ModelRouter:
                 "agent_models.json not found at %s — using built-in defaults", path
             )
             self._tiers = _DEFAULT_TIERS
-            self._default = {
-                "provider": "anthropic",
-                "model": "claude-sonnet-4-20250514",
-                "tier": "sonnet",
-            }
+            self._default = self._fallback_default()
             return
         try:
             data = json.loads(path.read_text())
             self._tiers = {k: v for k, v in data.get("_tiers", _DEFAULT_TIERS).items()}
-            self._default = data.get(
-                "DEFAULT",
-                {
-                    "provider": "anthropic",
-                    "model": "claude-sonnet-4-20250514",
-                    "tier": "sonnet",
-                },
-            )
+            self._default = data.get("DEFAULT", self._fallback_default())
             # Strip metadata keys (start with _ or "DEFAULT")
             self._table = {
                 k: v
@@ -114,11 +121,7 @@ class ModelRouter:
         except Exception as exc:
             logger.error("Failed to load agent_models.json: %s", exc)
             self._tiers = _DEFAULT_TIERS
-            self._default = {
-                "provider": "anthropic",
-                "model": "claude-sonnet-4-20250514",
-                "tier": "sonnet",
-            }
+            self._default = self._fallback_default()
 
     def reload(self, json_path: str | Path | None = None) -> None:
         """Hot-reload the routing table without restarting."""
@@ -133,7 +136,7 @@ class ModelRouter:
         return RouteConfig(
             agent_name=agent_name,
             provider=entry.get("provider", "anthropic"),
-            model=entry.get("model", "claude-sonnet-4-20250514"),
+            model=entry.get("model") or self._fallback_default()["model"],
             tier=tier,
             max_tokens=tier_cfg.get("max_tokens", 4096),
             thinking_budget=tier_cfg.get("thinking_budget"),

@@ -6,8 +6,15 @@ import hashlib
 import re
 from dataclasses import dataclass
 
-from app.repo_tools.scanner import RepoIndex, build_call_graph
+from app.repo_tools.scanner import RepoIndex
+from app.repo_tools.cross_file_graph import build_cross_file_graph
 from app.repo_tools.embeddings import semantic_search
+
+# Tiebreak weight for the PageRank-informed relevance boost below — modest
+# relative to a keyword match (1.0 per token) or semantic hit (+2.0), so it
+# only nudges ordering among files that already scored > 0, never surfaces
+# an unrelated-but-central file (e.g. main.py) on its own.
+_RANK_BOOST_WEIGHT = 0.5
 
 # In-memory per-task context cache: {cache_key: ContextResult}
 # Cache key = SHA-256(task_description + repo_path).
@@ -88,12 +95,38 @@ def build_context(
         for path in semantic_matches:
             scores[path] = scores.get(path, 0.0) + 2.0
 
+    # Gap-closure (2026-07-23): the real, function-level cross-file call
+    # graph (app/repo_tools/cross_file_graph.py) was built and persisted to
+    # the DB in an earlier pass, but this function — the one PM/Architect
+    # agents actually consume at runtime — still called scanner.py's
+    # file-level import-graph heuristic. Replaced with the real engine.
+    graph_result = build_cross_file_graph(index)
+
+    # PageRank-informed tiebreak: only applied to files that already scored
+    # > 0 from keyword/semantic matching, so a highly-central-but-unrelated
+    # file can never get pulled into relevant_files on rank alone.
+    if graph_result.file_rank:
+        for rel_path, score in list(scores.items()):
+            if score > 0:
+                scores[rel_path] = (
+                    score
+                    + graph_result.file_rank.get(rel_path, 0.0) * _RANK_BOOST_WEIGHT
+                )
+
     # Top files by combined score
     sorted_files = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     relevant_files = [p for p, s in sorted_files if s > 0][:top_k]
 
-    # Dependency chain — files imported by top relevant files
-    call_graph = build_call_graph(index)
+    # Dependency chain — files the real call graph shows top relevant files
+    # actually calling into (function-level, resolved by identifier-name
+    # matching), not a "does the file's basename appear in an import line"
+    # guess.
+    call_graph: dict[str, list[str]] = {}
+    for edge in graph_result.call_edges:
+        callees = call_graph.setdefault(edge.caller_file, [])
+        if edge.callee_file not in callees:
+            callees.append(edge.callee_file)
+
     dependency_chain: list[str] = []
     for rf in relevant_files[:5]:
         for dep in call_graph.get(rf, []):

@@ -2,6 +2,26 @@
 
 > Generated 2026-07-02. Update when packages are added or major refactors occur.
 
+> **⚠️ STALE — describes the pre-Python-pivot architecture (2026-07-23 note).** Everything below
+> this line documents the original TypeScript/Turborepo design (`packages/*`, `apps/worker`,
+> `ts-morph`, `node-pg-migrate`, `vitest`). The backend was archived to `TX/` and rebuilt in Python
+> on 2026-07-02 (see `docs/adr/001-anthropic-messages-api-not-agent-sdk.md` and CLAUDE.md's
+> "LANGUAGE ARCHITECTURE" section). Two concrete, verified facts worth knowing before reading
+> further (from `files/GAPS_ALL_FILES_REPORT.md`'s gap-closure audit):
+> - **`packages/` is now an empty directory** — every package listed below (`shared-config`,
+>   `agent-runtime`, `repo-tools`, `policy-engine`, `mcp-server`, etc.) has no code left. The
+>   equivalent real logic lives in `backend/app/` (Python/FastAPI/LangGraph) instead — see
+>   `backend/app/{agents,policy,repo_tools,mcp,event_bus}/` for the real current locations.
+> - **The real git branch convention is `agent/task-N`**, not the `stage-N/...`/`fix/...` pattern
+>   this doc and `04_Engineering_Standards_Conventions.md` describe (confirmed via `git branch -a`).
+>   `.github/workflows/ci.yml`'s own branch trigger list still references the old `stage-*`/`gap-*`
+>   pattern and could be trimmed if desired — not required, just noted.
+>
+> For the current, accurate picture of the real Python/TypeScript system, see
+> `docs/PROJECT_CONTROL_CENTER.md` (live state), `docs/DEPLOYMENT.md` (real deployment topology),
+> and `backend/app/` directly — this file has not been rewritten for the Python backend and should
+> not be trusted for directory layout, table names, or config var names below.
+
 ## Directory Layout
 
 ```

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -11,6 +11,8 @@ from app.pipeline.queue_adapter import (
     AsyncioQueueAdapter,
     BullMQQueueAdapter,
     QueueAdapter,
+    RQAdapterBridge,
+    _run_coroutine_job,
     get_queue_adapter,
 )
 
@@ -106,6 +108,97 @@ class TestBullMQAdapterStub:
         await adapter.shutdown()  # should not raise
 
 
+class TestRunCoroutineJob:
+    """_run_coroutine_job is the module-level, RQ-picklable sync shim that
+    lets a real RQ worker process run our async job functions."""
+
+    def test_awaits_the_coroutine_and_returns_its_result(self) -> None:
+        async def job(x: int, y: int) -> int:
+            return x + y
+
+        result = _run_coroutine_job(job, {"x": 2, "y": 3})
+        assert result == 5
+
+    def test_propagates_exceptions_from_the_coroutine(self) -> None:
+        async def failing_job() -> None:
+            raise RuntimeError("boom")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            _run_coroutine_job(failing_job, {})
+
+
+class TestRQAdapterBridge:
+    """RQAdapterBridge wraps app.queue.rq_adapter.RQQueueAdapter (real,
+    Redis-backed) for the async QueueAdapter interface — mocked here so
+    these tests never touch a real Redis server, matching this file's
+    existing style of testing behavior without real infrastructure."""
+
+    def _make_bridge(self, mock_rq_adapter: MagicMock) -> RQAdapterBridge:
+        with patch("app.queue.rq_adapter.get_rq_adapter", return_value=mock_rq_adapter):
+            return RQAdapterBridge()
+
+    async def test_enqueue_delegates_to_rq_adapter_and_returns_job_id(self) -> None:
+        mock_job = MagicMock()
+        mock_job.id = "rq-job-123"
+        mock_rq_adapter = MagicMock()
+        mock_rq_adapter.enqueue.return_value = mock_job
+        bridge = self._make_bridge(mock_rq_adapter)
+
+        async def job_fn(task_id: int) -> None:
+            pass
+
+        job_id = await bridge.enqueue(job_fn, task_id=42)
+
+        assert job_id == "rq-job-123"
+        # The real async job_fn + its kwargs travel as arguments to the
+        # RQ-picklable shim — RQ never receives job_fn as its own `fn`.
+        mock_rq_adapter.enqueue.assert_called_once_with(
+            _run_coroutine_job, job_fn, {"task_id": 42}
+        )
+
+    async def test_get_status_maps_rq_statuses(self) -> None:
+        from rq.job import JobStatus
+
+        cases = {
+            JobStatus.CREATED: "pending",
+            JobStatus.QUEUED: "pending",
+            JobStatus.DEFERRED: "pending",
+            JobStatus.SCHEDULED: "pending",
+            JobStatus.STARTED: "running",
+            JobStatus.FINISHED: "completed",
+            JobStatus.FAILED: "failed",
+            JobStatus.STOPPED: "failed",
+            JobStatus.CANCELED: "failed",
+        }
+        mock_rq_adapter = MagicMock()
+        bridge = self._make_bridge(mock_rq_adapter)
+
+        for rq_status, expected in cases.items():
+            mock_job = MagicMock()
+            mock_job.get_status.return_value = rq_status
+            with patch("rq.job.Job.fetch", return_value=mock_job):
+                status = await bridge.get_status("some-id")
+            assert status == expected, f"{rq_status} should map to {expected}"
+
+    async def test_get_status_unknown_job_returns_unknown(self) -> None:
+        from rq.exceptions import NoSuchJobError
+
+        mock_rq_adapter = MagicMock()
+        bridge = self._make_bridge(mock_rq_adapter)
+
+        with patch("rq.job.Job.fetch", side_effect=NoSuchJobError()):
+            status = await bridge.get_status("does-not-exist")
+
+        assert status == "unknown"
+
+    async def test_shutdown_is_a_noop(self) -> None:
+        """RQ workers are separate, externally-started processes — nothing
+        in-process for the bridge itself to drain or close."""
+        mock_rq_adapter = MagicMock()
+        bridge = self._make_bridge(mock_rq_adapter)
+        await bridge.shutdown()  # should not raise
+
+
 class TestGetQueueAdapter:
     @patch("app.config.get_settings")
     def test_asyncio_backend_by_default(self, mock_settings: object) -> None:
@@ -116,6 +209,25 @@ class TestGetQueueAdapter:
         (mock_settings if callable(mock_settings) else mock_settings).return_value = s  # type: ignore[union-attr]
         adapter = get_queue_adapter()
         assert isinstance(adapter, AsyncioQueueAdapter)
+
+    @patch("app.queue.rq_adapter.get_rq_adapter")
+    @patch("app.config.get_settings")
+    def test_rq_backend_returns_rq_bridge(
+        self, mock_settings: object, mock_get_rq_adapter: MagicMock
+    ) -> None:
+        """QUEUE_BACKEND=rq must actually reach RQAdapterBridge — previously
+        this function only ever checked for "bullmq", so setting
+        QUEUE_BACKEND=rq silently fell through to AsyncioQueueAdapter no
+        matter what, even though config.py documents rq as a real option and
+        a fully-built RQQueueAdapter already existed with zero callers."""
+        s = MagicMock()
+        s.queue_backend = "rq"
+        (mock_settings if callable(mock_settings) else mock_settings).return_value = s  # type: ignore[union-attr]
+        mock_get_rq_adapter.return_value = MagicMock()
+
+        adapter = get_queue_adapter()
+
+        assert isinstance(adapter, RQAdapterBridge)
 
     @patch("app.config.get_settings")
     def test_bullmq_backend_returns_bullmq(self, mock_settings: object) -> None:

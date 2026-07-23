@@ -445,6 +445,29 @@ export async function fetchEpicCosts(): Promise<EpicCostSummary[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Agent Registry (Mission Control Dashboard Stage 6 — GET /api/agents)
+// ---------------------------------------------------------------------------
+
+export interface AgentRegistryEntry {
+  agentId: string;
+  name: string;
+  capabilityTags: string[];
+  toolList: string[];
+  promptRef: string | null;
+  version: string;
+  successRate: number;
+  avgRetries: number;
+  lastComputedAt: string;
+  createdAt: string;
+}
+
+export async function fetchAgents(tag?: string): Promise<AgentRegistryEntry[]> {
+  const qs = tag ? `?tag=${encodeURIComponent(tag)}` : "";
+  const res = await fetch(`/api/agents${qs}`, { cache: "no-store" });
+  return handleResponse<AgentRegistryEntry[]>(res);
+}
+
+// ---------------------------------------------------------------------------
 // Settings (API key management)
 // ---------------------------------------------------------------------------
 

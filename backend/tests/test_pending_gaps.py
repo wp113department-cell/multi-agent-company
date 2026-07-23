@@ -11,8 +11,12 @@ Covers:
 - Auth API router structure
 - Auth dependencies (get_current_user, require_approver)
 - Procfile and docker-compose existence
-- Eval runner and suites structure
 - Config new fields
+
+Gap-closure (2026-07-23): the standalone backend/evals/ CLI this file used to
+test here (TestEvalSuite) was retired — consolidated into the pytest-wired
+tests/evals/ system (see tests/evals/test_evals.py), which already has its
+own, more thorough coverage.
 """
 
 from __future__ import annotations
@@ -484,80 +488,3 @@ class TestInfraFiles:
         content = (_REPO / "docker-compose.yml").read_text()
         assert "rq worker" in content
         assert "profiles" in content
-
-
-# ===========================================================================
-# 12. Agent Evaluation suite
-# ===========================================================================
-
-
-class TestEvalSuite:
-    def test_suites_dict_exists(self) -> None:
-        from evals.suites import SUITES
-
-        assert isinstance(SUITES, dict)
-        assert len(SUITES) > 0
-
-    def test_all_suites_have_cases(self) -> None:
-        from evals.suites import SUITES
-        from evals.eval_runner import EvalCase
-
-        for slug, cases in SUITES.items():
-            assert len(cases) > 0, f"Suite {slug!r} has no cases"
-            for case in cases:
-                assert isinstance(case, EvalCase)
-
-    def test_eval_runner_imports(self) -> None:
-        from evals.eval_runner import run_eval_case, run_suite, save_report
-
-        assert callable(run_eval_case)
-        assert callable(run_suite)
-        assert callable(save_report)
-
-    def test_all_cases_have_criteria(self) -> None:
-        from evals.suites import SUITES
-
-        for slug, cases in SUITES.items():
-            for case in cases:
-                assert (
-                    len(case.criteria) > 0
-                ), f"Case {case.name!r} in {slug!r} has no criteria"
-                assert len(case.criteria) == len(case.criteria_labels)
-
-    def test_eval_report_to_dict(self) -> None:
-        from evals.eval_runner import EvalReport, EvalResult
-
-        r = EvalResult(
-            case_name="test",
-            agent_slug="bug_fix",
-            passed=True,
-            criteria_results=[{"criterion": "x", "passed": True}],
-            duration_seconds=1.5,
-            tokens_in=100,
-            tokens_out=50,
-            status="completed",
-        )
-        report = EvalReport(
-            agent_slug="bug_fix",
-            total=1,
-            passed=1,
-            failed=0,
-            score=1.0,
-            duration_seconds=1.5,
-            results=[r],
-        )
-        d = report.to_dict()
-        assert d["agent_slug"] == "bug_fix"
-        assert d["score"] == 1.0
-        assert len(d["results"]) == 1
-
-    def test_suites_cover_key_agents(self) -> None:
-        from evals.suites import SUITES
-
-        key_agents = {
-            "bug_fix",
-            "security_reviewer",
-            "user_story_generator",
-            "evaluation_agent",
-        }
-        assert key_agents.issubset(SUITES.keys())
