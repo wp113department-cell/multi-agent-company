@@ -400,7 +400,7 @@ gap-closure process this session (Days 11-13 audit, Days 11-15 audit, and a full
 
 ---
 
-## Bottom Line
+## Bottom Line (as of 10:43 — superseded by Part 4 below)
 
 Nothing in this report is "fake progress" — every gap listed was confirmed absent by direct
 grep/read, and every "done" claim has file:line evidence behind it. The project is genuinely far
@@ -412,3 +412,98 @@ that were never built at all** (Architecture Mapper, Agent Registry dashboard vi
 tests, DB-level status constraints), and **(c) one thing that fundamentally requires you, not more
 code** (an actual live deployment). Nothing here needs guessing at what "done" means — it's all
 independently checkable the same way this report was produced.
+
+---
+
+## Part 4 — Re-Verification (2026-07-23, evening) — Six Gap-Closure Commits Checked Against Live Code
+
+Between this report (10:43) and now, seven commits landed (`1abafa9`, `49502bd`, `d7a0a8a`,
+`0284eff`, `957b044`, `7c4ce58`, `7a14940`) claiming to close most of the gaps above, plus a new
+`/files/Audit/` folder (11 audit-checklist docs, not previously cross-referenced). Every claim below
+was re-verified against current file contents by four independent research passes — none trusted
+from commit messages alone.
+
+### Confirmed genuinely fixed (real, wired, not cosmetic)
+1. **Redis Streams** — `event_bus/bus.py:179-183`, `publish_event()` now calls
+   `publish_to_stream()` unconditionally on every event. Real callers throughout
+   (`manager.py`, `api/epics.py`, `fleet_events.py`).
+2. **RQ queue backend** — `queue_adapter.py:get_queue_adapter()` now branches on `"rq"` and returns
+   a real `RQAdapterBridge` wrapping `queue/rq_adapter.py`. `config.py` validates only
+   `asyncio`/`rq`; `bullmq` stub is no longer a reachable config value.
+3. **`dev_tasks` columns** — migration `018_dev_task_metadata_fields.py` adds real
+   `priority`/`assigned_agent`/`project`/`final_summary` columns; `tasks.py:_task_to_dict()` reads
+   them for real — no more hardcoded placeholders.
+4. **Retention archive-not-delete** — `services/retention.py` now does `UPDATE ... SET archived =
+   true` (not `DELETE`) across `task_logs`, `agent_runs`, **and** `artifacts` (migration `019`).
+5. **Learning Signal memory** — `memory/store.py:embed_learning_signal()` sets `category="learning"`,
+   genuinely called from `api/fleet_dashboard.py` on successful fleet-governance APPLY phases.
+6. **Repo-intel DB persistence** — `repo_tools/persistence.py:persist_repo_index()` does real
+   `db.add()`+`commit()` into `indexed_files`/`symbols`/`call_edges`, wired into `_do_reindex()`
+   (the function backing both manual reindex and the weekly loop). Confirmed by a real
+   fixture-repo test (`test_repo_persistence.py`).
+7. **Incremental-reindex bug** — genuinely fixed. `api/repo.py` now caches a merged full index
+   (`_cached_index`, using the previously-dead `scanner.merge_indexes()`) instead of silently
+   degrading to a partial "changed files only" index after the first reindex.
+8. **Agent Registry dashboard** — `apps/web/app/agents/page.tsx` (263 lines) is real: fetches
+   `GET /api/agents`, renders name/version/capabilities/successRate/avgRetries in a sortable,
+   filterable table with KPI tiles. The doc-15 gap is closed.
+9. **Frontend test infra** — real test files now exist (`lib/auth.test.ts`,
+   `app/agents/page.test.tsx`), and CI's frontend job runs `pnpm run test` (vitest) as a real,
+   blocking step — not `|| true`. (The separate frontend **lint** step is still `|| true`,
+   non-blocking — that narrower sub-issue was not touched.)
+10. **Playwright E2E** — real `playwright.config.ts`, 5 real spec files in `apps/web/e2e/` with
+    genuine DOM assertions and route-mocking (not empty scaffolding), run in a dedicated CI job.
+11. **Eval system consolidation** — `backend/evals/` deleted outright (only stale `.pyc` remains);
+    `backend/tests/evals/` is the sole surviving system, now pulling agent functions from the real
+    60-agent registry instead of a hardcoded 12-agent map.
+
+### Confirmed NOT fixed (correctly not claimed, or claimed but substance missing)
+12. **MCP as tool-access layer — still not a functional fix.** The only MCP-related commit
+    (`1abafa9`) added `docs/adr/005-mcp-not-primary-tool-access.md` — a documentation-only ADR that
+    explicitly states "No functional change... documents an already-existing architecture." MCP
+    server still has zero callers in the running app. Correctly not claimed as fixed by the commits
+    themselves — flagging so it isn't mistaken for closed.
+13. **Cross-file call graph — half-fixed.** A genuine cross-file, function-level call-graph engine
+    now exists (`repo_tools/cross_file_graph.py`) and its output is persisted to the DB. **But it is
+    not wired into the Context Builder** — `context_builder.py` still calls the old file-level
+    `scanner.build_call_graph()` for `dependency_chain`/`call_graph_edges`. The thing agents actually
+    consume at runtime is unchanged; only the DB-persistence half of this gap closed.
+14. **Webhook-triggered reindex on merge** — still doesn't exist; only manual trigger + weekly timer.
+    Not in scope of any of the six commits.
+15. **Architecture Mapper (spec 10)** — still no module; only a passing comment mentions the name.
+16. **`packages/*` Turborepo structure** — still completely empty.
+17. **Branch naming (`stage-N/...`)** — still not followed; `git branch -a` shows `agent/task-N`.
+18. **External tool integrations** (GitLab API, Jira, Notion, Figma, Azure API, Helm) — still absent.
+    `gitlab.com`/AWS hits are unrelated (git-clone allowlist string, S3 artifact storage).
+19. **Live deployment** — still zero evidence anywhere; `vercel.json` still points at a placeholder
+    URL, no `.vercel` dir, no live-host strings in the repo.
+
+### New gaps surfaced this pass (not in the original 10:43 report)
+20. **Regression gate is dormant.** `regression_detector.gate_deploy()` is genuinely called from
+    `PromptRegistry.deploy()` (`fleet/prompt_registry.py:332`) — but `deploy()` itself has **zero
+    callers anywhere** (no API route exists to deploy a prompt version). The gate that's supposed to
+    block bad prompt rollouts can never fire in production today.
+21. **Fire-and-forget async tasks swallow exceptions.** Every `asyncio.create_task(...)` call site
+    across `main.py`, `api/chat.py`, `api/agents.py`, `api/epics.py`, `api/fleet_dashboard.py` (10+
+    sites) has no `add_done_callback`/exception-logging wrapper, and Sentry's `AsyncioIntegration`
+    is never initialized. An exception raised inside any of these background tasks vanishes
+    silently — it never reaches Sentry or any log.
+22. **Hardcoded model-string fallback.** `fleet/model_router.py` (lines ~90-136) hardcodes
+    `"claude-sonnet-4-20250514"` as a fallback used only when `agent_models.json` is missing/
+    malformed or a key isn't found. Not a functional bypass (JSON stays primary), but a literal
+    violation of CLAUDE.md's zero-hardcoding rule worth a one-line fix (move to config).
+
+### Not independently re-verified this pass (flagged, not claimed either way)
+Two-entry-point parity per feature, full per-agent AGENT_CONTRACT/VerificationConfig scorecard
+across all ~72 agents, Alembic migration-chain/ORM drift, and a dedicated N+1 query audit — these
+were named as checklist items in the new `/files/Audit/` folder but need a dedicated follow-up pass;
+not claimed done or missing here.
+
+### Updated bottom line
+Of the 18 gaps in the original 10:43 report, **11 are now genuinely closed**, **1 (MCP) was
+correctly left open and documented rather than falsely claimed fixed**, **1 (cross-file call graph)
+is half-closed** (DB side done, consumer side not), and **5 remain untouched** (Architecture Mapper,
+`packages/*`, branch naming, external integrations, live deployment) plus the pre-existing
+webhook-reindex gap. Three genuinely new gaps were found (dormant regression gate, silent
+async-task exceptions, one hardcoded model fallback). Every line above is file:line/grep-verified
+against code as it exists right now, not carried forward from any earlier report.
