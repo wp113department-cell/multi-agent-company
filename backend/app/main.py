@@ -48,6 +48,7 @@ def _init_sentry(settings: "Settings") -> None:  # type: ignore[name-defined]  #
         return
     try:
         import sentry_sdk
+        from sentry_sdk.integrations.asyncio import AsyncioIntegration
         from sentry_sdk.integrations.fastapi import FastApiIntegration
         from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
@@ -55,7 +56,18 @@ def _init_sentry(settings: "Settings") -> None:  # type: ignore[name-defined]  #
             dsn=settings.sentry_dsn,
             environment=settings.sentry_environment,
             traces_sample_rate=settings.sentry_traces_sample_rate,
-            integrations=[FastApiIntegration(), SqlalchemyIntegration()],
+            # AsyncioIntegration (gap-closure 2026-07-23): this codebase has
+            # several genuine fire-and-forget asyncio.create_task() sites
+            # (e.g. db/repository.py's heartbeat_agent_run(), called from
+            # api/agents.py with no try/except of its own) — without this,
+            # an exception raised inside one of those tasks is never
+            # awaited/retrieved and never reaches Sentry, only asyncio's own
+            # "Task exception was never retrieved" warning at GC time.
+            integrations=[
+                FastApiIntegration(),
+                SqlalchemyIntegration(),
+                AsyncioIntegration(),
+            ],
             # Never send secrets to Sentry
             before_send=lambda event, hint: event,
         )

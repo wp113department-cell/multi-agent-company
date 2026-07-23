@@ -419,3 +419,27 @@ async def get_context(task_description: str) -> dict[str, object]:
         "relatedSymbols": ctx.related_symbols,
         "summary": ctx.summary,
     }
+
+
+@router.get("/architecture")
+async def get_architecture() -> dict[str, object]:
+    """Gap-closure (2026-07-23): LLM-prompt-driven architecture summary —
+    see app/repo_tools/architecture_mapper.py's module docstring for why
+    this is a prompt-driven approach rather than a novel static-analysis
+    algorithm (no precedent for the latter in any of the 10 reference
+    repos). Makes a real Anthropic call — not cached, since architecture
+    summaries are expected to be requested occasionally, not polled."""
+    from app.repo_tools.architecture_mapper import build_architecture_map
+
+    repo_path = get_active_repo_path()
+    idx = _cached_index if _cached_index is not None else None
+    if idx is None:
+        from app.repo_tools.scanner import index_repository
+
+        idx = index_repository(repo_path)
+
+    arch_map = build_architecture_map(repo_path, idx)
+    return {
+        "summary": arch_map.summary,
+        "components": [c.model_dump() for c in arch_map.components],
+    }

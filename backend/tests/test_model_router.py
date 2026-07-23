@@ -109,7 +109,10 @@ class TestModelRouter:
         router = ModelRouter()
         cfg = router.route("nonexistent_agent_xyz")
         assert cfg.tier == "sonnet"
-        assert cfg.model == "claude-sonnet-4-20250514"
+        # Falls back to the real agent_models.json DEFAULT entry (a legit,
+        # editable config value) — not asserting a specific literal here,
+        # since that's the JSON's own data, not this test's concern.
+        assert cfg.model
         assert cfg.provider == "anthropic"
 
     def test_model_for(self):
@@ -159,10 +162,29 @@ class TestModelRouter:
             assert cfg.max_tokens == 999
 
     def test_missing_json_uses_defaults(self):
+        from app.config import get_settings
+
         router = ModelRouter(json_path="/nonexistent/path/models.json")
-        # Should not raise; falls back to built-in defaults
+        # Should not raise; falls back to config.py's model_coder (gap-
+        # closure 2026-07-23: this used to be a second, independently-
+        # hardcoded literal that had already drifted from model_coder's
+        # real value — now there is exactly one source of truth).
         cfg = router.route("architect")
-        assert cfg.model == "claude-sonnet-4-20250514"  # DEFAULT fallback
+        assert cfg.model == get_settings().model_coder
+
+    def test_fallback_default_genuinely_reads_settings_model_coder(self):
+        """Proves the wiring, not just a coincidental match — changes
+        settings.model_coder and confirms the fallback actually follows it."""
+        from unittest.mock import MagicMock, patch
+
+        with patch("app.config.get_settings") as mock_get_settings:
+            mock_get_settings.return_value = MagicMock(
+                model_coder="test-marker-model-xyz"
+            )
+            router = ModelRouter(json_path="/nonexistent/path/models.json")
+            cfg = router.route("architect")
+
+        assert cfg.model == "test-marker-model-xyz"
 
     def test_hot_reload(self):
         with tempfile.TemporaryDirectory() as tmpdir:
