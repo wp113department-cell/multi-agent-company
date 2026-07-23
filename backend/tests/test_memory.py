@@ -10,8 +10,10 @@ import pytest
 from app.memory.store import (
     _build_outcome_text,
     _ZERO_VECTOR_1536,
+    embed_learning_signal,
     embed_task_outcome,
     format_memory_context,
+    query_learning_signals,
     query_similar_tasks,
 )
 
@@ -258,3 +260,118 @@ def test_format_memory_context_multiple_tasks() -> None:
     ctx = format_memory_context(tasks)
     assert "t-0" in ctx
     assert "t-2" in ctx
+
+
+# ---- embed_learning_signal / query_learning_signals ----
+# Gap-closure (files/GAPS_ALL_FILES_REPORT.md, 2026-07-23): Doc 11's 4th
+# memory category ("learning") was schema-supported (migration 010) but
+# never actually written anywhere — grep confirmed zero real writes.
+
+
+@pytest.mark.asyncio
+async def test_embed_learning_signal_inserts_row_with_learning_category() -> None:
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_db.commit = AsyncMock()
+    mock_db.rollback = AsyncMock()
+
+    async def fake_refresh(obj: Any) -> None:
+        obj.id = 7
+
+    mock_db.refresh = fake_refresh
+
+    with patch("app.memory.store.get_settings") as ms, patch(
+        "app.memory.store._embed"
+    ) as mock_embed:
+        ms.return_value = MagicMock(memory_enabled=True)
+        mock_embed.return_value = _ZERO_VECTOR_1536
+
+        result = await embed_learning_signal(
+            agent_name="agent_performance_reviewer",
+            description="Tighten reviewer prompt to reduce false positives",
+            outcome_summary="Applied and committed role prompt change",
+            db=mock_db,
+        )
+
+    assert mock_db.add.called
+    assert mock_db.commit.called
+    added_row = mock_db.add.call_args.args[0]
+    assert added_row.category == "learning"
+    assert added_row.outcome == "learning"
+    assert added_row.task_id == "fleet-agent_performance_reviewer"
+    assert result is not None
+
+
+@pytest.mark.asyncio
+async def test_embed_learning_signal_disabled_returns_none() -> None:
+    mock_db = AsyncMock()
+    with patch("app.memory.store.get_settings") as ms:
+        ms.return_value = MagicMock(memory_enabled=False)
+        result = await embed_learning_signal(
+            agent_name="knowledge_curator",
+            description="d",
+            outcome_summary="o",
+            db=mock_db,
+        )
+    assert result is None
+    mock_db.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_embed_learning_signal_db_error_returns_none() -> None:
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_db.commit = AsyncMock(side_effect=RuntimeError("DB is down"))
+    mock_db.rollback = AsyncMock()
+
+    with patch("app.memory.store.get_settings") as ms, patch(
+        "app.memory.store._embed"
+    ) as mock_embed:
+        ms.return_value = MagicMock(memory_enabled=True)
+        mock_embed.return_value = _ZERO_VECTOR_1536
+
+        result = await embed_learning_signal(
+            agent_name="agent_debugger",
+            description="d",
+            outcome_summary="o",
+            db=mock_db,
+        )
+
+    assert result is None
+    assert mock_db.rollback.called
+
+
+@pytest.mark.asyncio
+async def test_query_learning_signals_disabled_returns_empty() -> None:
+    mock_db = AsyncMock()
+    with patch("app.memory.store.get_settings") as ms:
+        ms.return_value = MagicMock(memory_enabled=False)
+        results = await query_learning_signals("retry loop tuning", mock_db)
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_query_learning_signals_returns_formatted_rows() -> None:
+    mock_db = AsyncMock()
+    fake_row = MagicMock()
+    fake_row.task_id = "fleet-quality_auditor"
+    fake_row.description = "Fixed secrets_scan false negative"
+    fake_row.summary = "Applied and committed"
+    fake_row.similarity = 0.87
+
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = [fake_row]
+    mock_db.execute = AsyncMock(return_value=mock_result)
+
+    with patch("app.memory.store.get_settings") as ms, patch(
+        "app.memory.store._embed"
+    ) as mock_embed:
+        ms.return_value = MagicMock(memory_enabled=True)
+        mock_embed.return_value = [0.1] * 1536
+
+        results = await query_learning_signals("secrets scan", mock_db)
+
+    assert len(results) == 1
+    assert results[0]["agent_name"] == "quality_auditor"
+    assert results[0]["action"] == "Fixed secrets_scan false negative"
+    assert results[0]["similarity"] == 0.87

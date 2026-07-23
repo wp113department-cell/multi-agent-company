@@ -17,7 +17,9 @@ from app.db.repository import (
     save_subtasks,
     transition_task,
     update_pipeline_state,
+    update_task_assigned_agent,
     update_task_diff,
+    update_task_final_summary,
     update_task_plan,
 )
 from app.db.session import get_session_factory
@@ -56,6 +58,7 @@ async def launch_planning_pipeline(
     async with factory() as db:
         try:
             await update_pipeline_state(db, task_id, "pm")
+            await update_task_assigned_agent(db, task_id, "pm")
             await append_log(
                 db,
                 task_id,
@@ -414,6 +417,7 @@ async def launch_manager(
             await append_log(db, task_id, "worktree", f"Worktree created: {wt_path}")
             await update_pipeline_state(db, task_id, "dev_running")
             await transition_task(db, task_id, "coding")
+            await update_task_assigned_agent(db, task_id, "manager")
 
             def on_status(subtask_id: int, status: str) -> None:
                 asyncio.create_task(
@@ -484,12 +488,12 @@ async def launch_manager(
                 await update_pipeline_state(db, task_id, "dev_complete")
                 await transition_task(db, task_id, "testing")
                 await transition_task(db, task_id, "ready_for_review")
-                await append_log(
-                    db,
-                    task_id,
-                    "pipeline",
-                    f"All subtasks complete — {len(results)} subtasks, diff ready for review",
+                summary = (
+                    f"All subtasks complete — {len(results)} subtasks, "
+                    "diff ready for review"
                 )
+                await update_task_final_summary(db, task_id, summary)
+                await append_log(db, task_id, "pipeline", summary)
 
                 await _record_git_push_approval(
                     db, task_id, effective_repo, all_files, diff, len(results)
@@ -532,6 +536,7 @@ async def launch_planner(
     async with factory() as db:
         run = await create_agent_run(db, task_id, "planner", settings.model_coder)
         run_id = str(run.id)
+        await update_task_assigned_agent(db, task_id, "planner")
 
         def heartbeat() -> None:
             asyncio.create_task(heartbeat_agent_run(db, run_id))
@@ -605,6 +610,7 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
     async with factory() as db:
         run = await create_agent_run(db, task_id, "coder", settings.model_coder)
         run_id = str(run.id)
+        await update_task_assigned_agent(db, task_id, "coder")
 
         wt_path = None
         try:
@@ -699,12 +705,12 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
                 preserve_worktree(task_id)
                 await transition_task(db, task_id, "testing")
                 await transition_task(db, task_id, "ready_for_review")
-                await append_log(
-                    db,
-                    task_id,
-                    "diff",
-                    f"Diff ready — {len(files_changed)} files changed, tokens_in={tokens_in} cost=${cost:.4f}",
+                summary = (
+                    f"Diff ready — {len(files_changed)} files changed, "
+                    f"tokens_in={tokens_in} cost=${cost:.4f}"
                 )
+                await update_task_final_summary(db, task_id, summary)
+                await append_log(db, task_id, "diff", summary)
 
         except Exception as e:
             logger.exception("Coder failed for task %d", task_id)
