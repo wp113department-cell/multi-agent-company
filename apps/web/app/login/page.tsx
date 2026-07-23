@@ -36,10 +36,14 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
+            <label
+              htmlFor="login-username"
+              className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300"
+            >
               Username
             </label>
             <input
+              id="login-username"
               type="text"
               autoComplete="username"
               required
@@ -51,10 +55,14 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
+            <label
+              htmlFor="login-password"
+              className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300"
+            >
               Password
             </label>
             <input
+              id="login-password"
               type="password"
               autoComplete="current-password"
               required

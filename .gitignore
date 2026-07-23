@@ -45,6 +45,11 @@ dist/
 build/
 coverage/
 
+# Playwright E2E
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/blob-report/
+
 # TypeScript incremental build info (generated, not source)
 *.tsbuildinfo
 tsconfig.tsbuildinfo
