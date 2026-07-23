@@ -74,6 +74,38 @@ class TestEvalTaskDefinitions:
         assert isinstance(tasks, list)
         assert len(tasks) >= 5
 
+    def test_run_agent_dispatches_through_the_real_specialized_agents_registry(
+        self,
+    ) -> None:
+        """Gap-closure (2026-07-23): _run_agent() used to keep its own
+        separate, hardcoded 12-agent _AGENT_MAP instead of using
+        app.api.specialized_agents._load_agent_fn() (the same real,
+        60-agent dispatch table the actual /api/agents/{name}/run endpoint
+        uses) — meaning it could silently diverge from the real registry.
+        Verifies the dispatch now genuinely goes through _load_agent_fn,
+        with no real LLM call (the agent function itself is mocked)."""
+        from unittest.mock import MagicMock, patch
+
+        from tests.evals.eval_runner import _run_agent
+
+        fake_fn = MagicMock(return_value="fake-result")
+        with patch(
+            "app.api.specialized_agents._load_agent_fn", return_value=fake_fn
+        ) as mock_load:
+            result = _run_agent("bug_fix", 1, "some description", ".")
+
+        mock_load.assert_called_once_with("bug_fix")
+        fake_fn.assert_called_once_with(
+            task_id=1, description="some description", repo_path="."
+        )
+        assert result == "fake-result"
+
+    def test_run_agent_raises_for_unknown_agent(self) -> None:
+        from tests.evals.eval_runner import _run_agent
+
+        with pytest.raises(ValueError, match="Unknown agent"):
+            _run_agent("totally_not_a_real_agent", 1, "d", ".")
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Slow tests — require USE_GROQ=true and GROQ_API_KEY set
