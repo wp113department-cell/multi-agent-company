@@ -466,6 +466,8 @@ class MemoryEmbedding(Base):
     )
     embedding: Mapped[Any] = mapped_column(Vector(1536), nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class EnhancementRequest(Base):

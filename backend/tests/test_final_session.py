@@ -236,6 +236,7 @@ async def test_enforce_retention_disabled_returns_zero() -> None:
     sys.path.insert(0, "backend")  # noqa: E702
     with patch("app.services.retention.get_settings") as mock_settings:
         mock_settings.return_value.log_retention_days = 0
+        mock_settings.return_value.memory_embeddings_retention_days = 0
         from app.services.retention import enforce_retention_policy
 
         count = await enforce_retention_policy()
@@ -266,6 +267,7 @@ async def test_enforce_retention_archives_across_all_three_tables() -> None:
         "app.services.retention.get_session_factory", return_value=mock_factory
     ):
         mock_s.return_value.log_retention_days = 90
+        mock_s.return_value.memory_embeddings_retention_days = 0
         from app.services.retention import enforce_retention_policy
 
         count = await enforce_retention_policy()

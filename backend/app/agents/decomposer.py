@@ -127,10 +127,14 @@ def decomposer_node(state: PipelineState) -> PipelineState:
     pm_brief = json.dumps(state.get("pm_brief", {}), indent=2)
     architect_plan = json.dumps(state.get("architect_plan", {}), indent=2)
 
+    memory_context = state.get("memory_context", "")
+    memory_block = f"\n\n{memory_context}" if memory_context else ""
+
     initial_message = (
         f"Task: {state['task_title']}\n\n"
         f"PM Brief:\n{pm_brief}\n\n"
-        f"Architect Plan:\n{architect_plan}\n\n"
+        f"Architect Plan:\n{architect_plan}"
+        f"{memory_block}\n\n"
         "Decompose this into typed subtasks using the submit_subtasks tool. "
         "Only include files that are confirmed in the architect's impacted_files list."
     )

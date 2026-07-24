@@ -333,6 +333,10 @@ class Settings(BaseSettings):
         default=180,
         description="Days to keep SUPERSEDED/MERGED_INTO versioned_lessons rows before archive_expired() marks them ARCHIVED. 0 disables.",
     )
+    memory_embeddings_retention_days: int = Field(
+        default=180,
+        description="Days to keep memory_embeddings rows before the retention loop marks them archived=true. 0 disables. Separate from LOG_RETENTION_DAYS since engineering memory is longer-lived than raw execution logs.",
+    )
 
     # Groq (optional — enables Groq as LLM backend when ANTHROPIC_API_KEY is unavailable)
     groq_api_key: str = Field(

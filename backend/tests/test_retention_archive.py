@@ -86,6 +86,7 @@ def test_enforce_retention_archives_old_row_and_keeps_fresh_row_real_db() -> Non
     try:
         with patch("app.services.retention.get_settings") as mock_settings:
             mock_settings.return_value.log_retention_days = 90
+            mock_settings.return_value.memory_embeddings_retention_days = 0
 
             async def _run() -> int:
                 # enforce_retention_policy() uses the shared, process-wide
