@@ -88,6 +88,7 @@ def run_sprint_planner(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="sprint_planner",
         model=settings.model_planner,
         tools=SPRINT_PLANNER_TOOLS,

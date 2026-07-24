@@ -34,12 +34,24 @@ from threading import Lock
 from typing import Any, Callable, TypedDict
 
 import anthropic
+import jsonschema
 
 from app.agents.base import get_effective_api_key, load_role
 from app.agents.guardrails import check_command, check_path
+from app.config import get_settings
 from langgraph.graph import END, StateGraph
 
 logger = logging.getLogger(__name__)
+
+
+def _make_client() -> anthropic.Anthropic:
+    """Every Anthropic client in this file goes through here so the call-site
+    timeout (Audit 02 gap-closure, 2026-07-24) can't be forgotten at a new
+    call site the way it was omitted everywhere before this fix."""
+    return anthropic.Anthropic(
+        api_key=get_effective_api_key(),
+        timeout=get_settings().llm_call_timeout_seconds,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +295,7 @@ def _make_planner_node(
     """
 
     def planner_node(state: AgentRunState) -> dict[str, Any]:
-        client = anthropic.Anthropic(api_key=get_effective_api_key())
+        client = _make_client()
         task = task_description or str(
             (state["messages"][0].get("content", "") if state["messages"] else "")
         )
@@ -410,7 +422,7 @@ def _make_call_llm_node(
             except Exception:
                 pass
 
-        client = anthropic.Anthropic(api_key=get_effective_api_key())
+        client = _make_client()
 
         # Context trim
         messages = _trim_messages(
@@ -491,7 +503,7 @@ def _make_reflection_node(model: str) -> Callable[[AgentRunState], dict[str, Any
     )
 
     def reflection_node(state: AgentRunState) -> dict[str, Any]:
-        client = anthropic.Anthropic(api_key=get_effective_api_key())
+        client = _make_client()
         try:
             r = client.messages.create(
                 model=model,
@@ -532,10 +544,24 @@ def _make_execute_tools_node(
     human_approval_required: bool,
     task_id: str = "",
     trace_id: str = "",
+    tools: list[dict[str, Any]] | None = None,
 ) -> Callable[[AgentRunState], dict[str, Any]]:
     """Runs tool calls, enforces verification contract, resets stall counter.
     Pushes tool_call / tool_result / file_edit / terminal events to ActivityStream.
     """
+    # Audit 02 gap-closure (2026-07-24) — every submit_* handler across the
+    # agent fleet used to do a raw dict.update(inp) with zero validation
+    # against the tool's own declared input_schema, so a malformed/partial
+    # tool call from the model silently passed through as "the result."
+    # Validated centrally here (the one real chokepoint every submit_* call
+    # passes through for all ~72 agents) instead of duplicating a Pydantic
+    # model per tool across dozens of handler files — this reuses the
+    # input_schema that already exists on every tool spec.
+    _schema_by_name: dict[str, dict[str, Any]] = {
+        t["name"]: t["input_schema"]
+        for t in (tools or [])
+        if isinstance(t.get("input_schema"), dict)
+    }
 
     def execute_tools(state: AgentRunState) -> dict[str, Any]:
         last_msg = state["messages"][-1]
@@ -614,6 +640,18 @@ def _make_execute_tools_node(
                     if tu_name.startswith("submit_"):
                         submitted = True
                         raw_result = dict(tu_input)
+                        schema = _schema_by_name.get(tu_name)
+                        if schema is not None:
+                            try:
+                                jsonschema.validate(instance=raw_result, schema=schema)
+                            except jsonschema.ValidationError as exc:
+                                logger.warning(
+                                    "submit tool %s did not match its declared "
+                                    "input_schema: %s",
+                                    tu_name,
+                                    exc.message,
+                                )
+                                raw_result["_validation_warning"] = exc.message[:300]
                         for (
                             result_field,
                             verif_key,
@@ -710,7 +748,7 @@ def _extract_and_store_lesson(
         '"reusable": true}'
     )
     try:
-        client = anthropic.Anthropic(api_key=get_effective_api_key())
+        client = _make_client()
         r = client.messages.create(
             model=model_haiku,
             max_tokens=256,
@@ -842,7 +880,12 @@ def build_agent_graph(
         role_name, model, tools, context_token_budget, task_id
     )
     execute_tools_node = _make_execute_tools_node(
-        tool_handlers, verification_cfg, human_approval_required, task_id, trace_id
+        tool_handlers,
+        verification_cfg,
+        human_approval_required,
+        task_id,
+        trace_id,
+        tools=tools,
     )
     router = _make_router(max_turns, max_stalls, enable_reflection)
 

@@ -116,6 +116,7 @@ def run_api_designer_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="api_designer_agent",
         model=settings.model_coder,
         tools=_TOOLS,

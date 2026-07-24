@@ -95,6 +95,7 @@ def run_ai_engineer(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="ai_engineer",
         model=settings.model_coder,
         tools=AI_ENGINEER_TOOLS,

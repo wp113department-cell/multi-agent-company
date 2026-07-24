@@ -88,6 +88,7 @@ def run_business_analyst(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="business_analyst",
         model=settings.model_planner,
         tools=BUSINESS_ANALYST_TOOLS,

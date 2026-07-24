@@ -147,6 +147,7 @@ def run_evaluation_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="evaluation_agent",
         model=settings.model_coder,
         tools=_EVAL_TOOLS,

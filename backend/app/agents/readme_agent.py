@@ -100,6 +100,7 @@ def run_readme_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="readme_agent",
         model=settings.model_planner,
         tools=README_AGENT_TOOLS,

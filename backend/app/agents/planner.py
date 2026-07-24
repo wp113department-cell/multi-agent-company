@@ -138,6 +138,7 @@ def run_planner(
 
     try:
         final_state = run_agent_graph(
+            task_id=str(task_id),
             role_name="planner",
             model=settings.model_coder,
             tools=READ_ONLY_TOOLS + [_SUBMIT_TOOL],

@@ -160,6 +160,7 @@ def run_user_story_generator(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="user_story_generator",
         model=settings.model_planner,
         tools=_USER_STORY_TOOLS,

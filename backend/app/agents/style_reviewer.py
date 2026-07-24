@@ -87,6 +87,7 @@ def run_style_reviewer(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="style_reviewer",
         model=settings.model_coder,
         tools=STYLE_REVIEWER_TOOLS,

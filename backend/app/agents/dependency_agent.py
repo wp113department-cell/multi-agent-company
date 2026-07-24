@@ -96,6 +96,7 @@ def run_dependency_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="dependency_agent",
         model=settings.model_coder,
         tools=DEPENDENCY_AGENT_TOOLS,

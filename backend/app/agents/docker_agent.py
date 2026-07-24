@@ -99,6 +99,7 @@ def run_docker_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="docker_agent",
         model=settings.model_coder,
         tools=DOCKER_AGENT_TOOLS,

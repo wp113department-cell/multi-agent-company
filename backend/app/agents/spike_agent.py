@@ -115,6 +115,7 @@ def run_spike_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="spike_agent",
         model=settings.model_planner,
         tools=_TOOLS,

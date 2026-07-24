@@ -114,6 +114,7 @@ def run_version_manager_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="version_manager_agent",
         model=settings.model_coder,
         tools=_TOOLS,

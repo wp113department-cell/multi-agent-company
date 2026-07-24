@@ -172,6 +172,7 @@ def run_changelog_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="changelog_agent",
         model=settings.model_planner,
         tools=_CHANGELOG_TOOLS,

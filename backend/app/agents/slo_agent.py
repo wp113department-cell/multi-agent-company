@@ -114,6 +114,7 @@ def run_slo_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="slo_agent",
         model=settings.model_planner,
         tools=_TOOLS,
