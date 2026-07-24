@@ -47,7 +47,10 @@ def load_role(name: str) -> str:
 
 
 def _make_client() -> anthropic.Anthropic:
-    return anthropic.Anthropic(api_key=get_effective_api_key())
+    return anthropic.Anthropic(
+        api_key=get_effective_api_key(),
+        timeout=get_settings().llm_call_timeout_seconds,
+    )
 
 
 def _enforce_policy(tool_name: str, tool_input: dict[str, Any]) -> str | None:

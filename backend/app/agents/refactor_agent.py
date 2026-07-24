@@ -105,6 +105,7 @@ def run_refactor_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="refactor_agent",
         model=settings.model_coder,
         tools=REFACTOR_AGENT_TOOLS,

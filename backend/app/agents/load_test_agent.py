@@ -114,6 +114,7 @@ def run_load_test_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="load_test_agent",
         model=settings.model_coder,
         tools=_TOOLS,

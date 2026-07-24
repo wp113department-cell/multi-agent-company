@@ -95,6 +95,7 @@ def run_tech_debt_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="tech_debt_agent",
         model=settings.model_coder,
         tools=TECH_DEBT_AGENT_TOOLS,

@@ -114,6 +114,7 @@ def run_test_writer_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="test_writer_agent",
         model=settings.model_coder,
         tools=_TOOLS,

@@ -94,6 +94,7 @@ def run_cleanup_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="cleanup_agent",
         model=settings.model_coder,
         tools=CLEANUP_AGENT_TOOLS,

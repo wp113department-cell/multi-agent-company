@@ -96,6 +96,7 @@ def run_cicd_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="cicd_agent",
         model=settings.model_coder,
         tools=CICD_AGENT_TOOLS,

@@ -156,6 +156,7 @@ def run_release_notes_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="release_notes_agent",
         model=settings.model_planner,
         tools=_RELEASE_NOTES_TOOLS,

@@ -94,6 +94,7 @@ def run_bug_fix(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="bug_fix",
         model=settings.model_coder,
         tools=BUG_FIX_TOOLS,

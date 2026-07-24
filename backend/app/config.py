@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     context_token_budget: int = Field(
         default=8000, description="Max tokens for context assembly"
     )
+    llm_call_timeout_seconds: float = Field(
+        default=300.0,
+        description="Timeout (seconds) applied to every Anthropic SDK client "
+        "construction. Without this, LLM calls rely entirely on the SDK's own "
+        "undocumented default, which could hang a worker thread indefinitely.",
+    )
 
     # Phase 5 — Cost Controller
     cost_approval_threshold: float = Field(

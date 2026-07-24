@@ -92,6 +92,7 @@ def run_schema_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="schema_agent",
         model=settings.model_coder,
         tools=SCHEMA_AGENT_TOOLS,

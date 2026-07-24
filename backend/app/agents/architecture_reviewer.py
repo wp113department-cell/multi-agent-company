@@ -100,6 +100,7 @@ def run_arch_review(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="architecture_reviewer",
         model=settings.model_coder,
         tools=ARCH_REVIEWER_TOOLS,

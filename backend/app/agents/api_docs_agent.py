@@ -104,6 +104,7 @@ def run_api_docs_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="api_docs_agent",
         model=settings.model_planner,
         tools=API_DOCS_AGENT_TOOLS,

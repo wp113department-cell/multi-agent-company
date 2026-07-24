@@ -114,6 +114,7 @@ def run_pair_programmer_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="pair_programmer_agent",
         model=settings.model_coder,
         tools=_TOOLS,

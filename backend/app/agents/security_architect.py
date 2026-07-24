@@ -158,6 +158,7 @@ def run_security_architect(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="security_architect",
         model=settings.model_coder,
         tools=_SECURITY_TOOLS,

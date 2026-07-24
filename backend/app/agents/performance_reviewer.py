@@ -93,6 +93,7 @@ def run_performance_reviewer(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="performance_reviewer",
         model=settings.model_coder,
         tools=PERFORMANCE_REVIEWER_TOOLS,

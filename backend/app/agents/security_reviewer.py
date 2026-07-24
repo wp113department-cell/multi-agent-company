@@ -99,6 +99,7 @@ def run_security_review(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="security_reviewer",
         model=settings.model_coder,
         tools=SECURITY_REVIEWER_TOOLS,

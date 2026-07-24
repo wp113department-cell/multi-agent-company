@@ -1,0 +1,93 @@
+{
+  "audit_id": "02",
+  "audit_name": "Master Agent Audit",
+  "run_date": "2026-07-24",
+  "layer_score": 78,
+  "findings": [
+    {
+      "id": "AGENT-02-001",
+      "severity": "High",
+      "file": "53 files under backend/app/agents/*.py",
+      "location": "each file's run_<name>(task_id: int, ...) function",
+      "line": "varies; representative: accessibility_agent.py:89-126, bug_fix.py:71-111",
+      "finding": "53 agent functions receive task_id as a parameter (used in the prompt text) but never pass task_id= into their run_agent_graph() call, which defaults it to \"\".",
+      "evidence": "accessibility_agent.py:102 uses task_id in an f-string; the run_agent_graph(...) call at lines 111-126 has no task_id= kwarg. Confirmed by direct read on 5 representative agents. Real task_id is available at the dispatch site: api/specialized_agents.py SpecializedAgentRequest.task_id (line 167), a required real DevTask.id.",
+      "production_impact": "Day 18 real-time activity-stream SSE events (push_thinking/push_tool_call/push_done, all gated on if task_id:) never fire for these 53 agents when dispatched via /api/specialized-agents/{name}/run(-sync). TaskStarted/TaskCompleted/TaskFailed/HealthUpdated fleet events record task_id=\"\" instead of the real id, breaking correlation -- the same bug class the Days-0-18 gap-closure fixed internally in base_graph.py, recurring here caller-side across the majority of the fleet. DevTask status itself is unaffected (transition_task() called directly and correctly elsewhere).",
+      "confidence": "High",
+      "recommendation": "Add task_id=task_id to the run_agent_graph(...) call in each of the 53 files, matching the pattern already correct in backend_dev.py/frontend_dev.py/coder.py/qa.py/reviewer.py.",
+      "effort": "Medium",
+      "outcome": "fixed",
+      "fix_note": "Added task_id=str(task_id) (str() required -- run_agent_graph's task_id param is str-typed) to all 53 files; 52 via a scripted span-verified insertion, planner.py by hand. Re-verified via fresh AST pass: 0/53 missing."
+    },
+    {
+      "id": "AGENT-02-002",
+      "severity": "Medium-High",
+      "file": "backend/app/fleet/agent_models.json",
+      "location": "per-agent model field for sonnet-tier (62) and opus-tier (9) entries",
+      "line": "9-84",
+      "finding": "agent_models.json (authoritative over any agent-passed fallback model, per model_router.py) pins 62 agents to claude-sonnet-4-20250514 and 9 to claude-opus-4-20250514, while config.py's own model_coder default is claude-sonnet-5 -- a different, newer identifier. Only the 2 haiku-tier entries match config.py's defaults.",
+      "evidence": "agent_models.json:9 DEFAULT model=claude-sonnet-4-20250514, repeated at 62 sonnet entries; config.py:32 model_coder default=claude-sonnet-5. File's own _comment says \"all 68 Gridiron agents\" -- stale (73 entries, 72 real agents).",
+      "production_impact": "71 of 72 agents silently run an older model generation than config.py's documented default implies, since model_router.py always overrides the passed-in fallback. Not a crash, but a real drift between two config sources CLAUDE.md's own model-in-config rule exists to prevent.",
+      "confidence": "High",
+      "recommendation": "Reconcile agent_models.json's model strings with config.py's current defaults, or derive tier->model from Settings at load time instead of maintaining two files by hand.",
+      "effort": "Small",
+      "outcome": "fixed",
+      "fix_note": "Bulk-replaced claude-sonnet-4-20250514 -> claude-sonnet-5 (63 entries) and claude-opus-4-20250514 -> claude-opus-4-8 (9 entries); haiku entries were already correct. Updated stale _comment (68->72 agents)."
+    },
+    {
+      "id": "AGENT-02-003",
+      "severity": "Medium",
+      "file": "backend/app/agents/base_graph.py",
+      "location": "_make_call_llm_node, _make_reflection_node, planner_node, _extract_and_store_lesson",
+      "line": "286,413,494,713",
+      "finding": "No anthropic.Anthropic(...) client construction or .messages.create(...) call anywhere in base_graph.py passes an explicit timeout=. Relies entirely on the SDK's undocumented built-in default.",
+      "evidence": "grep -n \"timeout\" app/agents/base_graph.py app/agents/base.py app/config.py returns zero matches.",
+      "production_impact": "A hung LLM connection could block an asyncio.to_thread() worker indefinitely with no project-level control to bound it -- matches this audit's own stated concern verbatim.",
+      "confidence": "High",
+      "recommendation": "Add a config field (e.g. LLM_CALL_TIMEOUT_SECONDS) and pass timeout=settings.llm_call_timeout_seconds to every Anthropic client construction in base_graph.py.",
+      "effort": "Small",
+      "outcome": "fixed",
+      "fix_note": "Added llm_call_timeout_seconds (default 300.0) to config.py. Added shared _make_client() helper in base_graph.py (all 4 sites now route through it) and updated base.py's existing _make_client() the same way."
+    },
+    {
+      "id": "AGENT-02-004",
+      "severity": "Medium",
+      "file": "backend/app/agents/tools.py",
+      "location": "every submit_* handler factory",
+      "line": "1015,1030,1165,1227,3261,3400,3477",
+      "finding": "Every submit_* tool handler does result.update(inp) -- a raw, unvalidated dict merge of the LLM's tool-call arguments. No Pydantic model validates inp against the tool's declared input_schema before it is trusted.",
+      "evidence": "grep -n \"\\.update(inp)\" app/agents/tools.py matches at minimum 7 sites across QA, review, research, docs, bug-fix, security, and architecture-review handlers.",
+      "production_impact": "Malformed-but-silently-defaulted output risk for non-boolean fields (summaries, findings, recommendations) -- downstream code reads with .get(key, default), masking gaps rather than surfacing them. The boolean verification contract (state[\"verification\"] override) is unaffected by this finding.",
+      "confidence": "High",
+      "recommendation": "Define a Pydantic model per submit_* tool and validate inp through a shared helper before merging into result.",
+      "effort": "Medium",
+      "outcome": "fixed",
+      "fix_note": "Implemented differently than originally recommended, for good reason: instead of one Pydantic model per tool (dozens, real scope bloat), added centralized jsonschema validation in base_graph.py's execute_tools() -- the one chokepoint every submit_* call already passes through -- reusing each tool's existing input_schema. jsonschema==4.26.0 installed and pinned in requirements.txt. A mismatch is non-fatal (logged + result[\"_validation_warning\"]). Covers all ~72 agents uniformly (tools.py handlers and per-agent inline handlers alike). Live-verified: malformed submit flagged without crashing the run; well-formed submit unaffected."
+    }
+  ],
+  "counts": {"critical": 0, "high": 1, "medium": 2, "low": 0},
+  "fix_verification": {
+    "date": "2026-07-24",
+    "pytest": "2758 passed, 0 failed, 55 skipped, 17 deselected (unchanged from pre-fix baseline)",
+    "mypy_strict": "0 errors, 176 source files (caught a real int/str type bug in the AGENT-02-001 fix itself, corrected before this passed clean)",
+    "files_changed": [
+      "53 files under backend/app/agents/*.py (AGENT-02-001)",
+      "backend/app/fleet/agent_models.json (AGENT-02-002)",
+      "backend/app/config.py (AGENT-02-003)",
+      "backend/app/agents/base_graph.py (AGENT-02-003, AGENT-02-004)",
+      "backend/app/agents/base.py (AGENT-02-003)",
+      "backend/requirements.txt (AGENT-02-004)"
+    ]
+  },
+  "not_found": [
+    "Capability tag collisions -- 0 found across all 72 real agents, re-confirmed fresh",
+    "Orphaned/unreachable agents -- 0 found; full real-caller dispatch map traced for all 72",
+    "Tool-scope violations on read-only-named agents -- 0 found among 44 read-only-tool-scope agents checked",
+    "Dead enforce_in_result keys (not backed by a set_by value) -- 0 found across all 72",
+    "_register() defined but not called at top level -- 0 found",
+    "Missing role files -- 0 genuinely missing (chat_agent initially flagged by automated scan was a false positive: it loads roles/chat.md under a different filename, verified working)",
+    "Cross-provider fallback on Anthropic call failure -- confirmed NOT present (retry-same-provider only via the outer exception handler; the only cross-provider path is the separate USE_GROQ=true bypass, not a runtime fallback)",
+    "Retry-state leak across tasks/runs -- confirmed clean; AgentRunState constructed fresh per run_agent_graph() call"
+  ],
+  "verdict": "READY"
+}

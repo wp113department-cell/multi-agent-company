@@ -105,6 +105,7 @@ def run_sql_agent(
     requires_approval = _is_destructive(task_description)
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="sql_agent",
         model=settings.model_coder,
         tools=SQL_AGENT_TOOLS,

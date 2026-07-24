@@ -113,6 +113,7 @@ def run_env_checker_agent(
     )
 
     final_state = run_agent_graph(
+        task_id=str(task_id),
         role_name="env_checker_agent",
         model=settings.model_coder,
         tools=_TOOLS,
