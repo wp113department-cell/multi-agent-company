@@ -247,7 +247,7 @@ async def _verify_anthropic(key: str) -> dict[str, Any]:
 
         client = _anthropic.Anthropic(api_key=key)
         client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=get_settings().model_router,
             max_tokens=1,
             messages=[{"role": "user", "content": "hi"}],
         )

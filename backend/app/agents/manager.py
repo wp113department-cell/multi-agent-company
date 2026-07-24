@@ -84,6 +84,7 @@ async def run_manager(
     epic_id: str | None = None,
     images: list[dict[str, str]] | None = None,
     extra_env: dict[str, str] | None = None,
+    db: AsyncSession | None = None,
 ) -> dict[str, Any]:
     """Orchestrate Dev → QA → Review per subtask.
 
@@ -95,6 +96,12 @@ async def run_manager(
     the plan's own agent list.
     extra_env (Day 17): custom secrets merged into both backend_dev's and
     frontend_dev's bash tool subprocess env.
+    db (Audit 01, gap-closure 2026-07-24): optional session, forwarded to every
+    publish_event() call in this function so events actually persist to the
+    events table — every prior call site omitted it, so db was always None and
+    _persist_event() was always a no-op. Optional because run_manager() has no
+    other DB dependency of its own; callers without a session simply keep the
+    previous (non-persisting) behavior instead of being forced to acquire one.
     """
     from app.agents.backend_dev import run_backend_dev
     from app.agents.frontend_dev import run_frontend_dev
@@ -173,7 +180,8 @@ async def run_manager(
                     "title": subtask_title,
                 },
                 emitted_by="manager",
-            )
+            ),
+            db=db,
         )
 
         if on_status:
@@ -304,7 +312,8 @@ async def run_manager(
                         epic_id=epic_id,
                         payload={"subtask_id": subtask_id, "errors": qa_errors[:3]},
                         emitted_by="qa",
-                    )
+                    ),
+                    db=db,
                 )
                 logger.warning(
                     "QA failed attempt %d subtask %d", attempt + 1, subtask_id
@@ -320,7 +329,8 @@ async def run_manager(
                     epic_id=epic_id,
                     payload={"subtask_id": subtask_id},
                     emitted_by="qa",
-                )
+                ),
+                db=db,
             )
 
             subtask_diff = get_diff(task_id, repo)
@@ -363,7 +373,8 @@ async def run_manager(
                         "blocking_count": review_result.blocking_count,
                     },
                     emitted_by="reviewer",
-                )
+                ),
+                db=db,
             )
 
             if not review_result.has_blocking:
@@ -408,7 +419,8 @@ async def run_manager(
                         "reason": "max retries exceeded",
                     },
                     emitted_by="manager",
-                )
+                ),
+                db=db,
             )
 
             # Halt the epic early if too many subtasks failed
@@ -535,7 +547,8 @@ async def run_epic_manager(
                     "threshold": settings.cost_approval_threshold,
                 },
                 emitted_by="manager",
-            )
+            ),
+            db=db,
         )
         return EpicApprovalPackage(
             epic_id=epic_id,
@@ -560,7 +573,8 @@ async def run_epic_manager(
             epic_id=epic_id,
             payload={"goal": goal[:200]},
             emitted_by="manager",
-        )
+        ),
+        db=db,
     )
 
     # Create a DevTask for this epic
@@ -617,6 +631,7 @@ async def run_epic_manager(
         plan=plan_text,
         repo_path=repo,
         epic_id=epic_id,
+        db=db,
     )
 
     final_status = manager_result["status"]
@@ -680,7 +695,8 @@ async def run_epic_manager(
                 epic_id=epic_id,
                 payload={"blocked_count": blocked_count, "halt_reason": halt_reason},
                 emitted_by="manager",
-            )
+            ),
+            db=db,
         )
         # Store outcome in engineering memory
         await embed_task_outcome(
@@ -718,7 +734,8 @@ async def run_epic_manager(
                 "cost_actual_usd": cost_actual,
             },
             emitted_by="manager",
-        )
+        ),
+        db=db,
     )
 
     # Store outcome in engineering memory

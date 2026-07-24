@@ -180,7 +180,8 @@ async def approve_epic(
             epic_id=epic_id,
             payload={"approved_by": user_id},
             emitted_by="api",
-        )
+        ),
+        db=db,
     )
 
     return {"epicId": epic_id, "status": "approved", "approvedBy": user_id}
@@ -213,7 +214,8 @@ async def reject_epic(
             epic_id=epic_id,
             payload={"rejected_by": user_id},
             emitted_by="api",
-        )
+        ),
+        db=db,
     )
 
     return {"epicId": epic_id, "status": "rejected", "rejectedBy": user_id}
