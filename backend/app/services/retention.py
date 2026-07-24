@@ -69,18 +69,28 @@ async def _archive_table(table: str, age_column: str, cutoff: datetime) -> int:
 
 async def _run_cleanup() -> int:
     """Archive rows older than LOG_RETENTION_DAYS across task_logs,
-    agent_runs, and artifacts. Returns the combined count newly archived."""
+    agent_runs, and artifacts, plus memory_embeddings on its own separate
+    MEMORY_EMBEDDINGS_RETENTION_DAYS window (Audit 03 gap-closure,
+    2026-07-24 — engineering memory is longer-lived than raw execution logs,
+    so it gets its own knob rather than reusing LOG_RETENTION_DAYS, matching
+    the precedent versioned_lessons already set with its own
+    LESSON_RETENTION_DAYS). Returns the combined count newly archived."""
     settings = get_settings()
-    if settings.log_retention_days <= 0:
-        return 0
-
-    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
-        days=settings.log_retention_days
-    )
-
     total = 0
-    for table, age_column in _RETAINED_TABLES.items():
-        total += await _archive_table(table, age_column, cutoff)
+
+    if settings.log_retention_days > 0:
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            days=settings.log_retention_days
+        )
+        for table, age_column in _RETAINED_TABLES.items():
+            total += await _archive_table(table, age_column, cutoff)
+
+    if settings.memory_embeddings_retention_days > 0:
+        memory_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            days=settings.memory_embeddings_retention_days
+        )
+        total += await _archive_table("memory_embeddings", "created_at", memory_cutoff)
+
     return total
 
 
@@ -93,14 +103,18 @@ async def enforce_retention_policy() -> int:
 async def start_retention_loop() -> None:
     """Background task: run archival on startup and then every 24 hours."""
     settings = get_settings()
-    if settings.log_retention_days <= 0:
-        logger.info("Log retention disabled (LOG_RETENTION_DAYS=0)")
+    if settings.log_retention_days <= 0 and settings.memory_embeddings_retention_days <= 0:
+        logger.info(
+            "Retention disabled (LOG_RETENTION_DAYS=0 and "
+            "MEMORY_EMBEDDINGS_RETENTION_DAYS=0)"
+        )
         return
 
     logger.info(
-        "Log retention started: archiving task_logs/agent_runs/artifacts "
-        "older than %d days every 24 h",
+        "Retention started: task_logs/agent_runs/artifacts older than %d days, "
+        "memory_embeddings older than %d days, checked every 24 h",
         settings.log_retention_days,
+        settings.memory_embeddings_retention_days,
     )
 
     while True:

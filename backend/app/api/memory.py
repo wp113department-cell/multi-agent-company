@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.db.models import MemoryEmbedding
+from app.db.models import MemoryEmbedding, VersionedLesson
 from app.memory.store import query_similar_tasks
+from app.middleware.rbac import require_approver
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
@@ -93,3 +98,82 @@ async def search_memory(
     """Search engineering memory for similar past tasks by description."""
     results = await query_similar_tasks(description=q, db=db, top_k=top_k)
     return results
+
+
+@router.get("/lessons")
+async def list_versioned_lessons(
+    state: str | None = Query(
+        default=None,
+        description="Filter by lifecycle state: draft | published | superseded | merged_into | archived",
+    ),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """List versioned lessons (Day 11 durable lesson lifecycle).
+
+    Audit 03 gap-closure (2026-07-24) — added alongside the rollback endpoint
+    below so rollback() has a real, reachable way to discover a lesson_id
+    rather than being unreachable infrastructure.
+    """
+    q = select(VersionedLesson)
+    if state:
+        q = q.where(VersionedLesson.state == state)
+    q = q.order_by(VersionedLesson.created_at.desc()).limit(limit)
+    result = await db.execute(q)
+    rows = result.scalars().all()
+    return [
+        {
+            "id": r.id,
+            "lessonId": r.lesson_id,
+            "topic": r.topic,
+            "content": r.content,
+            "version": r.version,
+            "state": r.state,
+            "supersedesId": r.supersedes_id,
+            "createdAt": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
+
+
+@router.post("/lessons/{lesson_id}/rollback")
+async def rollback_versioned_lesson(
+    lesson_id: str,
+    user_id: str = Depends(require_approver),
+) -> dict[str, Any]:
+    """Roll back a versioned lesson to its most recently superseded version.
+
+    Audit 03 gap-closure (2026-07-24) — VersionedMemoryStore.rollback() was
+    fully built and tested since Day 11 but had zero real callers anywhere.
+    This is its first real trigger.
+
+    VersionedMemoryStore.rollback() is a sync method that calls asyncio.run()
+    internally (see app/fleet/versioned_memory.py's own documented reasoning
+    for why a fresh, isolated engine is used there) — this route handler
+    already has a running event loop, so the call is dispatched via
+    asyncio.to_thread(), the same safe pattern main.py's archive loop uses
+    for the sibling archive_expired() call.
+    """
+    from app.fleet.versioned_memory import get_versioned_memory_store
+
+    try:
+        record = await asyncio.to_thread(
+            get_versioned_memory_store().rollback, lesson_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    logger.info(
+        "Versioned lesson %s rolled back to version %d by %s",
+        lesson_id,
+        record.version,
+        user_id,
+    )
+    return {
+        "lessonId": record.lesson_id,
+        "topic": record.topic,
+        "content": record.content,
+        "version": record.version,
+        "state": record.state,
+        "rolledBackBy": user_id,
+    }

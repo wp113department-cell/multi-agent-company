@@ -259,7 +259,7 @@ class VersionedMemoryStore:
             supersedes_id=existing_row.id,
         )
         merged_content = await _merge_via_llm(
-            existing_row.content, content, get_settings().model_planner
+            existing_row.content, content, get_settings().model_router
         )
         merged_vector = await _embed(merged_content)
         merged_row = await _insert(
