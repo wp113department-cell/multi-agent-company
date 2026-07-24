@@ -1,0 +1,91 @@
+{
+  "audit_id": "01",
+  "audit_name": "Master Architecture Audit",
+  "run_date": "2026-07-24",
+  "layer_score": 74,
+  "findings": [
+    {
+      "id": "ARCH-01-001",
+      "severity": "High",
+      "file": "backend/app/event_bus/bus.py",
+      "location": "publish_event / _persist_event / subscribe / get_unprocessed_events",
+      "line": "42-51,87-118,159-190,193-224",
+      "finding": "publish_event()'s db parameter gates all DB persistence and dead-letter recording. Every call site in app/ (12) and every call in tests/test_event_bus.py omits db, so it always defaults to None. subscribe() (in-process handler registry) has zero real callers anywhere.",
+      "evidence": "grep -rn \"publish_event(\" app --include=\"*.py\" returns 12 call sites, none containing db=; tests/test_event_bus.py calls are exclusively publish_event(evt, db=None). event_bus/bus.py:42 subscribe() is defined but never called in app/ (only activity_stream.py's distinct .subscribe() method is used).",
+      "production_impact": "events/failed_events DB tables are permanently empty in production; get_unprocessed_events() (replay-on-restart) always returns [] and additionally has zero real callers. The retry-then-dead-letter design is unreachable since _subscribers is always empty. Does not affect user-visible functionality (task/epic status persists via separate direct DB writes in manager.py; real-time UI uses the independent activity_stream.py SSE mechanism), but the entire Postgres-backed event-bus subsystem described in this module's own docstring has no real effect beyond logging and optional Redis Streams fan-out.",
+      "confidence": "High",
+      "recommendation": "Either thread a real AsyncSession into every publish_event() call site so persistence/replay/dead-letter actually work, or deliberately remove _persist_event/_write_failed_event/get_unprocessed_events/the events+failed_events tables and update the module docstring to stop claiming DB-backed replay.",
+      "effort": "Medium",
+      "outcome": "fixed",
+      "fix_note": "db: AsyncSession threaded through run_manager() (new param) and passed at all 11 direct publish_event() call sites (9 in manager.py, 2 in api/epics.py); both real callers of run_manager() updated to pass their in-scope db. FleetBus's 12th (indirect) call site left non-persisting by design -- documented limitation, not a gap."
+    },
+    {
+      "id": "ARCH-01-002",
+      "severity": "Medium",
+      "file": "backend/app/fleet/fleet_events.py",
+      "location": "FleetBus._publish_to_existing_bus",
+      "line": "219-249",
+      "finding": "The Fleet OS to legacy-bus forward wraps asyncio.get_event_loop() in a bare try/except RuntimeError: pass, then only forwards if loop.is_running(). asyncio.get_event_loop() raises RuntimeError inside any asyncio.to_thread() worker (no loop ever set there). run_agent_graph() -- which contains every publish(task_started/...) call in base_graph.py -- is invoked via asyncio.to_thread at every real production call site (api/agents.py:667 for simple mode; manager.py's 4 to_thread dispatches of run_backend_dev/run_frontend_dev/run_qa/run_reviewer for full mode).",
+      "evidence": "fleet_events.py:240-247 (loop=None; try/except RuntimeError: pass; if loop and loop.is_running(): asyncio.create_task(...)); api/agents.py:667 (await asyncio.to_thread(run_coder, ...)); coder.py:144 confirms run_coder calls run_agent_graph() directly (same thread, not further wrapped).",
+      "production_impact": "For the majority of Fleet OS lifecycle events (TaskStarted/TaskCompleted/TaskFailed/HealthUpdated/LessonPublished), the legacy-bus forward silently never fires -- independent of and compounding ARCH-01-001.",
+      "confidence": "High",
+      "recommendation": "Capture the main event loop reference before spawning the to_thread call and use call_soon_threadsafe/run_coroutine_threadsafe to schedule the forward, or move the forward out of publish() into an async wrapper called explicitly from the async call sites after their to_thread call returns.",
+      "effort": "Small",
+      "outcome": "fixed",
+      "fix_note": "Added set_main_loop()/_main_loop to fleet_events.py, called from main.py lifespan startup on the real main loop; forward now uses run_coroutine_threadsafe against the captured loop (falls back to get_running_loop()+create_task if lifespan never ran). Live-verified with a standalone to_thread-worker reproduction -- event now reaches the legacy bus."
+    },
+    {
+      "id": "ARCH-01-003",
+      "severity": "Medium",
+      "file": "backend/app/api/settings.py",
+      "location": "_verify_anthropic",
+      "line": "250",
+      "finding": "client.messages.create(model=\"claude-haiku-4-5-20251001\", ...) is a hardcoded model string used to verify a user-supplied Anthropic API key, bypassing config.py/model_router.py -- the only such literal found outside those files.",
+      "evidence": "app/api/settings.py:249-253: client.messages.create(model=\"claude-haiku-4-5-20251001\", max_tokens=1, messages=[{\"role\": \"user\", \"content\": \"hi\"}])",
+      "production_impact": "Low immediate risk (key-verification ping, not a production inference path), but silently breaks key verification for all users if this exact model string is ever deprecated, and violates CLAUDE.md's permanent Zero Hardcoding rule.",
+      "confidence": "High",
+      "recommendation": "Replace the literal with get_settings().model_router (or the Haiku-tier config field), matching the pattern used everywhere else in the codebase.",
+      "effort": "Small",
+      "outcome": "fixed",
+      "fix_note": "api/settings.py:250 now reads get_settings().model_router."
+    },
+    {
+      "id": "ARCH-01-004",
+      "severity": "Low",
+      "file": "backend/requirements.txt",
+      "location": "dependency pin",
+      "line": "langchain-anthropic==1.4.8",
+      "finding": "Pinned but never imported anywhere in app/ or tests/. The codebase calls the anthropic SDK directly, not through LangChain's wrapper.",
+      "evidence": "grep -rln \"langchain_anthropic|langchain\\.anthropic|from langchain\" app tests --include=\"*.py\" returns zero files.",
+      "production_impact": "Unnecessary supply-chain surface for zero functional benefit; could mislead a future engineer about the actual LLM-call mechanism.",
+      "confidence": "High",
+      "recommendation": "Remove from requirements.txt unless a concrete near-term use is planned; if kept intentionally, add a rationale comment matching this project's own convention.",
+      "effort": "Small",
+      "outcome": "skipped",
+      "fix_note": "Explicitly deferred per user instruction (2026-07-24) -- not addressed this round."
+    }
+  ],
+  "counts": {"critical": 0, "high": 1, "medium": 2, "low": 1},
+  "fix_verification": {
+    "date": "2026-07-24",
+    "pytest": "2758 passed, 0 failed, 55 skipped, 17 deselected (unchanged from pre-fix baseline)",
+    "mypy_strict": "0 errors, 176 source files",
+    "files_changed": [
+      "backend/app/agents/manager.py",
+      "backend/app/api/agents.py",
+      "backend/app/api/epics.py",
+      "backend/app/api/settings.py",
+      "backend/app/fleet/fleet_events.py",
+      "backend/app/main.py"
+    ]
+  },
+  "not_found": [
+    "Circular imports at module top-level (2 candidate cycles found via AST scan, both traced to deferred/lazy function-body imports on both sides -- not real import-time cycles)",
+    "task_id/trace_id regressions at the 4 previously-documented base_graph.py sites -- fix confirmed still holding",
+    "New orphan agent/fleet modules beyond the previously-documented and already-fixed set (versioned_memory.publish, fleet_checkpoint, tool_discovery all confirmed wired; prompt_registry.deploy confirmed still intentionally unused per main.py:181 comment)",
+    "CORS/event-bus-retries/Groq-retries hardcoding regressions -- all 3 previously-documented fixes confirmed still config-driven",
+    "Two-mode parity regression in launch_coder() (bootstrap check + blocked-transition-on-exception) -- confirmed still present, no regression since Days 11-15 gap closure",
+    "Migration chain gaps -- 001 through 019 confirmed linear and gapless by reading actual revision/down_revision values"
+  ],
+  "verdict": "READY"
+}

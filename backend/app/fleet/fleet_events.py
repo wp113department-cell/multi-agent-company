@@ -208,6 +208,37 @@ def translate_fleet_to_legacy(fleet_event_type: FleetEventType) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Main-loop capture (Audit 01 gap-closure, 2026-07-24)
+#
+# publish() is called from two very different execution contexts:
+#   1. Directly inside an async function already running on the app's main
+#      event loop (e.g. manager.py's run_manager/run_epic_manager).
+#   2. From inside run_agent_graph() (base_graph.py), which every real agent
+#      dispatch path (launch_coder -> run_coder, run_manager's dev/qa/review
+#      dispatch -> run_backend_dev/run_frontend_dev/run_qa/run_reviewer) runs
+#      via asyncio.to_thread() — a plain ThreadPoolExecutor worker thread that
+#      never has an event loop of its own.
+#
+# The previous implementation called asyncio.get_event_loop(), which raises
+# RuntimeError in case 2 (silently swallowed below), meaning the forward to
+# the legacy event bus never fired for the large majority of real Fleet OS
+# events. Capturing the real main loop once at FastAPI startup (main.py's
+# lifespan, which runs on that loop) and scheduling onto it with
+# run_coroutine_threadsafe works correctly from any thread, covering both
+# contexts uniformly.
+# ---------------------------------------------------------------------------
+
+_main_loop: Any = None
+
+
+def set_main_loop(loop: Any) -> None:
+    """Record the app's main event loop. Call once from FastAPI lifespan
+    startup, on that loop, before any agent run can publish an event."""
+    global _main_loop
+    _main_loop = loop
+
+
 class FleetBus:
     """Overlay bus that publishes Fleet OS typed events while also forwarding
     to the existing event_bus so legacy subscribers receive them.
@@ -237,14 +268,21 @@ class FleetBus:
                 emitted_by=event.agent_name or "fleet_os",
             )
 
-            loop = None
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                pass
+            # Preferred path: a real main loop was captured at startup.
+            # run_coroutine_threadsafe works correctly regardless of which
+            # thread calls publish() from (worker thread or the loop itself).
+            if _main_loop is not None and _main_loop.is_running():
+                asyncio.run_coroutine_threadsafe(publish_event(legacy), _main_loop)
+                return
 
-            if loop and loop.is_running():
-                asyncio.create_task(publish_event(legacy))
+            # Fallback for contexts where the app lifespan never ran (e.g. a
+            # test that calls publish() directly inside its own async test
+            # function) — schedule on the currently-running loop, if any.
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            loop.create_task(publish_event(legacy))
         except Exception:
             pass
 

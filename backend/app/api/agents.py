@@ -453,6 +453,7 @@ async def launch_manager(
                 on_status=on_status,
                 images=task_images,
                 extra_env=custom_secrets_env or None,
+                db=db,
             )
 
             overall_status = result.get("status", "blocked")

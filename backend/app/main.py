@@ -232,6 +232,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = get_settings()
     logging.basicConfig(level=settings.log_level.upper())
 
+    # Audit 01 gap-closure (2026-07-24) — capture the real main event loop so
+    # FleetBus (app/fleet/fleet_events.py) can forward events published from
+    # inside asyncio.to_thread() worker threads (every real agent run) onto
+    # it via run_coroutine_threadsafe, instead of silently failing to find a
+    # loop from the worker thread's own perspective.
+    from app.fleet.fleet_events import set_main_loop
+
+    set_main_loop(asyncio.get_running_loop())
+
     # Sentry — must happen before any request processing
     _init_sentry(settings)
 
