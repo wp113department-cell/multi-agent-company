@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 .mypy_cache/
 .pytest_cache/
+pytest-results.xml
 *.egg-info/
 dist/
 build/

@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
-import { fetchEpics, createEpic, type Epic } from "../../lib/api";
+import { fetchEpics, createEpic } from "../../lib/api";
 
 const STATUS_COLORS: Record<string, string> = {
   pending: "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300",
