@@ -120,8 +120,6 @@ function EpicRow({
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-
   return (
     <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
       <div className="flex flex-wrap items-start gap-3">
