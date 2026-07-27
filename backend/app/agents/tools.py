@@ -8195,10 +8195,46 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # BATCH 12 — Terminal extras (read_output, run_node, run_script, docker_build, docker_restart)
     # =========================================================================
 
-    def read_output_h(inp: dict[str, Any]) -> str:
-        import fcntl as _fcntl
-        import os as _os
+    def _read_stream_nonblocking(stream: Any, max_bytes: int = 8192) -> str | None:
+        """Best-effort non-blocking read of up to max_bytes from a pipe.
 
+        fcntl-based O_NONBLOCK (the POSIX approach) doesn't exist on Windows
+        pipe file descriptors — found via real execution (ModuleNotFoundError:
+        'fcntl'), which broke every test that reaches this handler. On
+        Windows, run the blocking read() in a daemon thread and give it a
+        short timeout instead: if data arrives in time we return it, if not
+        we abandon the thread (harmless — it's a daemon thread that will
+        simply finish, its result unused, whenever the target process next
+        writes or exits) and report no output yet, matching this function's
+        existing "(no output yet ...)" behavior for an idle process.
+        """
+        if sys.platform != "win32":
+            import fcntl as _fcntl
+
+            fd = stream.fileno()
+            fl = _fcntl.fcntl(fd, _fcntl.F_GETFL)
+            _fcntl.fcntl(fd, _fcntl.F_SETFL, fl | os.O_NONBLOCK)
+            try:
+                return stream.read(max_bytes)
+            except (IOError, BlockingIOError, TypeError):
+                return None
+
+        import threading
+
+        result: dict[str, str | None] = {"data": None}
+
+        def _reader() -> None:
+            try:
+                result["data"] = stream.read(max_bytes)
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_reader, daemon=True)
+        t.start()
+        t.join(timeout=0.1)
+        return result["data"]
+
+    def read_output_h(inp: dict[str, Any]) -> str:
         ro_pid = int(inp["pid"])
         ro_max = int(inp.get("lines", 50))
         proc = _session_bg_procs.get(ro_pid)
@@ -8210,15 +8246,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         for stream in [proc.stdout, proc.stderr]:
             if stream is None:
                 continue
-            fd = stream.fileno()
-            fl = _fcntl.fcntl(fd, _fcntl.F_GETFL)
-            _fcntl.fcntl(fd, _fcntl.F_SETFL, fl | _os.O_NONBLOCK)
-            try:
-                chunk = stream.read(8192)
-                if chunk:
-                    out_lines.extend(chunk.splitlines())
-            except (IOError, BlockingIOError, TypeError):
-                pass
+            chunk = _read_stream_nonblocking(stream)
+            if chunk:
+                out_lines.extend(chunk.splitlines())
         return (
             "\n".join(out_lines[-ro_max:])
             if out_lines
@@ -9033,7 +9063,33 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     import json as _json_mem
     import hashlib as _hlib
-    import fcntl as _fcntl
+
+    # fcntl.flock is POSIX-only (found via real execution: ModuleNotFoundError
+    # on Windows, breaking every test that builds this handler set, since the
+    # import ran unconditionally at handler-setup time, not lazily inside a
+    # single tool call). msvcrt.locking is stdlib and available on Windows;
+    # both are used purely as an advisory mutual-exclusion lock around the
+    # read-modify-write of these flat JSON/JSONL memory files, so locking a
+    # single agreed-upon byte (offset 0) via msvcrt is equivalent in effect
+    # to flock's whole-file lock for this use case.
+    if sys.platform == "win32":
+        import msvcrt as _msvcrt
+
+        def _mem_lock(fh: Any) -> None:
+            fh.seek(0)
+            _msvcrt.locking(fh.fileno(), _msvcrt.LK_LOCK, 1)
+
+        def _mem_unlock(fh: Any) -> None:
+            fh.seek(0)
+            _msvcrt.locking(fh.fileno(), _msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl as _fcntl
+
+        def _mem_lock(fh: Any) -> None:
+            _fcntl.flock(fh, _fcntl.LOCK_EX)
+
+        def _mem_unlock(fh: Any) -> None:
+            _fcntl.flock(fh, _fcntl.LOCK_UN)
 
     _mem_slug = _hlib.md5(repo_path.encode()).hexdigest()[:8]
     _mem_dir = Path(__file__).parent.parent / "memory"
@@ -9052,9 +9108,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def _write_mem_store(store: dict[str, str]) -> None:
         with open(_mem_store_path, "w", encoding="utf-8") as _fh:
-            _fcntl.flock(_fh, _fcntl.LOCK_EX)
+            _mem_lock(_fh)
             _json_mem.dump(store, _fh, indent=2)
-            _fcntl.flock(_fh, _fcntl.LOCK_UN)
+            _mem_unlock(_fh)
 
     def memory_read_h(inp: dict[str, Any]) -> str:
         key = str(inp["key"])
@@ -9081,9 +9137,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         }
         try:
             with open(_mem_decisions_path, "a", encoding="utf-8") as _fh:
-                _fcntl.flock(_fh, _fcntl.LOCK_EX)
+                _mem_lock(_fh)
                 _fh.write(_json_mem.dumps(entry) + "\n")
-                _fcntl.flock(_fh, _fcntl.LOCK_UN)
+                _mem_unlock(_fh)
             return f"Decision logged: {entry['decision'][:80]}"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -9105,9 +9161,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         )
         try:
             with open(_mem_issues_path, "a", encoding="utf-8") as _fh:
-                _fcntl.flock(_fh, _fcntl.LOCK_EX)
+                _mem_lock(_fh)
                 _fh.write(line)
-                _fcntl.flock(_fh, _fcntl.LOCK_UN)
+                _mem_unlock(_fh)
             return f"Known issue appended (severity: {severity})"
         except Exception as e:
             return f"[ERROR] {e}"

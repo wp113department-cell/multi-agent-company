@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import subprocess
+import sys
+import threading
 import uuid
 from pathlib import Path
 from typing import Any, cast
@@ -25,6 +28,44 @@ from app.models.chat import ChatSession
 from app.repo_tools import ast_engine as _ast_engine
 
 logger = logging.getLogger(__name__)
+
+
+def _read_stream_nonblocking(stream: Any, max_bytes: int = 8192) -> str | None:
+    """Best-effort non-blocking read of up to max_bytes from a pipe.
+
+    fcntl-based O_NONBLOCK (the POSIX approach) doesn't exist on Windows pipe
+    file descriptors — found via real execution (ModuleNotFoundError:
+    'fcntl'). On Windows, run the blocking read() in a daemon thread with a
+    short timeout: if data arrives in time we return it, otherwise we abandon
+    the thread (harmless — it finishes whenever the target process next
+    writes or exits, its result simply unused) and report no output yet,
+    matching this tool's existing "(no output yet ...)" behavior for an idle
+    process. Mirrors app.agents.tools._read_stream_nonblocking.
+    """
+    if sys.platform != "win32":
+        import fcntl as _fcntl
+
+        fd = stream.fileno()
+        fl = _fcntl.fcntl(fd, _fcntl.F_GETFL)
+        _fcntl.fcntl(fd, _fcntl.F_SETFL, fl | os.O_NONBLOCK)
+        try:
+            return stream.read(max_bytes)
+        except (IOError, BlockingIOError, TypeError):
+            return None
+
+    ro_result: dict[str, str | None] = {"data": None}
+
+    def _reader() -> None:
+        try:
+            ro_result["data"] = stream.read(max_bytes)
+        except Exception:
+            pass
+
+    ro_thread = threading.Thread(target=_reader, daemon=True)
+    ro_thread.start()
+    ro_thread.join(timeout=0.1)
+    return ro_result["data"]
+
 
 # ---------------------------------------------------------------------------
 # Fleet OS capability declaration.
@@ -1624,9 +1665,6 @@ class ChatAgent:
         # ========== BATCH 12 — Terminal extras ==========
 
         if tool_name == "read_output":
-            import fcntl as _fcntl2
-            import os as _os2
-
             ro_pid = int(inp["pid"])
             ro_max_lines = int(inp.get("lines", 50))
             ro_proc = self._background_processes.get(ro_pid)
@@ -1638,15 +1676,9 @@ class ChatAgent:
             for ro_stream in [ro_proc.stdout, ro_proc.stderr]:
                 if ro_stream is None:
                     continue
-                ro_fd = ro_stream.fileno()
-                ro_fl = _fcntl2.fcntl(ro_fd, _fcntl2.F_GETFL)
-                _fcntl2.fcntl(ro_fd, _fcntl2.F_SETFL, ro_fl | _os2.O_NONBLOCK)
-                try:
-                    ro_chunk = ro_stream.read(8192)
-                    if ro_chunk:
-                        ro_lines.extend(ro_chunk.splitlines())
-                except (IOError, BlockingIOError, TypeError):
-                    pass
+                ro_chunk = _read_stream_nonblocking(ro_stream)
+                if ro_chunk:
+                    ro_lines.extend(ro_chunk.splitlines())
             return (
                 "\n".join(ro_lines[-ro_max_lines:])
                 if ro_lines
