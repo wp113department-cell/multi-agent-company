@@ -110,7 +110,13 @@ jobs:
         run: pnpm --filter @gridiron/web run typecheck
 
       - name: Lint (eslint)
-        run: pnpm --filter @gridiron/web run lint || true
+        # Gap-closure (Audit 06, INFRA-06-004): the trailing `|| true` made
+        # this step always exit 0 regardless of findings, matching the same
+        # anti-pattern already fixed for pip-audit (SEC-05-019). Removed.
+        # `eslint .` (no --max-warnings) only fails on error-severity rule
+        # violations, not plain warnings, so this is a real gate now without
+        # being overly strict about next/core-web-vitals' warn-level rules.
+        run: pnpm --filter @gridiron/web run lint
 
       - name: Test (vitest)
         run: pnpm --filter @gridiron/web run test

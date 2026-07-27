@@ -10,6 +10,7 @@ No paths, keys, or bucket names are hardcoded.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -171,6 +172,64 @@ def get_artifact(artifact_id: str) -> str | None:
     p = _artifact_path(artifact_id)
     if not p.exists():
         logger.warning("Artifact not found on disk: %s", artifact_id)
+        return None
+    return p.read_text(encoding="utf-8")
+
+
+async def get_artifact_content(artifact_id: str, db: Any) -> str | None:
+    """Retrieve artifact content regardless of storage backend.
+
+    Gap-closure (Audit 06, INFRA-06-002): get_artifact() (above) only ever
+    reads local disk -- when ARTIFACT_BACKEND=s3, save_artifact_async()
+    correctly uploads to S3, but nothing on the retrieval side ever looked
+    there, so S3-backed artifacts 404'd on every read, permanently. This
+    looks up the real storage_path recorded at save time (works for both
+    backends, and doesn't depend on ARTIFACT_BACKEND's *current* value
+    matching whatever it was when this specific artifact was saved) and
+    dispatches based on its scheme.
+    """
+    if db is None:
+        # No DB configured -- fall back to the local-disk-only path (matches
+        # get_artifact()'s existing behavior for db=None callers).
+        return get_artifact(artifact_id)
+
+    try:
+        from sqlalchemy import text
+
+        row = (
+            await db.execute(
+                text("SELECT storage_path FROM artifacts WHERE artifact_id = :aid"),
+                {"aid": artifact_id},
+            )
+        ).mappings().first()
+    except Exception:
+        logger.exception("Failed to look up artifact %s in DB", artifact_id)
+        row = None
+
+    if row is None:
+        # No DB row (or DB lookup failed) -- fall back to local disk, since
+        # older artifacts saved before this DB-lookup path existed may still
+        # be retrievable there even without a matching artifacts row.
+        return get_artifact(artifact_id)
+
+    storage_path = str(row["storage_path"])
+    if storage_path.startswith("s3://"):
+        from app.artifacts.s3_store import load_artifact_s3_by_key
+
+        # s3://{bucket}/{key} -- bucket is whatever it was at save time;
+        # strip the scheme and the (already-known) bucket segment, keep key.
+        _, _, rest = storage_path.partition("s3://")
+        _, _, key = rest.partition("/")
+        try:
+            payload = await asyncio.to_thread(load_artifact_s3_by_key, key)
+        except Exception:
+            logger.exception("Failed to load artifact %s from S3", artifact_id)
+            return None
+        return json.dumps(payload, indent=2, default=str)
+
+    p = Path(storage_path)
+    if not p.exists():
+        logger.warning("Artifact not found on disk: %s (%s)", artifact_id, storage_path)
         return None
     return p.read_text(encoding="utf-8")
 

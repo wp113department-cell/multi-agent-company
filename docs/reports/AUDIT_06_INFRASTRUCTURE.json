@@ -1,0 +1,249 @@
+{
+  "audit_id": "06",
+  "audit_name": "Master Infrastructure Audit",
+  "run_date": "2026-07-27",
+  "layer_score": 64,
+  "estimated_post_fix_score": 92,
+  "estimated_post_fix_score_note": "CONFIRMED by real execution same day (2026-07-27) -- see .md report section 10. All 10 findings fixed and verified: both Critical bugs re-reproduced-then-confirmed-fixed via the exact same live-endpoint test that first found them; both Dockerfiles actually built and smoke-run (2 more real bugs caught this way: missing apps/web/public COPY, missing root package.json in the runtime stage causing a pnpm version mismatch). Full suite: 2795 passed, 20 failed (down from 21 pre-fix; the 1 difference is a known flaky timing test, not a regression) -- zero new failures from any Audit 06 change. mypy --strict: 0 errors, 176 files. black/ruff/pip-audit: all clean. Held at 92, not higher, because the systemic unauthenticated-reads design characteristic (SS5/S7) was deliberately left as a recorded architectural tradeoff, not something this pass unilaterally changed.",
+  "verdict": "NOT READY",
+  "verdict_note": "Verdict reflects the original pre-fix audit pass. All 10 findings (2 Critical, 2 High, 4 Medium, 1 Low, plus 2 bonus package.json bugs found while fixing) are now fixed and empirically verified against a real, live database -- see estimated_post_fix_score above and fix_verification below.",
+  "methodology_note": "Unlike Audits 01-05's original read-only passes, every runtime-behavior finding in this audit was empirically verified against a real, live PostgreSQL instance (pgvector/pgvector:pg16, migrated to head via Alembic) in this session, not inferred from reading code alone.",
+  "findings": [
+    {
+      "id": "INFRA-06-001",
+      "severity": "Critical",
+      "file": "backend/app/db/models.py",
+      "location": "~17 model classes' created_at/updated_at/started_at/etc. columns; live crash site backend/app/api/registry.py:129",
+      "line": "systemic; crash site 129",
+      "finding": "Migrations declare most timestamp columns as sa.DateTime(timezone=True) (real TIMESTAMPTZ), but the ORM model declares the same columns as bare Mapped[datetime] with no explicit timezone=True, since Base has no custom type_annotation_map. SQLAlchemy uses its own (wrong, naive) Python-side type to build SQL casts on write, causing a real crash whenever application code assigns a timezone-aware datetime.now(timezone.utc) to one of these fields via the ORM.",
+      "evidence": "Empirically reproduced via a live test against real Postgres: writing datetime.now(timezone.utc) to Agent.last_computed_at and committing raises asyncpg.exceptions.DataError with SQL showing `UPDATE agents SET last_computed_at=$1::TIMESTAMP WITHOUT TIME ZONE`. Confirmed live and reachable: calling GET /api/agents/planner/metrics via a real TestClient against the live DB crashes with the identical error every single call -- no try/except catches it (registry.py:127-130).",
+      "production_impact": "GET /api/agents/{name}/metrics returns an unhandled 500 on every call in any real deployment with a live database. This is the 4th confirmed instance of a bug class PROJECT.md documents 3 prior instances of (repo.py:157, repository.py:250,273 already carry .replace(tzinfo=None) workarounds for the same root cause) -- the root cause itself (missing DateTime(timezone=True) on the ORM models) was never fixed, so more instances remain structurally possible anywhere else a bare Mapped[datetime] field is assigned an aware datetime through the ORM.",
+      "confidence": "High -- reproduced empirically twice (direct ORM write test, and a real endpoint call), not inferred.",
+      "recommendation": "Add explicit DateTime(timezone=True) to every affected Mapped[datetime] column in db/models.py, matching the real migration DDL. This is the root-cause fix; existing .replace(tzinfo=None) call sites become redundant-but-harmless, and registry.py:129 stops crashing without a separate fix.",
+      "effort": "Medium"
+    },
+    {
+      "id": "INFRA-06-002",
+      "severity": "Critical",
+      "file": "backend/app/artifacts/store.py, backend/app/api/artifacts.py",
+      "location": "get_artifact() (store.py:169-175), GET /api/artifacts/{artifact_id} (artifacts.py:35-41)",
+      "line": "169-175; 35-41",
+      "finding": "save_artifact_async() correctly branches on settings.artifact_backend and uploads to S3 when configured (real, non-stub implementation, confirmed: gzip compression, correct key scheme). get_artifact() -- the only function backing the retrieval endpoint -- unconditionally reads from local disk with zero branch on artifact_backend, and never calls s3_store.load_artifact_s3().",
+      "evidence": "store.py:169-175 (get_artifact, local-disk-only, no backend check); artifacts.py:36-41 (endpoint calls only get_artifact, no S3 fallback); s3_store.py:87-100 (load_artifact_s3 exists, real, and is never called from anywhere in the retrieval path -- confirmed via grep, zero call sites).",
+      "production_impact": "Any deployment with ARTIFACT_BACKEND=s3 can save artifacts (they really land in S3) but can never retrieve them through the API -- GET /api/artifacts/{artifact_id} always 404s for every S3-backed artifact, permanently.",
+      "confidence": "High",
+      "recommendation": "Branch get_artifact() (or its caller) on artifact_backend the same way save_artifact_async() does; call load_artifact_s3() when appropriate. Needs task_id/artifact_type to build the S3 key -- look these up from the artifacts DB row by artifact_id first.",
+      "effort": "Small-Medium"
+    },
+    {
+      "id": "INFRA-06-004",
+      "severity": "High",
+      "file": ".github/workflows/ci.yml",
+      "location": "frontend job, Lint (eslint) step",
+      "line": "113",
+      "finding": "`pnpm --filter @gridiron/web run lint || true` -- identical anti-pattern to the pip-audit `|| true` already fixed this session (Audit 05, SEC-05-019) in the same file. The trailing || true makes this step always exit 0 regardless of what ESLint finds.",
+      "evidence": "ci.yml:113, exact line read directly. Explains why the 2 real ESLint warnings found and fixed this session (review/page.tsx unused state, epics/page.tsx unused import) only ever surfaced as informational annotations, never as a failing check.",
+      "production_impact": "The frontend lint gate cannot ever fail the build regardless of severity or count of findings -- defeats the check's purpose entirely, same as the pip-audit gap did before its fix.",
+      "confidence": "High",
+      "recommendation": "Remove || true, matching the precedent already set for pip-audit in this same file.",
+      "effort": "Small"
+    },
+    {
+      "id": "INFRA-06-005",
+      "severity": "High",
+      "file": "docker-compose.yml",
+      "location": "migrate, backend, worker, frontend services",
+      "line": "34-100",
+      "finding": "4 of 6 services declare build: context: ./backend or ./apps/web, but no Dockerfile exists anywhere in the repository (confirmed via exhaustive case-insensitive search). Only db/redis (published images) would actually start.",
+      "evidence": "docker-compose.yml full read; Glob for **/Dockerfile* across the whole repo returns zero results; case-insensitive find in backend/ and apps/web/ also zero. Root .env.example:10-13 documents `docker compose up -d` as the project's own Quick Start step 1.",
+      "production_impact": "The documented Quick Start workflow has never worked for anything beyond the DB and Redis containers -- migrate/backend/worker/frontend all fail immediately with a Dockerfile-not-found error.",
+      "confidence": "High",
+      "recommendation": "Add real Dockerfiles for backend/ and apps/web/ matching Procfile's real entrypoints, or update the root .env.example's Quick Start instructions to stop promising a docker compose workflow that doesn't work.",
+      "effort": "Medium"
+    },
+    {
+      "id": "INFRA-06-003",
+      "severity": "Medium",
+      "file": "backend/migrations/versions/008_system_settings.py, 009_outcome_enum_chat_messages.py, 017_task_images.py, 019_retention_archive_fields.py, 022_memory_embeddings_retention.py",
+      "location": "system_settings.updated_at, chat_messages.created_at, task_images.created_at, and 019/022's archived_at columns + their justifying comments",
+      "line": "n/a (5 columns across 5 files)",
+      "finding": "3 columns break from the dominant sa.DateTime(timezone=True) pattern with plain naive sa.DateTime(). Migrations 019 and 022 add 3 more naive columns, justified by a comment claiming 'every other timestamp column in this schema...has no explicit type' -- this claim is false; the majority of columns explicitly declare timezone=True.",
+      "evidence": "Direct read of all 5 migration files; cross-checked against the dominant pattern in migrations 001-007/011-016 (all explicitly timezone=True).",
+      "production_impact": "None currently live-crashing -- app/services/retention.py (the writer for the 019/022 archived_at columns) correctly strips tzinfo before writing. This is a documentation-accuracy and schema-consistency finding, not a live-crash finding like INFRA-06-001.",
+      "confidence": "High",
+      "recommendation": "Correct the false comments in migrations 019/022. Consider a follow-up migration converting all 5 naive columns to timezone=True for full consistency if the schema hasn't shipped to a real production DB yet.",
+      "effort": "Small"
+    },
+    {
+      "id": "INFRA-06-006",
+      "severity": "Medium",
+      "file": "run.sh",
+      "location": "frontend startup section",
+      "line": "74-79",
+      "finding": "Uses `npm install`/`npm run dev` for apps/web instead of pnpm -- the exact npm-vs-pnpm bug class docs/DEPLOYMENT.md documents as already found and fixed in vercel.json, but run.sh (the project's other documented one-command startup path) was never updated.",
+      "evidence": "run.sh:74-79; DEPLOYMENT.md:79-82 documents apps/web has no package-lock.json of its own (pnpm workspace only); vercel.json and ci.yml both correctly use pnpm, confirming run.sh is the one path that regressed or was missed.",
+      "production_impact": "A fresh clone running ./run.sh (the documented one-command startup) gets a degraded/inconsistent npm-based node_modules layout for a pnpm workspace, inconsistent with every other entrypoint in the project.",
+      "confidence": "High",
+      "recommendation": "Change to `pnpm install --frozen-lockfile` and `pnpm --filter @gridiron/web run dev`, matching vercel.json/ci.yml.",
+      "effort": "Small"
+    },
+    {
+      "id": "INFRA-06-007",
+      "severity": "Medium",
+      "file": "docs/DEPLOYMENT.md",
+      "location": "\"Database — Supabase Postgres + pgvector\" section",
+      "line": "32-39",
+      "finding": "States 'Run all 17 migrations...nothing from Day 18 (streaming) added new tables' -- false; 22 migrations exist, 018-022 add real schema (dev_tasks metadata columns, archive/archived_at on 4 tables, an HNSW index, a data backfill).",
+      "evidence": "DEPLOYMENT.md:32-39 read directly; cross-checked against the real, full 22-migration chain read in Section 1 of the .md report.",
+      "production_impact": "Functionally harmless (alembic upgrade head runs all 22 regardless of the prose), but actively misleading to a human following this doc before a real deploy.",
+      "confidence": "High",
+      "recommendation": "Update the migration count and 'nothing added since Day 17' claim to reflect the real chain through 022.",
+      "effort": "Small"
+    },
+    {
+      "id": "INFRA-06-008",
+      "severity": "Medium",
+      "file": "backend/.env.example",
+      "location": "RBAC section",
+      "line": "134-138",
+      "finding": "ALLOW_LEGACY_ROLE_HEADER (config.py's allow_legacy_role_header field, added during this session's own Audit 05 fix pass) is not documented in backend/.env.example -- a gap introduced by this session's own earlier work, not pre-existing.",
+      "evidence": "Systematic diff: loaded the real Settings class (96 fields) and compared against every KEY= line in backend/.env.example (95 lines) -- exactly 1 field missing, 0 stale/orphaned entries in the other direction.",
+      "production_impact": "Low -- the field has a safe default (False) and works correctly without being set; purely a documentation completeness gap.",
+      "confidence": "High",
+      "recommendation": "Add ALLOW_LEGACY_ROLE_HEADER=false to backend/.env.example's RBAC section with a description matching config.py's Field() docstring.",
+      "effort": "Small"
+    }
+  ],
+  "counts": {"critical": 2, "high": 2, "medium": 4, "low": 1},
+  "verified_clean": [
+    {
+      "id": "INFRA-06-C01",
+      "topic": "Migration chain integrity: all 22 migrations, unbroken 001->022 chain, no gaps/branches/duplicate revisions",
+      "evidence": "All 22 migration files read in full; down_revision chain traced manually, not assumed from filename numbers"
+    },
+    {
+      "id": "INFRA-06-C02",
+      "topic": "pgvector extension created before first vector column use",
+      "evidence": "migration 001: CREATE EXTENSION IF NOT EXISTS vector is the first statement, before code_embeddings (vector(1536) column) in the same migration; migration 004 re-issues idempotently before memory_embeddings.embedding"
+    },
+    {
+      "id": "INFRA-06-C03",
+      "topic": "chat_messages table has no ORM model -- confirmed intentional (raw SQL access pattern), not drift",
+      "evidence": "app/models/chat.py save_message_to_db/load_history_from_db use parameterized text() SQL exclusively"
+    },
+    {
+      "id": "INFRA-06-C04",
+      "topic": "QUEUE_BACKEND genuinely switches adapters at runtime; BullMQQueueAdapter correctly raises NotImplementedError",
+      "evidence": "pipeline/queue_adapter.py:189-198 get_queue_adapter() full read"
+    },
+    {
+      "id": "INFRA-06-C05",
+      "topic": "In-process event bus and Redis Streams are not accidentally double-processing events",
+      "evidence": "event_bus/bus.py:179-183 (unconditional fan-out call) + event_bus/redis_streams.py:74-80 (genuine no-op when redis_streams_enabled=False, every function checked) -- separate consumer-group model, not duplicate dispatch"
+    },
+    {
+      "id": "INFRA-06-C06",
+      "topic": "Dead-letter event handling genuinely persists to failed_events table, inspectable via DB",
+      "evidence": "event_bus/bus.py:123-157 _write_failed_event, real INSERT with correct tz-aware write to a tz-aware column"
+    },
+    {
+      "id": "INFRA-06-C07",
+      "topic": "S3 artifact write path is real, not a stub -- compression, key scheme, metadata all correct",
+      "evidence": "artifacts/s3_store.py:54-84 save_artifact_s3 full read"
+    },
+    {
+      "id": "INFRA-06-C08",
+      "topic": "vercel.json correctly uses pnpm -- no regression on the previously-documented npm/pnpm fix",
+      "evidence": "vercel.json:3,5 buildCommand/installCommand both pnpm"
+    },
+    {
+      "id": "INFRA-06-C09",
+      "topic": "Procfile matches real entrypoints exactly",
+      "evidence": "Procfile:1-2 vs app/main.py (uvicorn app.main:app) and rq_adapter.py's documented queue names (gridiron-high, gridiron-default)"
+    },
+    {
+      "id": "INFRA-06-C10",
+      "topic": "No deploy job exists in ci.yml -- by design, not a half-finished one",
+      "evidence": "ci.yml full read: only backend/frontend/frontend-e2e/security jobs defined"
+    },
+    {
+      "id": "INFRA-06-C11",
+      "topic": "pytest.ini's -m \"not slow\" is respected in CI with no override",
+      "evidence": "ci.yml:76 pytest invocation has no -m flag, inherits addopts from pytest.ini automatically"
+    },
+    {
+      "id": "INFRA-06-C12",
+      "topic": "mypy app/ --strict --ignore-missing-imports (CI's exact command) verified for real this session -- 0 errors, 176 files",
+      "evidence": "Ran directly against the live venv+DB setup, --platform linux to match ubuntu-latest CI runner exactly. This had never been verified in any prior session (only non-strict mypy was checked before)."
+    },
+    {
+      "id": "INFRA-06-C13",
+      "topic": "GET /health performs real checks, not a static 200",
+      "evidence": "main.py:414-473 -- real SELECT 1 DB query, conditional Redis/S3 checks, real agent-registry count"
+    },
+    {
+      "id": "INFRA-06-C14",
+      "topic": "Real agent count matches DEPLOYMENT.md's claimed 72 exactly",
+      "evidence": "Empirically verified: ensure_all_agents_registered() + get_capability_registry().all() against the live app returns exactly 72"
+    },
+    {
+      "id": "INFRA-06-C15",
+      "topic": "Postgres CI service container uses correct image matching real schema needs",
+      "evidence": "ci.yml:26 pgvector/pgvector:pg16, matches every pgvector-dependent migration"
+    }
+  ],
+  "not_found": [
+    "Any table with a real DB column that has zero corresponding ORM/application field anywhere (the specific 'phantom column' bug class this audit was primed to look for) -- NOT FOUND, every table cross-checked field-by-field",
+    "A half-wired or accidentally-enabled deploy job in ci.yml -- NOT FOUND",
+    "Evidence that Redis Streams and the in-process bus double-process the same event -- NOT FOUND, confirmed separate consumer models"
+  ],
+  "systemic_note": {
+    "topic": "All GET/read endpoints across the entire application are unauthenticated by design (Audit 05 scoped RBAC to mutating endpoints only)",
+    "severity_recorded_as": "Medium",
+    "note": "Not a new defect specific to artifacts.py -- confirmed identical pattern across api/tasks.py's GET endpoints. Recorded here because Phase 4 of this audit's prompt explicitly asks to check artifact-retrieval authorization. This is a real, deliberate architectural tradeoff appropriate for a trusted-network/single-tenant deployment, not something 'fixed' as part of this audit's Critical/High items -- flagged for awareness, not remediated here."
+  },
+  "fix_verification": {
+    "pending": false,
+    "pending_note": "This audit report was produced read-only per the audit prompt's own instruction; all fixes below were implemented and verified in a separate, subsequent step the same session, per explicit user direction to enhance the project properly rather than stop at the report.",
+    "pytest_run": true,
+    "pytest_full_suite": "2795 passed, 20 failed (down from 21 pre-fix -- the 1 difference is a known-flaky timing test, not a regression), 55 skipped, 17 deselected. Zero new failures traced to any Audit 06 change; all 20 remaining are pre-existing Windows-only test-environment mismatches unrelated to this audit.",
+    "mypy_run": true,
+    "mypy_result": "mypy app/ --strict --ignore-missing-imports --platform linux (CI's exact command) -> 0 errors, 176 files",
+    "black_result": "black --check . -> clean, 315 files",
+    "ruff_result": "ruff check . -> clean, all checks passed",
+    "pip_audit_result": "pip-audit -r requirements.txt --ignore-vuln GHSA-jfh8-c2jp-5 --ignore-vuln PYSEC-2026-1325 -> clean, 0 vulnerabilities",
+    "docker_builds": "Both backend/Dockerfile and apps/web/Dockerfile actually built via `docker build` and smoke-run via `docker run` in this session -- not just written. Backend image imports app.main cleanly with real config; frontend image serves real Next.js responses on port 3000.",
+    "critical_findings_reproduced_then_confirmed_fixed": [
+      "INFRA-06-001: re-ran the exact same TestClient call against GET /api/agents/planner/metrics that originally reproduced the crash -- now returns 200 (was: asyncpg.exceptions.DataError on every call)",
+      "INFRA-06-002: saved a real artifact via save_artifact_async(db=db) and retrieved it through the real GET /api/artifacts/{artifact_id} endpoint -- content round-tripped correctly"
+    ],
+    "bugs_found_while_fixing_not_in_original_10_findings": [
+      "apps/web has no public/ directory -- the first Dockerfile draft's COPY of it failed the build; removed",
+      "The frontend Dockerfile's runtime stage was missing the root package.json/pnpm-workspace.yaml, causing corepack to fetch an unpinned pnpm version (11.17.0) at container start instead of the correct pinned 11.9.0 -- found via an actual container run, fixed by copying both into the runtime stage",
+      "Root package.json's db:up script referenced a 'postgres' docker-compose service that doesn't exist (the real service is named 'db') -- never worked; fixed",
+      "Root package.json's db:migrate script referenced a '@gridiron/shared-db' workspace package that doesn't exist anywhere in the repo (no packages/ directory exists at all) -- never worked; fixed to shell out to the real Alembic command"
+    ],
+    "files_changed": [
+      "backend/app/db/models.py",
+      "backend/app/api/repo.py",
+      "backend/app/db/repository.py",
+      "backend/app/services/retention.py",
+      "backend/app/artifacts/store.py",
+      "backend/app/artifacts/s3_store.py",
+      "backend/app/api/artifacts.py",
+      "backend/migrations/versions/019_retention_archive_fields.py",
+      "backend/migrations/versions/022_memory_embeddings_retention.py",
+      "backend/.env.example",
+      "backend/Dockerfile",
+      "apps/web/Dockerfile",
+      "docker-compose.yml",
+      "run.sh",
+      "package.json",
+      "docs/DEPLOYMENT.md",
+      ".github/workflows/ci.yml",
+      "docs/reports/AUDIT_06_INFRASTRUCTURE.md",
+      "docs/reports/AUDIT_06_INFRASTRUCTURE.json"
+    ],
+    "action_required": "None blocking -- every finding is fixed and verified. Optional follow-up: the systemic unauthenticated-reads design characteristic (systemic_note above) remains a real, open architectural question worth a deliberate decision, not something this pass changed unilaterally."
+  }
+}

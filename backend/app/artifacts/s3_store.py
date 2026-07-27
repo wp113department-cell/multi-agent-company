@@ -94,6 +94,22 @@ def load_artifact_s3(
 
     settings = get_settings()
     key = _make_key(task_id, artifact_type, artifact_id)
+    return load_artifact_s3_by_key(key)
+
+
+def load_artifact_s3_by_key(key: str) -> dict[str, Any]:
+    """Download and decompress an artifact from S3 given its exact key.
+
+    Gap-closure (Audit 06, INFRA-06-002): the retrieval endpoint only knows
+    the artifact_id and the artifacts table's stored storage_path (an
+    `s3://{bucket}/{key}` URI written at save time) -- it doesn't separately
+    track task_id/artifact_type, so reconstructing the key via _make_key()
+    isn't reliable at read time. Downloading by the exact, already-known key
+    avoids that reconstruction entirely.
+    """
+    from app.config import get_settings
+
+    settings = get_settings()
     response = _get_s3().get_object(Bucket=settings.s3_bucket, Key=key)
     body: bytes = response["Body"].read()
     result: dict[str, Any] = json.loads(gzip.decompress(body).decode("utf-8"))

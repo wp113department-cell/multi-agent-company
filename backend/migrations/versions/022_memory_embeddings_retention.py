@@ -30,10 +30,13 @@ def upgrade() -> None:
         "memory_embeddings",
         sa.Column("archived", sa.Boolean(), nullable=False, server_default=sa.false()),
     )
-    # Naive DateTime, matching migration 019's own documented reasoning:
-    # every other timestamp column in this schema is naive; a prior
-    # gap-closure found writing timezone-aware datetimes into naive columns
-    # raises asyncpg.DataError.
+    # Naive DateTime, matching migration 019's archived_at column exactly
+    # (same table family, same writer: app/services/retention.py, which
+    # strips tzinfo before writing here). Audit 06 correction: migration
+    # 019's original comment claiming "every other timestamp column in this
+    # schema is naive" was false -- most declare timezone=True (see
+    # db/models.py). This one column is naive by its writer's design, not
+    # because that's the schema's dominant pattern.
     op.add_column(
         "memory_embeddings", sa.Column("archived_at", sa.DateTime(), nullable=True)
     )

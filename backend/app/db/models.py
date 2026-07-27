@@ -98,9 +98,11 @@ class DevTask(Base):
     assigned_agent: Mapped[str | None] = mapped_column(String(100), nullable=True)
     project: Mapped[str | None] = mapped_column(String(200), nullable=True)
     final_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     logs: Mapped[list[TaskLog]] = relationship(
@@ -131,7 +133,9 @@ class TaskLog(Base):
     category: Mapped[str] = mapped_column(String(100))
     message: Mapped[str] = mapped_column(Text)
     extra_data: Mapped[Any] = mapped_column(JSONB, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     # Gap-closure (2026-07-23): retention now archives (flags) rather than
     # hard-deletes — see app/services/retention.py.
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -174,10 +178,16 @@ class AgentRun(Base):
     cache_read_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cache_creation_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cost_estimate: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
-    last_heartbeat_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    started_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -197,7 +207,9 @@ class Subtask(Base):
     files_to_edit: Mapped[Any] = mapped_column(ARRAY(Text), nullable=True)
     depends_on: Mapped[Any] = mapped_column(ARRAY(BigInteger), nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="pending")
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     task: Mapped[DevTask] = relationship(back_populates="subtasks")
 
@@ -214,9 +226,11 @@ class PipelineState(Base):
     architect_plan: Mapped[Any] = mapped_column(JSONB, nullable=True)
     subtasks_json: Mapped[Any] = mapped_column(JSONB, nullable=True)
     approved: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     task: Mapped[DevTask] = relationship(back_populates="pipeline_state")
@@ -230,7 +244,9 @@ class IndexedFile(Base):
     file_path: Mapped[str] = mapped_column(Text)
     language: Mapped[str | None] = mapped_column(String(50), nullable=True)
     content_hash: Mapped[str] = mapped_column(String(64))
-    last_indexed_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    last_indexed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     symbols: Mapped[list[Symbol]] = relationship(
         back_populates="file", cascade="all, delete-orphan"
@@ -278,7 +294,9 @@ class Event(Base):
     epic_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload: Mapped[Any] = mapped_column(JSONB, nullable=True)
     emitted_by: Mapped[str] = mapped_column(String(100))
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class FailedEvent(Base):
@@ -294,7 +312,9 @@ class FailedEvent(Base):
     emitted_by: Mapped[str] = mapped_column(String(100))
     handler_name: Mapped[str] = mapped_column(String(200))
     error: Mapped[str] = mapped_column(Text)
-    failed_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    failed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class Artifact(Base):
@@ -308,7 +328,9 @@ class Artifact(Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
     storage_path: Mapped[str] = mapped_column(Text)
     created_by_agent: Mapped[str] = mapped_column(String(100))
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -328,9 +350,11 @@ class Epic(Base):
     cost_estimate: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
     cost_actual: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
     halt_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     tasks: Mapped[list["DevTask"]] = relationship("DevTask", back_populates="epic")
@@ -347,7 +371,9 @@ class Policy(Base):
     required_approval_role: Mapped[str] = mapped_column(String(100))
     blocking: Mapped[bool] = mapped_column(Boolean, default=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     approvals: Mapped[list["PolicyApproval"]] = relationship(
         back_populates="policy", cascade="all, delete-orphan"
@@ -368,7 +394,9 @@ class PolicyApproval(Base):
     file_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     approver_role: Mapped[str] = mapped_column(String(100))
     decision: Mapped[str] = mapped_column(String(50))  # approved | rejected
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     policy: Mapped[Policy] = relationship(back_populates="approvals")
 
@@ -381,7 +409,9 @@ class UserRole(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String(200), unique=True)
     role: Mapped[str] = mapped_column(String(50), default="viewer")
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 # ---- Phase 6 tables ----
@@ -402,8 +432,12 @@ class Agent(Base):
     version: Mapped[str] = mapped_column(String(50), default="1.0")
     success_rate: Mapped[float] = mapped_column(Float, default=1.0)
     avg_retries: Mapped[float] = mapped_column(Float, default=0.0)
-    last_computed_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    last_computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class Goal(Base):
@@ -416,9 +450,11 @@ class Goal(Base):
     status: Mapped[str] = mapped_column(String(50), default="pending")
     epic_ids: Mapped[Any] = mapped_column(ARRAY(Text), nullable=False, default=list)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 
@@ -436,8 +472,12 @@ class Repo(Base):
     )  # cloning | ready | error
     error_msg: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
-    cloned_at: Mapped[datetime | None] = mapped_column(nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    cloned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class SystemSetting(Base):
@@ -472,7 +512,9 @@ class MemoryEmbedding(Base):
         ARRAY(Text), nullable=False, default=list
     )
     embedding: Mapped[Any] = mapped_column(Vector(1536), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
