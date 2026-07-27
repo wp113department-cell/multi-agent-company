@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -87,8 +85,13 @@ services:
   # Frontend — enabled via: docker compose --profile frontend up
   frontend:
     build:
-      context: ./apps/web
-    command: npm run start
+      # Context must be the repo root, not ./apps/web: this is a pnpm
+      # workspace, and pnpm-lock.yaml/pnpm-workspace.yaml/the root
+      # package.json (all required for `pnpm install` to resolve workspace
+      # deps) live outside apps/web. See apps/web/Dockerfile's own header
+      # comment for the same reasoning.
+      context: .
+      dockerfile: apps/web/Dockerfile
     ports:
       - "3000:3000"
     environment:

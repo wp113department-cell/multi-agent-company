@@ -35,12 +35,14 @@ def upgrade() -> None:
                 "archived", sa.Boolean(), nullable=False, server_default=sa.false()
             ),
         )
-        # Naive DateTime (no timezone=True) — matches every other timestamp
-        # column in this schema (created_at/started_at/etc. all use plain
-        # server_default=func.now() with no explicit type). A prior
-        # gap-closure found writing timezone-aware datetimes into naive
-        # columns raises asyncpg.DataError — retention.py strips tzinfo
-        # before writing here for the same reason.
+        # Naive DateTime (no timezone=True) — deliberately, for this new
+        # archived_at column specifically. Audit 06 correction: the original
+        # comment here claimed "every other timestamp column in this schema
+        # uses no explicit type", which was false — most do declare
+        # timezone=True (see db/models.py, fixed in the same audit pass to
+        # match). retention.py strips tzinfo before writing to archived_at
+        # regardless, so this column being naive is internally consistent
+        # with its own writer, just not with the schema's dominant pattern.
         op.add_column(table, sa.Column("archived_at", sa.DateTime(), nullable=True))
         op.create_index(f"ix_{table}_archived", table, ["archived"])
 

@@ -14,8 +14,8 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\" --ignore-path .prettierignore",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "db:migrate": "pnpm --filter @gridiron/shared-db migrate:up",
-    "db:up": "docker compose up -d postgres"
+    "db:migrate": "cd backend && alembic upgrade head",
+    "db:up": "docker compose up -d db"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^6.21.0",

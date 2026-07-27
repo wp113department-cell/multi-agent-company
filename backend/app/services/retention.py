@@ -41,9 +41,15 @@ async def _archive_table(table: str, age_column: str, cutoff: datetime) -> int:
     """Flip archived=true/archived_at=now() for rows older than cutoff.
     Returns the number of rows newly archived (was: number deleted)."""
     factory = get_session_factory()
-    # Naive datetime — these columns are all TIMESTAMP WITHOUT TIME ZONE
-    # (matches every other timestamp column in this schema); a prior
-    # gap-closure found asyncpg raises DataError on a timezone-aware write.
+    # Audit 06 correction: archived_at (the column actually written below) is
+    # genuinely TIMESTAMP WITHOUT TIME ZONE (migrations 019/022) — that part
+    # was correct. But age_column (created_at/started_at) is TIMESTAMP WITH
+    # TIME ZONE like most of this schema, contrary to this comment's old,
+    # inaccurate claim that "every other timestamp column" is naive. Both
+    # binds still work here because this uses raw text() SQL, which doesn't
+    # go through SQLAlchemy's ORM type system (the layer where an ORM/DB type
+    # mismatch actually causes a crash — see db/models.py's DateTime(timezone=True)
+    # fixes and docs/reports/AUDIT_06_INFRASTRUCTURE.md, INFRA-06-001).
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
     async with factory() as db:

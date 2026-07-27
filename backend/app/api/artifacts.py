@@ -7,7 +7,7 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.artifacts.store import get_artifact, list_artifacts
+from app.artifacts.store import get_artifact_content, list_artifacts
 
 router = APIRouter(prefix="/api", tags=["artifacts"])
 
@@ -33,9 +33,13 @@ async def list_task_artifacts(
 
 
 @router.get("/artifacts/{artifact_id}")
-async def get_artifact_content(artifact_id: str) -> PlainTextResponse:
-    """Download artifact content by ID."""
-    content = get_artifact(artifact_id)
+async def get_artifact_route(
+    artifact_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> PlainTextResponse:
+    """Download artifact content by ID — works for both the local-disk and
+    S3 storage backends (Audit 06 fix, INFRA-06-002)."""
+    content = await get_artifact_content(artifact_id, db=db)
     if content is None:
         raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} not found")
     return PlainTextResponse(content=content, media_type="text/plain")

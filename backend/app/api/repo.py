@@ -154,7 +154,7 @@ async def _clone_and_activate(
                 .values(
                     status="ready",
                     is_active=True,
-                    cloned_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    cloned_at=datetime.now(timezone.utc),
                 )
             )
             await db.commit()

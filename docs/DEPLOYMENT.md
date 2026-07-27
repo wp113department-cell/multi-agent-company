@@ -29,14 +29,16 @@ Two independent runtimes deploy separately:
    by default. Use the direct connection (port 5432) or Supabase's "Session"
    pooler mode — verify with a real `alembic upgrade head` run before
    trusting either.
-4. Run all 17 migrations against Supabase:
+4. Run all migrations against Supabase:
    ```bash
    cd backend
    DATABASE_URL=postgresql+asyncpg://... alembic upgrade head
    ```
    (`migrations/env.py` reads `DATABASE_URL` directly — no separate config
-   file to edit.) Migrations 001–017 cover every phase through Day 17
-   (Credential Vault); nothing from Day 18 (streaming) added new tables.
+   file to edit.) 22 migrations exist as of this update (Audit 06,
+   2026-07-27) — `alembic upgrade head` always applies whichever are new
+   relative to the target DB, so this note is informational only, not
+   something you need to act on manually.
 
 ## 2. Backend — Railway or Render
 
@@ -50,7 +52,9 @@ worker: cd backend && rq worker gridiron-high gridiron-default --url ${REDIS_URL
   needed for a first deploy).
 - Point the platform at `backend/requirements.txt` for dependency install.
 - Set every variable your deployment needs from `backend/.env.example`
-  (93 documented variables — all optional except `DATABASE_URL` and
+  (96 documented variables as of Audit 06, 2026-07-27 — count drifts as
+  fields are added, verify with a real Settings-vs-.env.example diff if
+  precision matters; all are optional except `DATABASE_URL` and
   `ANTHROPIC_API_KEY`, which crash startup with a clear message if unset).
   At minimum for a working deploy:
   - `DATABASE_URL` (from step 1)
@@ -148,3 +152,21 @@ prep work.
 - `.github/workflows/ci.yml` already gates on pytest + mypy --strict for
   every push — no changes needed.
 - `Procfile` already defines both `web` and `worker` processes correctly.
+
+## Audit 06 update (2026-07-27) — see `docs/reports/AUDIT_06_INFRASTRUCTURE.md` for full detail
+
+Unlike the read-only prep work above, Audit 06 empirically verified runtime behavior against a real,
+live PostgreSQL instance and found (and fixed) two Critical bugs that would have shipped invisibly:
+
+- A systemic ORM/migration timezone-type mismatch that made `GET /api/agents/{name}/metrics` crash
+  on every call against a real database — fixed in `backend/app/db/models.py`.
+- The S3 artifact storage backend could save but never retrieve artifacts through the API — fixed in
+  `backend/app/artifacts/store.py`.
+- `docker-compose.yml`'s documented Quick Start never actually worked — no `Dockerfile` existed for
+  `backend/` or `apps/web/` despite 4 of 6 services declaring a `build:` context. Real, build-tested
+  `Dockerfile`s now exist for both (`apps/web/Dockerfile` builds from the repo root, required for a
+  pnpm workspace to resolve its lockfile correctly).
+- `run.sh` had the same npm-vs-pnpm bug already fixed in `vercel.json` above — fixed.
+- Root `package.json`'s `db:up`/`db:migrate` scripts referenced a `postgres` compose service (the
+  real service is named `db`) and a `@gridiron/shared-db` package that doesn't exist anywhere in this
+  repo — both fixed to point at what's actually real.

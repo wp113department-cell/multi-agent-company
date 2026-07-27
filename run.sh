@@ -70,13 +70,17 @@ fi
 
 # ── 4. Next.js frontend ────────────────────────────────────────────────────────
 info "Starting Next.js frontend on http://localhost:3000 …"
-cd "$FRONTEND"
-if [ ! -d node_modules ]; then
-  warn "node_modules missing — running npm install …"
-  npm install
+cd "$REPO"
+if [ ! -d "$FRONTEND/node_modules" ]; then
+  # Gap-closure (Audit 06, INFRA-06-006): this is a pnpm workspace (root
+  # pnpm-lock.yaml, no package-lock.json in apps/web) — `npm install` here
+  # produced a degraded/inconsistent node_modules layout, inconsistent with
+  # vercel.json and ci.yml, both of which already use pnpm.
+  warn "node_modules missing — running pnpm install …"
+  pnpm install --frozen-lockfile
 fi
 # Force port 3000 — unset PORT so backend's PORT=8000 doesn't leak in
-PORT=3000 npm run dev &
+PORT=3000 pnpm --filter @gridiron/web run dev &
 FRONTEND_PID=$!
 cd "$REPO"
 
