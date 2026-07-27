@@ -109,10 +109,20 @@ async def run_manager(
     from app.agents.reviewer import run_reviewer
     from app.event_bus.bus import publish_event
     from app.event_bus.models import GridironEvent
+    from app.fleet.failure_ladder import should_retry
+    from app.pipeline.concurrency import agent_run_slot, subtask_slot
     from app.repo_tools.worktree import get_diff
 
     settings = get_settings()
-    max_retries = settings.max_retries
+    # Gap-closure (Audit 04 fix, ORCH-04-015): this loop previously reused
+    # settings.max_retries — the SAME setting run_backend_dev()/
+    # run_frontend_dev()'s own internal static-check retry loop uses — so a
+    # transient failure could trigger up to max_retries x max_retries real
+    # LLM-call attempts before the subtask gave up. manager_max_subtask_retries
+    # exists specifically for this outer loop's purpose (config.py: "Max
+    # per-subtask retries before epic is halted") but was previously never
+    # referenced anywhere.
+    max_retries = settings.manager_max_subtask_retries
     max_epic_failures = settings.manager_max_epic_failures
     repo = repo_path or settings.target_repo_path
 
@@ -127,7 +137,29 @@ async def run_manager(
     overall_status = "completed"
     blocked_count = 0
 
-    for subtask in subtasks:
+    # Gap-closure (Audit 04 fix, ORCH-04-011): the "id" field on each subtask
+    # dict here is the decomposer's own transient numbering (e.g. 1, 2, 3),
+    # NOT the real Subtask table's autoincrement primary key — save_subtasks()
+    # never persists that transient id anywhere, so it can't be used to look
+    # up which DB row to update. The real Subtask rows for this task_id were
+    # inserted (by save_subtasks(), in launch_planning_pipeline) in this same
+    # `subtasks` list's order, so position-based correlation is the only
+    # reliable link available. Fetched once, best-effort (db is optional).
+    _db_subtask_rows: list[Any] = []
+    if db is not None:
+        try:
+            from app.db.repository import list_subtasks
+
+            _db_subtask_rows = await list_subtasks(db, task_id)
+        except Exception:
+            logger.debug(
+                "Could not fetch Subtask rows for task %d (status persistence "
+                "will be skipped)",
+                task_id,
+                exc_info=True,
+            )
+
+    for _subtask_idx, subtask in enumerate(subtasks):
         subtask_id = int(subtask.get("id", 0))
         subtask_type = str(subtask.get("type", "backend"))
         subtask_title = str(subtask.get("title", ""))
@@ -195,6 +227,17 @@ async def run_manager(
         review_findings: list[dict[str, Any]] = []
         subtask_diff = ""
 
+        # Gap-closure (Audit 04 fix, ORCH-04-009): concurrency.py's semaphores
+        # were fully built and unit-tested but had zero real callers anywhere
+        # in the dispatch path. Manual __aenter__/__aexit__ (not `async with`)
+        # deliberately avoids re-indenting the whole retry loop below — safe
+        # here because nothing in this loop raises past this function (every
+        # dev/qa/reviewer call and publish_event() already catches its own
+        # exceptions, matching this module's established no-raise convention
+        # for the per-subtask loop).
+        _subtask_slot_cm = subtask_slot(epic_id or f"task-{task_id}")
+        await _subtask_slot_cm.__aenter__()
+
         for attempt in range(max_retries):
             retry_context = ""
             if attempt > 0 and qa_errors:
@@ -217,27 +260,28 @@ async def run_manager(
             except Exception:
                 pass
 
-            if subtask_type == "frontend":
-                files_changed, dev_error = await asyncio.to_thread(
-                    run_frontend_dev,
-                    task_id=task_id,
-                    subtask_id=subtask_id,
-                    plan=full_plan,
-                    worktree_path=worktree_path,
-                    repo_path=repo,
-                    images=images,
-                    extra_env=extra_env,
-                )
-            else:
-                files_changed, dev_error = await asyncio.to_thread(
-                    run_backend_dev,
-                    task_id=task_id,
-                    subtask_id=subtask_id,
-                    plan=full_plan,
-                    worktree_path=worktree_path,
-                    repo_path=repo,
-                    extra_env=extra_env,
-                )
+            async with agent_run_slot():
+                if subtask_type == "frontend":
+                    files_changed, dev_error = await asyncio.to_thread(
+                        run_frontend_dev,
+                        task_id=task_id,
+                        subtask_id=subtask_id,
+                        plan=full_plan,
+                        worktree_path=worktree_path,
+                        repo_path=repo,
+                        images=images,
+                        extra_env=extra_env,
+                    )
+                else:
+                    files_changed, dev_error = await asyncio.to_thread(
+                        run_backend_dev,
+                        task_id=task_id,
+                        subtask_id=subtask_id,
+                        plan=full_plan,
+                        worktree_path=worktree_path,
+                        repo_path=repo,
+                        extra_env=extra_env,
+                    )
 
             if dev_error:
                 qa_errors = [f"Dev agent error: {dev_error}"]
@@ -247,8 +291,9 @@ async def run_manager(
                     subtask_id,
                     dev_error,
                 )
-                if attempt == max_retries - 1:
+                if not should_retry(attempt + 1, max_retries):
                     break
+                await asyncio.sleep(0.5 * (2**attempt))
                 continue
 
             # Gap-closure (2026-07-22, Day 14 prep) — nothing in the dev-agent
@@ -293,14 +338,15 @@ async def run_manager(
             except Exception:
                 pass
 
-            qa_result = await asyncio.to_thread(
-                run_qa,
-                task_id=task_id,
-                subtask_id=subtask_id,
-                files_changed=files_changed,
-                worktree_path=worktree_path,
-                repo_path=repo,
-            )
+            async with agent_run_slot():
+                qa_result = await asyncio.to_thread(
+                    run_qa,
+                    task_id=task_id,
+                    subtask_id=subtask_id,
+                    files_changed=files_changed,
+                    worktree_path=worktree_path,
+                    repo_path=repo,
+                )
             qa_summary = qa_result.summary
 
             if qa_result.status == "failed":
@@ -318,8 +364,9 @@ async def run_manager(
                 logger.warning(
                     "QA failed attempt %d subtask %d", attempt + 1, subtask_id
                 )
-                if attempt == max_retries - 1:
+                if not should_retry(attempt + 1, max_retries):
                     break
+                await asyncio.sleep(0.5 * (2**attempt))
                 continue
 
             await publish_event(
@@ -341,15 +388,16 @@ async def run_manager(
             except Exception:
                 pass
 
-            review_result = await asyncio.to_thread(
-                run_reviewer,
-                task_id=task_id,
-                subtask_id=subtask_id,
-                diff=subtask_diff,
-                plan=subtask_plan,
-                repo_path=repo,
-                images=images,
-            )
+            async with agent_run_slot():
+                review_result = await asyncio.to_thread(
+                    run_reviewer,
+                    task_id=task_id,
+                    subtask_id=subtask_id,
+                    diff=subtask_diff,
+                    plan=subtask_plan,
+                    repo_path=repo,
+                    images=images,
+                )
             review_summary = review_result.summary
             review_findings = [
                 {
@@ -391,8 +439,25 @@ async def run_manager(
                 attempt + 1,
                 subtask_id,
             )
-            if attempt == max_retries - 1:
+            if not should_retry(attempt + 1, max_retries):
                 break
+            await asyncio.sleep(0.5 * (2**attempt))
+
+        await _subtask_slot_cm.__aexit__(None, None, None)
+
+        if db is not None and _subtask_idx < len(_db_subtask_rows):
+            try:
+                from app.db.repository import update_subtask_status
+
+                await update_subtask_status(
+                    db, _db_subtask_rows[_subtask_idx].id, subtask_status
+                )
+            except Exception:
+                logger.debug(
+                    "Could not persist status for subtask %d (non-fatal)",
+                    subtask_id,
+                    exc_info=True,
+                )
 
         results.append(
             {
@@ -498,7 +563,31 @@ async def run_epic_manager(
     db: AsyncSession,
     repo_path: str | None = None,
 ) -> EpicApprovalPackage:
-    """Top-level epic orchestrator.
+    """Top-level epic orchestrator — thin wrapper around _run_epic_manager_body()
+    that holds the epic concurrency slot for the whole call.
+
+    Gap-closure (Audit 04 fix, ORCH-04-009): epic_slot() was fully built and
+    unit-tested but had zero real callers — settings.max_concurrent_epics was
+    dead configuration. `async with` here (rather than manual
+    __aenter__/__aexit__ scattered through the body) guarantees the slot is
+    released even if the body raises, without needing to re-indent the whole
+    function.
+    """
+    from app.pipeline.concurrency import epic_slot
+
+    async with epic_slot():
+        return await _run_epic_manager_body(epic_id, goal, db, repo_path)
+
+
+async def _run_epic_manager_body(
+    epic_id: str,
+    goal: str,
+    db: AsyncSession,
+    repo_path: str | None = None,
+) -> EpicApprovalPackage:
+    """The real epic orchestration logic — see run_epic_manager()'s docstring
+    for the flow. Split out so run_epic_manager() can hold epic_slot() for
+    the whole call via `async with` regardless of how this returns/raises.
 
     Flow:
     1. Cost estimate → if over threshold → mark epic 'pending_cost_approval' and return early
@@ -615,6 +704,51 @@ async def run_epic_manager(
         .values(cost_estimate=Decimal(str(refined_estimate.estimated_cost_usd)))
     )
     await db.commit()
+
+    # Gap-closure (Audit 04 fix, ORCH-04-010): conflict_guard.check_file_conflicts()
+    # was fully built with a docstring claiming it's "called before dispatching
+    # a coder/backend-dev/frontend-dev subtask" but had zero real callers.
+    # Checked here, right before coding starts, using the architect plan's
+    # impacted_files — the same field conflict_guard.py's own
+    # _get_epic_files() reads from PipelineState.architect_plan.
+    architect_plan = pipeline_result.get("architect_plan") or {}
+    candidate_files = [
+        f.get("path", "")
+        for f in architect_plan.get("impacted_files", [])
+        if isinstance(f, dict) and f.get("path")
+    ]
+    if candidate_files:
+        from app.pipeline.conflict_guard import check_file_conflicts
+
+        conflict = await check_file_conflicts(candidate_files, epic_id, db)
+        if conflict:
+            logger.warning("Epic %s halted on file conflict: %s", epic_id, conflict)
+            await db.execute(
+                sa_update(Epic)
+                .where(Epic.epic_id == epic_id)
+                .values(status="halted", halt_reason=conflict)
+            )
+            await db.commit()
+            await publish_event(
+                GridironEvent(
+                    event_type="epic.halted",
+                    epic_id=epic_id,
+                    payload={"reason": conflict},
+                    emitted_by="manager",
+                ),
+                db=db,
+            )
+            return EpicApprovalPackage(
+                epic_id=epic_id,
+                status="halted",
+                subtask_results=[],
+                total_files_changed=[],
+                all_diffs="",
+                all_qa_summaries=[],
+                all_review_findings=[],
+                cost_actual_usd=0.0,
+                halt_reason=conflict,
+            )
 
     # --- Step 3: Coding pipeline ---
     await db.execute(

@@ -30,6 +30,7 @@ from app.db.repository import (
     get_or_create_pipeline_state,
 )
 from app.config import get_settings
+from app.repo_tools.worktree import remove_worktree
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -229,6 +230,27 @@ async def restart_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
+    # Gap-closure (Audit 04 fix, ORCH-04-004): restart previously force-reset
+    # status regardless of current state, with no check for whether a
+    # background pipeline run (launch_planning_pipeline/launch_manager/
+    # launch_coder/launch_planner) was already actively running for this
+    # task_id — a double-dispatch race against the same worktree. Those are
+    # the only statuses ever set at the START of an in-flight background
+    # task and held until it reaches a terminal-ish status itself, so they
+    # reliably signal "something is still running" without needing a new
+    # lock/column.
+    _ACTIVE_STATUSES = ("planning", "coding", "testing")
+    if task.status in _ACTIVE_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Task {task_id} has an active pipeline run in progress "
+                f"(status={task.status!r}) — wait for it to reach a "
+                "terminal-ish status (ready_for_review/blocked/failed/"
+                "rejected) before restarting."
+            ),
+        )
+
     # Force-reset to pending regardless of current status
     await db.execute(
         update(DevTask).where(DevTask.id == task_id).values(status="pending")
@@ -282,6 +304,23 @@ async def approve_task(
             status_code=400,
             detail=f"Task must be ready_for_review, got {task.status!r}",
         )
+    # Gap-closure (Audit 04 fix, ORCH-04-002): "ready_for_review" is reused
+    # for two different real states — "plan ready, awaiting approval to
+    # start coding" (task.diff is still None) and "code diff ready for
+    # final review" (task.diff was already set by a prior coding run).
+    # Without this check, re-clicking "Approve" on an already-coded task
+    # silently re-launches the coder from scratch instead of being a no-op
+    # or a clear error — task.diff's presence is the same signal
+    # POST /{task_id}/complete uses below.
+    if task.diff is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Task already has a diff — coding already completed once. "
+                "Nothing to approve here; use POST /{task_id}/complete or "
+                "the git-push flow instead of re-approving."
+            ),
+        )
 
     # Gap-closure (Days 11-15 audit, 2026-07-22): this endpoint never resolved
     # the task's assigned repo (task.repo_id), unlike /run, /restart, and
@@ -306,12 +345,32 @@ async def approve_task(
 async def reject_task(
     task_id: int, body: RejectRequest, db: AsyncSession = Depends(get_db)
 ) -> dict[str, Any]:
+    from app.db.models import Repo
+    from sqlalchemy import select
+
     task = await get_task(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     task = await transition_task(db, task_id, "rejected")
     msg = f"Task rejected. Reason: {body.reason}" if body.reason else "Task rejected"
     await append_log(db, task_id, "rejection", msg)
+
+    # Gap-closure (Audit 04 fix, ORCH-04-012): the worktree is no longer
+    # needed once a task is rejected (whether the plan or an already-coded
+    # diff) — remove_worktree() previously had zero real callers anywhere,
+    # so worktrees accumulated forever. Best-effort: usually a no-op if
+    # coding never started (no worktree exists yet for a rejected plan).
+    try:
+        repo_path: str | None = None
+        if task.repo_id:
+            result = await db.execute(select(Repo).where(Repo.id == task.repo_id))
+            repo_obj = result.scalar_one_or_none()
+            if repo_obj:
+                repo_path = repo_obj.local_path
+        remove_worktree(task_id, repo_path)
+    except Exception:
+        pass
+
     return {"rejected": True, "task": _task_to_dict(task)}
 
 
@@ -418,6 +477,51 @@ async def get_diff(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return {"diff": task.diff, "filesTouched": task.files_touched or []}
+
+
+@router.post("/{task_id}/complete")
+async def complete_task(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Gap-closure (Audit 04 fix, ORCH-04-002). Manually close out a task
+    that has a real diff ready and no further action expected — the
+    counterpart to the automatic completion dispatch_git_push_decision()
+    performs on a successful push, for tasks with no GitHub-linked repo
+    (simple mode has no push flow at all; full mode without a linked repo
+    never gets a push approval either). Requires the *coded*
+    ready_for_review (task.diff already set), not the *plan* one — the same
+    signal approve_task's idempotency check above uses."""
+    task = await get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status != "ready_for_review":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Task must be ready_for_review, got {task.status!r}",
+        )
+    if task.diff is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Task has no diff yet — coding hasn't completed.",
+        )
+    task = await transition_task(db, task_id, "completed")
+    await append_log(db, task_id, "completion", "Task marked completed")
+
+    # Gap-closure (Audit 04 fix, ORCH-04-012): worktree no longer needed
+    # once a task is completed. Best-effort.
+    try:
+        from app.db.models import Repo
+        from sqlalchemy import select
+
+        repo_path: str | None = None
+        if task.repo_id:
+            result = await db.execute(select(Repo).where(Repo.id == task.repo_id))
+            repo_obj = result.scalar_one_or_none()
+            if repo_obj:
+                repo_path = repo_obj.local_path
+        remove_worktree(task_id, repo_path)
+    except Exception:
+        pass
+
+    return {"completed": True, "task": _task_to_dict(task)}
 
 
 @router.get("/{task_id}/pr")

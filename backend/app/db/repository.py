@@ -299,6 +299,18 @@ async def list_subtasks(db: AsyncSession, task_id: int) -> list[Subtask]:
     return list(result.scalars())
 
 
+async def update_subtask_status(db: AsyncSession, subtask_id: int, status: str) -> None:
+    """Gap-closure (Audit 04 fix, ORCH-04-011): Subtask.status defaulted to
+    "pending" at creation and was never updated anywhere afterward, so
+    GET /api/tasks/{id}/subtasks always reported "pending" regardless of the
+    real dev/QA/review outcome. Called from run_manager()'s per-subtask loop
+    once a subtask's final status (completed|blocked) is known."""
+    await db.execute(
+        update(Subtask).where(Subtask.id == subtask_id).values(status=status)
+    )
+    await db.commit()
+
+
 async def get_pipeline_state(db: AsyncSession, task_id: int) -> PipelineState | None:
     """Return the pipeline state row if it exists, or None."""
     result = await db.execute(

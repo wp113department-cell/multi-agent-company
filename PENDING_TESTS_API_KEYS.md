@@ -12,6 +12,11 @@ deselected**. This file accounts for all 55 + all 17 = **72 tests**, of which **
 blocked on a real API key or a real external service** (1 skip — `reportlab` — is an unrelated
 missing pip package, not an API-key issue; included below for completeness so nothing is left out).
 
+**Update (2026-07-27):** section F below adds a second, different category — new tests written
+during the Audit 04 (Orchestration) fix pass that are blocked on *environment* (no Python
+interpreter, no Postgres reachable) rather than credentials. Keeping both categories in this one
+file per user direction, since both boil down to "written, not yet confirmed to pass."
+
 ---
 
 ## Quick answer to "OpenAI too, right?"
@@ -171,6 +176,79 @@ not a new one.
 
 ---
 
+## F. (Added 2026-07-27) Audit 04 orchestration-fix tests — blocked on environment, not credentials
+
+**File:** `backend/tests/test_audit04_orchestration_fixes.py` (25 test functions across 12 classes (29 collected test cases once
+pytest expands the two `@pytest.mark.parametrize` functions), one per
+Audit 04 finding — see `docs/reports/AUDIT_04_ORCHESTRATION.md` §12 "Fixes Applied").
+
+**This is a different blocking reason than sections A-D above — not an API key gap.** Every test in
+this file mocks the LLM/agent layer directly (no real Anthropic/Groq call anywhere in it — verified
+by grep: zero references to `anthropic.Anthropic` or real model calls). What actually blocks it:
+
+1. **No Python interpreter exists in the environment this fix pass was written in.** Checked
+   directly: no `python`/`python3`/`py` binary (only a Windows Store stub alias that errors out), no
+   `.venv` anywhere in the repo, no WSL, no Docker. This means `pytest`/`mypy` could not be executed
+   at all during this session — not for this new file, and not to confirm the 12 fixed files
+   (`backend/app/api/agents.py`, `tasks.py`, `approvals.py`, `backend/app/agents/manager.py`,
+   `backend_dev.py`, `frontend_dev.py`, `backend/app/db/models.py`, `repository.py`,
+   `backend/app/repo_tools/worktree.py`, `backend/app/pipeline/conflict_guard.py`,
+   `backend/app/fleet/failure_ladder.py`, `backend/app/pipeline/queue_adapter.py`) didn't introduce a
+   regression in the existing 2707-test suite.
+2. **A real Postgres instance is also required** (same as every other DB-touching test in this repo
+   — see `tests/conftest.py`'s `DATABASE_URL` default) — most of this file's tests create/query real
+   `DevTask`/`Subtask`/`Epic`/`PipelineState`/`PendingApproval` rows via an isolated engine, matching
+   the established pattern in `test_launch_coder_bootstrap.py`/`test_approvals_api.py`/
+   `test_git_push_approval_dispatch.py`.
+
+**What was done instead, to compensate for not being able to execute anything:** every one of the 12
+fixed files was re-read in full after editing and manually traced end-to-end (call sites, patch
+targets, import scoping — this codebase's convention of deferred `from X import Y` inside function
+bodies rather than module-level imports means `unittest.mock.patch` targets must point at the
+*definition* site, not the call site; verified this was done correctly throughout). One real,
+previously-undocumented bug was found this way (not just assumed away): `conflict_guard.py`'s own
+`_get_epic_files()` checked `isinstance(f, str)` against `impacted_files` entries, but architect.py's
+real `submit_architect_plan` schema always produces `{"path": ..., "reason": ...}` objects — meaning
+`check_file_conflicts()` would have silently found zero conflicts ever, even after being wired in,
+had this not been caught and fixed alongside ORCH-04-010. This is exactly the class of bug a live
+test run would have caught immediately — treat every fix in this pass as **implemented and reasoned
+through carefully, not test-confirmed**, until this file (and the existing 2707-test suite) actually
+run green.
+
+**What each test class covers** (all in `test_audit04_orchestration_fixes.py`):
+
+| Class | Finding | What it proves |
+|---|---|---|
+| `TestOrch04_001_LaunchCoderCommits` | ORCH-04-001 | `launch_coder` now calls `git_add`/`git_commit` before computing the diff; skips cleanly when there's nothing to commit |
+| `TestOrch04_002_TerminalState` | ORCH-04-002 | `can_transition("ready_for_review","completed")`; `/approve` 409s on an already-coded task; `/complete` endpoint's both guard conditions; a successful push auto-transitions to `completed` |
+| `TestOrch04_004_RestartGuard` | ORCH-04-004 | `/restart` 409s on `planning`/`coding`/`testing`; still works from `blocked`/`failed`/`rejected` |
+| `TestOrch04_007_ApprovalRace` | ORCH-04-007 | `_decide_or_409()`'s second call 409s immediately (not just after the whole background dispatch resolves); `git_push`-action rows now actually leave `"pending"` |
+| `TestOrch04_014_SpawnTracked` | ORCH-04-014 | `_spawn_tracked()` retains a reference while running, releases it via the done-callback after completion |
+| `TestOrch04_008_015_RetryWiring` | ORCH-04-008, ORCH-04-015 | `run_manager()`'s retry count matches `manager_max_subtask_retries` (not the larger, separate `max_retries`); backoff (`asyncio.sleep`) actually fires between retries |
+| `TestOrch04_009_ConcurrencySlots` | ORCH-04-009 | `run_manager()` doesn't deadlock/leak `agent_run_slot()` across a full dev→qa→review cycle at cap=1; `run_epic_manager()` releases `epic_slot()` on the early `pending_cost_approval` return path (two sequential calls at `max_epics=1` must not hang) |
+| `TestOrch04_010_ConflictGuard` | ORCH-04-010 | `_get_epic_files()` correctly extracts real dict-shaped `impacted_files` (locks in the bug fix above); `check_file_conflicts()` detects a real overlap and clears a real non-overlap |
+| `TestOrch04_011_SubtaskStatusPersistence` | ORCH-04-011 | A real `Subtask` row's `status` actually flips to `"completed"` after `run_manager()` |
+| `TestOrch04_012_WorktreeCleanup` | ORCH-04-012 | `create_worktree()` detects and rebuilds a stale/unregistered directory at the same path instead of silently reusing it; `/reject` calls `remove_worktree()` |
+| `TestOrch04_016_QueueAdapterDocumented` | ORCH-04-016 | Sanity-checks the module still imports; documents (doesn't newly test) that real dispatch bypasses it |
+
+**To run once Python + Postgres are available:**
+```bash
+cd backend
+# .venv with backend/requirements.txt installed, real Postgres reachable at
+# the DATABASE_URL in tests/conftest.py (or your own .env override) — no
+# ANTHROPIC_API_KEY/GROQ_API_KEY needed for this file specifically.
+.venv/bin/pytest tests/test_audit04_orchestration_fixes.py -v
+
+# Then confirm no regression in the existing suite:
+.venv/bin/pytest tests/ -q
+mypy app/ --strict
+```
+If anything fails: re-read the failing test against the real source first (this file was written by
+tracing the code, not by running it) — the bug is as likely to be in the test's assumptions as in the
+fix itself, and either is useful signal. Update this note once it's actually been run.
+
+---
+
 ## Full tally
 
 | Category | Count | Blocked on |
@@ -180,7 +258,9 @@ not a new one.
 | B2 — Groq eval tests (now covering 11 tasks in `tasks.json`, up from 5) | 4 | Real `GROQ_API_KEY` |
 | C — `tests/pending/` full directory | 54 | Real LLM key (Anthropic or Groq) + some need DB/Voyage too |
 | D — Unrelated (missing pip package) | 1 | `pip install reportlab` — not an API-key issue |
-| **Total pytest-collected, blocked on real credentials** | **71** (55 skipped + 17 deselected − 1 reportlab) | |
+| F — Audit 04 orchestration-fix tests (2026-07-27) | 29 (25 functions) | **Python interpreter + Postgres in the audit environment — no API key needed** |
+| **Total pytest-collected, blocked on real credentials (A-D)** | **71** (55 skipped + 17 deselected − 1 reportlab) | |
+| **Total blocked on execution environment only, no credentials (F)** | **29** | |
 
 **Bottom line:** every one of these is real, written code — nothing here is a stub pretending to be
 a test (except the 4 in section A, which are honest TODO stubs, not disguised ones). Once you have

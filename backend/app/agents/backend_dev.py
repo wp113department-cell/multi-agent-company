@@ -117,6 +117,8 @@ def run_backend_dev(
     extra_env (Day 17): custom secrets merged into the bash tool's
     subprocess env.
     """
+    from app.fleet.failure_ladder import should_retry
+
     settings = get_settings()
     repo = repo_path or settings.target_repo_path
     max_retries = settings.max_retries
@@ -163,7 +165,7 @@ def run_backend_dev(
                 attempt + 1,
                 subtask_id,
             )
-            if attempt == max_retries - 1:
+            if not should_retry(attempt + 1, max_retries):
                 return [], f"Backend dev agent error: {exc}"
             continue
 
@@ -172,7 +174,7 @@ def run_backend_dev(
 
         if not final_state.get("submitted"):
             logger.warning("Backend dev did not submit on attempt %d", attempt + 1)
-            if attempt == max_retries - 1:
+            if not should_retry(attempt + 1, max_retries):
                 return [], "Backend dev did not submit a patch"
             continue
 
@@ -193,7 +195,7 @@ def run_backend_dev(
             attempt + 1,
             check_error[:200],
         )
-        if attempt == max_retries - 1:
+        if not should_retry(attempt + 1, max_retries):
             return (
                 [],
                 f"Checks still failing after {max_retries} attempts:\n{check_error}",

@@ -71,6 +71,19 @@ async def _get_epic_files(epic_id: str, db: AsyncSession) -> set[str]:
         plan: Any = ps.architect_plan
         if isinstance(plan, dict):
             for f in plan.get("impacted_files", []):
+                # Gap-closure (Audit 04 fix, ORCH-04-010): the architect
+                # agent's real submit_architect_plan schema
+                # (architect.py's _SUBMIT_TOOL) always produces
+                # impacted_files entries as {"path": ..., "reason": ...}
+                # objects, never plain strings — the `isinstance(f, str)`
+                # check below always failed against real data, so this
+                # function silently returned an empty set for every epic,
+                # every time, defeating check_file_conflicts() entirely
+                # regardless of whether it had a real caller. Fixed to match
+                # the real schema; a bare string is still accepted too, in
+                # case any caller ever passes the simpler shape.
                 if isinstance(f, str):
                     files.add(f)
+                elif isinstance(f, dict) and f.get("path"):
+                    files.add(str(f["path"]))
     return files

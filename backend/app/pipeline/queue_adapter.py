@@ -6,6 +6,22 @@ Swap backends via QUEUE_BACKEND:
   (wraps app.queue.rq_adapter.RQQueueAdapter, which is real, tested code).
 - bullmq — still an intentional stub; requires a bullmq-python client that
   doesn't exist yet. Set QUEUE_BACKEND=asyncio or rq instead.
+
+NOT WIRED INTO REAL TASK DISPATCH (Audit 04 finding ORCH-04-016, documented
+rather than force-wired): every real task-launch call site in api/tasks.py
+(run/restart/approve/pipeline_approve/push) dispatches via FastAPI's
+BackgroundTasks.add_task(...) directly, not queue().enqueue(...) — so
+QUEUE_BACKEND=rq currently has no effect on real task dispatch. This is
+intentionally left as infrastructure-not-yet-integrated rather than force-
+wired during the Audit 04 fix pass: BackgroundTasks (fire-and-forget within
+the request's own process, no retry/persistence across a restart) and a real
+queue worker (a separate process, survives app restarts, has its own retry
+policy) have materially different failure semantics — swapping the real
+dispatch call sites to use this adapter is a deliberate architectural
+decision about which failure model the whole task lifecycle wants, not a
+one-line wiring fix, and shouldn't be made as a drive-by change alongside
+unrelated orchestration fixes. Same category as prompt_registry.deploy()'s
+documented-dormant status. See docs/reports/AUDIT_04_ORCHESTRATION.md.
 """
 
 from __future__ import annotations
