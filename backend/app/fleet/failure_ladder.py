@@ -41,16 +41,24 @@ from app.fleet.fleet_checkpoint import (
 
 # ---------------------------------------------------------------------------
 # Checkpoint / Rollback — re-exported, no new logic
+#
+# Gap-closure (Audit 04 fix, ORCH-04-008): Checkpoint/Escalate/Abort/Human
+# Review/Retry (should_retry, now wired into manager.py's and
+# backend_dev.py's/frontend_dev.py's retry loops) all have real, automatic
+# call sites reachable from a failure condition. Rollback and Resume are
+# deliberately NOT auto-wired: unlike the others, "revert this agent run's
+# state to an earlier checkpoint" or "continue forward from a checkpoint" is
+# a judgment call about whether the earlier state was actually good — the
+# kind of decision this codebase's own conventions (see approval_gate.py,
+# credential_vault.py) route through an explicit human action, not an
+# automatic trigger. They're intentionally manual/operator-invoked tooling
+# (e.g. a future "rollback this run" dashboard action, or an ad hoc script
+# using a checkpoint_id from fleet_checkpoint's ring buffer) — not unwired
+# oversights, matching the precedent already set for prompt_registry.deploy().
 # ---------------------------------------------------------------------------
 
 checkpoint = save_checkpoint
 rollback = rollback_to
-
-
-# ---------------------------------------------------------------------------
-# Resume — continues forward from the latest checkpoint, distinct in intent
-# from Rollback (which implies reverting to an earlier, presumably-good point)
-# ---------------------------------------------------------------------------
 
 
 def resume(checkpoint_id: str) -> AgentStateSnapshot:

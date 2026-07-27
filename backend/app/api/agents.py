@@ -32,6 +32,23 @@ logger = logging.getLogger(__name__)
 _COST_PER_INPUT_TOKEN = 0.0000008
 _COST_PER_OUTPUT_TOKEN = 0.000004
 
+# Gap-closure (Audit 04 fix, ORCH-04-014): asyncio.create_task()'s own docs
+# warn "save a reference to the result of this function, to avoid a task
+# disappearing mid-execution" — the event loop only holds a weak reference,
+# so a task with no other referent can in principle be garbage collected
+# before it completes. Several real dispatch points here previously
+# discarded the return value outright. This module-level set + done-callback
+# is the standard idiom: retains a strong reference until the task finishes,
+# then discards it automatically.
+_background_tasks: set[asyncio.Task[Any]] = set()
+
+
+def _spawn_tracked(coro: Any) -> "asyncio.Task[Any]":
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
 
 def _estimate_cost(tokens_in: int, tokens_out: int) -> float:
     return round(
@@ -288,7 +305,7 @@ async def resume_planning_pipeline(
                 plan = _build_plan_summary(result)
                 subtasks = result.get("subtasks", [])
                 # Launch multi-agent manager pipeline instead of single coder
-                asyncio.create_task(launch_manager(task_id, subtasks, plan, repo_path))
+                _spawn_tracked(launch_manager(task_id, subtasks, plan, repo_path))
             else:
                 await update_pipeline_state(db, task_id, "rejected")
                 await transition_task(db, task_id, "rejected")
@@ -420,7 +437,7 @@ async def launch_manager(
             await update_task_assigned_agent(db, task_id, "manager")
 
             def on_status(subtask_id: int, status: str) -> None:
-                asyncio.create_task(
+                _spawn_tracked(
                     append_log(
                         db, task_id, "pipeline", f"Subtask {subtask_id}: {status}"
                     )
@@ -540,10 +557,10 @@ async def launch_planner(
         await update_task_assigned_agent(db, task_id, "planner")
 
         def heartbeat() -> None:
-            asyncio.create_task(heartbeat_agent_run(db, run_id))
+            _spawn_tracked(heartbeat_agent_run(db, run_id))
 
         def on_tool(name: str, inp: Any, result: Any) -> None:
-            asyncio.create_task(
+            _spawn_tracked(
                 append_log(db, task_id, "tool_call", f"{name}: {str(result)[:200]}")
             )
 
@@ -656,7 +673,7 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
             await append_log(db, task_id, "worktree", f"Worktree created: {wt_path}")
 
             def heartbeat() -> None:
-                asyncio.create_task(heartbeat_agent_run(db, run_id))
+                _spawn_tracked(heartbeat_agent_run(db, run_id))
 
             # Day 17 — Credential Vault. Custom secrets, if any.
             from app.security.credential_vault import get_credential_vault
@@ -691,6 +708,37 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
                 await transition_task(db, task_id, "blocked")
                 await append_log(db, task_id, "error", error)
             else:
+                # Gap-closure (Audit 04, ORCH-04-001): nothing in this path ever
+                # committed files_changed to the worktree's branch — the same
+                # bug Day 14 fixed for run_manager()'s full-mode loop
+                # (manager.py's git_add+git_commit step), never applied here.
+                # Without a commit, get_diff() (HEAD...branch) always returns
+                # empty even though files_changed is non-empty, so the human
+                # reviewer sees no diff for a task that actually wrote code.
+                if files_changed:
+                    from app.services.git_service import git_add, git_commit
+
+                    add_result = await git_add(wt_path, files_changed)
+                    if add_result["ok"]:
+                        commit_result = await git_commit(
+                            wt_path,
+                            f"coder: task {task_id}",
+                            author_name="Gridiron Agent",
+                            author_email="agent@gridiron.local",
+                        )
+                        if not commit_result["ok"]:
+                            logger.warning(
+                                "Commit failed for task %d: %s",
+                                task_id,
+                                commit_result["stderr"][:300],
+                            )
+                    else:
+                        logger.warning(
+                            "git add failed for task %d: %s",
+                            task_id,
+                            add_result["stderr"][:300],
+                        )
+
                 diff = get_diff(task_id, effective_repo)
                 await update_task_diff(db, task_id, diff, files_changed)
                 if diff:

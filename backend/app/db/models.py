@@ -37,9 +37,16 @@ VALID_TRANSITIONS: dict[str, list[str]] = {
     # column, not DevTask.status) — this transition was missing since Day 0,
     # meaning rejecting a plan during the approval pause has always raised
     # TransitionError in real use, not just in this new test.
+    # "completed" added to "ready_for_review" (Audit 04 fix, ORCH-04-002):
+    # previously nothing in the codebase ever transitioned a task into
+    # "completed" despite it being a defined terminal status — confirmed by
+    # grepping every transition_task() call site before this change, not
+    # assumed. Reached automatically when a git push succeeds
+    # (approvals.dispatch_git_push_decision) or manually via
+    # POST /api/tasks/{id}/complete for tasks with no push flow.
     "pending": ["planning", "blocked", "failed"],
     "planning": ["ready_for_review", "blocked", "rejected", "failed"],
-    "ready_for_review": ["coding", "blocked", "rejected", "failed"],
+    "ready_for_review": ["coding", "blocked", "rejected", "failed", "completed"],
     "coding": ["testing", "blocked", "failed"],
     "testing": ["ready_for_review", "blocked", "failed"],
     "rejected": ["planning"],

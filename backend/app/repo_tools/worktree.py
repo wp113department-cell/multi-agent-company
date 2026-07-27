@@ -24,6 +24,36 @@ def worktree_path(task_id: int | str, epic_id: str | None = None) -> Path:
     return base / f"task-{task_id}"
 
 
+def _is_registered_worktree(wt_path: Path, base_repo: str) -> bool:
+    """Gap-closure (Audit 04 fix, ORCH-04-012): check whether wt_path is
+    actually a registered git worktree of base_repo (not just an existing
+    directory — could be a stale/partial leftover from a crashed prior run,
+    or a directory git itself doesn't know about). `git worktree list
+    --porcelain` lists one `worktree <path>` line per real, registered
+    worktree; a normalized path comparison confirms membership."""
+    try:
+        result = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=base_repo,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return False
+        target = str(wt_path.resolve())
+        for line in result.stdout.splitlines():
+            if line.startswith("worktree "):
+                registered = line[len("worktree ") :].strip()
+                try:
+                    if str(Path(registered).resolve()) == target:
+                        return True
+                except OSError:
+                    continue
+        return False
+    except Exception:
+        return False
+
+
 def create_worktree(
     task_id: int | str,
     repo_path: str | None = None,
@@ -36,7 +66,29 @@ def create_worktree(
 
     os.makedirs(wt_path.parent, exist_ok=True)
     if wt_path.exists():
-        return wt_path
+        # Gap-closure (Audit 04 fix, ORCH-04-012): previously this returned
+        # the existing directory unconditionally, trusting it as-is — a
+        # restarted task (same task_id, same worktree path) would silently
+        # build on top of whatever was left over from a prior failed/crashed
+        # attempt instead of a clean checkout, with no signal this happened.
+        # Only trust it if git itself still considers it a real, registered
+        # worktree; otherwise treat it as stale and rebuild fresh.
+        if _is_registered_worktree(wt_path, base_repo):
+            return wt_path
+        try:
+            _run(
+                ["git", "worktree", "remove", "--force", str(wt_path)],
+                cwd=base_repo,
+            )
+        except RuntimeError:
+            shutil.rmtree(wt_path, ignore_errors=True)
+        # A `git worktree add -b <branch>` would fail if <branch> already
+        # exists from the stale attempt (branch survives worktree removal) —
+        # delete it too, best-effort, before recreating.
+        try:
+            _run(["git", "branch", "-D", branch], cwd=base_repo)
+        except RuntimeError:
+            pass
 
     _run(["git", "worktree", "add", "-b", branch, str(wt_path)], cwd=base_repo)
     return wt_path
