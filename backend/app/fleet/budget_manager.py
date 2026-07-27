@@ -15,12 +15,51 @@ per_instance_cost_limit / total_cost_limit pattern
 
 from __future__ import annotations
 
-import resource
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from app.config import get_settings
 from app.fleet.metrics import MetricsCollector, RunMetrics, get_metrics_collector
+
+# `resource` is POSIX-only (no ru_maxrss/RUSAGE_SELF on Windows) — this
+# blocked this module's import entirely on Windows, which in turn aborted
+# pytest collection for the whole suite (found via real execution while
+# setting up Windows-based test verification for Audit 04/05). ctypes is
+# stdlib, so the Windows branch below adds no new dependency.
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
+
+    class _ProcessMemoryCounters(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD),
+            ("PageFaultCount", wintypes.DWORD),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+        ]
+
+    # Explicit argtypes/restype are required: ctypes' default (c_int) return
+    # type for GetCurrentProcess() truncates the 64-bit pseudo-handle it
+    # returns, so GetProcessMemoryInfo silently fails (returns 0) if called
+    # with the untyped result. Confirmed via direct execution — the untyped
+    # version always returned ok=0/peak=0 with no exception.
+    ctypes.windll.kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    ctypes.windll.kernel32.GetCurrentProcess.argtypes = []
+    ctypes.windll.psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+    ctypes.windll.psapi.GetProcessMemoryInfo.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(_ProcessMemoryCounters),
+        wintypes.DWORD,
+    ]
+else:
+    import resource
 
 
 @dataclass
@@ -38,9 +77,20 @@ class BudgetExceeded(Exception):
 
 
 def _current_memory_mb() -> float:
-    """Best-effort process-wide peak RSS (ru_maxrss), not per-run isolated
-    memory — there is no cheap way to attribute memory to a single agent run
-    inside one process. This is a coarse proxy, documented as such."""
+    """Best-effort process-wide peak RSS, not per-run isolated memory —
+    there is no cheap way to attribute memory to a single agent run inside
+    one process. This is a coarse proxy, documented as such."""
+    if sys.platform == "win32":
+        counters = _ProcessMemoryCounters()
+        counters.cb = ctypes.sizeof(_ProcessMemoryCounters)
+        handle = ctypes.windll.kernel32.GetCurrentProcess()
+        ok = ctypes.windll.psapi.GetProcessMemoryInfo(
+            handle, ctypes.byref(counters), counters.cb
+        )
+        return (counters.PeakWorkingSetSize / (1024 * 1024)) if ok else 0.0
+    # ru_maxrss is KB on Linux, bytes on macOS — this codebase's documented
+    # prod target is Linux, so KB is assumed here (pre-existing behavior,
+    # unchanged by this fix).
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
 
 

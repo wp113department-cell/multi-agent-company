@@ -20,15 +20,24 @@ Fixes vs. previous version:
   7. Added check_allowlisted_command() combining chaining-metachar rejection +
      prefix allowlist in one call — use this for all allowlist-based bash agents.
   8. (Audit 05 fix, found while writing test coverage for SEC-05-007) The fork-
-     bomb pattern `r"\b:(){ :\|:& };:"` had unescaped parentheses — `()` in
+     bomb pattern `r"\\b:(){ :\\|:& };:"` had unescaped parentheses — `()` in
      regex is an empty capturing group (matches a zero-width position), not a
      literal `(` `)` match, so this pattern never actually matched a real fork
      bomb (`:(){ :|:& };:`) at all since the "(){ " Day 0. Fixed to
-     `r"\b:\(\)\s*\{\s*:\|:&\s*\}\s*;\s*:"` (escaped parens, \s* for
+     `r"\\b:\\(\\)\\s*\\{\\s*:\\|:&\\s*\\}\\s*;\\s*:"` (escaped parens, \\s* for
      whitespace-variant tolerance). No existing test exercised this pattern
      (confirmed by grep), so this had zero real-world coverage either way —
      found by manual regex tracing while writing check_command_stays_in_boundary's
      test suite, not by execution.
+  9. (Found via real execution, 2026-07-27) This module's own docstring (a
+     non-raw string) had `\b` sequences above that Python was silently
+     interpreting as literal backspace control characters instead of the
+     two-character text "\b" the docstring intended to display — same class
+     of bug as fix #8, just in documentation instead of a regex, caught only
+     once a real Python interpreter actually compiled this file. Fixed by
+     doubling the backslashes (`\\b`) so they render as literal text. Purely
+     a docstring content fix — the actual regex patterns above (already
+     properly escaped in code, not in prose) were never affected.
 """
 
 from __future__ import annotations
