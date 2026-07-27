@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.policy.engine import (
     check_allowlisted_command,
     check_command,
+    check_command_stays_in_boundary,
     check_path,
     check_path_in_worktree,
 )
@@ -914,6 +915,13 @@ def make_coder_handlers(
         policy = check_command(cmd)
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
+        # Gap-closure (Audit 05 fix, SEC-05-005): the denylist alone doesn't
+        # stop `cd /outside/the/worktree && <anything>` — cwd= below only
+        # sets the *starting* directory. See check_command_stays_in_boundary's
+        # own docstring for what this does and doesn't cover.
+        boundary_policy = check_command_stays_in_boundary(cmd, worktree_path)
+        if not boundary_policy.allowed:
+            return f"[POLICY DENIED] {boundary_policy.reason}"
         env = {**os.environ, **extra_env} if extra_env else None
         try:
             result = subprocess.run(
@@ -6564,9 +6572,36 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         import uuid
 
         command = inp["command"]
-        cwd = inp.get("cwd") or repo_path
+        # Gap-closure (Audit 05 fix, SEC-05-006): this used to accept an
+        # LLM-controlled cwd override (`inp.get("cwd") or repo_path`) with no
+        # validation it stayed inside repo_path — widening the escape
+        # surface beyond even the `cd &&` chaining issue (SEC-05-005),
+        # since the tool call itself could just set cwd directly. Every
+        # other bash-capable handler in this file hardcodes its working
+        # directory; this one now does too.
+        cwd = repo_path
+
+        # Gap-closure (Audit 05 fix, SEC-05-005): rejected before the
+        # confirmation flow below — a command trying to leave the sandbox
+        # entirely is a different, non-overridable class of problem from a
+        # destructive-but-in-scope command a human can knowingly approve.
+        boundary_policy = check_command_stays_in_boundary(command, repo_path)
+        if not boundary_policy.allowed:
+            return f"[POLICY DENIED] {boundary_policy.reason}"
 
         if _is_dangerous_command(command):
+            # Gap-closure (Audit 05 fix, SEC-05-007): a human "approve" click
+            # used to be able to run ANY denylisted command, including
+            # irreversible/catastrophic ones (rm -rf, dd if=, mkfs, a fork
+            # bomb) — no different from an unconfirmed one once approved.
+            # These now stay hard-blocked regardless of confirmation.
+            from app.policy.engine import is_command_override_eligible
+
+            if not is_command_override_eligible(command):
+                return (
+                    f"[BLOCKED] This command is irreversible/catastrophic and "
+                    f"cannot be run even with confirmation: {command!r}"
+                )
             if session is None:
                 return (
                     f"[BLOCKED] This command is potentially destructive: {command!r}\n"

@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.db.models import EnhancementRequest
+from app.middleware.rbac import require_approver
 from app.services.activity_stream import get_activity_registry
 
 logger = logging.getLogger(__name__)
@@ -211,6 +212,7 @@ async def approve_request(
     request_id: int,
     payload: DecisionPayload | None = None,
     db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     row = await db.get(EnhancementRequest, request_id)
     if row is None:
@@ -244,6 +246,7 @@ async def reject_request(
     request_id: int,
     payload: DecisionPayload | None = None,
     db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     row = await db.get(EnhancementRequest, request_id)
     if row is None:

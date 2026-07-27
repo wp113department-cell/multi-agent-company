@@ -117,6 +117,19 @@ class Settings(BaseSettings):
         default=True,
         description="Enforce viewer/approver RBAC on approve/reject endpoints",
     )
+    # Gap-closure (Audit 05 fix, SEC-05-014): the X-User-Role header self-
+    # declaration fallback (used when jwt_auth_enabled=False) let ANY caller
+    # become an "approver" by setting one header, with zero verification.
+    # Defaulting this to False closes that by default; a deployment that
+    # genuinely wants the old no-real-auth convenience must opt in
+    # explicitly, the same way rbac_enabled=False is an explicit, visible
+    # opt-out rather than a silent one. Does not affect rbac_enabled=False
+    # (still a full, deliberate bypass) or a real JWT/X-User-Id+DB-role
+    # login — only removes the self-declared-header shortcut.
+    allow_legacy_role_header: bool = Field(
+        default=False,
+        description="Allow the X-User-Role header to grant a role with zero verification when JWT auth is disabled. Insecure — for local/dev convenience only. Defaults off.",
+    )
 
     # Phase 6 — Research Agent
     research_enabled: bool = Field(

@@ -17,7 +17,7 @@ from app.db import get_db
 from app.db.models import DevTask, Epic
 from app.event_bus.bus import publish_event
 from app.event_bus.models import GridironEvent
-from app.middleware.rbac import require_approver
+from app.middleware.rbac import require_approver, require_authenticated
 from app.pipeline.cost_controller import estimate_epic_cost
 
 logger = logging.getLogger(__name__)
@@ -86,6 +86,7 @@ def _epic_to_response(epic: Epic, tasks: list[DevTask]) -> dict[str, Any]:
 async def create_epic(
     body: CreateEpicRequest,
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     """Create a new epic and start the epic manager pipeline in the background."""
     epic_id = str(uuid.uuid4())

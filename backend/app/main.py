@@ -274,12 +274,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning("Could not load API key from DB at startup: %s", exc)
 
-    # Ensure admin user always exists with the correct password on every startup
+    # Gap-closure (Audit 05 fix, SEC-05-015): this used to reseed the admin
+    # user's password back to settings.default_admin_password on EVERY
+    # startup whenever it didn't match — meaning a manually-changed admin
+    # password was silently reverted on the next restart, with no way to
+    # durably change it short of overriding DEFAULT_ADMIN_PASSWORD itself
+    # (a hardcoded "gridiron123" by default, checked into source). Now:
+    # seed the admin account ONLY if it doesn't exist at all (first-ever
+    # startup); never touch an existing admin row's password again. The
+    # freshly-seeded row carries must_change_password=True so the login
+    # flow (see app/api/auth.py) can surface a forced-change prompt.
     if settings.jwt_secret_key:
         try:
             import json
             from sqlalchemy import text
-            from app.auth.jwt import hash_password, verify_password
+            from app.auth.jwt import hash_password
 
             factory = get_session_factory()
             async with factory() as db:
@@ -292,30 +301,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 admin_user = next(
                     (u for u in existing if u.get("username") == "admin"), None
                 )
-                # Re-seed if admin is missing OR if their password no longer matches
-                if admin_user is None or not verify_password(
-                    settings.default_admin_password,
-                    admin_user.get("hashed_password", ""),
-                ):
-                    non_admin = [u for u in existing if u.get("username") != "admin"]
+                if admin_user is None:
                     admin = {
                         "username": "admin",
                         "hashed_password": hash_password(
                             settings.default_admin_password
                         ),
                         "role": "approver",
+                        "must_change_password": True,
                     }
                     await db.execute(
                         text(
                             "INSERT INTO system_settings (key, value) VALUES ('auth_users', :v) "
                             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
                         ),
-                        {"v": json.dumps([admin] + non_admin)},
+                        {"v": json.dumps([admin] + existing)},
                     )
                     await db.commit()
-                    logger.info("Admin user synced (username=admin)")
+                    logger.info(
+                        "Admin user seeded (username=admin, must_change_password=True) "
+                        "— this only happens once, on first-ever startup"
+                    )
         except Exception as exc:
-            logger.warning("Could not sync admin user: %s", exc)
+            logger.warning("Could not seed admin user: %s", exc)
 
     reindex_task = asyncio.create_task(_weekly_reindex_loop())
     retention_task = asyncio.create_task(start_retention_loop())

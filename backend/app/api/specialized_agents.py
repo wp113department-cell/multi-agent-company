@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.repository import append_log, transition_task
 from app.db.session import get_db
+from app.middleware.rbac import require_authenticated
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +279,7 @@ async def run_specialized_agent(
     body: RunAgentRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, str]:
     """Dispatch a specialized worker agent on a task asynchronously.
 
@@ -310,6 +312,7 @@ async def run_specialized_agent_sync(
     agent_name: str,
     body: RunAgentRequest,
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> RunAgentResponse:
     """Run a specialized agent synchronously and return the full result.
 

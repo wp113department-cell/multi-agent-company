@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from app.fleet.approval_gate import (
     PendingApprovalRecord,
@@ -22,6 +22,7 @@ from app.fleet.approval_gate import (
     alist_pending,
     arecord_decision,
 )
+from app.middleware.rbac import require_approver
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +190,9 @@ async def _decide_or_409(thread_id: str, approved: bool) -> PendingApprovalRecor
 
 @router.post("/{thread_id}/approve")
 async def approve_approval(
-    thread_id: str, background_tasks: BackgroundTasks
+    thread_id: str,
+    background_tasks: BackgroundTasks,
+    _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     row = await _decide_or_409(thread_id, True)
     background_tasks.add_task(_dispatch_decision, row, True)
@@ -198,7 +201,9 @@ async def approve_approval(
 
 @router.post("/{thread_id}/reject")
 async def reject_approval(
-    thread_id: str, background_tasks: BackgroundTasks
+    thread_id: str,
+    background_tasks: BackgroundTasks,
+    _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     row = await _decide_or_409(thread_id, False)
     background_tasks.add_task(_dispatch_decision, row, False)

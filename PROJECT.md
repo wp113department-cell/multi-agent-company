@@ -2032,6 +2032,17 @@ Last updated: 2026-07-15
 - Worktree path traversal and absolute path escape: BLOCKED
 - All legitimate reads/writes/git-status: ALLOWED
 
+**Update (Audit 05 fix, 2026-07-27, SEC-05-002):** the specific 21-test file this section
+originally referred to is no longer identifiable as a standalone file — `policy/engine.py` was
+substantially rewritten after this day (see its own changelog docstring: the http/https
+word-boundary bug, `rm -rf` flag-variant bypasses, missing `sudo`/`dd`/`mkfs`/exfiltration
+patterns, and missing chaining-metachar rejection were all fixed *after* this "21/21" claim was
+recorded, meaning the original 21 tests validated a buggier implementation than what runs today).
+The real, current descendant is `backend/tests/test_policy.py` (28 assertions) plus
+`backend/tests/test_policy_v2.py` — both conceptually cover every protection claimed above and
+then some (symlink-safe worktree traversal, additional command patterns). Treat "21/21" as a
+historical marker of this day's work, not a live, currently-meaningful test count.
+
 ### Files Created
 - `README.md` — full production runbook (quickstart, all 27 agents, safety model, deploy)
 - `docs/SELLABILITY_GAP.md` — P0/P1/P2 gap analysis with recommended fill order

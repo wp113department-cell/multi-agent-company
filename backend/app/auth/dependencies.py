@@ -1,9 +1,21 @@
 """FastAPI dependency: extract and verify the current user from request.
 
 When JWT_AUTH_ENABLED=true: reads Authorization: Bearer <token> header.
-When JWT_AUTH_ENABLED=false: reads X-User-Role header (backward compat).
+When JWT_AUTH_ENABLED=false and ALLOW_LEGACY_ROLE_HEADER=true: reads
+X-User-Role header (backward compat, insecure — see Audit 05 fix
+SEC-05-014). Defaults to an anonymous viewer otherwise.
 
 The returned CurrentUser is injected into route handlers via Depends(get_current_user).
+
+Gap-closure (Audit 05 fix): this module previously duplicated
+app.middleware.rbac's require_approver with weaker logic (no X-User-Id → DB
+role lookup tier at all, and its own X-User-Role fallback was unconditional
+rather than gated) — the exact "second, independently-maintained, weaker
+duplicate" pattern already found in app.agents.guardrails.py vs.
+app.policy.engine. Currently dormant for require_approver specifically (both
+real call sites, epics.py/memory.py, import from app.middleware.rbac, not
+here — confirmed by grep), but get_current_user IS the real implementation
+behind GET /api/auth/me, so it's fixed in place rather than removed.
 """
 
 from __future__ import annotations
@@ -31,7 +43,8 @@ async def get_current_user(request: Request) -> CurrentUser:
 
     Priority:
     1. When JWT_AUTH_ENABLED=true: Bearer token in Authorization header.
-    2. Fallback: X-User-Role header (legacy, supports viewer|approver).
+    2. When ALLOW_LEGACY_ROLE_HEADER=true: X-User-Role header (legacy,
+       supports viewer|approver) — insecure, opt-in only.
     3. Default: anonymous viewer.
     """
     settings = get_settings()
@@ -54,11 +67,14 @@ async def get_current_user(request: Request) -> CurrentUser:
             status_code=401, detail="Authorization header missing or malformed"
         )
 
-    # Legacy fallback: X-User-Role header
-    role = request.headers.get("X-User-Role", "viewer").lower()
-    if role not in ("viewer", "approver", "admin"):
-        role = "viewer"
-    return CurrentUser(username="legacy-user", role=role, is_authenticated=False)
+    # Legacy fallback: X-User-Role header — opt-in only (Audit 05 fix, SEC-05-014).
+    if settings.allow_legacy_role_header:
+        role = request.headers.get("X-User-Role", "viewer").lower()
+        if role not in ("viewer", "approver", "admin"):
+            role = "viewer"
+        return CurrentUser(username="legacy-user", role=role, is_authenticated=False)
+
+    return _ANONYMOUS
 
 
 async def require_approver(request: Request) -> CurrentUser:

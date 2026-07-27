@@ -4,9 +4,14 @@ The server is the enforcement point. UI hiding buttons is a courtesy only.
 
 Role lookup (in priority order):
   1. When JWT_AUTH_ENABLED=true: Authorization: Bearer <token> → role from JWT claim.
-  2. X-User-Role header: "approver" is accepted directly (legacy/dev mode).
+  2. When ALLOW_LEGACY_ROLE_HEADER=true (default false): X-User-Role header —
+     "approver" is accepted directly, with zero verification. Insecure,
+     local/dev-only convenience — see Audit 05 fix SEC-05-014. A caller that
+     wants no real auth at all should set RBAC_ENABLED=false instead (an
+     explicit, visible bypass), not rely on this header being trusted by
+     accident whenever JWT happens to be off.
   3. X-User-Id header → user_roles table → role (original Phase 5 path).
-  4. Default: "viewer".
+  4. Default: deny (require_approver) / anonymous (require_authenticated).
 
 When RBAC_ENABLED=false all requests are treated as "approver" (local dev).
 """
@@ -43,7 +48,7 @@ async def require_approver(
 
     Auth priority (highest first):
       1. JWT Bearer token in Authorization header (when JWT_AUTH_ENABLED=true)
-      2. X-User-Role: approver header (dev / legacy shortcut)
+      2. X-User-Role: approver header (only when ALLOW_LEGACY_ROLE_HEADER=true)
       3. X-User-Id header → DB user_roles lookup
     """
     settings = get_settings()
@@ -79,10 +84,11 @@ async def require_approver(
             detail="Authorization: Bearer <token> header required when JWT auth is enabled",
         )
 
-    # 2. X-User-Role shortcut — read from request headers (avoids Header sentinel issue)
-    x_user_role = request.headers.get("X-User-Role", "")
-    if x_user_role.lower() in ("approver", "admin"):
-        return x_user_id or x_user_role
+    # 2. X-User-Role shortcut — opt-in only (Audit 05 fix, SEC-05-014).
+    if settings.allow_legacy_role_header:
+        x_user_role = request.headers.get("X-User-Role", "")
+        if x_user_role.lower() in ("approver", "admin"):
+            return x_user_id or x_user_role
 
     # 3. X-User-Id → DB lookup
     if x_user_id:
@@ -96,5 +102,62 @@ async def require_approver(
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="Approver role required: provide Authorization: Bearer <token> or X-User-Role: approver header",
+        detail="Approver role required: provide Authorization: Bearer <token> "
+        "or X-User-Id (with an approver role recorded in user_roles)",
+    )
+
+
+async def require_authenticated(
+    request: Request,
+    x_user_id: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> str:
+    """FastAPI dependency — raise 403 if the caller has no resolvable identity.
+
+    Gap-closure (Audit 05 fix, SEC-05-012/013): the large majority of
+    mutating endpoints had no auth dependency of any kind — not even a
+    lighter check than require_approver. This is that lighter check: any
+    identifiable caller (any role) passes, matching require_approver's same
+    lookup tiers but without the approver/admin role restriction. Used for
+    mutations that need *some* real identity behind them (create a task,
+    clone a repo, send a chat message) but don't themselves grant approval
+    authority — those still use require_approver.
+
+    Returns the resolved user_id / username so route handlers can log it.
+    """
+    settings = get_settings()
+
+    if not settings.rbac_enabled:
+        return x_user_id or "system"
+
+    if settings.jwt_auth_enabled:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[len("Bearer ") :]
+            try:
+                from app.auth.jwt import decode_access_token
+
+                payload = decode_access_token(token)
+                return str(payload.get("sub", "unknown"))
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+                ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization: Bearer <token> header required when JWT auth is enabled",
+        )
+
+    if settings.allow_legacy_role_header:
+        x_user_role = request.headers.get("X-User-Role", "")
+        if x_user_role:
+            return x_user_id or x_user_role
+
+    if x_user_id:
+        return x_user_id
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Authentication required: provide Authorization: Bearer <token> "
+        "or X-User-Id",
     )

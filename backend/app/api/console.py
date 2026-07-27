@@ -14,9 +14,10 @@ import logging
 from typing import Any
 from urllib.parse import unquote
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.middleware.rbac import require_approver, require_authenticated
 from app.services import git_service, workspace_service
 
 logger = logging.getLogger(__name__)
@@ -97,7 +98,9 @@ def _decode_path(encoded: str) -> str:
 
 
 @router.post("/workspace/browse")
-async def browse_workspace(req: BrowseRequest) -> dict[str, Any]:
+async def browse_workspace(
+    req: BrowseRequest, _actor: str = Depends(require_authenticated)
+) -> dict[str, Any]:
     """List directory contents inside the allowed workspace."""
     try:
         entries = workspace_service.list_directory(req.path)
@@ -108,7 +111,9 @@ async def browse_workspace(req: BrowseRequest) -> dict[str, Any]:
 
 
 @router.post("/workspace/mkdir")
-async def make_directory(req: MkdirRequest) -> dict[str, Any]:
+async def make_directory(
+    req: MkdirRequest, _actor: str = Depends(require_authenticated)
+) -> dict[str, Any]:
     """Create a new directory inside the allowed workspace."""
     import os
 
@@ -126,7 +131,9 @@ async def make_directory(req: MkdirRequest) -> dict[str, Any]:
 
 
 @router.post("/repos/clone-private")
-async def clone_private_repo(req: ClonePrivateRequest) -> dict[str, Any]:
+async def clone_private_repo(
+    req: ClonePrivateRequest, _approver: str = Depends(require_approver)
+) -> dict[str, Any]:
     """Clone a private repo using a GitHub Personal Access Token (HTTPS token auth)."""
     try:
         result = await git_service.git_clone_with_token(
@@ -148,7 +155,9 @@ async def clone_private_repo(req: ClonePrivateRequest) -> dict[str, Any]:
 
 
 @router.post("/repos/clone")
-async def clone_repo(req: CloneRequest) -> dict[str, Any]:
+async def clone_repo(
+    req: CloneRequest, _actor: str = Depends(require_authenticated)
+) -> dict[str, Any]:
     """Clone a remote repo to a local folder in the workspace."""
     try:
         result = await git_service.git_clone(req.url, req.dest_path, req.branch or None)
@@ -189,7 +198,9 @@ async def repo_diff(rpath: str, staged: bool = False) -> dict[str, Any]:
 
 
 @router.post("/repos/{rpath:path}/add")
-async def repo_add(rpath: str, req: AddRequest) -> dict[str, Any]:
+async def repo_add(
+    rpath: str, req: AddRequest, _actor: str = Depends(require_authenticated)
+) -> dict[str, Any]:
     path = _decode_path(rpath)
     try:
         return await git_service.git_add(path, req.paths)
@@ -198,7 +209,9 @@ async def repo_add(rpath: str, req: AddRequest) -> dict[str, Any]:
 
 
 @router.post("/repos/{rpath:path}/commit")
-async def repo_commit(rpath: str, req: CommitRequest) -> dict[str, Any]:
+async def repo_commit(
+    rpath: str, req: CommitRequest, _actor: str = Depends(require_authenticated)
+) -> dict[str, Any]:
     path = _decode_path(rpath)
     try:
         return await git_service.git_commit(
@@ -209,7 +222,9 @@ async def repo_commit(rpath: str, req: CommitRequest) -> dict[str, Any]:
 
 
 @router.post("/repos/{rpath:path}/push")
-async def repo_push(rpath: str, req: PushRequest) -> dict[str, Any]:
+async def repo_push(
+    rpath: str, req: PushRequest, _approver: str = Depends(require_approver)
+) -> dict[str, Any]:
     path = _decode_path(rpath)
     try:
         return await git_service.git_push(path, req.remote, req.branch)
@@ -227,7 +242,9 @@ async def repo_branches(rpath: str) -> dict[str, Any]:
 
 
 @router.post("/repos/{rpath:path}/checkout")
-async def repo_checkout(rpath: str, req: CheckoutRequest) -> dict[str, Any]:
+async def repo_checkout(
+    rpath: str, req: CheckoutRequest, _approver: str = Depends(require_approver)
+) -> dict[str, Any]:
     path = _decode_path(rpath)
     try:
         return await git_service.git_checkout(path, req.branch, req.create)
@@ -236,7 +253,11 @@ async def repo_checkout(rpath: str, req: CheckoutRequest) -> dict[str, Any]:
 
 
 @router.post("/repos/{rpath:path}/pull")
-async def repo_pull(rpath: str, remote: str = "origin") -> dict[str, Any]:
+async def repo_pull(
+    rpath: str,
+    remote: str = "origin",
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
     path = _decode_path(rpath)
     try:
         return await git_service.git_pull(path, remote)

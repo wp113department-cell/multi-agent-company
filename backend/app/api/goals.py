@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.executive import run_executive
 from app.db.models import Goal
 from app.db.session import get_db
+from app.middleware.rbac import require_authenticated
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/goals", tags=["goals"])
@@ -36,6 +37,7 @@ class GoalResponse(BaseModel):
 async def create_goal(
     body: CreateGoalRequest,
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> Any:
     if not body.text.strip():
         raise HTTPException(status_code=400, detail="goal text cannot be empty")
