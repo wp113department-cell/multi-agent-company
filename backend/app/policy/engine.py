@@ -38,6 +38,23 @@ Fixes vs. previous version:
      doubling the backslashes (`\\b`) so they render as literal text. Purely
      a docstring content fix — the actual regex patterns above (already
      properly escaped in code, not in prose) were never affected.
+  10. (Found via real execution, 2026-07-27 — the escaping fix from #8 was
+      still not enough) The fork-bomb pattern, even after fixing the
+      unescaped parens, still failed to match a real fork bomb because of
+      its own leading word-boundary anchor. That anchor only matches at a
+      position where one side is a word character (alnum/underscore) and
+      the other isn't — but a fork bomb command starts with a colon, a
+      non-word character, on both sides of every relevant position in
+      ":(){ :|:& };:". So the anchor could never match here at all, unlike
+      patterns such as the rm -rf one above where "rm" genuinely starts with
+      word characters. This was invisible to manual regex tracing (which
+      confirmed the character-class matched correctly) and was only caught
+      by running the actual test against a real regex search call. Fixed by
+      dropping the leading anchor from this one pattern in both
+      _DENIED_COMMAND_PATTERNS and _NON_OVERRIDABLE_PATTERNS — safe to drop
+      since the pattern's own content (colon/paren/brace sequence) is
+      distinctive enough that it won't spuriously match inside an unrelated
+      identifier, unlike a bare word like "rm".
 """
 
 from __future__ import annotations
@@ -155,7 +172,7 @@ _NON_OVERRIDABLE_PATTERNS = [
     r"\bmkfs\b",
     r"\bshutdown\b",
     r"\breboot\b",
-    r"\b:\(\)\s*\{\s*:\|:&\s*\}\s*;\s*:",
+    r":\(\)\s*\{\s*:\|:&\s*\}\s*;\s*:",
     r">\s*/dev/(sd|nvme)",
 ]
 
@@ -179,7 +196,7 @@ _DENIED_COMMAND_PATTERNS = [
     r"\bmkfs\b",
     r"\bshutdown\b",
     r"\breboot\b",
-    r"\b:\(\)\s*\{\s*:\|:&\s*\}\s*;\s*:",
+    r":\(\)\s*\{\s*:\|:&\s*\}\s*;\s*:",
     r">\s*/dev/(sd|nvme)",
     r"\bcat\s+.*(id_rsa|\.ssh/|\.aws/credentials|\.env\b)",
     r"\bcurl\b.*-d\s*@",

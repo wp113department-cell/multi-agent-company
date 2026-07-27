@@ -31,7 +31,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-
 # ---------------------------------------------------------------------------
 # SEC-05-014 / duplicate-require_approver — X-User-Role gating
 # ---------------------------------------------------------------------------
@@ -156,7 +155,9 @@ class TestRequireAuthenticated:
 # ---------------------------------------------------------------------------
 
 
-def _collect_dependency_names(dependant: object, seen: set[int] | None = None) -> set[str]:
+def _collect_dependency_names(
+    dependant: object, seen: set[int] | None = None
+) -> set[str]:
     """Walk a FastAPI Dependant tree and collect the __name__ of every real
     dependency callable in it, including nested sub-dependencies."""
     if seen is None:
@@ -234,7 +235,9 @@ class TestCommandStaysInBoundary:
         outside = tmp_path / "outside"
         outside.mkdir()
 
-        result = check_command_stays_in_boundary(f"cd {outside} && cat secret.txt", str(boundary))
+        result = check_command_stays_in_boundary(
+            f"cd {outside} && cat secret.txt", str(boundary)
+        )
         assert result.allowed is False
 
     def test_cd_inside_boundary_allowed(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -333,9 +336,7 @@ class TestChatBashCwd:
         bash = handlers["bash"]
 
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                stdout="", stderr="", returncode=0
-            )
+            mock_run.return_value = MagicMock(stdout="", stderr="", returncode=0)
             bash({"command": "pwd", "cwd": str(outside)})
 
         assert mock_run.call_count == 1

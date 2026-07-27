@@ -16,7 +16,7 @@ import pytest  # noqa: E402
 
 
 def test_total_tools_190() -> None:
-    src = (Path(__file__).parent.parent / "app/agents/tools.py").read_text()
+    src = (Path(__file__).parent.parent / "app/agents/tools.py").read_text(encoding="utf-8")
     names = set(re.findall(r'"name":\s*"([a-z][a-z0-9_]+)"', src))
     assert len(names) >= 190, f"Expected ≥190 tools, got {len(names)}"
 
@@ -132,7 +132,7 @@ def test_migration_010_exists() -> None:
 def test_migration_010_revision_chain() -> None:
     src = (
         _BACKEND / "migrations/versions/010_memory_category_retention.py"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert 'revision: str = "010"' in src
     assert "down_revision" in src and '"009"' in src
 
@@ -140,7 +140,7 @@ def test_migration_010_revision_chain() -> None:
 def test_migration_010_adds_category_column() -> None:
     src = (
         _BACKEND / "migrations/versions/010_memory_category_retention.py"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert "category" in src
     assert "add_column" in src
 
@@ -304,18 +304,18 @@ def test_cost_page_exists() -> None:
 
 
 def test_navbar_has_dark_mode_toggle() -> None:
-    src = (_ROOT / "apps/web/components/NavBar.tsx").read_text()
+    src = (_ROOT / "apps/web/components/NavBar.tsx").read_text(encoding="utf-8")
     assert "ThemeToggle" in src
     assert "dark" in src.lower()
 
 
 def test_navbar_has_logout() -> None:
-    src = (_ROOT / "apps/web/components/NavBar.tsx").read_text()
+    src = (_ROOT / "apps/web/components/NavBar.tsx").read_text(encoding="utf-8")
     assert "logout" in src.lower() or "Sign out" in src
 
 
 def test_login_page_calls_auth_login() -> None:
-    src = (_ROOT / "apps/web/app/login/page.tsx").read_text()
+    src = (_ROOT / "apps/web/app/login/page.tsx").read_text(encoding="utf-8")
     assert "login" in src
     assert "/api/auth/login" in src or 'from "../../lib/auth"' in src
 
@@ -323,16 +323,16 @@ def test_login_page_calls_auth_login() -> None:
 def test_cost_page_calls_metrics_api() -> None:
     # 2026-07-20: cost page was consolidated into /metrics (single KPI page) —
     # it now redirects there instead of duplicating the /api/metrics fetch.
-    src = (_ROOT / "apps/web/app/cost/page.tsx").read_text()
+    src = (_ROOT / "apps/web/app/cost/page.tsx").read_text(encoding="utf-8")
     assert "redirect" in src
     assert "/metrics" in src
-    metrics_src = (_ROOT / "apps/web/app/metrics/page.tsx").read_text()
+    metrics_src = (_ROOT / "apps/web/app/metrics/page.tsx").read_text(encoding="utf-8")
     assert "metrics" in metrics_src.lower()
-    api_src = (_ROOT / "apps/web/lib/api.ts").read_text()
+    api_src = (_ROOT / "apps/web/lib/api.ts").read_text(encoding="utf-8")
     assert "/api/metrics" in api_src
 
 
 def test_middleware_protects_routes() -> None:
-    src = (_ROOT / "apps/web/middleware.ts").read_text()
+    src = (_ROOT / "apps/web/middleware.ts").read_text(encoding="utf-8")
     assert "/login" in src
     assert "redirect" in src.lower()

@@ -103,7 +103,10 @@ async def enforce_retention_policy() -> int:
 async def start_retention_loop() -> None:
     """Background task: run archival on startup and then every 24 hours."""
     settings = get_settings()
-    if settings.log_retention_days <= 0 and settings.memory_embeddings_retention_days <= 0:
+    if (
+        settings.log_retention_days <= 0
+        and settings.memory_embeddings_retention_days <= 0
+    ):
         logger.info(
             "Retention disabled (LOG_RETENTION_DAYS=0 and "
             "MEMORY_EMBEDDINGS_RETENTION_DAYS=0)"
