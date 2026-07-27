@@ -37,9 +37,7 @@ def upgrade() -> None:
     op.add_column(
         "memory_embeddings", sa.Column("archived_at", sa.DateTime(), nullable=True)
     )
-    op.create_index(
-        "ix_memory_embeddings_archived", "memory_embeddings", ["archived"]
-    )
+    op.create_index("ix_memory_embeddings_archived", "memory_embeddings", ["archived"])
 
 
 def downgrade() -> None:

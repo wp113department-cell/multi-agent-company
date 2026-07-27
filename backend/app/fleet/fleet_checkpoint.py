@@ -144,11 +144,22 @@ class CheckpointStore:
         return cps
 
     def latest_for(self, agent_name: str, task_id: str = "") -> AgentCheckpoint | None:
-        """Return the most recently saved checkpoint for this agent/task."""
+        """Return the most recently saved checkpoint for this agent/task.
+
+        Found via real execution: plain `max(cps, key=lambda c: c.created_at)`
+        breaks a created_at tie by returning the *first* matching element,
+        not the most recently inserted one — and `datetime.now()` ties are
+        real, not just theoretical, when two saves happen close enough
+        together (observed on this machine's clock resolution). cps is
+        already in insertion order (list_checkpoints() preserves
+        self._store's dict insertion order), so pairing each checkpoint with
+        its index and breaking ties on that gives the correct "most recent"
+        checkpoint deterministically.
+        """
         cps = self.list_checkpoints(agent_name=agent_name, task_id=task_id or None)
         if not cps:
             return None
-        return max(cps, key=lambda c: c.created_at)
+        return max(enumerate(cps), key=lambda pair: (pair[1].created_at, pair[0]))[1]
 
     # ------------------------------------------------------------------
     # Metrics

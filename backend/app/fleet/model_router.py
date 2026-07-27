@@ -106,7 +106,7 @@ class ModelRouter:
             self._default = self._fallback_default()
             return
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
             self._tiers = {k: v for k, v in data.get("_tiers", _DEFAULT_TIERS).items()}
             self._default = data.get("DEFAULT", self._fallback_default())
             # Strip metadata keys (start with _ or "DEFAULT")

@@ -7300,9 +7300,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
         kp_pid = int(inp["pid"])
         kp_sig_name = str(inp.get("signal", "TERM"))
+        # SIGKILL doesn't exist on Windows (found via real execution:
+        # AttributeError). os.kill()+SIGTERM on Windows already maps to
+        # TerminateProcess (an unconditional hard-kill, no graceful-shutdown
+        # distinction like POSIX), so falling back to SIGTERM for "KILL"
+        # produces the same practical effect there.
         sig_map = {
             "TERM": _signal.SIGTERM,
-            "KILL": _signal.SIGKILL,
+            "KILL": getattr(_signal, "SIGKILL", _signal.SIGTERM),
             "INT": _signal.SIGINT,
         }
         kp_sig = sig_map.get(kp_sig_name, _signal.SIGTERM)
@@ -8215,7 +8220,8 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             fl = _fcntl.fcntl(fd, _fcntl.F_GETFL)
             _fcntl.fcntl(fd, _fcntl.F_SETFL, fl | os.O_NONBLOCK)
             try:
-                return stream.read(max_bytes)
+                chunk: str | None = stream.read(max_bytes)
+                return chunk
             except (IOError, BlockingIOError, TypeError):
                 return None
 
@@ -9082,6 +9088,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         def _mem_unlock(fh: Any) -> None:
             fh.seek(0)
             _msvcrt.locking(fh.fileno(), _msvcrt.LK_UNLCK, 1)
+
     else:
         import fcntl as _fcntl
 

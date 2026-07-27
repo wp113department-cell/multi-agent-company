@@ -40,7 +40,7 @@ def test_total_tool_names_190() -> None:
     """All unique tool names across tools.py must reach 190."""
     import re
 
-    src = (Path(__file__).parent.parent / "app" / "agents" / "tools.py").read_text()
+    src = (Path(__file__).parent.parent / "app" / "agents" / "tools.py").read_text(encoding="utf-8")
     names = set(re.findall(r'"name":\s*"([a-z][a-z0-9_]+)"', src))
     assert (
         len(names) >= 190

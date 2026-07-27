@@ -56,9 +56,7 @@ def _cleanup_task(task_id: int, repo_id: int | None = None) -> None:
                 await session.execute(
                     delete(PendingApproval).where(PendingApproval.task_id == task_id)
                 )
-                await session.execute(
-                    delete(Subtask).where(Subtask.task_id == task_id)
-                )
+                await session.execute(delete(Subtask).where(Subtask.task_id == task_id))
                 await session.execute(delete(DevTask).where(DevTask.id == task_id))
                 if repo_id is not None:
                     await session.execute(delete(Repo).where(Repo.id == repo_id))
@@ -138,13 +136,13 @@ class TestOrch04_001_LaunchCoderCommits:
                 new=AsyncMock(return_value={"ok": True, "stdout": "", "stderr": ""}),
             ) as mock_git_add, patch(
                 "app.services.git_service.git_commit",
-                new=AsyncMock(
-                    return_value={"ok": True, "stdout": "", "stderr": ""}
-                ),
+                new=AsyncMock(return_value={"ok": True, "stdout": "", "stderr": ""}),
             ) as mock_git_commit, patch(
                 "app.api.agents.get_diff",
                 return_value="diff --git a/backend/app/new_file.py ...",
-            ), patch("app.api.agents.preserve_worktree"):
+            ), patch(
+                "app.api.agents.preserve_worktree"
+            ):
                 with TestClient(app) as client:
                     resp = client.post(f"/api/tasks/{task_id}/approve")
                 assert resp.status_code == 200, resp.text
@@ -176,7 +174,9 @@ class TestOrch04_001_LaunchCoderCommits:
                 "app.services.git_service.git_commit", new=AsyncMock()
             ) as mock_git_commit, patch(
                 "app.api.agents.get_diff", return_value=""
-            ), patch("app.api.agents.preserve_worktree"):
+            ), patch(
+                "app.api.agents.preserve_worktree"
+            ):
                 with TestClient(app) as client:
                     resp = client.post(f"/api/tasks/{task_id}/approve")
                 assert resp.status_code == 200, resp.text
@@ -290,7 +290,9 @@ class TestOrch04_002_TerminalState:
                     await session.commit()
                     await session.refresh(repo)
 
-                    task = await create_task(session, "push completes", "desc", repo_id=repo.id)
+                    task = await create_task(
+                        session, "push completes", "desc", repo_id=repo.id
+                    )
                     await session.execute(
                         update(DevTask)
                         .where(DevTask.id == task.id)
@@ -307,7 +309,9 @@ class TestOrch04_002_TerminalState:
 
         task_id, repo_id = _run(_setup())
         try:
-            with patch("app.tools.git_push_tool.push_and_create_pr") as mock_push, patch(
+            with patch(
+                "app.tools.git_push_tool.push_and_create_pr"
+            ) as mock_push, patch(
                 "app.repo_tools.worktree.remove_worktree"
             ) as mock_remove:
                 mock_push.return_value = PushResult(
@@ -474,7 +478,14 @@ class TestOrch04_014_SpawnTracked:
         assert task in agents_mod._background_tasks  # still running -> still tracked
 
         await asyncio.wait_for(finished.wait(), timeout=1.0)
-        await task  # let the done-callback fire
+        await task
+        # `await task` on an already-completed task returns synchronously
+        # without yielding to the loop, but add_done_callback's callback
+        # (the discard() that untracks it) is scheduled via call_soon and
+        # only actually runs on the *next* loop iteration. Found via real
+        # execution: without this extra yield, the assertion below ran one
+        # tick too early and saw the task still tracked.
+        await asyncio.sleep(0)
         assert task not in agents_mod._background_tasks
 
 
@@ -485,7 +496,9 @@ class TestOrch04_014_SpawnTracked:
 
 
 class TestOrch04_008_015_RetryWiring:
-    async def test_run_manager_retry_count_uses_manager_max_subtask_retries(self) -> None:
+    async def test_run_manager_retry_count_uses_manager_max_subtask_retries(
+        self,
+    ) -> None:
         """A persistently-failing dev agent should be retried exactly
         settings.manager_max_subtask_retries times (not settings.max_retries,
         which is a separate, larger-by-default budget used one layer down
@@ -505,7 +518,9 @@ class TestOrch04_008_015_RetryWiring:
         ), patch("asyncio.sleep", new=AsyncMock()):
             result = await run_manager(
                 task_id=999999001,
-                subtasks=[{"id": 1, "type": "backend", "title": "t", "description": "d"}],
+                subtasks=[
+                    {"id": 1, "type": "backend", "title": "t", "description": "d"}
+                ],
                 worktree_path="/tmp/does-not-matter",
                 plan="plan",
             )
@@ -524,7 +539,9 @@ class TestOrch04_008_015_RetryWiring:
         ), patch("asyncio.sleep", new=AsyncMock()) as mock_sleep:
             await run_manager(
                 task_id=999999002,
-                subtasks=[{"id": 1, "type": "backend", "title": "t", "description": "d"}],
+                subtasks=[
+                    {"id": 1, "type": "backend", "title": "t", "description": "d"}
+                ],
                 worktree_path="/tmp/does-not-matter",
                 plan="plan",
             )
@@ -849,10 +866,14 @@ class TestOrch04_011_SubtaskStatusPersistence:
                     return_value=(["f.py"], None),
                 ), patch(
                     "app.services.git_service.git_add",
-                    new=AsyncMock(return_value={"ok": True, "stdout": "", "stderr": ""}),
+                    new=AsyncMock(
+                        return_value={"ok": True, "stdout": "", "stderr": ""}
+                    ),
                 ), patch(
                     "app.services.git_service.git_commit",
-                    new=AsyncMock(return_value={"ok": True, "stdout": "", "stderr": ""}),
+                    new=AsyncMock(
+                        return_value={"ok": True, "stdout": "", "stderr": ""}
+                    ),
                 ), patch(
                     "app.agents.qa.run_qa",
                     return_value=QAResult(

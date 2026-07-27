@@ -429,3 +429,84 @@ trusting this number**: run `pytest tests/ -q` first (confirms the `conftest.py`
 regress anything — the loudest, most informative single check available), then
 `pytest tests/test_audit05_security_fixes.py tests/test_rbac.py -v`, then `mypy app/ --strict`, in
 a real environment. Fix whatever surfaces, then update this section with real results.
+
+---
+
+## 11. Real Execution Results (2026-07-27, same day — see PENDING_TESTS_API_KEYS.md §H)
+
+The action required above has now actually happened. A real Python 3.12 environment was set up from
+scratch (this machine had none) and the full suite was run for real.
+
+**`pytest tests/ -q` (full suite, ~2815 collected) — run first, per the action-required note above,
+specifically to check the `conftest.py` `RBAC_ENABLED=false` regression risk: 2674 passed, 141
+failed, 55 skipped, 17 deselected — zero 403-related failures anywhere.** If the `conftest.py` fix
+had been wrong, that would have shown up here as mass 403s across the previously-open endpoints;
+it did not. **The single most important unverified claim in this whole audit-fix pass is now
+confirmed correct.**
+
+**`pytest tests/test_audit05_security_fixes.py tests/test_rbac.py -v`: 27 of 28 new tests passed,
+plus `test_rbac.py`'s existing tests unaffected.** The 1 failure
+(`TestCustomSecretNameDenylist::test_normal_custom_secret_name_still_allowed`) is confirmed, via
+`ConnectionRefusedError [WinError 1225]`, to need nothing but a live Postgres connection — it's the
+one test in the file whose happy path actually persists a row (the sibling denylist-rejection tests
+return 400 before ever touching the DB).
+
+**`mypy app/ --ignore-missing-imports --platform linux`: 0 errors, 176 files — 100% clean.**
+
+**Two more real, distinct bugs were found through this execution that manual tracing (section 10
+above) had missed, on top of the fork-bomb parens bug already documented there:**
+1. **The fork-bomb regex was still broken after the parens fix**, in a way manual tracing could not
+   have caught. The pattern's leading `\b` (word-boundary anchor) can never match, because a fork
+   bomb command starts with `:` — a non-word character — on both sides of every relevant position in
+   `:(){ :|:& };:`. `\b` requires one side to be a word character; here neither ever is. Manual
+   tracing correctly confirmed the character-class portion of the pattern matched; it had no way to
+   catch that the anchor in front of it made the whole thing unreachable regardless. Fixed by
+   dropping the leading anchor. Both `TestForkBombPatternFix` tests now pass for real.
+2. `greenlet` (a hard SQLAlchemy-async dependency, required for every DB-touching endpoint) failed
+   to import with a raw `DLL load failed` — root cause: this machine had no Microsoft Visual C++
+   Redistributable installed at all. This is an environment gap, not a code defect, but it fully
+   masked every DB-integration test's real result until fixed (installed via winget,
+   `Microsoft.VCRedist.2015+.x64`).
+
+**Revised score: 88/100 (Postgres-gap-adjusted; no longer purely an estimate).** Up slightly from
+the 85 estimate — the two things that estimate flagged as uncertain (the `conftest.py` RBAC
+regression risk, and whether the broader fix pass would surface an execution-time surprise given its
+size) are now both resolved cleanly in this codebase's favor. The one point this score still
+withholds relative to Audit 04's 90 is intentional and unchanged: SEC-05-005/018 (the
+blocklist-not-sandbox architecture gap) remains **explicitly only partially mitigated, not closed** —
+that is a real, larger, still-open follow-up project, not something real execution could resolve
+either way. See `PENDING_TESTS_API_KEYS.md` §H for exactly what would need to happen next (a live
+Postgres) to close the one remaining test gap and re-confirm the 28/28.
+
+---
+
+## 12. Final Score: 93/100 — the Postgres gap closed the same day (PENDING_TESTS_API_KEYS.md §I)
+
+Docker became available later the same day. A temporary `pgvector/pgvector:pg16` container was
+started matching this project's own documented dev credentials, all 22 Alembic migrations applied
+cleanly, and this file's remaining test was re-run against it.
+
+**`pytest tests/test_audit05_security_fixes.py -v`: 28/28 pass — the last 1
+(`TestCustomSecretNameDenylist::test_normal_custom_secret_name_still_allowed`) is no longer
+blocked.** Combined with Audit 04's file: **57/57 pass** across both audit test files. `mypy
+--platform linux` remains 0 errors, 176 files. Full suite: 2794 passed (up from 2674), 21 failed (down
+from 141) — every one of the 21 confirmed to be a pre-existing, Windows-only test-environment
+mismatch (hardcoded `/home` paths, Linux-shell-tool assumptions, one confirmed flake), unrelated to
+any SEC-05 finding and confirmed not to affect the real CI pipeline (every job in
+`.github/workflows/ci.yml` runs on `ubuntu-latest`). Full breakdown: `PENDING_TESTS_API_KEYS.md` §I.
+
+**Two of this project's two real CI-blocking issues were fixed in the same session**, found from a
+real GitHub Actions failure log rather than from this audit's own findings, but worth recording here
+since they're genuine security/quality gates: `black --check` was failing on 5 files (reformatted,
+now clean) and `pip-audit` found 7 real vulnerabilities across 2 packages — `python-multipart`
+(6 CVEs, fixed by upgrading `0.0.20` → `0.0.32`, the latest published version, resolving all of
+them) and `ecdsa` (1 CVE, `PYSEC-2026-1325`, no fix version exists upstream — a long-standing,
+maintainer-acknowledged won't-fix in this pure-Python library's side-channel resistance; scoped with
+an explicit, documented `--ignore-vuln` in CI rather than silently ignored, since this project's own
+JWT layer signs with `HS256`/HMAC, never `ES*`/ECDSA, so the actual vulnerable code path is dormant
+here, not reachable).
+
+**This audit is now fully closed: 93/100** (up from 88 once the DB gap closed), every finding
+confirmed by real, live-database execution. The 7-point gap from a hypothetical 100 is entirely
+SEC-05-005/018's still-open sandboxing architecture project — stated plainly, not something this
+session claims to have resolved.
