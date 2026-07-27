@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.db.models import Agent, AgentRun
+from app.middleware.rbac import require_approver
 
 router = APIRouter(prefix="/api/agents", tags=["registry"])
 
@@ -142,6 +143,7 @@ async def get_agent_metrics(
 async def register_agent(
     body: RegisterAgentRequest,
     db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Register a new agent. If name already exists, updates capability_tags and tool_list."""
     result = await db.execute(select(Agent).where(Agent.name == body.name))

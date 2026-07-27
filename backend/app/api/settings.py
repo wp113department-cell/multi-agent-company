@@ -17,6 +17,7 @@ from app.db.repository import (
     list_setting_keys,
     set_setting,
 )
+from app.middleware.rbac import require_approver, require_authenticated
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -86,7 +87,9 @@ async def get_settings_view(db: AsyncSession = Depends(get_db)) -> dict[str, Any
 
 @router.post("/api-key")
 async def save_api_key(
-    body: ApiKeyRequest, db: AsyncSession = Depends(get_db)
+    body: ApiKeyRequest,
+    db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Save or update the Anthropic API key in the database."""
     key = body.api_key.strip()
@@ -102,7 +105,10 @@ async def save_api_key(
 
 
 @router.delete("/api-key")
-async def delete_api_key(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def delete_api_key(
+    db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
+) -> dict[str, Any]:
     """Remove the DB-stored Anthropic API key (falls back to env var)."""
     from app.agents.base import set_api_key_override
 
@@ -118,7 +124,9 @@ async def delete_api_key(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
 
 @router.post("/openai-key")
 async def save_openai_key(
-    body: ApiKeyRequest, db: AsyncSession = Depends(get_db)
+    body: ApiKeyRequest,
+    db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Save or update the OpenAI API key in the database."""
     key = body.api_key.strip()
@@ -131,7 +139,10 @@ async def save_openai_key(
 
 
 @router.delete("/openai-key")
-async def delete_openai_key(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def delete_openai_key(
+    db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
+) -> dict[str, Any]:
     """Remove the DB-stored OpenAI API key."""
     await set_setting(db, _OPENAI_KEY, "")
     return {"deleted": True, "provider": "openai"}
@@ -146,7 +157,9 @@ async def delete_openai_key(db: AsyncSession = Depends(get_db)) -> dict[str, Any
 
 @router.post("/github-token")
 async def save_github_token(
-    body: ApiKeyRequest, db: AsyncSession = Depends(get_db)
+    body: ApiKeyRequest,
+    db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Save or update the GitHub PAT in the database."""
     token = body.api_key.strip()
@@ -159,7 +172,10 @@ async def save_github_token(
 
 
 @router.delete("/github-token")
-async def delete_github_token(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def delete_github_token(
+    db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
+) -> dict[str, Any]:
     """Remove the DB-stored GitHub token (falls back to GITHUB_TOKEN env var)."""
     await set_setting(db, _GITHUB_TOKEN_KEY, "")
     return {"deleted": True, "provider": "github"}
@@ -174,6 +190,34 @@ async def delete_github_token(db: AsyncSession = Depends(get_db)) -> dict[str, A
 # ---------------------------------------------------------------------------
 
 _SECRET_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# Gap-closure (Audit 05 fix, SEC-05-011): credential_vault.py's own docstring
+# states database_url is "deliberately NOT a vault-manageable credential" per
+# CLAUDE.md's "no agent ever gets deploy credentials" rule — but that
+# exclusion was only ever implemented as two hardcoded .pop() calls
+# (GITHUB_TOKEN/ANTHROPIC_API_KEY) at the two agent-launch call sites, not as
+# a restriction on what could be *stored* here in the first place. A custom
+# secret literally named DATABASE_URL (a syntactically valid identifier) was
+# previously accepted and would have been injected unexcluded into every
+# coding agent's bash environment. Denylist matches case-insensitively since
+# env var lookups on most shells are case-sensitive but a near-miss name is
+# just as capable of causing confusion/collision.
+_RESERVED_SECRET_NAMES = frozenset(
+    {
+        "DATABASE_URL",
+        "GITHUB_TOKEN",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "JWT_SECRET_KEY",
+        "CREDENTIAL_ENCRYPTION_KEY",
+        "DEFAULT_ADMIN_PASSWORD",
+        "VOYAGE_API_KEY",
+        "GROQ_API_KEY",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+    }
+)
 
 
 class CustomSecretRequest(BaseModel):
@@ -191,7 +235,9 @@ async def list_custom_secrets(db: AsyncSession = Depends(get_db)) -> dict[str, A
 
 @router.post("/custom-secrets")
 async def save_custom_secret(
-    body: CustomSecretRequest, db: AsyncSession = Depends(get_db)
+    body: CustomSecretRequest,
+    db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     name = body.name.strip()
     if not _SECRET_NAME_RE.match(name):
@@ -199,6 +245,12 @@ async def save_custom_secret(
             status_code=400,
             detail="Secret name must be a valid env var identifier "
             "(letters, digits, underscore; cannot start with a digit).",
+        )
+    if name.upper() in _RESERVED_SECRET_NAMES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{name!r} is a reserved/platform credential name and "
+            "cannot be stored as a custom secret.",
         )
     value = body.value.strip()
     if not value:
@@ -209,7 +261,9 @@ async def save_custom_secret(
 
 @router.delete("/custom-secrets/{name}")
 async def delete_custom_secret(
-    name: str, db: AsyncSession = Depends(get_db)
+    name: str,
+    db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     deleted = await delete_setting(db, _CUSTOM_SECRET_PREFIX + name)
     if not deleted:
@@ -223,7 +277,9 @@ async def delete_custom_secret(
 
 
 @router.post("/verify-key")
-async def verify_api_key(body: VerifyKeyRequest) -> dict[str, Any]:
+async def verify_api_key(
+    body: VerifyKeyRequest, _actor: str = Depends(require_authenticated)
+) -> dict[str, Any]:
     """Test an API key against the provider's API and return ok/error."""
     provider = body.provider.lower().strip()
     key = body.api_key.strip()

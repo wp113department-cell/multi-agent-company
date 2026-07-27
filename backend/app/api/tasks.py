@@ -30,6 +30,7 @@ from app.db.repository import (
     get_or_create_pipeline_state,
 )
 from app.config import get_settings
+from app.middleware.rbac import require_approver, require_authenticated
 from app.repo_tools.worktree import remove_worktree
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -98,7 +99,9 @@ def _task_to_dict(task: Any, logs: list[Any] | None = None) -> dict[str, Any]:
 
 @router.post("", status_code=201)
 async def create(
-    body: CreateTaskRequest, db: AsyncSession = Depends(get_db)
+    body: CreateTaskRequest,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     task = await create_task(
         db,
@@ -136,7 +139,10 @@ async def get_one(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str,
 
 @router.patch("/{task_id}")
 async def patch_status(
-    task_id: int, body: TransitionRequest, db: AsyncSession = Depends(get_db)
+    task_id: int,
+    body: TransitionRequest,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     try:
         task = await transition_task(db, task_id, body.status)
@@ -149,7 +155,10 @@ async def patch_status(
 
 @router.post("/{task_id}/logs", status_code=201)
 async def add_log(
-    task_id: int, body: LogRequest, db: AsyncSession = Depends(get_db)
+    task_id: int,
+    body: LogRequest,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     log = await append_log(db, task_id, body.category, body.message, body.extra_data)
     return _log_to_dict(log)
@@ -171,6 +180,7 @@ async def run_task(
     body: RunRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     """Trigger planning pipeline or simple planner for a pending/blocked/rejected task."""
     from app.api.agents import launch_planning_pipeline, launch_planner
@@ -220,6 +230,7 @@ async def restart_task(
     task_id: int,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     """Reset a failed/blocked/error task back to pending and re-trigger the planning pipeline."""
     from app.api.agents import launch_planning_pipeline
@@ -290,6 +301,7 @@ async def approve_task(
     task_id: int,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Approve diff after coding — start coder or mark completed."""
     from app.api.agents import launch_coder
@@ -343,7 +355,10 @@ async def approve_task(
 
 @router.post("/{task_id}/reject")
 async def reject_task(
-    task_id: int, body: RejectRequest, db: AsyncSession = Depends(get_db)
+    task_id: int,
+    body: RejectRequest,
+    db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     from app.db.models import Repo
     from sqlalchemy import select
@@ -379,6 +394,7 @@ async def pipeline_approve(
     task_id: int,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Resume the LangGraph pipeline with approval → launch coder."""
     from app.api.agents import resume_planning_pipeline
@@ -413,6 +429,7 @@ async def pipeline_reject(
     task_id: int,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Resume the LangGraph pipeline with rejection."""
     from app.api.agents import resume_planning_pipeline
@@ -480,7 +497,11 @@ async def get_diff(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str
 
 
 @router.post("/{task_id}/complete")
-async def complete_task(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def complete_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
+) -> dict[str, Any]:
     """Gap-closure (Audit 04 fix, ORCH-04-002). Manually close out a task
     that has a real diff ready and no further action expected — the
     counterpart to the automatic completion dispatch_git_push_decision()
@@ -539,7 +560,10 @@ async def get_pr(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, 
 
 @router.post("/{task_id}/push")
 async def push_task(
-    task_id: int, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)
+    task_id: int,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Day 14 — Git Push Workflow. Manual retry: re-runs push+PR creation
     directly, bypassing the approval gate since approval already happened
@@ -569,7 +593,10 @@ MAX_PDF_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB per file
 
 
 @router.post("/extract-pdfs")
-async def extract_pdfs(files: list[UploadFile] = File(...)) -> dict[str, Any]:
+async def extract_pdfs(
+    files: list[UploadFile] = File(...),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
     """Extract text from up to 5 PDF files. Returns extracted text for each file.
 
     The caller can then append this text to the task description before submitting.
@@ -652,6 +679,7 @@ async def upload_task_images(
     task_id: int,
     files: list[UploadFile] = File(...),
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     """Upload reference images for a task (e.g. a website design screenshot).
     Multipart, same shape as /extract-pdfs. Per-file 5MB limit, 20MB total
@@ -749,7 +777,10 @@ async def get_task_image_bytes(
 
 @router.delete("/{task_id}/images/{image_id}")
 async def remove_task_image(
-    task_id: int, image_id: int, db: AsyncSession = Depends(get_db)
+    task_id: int,
+    image_id: int,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     image = await get_task_image(db, image_id)
     if not image or image.task_id != task_id:

@@ -12,10 +12,15 @@ deselected**. This file accounts for all 55 + all 17 = **72 tests**, of which **
 blocked on a real API key or a real external service** (1 skip — `reportlab` — is an unrelated
 missing pip package, not an API-key issue; included below for completeness so nothing is left out).
 
-**Update (2026-07-27):** section F below adds a second, different category — new tests written
-during the Audit 04 (Orchestration) fix pass that are blocked on *environment* (no Python
-interpreter, no Postgres reachable) rather than credentials. Keeping both categories in this one
-file per user direction, since both boil down to "written, not yet confirmed to pass."
+**Update (2026-07-27):** sections F and G below add a second, different category — new tests
+written during the Audit 04 (Orchestration) and Audit 05 (Security) fix passes that are blocked on
+*environment* (no Python interpreter, no Postgres reachable) rather than credentials. Keeping both
+categories in this one file per user direction, since both boil down to "written, not yet confirmed
+to pass." **Section G carries extra weight**: the Audit 05 fix pass added a real auth dependency to
+essentially every mutating endpoint in the API — this is a real, structural change to how the whole
+app behaves, and `tests/conftest.py` itself was changed to compensate (see section G) — running
+`pytest tests/ -q` for the very first time after this fix pass is the single most important
+verification step in this entire file, more so than any individual new test.
 
 ---
 
@@ -249,6 +254,58 @@ fix itself, and either is useful signal. Update this note once it's actually bee
 
 ---
 
+## G. (Added 2026-07-27) Audit 05 security-fix tests — same environment blocker as section F
+
+**File:** `backend/tests/test_audit05_security_fixes.py` (28 test functions across 10 classes).
+Same category as section F — blocked on *environment* (no Python interpreter, no Postgres),
+**not** credentials. No real LLM call anywhere in this file either.
+
+**What each test class covers:**
+
+| Class | Finding | What it proves |
+|---|---|---|
+| `TestLegacyRoleHeaderGating` | SEC-05-014 | `X-User-Role: approver` no longer grants approver rights by default; still works when `ALLOW_LEGACY_ROLE_HEADER=true` is explicitly set; `get_current_user` (the second, previously-dormant duplicate in `auth/dependencies.py`) returns an anonymous viewer, not a trusted legacy user, when the flag is off |
+| `TestRequireAuthenticated` | SEC-05-012/013 | The new lighter dependency: no identity -> 403; any resolvable identity (any role) -> passes; `rbac_enabled=False` still bypasses (the sanctioned "local dev" escape hatch) |
+| `TestAllMutatingEndpointsHaveAuth` | SEC-05-012/013 | **The single highest-value test in this file** — walks every route in the live FastAPI app and asserts every POST/PATCH/DELETE has `require_approver`/`require_authenticated`/`get_current_user` in its dependency tree, except the 2 deliberately-public auth-bootstrap routes. A real regression guard: if a future PR adds a new mutating endpoint and forgets auth, this test fails immediately instead of silently reopening the gap. Uses FastAPI's internal `route.dependant` tree — flagged as the one test in this file with framework-version risk beyond the general "not executed" caveat |
+| `TestCommandStaysInBoundary` | SEC-05-005/006/018 | `cd <absolute-path-outside-worktree>` denied; relative `cd` and no-`cd` commands unaffected |
+| `TestForkBombPatternFix` | Bug found while writing SEC-05-007 tests, not in the original audit | The fork-bomb denylist pattern had unescaped parens (`()` is an empty regex group, not a literal-paren match) and never matched a real fork bomb since it was written — fixed as a bonus, zero pre-existing test coverage so zero regression risk |
+| `TestCommandOverrideEligibility` | SEC-05-007 | `rm -rf`/`dd`/fork-bomb are NOT overridable via chat confirmation even after a human clicks approve; `git push`/`kubectl` still are (the non-overridable set is deliberately narrow) |
+| `TestChatBashCwd` | SEC-05-006 | The chat agent's bash tool now ignores an LLM-supplied `cwd` override entirely — always uses `repo_path` |
+| `TestGuardrailsDelegatesToStrongEngine` | SEC-05-004 | `guardrails.py` (base_graph.py's policy gate for all 72+ agents) now catches `curl https://`, `sudo`, and private-key filenames — all previously missed by the old standalone weaker implementation; the chaining-vulnerable `check_bash_allowlist` now rejects `cmd && malicious` (confirmed zero real callers today, so this was a dormant not live gap) |
+| `TestCustomSecretNameDenylist` | SEC-05-011 | `DATABASE_URL` (any case) rejected when saved as a custom secret; a normal name still works |
+| `TestChangePasswordEndpoint` | SEC-05-015 | The legacy `X-User-Role` header cannot be used to change a password (needs a real JWT); the new-password-length validation is reachable |
+
+**A second, more subtle risk this fix pass had to close, found and fixed while writing these
+tests (not by running anything):** adding a real auth dependency to ~50 previously-open mutating
+endpoints would, on its own, have broken the *entire pre-existing 2700+-test suite* — almost none
+of those tests pass any auth header, since nothing was gated before. Fixed by adding
+`os.environ.setdefault("RBAC_ENABLED", "false")` to `tests/conftest.py` — the same explicit,
+already-documented "local dev" bypass this project's own RBAC design treats as legitimate, scoped
+to the test environment only (production's own default, `rbac_enabled=True`, is untouched — that
+env var default never runs outside pytest). Real enforcement is verified separately, by explicitly
+mocking `rbac_enabled=True` in `test_rbac.py` and this file. **This conftest.py change is itself
+unexecuted and should be the very first thing confirmed when this suite is finally run** — if it's
+wrong, most of the existing suite will fail with 403s, which is an unambiguous, loud signal (not a
+silent one) that would show up immediately.
+
+**To run once Python + Postgres are available:**
+```bash
+cd backend
+.venv/bin/pytest tests/test_audit05_security_fixes.py -v
+
+# Then confirm the conftest.py RBAC_ENABLED=false fix actually prevents regression
+# in the pre-existing suite (this is the most important check in this whole section):
+.venv/bin/pytest tests/ -q
+
+# And confirm test_rbac.py's own pre-existing 6 tests (which mock settings directly,
+# unaffected by the conftest.py change either way) still pass:
+.venv/bin/pytest tests/test_rbac.py -v
+
+mypy app/ --strict
+```
+
+---
+
 ## Full tally
 
 | Category | Count | Blocked on |
@@ -259,8 +316,9 @@ fix itself, and either is useful signal. Update this note once it's actually bee
 | C — `tests/pending/` full directory | 54 | Real LLM key (Anthropic or Groq) + some need DB/Voyage too |
 | D — Unrelated (missing pip package) | 1 | `pip install reportlab` — not an API-key issue |
 | F — Audit 04 orchestration-fix tests (2026-07-27) | 29 (25 functions) | **Python interpreter + Postgres in the audit environment — no API key needed** |
+| G — Audit 05 security-fix tests (2026-07-27) | 28 | **Python interpreter (+ Postgres for the TestClient-based tests) — no API key needed** |
 | **Total pytest-collected, blocked on real credentials (A-D)** | **71** (55 skipped + 17 deselected − 1 reportlab) | |
-| **Total blocked on execution environment only, no credentials (F)** | **29** | |
+| **Total blocked on execution environment only, no credentials (F+G)** | **57** | |
 
 **Bottom line:** every one of these is real, written code — nothing here is a stub pretending to be
 a test (except the 4 in section A, which are honest TODO stubs, not disguised ones). Once you have

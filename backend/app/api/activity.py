@@ -12,10 +12,11 @@ import json
 import logging
 from typing import Any, AsyncIterator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.middleware.rbac import require_authenticated
 from app.services.activity_stream import get_activity_registry
 
 logger = logging.getLogger(__name__)
@@ -58,7 +59,9 @@ async def stream_task_events(task_id: str) -> StreamingResponse:
 
 
 @router.post("/{task_id}/stop")
-async def stop_task(task_id: str) -> dict[str, Any]:
+async def stop_task(
+    task_id: str, _actor: str = Depends(require_authenticated)
+) -> dict[str, Any]:
     """Signal the agent to stop after the current tool call completes."""
     registry = get_activity_registry()
     existed = registry.set_abort(task_id)
@@ -71,7 +74,11 @@ async def stop_task(task_id: str) -> dict[str, Any]:
 
 
 @router.post("/{task_id}/resume")
-async def resume_task(task_id: str, payload: ResumePayload) -> dict[str, Any]:
+async def resume_task(
+    task_id: str,
+    payload: ResumePayload,
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
     """Resume after a stop: clears abort flag and injects a user message."""
     registry = get_activity_registry()
     stream = registry.get(task_id)

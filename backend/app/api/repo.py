@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db.models import Repo
 from app.db.session import get_async_session, get_db
+from app.middleware.rbac import require_approver, require_authenticated
 
 if TYPE_CHECKING:
     # Deferred at runtime like every other scanner import in this file —
@@ -248,6 +249,7 @@ async def clone_repo(
     body: CloneRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Clone a GitHub repo and auto-activate it as the target for all agents."""
     url = body.github_url.strip()
@@ -299,7 +301,9 @@ async def clone_repo(
 
 @router.delete("/{repo_id}")
 async def delete_repo(
-    repo_id: int, db: AsyncSession = Depends(get_db)
+    repo_id: int,
+    db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Remove a repo record from the database. Local files are left untouched."""
     global _active_repo_path
@@ -316,7 +320,9 @@ async def delete_repo(
 
 @router.post("/{repo_id}/activate")
 async def activate_repo(
-    repo_id: int, db: AsyncSession = Depends(get_db)
+    repo_id: int,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     """Switch the active repo without re-cloning."""
     global _active_repo_path
@@ -384,7 +390,10 @@ async def _do_reindex() -> None:
 
 
 @router.post("/reindex")
-async def trigger_reindex(background_tasks: BackgroundTasks) -> dict[str, object]:
+async def trigger_reindex(
+    background_tasks: BackgroundTasks,
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, object]:
     background_tasks.add_task(_do_reindex)
     return {"triggered": True}
 

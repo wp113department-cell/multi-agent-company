@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -42,12 +43,18 @@ class LoginResponse(BaseModel):
     token_type: str = "bearer"
     role: str
     username: str
+    must_change_password: bool = False
 
 
 class MeResponse(BaseModel):
     username: str
     role: str
     is_authenticated: bool
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -90,7 +97,12 @@ async def login(
 
     role = user.get("role", "viewer")
     token = create_access_token({"sub": body.username, "role": role})
-    return LoginResponse(access_token=token, role=role, username=body.username)
+    return LoginResponse(
+        access_token=token,
+        role=role,
+        username=body.username,
+        must_change_password=bool(user.get("must_change_password", False)),
+    )
 
 
 @router.get("/me", response_model=MeResponse)
@@ -158,3 +170,65 @@ async def setup_first_user(
     await db.commit()
     logger.info("First auth user created: %s (role=%s)", body.username, role)
     return {"status": "created", "username": body.username, "role": role}
+
+
+@router.post("/change-password")
+async def change_password(
+    body: ChangePasswordRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Gap-closure (Audit 05 fix, SEC-05-015): the only way to durably change
+    a user's (including the seeded admin's) password used to be overriding
+    an env var before every restart — any change made another way was
+    silently reverted. This is the real, durable change path: requires the
+    caller to be authenticated (a real JWT, not the legacy header — a
+    CurrentUser from the X-User-Role fallback or anonymous default has
+    is_authenticated=False) and to know their current password, then
+    persists the new hash and clears must_change_password."""
+    if not current_user.is_authenticated:
+        raise HTTPException(
+            status_code=401,
+            detail="A real JWT is required to change a password "
+            "(the legacy X-User-Role header cannot be used here).",
+        )
+
+    from app.auth.jwt import hash_password
+    from sqlalchemy import text
+
+    row = await db.execute(
+        text("SELECT value FROM system_settings WHERE key = 'auth_users'")
+    )
+    result = row.scalar_one_or_none()
+    users: list[dict[str, Any]] = json.loads(result) if result else []
+
+    idx = next(
+        (i for i, u in enumerate(users) if u.get("username") == current_user.username),
+        None,
+    )
+    if idx is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not verify_password(
+        body.current_password, users[idx].get("hashed_password", "")
+    ):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+    if not body.new_password or len(body.new_password) < 8:
+        raise HTTPException(
+            status_code=400, detail="New password must be at least 8 characters"
+        )
+
+    users[idx]["hashed_password"] = hash_password(body.new_password)
+    users[idx]["must_change_password"] = False
+
+    await db.execute(
+        text(
+            "INSERT INTO system_settings (key, value) VALUES ('auth_users', :v) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        ),
+        {"v": json.dumps(users)},
+    )
+    await db.commit()
+    logger.info("Password changed for user: %s", current_user.username)
+    return {"status": "changed", "username": current_user.username}

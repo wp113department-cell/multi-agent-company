@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
+from app.middleware.rbac import require_authenticated
 from app.models.chat import (
     ChatSession,
     create_session,
@@ -90,7 +91,9 @@ async def _event_stream(session: ChatSession) -> AsyncGenerator[str, None]:
 
 
 @router.post("/sessions", response_model=CreateSessionResponse)
-async def create_chat_session(body: CreateSessionRequest) -> CreateSessionResponse:
+async def create_chat_session(
+    body: CreateSessionRequest, _actor: str = Depends(require_authenticated)
+) -> CreateSessionResponse:
     """Create a new chat session for a repository."""
     session = create_session(repo_path=body.repo_path)
     return CreateSessionResponse(session_id=session.session_id)
@@ -101,6 +104,7 @@ async def send_message(
     session_id: str,
     body: SendMessageRequest,
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> StreamingResponse:
     """
     Send a user message and stream the agent's response as SSE.
@@ -177,7 +181,11 @@ async def _run_agent(
 
 
 @router.post("/sessions/{session_id}/confirm")
-async def confirm_action(session_id: str, body: ConfirmActionRequest) -> dict[str, str]:
+async def confirm_action(
+    session_id: str,
+    body: ConfirmActionRequest,
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, str]:
     """
     Resolve a pending confirmation request (approve or deny a dangerous action).
     Called when the user clicks Approve/Deny in the UI.
@@ -223,7 +231,9 @@ async def get_history(
 
 
 @router.delete("/sessions/{session_id}")
-async def close_session(session_id: str) -> dict[str, str]:
+async def close_session(
+    session_id: str, _actor: str = Depends(require_authenticated)
+) -> dict[str, str]:
     """Close and clean up a chat session."""
     _require_session(session_id)
     delete_session(session_id)

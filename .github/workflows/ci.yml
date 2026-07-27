@@ -186,4 +186,11 @@ jobs:
         run: pip install pip-audit
 
       - name: Audit dependencies
-        run: pip-audit -r requirements.txt --ignore-vuln GHSA-jfh8-c2jp-5 || true
+        # Gap-closure (Audit 05 fix, SEC-05-019): the trailing `|| true` this
+        # step used to end with made it always exit 0 regardless of what
+        # pip-audit found — a security gate that could never fail the build.
+        # Removed. If this starts failing on a specific finding that's a
+        # known, deliberately-accepted risk, add it to --ignore-vuln
+        # explicitly (matching the existing GHSA-jfh8-c2jp-5 entry) rather
+        # than reintroducing a blanket suppression.
+        run: pip-audit -r requirements.txt --ignore-vuln GHSA-jfh8-c2jp-5
