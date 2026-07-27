@@ -162,10 +162,14 @@ class TestAssignedAgentAndFinalSummaryWiring:
                     "app.api.agents.create_worktree", return_value="/tmp/td-wt"
                 ), patch(
                     "app.services.git_service.git_add",
-                    new=AsyncMock(return_value={"ok": True, "stdout": "", "stderr": ""}),
+                    new=AsyncMock(
+                        return_value={"ok": True, "stdout": "", "stderr": ""}
+                    ),
                 ), patch(
                     "app.services.git_service.git_commit",
-                    new=AsyncMock(return_value={"ok": True, "stdout": "", "stderr": ""}),
+                    new=AsyncMock(
+                        return_value={"ok": True, "stdout": "", "stderr": ""}
+                    ),
                 ), patch(
                     "app.api.agents.get_diff", return_value="diff --git a/foo b/foo"
                 ), patch(

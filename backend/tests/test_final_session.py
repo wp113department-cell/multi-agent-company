@@ -16,7 +16,9 @@ import pytest  # noqa: E402
 
 
 def test_total_tools_190() -> None:
-    src = (Path(__file__).parent.parent / "app/agents/tools.py").read_text(encoding="utf-8")
+    src = (Path(__file__).parent.parent / "app/agents/tools.py").read_text(
+        encoding="utf-8"
+    )
     names = set(re.findall(r'"name":\s*"([a-z][a-z0-9_]+)"', src))
     assert len(names) >= 190, f"Expected ≥190 tools, got {len(names)}"
 
@@ -130,17 +132,17 @@ def test_migration_010_exists() -> None:
 
 
 def test_migration_010_revision_chain() -> None:
-    src = (
-        _BACKEND / "migrations/versions/010_memory_category_retention.py"
-    ).read_text(encoding="utf-8")
+    src = (_BACKEND / "migrations/versions/010_memory_category_retention.py").read_text(
+        encoding="utf-8"
+    )
     assert 'revision: str = "010"' in src
     assert "down_revision" in src and '"009"' in src
 
 
 def test_migration_010_adds_category_column() -> None:
-    src = (
-        _BACKEND / "migrations/versions/010_memory_category_retention.py"
-    ).read_text(encoding="utf-8")
+    src = (_BACKEND / "migrations/versions/010_memory_category_retention.py").read_text(
+        encoding="utf-8"
+    )
     assert "category" in src
     assert "add_column" in src
 
