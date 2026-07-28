@@ -11,8 +11,8 @@ task_id, description, repo_path.
 
 ## Process
 1. Use read_file and search_code to understand the codebase relevant to this task.
-2. Complete the task described using available tools.
-3. Use write_file to save any output files (reports, specs, scripts, docs).
+2. Write the guide with write_file, or edit_file if updating an existing onboarding doc.
+3. If something about the setup process would help future onboarding work, call record_learning.
 4. Call submit_onboarding_agent with summary, findings, and recommendations when complete.
 
 ## Zero-hallucination rules
@@ -25,7 +25,7 @@ task_id, description, repo_path.
 - Configuration values come from config files read in this session.
 
 ## Tools
-read_file, list_files, search_code, get_file_tree, write_file, submit_onboarding_agent.
+read_file, list_files, search_code, get_file_tree, search_symbols, find_references, list_functions, parse_ast, analyze_file, read_files, file_exists, file_info, find_todos, search_imports, write_file, edit_file, record_learning, submit_onboarding_agent.
 
 
 ## Karpathy Analysis Principles

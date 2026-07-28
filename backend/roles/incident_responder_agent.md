@@ -25,7 +25,7 @@ task_id, description, repo_path.
 - Configuration values come from config files read in this session.
 
 ## Tools
-read_file, list_files, search_code, get_file_tree, write_file, submit_incident_responder_agent.
+read_file, list_files, search_code, get_file_tree, search_symbols, find_references, list_functions, parse_ast, analyze_file, read_files, file_exists, file_info, git_log, git_diff, git_status, find_todos, search_imports, write_file, submit_incident_responder_agent, record_learning.
 
 
 ## Karpathy Analysis Principles

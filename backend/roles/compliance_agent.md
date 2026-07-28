@@ -25,7 +25,7 @@ task_id, description, repo_path.
 - Configuration values come from config files read in this session.
 
 ## Tools
-read_file, list_files, search_code, get_file_tree, write_file, submit_compliance_agent.
+read_file, list_files, search_code, get_file_tree, search_symbols, find_references, read_files, file_exists, file_info, analyze_file, find_todos, search_imports, write_file, submit_compliance_agent, record_learning.
 
 
 ## Karpathy Review Principles

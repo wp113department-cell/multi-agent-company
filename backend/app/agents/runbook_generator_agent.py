@@ -8,6 +8,10 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
+    _EDIT_FILE_TOOL_SPEC,
+    _LIST_FUNCTIONS_TOOL,
+    _PARSE_AST_TOOL,
+    _YAML_VALIDATE_TOOL,
     READ_ONLY_TOOLS,
     RECORD_LEARNING_TOOL,
     make_chat_handlers,
@@ -36,12 +40,18 @@ AGENT_CONTRACT: dict[str, Any] = {
         "find_todos",
         "search_imports",
         "write_file",
+        "edit_file",
+        "yaml_validate",
         "submit_runbook_generator_agent",
         "record_learning",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
-    "side_effects": ["writes operational runbooks"],
+    "side_effects": [
+        "writes operational runbooks",
+        "edits existing runbooks",
+        "validates embedded YAML for syntax",
+    ],
     "permissions": ["read_repo", "write_docs"],
     "risk_level": "low",
     "expected_verification": {
@@ -72,14 +82,31 @@ _WRITE = {
         "required": ["path", "content"],
     },
 }
-_TOOLS = READ_ONLY_TOOLS + [_WRITE, _SUBMIT, RECORD_LEARNING_TOOL]
+_TOOLS = READ_ONLY_TOOLS + [
+    _WRITE,
+    _SUBMIT,
+    RECORD_LEARNING_TOOL,
+    _LIST_FUNCTIONS_TOOL,
+    _PARSE_AST_TOOL,
+    _EDIT_FILE_TOOL_SPEC,
+    _YAML_VALIDATE_TOOL,
+]
 
 _CFG = VerificationConfig(
-    set_by={"read_file": "read", "search_code": "read", "get_file_tree": "read"},
-    reset_by=(),
-    reset_keys=(),
+    set_by={
+        "read_file": "read",
+        "search_code": "read",
+        "get_file_tree": "read",
+        # MASTER_AGENT_v2.md Phase 2.1 (Editor tier) — "a scoped verification
+        # tool (e.g. a syntax/type check), not folded into AgentResult.verified:
+        # not every runbook embeds YAML (a shell-command-only runbook has
+        # nothing to validate this way), so this is tracked, not required.
+        "yaml_validate": "structure_validated",
+    },
+    reset_by=("write_file", "edit_file"),
+    reset_keys=("structure_validated",),
     enforce_in_result={"read": "read"},
-    initial={"read": False},
+    initial={"read": False, "structure_validated": False},
 )
 
 
@@ -116,8 +143,10 @@ def run_runbook_generator_agent(
         "3. Write a runbook where every step is a concrete command with an observable outcome.\n"
         "4. Each step format: 'Run: <command> → Expected: <what you see on success>'\n"
         "5. Never include commands from memory — derive all commands from actual files read.\n"
-        "6. Write the runbook with write_file.\n"
-        "7. Call submit_runbook_generator_agent with summary, findings, and recommendations."
+        "6. Write the runbook with write_file, or edit_file if updating an existing one.\n"
+        "7. If the runbook includes YAML (frontmatter or embedded manifests), validate it "
+        "with yaml_validate before submitting.\n"
+        "8. Call submit_runbook_generator_agent with summary, findings, and recommendations."
     )
 
     final_state = run_agent_graph(

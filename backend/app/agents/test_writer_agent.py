@@ -8,10 +8,14 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
+    _LIST_FUNCTIONS_TOOL,
+    _PARSE_AST_TOOL,
     READ_ONLY_TOOLS,
     RECORD_LEARNING_TOOL,
+    TEST_RUNNER_BASH_TOOL,
     make_chat_handlers,
     make_record_learning_handler,
+    make_test_runner_bash_handler,
 )
 from app.config import get_settings
 
@@ -36,16 +40,21 @@ AGENT_CONTRACT: dict[str, Any] = {
         "find_todos",
         "search_imports",
         "write_file",
+        "bash",
         "submit_test_writer_agent",
         "record_learning",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
-    "side_effects": ["writes test files"],
-    "permissions": ["read_repo", "write_code"],
+    "side_effects": [
+        "writes test files",
+        "runs the tests it writes to confirm they pass",
+    ],
+    "permissions": ["read_repo", "write_code", "execute_tests"],
     "risk_level": "low",
     "expected_verification": {
-        "read": "read_file must run to understand code under test before writing tests"
+        "read": "read_file must run to understand code under test before writing tests",
+        "tests_run": "bash must run the written test file with 0 failures before submit",
     },
     "dependencies": [],
 }
@@ -72,14 +81,31 @@ _WRITE = {
         "required": ["path", "content"],
     },
 }
-_TOOLS = READ_ONLY_TOOLS + [_WRITE, _SUBMIT, RECORD_LEARNING_TOOL]
+_TOOLS = READ_ONLY_TOOLS + [
+    _WRITE,
+    _SUBMIT,
+    RECORD_LEARNING_TOOL,
+    _LIST_FUNCTIONS_TOOL,
+    _PARSE_AST_TOOL,
+    TEST_RUNNER_BASH_TOOL,
+]
 
 _CFG = VerificationConfig(
-    set_by={"read_file": "read", "search_code": "read", "parse_ast": "read"},
-    reset_by=(),
-    reset_keys=(),
-    enforce_in_result={"read": "read"},
-    initial={"read": False},
+    set_by={
+        "read_file": "read",
+        "search_code": "read",
+        "parse_ast": "read",
+        # MASTER_AGENT_v2.md Phase 2.1 (Executor tier) — this is the exact
+        # gap the original audit found: this agent's own role file requires
+        # "0 test failures before submit" with no way to actually run tests.
+        # Mutating write_file resets this (see reset_by/reset_keys below) so
+        # a later edit can't ride on an earlier, now-stale test run.
+        "bash": "tests_run",
+    },
+    reset_by=("write_file",),
+    reset_keys=("tests_run",),
+    enforce_in_result={"read": "read", "tests_run": "tests_run"},
+    initial={"read": False, "tests_run": False},
 )
 
 
@@ -94,6 +120,7 @@ def make_test_writer_agent_handlers(repo_path: str) -> dict[str, Any]:
     base["submit_test_writer_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
+    base["bash"] = make_test_runner_bash_handler(repo_path)
     return base
 
 
@@ -117,7 +144,10 @@ def run_test_writer_agent(
         "4. No speculative edge cases for behaviors not requested.\n"
         "5. Match existing test file style exactly (imports, fixtures, naming conventions).\n"
         "6. Write the test file with write_file.\n"
-        "7. Call submit_test_writer_agent with summary, findings, and recommendations."
+        "7. Run it yourself with bash (pytest/npm test/npx jest/npx vitest only) and confirm "
+        "0 failures before submitting — do not claim the tests pass without having run them.\n"
+        "8. If a test failed and you fixed it, that's worth a record_learning call.\n"
+        "9. Call submit_test_writer_agent with summary, findings, and recommendations."
     )
 
     final_state = run_agent_graph(
@@ -143,7 +173,12 @@ def run_test_writer_agent(
         summary=str(raw.get("summary", description[:100])),
         findings=list(raw.get("findings", [])),
         files_touched=[],
-        verified=bool(final_state["verification"].get("read")),
+        # MASTER_AGENT_v2.md Phase 2.1 — "verified" for this agent means the
+        # written tests were actually run and passed, not merely that some
+        # code was read. Both flags are graph-enforced (base_graph.py's
+        # verification contract), never taken from the model's own claim.
+        verified=bool(final_state["verification"].get("read"))
+        and bool(final_state["verification"].get("tests_run")),
         requires_human_approval=False,
         tokens_in=final_state["tokens_in"],
         tokens_out=final_state["tokens_out"],

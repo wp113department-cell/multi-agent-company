@@ -8,9 +8,13 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
+    _LIST_FUNCTIONS_TOOL,
+    _PARSE_AST_TOOL,
+    LOAD_TEST_BASH_TOOL,
     READ_ONLY_TOOLS,
     RECORD_LEARNING_TOOL,
     make_chat_handlers,
+    make_load_test_bash_handler,
     make_record_learning_handler,
 )
 from app.config import get_settings
@@ -36,13 +40,17 @@ AGENT_CONTRACT: dict[str, Any] = {
         "find_todos",
         "search_imports",
         "write_file",
+        "bash",
         "submit_load_test_agent",
         "record_learning",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
-    "side_effects": ["writes load test scripts"],
-    "permissions": ["read_repo", "write_docs"],
+    "side_effects": [
+        "writes load test scripts",
+        "runs a short smoke test of the script",
+    ],
+    "permissions": ["read_repo", "write_docs", "execute_load_test"],
     "risk_level": "low",
     "expected_verification": {
         "read": "read_file must run to inspect API routes and schemas"
@@ -72,14 +80,32 @@ _WRITE = {
         "required": ["path", "content"],
     },
 }
-_TOOLS = READ_ONLY_TOOLS + [_WRITE, _SUBMIT, RECORD_LEARNING_TOOL]
+_TOOLS = READ_ONLY_TOOLS + [
+    _WRITE,
+    _SUBMIT,
+    RECORD_LEARNING_TOOL,
+    _LIST_FUNCTIONS_TOOL,
+    _PARSE_AST_TOOL,
+    LOAD_TEST_BASH_TOOL,
+]
 
 _CFG = VerificationConfig(
-    set_by={"read_file": "read", "search_code": "read", "search_symbols": "read"},
-    reset_by=(),
-    reset_keys=(),
-    enforce_in_result={"read": "read"},
-    initial={"read": False},
+    set_by={
+        "read_file": "read",
+        "search_code": "read",
+        "search_symbols": "read",
+        # MASTER_AGENT_v2.md Phase 2.1 (Executor tier) — tracked separately
+        # from "read"/AgentResult.verified, not folded in: k6/locust may
+        # genuinely not be installed in a given environment, and that's not
+        # a reason to block an otherwise-correct script from being handed
+        # off. Reset on a later edit so a stale smoke-test result can't
+        # ride on top of a script that changed since.
+        "bash": "smoke_tested",
+    },
+    reset_by=("write_file",),
+    reset_keys=("smoke_tested",),
+    enforce_in_result={"read": "read", "smoke_tested": "smoke_tested"},
+    initial={"read": False, "smoke_tested": False},
 )
 
 
@@ -94,6 +120,7 @@ def make_load_test_agent_handlers(repo_path: str) -> dict[str, Any]:
     base["submit_load_test_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
+    base["bash"] = make_load_test_bash_handler(repo_path)
     return base
 
 
@@ -117,7 +144,11 @@ def run_load_test_agent(
         "4. Each scenario must have explicit thresholds: 'p95 latency < Xms at Y RPS with 0 errors'.\n"
         "5. Match request bodies exactly to the Pydantic schema — no invented fields.\n"
         "6. Write the script file with write_file.\n"
-        "7. Call submit_load_test_agent with summary, findings, and recommendations."
+        "7. Run a short smoke test of it with bash (k6 run / locust only, low "
+        "duration/VU flags) to confirm it actually executes against the target — "
+        "if k6/locust isn't installed in this environment, say so explicitly rather "
+        "than claiming it was verified.\n"
+        "8. Call submit_load_test_agent with summary, findings, and recommendations."
     )
 
     final_state = run_agent_graph(

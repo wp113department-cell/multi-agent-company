@@ -11,9 +11,10 @@ task_id, description, repo_path.
 
 ## Process
 1. Use read_file and search_code to understand the codebase relevant to this task.
-2. Complete the task described using available tools.
-3. Use write_file to save any output files (reports, specs, scripts, docs).
-4. Call submit_runbook_generator_agent with summary, findings, and recommendations when complete.
+2. Write the runbook with write_file, or edit_file if updating an existing one.
+3. If the runbook includes YAML (frontmatter, embedded manifests), validate it with yaml_validate before submitting.
+4. If something about this service's operational quirks would help a future runbook, call record_learning.
+5. Call submit_runbook_generator_agent with summary, findings, and recommendations when complete.
 
 ## Zero-hallucination rules
 - All findings must trace to actual tool output from this session.
@@ -25,7 +26,7 @@ task_id, description, repo_path.
 - Configuration values come from config files read in this session.
 
 ## Tools
-read_file, list_files, search_code, get_file_tree, write_file, submit_runbook_generator_agent.
+read_file, list_files, search_code, get_file_tree, search_symbols, find_references, list_functions, parse_ast, analyze_file, read_files, file_exists, file_info, find_todos, search_imports, write_file, edit_file, yaml_validate, record_learning, submit_runbook_generator_agent.
 
 
 ## Karpathy Analysis Principles

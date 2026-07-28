@@ -17,7 +17,7 @@ Audits developer experience: onboarding steps, build and test feedback loops, sc
 - Never invent file paths, line numbers, or configurations.
 
 ## Tools
-read_file, list_files, search_code, get_file_tree, write_file, submit_devex_agent.
+read_file, list_files, search_code, get_file_tree, search_symbols, find_references, list_functions, parse_ast, analyze_file, read_files, file_exists, file_info, find_todos, search_imports, write_file, submit_devex_agent, record_learning.
 
 
 ## Karpathy Review Principles

@@ -8,10 +8,14 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
+    _LIST_FUNCTIONS_TOOL,
+    _PARSE_AST_TOOL,
     READ_ONLY_TOOLS,
     RECORD_LEARNING_TOOL,
+    TEST_RUNNER_BASH_TOOL,
     make_chat_handlers,
     make_record_learning_handler,
+    make_test_runner_bash_handler,
 )
 from app.config import get_settings
 
@@ -36,16 +40,21 @@ AGENT_CONTRACT: dict[str, Any] = {
         "find_todos",
         "search_imports",
         "write_file",
+        "bash",
         "submit_test_coverage_agent",
         "record_learning",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
-    "side_effects": ["writes test coverage gap reports"],
-    "permissions": ["read_repo", "write_docs"],
+    "side_effects": [
+        "writes test coverage gap reports",
+        "runs coverage tooling (pytest --cov / jest --coverage) — never writes code",
+    ],
+    "permissions": ["read_repo", "write_docs", "execute_tests"],
     "risk_level": "low",
     "expected_verification": {
-        "read": "read_file must run to inspect test files and coverage reports"
+        "read": "read_file must run to inspect test files and coverage reports",
+        "coverage_measured": "bash must run real coverage tooling — never estimate from memory",
     },
     "dependencies": [],
 }
@@ -72,14 +81,34 @@ _WRITE = {
         "required": ["path", "content"],
     },
 }
-_TOOLS = READ_ONLY_TOOLS + [_WRITE, _SUBMIT, RECORD_LEARNING_TOOL]
+_TOOLS = READ_ONLY_TOOLS + [
+    _WRITE,
+    _SUBMIT,
+    RECORD_LEARNING_TOOL,
+    _LIST_FUNCTIONS_TOOL,
+    _PARSE_AST_TOOL,
+    TEST_RUNNER_BASH_TOOL,
+]
 
 _CFG = VerificationConfig(
-    set_by={"read_file": "read", "search_code": "read", "analyze_file": "read"},
+    set_by={
+        "read_file": "read",
+        "search_code": "read",
+        "analyze_file": "read",
+        # MASTER_AGENT_v2.md Phase 2.1 — found while auditing this agent's own
+        # role file (roles/test_coverage_agent.md), not from the original
+        # Executor-tier example list: "Reporting coverage numbers from memory
+        # — run the coverage tool this run" is an explicit Non-Responsibility,
+        # and "Coverage tool cannot run -> status blocked, never estimate" is
+        # an explicit Edge Case. Required for verified below, unlike
+        # debugger_agent/load_test_agent's optional reproduction flags — this
+        # role has no legitimate path to a real finding without it.
+        "bash": "coverage_measured",
+    },
     reset_by=(),
     reset_keys=(),
-    enforce_in_result={"read": "read"},
-    initial={"read": False},
+    enforce_in_result={"read": "read", "coverage_measured": "coverage_measured"},
+    initial={"read": False, "coverage_measured": False},
 )
 
 
@@ -94,6 +123,7 @@ def make_test_coverage_agent_handlers(repo_path: str) -> dict[str, Any]:
     base["submit_test_coverage_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
+    base["bash"] = make_test_runner_bash_handler(repo_path)
     return base
 
 
@@ -116,8 +146,12 @@ def run_test_coverage_agent(
         "3. Each coverage gap must cite: file:line range, the specific code path, and why it's a production risk.\n"
         "4. For each gap, provide a minimal test sketch: inputs, expected output, and any mock needed.\n"
         "5. Only flag gaps that represent real production risk — not every possible edge case.\n"
-        "6. Write the coverage gap report with write_file if requested.\n"
-        "7. Call submit_test_coverage_agent with summary, findings, and recommendations."
+        "6. Run the real coverage tool yourself with bash (pytest --cov / npm test -- "
+        "--coverage / npx jest --coverage only) — never report a coverage percentage "
+        "you didn't actually measure this run. If the tool can't run, report status "
+        "blocked with the error instead of estimating.\n"
+        "7. Write the coverage gap report with write_file if requested.\n"
+        "8. Call submit_test_coverage_agent with summary, findings, and recommendations."
     )
 
     final_state = run_agent_graph(
@@ -143,7 +177,11 @@ def run_test_coverage_agent(
         summary=str(raw.get("summary", description[:100])),
         findings=list(raw.get("findings", [])),
         files_touched=[],
-        verified=bool(final_state["verification"].get("read")),
+        # MASTER_AGENT_v2.md Phase 2.1 — this role's own contract explicitly
+        # forbids reporting coverage from memory, so "verified" requires the
+        # coverage tool to have actually run, not just that code was read.
+        verified=bool(final_state["verification"].get("read"))
+        and bool(final_state["verification"].get("coverage_measured")),
         requires_human_approval=False,
         tokens_in=final_state["tokens_in"],
         tokens_out=final_state["tokens_out"],

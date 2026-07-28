@@ -8,10 +8,14 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
+    _LIST_FUNCTIONS_TOOL,
+    _PARSE_AST_TOOL,
     READ_ONLY_TOOLS,
     RECORD_LEARNING_TOOL,
+    TEST_RUNNER_BASH_TOOL,
     make_chat_handlers,
     make_record_learning_handler,
+    make_test_runner_bash_handler,
 )
 from app.config import get_settings
 
@@ -41,13 +45,17 @@ AGENT_CONTRACT: dict[str, Any] = {
         "find_todos",
         "search_imports",
         "write_file",
+        "bash",
         "submit_debugger_agent",
         "record_learning",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
-    "side_effects": ["writes debug analysis .md reports"],
-    "permissions": ["read_repo", "write_docs"],
+    "side_effects": [
+        "writes debug analysis .md reports",
+        "runs test commands to reproduce",
+    ],
+    "permissions": ["read_repo", "write_docs", "execute_tests"],
     "risk_level": "low",
     "expected_verification": {"read": "read_file or search_code must run"},
     "dependencies": [],
@@ -75,7 +83,14 @@ _WRITE = {
         "required": ["path", "content"],
     },
 }
-_TOOLS = READ_ONLY_TOOLS + [_WRITE, _SUBMIT, RECORD_LEARNING_TOOL]
+_TOOLS = READ_ONLY_TOOLS + [
+    _WRITE,
+    _SUBMIT,
+    RECORD_LEARNING_TOOL,
+    _LIST_FUNCTIONS_TOOL,
+    _PARSE_AST_TOOL,
+    TEST_RUNNER_BASH_TOOL,
+]
 
 _CFG = VerificationConfig(
     set_by={
@@ -84,11 +99,18 @@ _CFG = VerificationConfig(
         "git_blame": "read",
         "git_log": "read",
         "analyze_file": "read",
+        # MASTER_AGENT_v2.md Phase 2.1 (Executor tier) — debugger_agent must
+        # be able to reproduce, not just theorize. Tracked separately from
+        # "read" (not folded into AgentResult.verified below) since not
+        # every bug is reproducible by a single test command — a Heisenbug
+        # or environment-specific failure can still be a legitimate
+        # evidence-backed finding without this flag being set.
+        "bash": "reproduced",
     },
     reset_by=(),
     reset_keys=(),
     enforce_in_result={"read": "read"},
-    initial={"read": False},
+    initial={"read": False, "reproduced": False},
 )
 
 
@@ -103,6 +125,7 @@ def make_debugger_agent_handlers(repo_path: str) -> dict[str, Any]:
     base["submit_debugger_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
+    base["bash"] = make_test_runner_bash_handler(repo_path)
     return base
 
 
@@ -123,10 +146,15 @@ def run_debugger_agent(
         "1. Use read_file and search_code to locate the relevant code path.\n"
         "2. Use git_blame and git_log to trace when the bug was introduced.\n"
         "3. Use find_references to understand call chains and data flow.\n"
-        "4. Identify the root cause — not just symptoms.\n"
-        "5. Produce a concrete fix recommendation (what to change and why).\n"
-        "6. Write an analysis report with write_file if requested.\n"
-        "7. Call submit_debugger_agent with summary, findings, and recommendations."
+        "4. If a test or command can trigger the failure, run it yourself with "
+        "bash (pytest/npm test/npx jest/npx vitest only) and cite the real output "
+        "as your reproduction evidence — don't just describe what you expect it to do.\n"
+        "5. Identify the root cause — not just symptoms.\n"
+        "6. Produce a concrete fix recommendation (what to change and why).\n"
+        "7. Write an analysis report with write_file if requested.\n"
+        "8. If you found something a future agent working on a similar bug would "
+        "want to know, call record_learning.\n"
+        "9. Call submit_debugger_agent with summary, findings, and recommendations."
     )
 
     final_state = run_agent_graph(

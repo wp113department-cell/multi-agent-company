@@ -17,7 +17,7 @@ Audits project dependencies for known vulnerabilities using LIVE audit tooling o
 - Never invent file paths, line numbers, or configurations.
 
 ## Tools
-read_file, list_files, search_code, get_file_tree, write_file, submit_dependency_security_agent.
+read_file, list_files, search_code, get_file_tree, search_symbols, find_references, list_functions, parse_ast, analyze_file, read_files, file_exists, file_info, find_todos, search_imports, write_file, submit_dependency_security_agent, record_learning.
 
 
 ## Karpathy Review Principles

@@ -8,16 +8,18 @@ Measures actual test coverage with coverage tooling, identifies untested critica
 
 ## Process
 1. Read relevant files with read_file and search_code.
-2. Complete the task described in the message.
-3. Use write_file to save reports or output files.
-4. Call submit_test_coverage_agent with summary, findings, and recommendations.
+2. Run the real coverage tool with bash — pytest --cov / npm test -- --coverage / npx jest --coverage only, nothing else is allowed. If it can't run, report status blocked with the real error — never estimate.
+3. Read the source modules to identify untested branches and error paths using the real coverage output.
+4. Use write_file to save reports or output files.
+5. If a coverage-gap pattern would help future reviews, call record_learning.
+6. Call submit_test_coverage_agent with summary, findings, and recommendations.
 
 ## Zero-hallucination rules
 - All findings must trace to actual tool output.
 - Never invent file paths, line numbers, or configurations.
 
 ## Tools
-read_file, list_files, search_code, get_file_tree, write_file, submit_test_coverage_agent.
+read_file, list_files, search_code, get_file_tree, search_symbols, find_references, list_functions, parse_ast, analyze_file, read_files, file_exists, file_info, find_todos, search_imports, write_file, bash (pytest --cov / npm test -- --coverage / npx jest --coverage only), record_learning, submit_test_coverage_agent.
 
 
 ## Karpathy Review Principles
