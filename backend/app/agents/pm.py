@@ -18,7 +18,12 @@ import logging
 from typing import Any
 
 from app.agents.base_graph import VerificationConfig, run_agent_graph
-from app.agents.tools import READ_ONLY_TOOLS, make_read_only_handlers
+from app.agents.tools import (
+    READ_ONLY_TOOLS,
+    RECORD_LEARNING_TOOL,
+    make_read_only_handlers,
+    make_record_learning_handler,
+)
 from app.config import get_settings
 from app.pipeline.state import PipelineState
 
@@ -49,6 +54,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "git_blame",
         "analyze_file",
         "submit_brief",
+        "record_learning",
     ],
     "input_types": ["task_description", "repo_path"],
     "output_types": ["pm_brief"],
@@ -100,6 +106,7 @@ def pm_node(state: PipelineState) -> PipelineState:
     repo = state.get("repo_path", settings.target_repo_path)
     handlers = make_read_only_handlers(repo)
     handlers["submit_brief"] = lambda inp: "Brief submitted"
+    handlers["record_learning"] = make_record_learning_handler("pm")
 
     # Day 18 — Real-Time Streaming. task_id was never threaded into
     # run_agent_graph() from any pipeline node, so the activity stream (fully
@@ -136,7 +143,7 @@ def pm_node(state: PipelineState) -> PipelineState:
         final_state = run_agent_graph(
             role_name="pm",
             model=settings.model_planner,
-            tools=READ_ONLY_TOOLS + [_SUBMIT_TOOL],
+            tools=READ_ONLY_TOOLS + [_SUBMIT_TOOL, RECORD_LEARNING_TOOL],
             tool_handlers=handlers,
             verification_cfg=_VERIFICATION_CFG,
             initial_message=initial_message,

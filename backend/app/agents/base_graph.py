@@ -353,7 +353,6 @@ def _make_memory_hook_node(
 ) -> Callable[[AgentRunState], dict[str, Any]]:
     """Pre-inference lesson + repo context injection (runs once at graph entry).
     AutoGen MemoryController.update_context() + OpenHands repo.md pattern.
-    Sync only — no async DB calls.
     """
 
     def memory_hook_node(state: AgentRunState) -> dict[str, Any]:
@@ -361,11 +360,40 @@ def _make_memory_hook_node(
         query = task_description or str(
             (state["messages"][0].get("content", "") if state["messages"] else "")
         )
+        context_blocks: list[str] = []
 
-        # 1. Retrieve relevant past lessons from in-process LessonStore
+        # 1. Retrieve relevant past lessons from in-process LessonStore — fast,
+        # zero-latency, but ephemeral (wiped on restart) and process-local.
         lesson_block = get_lesson_store().format_for_injection(query, top_k=3)
         if lesson_block:
-            updates["memory_context"] = lesson_block
+            context_blocks.append(lesson_block)
+
+        # 1b. Phase 1.3 (MASTER_AGENT_v2.md) — also query memory_embeddings
+        # (DB-backed, semantic, survives restarts, shared across processes).
+        # Before this, memory_hook_node only ever read LessonStore, so a
+        # lesson written by a different process (or before this process's
+        # last restart) was invisible here even though it was durably stored.
+        # Additive, not a replacement — either source can be empty.
+        try:
+            from app.memory.store import (
+                format_full_memory_context,
+                query_memory_context_sync,
+            )
+
+            mem = query_memory_context_sync(query, top_k=3)
+            db_block = format_full_memory_context(
+                mem["tasks"],
+                mem["failures"],
+                mem["learnings"],
+                mem.get("procedures", []),
+            )
+            if db_block:
+                context_blocks.append(db_block)
+        except Exception as exc:
+            logger.debug("memory_hook_node: memory_embeddings query skipped: %s", exc)
+
+        if context_blocks:
+            updates["memory_context"] = "\n\n".join(context_blocks)
 
         # 2. Repo context injection (sync, non-fatal)
         if repo_path and not state.get("repo_context"):
@@ -805,6 +833,117 @@ def _extract_and_store_lesson(
 
 
 # ---------------------------------------------------------------------------
+# Post-graph procedural memory extraction — MASTER_AGENT_v2.md Phase 1.5.
+# Captures HOW a hard task was solved (the real ordered tool-call sequence),
+# not just THAT it was solved — distinct from _extract_and_store_lesson
+# above, which captures a one-line paraphrased insight. Only this function
+# has access to final_state["messages"] (the real tool-call history), which
+# is why this lives here rather than in the generic post-run memory hook
+# (app/memory/hooks.py, Phase 1.1) that only ever sees the final AgentResult.
+# ---------------------------------------------------------------------------
+
+
+def _extract_steps_taken(final_state: AgentRunState) -> list[str]:
+    """Reconstruct the ordered sequence of real tool calls from a completed
+    run's message history. This is the actual procedure followed, not a
+    model-generated summary of it — reading final_state["messages"] directly
+    is what makes this different from (and more trustworthy than) asking the
+    model to describe what it did."""
+    steps: list[str] = []
+    for msg in final_state.get("messages", []):
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        content = msg.get("content", [])
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not (isinstance(block, dict) and block.get("type") == "tool_use"):
+                continue
+            name = str(block.get("name", "unknown_tool"))
+            tool_input = block.get("input", {})
+            detail = ""
+            if isinstance(tool_input, dict):
+                for key in ("path", "command", "pattern", "query"):
+                    if key in tool_input:
+                        detail = f" ({key}={str(tool_input[key])[:80]})"
+                        break
+            steps.append(f"{name}{detail}")
+    return steps
+
+
+def _maybe_store_procedure(
+    final_state: AgentRunState,
+    role_name: str,
+    task_id: str,
+) -> None:
+    """Store a repair procedure, but only when the run actually needed real
+    iteration to succeed — reflection judged an earlier attempt unsatisfactory,
+    or the planner replanned. A task solved cleanly on the first pass has no
+    interesting procedure to record; recording it anyway would just fill
+    procedural memory with noise. Non-fatal, mirrors
+    _extract_and_store_lesson's own error handling.
+    """
+    if not final_state.get("submitted"):
+        return
+
+    needed_iteration = (
+        final_state.get("reflection_unsatisfied_count", 0) > 0
+        or final_state.get("retry_count", 0) > 0
+    )
+    if not needed_iteration:
+        return
+
+    steps = _extract_steps_taken(final_state)
+    if not steps:
+        return
+
+    symptom_content = (
+        final_state["messages"][0].get("content", "") if final_state["messages"] else ""
+    )
+    if isinstance(symptom_content, list):
+        # Day 16 multimodal content (text + images) — use the text part only.
+        symptom = " ".join(
+            b.get("text", "")
+            for b in symptom_content
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    else:
+        symptom = str(symptom_content)
+
+    result = final_state.get("result", {})
+    resolution = str(result.get("summary", "")) or "Task completed after iteration."
+
+    try:
+        import asyncio
+
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        from app.db.session import new_isolated_async_engine
+        from app.memory.store import embed_procedure
+
+        async def _run() -> None:
+            engine = new_isolated_async_engine()
+            try:
+                async with async_sessionmaker(
+                    engine, expire_on_commit=False
+                )() as session:
+                    await embed_procedure(
+                        task_id=task_id or f"run-{role_name}",
+                        symptom=symptom[:500],
+                        steps_taken=steps,
+                        resolution=resolution,
+                        agent_name=role_name,
+                        db=session,
+                    )
+            finally:
+                await engine.dispose()
+
+        asyncio.run(_run())
+    except Exception as exc:
+        logger.debug("procedure capture skipped (non-fatal): %s", exc)
+
+
+# ---------------------------------------------------------------------------
 # Graph routing — stall detection (AutoGen MagenticOne progress_ledger pattern)
 # ---------------------------------------------------------------------------
 
@@ -1188,6 +1327,7 @@ def run_agent_graph(
             _extract_and_store_lesson(
                 final_state, role_name, model_haiku or model, trace_id=tid
             )
+            _maybe_store_procedure(final_state, role_name, task_id)
 
         # Day 10 — wire real data into the RunMetrics instance (non-fatal). Without this,
         # MetricsCollector records every run with zeroed tokens/cost/verification —

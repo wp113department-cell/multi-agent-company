@@ -13,7 +13,11 @@ from typing import Any
 
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
-from app.agents.tools import BUG_FIX_TOOLS, make_bug_fix_handlers
+from app.agents.tools import (
+    BUG_FIX_TOOLS,
+    make_bug_fix_handlers,
+    make_record_learning_handler,
+)
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -46,6 +50,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "git_diff",
         "bash",
         "submit_patch",
+        "record_learning",
     ],
     "input_types": ["task_id", "error_description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -78,6 +83,7 @@ def run_bug_fix(
     settings = get_settings()
     repo = repo_path or str(settings.target_repo_path)
     handlers = make_bug_fix_handlers(repo)
+    handlers["record_learning"] = make_record_learning_handler("bug_fix")
 
     message = (
         f"Task #{task_id} — Bug Report\n\n"

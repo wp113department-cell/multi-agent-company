@@ -679,3 +679,27 @@ class PendingApproval(Base):
         DateTime(timezone=True), nullable=True
     )
     decided_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+
+class EpicScratchpad(Base):
+    """MASTER_AGENT_v2.md Phase 1.7 — app/fleet/scratchpad.py.
+
+    Ephemeral, epic-scoped key-value store for cross-agent discoveries/
+    hypotheses/partial findings during a single epic's execution. Rows are
+    deleted outright (not archived) on epic completion or TTL expiry,
+    whichever is first — this is explicitly not a fifth permanent memory
+    category; a finding worth keeping gets promoted via the record_learning
+    tool (app/agents/tools.py, Phase 1.4) into memory_embeddings instead.
+    """
+
+    __tablename__ = "epic_scratchpad"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    epic_id: Mapped[str] = mapped_column(String(100), index=True)
+    key: Mapped[str] = mapped_column(String(200))
+    value: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    agent_name: Mapped[str] = mapped_column(String(100), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

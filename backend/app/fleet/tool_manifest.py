@@ -1286,6 +1286,19 @@ TOOL_MANIFEST: dict[str, ToolManifestEntry] = {
         verification_required=False,
         risk_level="medium",
     ),
+    "record_learning": ToolManifestEntry(
+        purpose=(
+            "Record a non-obvious finding for future agents working on similar "
+            "tasks (MASTER_AGENT_v2.md Phase 1.4) — writes to memory_embeddings' "
+            "learning category via embed_learning_signal_sync."
+        ),
+        permissions=["write_memory"],
+        timeout_s=5,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+        notes="Never raises — a broken memory backend returns an [ERROR] string, not an exception.",
+    ),
     "decision_log_append": ToolManifestEntry(
         purpose="Append a decision record to the project decision log",
         permissions=["write_repo"],

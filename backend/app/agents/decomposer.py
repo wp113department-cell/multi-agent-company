@@ -16,7 +16,12 @@ import logging
 from typing import Any
 
 from app.agents.base_graph import VerificationConfig, run_agent_graph
-from app.agents.tools import READ_ONLY_TOOLS, make_read_only_handlers
+from app.agents.tools import (
+    READ_ONLY_TOOLS,
+    RECORD_LEARNING_TOOL,
+    make_read_only_handlers,
+    make_record_learning_handler,
+)
 from app.config import get_settings
 from app.pipeline.state import PipelineState
 
@@ -47,6 +52,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "git_blame",
         "analyze_file",
         "submit_subtasks",
+        "record_learning",
     ],
     "input_types": ["pm_brief", "architect_plan", "task_title"],
     "output_types": ["subtasks"],
@@ -114,6 +120,7 @@ def decomposer_node(state: PipelineState) -> PipelineState:
     handlers["submit_subtasks"] = (
         lambda inp: f"Submitted {len(inp.get('subtasks', []))} subtasks"
     )
+    handlers["record_learning"] = make_record_learning_handler("decomposer")
 
     # Day 18 — Real-Time Streaming.
     stream_task_id = str(state.get("task_id", ""))
@@ -143,7 +150,7 @@ def decomposer_node(state: PipelineState) -> PipelineState:
         final_state = run_agent_graph(
             role_name="decomposer",
             model=settings.model_planner,
-            tools=READ_ONLY_TOOLS + [_SUBMIT_TOOL],
+            tools=READ_ONLY_TOOLS + [_SUBMIT_TOOL, RECORD_LEARNING_TOOL],
             tool_handlers=handlers,
             verification_cfg=_VERIFICATION_CFG,
             initial_message=initial_message,

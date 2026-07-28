@@ -29,6 +29,21 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     return _session_factory
 
 
+def new_isolated_async_engine() -> AsyncEngine:
+    """A throwaway async engine for code that bridges sync -> async via its
+    own asyncio.run() call (e.g. a LangGraph node, which is itself a sync
+    callable). Never reuse the shared get_engine() singleton for this —
+    asyncpg connections are bound to the event loop they were created on,
+    and asyncio.run() tears down its loop after every call, so a connection
+    borrowed from the shared pool raises "attached to a different loop" on
+    the second such call. app/fleet/versioned_memory.py was the first place
+    this pattern was needed; app/memory/store.py's query_memory_context_sync
+    is the second.
+    """
+    settings = get_settings()
+    return create_async_engine(settings.database_url, pool_pre_ping=True)
+
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     factory = get_session_factory()
     async with factory() as session:

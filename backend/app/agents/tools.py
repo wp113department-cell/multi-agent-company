@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from app.config import get_settings
 from app.policy.engine import (
@@ -285,6 +285,64 @@ READ_ONLY_TOOLS = [
     },
 ]
 
+# ---------------------------------------------------------------------------
+# record_learning — MASTER_AGENT_v2.md Phase 1.4. A single, explicit,
+# agent-controlled write path into shared fleet memory, distinct from the
+# automatic post-run hook (app/memory/hooks.py). The automatic hook captures
+# every run's outcome regardless of whether anything unusual happened; this
+# tool lets an agent flag a *specific* non-obvious finding mid-run — the kind
+# of thing a generic outcome summary would not surface (a root cause, a
+# workaround, a gotcha another agent working on a similar task would want).
+# ---------------------------------------------------------------------------
+
+RECORD_LEARNING_TOOL: dict[str, Any] = {
+    "name": "record_learning",
+    "description": (
+        "Record a non-obvious finding for future agents working on similar tasks. "
+        "Use this for something a plain code search would not surface on its own — "
+        "a root cause, a workaround, a gotcha — not for routine progress notes. "
+        "This writes to shared, durable, cross-agent memory; it does not replace "
+        "your normal submit_* result."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "finding": {
+                "type": "string",
+                "description": "The non-obvious insight, in one or two sentences.",
+            },
+            "outcome": {
+                "type": "string",
+                "description": "What this finding led to, or why it mattered.",
+            },
+        },
+        "required": ["finding"],
+    },
+}
+
+
+def make_record_learning_handler(agent_name: str) -> Callable[[dict[str, Any]], str]:
+    """Build the sync tool handler for record_learning, scoped to the calling
+    agent's own name so the stored signal is correctly attributed."""
+
+    def _handler(inp: dict[str, Any]) -> str:
+        finding = str(inp.get("finding", "")).strip()
+        if not finding:
+            return "[ERROR] finding is required."
+        outcome = (
+            str(inp.get("outcome", "")).strip() or "recorded during task execution"
+        )
+
+        from app.memory.store import embed_learning_signal_sync
+
+        stored = embed_learning_signal_sync(
+            agent_name=agent_name, description=finding, outcome_summary=outcome
+        )
+        return "Recorded." if stored else "[ERROR] failed to record learning."
+
+    return _handler
+
+
 CODER_TOOLS = READ_ONLY_TOOLS + [
     {
         "name": "edit_file",
@@ -379,6 +437,7 @@ CODER_TOOLS = READ_ONLY_TOOLS + [
             "required": ["files_changed", "summary"],
         },
     },
+    RECORD_LEARNING_TOOL,
 ]
 
 # QA Agent: read + bash (test/build only, no write)
@@ -426,7 +485,7 @@ _SUBMIT_QA_TOOL = {
 }
 
 # QA has read tools + bash (test only) + submit_qa_result. NO write_file, NO edit.
-QA_TOOLS = READ_ONLY_TOOLS + [_QA_BASH_TOOL, _SUBMIT_QA_TOOL]
+QA_TOOLS = READ_ONLY_TOOLS + [_QA_BASH_TOOL, _SUBMIT_QA_TOOL, RECORD_LEARNING_TOOL]
 
 _SUBMIT_REVIEW_TOOL = {
     "name": "submit_review",
@@ -459,7 +518,7 @@ _SUBMIT_REVIEW_TOOL = {
 }
 
 # Reviewer has read tools ONLY + submit_review. NO bash, NO write, NO edit.
-REVIEWER_TOOLS = READ_ONLY_TOOLS + [_SUBMIT_REVIEW_TOOL]
+REVIEWER_TOOLS = READ_ONLY_TOOLS + [_SUBMIT_REVIEW_TOOL, RECORD_LEARNING_TOOL]
 
 _DEVOPS_BASH_TOOL = {
     "name": "bash",
@@ -505,7 +564,11 @@ _SUBMIT_HEALTH_REPORT_TOOL = {
 }
 
 # DevOps: read tools + allowlisted bash + submit_health_report. NO write_file.
-DEVOPS_TOOLS = READ_ONLY_TOOLS + [_DEVOPS_BASH_TOOL, _SUBMIT_HEALTH_REPORT_TOOL]
+DEVOPS_TOOLS = READ_ONLY_TOOLS + [
+    _DEVOPS_BASH_TOOL,
+    _SUBMIT_HEALTH_REPORT_TOOL,
+    RECORD_LEARNING_TOOL,
+]
 
 # Allowed QA bash commands (prefix checks)
 _QA_ALLOWED_PREFIXES = (
@@ -1138,6 +1201,7 @@ RESEARCH_TOOLS = [
     READ_ONLY_TOOLS[1],
     READ_ONLY_TOOLS[2],
     _SUBMIT_RESEARCH_TOOL,
+    RECORD_LEARNING_TOOL,
 ]
 
 
@@ -1262,6 +1326,7 @@ DOCS_TOOLS = READ_ONLY_TOOLS + [
         },
     },
     _SUBMIT_DOCS_TOOL,
+    RECORD_LEARNING_TOOL,
 ]
 
 # ---------------------------------------------------------------------------
@@ -3064,6 +3129,7 @@ BUG_FIX_TOOLS = READ_ONLY_TOOLS + [
     _WRITE_FILE_TOOL_SPEC,
     _GIT_DIFF_TOOL_SPEC,
     _SUBMIT_BUG_FIX_TOOL,
+    RECORD_LEARNING_TOOL,
 ]
 
 SECURITY_REVIEWER_TOOLS = READ_ONLY_TOOLS + [

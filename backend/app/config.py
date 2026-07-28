@@ -350,6 +350,10 @@ class Settings(BaseSettings):
         default=180,
         description="Days to keep memory_embeddings rows before the retention loop marks them archived=true. 0 disables. Separate from LOG_RETENTION_DAYS since engineering memory is longer-lived than raw execution logs.",
     )
+    scratchpad_ttl_seconds: int = Field(
+        default=14400,
+        description="Max lifetime (seconds) of an epic_scratchpad entry before it's treated as expired, even if the epic never explicitly completes. Default 4 hours. Entries are also cleared outright the moment their epic completes — this TTL only matters for an epic that stalls or never finishes.",
+    )
 
     # Groq (optional — enables Groq as LLM backend when ANTHROPIC_API_KEY is unavailable)
     groq_api_key: str = Field(

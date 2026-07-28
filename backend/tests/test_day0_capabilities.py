@@ -269,6 +269,83 @@ class TestMemoryHookNodeFires:
 
     @patch("app.agents.base_graph.load_role", return_value="You are a test agent.")
     @patch("app.agents.base_graph.get_effective_api_key", return_value="test-key")
+    @patch("app.memory.store.query_memory_context_sync")
+    def test_memory_hook_merges_lessonstore_and_db_memory(
+        self, mock_query: Any, _k: Any, _l: Any
+    ) -> None:
+        """Phase 1.3 (MASTER_AGENT_v2.md) — memory_hook_node must inject both
+        the in-process LessonStore block AND the DB-backed memory_embeddings
+        block into memory_context, not just one or the other."""
+        from app.agents.base_graph import (
+            Lesson,
+            _make_memory_hook_node,
+            get_lesson_store,
+        )
+
+        mock_query.return_value = {
+            "tasks": [
+                {
+                    "task_id": "t-99",
+                    "epic_id": None,
+                    "outcome": "completed",
+                    "description": "fixed the retry loop",
+                    "summary": "added exponential backoff",
+                    "files_changed": [],
+                    "similarity": 0.93,
+                }
+            ],
+            "failures": [],
+            "learnings": [],
+        }
+
+        ls = get_lesson_store()
+        ls.add(Lesson("test_agent", "always retry with backoff", "retries", "testing"))
+
+        hook = _make_memory_hook_node("fix the flaky retry loop", "")
+        state: AgentRunState = {
+            "messages": [{"role": "user", "content": "fix the flaky retry loop"}],
+            "verification": {},
+            "result": {},
+            "turns": 0,
+            "submitted": False,
+            "requires_human_approval": False,
+            "tokens_in": 0,
+            "tokens_out": 0,
+        }
+        out = hook(state)
+
+        mock_query.assert_called_once()
+        assert "always retry with backoff" in out["memory_context"]
+        assert "exponential backoff" in out["memory_context"]
+        assert "t-99" in out["memory_context"]
+
+    @patch("app.agents.base_graph.load_role", return_value="You are a test agent.")
+    @patch("app.agents.base_graph.get_effective_api_key", return_value="test-key")
+    @patch(
+        "app.memory.store.query_memory_context_sync",
+        side_effect=RuntimeError("db unreachable"),
+    )
+    def test_memory_hook_non_fatal_when_db_memory_query_fails(
+        self, _q: Any, _k: Any, _l: Any
+    ) -> None:
+        from app.agents.base_graph import _make_memory_hook_node
+
+        hook = _make_memory_hook_node("some task", "")
+        state: AgentRunState = {
+            "messages": [{"role": "user", "content": "some task"}],
+            "verification": {},
+            "result": {},
+            "turns": 0,
+            "submitted": False,
+            "requires_human_approval": False,
+            "tokens_in": 0,
+            "tokens_out": 0,
+        }
+        out = hook(state)  # must not raise
+        assert isinstance(out, dict)
+
+    @patch("app.agents.base_graph.load_role", return_value="You are a test agent.")
+    @patch("app.agents.base_graph.get_effective_api_key", return_value="test-key")
     def test_memory_hook_skips_repo_context_when_already_set(
         self, _k: Any, _l: Any
     ) -> None:

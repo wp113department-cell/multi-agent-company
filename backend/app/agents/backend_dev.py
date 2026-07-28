@@ -18,7 +18,11 @@ import sys
 from typing import Any
 
 from app.agents.base_graph import VerificationConfig, run_agent_graph
-from app.agents.tools import CODER_TOOLS, make_coder_handlers
+from app.agents.tools import (
+    CODER_TOOLS,
+    make_coder_handlers,
+    make_record_learning_handler,
+)
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -52,6 +56,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "git_diff",
         "bash",
         "submit_patch",
+        "record_learning",
     ],
     "input_types": ["task_id", "subtask_id", "plan", "worktree_path", "repo_path"],
     "output_types": ["files_changed"],
@@ -126,6 +131,7 @@ def run_backend_dev(
 
     for attempt in range(max_retries):
         handlers = make_coder_handlers(worktree_path, repo, extra_env=extra_env)
+        handlers["record_learning"] = make_record_learning_handler("backend_dev")
 
         base_msg = (
             f"Task ID: {task_id}, Subtask ID: {subtask_id}\n\n"
