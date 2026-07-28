@@ -18,7 +18,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.agents.base_graph import VerificationConfig, run_agent_graph
-from app.agents.tools import RESEARCH_TOOLS, make_research_handlers
+from app.agents.tools import (
+    RESEARCH_TOOLS,
+    make_record_learning_handler,
+    make_research_handlers,
+)
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -35,6 +39,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "list_files",
         "search_code",
         "submit_research",
+        "record_learning",
     ],
     "input_types": ["task_description", "repo_path"],
     "output_types": ["ResearchReport"],
@@ -106,6 +111,7 @@ def run_research(
 
     effective_repo = repo_path or settings.target_repo_path
     handlers = make_research_handlers(effective_repo)
+    handlers["record_learning"] = make_record_learning_handler("research")
 
     try:
         final_state = run_agent_graph(

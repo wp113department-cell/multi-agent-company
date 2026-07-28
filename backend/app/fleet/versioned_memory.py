@@ -52,12 +52,11 @@ def _to_record(row: Any) -> VersionedLessonRecord:
 
 def _new_isolated_db_engine() -> Any:
     """A throwaway async engine, never the shared app.db.session singleton —
-    see feedback_asyncio_isolated_engine: reusing one engine across multiple
-    asyncio.run() calls in the same process raises 'attached to a different
-    loop'. A fresh, disposed-after-use engine per call is always correct."""
-    from sqlalchemy.ext.asyncio import create_async_engine
+    see app.db.session.new_isolated_async_engine's docstring for why. A
+    fresh, disposed-after-use engine per call is always correct."""
+    from app.db.session import new_isolated_async_engine
 
-    return create_async_engine(get_settings().database_url, pool_pre_ping=True)
+    return new_isolated_async_engine()
 
 
 async def _find_most_similar_published(vector: list[float]) -> tuple[Any, float] | None:
@@ -197,6 +196,39 @@ async def _archive_expired(cutoff: datetime) -> int:
         await engine.dispose()
 
 
+async def _sync_to_memory_embeddings(topic: str, content: str, agent_name: str) -> None:
+    """Phase 1.2 (MASTER_AGENT_v2.md) — bridge a PUBLISHED versioned lesson into
+    memory_embeddings (category="learning") so it's reachable by the exact same
+    query path (query_learning_signals) every live agent run already reads
+    through. Before this, a curated lesson could complete this module's whole
+    DRAFT -> PUBLISHED lifecycle and never be seen by a running agent again —
+    confirmed by grep: no code path read a versioned_lessons row back into any
+    live inference call. Non-fatal: a sync failure must not break publish()."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.memory.store import embed_learning_signal
+
+    engine = _new_isolated_db_engine()
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            await embed_learning_signal(
+                agent_name=agent_name or "knowledge_curator",
+                description=content,
+                outcome_summary=f"Published versioned lesson (topic: {topic})",
+                db=session,
+            )
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "versioned_memory: sync to memory_embeddings failed for topic=%s",
+            topic,
+            exc_info=True,
+        )
+    finally:
+        await engine.dispose()
+
+
 async def _merge_via_llm(old_content: str, new_content: str, model: str) -> str:
     import anthropic
 
@@ -226,9 +258,11 @@ class VersionedMemoryStore:
         """Publish a lesson. If an existing PUBLISHED lesson is semantically
         similar (cosine similarity >= MEMORY_MERGE_SIMILARITY_THRESHOLD),
         merges instead of silently overwriting or duplicating."""
-        return asyncio.run(self._publish(topic, content))
+        return asyncio.run(self._publish(topic, content, agent_name))
 
-    async def _publish(self, topic: str, content: str) -> VersionedLessonRecord:
+    async def _publish(
+        self, topic: str, content: str, agent_name: str = ""
+    ) -> VersionedLessonRecord:
         from app.memory.store import _embed
 
         s = get_settings()
@@ -246,6 +280,7 @@ class VersionedMemoryStore:
                 state="published",
                 supersedes_id=None,
             )
+            await _sync_to_memory_embeddings(topic, content, agent_name)
             return _to_record(row)
 
         existing_row, _similarity = match
@@ -273,6 +308,7 @@ class VersionedMemoryStore:
         )
         await _set_state(existing_row.id, "superseded")
         await _set_state(v2.id, "merged_into")
+        await _sync_to_memory_embeddings(topic, merged_content, agent_name)
         return _to_record(merged_row)
 
     def rollback(self, lesson_id: str) -> VersionedLessonRecord:

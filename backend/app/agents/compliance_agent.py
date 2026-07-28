@@ -7,7 +7,12 @@ from typing import Any
 
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
-from app.agents.tools import READ_ONLY_TOOLS, make_chat_handlers
+from app.agents.tools import (
+    READ_ONLY_TOOLS,
+    RECORD_LEARNING_TOOL,
+    make_chat_handlers,
+    make_record_learning_handler,
+)
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -30,6 +35,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "search_imports",
         "write_file",
         "submit_compliance_agent",
+        "record_learning",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -62,7 +68,7 @@ _WRITE = {
         "required": ["path", "content"],
     },
 }
-_TOOLS = READ_ONLY_TOOLS + [_WRITE, _SUBMIT]
+_TOOLS = READ_ONLY_TOOLS + [_WRITE, _SUBMIT, RECORD_LEARNING_TOOL]
 
 _CFG = VerificationConfig(
     set_by={"read_file": "read", "search_code": "read", "analyze_file": "read"},
@@ -83,6 +89,7 @@ def make_compliance_agent_handlers(repo_path: str) -> dict[str, Any]:
 
     base["submit_compliance_agent"] = submit_h
     base["_result"] = result
+    base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
     return base
 
 

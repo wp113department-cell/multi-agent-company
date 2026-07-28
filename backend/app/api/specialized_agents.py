@@ -219,6 +219,19 @@ async def _run_specialized_agent_bg(
                 repo_path=effective_repo,
             )
 
+            # Phase 1.1 (MASTER_AGENT_v2.md) — write to shared memory. Before this,
+            # only manager-driven epics ever called embed_task_outcome/embed_failure;
+            # every agent dispatched through this endpoint discarded its result.
+            from app.memory.hooks import record_agent_run_outcome
+
+            await record_agent_run_outcome(
+                agent_name=agent_name,
+                task_id=str(task_id),
+                description=description,
+                result=result,
+                db=db,
+            )
+
             # Persist as artifact
             artifact_payload: dict[str, Any] = {
                 "agent": agent_name,
@@ -348,6 +361,18 @@ async def run_specialized_agent_sync(
         raise HTTPException(
             status_code=500, detail=f"{agent_name} failed: {exc}"
         ) from exc
+
+    # Phase 1.1 (MASTER_AGENT_v2.md) — same universal memory write as the
+    # background dispatch path above, so /run-sync callers get it too.
+    from app.memory.hooks import record_agent_run_outcome
+
+    await record_agent_run_outcome(
+        agent_name=agent_name,
+        task_id=str(body.task_id),
+        description=body.description,
+        result=result,
+        db=db,
+    )
 
     await save_artifact_async(
         body.task_id,

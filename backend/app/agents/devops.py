@@ -17,7 +17,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.agents.base_graph import VerificationConfig, run_agent_graph
-from app.agents.tools import DEVOPS_TOOLS, make_devops_handlers
+from app.agents.tools import (
+    DEVOPS_TOOLS,
+    make_devops_handlers,
+    make_record_learning_handler,
+)
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -48,6 +52,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "analyze_file",
         "bash",
         "submit_health_report",
+        "record_learning",
     ],
     "input_types": ["repo_path", "task_description"],
     "output_types": ["HealthReport"],
@@ -114,6 +119,7 @@ def run_devops(
     settings = get_settings()
     effective_repo = repo_path or settings.target_repo_path
     handlers = make_devops_handlers(effective_repo)
+    handlers["record_learning"] = make_record_learning_handler("devops")
 
     try:
         final_state = run_agent_graph(

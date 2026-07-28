@@ -302,3 +302,90 @@ def test_archive_expired_disabled_when_retention_is_zero(
 
 def test_get_versioned_memory_store_returns_singleton() -> None:
     assert get_versioned_memory_store() is get_versioned_memory_store()
+
+
+# ---------------------------------------------------------------------------
+# Phase 1.2 (MASTER_AGENT_v2.md) — publish() must bridge into memory_embeddings.
+# End-to-end against the real DB, matching this file's own convention — the
+# DB-connection-free unit tests for _sync_to_memory_embeddings itself live in
+# tests/test_versioned_memory_sync.py.
+# ---------------------------------------------------------------------------
+
+
+def _cleanup_memory_embeddings(task_id: str) -> None:
+    from sqlalchemy import delete
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.config import get_settings
+    from app.db.models import MemoryEmbedding
+
+    async def _run() -> None:
+        engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                await session.execute(
+                    delete(MemoryEmbedding).where(MemoryEmbedding.task_id == task_id)
+                )
+                await session.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+def test_publish_syncs_published_lesson_into_memory_embeddings() -> None:
+    """A PUBLISHED versioned lesson must land in memory_embeddings
+    (category="learning") too, so it's reachable by the same query path
+    (query_learning_signals) a live agent run reads through — before this,
+    versioned_lessons' whole DRAFT -> PUBLISHED lifecycle was confirmed
+    disconnected from live inference (MASTER_AGENT_v2.md §A.4, System 3)."""
+    with patch(
+        "app.memory.store._embed",
+        # Two _embed calls happen inside this one publish(): the lesson's own
+        # embedding, then the memory_embeddings sync's embedding.
+        _patched_embed([_DIFFERENT_VECTOR, _DIFFERENT_VECTOR]),
+    ):
+        store = VersionedMemoryStore()
+        result = store.publish(
+            "td_vm_sync_topic",
+            "td_vm_sync_marker: exponential backoff caps retries at 30s",
+            agent_name="td_vm_sync_agent",
+        )
+
+    try:
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        from app.config import get_settings
+        from app.db.models import MemoryEmbedding
+
+        async def _query() -> list[Any]:
+            engine = create_async_engine(
+                get_settings().database_url, pool_pre_ping=True
+            )
+            try:
+                async with async_sessionmaker(
+                    engine, expire_on_commit=False
+                )() as session:
+                    rows = (
+                        (
+                            await session.execute(
+                                select(MemoryEmbedding).where(
+                                    MemoryEmbedding.task_id == "fleet-td_vm_sync_agent"
+                                )
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    return list(rows)
+            finally:
+                await engine.dispose()
+
+        rows = asyncio.run(_query())
+        assert len(rows) == 1
+        assert rows[0].category == "learning"
+        assert "td_vm_sync_marker" in rows[0].description
+    finally:
+        _cleanup(result.lesson_id)
+        _cleanup_memory_embeddings("fleet-td_vm_sync_agent")

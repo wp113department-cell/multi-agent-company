@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.agents.base_graph import VerificationConfig, run_agent_graph
-from app.agents.tools import QA_TOOLS, make_qa_handlers
+from app.agents.tools import QA_TOOLS, make_qa_handlers, make_record_learning_handler
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -48,6 +48,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "analyze_file",
         "bash",
         "submit_qa_result",
+        "record_learning",
     ],
     "input_types": [
         "task_id",
@@ -111,6 +112,7 @@ def run_qa(
     settings = get_settings()
     repo = repo_path or settings.target_repo_path
     handlers = make_qa_handlers(worktree_path, repo)
+    handlers["record_learning"] = make_record_learning_handler("qa")
 
     initial_message = (
         f"Task ID: {task_id}, Subtask ID: {subtask_id}\n\n"

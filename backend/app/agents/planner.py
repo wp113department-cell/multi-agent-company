@@ -16,7 +16,12 @@ import logging
 from typing import Any
 
 from app.agents.base_graph import VerificationConfig, run_agent_graph
-from app.agents.tools import READ_ONLY_TOOLS, make_read_only_handlers
+from app.agents.tools import (
+    READ_ONLY_TOOLS,
+    RECORD_LEARNING_TOOL,
+    make_read_only_handlers,
+    make_record_learning_handler,
+)
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -46,6 +51,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "git_blame",
         "analyze_file",
         "submit_plan",
+        "record_learning",
     ],
     "input_types": ["task_id", "title", "description", "repo_path"],
     "output_types": ["plan_text"],
@@ -127,6 +133,7 @@ def run_planner(
     repo = repo_path or settings.target_repo_path
     handlers = make_read_only_handlers(repo)
     handlers["submit_plan"] = lambda inp: "Plan submitted"
+    handlers["record_learning"] = make_record_learning_handler("planner")
 
     initial_message = (
         f"Task ID: {task_id}\n"
@@ -141,7 +148,7 @@ def run_planner(
             task_id=str(task_id),
             role_name="planner",
             model=settings.model_coder,
-            tools=READ_ONLY_TOOLS + [_SUBMIT_TOOL],
+            tools=READ_ONLY_TOOLS + [_SUBMIT_TOOL, RECORD_LEARNING_TOOL],
             tool_handlers=handlers,
             verification_cfg=_VERIFICATION_CFG,
             initial_message=initial_message,

@@ -16,7 +16,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.agents.base_graph import VerificationConfig, run_agent_graph
-from app.agents.tools import REVIEWER_TOOLS, make_reviewer_handlers
+from app.agents.tools import (
+    REVIEWER_TOOLS,
+    make_record_learning_handler,
+    make_reviewer_handlers,
+)
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -46,6 +50,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "git_blame",
         "analyze_file",
         "submit_review",
+        "record_learning",
     ],
     "input_types": ["task_id", "subtask_id", "diff", "plan", "repo_path"],
     "output_types": ["ReviewResult"],
@@ -120,6 +125,7 @@ def run_reviewer(
     settings = get_settings()
     repo = repo_path or settings.target_repo_path
     handlers = make_reviewer_handlers(repo)
+    handlers["record_learning"] = make_record_learning_handler("reviewer")
 
     diff_preview = diff[:4000] if diff else "(no diff available)"
     image_note = (

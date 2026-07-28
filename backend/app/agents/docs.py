@@ -18,7 +18,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.agents.base_graph import VerificationConfig, run_agent_graph
-from app.agents.tools import DOCS_TOOLS, make_docs_handlers
+from app.agents.tools import (
+    DOCS_TOOLS,
+    make_docs_handlers,
+    make_record_learning_handler,
+)
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -49,6 +53,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "analyze_file",
         "write_file",
         "submit_docs",
+        "record_learning",
     ],
     "input_types": [
         "epic_title",
@@ -164,6 +169,7 @@ def run_docs(
     settings = get_settings()
     effective_repo = repo_path or settings.target_repo_path
     handlers = make_docs_handlers(worktree_path, effective_repo)
+    handlers["record_learning"] = make_record_learning_handler("docs")
 
     context = _build_docs_context(
         epic_title=epic_title,

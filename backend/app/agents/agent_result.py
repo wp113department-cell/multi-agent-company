@@ -18,7 +18,12 @@ class AgentResult:
     """
 
     summary: str
-    findings: list[dict[str, Any]] = field(default_factory=list)
+    # Real usage is mixed across agents: some submit_* schemas declare findings
+    # as an array of strings (e.g. debugger_agent.py, code_quality_agent.py —
+    # `"findings": {"type": "array", "items": {"type": "string"}}`), others pass
+    # structured dicts (e.g. changelog_agent.py). `list[Any]` reflects what's
+    # actually populated instead of a `list[dict]` hint half the fleet violates.
+    findings: list[Any] = field(default_factory=list)
     files_touched: list[str] = field(default_factory=list)
     verified: bool = False  # from state["verification"], never from the model
     requires_human_approval: bool = False

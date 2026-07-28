@@ -842,6 +842,11 @@ async def _run_epic_manager_body(
             db=db,
             epic_id=epic_id,
         )
+        # Phase 1.7 (MASTER_AGENT_v2.md) — the epic reached a terminal state;
+        # its scratchpad is no longer live working state for anyone.
+        from app.fleet.scratchpad import clear_epic_scratchpad
+
+        await clear_epic_scratchpad(epic_id, db)
         return EpicApprovalPackage(
             epic_id=epic_id,
             status="halted",
@@ -883,6 +888,13 @@ async def _run_epic_manager_body(
         db=db,
         epic_id=epic_id,
     )
+    # Phase 1.7 (MASTER_AGENT_v2.md) — same terminal-state cleanup as the
+    # halted path above; ready_for_review is also terminal for this epic's
+    # own subtask-dispatch loop (a human reviewing it next isn't dispatching
+    # more scratchpad-writing subtask agents).
+    from app.fleet.scratchpad import clear_epic_scratchpad
+
+    await clear_epic_scratchpad(epic_id, db)
 
     return EpicApprovalPackage(
         epic_id=epic_id,
