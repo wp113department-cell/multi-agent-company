@@ -540,6 +540,25 @@ def _make_call_llm_node(
     Pushes thinking/token_usage events to ActivityStream when task_id is set.
     """
     system_prompt = load_role(role_name)
+
+    # MASTER_AGENT_v2.md Phase 5.4 (2026-07-29) — thinking_budget_opus was a
+    # dead config field (existed, never passed into any real API call).
+    # Scoped to real opus-tier agents only (agent_models.json is the one
+    # source of truth for tiers — not a hardcoded name list, which the spec's
+    # own example list already shows going stale: 9 named vs. 17 real opus
+    # agents today). Computed once at graph-build time, not per turn.
+    _thinking_budget: dict[str, Any] | None = None
+    try:
+        from app.fleet.model_router import get_model_router as _get_router
+
+        if _get_router().route(role_name).tier == "opus":
+            _thinking_budget = {
+                "type": "enabled",
+                "budget_tokens": get_settings().thinking_budget_opus,
+            }
+    except Exception:
+        _thinking_budget = None
+
     anthropic_tools: list[anthropic.types.ToolParam] = [
         anthropic.types.ToolParam(
             name=t["name"],
@@ -585,6 +604,9 @@ def _make_call_llm_node(
         if suffix_parts:
             full_system = full_system + "\n\n" + "\n\n".join(suffix_parts)
 
+        extra_kwargs: dict[str, Any] = (
+            {"thinking": _thinking_budget} if _thinking_budget else {}
+        )
         response = client.messages.create(
             model=model,
             max_tokens=8096,
@@ -597,6 +619,7 @@ def _make_call_llm_node(
             ],
             messages=messages,  # type: ignore[arg-type]
             tools=anthropic_tools,
+            **extra_kwargs,
         )
         serialized = _serialize_content(response.content)
 

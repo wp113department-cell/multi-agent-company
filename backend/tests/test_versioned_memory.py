@@ -86,7 +86,19 @@ def test_publish_fresh_topic_creates_version_1_published() -> None:
 def test_publish_similar_content_triggers_merge_not_duplicate() -> None:
     with patch(
         "app.memory.store._embed",
-        _patched_embed([_BASE_VECTOR, _SIMILAR_VECTOR, _BASE_VECTOR]),
+        # v1: content embed, sync-to-memory-embeddings embed.
+        # v2 (merge): content embed (must be similar to v1's), merged-content
+        # embed, sync-to-memory-embeddings embed. The sync embeds don't feed
+        # the versioned_lessons similarity search, so their value is a don't-care.
+        _patched_embed(
+            [
+                _BASE_VECTOR,
+                _DIFFERENT_VECTOR,
+                _SIMILAR_VECTOR,
+                _DIFFERENT_VECTOR,
+                _DIFFERENT_VECTOR,
+            ]
+        ),
     ), patch("anthropic.Anthropic") as MockAnthropic:
         mock_client = MagicMock()
         mock_client.messages.create.return_value = _mock_merge_response(
@@ -122,7 +134,17 @@ def test_publish_similar_content_triggers_merge_not_duplicate() -> None:
 def test_publish_similar_content_flips_prior_states_correctly() -> None:
     with patch(
         "app.memory.store._embed",
-        _patched_embed([_BASE_VECTOR, _SIMILAR_VECTOR, _BASE_VECTOR]),
+        # Same 5-call shape as test_publish_similar_content_triggers_merge_not_duplicate:
+        # v1 content+sync, then v2 content (similar, to force the merge)+merged+sync.
+        _patched_embed(
+            [
+                _BASE_VECTOR,
+                _DIFFERENT_VECTOR,
+                _SIMILAR_VECTOR,
+                _DIFFERENT_VECTOR,
+                _DIFFERENT_VECTOR,
+            ]
+        ),
     ), patch("anthropic.Anthropic") as MockAnthropic:
         mock_client = MagicMock()
         mock_client.messages.create.return_value = _mock_merge_response(
@@ -172,7 +194,12 @@ def test_publish_similar_content_flips_prior_states_correctly() -> None:
 
 def test_publish_different_topic_does_not_merge() -> None:
     with patch(
-        "app.memory.store._embed", _patched_embed([_BASE_VECTOR, _DIFFERENT_VECTOR])
+        "app.memory.store._embed",
+        # v1: content embed, sync embed. v2: content embed (dissimilar, so no
+        # merge), sync embed.
+        _patched_embed(
+            [_BASE_VECTOR, _BASE_VECTOR, _DIFFERENT_VECTOR, _DIFFERENT_VECTOR]
+        ),
     ):
         store = VersionedMemoryStore()
         v1 = store.publish(
@@ -210,7 +237,16 @@ def test_publish_with_zero_vector_never_merges() -> None:
 def test_rollback_restores_previous_published_version_and_state() -> None:
     with patch(
         "app.memory.store._embed",
-        _patched_embed([_BASE_VECTOR, _SIMILAR_VECTOR, _BASE_VECTOR]),
+        # v1 content+sync, then v2 content (similar, forces merge)+merged+sync.
+        _patched_embed(
+            [
+                _BASE_VECTOR,
+                _DIFFERENT_VECTOR,
+                _SIMILAR_VECTOR,
+                _DIFFERENT_VECTOR,
+                _DIFFERENT_VECTOR,
+            ]
+        ),
     ), patch("anthropic.Anthropic") as MockAnthropic:
         mock_client = MagicMock()
         mock_client.messages.create.return_value = _mock_merge_response(
@@ -240,7 +276,16 @@ def test_rollback_with_no_superseded_version_raises() -> None:
 def test_archive_expired_marks_old_superseded_rows_archived() -> None:
     with patch(
         "app.memory.store._embed",
-        _patched_embed([_BASE_VECTOR, _SIMILAR_VECTOR, _BASE_VECTOR]),
+        # v1 content+sync, then v2 content (similar, forces merge)+merged+sync.
+        _patched_embed(
+            [
+                _BASE_VECTOR,
+                _DIFFERENT_VECTOR,
+                _SIMILAR_VECTOR,
+                _DIFFERENT_VECTOR,
+                _DIFFERENT_VECTOR,
+            ]
+        ),
     ), patch("anthropic.Anthropic") as MockAnthropic:
         mock_client = MagicMock()
         mock_client.messages.create.return_value = _mock_merge_response(

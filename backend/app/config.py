@@ -158,6 +158,15 @@ class Settings(BaseSettings):
         default=5,
         description="Max subtasks running simultaneously within a single epic",
     )
+    # MASTER_AGENT_v2.md Phase 5.6 — bounded wait on slot acquisition, so a
+    # slot that can never be freed (e.g. an epic holding a subtask slot
+    # while waiting on another subtask that can't acquire one because the
+    # epic's own concurrency cap is exhausted) fails loudly instead of
+    # hanging a task in "running" state forever.
+    slot_acquisition_timeout_seconds: float = Field(
+        default=300.0,
+        description="Max seconds to wait for an agent_run_slot()/subtask_slot() before raising SlotAcquisitionTimeout.",
+    )
 
     # Phase 7 — Executive Agent
     executive_max_epics_per_goal: int = Field(
@@ -236,6 +245,16 @@ class Settings(BaseSettings):
     log_retention_days: int = Field(
         default=90,
         description="Days to keep task_logs rows before automated cleanup. Set to 0 to disable cleanup.",
+    )
+
+    # MASTER_AGENT_v2.md Phase 5.6 — orphan agent_run recovery
+    agent_run_orphan_threshold_seconds: int = Field(
+        default=900,
+        description=(
+            "How long an agent_runs row can stay status='running' with no "
+            "heartbeat update before the periodic sweep reconciles it to "
+            "'failed' as orphaned. Set to 0 to disable the sweep."
+        ),
     )
 
     # Day 5A — Fleet Platform enhancements

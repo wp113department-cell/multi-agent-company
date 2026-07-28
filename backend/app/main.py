@@ -228,6 +228,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.db.repository import get_setting
     from app.agents.base import set_api_key_override
     from app.services.retention import start_retention_loop
+    from app.fleet.failure_ladder import start_orphan_recovery_loop
 
     settings = get_settings()
     logging.basicConfig(level=settings.log_level.upper())
@@ -330,6 +331,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     fleet_scan_task = asyncio.create_task(_fleet_agents_scan_loop())
     lesson_archive_task = asyncio.create_task(_versioned_lesson_archive_loop())
     benchmark_baseline_task = asyncio.create_task(_benchmark_baseline_loop())
+    orphan_recovery_task = asyncio.create_task(start_orphan_recovery_loop())
 
     yield
 
@@ -338,12 +340,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     fleet_scan_task.cancel()
     lesson_archive_task.cancel()
     benchmark_baseline_task.cancel()
+    orphan_recovery_task.cancel()
     for task in (
         reindex_task,
         retention_task,
         fleet_scan_task,
         lesson_archive_task,
         benchmark_baseline_task,
+        orphan_recovery_task,
     ):
         try:
             await task
