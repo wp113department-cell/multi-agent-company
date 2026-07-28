@@ -8,6 +8,8 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
+    _LIST_FUNCTIONS_TOOL,
+    _PARSE_AST_TOOL,
     READ_ONLY_TOOLS,
     RECORD_LEARNING_TOOL,
     make_chat_handlers,
@@ -71,7 +73,13 @@ _WRITE = {
         "required": ["path", "content"],
     },
 }
-_TOOLS = READ_ONLY_TOOLS + [_WRITE, _SUBMIT, RECORD_LEARNING_TOOL]
+_TOOLS = READ_ONLY_TOOLS + [
+    _WRITE,
+    _SUBMIT,
+    RECORD_LEARNING_TOOL,
+    _LIST_FUNCTIONS_TOOL,
+    _PARSE_AST_TOOL,
+]
 
 _CFG = VerificationConfig(
     set_by={

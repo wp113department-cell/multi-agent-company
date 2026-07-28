@@ -8,9 +8,13 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
+    _LIST_FUNCTIONS_TOOL,
+    _PARSE_AST_TOOL,
+    INFRA_DRY_RUN_BASH_TOOL,
     READ_ONLY_TOOLS,
     RECORD_LEARNING_TOOL,
     make_chat_handlers,
+    make_infra_dry_run_bash_handler,
     make_record_learning_handler,
 )
 from app.config import get_settings
@@ -36,14 +40,18 @@ AGENT_CONTRACT: dict[str, Any] = {
         "find_todos",
         "search_imports",
         "write_file",
+        "bash",
         "submit_infra_agent",
         "record_learning",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
-    "side_effects": ["writes infrastructure security reports"],
-    "permissions": ["read_repo", "write_docs"],
-    "risk_level": "low",
+    "side_effects": [
+        "writes infrastructure security reports",
+        "runs dry-run/plan validation commands — never applies or deploys",
+    ],
+    "permissions": ["read_repo", "write_docs", "execute_infra_dry_run"],
+    "risk_level": "medium",
     "expected_verification": {
         "read": "read_file must run to inspect infrastructure files"
     },
@@ -72,14 +80,34 @@ _WRITE = {
         "required": ["path", "content"],
     },
 }
-_TOOLS = READ_ONLY_TOOLS + [_WRITE, _SUBMIT, RECORD_LEARNING_TOOL]
+_TOOLS = READ_ONLY_TOOLS + [
+    _WRITE,
+    _SUBMIT,
+    RECORD_LEARNING_TOOL,
+    _LIST_FUNCTIONS_TOOL,
+    _PARSE_AST_TOOL,
+    INFRA_DRY_RUN_BASH_TOOL,
+]
 
 _CFG = VerificationConfig(
-    set_by={"read_file": "read", "search_code": "read", "get_file_tree": "read"},
+    set_by={
+        "read_file": "read",
+        "search_code": "read",
+        "get_file_tree": "read",
+        # MASTER_AGENT_v2.md Phase 2.1 (Executor tier) — "must be able to
+        # apply and verify an infra change in a sandboxed/dry-run mode at
+        # minimum." Tracked separately from AgentResult.verified (like
+        # load_test_agent's smoke_tested): docker/helm may not be installed
+        # in every environment, a finding-only run (no infra change
+        # proposed) has nothing to dry-run in the first place, and
+        # terraform/kubectl changes can never set this flag at all — see
+        # INFRA_DRY_RUN_ALLOWED_PREFIXES's docstring in tools.py.
+        "bash": "dry_run_validated",
+    },
     reset_by=(),
     reset_keys=(),
-    enforce_in_result={"read": "read"},
-    initial={"read": False},
+    enforce_in_result={"read": "read", "dry_run_validated": "dry_run_validated"},
+    initial={"read": False, "dry_run_validated": False},
 )
 
 
@@ -94,6 +122,7 @@ def make_infra_agent_handlers(repo_path: str) -> dict[str, Any]:
     base["submit_infra_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
+    base["bash"] = make_infra_dry_run_bash_handler(repo_path)
     return base
 
 
@@ -116,8 +145,14 @@ def run_infra_agent(
         "3. Each finding must cite: specific resource, file:line, and the concrete risk (unauthorized access, data loss, etc.).\n"
         "4. Each recommendation must specify the exact config change and how to verify it.\n"
         "5. Do not flag stylistic preferences — only security risks and misconfigurations.\n"
-        "6. Write a security review report with write_file if requested.\n"
-        "7. Call submit_infra_agent with summary, findings, and recommendations."
+        "6. When you're proposing a specific config change, validate it with bash in "
+        "dry-run/lint mode only (docker build, docker-compose config, helm "
+        "template/lint) — never deploy. terraform and kubectl are not available "
+        "here (blocked fleet-wide by policy, no dry-run exception) — for those, "
+        "state what you'd run and why, without claiming it was executed. If the "
+        "relevant tool isn't installed, say so rather than claiming it was validated.\n"
+        "7. Write a security review report with write_file if requested.\n"
+        "8. Call submit_infra_agent with summary, findings, and recommendations."
     )
 
     final_state = run_agent_graph(

@@ -159,12 +159,115 @@ memory actually working. Source: `MASTER_AGENT_v2.md` §Phase 1.
 ~24 agents currently share one generic tool template with no `bash`/`edit_file`/test-running
 capability, despite role prompts that require it. Source: `MASTER_AGENT_v2.md` §Phase 2.
 
-- [ ] Re-derive the exact current Tier-B agent list (grep, don't trust the spec's snapshot).
-- [ ] Classify each into Executor / Analyzer / Editor tier.
-- [ ] Day 4–6: upgrade each agent's tool contract + role prompt together, per agent, scoped `bash`
-      routed through `app/policy/engine.py`.
-- [ ] Day 7: fix the dead-contract bug (`parse_ast`/`list_functions` declared but unreachable).
-- [ ] Step 2 regression gate.
+- [x] Re-derived the exact current Tier-B agent list (grep, not the spec's snapshot) — confirmed 25
+      agents (24 + `compliance_agent`, which was already contract-honest).
+- [x] **Day 4 / 2.3** — Fixed the dead-contract bug (`parse_ast`/`list_functions` declared in
+      `AGENT_CONTRACT` but absent from the real `tools=` schema) across all 24 affected agents.
+      Discovery that simplified this a lot: the real handlers already existed and already worked —
+      every Tier-B agent already calls `make_chat_handlers()` as its base, which already registers
+      working `parse_ast`/`list_functions`/`list_classes`/`find_function_body` handlers (verified live
+      — not stubs, real tree/regex-based analysis). The bug was purely a missing schema entry in each
+      agent's own `_TOOLS` list, not a missing capability. Fixed via a verified codemod (23/24 agents
+      byte-identical `_TOOLS`/import lines confirmed before writing; `accessibility_agent` only
+      declares `parse_ast`, handled as its own case) — imported the existing `_LIST_FUNCTIONS_TOOL`/
+      `_PARSE_AST_TOOL` schema constants from `tools.py` into each agent file and added them to
+      `_TOOLS`. Tests: `tests/test_dead_contract_fix.py` (49 — schema presence *and* a broader check
+      that every other declared tool in each of the 24 contracts also has a real handler, plus a
+      sanity check that the handlers return real analysis, not placeholders). 511 tests green across
+      the touched-area sweep; `mypy --strict`/`black`/`ruff` clean.
+- [x] **Day 4-5 / 2.1** — Executor-tier upgrade for all 4 agents the spec explicitly names:
+      `debugger_agent`, `test_writer_agent` (share a new `TEST_RUNNER_BASH_TOOL`/
+      `make_test_runner_bash_handler`, scoped to pytest/npm test/jest/vitest only),
+      `load_test_agent` (new `LOAD_TEST_BASH_TOOL`, scoped to `k6 run`/`locust` only),
+      `infra_agent` (new `INFRA_DRY_RUN_BASH_TOOL`, scoped to dry-run/lint commands only). All three
+      scoped-bash tools route through `app/policy/engine.py::check_allowlisted_command` — the same
+      allowlist-then-denylist pattern `make_qa_handlers` already established, not reinvented.
+      **Real discovery made while building `infra_agent`'s tool, not assumed:** `terraform`/`kubectl`
+      are blanket-denylisted for *every* agent in the fleet by `app/policy/engine.py`'s own
+      `_DENIED_COMMAND_PATTERNS` (`r"\bterraform\b"`, `r"\bkubectl\b"`, no subcommand exception) — a
+      real, deliberate, pre-existing security boundary. My first attempt (a `terraform plan`/`kubectl
+      --dry-run` allowlist) would have been permanently unreachable dead code, caught by the test
+      suite itself, not by inspection. Rescoped `infra_agent` to what's actually real: `docker build`/
+      `docker-compose config`/`helm template`/`helm lint`. Modifying the shared denylist to add a
+      dry-run carve-out was deliberately not done — that's a separate, security-sensitive change
+      affecting every agent, not something to fold into per-agent tool provisioning.
+      Per-agent behavior changes, each with a real, graph-enforced (never model-claimed) flag:
+      `debugger_agent` — new `reproduced` flag (tracked, not required — a Heisenbug can still be a
+      legitimate finding without a bash reproduction). `test_writer_agent` — new `tests_run` flag,
+      and **`AgentResult.verified` now requires both `read` AND `tests_run`**, closing the exact gap
+      the original audit found (a role file promising "0 test failures before submit" with no way to
+      run tests). `load_test_agent` — new `smoke_tested` flag (tracked, not required — k6/locust may
+      not be installed). `infra_agent` — new `dry_run_validated` flag (tracked, not required);
+      `risk_level` raised from `low` to `medium` to honestly reflect real command execution.
+      All 4 role files (`roles/*.md`) rewritten to match: Process/Tools sections corrected, and for
+      `infra_agent` specifically, the Non-Responsibilities section now states the terraform/kubectl
+      boundary as a real policy fact instead of implying dry-run was available.
+      Tests: `tests/test_executor_tier_bash.py` (19 — each scoped handler's allow/deny behavior,
+      including the terraform/kubectl-always-denied case, plus per-agent wiring and the
+      `test_writer_agent` verified-formula change). 777 tests green across the full touched-area
+      sweep; `mypy --strict`/`black`/`ruff` clean.
+- [x] **Day 6 / 2.1 (Editor tier)** — `runbook_generator_agent` and `onboarding_agent` got real
+      `edit_file` (already a working handler via `make_chat_handlers` — no new factory needed, same
+      "handler already existed, only the schema was missing" pattern as 2.3).
+      `runbook_generator_agent` also got `yaml_validate` (tracked as `structure_validated`, not
+      required — not every runbook embeds YAML).
+      **Real correction made against the spec's own example list:** `localization_agent` was named
+      as an Editor-tier example in MASTER_AGENT_v2.md's spec text, but its role file
+      (`roles/localization_agent.md`) explicitly and repeatedly declares itself read-only on code —
+      "Modifying, creating, or deleting any repo file" is a Failure Condition, "Zero repo files were
+      modified" is a Quality Gate, "Translating content or editing code" is a Non-Responsibility.
+      Trusted the concrete, deliberate role contract over the abstract spec example: localization_agent
+      stayed Analyzer tier, did **not** get `edit_file`. A regression test
+      (`test_localization_agent_role_file_still_declares_read_only`) guards this so a future edit
+      can't silently drop the constraint without revisiting the decision.
+- [x] **Day 6-7 / 2.1 (second Executor-tier find)** — auditing the remaining 21 agents' role files
+      (not just the spec's 4 named Executor examples) surfaced one more genuine gap:
+      `test_coverage_agent`'s own contract explicitly requires running real coverage tooling
+      ("Reporting coverage numbers from memory — run the coverage tool this run" is a
+      Non-Responsibility; "Coverage tool cannot run → blocked, never estimate" is an Edge Case) while
+      staying read-only on code otherwise. Wired to the same shared `TEST_RUNNER_BASH_TOOL` as
+      `debugger_agent`/`test_writer_agent` (no new tool needed — `pytest --cov`/`npm test --
+      --coverage`/`npx jest --coverage` all match the existing prefix allowlist). New `coverage_measured`
+      flag, and `AgentResult.verified` now requires both `read` and `coverage_measured`, mirroring
+      `test_writer_agent`'s fix.
+- [x] **Day 7 / 2.1 (Analyzer-tier confirmation)** — the remaining 17 agents (`accessibility_agent`,
+      `api_designer_agent`, `code_explainer_agent`, `code_quality_agent`, `compliance_agent`,
+      `cost_estimator_agent`, `data_pipeline_agent`, `dependency_security_agent`, `devex_agent`,
+      `env_checker_agent`, `feature_flag_agent`, `incident_responder_agent`, `pair_programmer_agent`,
+      `rollback_agent`, `slo_agent`, `spike_agent`, `version_manager_agent`) were confirmed
+      Analyzer-tier by direct evidence, not assumption: every one of their role files has an explicit
+      "never edit/fix/modify code" Non-Responsibility (verified via grep across all 17, not sampled).
+      Phase 2.3's dead-contract fix was already their real, complete capability upgrade — no further
+      tool work needed. Locked in with `test_analyzer_tier_confirmed.py` (34 tests: confirms no
+      `edit_file`/`bash` present, confirms real code-intel tools are present where declared).
+      **Also fixed while doing this pass:** all 17 role files' `## Tools` lines were stale (missing
+      `record_learning`, `parse_ast`, `list_functions` from earlier phases). Regenerated every line
+      directly from each agent's real `AGENT_CONTRACT["allowed_tools"]` (not a hand-written template —
+      a first attempt using a shared template string got 3 agents wrong, since
+      `api_designer_agent`/`incident_responder_agent`/`rollback_agent` have small real per-agent tool
+      variations from the "standard" 24-agent set; caught by a new general-purpose regression test,
+      `test_role_file_tools_accuracy.py`, not by manual inspection).
+- [x] **Step 2 regression gate**: 846 tests green across every Phase 2 touched-area file
+      (`test_executor_tier_bash.py`, `test_editor_tier.py`, `test_analyzer_tier_confirmed.py`,
+      `test_role_file_tools_accuracy.py`, `test_dead_contract_fix.py`, plus every pre-existing
+      wiring/registry test file). `mypy --strict`/`black`/`ruff` clean on the full `app/` tree.
+      Full local suite re-run end-to-end after all of Step 2's changes: 2927 passed, 138 failed
+      (vs. 2674 passed / 139 failed at the end of Step 1 — pass count rose with the new tests added
+      today, as expected). Cross-checked the complete failure list against the pre-Step-2 baseline:
+      every failing file name matches exactly (`test_approval_gate.py`, `test_prompt_registry.py`,
+      `test_versioned_memory.py`, `test_task_images.py`, etc. — all confirmed live-Postgres/Windows-
+      AppLocker/missing-CLI-tool sandbox gaps, not regressions). Two lastfailed-cache entries named
+      old test_executor_tier_bash.py test names that were renamed earlier in this session (test file
+      no longer contains them at all — confirmed by grep; a direct fresh re-run shows 22/22 passing) —
+      stale cache artifacts from before the fix, not real failures. **Zero new regressions from any
+      of today's Step 2 work.**
+
+**Step 2 summary — all 25 Tier-B agents now individually tool-correct, not template-identical:**
+5 Executor tier (`debugger_agent`, `test_writer_agent`, `load_test_agent`, `infra_agent`,
+`test_coverage_agent`), 2 Editor tier (`runbook_generator_agent`, `onboarding_agent`), 18 Analyzer
+tier (`localization_agent` + the 17 above) — every tier assignment backed by that agent's own role
+file, not the original spec's illustrative examples, which were wrong in one case
+(`localization_agent`) and incomplete in another (`test_coverage_agent` wasn't named at all).
 
 ## Step 3 — Phase 3: Verification, Self-Critique, Continuous Replanning (Day 8–9)
 
@@ -216,3 +319,22 @@ capability, despite role prompts that require it. Source: `MASTER_AGENT_v2.md` �
   threaded through 4 signatures, real work correctly deferred to Phase 2). ~600 new/updated tests
   across 8 new test files, all green; `mypy --strict`/`black`/`ruff`/`pip-audit` clean.
   **Next: Step 2 (tool provisioning for the remaining ~34 not-yet-classified agents), Day 4.**
+- **2026-07-28 (same day, continued)**: Step 2 (Tool Provisioning for Tier-B Agents) fully completed
+  and tested — all 25 agents individually classified and made tool-correct against their own role
+  files (5 Executor, 2 Editor, 18 Analyzer). Fixed the dead-contract bug (24 agents), added 4 new
+  scoped-bash tools (`TEST_RUNNER_BASH_TOOL` shared by 3 agents, `LOAD_TEST_BASH_TOOL`,
+  `INFRA_DRY_RUN_BASH_TOOL`), reused already-real `edit_file`/`yaml_validate` handlers for 2 more.
+  Two real corrections made against MASTER_AGENT_v2.md's own spec text, both caught by verifying
+  against the actual codebase rather than trusting the abstract plan: `localization_agent` was
+  spec-named Editor-tier but its role file explicitly forbids editing (stayed Analyzer);
+  `test_coverage_agent` wasn't spec-named at all but its role file requires real coverage-tool
+  execution (upgraded to a read-only Executor variant). One real, existing security boundary
+  discovered and respected rather than worked around: `terraform`/`kubectl` are blocked fleet-wide
+  by policy with no dry-run exception — `infra_agent` was scoped to what's actually usable
+  (`docker build`/`docker-compose config`/`helm template`/`helm lint`) instead of building
+  unreachable dead code. All 17 Analyzer-tier role files' stale `## Tools` lines regenerated directly
+  from each agent's real `AGENT_CONTRACT` (a hand-written first attempt got 3 agents wrong — caught
+  by a new general-purpose test, not manual inspection). 846 targeted tests green, full local suite
+  re-run (2927 passed / 138 failed, zero new regressions vs. the pre-Step-2 baseline).
+  **Step 1 and Step 2 are both complete. Next: Step 3 (verification, self-critique, continuous
+  replanning), starting a future session per explicit instruction to stop here for today.**

@@ -590,6 +590,209 @@ _QA_ALLOWED_PREFIXES = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Shared test-runner bash — MASTER_AGENT_v2.md Phase 2.1 (Executor tier).
+# Same allowlist-then-denylist pattern make_qa_handlers already uses above,
+# scoped tighter (test commands only, no build/lint) and reused by any agent
+# whose job requires reproducing a failure or verifying a fix by actually
+# running a test — not duplicated per agent.
+# ---------------------------------------------------------------------------
+
+TEST_RUNNER_ALLOWED_PREFIXES = (
+    "pytest",
+    "python -m pytest",
+    "python3 -m pytest",
+    "npm test",
+    "npx jest",
+    "npx vitest",
+)
+
+TEST_RUNNER_BASH_TOOL: dict[str, Any] = {
+    "name": "bash",
+    "description": (
+        "Run a test command to reproduce a failure or verify a fix. Allowed: "
+        "pytest, npm test, npx jest/vitest. No write operations, no deploy commands."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "command": {"type": "string", "description": "Test command to run"},
+        },
+        "required": ["command"],
+    },
+}
+
+
+def make_test_runner_bash_handler(
+    worktree_path: str,
+) -> Callable[[dict[str, Any]], str]:
+    """Scoped bash handler for agents that only need to run tests (reproduce
+    a failure, or verify a fix). Never raises — a command outside the
+    allowlist returns a [POLICY DENIED] string, matching every other
+    scoped-bash handler's own contract."""
+    venv_bin = str(Path(sys.executable).parent)
+    env_with_venv = os.environ.copy()
+    env_with_venv["PATH"] = venv_bin + ":" + env_with_venv.get("PATH", "")
+
+    def bash(inp: dict[str, Any]) -> str:
+        cmd = str(inp["command"])
+        policy = check_allowlisted_command(cmd, TEST_RUNNER_ALLOWED_PREFIXES)
+        if not policy.allowed:
+            return f"[POLICY DENIED] {policy.reason}"
+        try:
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=worktree_path,
+                env=env_with_venv,
+                timeout=120,
+            )
+            out = (result.stdout + result.stderr)[:6000]
+            return out if out else "(no output)"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] Command timed out after 120s"
+
+    return bash
+
+
+# ---------------------------------------------------------------------------
+# Scoped load-test bash — MASTER_AGENT_v2.md Phase 2.1 (Executor tier).
+# k6/locust only. Real load tests run long; this tool's job is letting the
+# agent execute a short smoke run of the script it just wrote to confirm it
+# actually runs against the target (catches syntax errors, wrong URLs,
+# schema mismatches) — not to run the full-scale load test unattended.
+# ---------------------------------------------------------------------------
+
+LOAD_TEST_ALLOWED_PREFIXES = (
+    "k6 run",
+    "locust",
+)
+
+LOAD_TEST_BASH_TOOL: dict[str, Any] = {
+    "name": "bash",
+    "description": (
+        "Run a k6 or Locust load test script — use this for a short smoke run "
+        "(low duration/VU flags) to confirm the script actually executes against "
+        "the target before handing it off, not to run the full-scale load test. "
+        "Allowed: k6 run, locust. No write operations, no deploy commands."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "command": {"type": "string", "description": "k6/locust command to run"},
+        },
+        "required": ["command"],
+    },
+}
+
+
+def make_load_test_bash_handler(repo_path: str) -> Callable[[dict[str, Any]], str]:
+    """Scoped bash handler for load_test_agent — same allowlist-then-denylist
+    pattern as make_test_runner_bash_handler, scoped to k6/locust instead of
+    pytest/npm. A missing k6/locust binary is reported as command output
+    (non-zero exit + stderr), not an exception — the agent can see and
+    report that the tool isn't installed rather than the run crashing."""
+
+    def bash(inp: dict[str, Any]) -> str:
+        cmd = str(inp["command"])
+        policy = check_allowlisted_command(cmd, LOAD_TEST_ALLOWED_PREFIXES)
+        if not policy.allowed:
+            return f"[POLICY DENIED] {policy.reason}"
+        try:
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=repo_path,
+                timeout=120,
+            )
+            out = (result.stdout + result.stderr)[:6000]
+            return out if out else "(no output)"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] Command timed out after 120s"
+
+    return bash
+
+
+# ---------------------------------------------------------------------------
+# Scoped infra dry-run bash — MASTER_AGENT_v2.md Phase 2.1 (Executor tier).
+# Validate/lint/build only — no apply, no deploy, no push. This is the exact
+# boundary the spec calls for: "must be able to apply and verify an infra
+# change in a sandboxed/dry-run mode at minimum" — dry-run, not apply.
+#
+# terraform and kubectl are deliberately absent from this allowlist: both
+# are already unconditionally blocked for every agent in the fleet by
+# app/policy/engine.py's own _DENIED_COMMAND_PATTERNS (r"\bterraform\b",
+# r"\bkubectl\b" — verified directly, no dry-run/plan carve-out exists
+# there). That is a real, existing, fleet-wide security boundary this tool
+# does not override — building a carve-out into the shared denylist is a
+# separate, security-sensitive change that deserves its own review, not
+# something to fold silently into per-agent tool provisioning. Scoped to
+# what's actually real today: docker build (validates a Dockerfile builds),
+# docker-compose config (validates compose file syntax/interpolation), helm
+# template/lint (validates a chart renders/lints without installing it).
+# ---------------------------------------------------------------------------
+
+INFRA_DRY_RUN_ALLOWED_PREFIXES = (
+    "docker build",
+    "docker-compose config",
+    "helm template",
+    "helm lint",
+)
+
+INFRA_DRY_RUN_BASH_TOOL: dict[str, Any] = {
+    "name": "bash",
+    "description": (
+        "Run an infrastructure validation command in dry-run/lint mode only. "
+        "Allowed: docker build, docker-compose config, helm template, helm lint. "
+        "terraform and kubectl are not available here — they are blocked fleet-wide "
+        "by policy, with no dry-run exception. Never deploy, push, or otherwise "
+        "change live infrastructure."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "description": "Dry-run/plan/validate command to run",
+            },
+        },
+        "required": ["command"],
+    },
+}
+
+
+def make_infra_dry_run_bash_handler(repo_path: str) -> Callable[[dict[str, Any]], str]:
+    """Scoped bash handler for infra_agent — same allowlist-then-denylist
+    pattern as the other scoped-bash handlers, restricted to plan/validate/
+    lint commands. A missing terraform/docker/kubectl/helm binary is
+    reported as command output, not an exception."""
+
+    def bash(inp: dict[str, Any]) -> str:
+        cmd = str(inp["command"])
+        policy = check_allowlisted_command(cmd, INFRA_DRY_RUN_ALLOWED_PREFIXES)
+        if not policy.allowed:
+            return f"[POLICY DENIED] {policy.reason}"
+        try:
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=repo_path,
+                timeout=120,
+            )
+            out = (result.stdout + result.stderr)[:6000]
+            return out if out else "(no output)"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] Command timed out after 120s"
+
+    return bash
+
+
 # --- Tool handlers ---
 
 

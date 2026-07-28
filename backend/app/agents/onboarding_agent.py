@@ -8,6 +8,9 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
+    _EDIT_FILE_TOOL_SPEC,
+    _LIST_FUNCTIONS_TOOL,
+    _PARSE_AST_TOOL,
     READ_ONLY_TOOLS,
     RECORD_LEARNING_TOOL,
     make_chat_handlers,
@@ -36,12 +39,16 @@ AGENT_CONTRACT: dict[str, Any] = {
         "find_todos",
         "search_imports",
         "write_file",
+        "edit_file",
         "submit_onboarding_agent",
         "record_learning",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
-    "side_effects": ["writes onboarding documentation"],
+    "side_effects": [
+        "writes onboarding documentation",
+        "edits an existing onboarding guide",
+    ],
     "permissions": ["read_repo", "write_docs"],
     "risk_level": "low",
     "expected_verification": {
@@ -72,7 +79,14 @@ _WRITE = {
         "required": ["path", "content"],
     },
 }
-_TOOLS = READ_ONLY_TOOLS + [_WRITE, _SUBMIT, RECORD_LEARNING_TOOL]
+_TOOLS = READ_ONLY_TOOLS + [
+    _WRITE,
+    _SUBMIT,
+    RECORD_LEARNING_TOOL,
+    _LIST_FUNCTIONS_TOOL,
+    _PARSE_AST_TOOL,
+    _EDIT_FILE_TOOL_SPEC,
+]
 
 _CFG = VerificationConfig(
     set_by={"read_file": "read", "get_file_tree": "read", "list_files": "read"},
@@ -116,7 +130,7 @@ def run_onboarding_agent(
         "3. Write the minimum onboarding guide that gets a new developer to a running dev environment.\n"
         "4. Every command in the guide must come from files read in this session — never invent steps.\n"
         "5. The guide's final step must have a verifiable outcome (e.g., 'curl /health → {status: ok}').\n"
-        "6. Write the guide with write_file.\n"
+        "6. Write the guide with write_file, or edit_file if updating an existing one.\n"
         "7. Call submit_onboarding_agent with summary, findings, and recommendations."
     )
 
