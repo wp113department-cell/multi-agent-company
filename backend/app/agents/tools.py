@@ -3930,6 +3930,9 @@ def make_docker_agent_handlers(repo_path: str) -> dict[str, Any]:
             for d in ["rm ", "kill", "stop", "restart", "drop", "delete", "truncate"]
         ):
             return f"[POLICY DENIED] Docker exec not allowed: {de_cmd!r}"
+        de_risk = _docker_container_risk_reason(de_container)
+        if de_risk:
+            return f"[POLICY DENIED] {de_risk}"
         r = subprocess.run(
             ["docker", "exec", de_container] + de_cmd.split(),
             capture_output=True,
@@ -6739,6 +6742,141 @@ def _is_protected_path(path: str, worktree_path: str = "") -> bool:
     return not check_path(path).allowed
 
 
+_SHELL_METACHARS_RE = None  # set on first use — avoids a module-level `re` import
+
+
+def _shell_metachar_reason(value: str, field: str) -> str | None:
+    """Reject shell metacharacters in a value meant to be a literal CLI
+    flag/arg (e.g. pytest/ruff/mypy flags), not an arbitrary shell fragment.
+
+    Used for values that get f-string-interpolated into a `shell=True`
+    command as multiple space-separated tokens, where shlex.quote() can't be
+    applied to the whole string without collapsing it into one argument.
+    Returns a denial reason string, or None if the value is safe.
+    """
+    global _SHELL_METACHARS_RE
+    if _SHELL_METACHARS_RE is None:
+        import re as _re
+
+        _SHELL_METACHARS_RE = _re.compile(r"[;&|`$><(){}\n]")
+    m = _SHELL_METACHARS_RE.search(value)
+    if m:
+        return f"{field} contains disallowed shell metacharacter {m.group()!r}"
+    return None
+
+
+_SECRET_NAME_RE = None
+_SECRET_VALUE_RE = None
+
+
+def _mask_secret_value(name: str, value: str) -> str:
+    """Mask a value if it looks like a secret, showing only a short prefix.
+
+    Triggers on secret-shaped env var names (KEY, SECRET, TOKEN, PASSWORD,
+    PWD, CREDENTIAL, AUTH, PRIVATE) or values matching known secret shapes
+    (sk-..., AKIA..., gh_-style tokens) or generic long opaque tokens.
+    """
+    global _SECRET_NAME_RE, _SECRET_VALUE_RE
+    if _SECRET_NAME_RE is None:
+        import re as _re
+
+        _SECRET_NAME_RE = _re.compile(
+            r"(KEY|SECRET|TOKEN|PASSWORD|PWD|CREDENTIAL|AUTH|PRIVATE)", _re.IGNORECASE
+        )
+        _SECRET_VALUE_RE = _re.compile(
+            r"^(sk-|AKIA|gh[opsu]_|xox[baprs]-)", _re.IGNORECASE
+        )
+    if not value:
+        return value
+    looks_secret = bool(_SECRET_NAME_RE.search(name)) or bool(
+        _SECRET_VALUE_RE.match(value)
+    )
+    if not looks_secret and len(value) > 20:
+        import re as _re
+
+        if _re.fullmatch(r"[A-Za-z0-9_\-./+=]{20,}", value):
+            looks_secret = True
+    if not looks_secret:
+        return value
+    prefix = value[:6]
+    return f"{prefix}***REDACTED"
+
+
+_SENSITIVE_HOST_MOUNT_PATHS = (
+    "/etc",
+    "/root",
+    "/var/run/docker.sock",
+    "/proc",
+    "/sys",
+    "/home",
+    "/boot",
+)
+
+
+def _docker_container_risk_reason(container: str) -> str | None:
+    """Inspect a running container for host-escape surface before allowing
+    docker_exec into it: --privileged, --pid=host, dangerous added
+    capabilities, or a bind-mount of a sensitive host path (including a
+    bare '/'). Returns a denial reason, or None if nothing suspicious was
+    found. Fails closed (denies) if the container can't be inspected at
+    all — safer than executing blind into an unverifiable target.
+
+    Scope note: this only examines a container's *existing* configuration.
+    It cannot stop a caller who can also create containers (e.g. via
+    `docker compose up` against a compose file it just wrote) from first
+    building a privileged one — that's a container-*creation* control,
+    not an exec-time one, and needs to be enforced separately wherever
+    container creation is reachable.
+    """
+    import json as _json
+
+    try:
+        r = subprocess.run(
+            ["docker", "inspect", container],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception as e:
+        return f"could not inspect container {container!r} before exec: {e}"
+    if r.returncode != 0:
+        detail = (r.stderr or r.stdout).strip()[:200]
+        return f"could not inspect container {container!r} before exec: {detail}"
+    try:
+        data = _json.loads(r.stdout)
+    except Exception as e:
+        return f"could not parse docker inspect output for {container!r}: {e}"
+    if not data:
+        return f"docker inspect returned no data for container {container!r}"
+
+    info = data[0]
+    host_config = info.get("HostConfig") or {}
+
+    if host_config.get("Privileged"):
+        return f"container {container!r} is running with --privileged"
+
+    if host_config.get("PidMode") == "host":
+        return f"container {container!r} shares the host PID namespace (--pid=host)"
+
+    cap_add = [str(c).upper() for c in (host_config.get("CapAdd") or [])]
+    if "ALL" in cap_add or "SYS_ADMIN" in cap_add:
+        return f"container {container!r} has dangerous added capabilities: {cap_add}"
+
+    for m in info.get("Mounts") or []:
+        src = str(m.get("Source", ""))
+        if not src:
+            continue
+        if src == "/" or any(
+            src == p or src.startswith(p + "/") for p in _SENSITIVE_HOST_MOUNT_PATHS
+        ):
+            return (
+                f"container {container!r} has a sensitive host mount: "
+                f"{src!r} -> {m.get('Destination')!r}"
+            )
+
+    return None
+
+
 def task_history_query(inp: dict[str, Any]) -> str:
     """Query recent task history from task_logs. Standalone (not repo-scoped) so any
     agent can reuse it, not just chat."""
@@ -7250,17 +7388,24 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     # ---- run_tests ----
     def run_tests(inp: dict[str, Any]) -> str:
+        import shlex as _shlex
+
         runner = str(inp.get("runner", "pytest"))
         path = str(inp.get("path", ""))
         flags = str(inp.get("flags", ""))
 
+        flags_reason = _shell_metachar_reason(flags, "flags")
+        if flags_reason:
+            return f"[POLICY DENIED] {flags_reason}"
+        qpath = _shlex.quote(path) if path else ""
+
         if runner == "pytest":
-            cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true && python -m pytest {path} {flags} --tb=short -q 2>&1 | head -100"
+            cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true && python -m pytest {qpath} {flags} --tb=short -q 2>&1 | head -100"
         elif runner == "npm_test":
-            web_path = str(root.parent / "apps" / "web") if not path else path
+            web_path = str(root.parent / "apps" / "web") if not path else qpath
             cmd = f"cd {web_path} && npm test {flags} 2>&1 | head -100"
         elif runner == "tsc":
-            web_path = str(root.parent / "apps" / "web") if not path else path
+            web_path = str(root.parent / "apps" / "web") if not path else qpath
             cmd = f"cd {web_path} && npx tsc --noEmit {flags} 2>&1 | head -100"
         else:
             return f"[ERROR] Unknown runner: {runner}"
@@ -7278,13 +7423,16 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     # ---- run_linter ----
     def run_linter(inp: dict[str, Any]) -> str:
+        import shlex as _shlex
+
         tool = str(inp.get("tool", "all"))
         path = str(inp.get("path", ""))
         fix = bool(inp.get("fix", False))
         results: list[str] = []
+        qpath = _shlex.quote(path) if path else ""
 
         if tool in ("ruff", "all"):
-            target = path or f"{repo_path}"
+            target = qpath or f"{repo_path}"
             fix_flag = "--fix" if fix else ""
             cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true && python -m ruff check {target} {fix_flag} 2>&1 | head -50"
             r = subprocess.run(
@@ -7293,7 +7441,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             results.append(f"=== ruff ===\n{(r.stdout + r.stderr)[:2000] or 'clean'}")
 
         if tool in ("mypy", "all"):
-            target = path or f"{repo_path}"
+            target = qpath or f"{repo_path}"
             cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true && python -m mypy {target} --ignore-missing-imports 2>&1 | head -50"
             r = subprocess.run(
                 cmd, shell=True, capture_output=True, text=True, timeout=90
@@ -7309,7 +7457,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             results.append(f"=== tsc ===\n{(r.stdout + r.stderr)[:2000] or 'clean'}")
 
         if tool == "black":
-            target = path or f"{repo_path}"
+            target = qpath or f"{repo_path}"
             cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true && python -m black {'--check' if not fix else ''} {target} 2>&1 | head -50"
             r = subprocess.run(
                 cmd, shell=True, capture_output=True, text=True, timeout=60
@@ -7366,6 +7514,8 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] {e}"
 
     def format_file(inp: dict[str, Any]) -> str:
+        import shlex as _shlex
+
         rel = str(inp["path"])
         formatter = str(inp.get("formatter", "auto"))
         fmt_target = root / rel
@@ -7374,10 +7524,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         if formatter == "auto":
             formatter = "ruff" if fmt_target.suffix == ".py" else "prettier"
         activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
+        quoted_target = _shlex.quote(str(fmt_target))
         if formatter in ("ruff", "black"):
-            cmd = f"{activate} && python -m {formatter} format {str(fmt_target)} 2>&1"
+            cmd = f"{activate} && python -m {formatter} format {quoted_target} 2>&1"
         elif formatter == "prettier":
-            cmd = f"cd {repo_path} && npx prettier --write {str(fmt_target)} 2>&1"
+            cmd = f"cd {repo_path} && npx prettier --write {quoted_target} 2>&1"
         else:
             return f"[ERROR] Unknown formatter: {formatter}"
         r = subprocess.run(
@@ -7386,13 +7537,16 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         return (r.stdout + r.stderr).strip() or f"Formatted {rel}"
 
     def organize_imports(inp: dict[str, Any]) -> str:
+        import shlex as _shlex
+
         rel = str(inp["path"])
         oi_target = root / rel
         if not oi_target.exists():
             return f"[ERROR] File not found: {rel}"
         activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
         cmd = (
-            f"{activate} && python -m ruff check --select I --fix {str(oi_target)} 2>&1"
+            f"{activate} && python -m ruff check --select I --fix "
+            f"{_shlex.quote(str(oi_target))} 2>&1"
         )
         r = subprocess.run(
             cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=30
@@ -7549,6 +7703,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def run_background(inp: dict[str, Any]) -> str:
         rb_command = str(inp["command"])
         rb_cwd = str(inp.get("cwd") or repo_path)
+        rb_policy = check_command(rb_command)
+        if not rb_policy.allowed:
+            return f"[POLICY DENIED] {rb_policy.reason}"
         try:
             proc = subprocess.Popen(
                 rb_command,
@@ -7811,13 +7968,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # =========================================================================
 
     def run_single_test(inp: dict[str, Any]) -> str:
+        import shlex as _shlex
+
         rst_kw = str(inp["keyword"])
         rst_file = str(inp.get("file", ""))
         rst_verbose = bool(inp.get("verbose", True))
         rst_vflag = "-v" if rst_verbose else "-q"
         activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
         rst_path = rst_file if rst_file else "backend/tests/"
-        cmd = f"{activate} && python -m pytest {rst_path} -k '{rst_kw}' {rst_vflag} --tb=short 2>&1 | head -100"
+        cmd = f"{activate} && python -m pytest {_shlex.quote(rst_path)} -k {_shlex.quote(rst_kw)} {rst_vflag} --tb=short 2>&1 | head -100"
         try:
             r = subprocess.run(
                 cmd,
@@ -7834,14 +7993,21 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] {e}"
 
     def coverage_report(inp: dict[str, Any]) -> str:
+        import shlex as _shlex
+
         cov_path = str(inp.get("path", "backend/tests/"))
         cov_source = str(inp.get("source", "backend/app/"))
         cov_min = inp.get("min_coverage")
         activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
-        min_flag = f"--cov-fail-under={cov_min}" if cov_min else ""
+        min_flag = ""
+        if cov_min:
+            try:
+                min_flag = f"--cov-fail-under={int(cov_min)}"
+            except (TypeError, ValueError):
+                return f"[ERROR] min_coverage must be a number, got: {cov_min!r}"
         cmd = (
-            f"{activate} && python -m pytest {cov_path} "
-            f"--cov={cov_source} --cov-report=term-missing {min_flag} "
+            f"{activate} && python -m pytest {_shlex.quote(cov_path)} "
+            f"--cov={_shlex.quote(cov_source)} --cov-report=term-missing {min_flag} "
             f"--tb=no -q 2>&1 | tail -50"
         )
         try:
@@ -7860,13 +8026,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] {e}"
 
     def type_check(inp: dict[str, Any]) -> str:
+        import shlex as _shlex
+
         tc_path = str(inp.get("path", ""))
         tc_strict = bool(inp.get("strict", False))
         tc_lang = str(inp.get("language", "both"))
         activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
         tc_results: list[str] = []
         if tc_lang in ("python", "both"):
-            py_path = tc_path or "backend/"
+            py_path = _shlex.quote(tc_path) if tc_path else "backend/"
             strict_flag = "--strict" if tc_strict else "--ignore-missing-imports"
             cmd = (
                 f"{activate} && python -m mypy {py_path} {strict_flag} 2>&1 | head -60"
@@ -8214,6 +8382,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def docker_exec(inp: dict[str, Any]) -> str:
         de_container = str(inp["container"])
         de_command = str(inp["command"])
+        de_policy = check_command(de_command)
+        if not de_policy.allowed:
+            return f"[POLICY DENIED] {de_policy.reason}"
+        de_risk = _docker_container_risk_reason(de_container)
+        if de_risk:
+            return f"[POLICY DENIED] {de_risk}"
         try:
             r = subprocess.run(
                 ["docker", "exec", de_container, "sh", "-c", de_command],
@@ -8235,6 +8409,52 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         dc_detach = bool(inp.get("detach", True))
         dc_cmd = ["docker", "compose"]
         if dc_action == "up":
+            # Gap-closure: "up" creates/starts containers from whatever
+            # docker-compose.yml currently sits in the repo — including one
+            # this same agent could have just written via write_file, with
+            # no restriction on privileged:/pid: host/cap_add/host mounts.
+            # docker_exec's own risk-inspection guard only ever sees a
+            # container *after* it exists; this is the actual creation step,
+            # so it's gated the same way run_migration/seed_database/
+            # undo_changes already gate their own irreversible-ish actions
+            # in this file: require human confirmation, hard-block if no
+            # interactive session is available to ask.
+            import asyncio
+            import uuid as _uuid
+
+            if session is None:
+                return "[BLOCKED] docker_compose('up') requires interactive session for safety confirmation"
+
+            dc_cmd_preview = "docker compose up" + (
+                " -d" if dc_detach else ""
+            ) + (f" {' '.join(dc_services)}" if dc_services else "")
+            dc_action_id = str(_uuid.uuid4())
+            try:
+                dc_loop = asyncio.get_event_loop()
+                if dc_loop.is_running():
+                    dc_fut = asyncio.run_coroutine_threadsafe(
+                        session.request_confirmation(
+                            action_id=dc_action_id,
+                            description="Start containers via docker compose up",
+                            details=dc_cmd_preview,
+                        ),
+                        dc_loop,
+                    )
+                    dc_approved = dc_fut.result(timeout=300)
+                else:
+                    dc_approved = dc_loop.run_until_complete(
+                        session.request_confirmation(
+                            action_id=dc_action_id,
+                            description="Start containers via docker compose up",
+                            details=dc_cmd_preview,
+                        )
+                    )
+            except Exception as exc:
+                return f"[ERROR] Confirmation failed: {exc}"
+
+            if not dc_approved:
+                return "[DENIED] User declined docker compose up"
+
             dc_cmd.append("up")
             if dc_detach:
                 dc_cmd.append("-d")
@@ -10420,7 +10640,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def read_env_var_h(inp: dict[str, Any]) -> str:
         name = str(inp["name"])
         val = os.environ.get(name)
-        return f"{name}={val}" if val is not None else f"{name}=[NOT SET]"
+        if val is None:
+            return f"{name}=[NOT SET]"
+        return f"{name}={_mask_secret_value(name, val)}"
 
     def list_env_vars_h(inp: dict[str, Any]) -> str:
         names = sorted(os.environ.keys())
@@ -11313,9 +11535,14 @@ def make_fleet_apply_handlers(repo_path: str) -> dict[str, Any]:
         return f"Edited {rel}"
 
     def run_tests_h(inp: dict[str, Any]) -> str:
+        import shlex as _shlex
+
         path = str(inp.get("path", "backend/tests/"))
         flags = str(inp.get("flags", ""))
-        cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null; python -m pytest {path} {flags} -q --tb=short 2>&1 | tail -50"
+        flags_reason = _shell_metachar_reason(flags, "flags")
+        if flags_reason:
+            return f"[POLICY DENIED] {flags_reason}"
+        cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null; python -m pytest {_shlex.quote(path)} {flags} -q --tb=short 2>&1 | tail -50"
         try:
             r = subprocess.run(
                 cmd, shell=True, capture_output=True, text=True, timeout=180
