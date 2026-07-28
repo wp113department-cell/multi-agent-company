@@ -209,6 +209,82 @@ class ChatAgent:
         return anthropic.AsyncAnthropic(api_key=get_effective_api_key())
 
     # ------------------------------------------------------------------
+    # Unified memory read/write — MASTER_AGENT_v2.md Phase 1.1/3.3.
+    # chat_agent.py's own LangGraph conversion is deliberately deferred to
+    # Phase 5 (it never calls run_agent_graph, so it gets none of
+    # memory_hook_node's/the universal post-run hook's wiring "for free").
+    # Applying just the memory read/write behavior now — not the structural
+    # conversion — is what Phase 3.3 explicitly asks for. `run()` is called
+    # once per user message, so that's this agent's real unit of "a run":
+    # one memory read before the turn, one outcome write after it.
+    # ------------------------------------------------------------------
+
+    async def _memory_read_context(self, query: str) -> str:
+        """Fetch relevant past memory for this specific message — same
+        sources memory_hook_node already queries for every run_agent_graph
+        agent. Non-fatal: any failure returns "" so a broken memory backend
+        can never break a chat turn."""
+        try:
+            from sqlalchemy.ext.asyncio import async_sessionmaker
+
+            from app.db.session import new_isolated_async_engine
+            from app.memory.store import (
+                format_full_memory_context,
+                query_memory_context,
+            )
+
+            engine = new_isolated_async_engine()
+            try:
+                async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                    mem = await query_memory_context(query, db)
+            finally:
+                await engine.dispose()
+            return format_full_memory_context(
+                mem["tasks"],
+                mem["failures"],
+                mem["learnings"],
+                mem.get("procedures", []),
+            )
+        except Exception:
+            logger.debug("ChatAgent memory read skipped (non-fatal)", exc_info=True)
+            return ""
+
+    async def _memory_write_outcome(
+        self, description: str, summary: str, error: str | None
+    ) -> None:
+        """Write this turn's outcome to shared memory — the write-side
+        counterpart to _memory_read_context. Non-fatal by design, matching
+        every other post-run memory hook in this codebase."""
+        try:
+            from sqlalchemy.ext.asyncio import async_sessionmaker
+
+            from app.db.session import new_isolated_async_engine
+            from app.memory.store import embed_failure, embed_task_outcome
+
+            engine = new_isolated_async_engine()
+            try:
+                async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                    await embed_task_outcome(
+                        task_id=self.session.session_id,
+                        description=description,
+                        summary=summary or (error or ""),
+                        outcome="blocked" if error else "completed",
+                        files_changed=[],
+                        db=db,
+                    )
+                    if error:
+                        await embed_failure(
+                            task_id=self.session.session_id,
+                            error_description=error,
+                            root_cause=error,
+                            db=db,
+                        )
+            finally:
+                await engine.dispose()
+        except Exception:
+            logger.debug("ChatAgent memory write skipped (non-fatal)", exc_info=True)
+
+    # ------------------------------------------------------------------
     # Tool execution — dispatches all 36 CHAT_TOOLS
     # ------------------------------------------------------------------
 
@@ -2084,6 +2160,14 @@ class ChatAgent:
         client = self._client()
         settings = get_settings()
 
+        memory_block = await self._memory_read_context(user_message)
+        system_prompt = (
+            f"{self._system}\n\n{memory_block}" if memory_block else self._system
+        )
+
+        last_error: str | None = None
+        final_text = ""
+
         for iteration in range(self.MAX_ITERATIONS):
             await self.session.push({"type": "thinking", "iteration": iteration})
 
@@ -2099,7 +2183,7 @@ class ChatAgent:
                 async with client.messages.stream(
                     model=settings.model_coder,
                     max_tokens=8192,
-                    system=self._system,
+                    system=system_prompt,
                     messages=sdk_messages,
                     tools=sdk_tools,
                 ) as stream:
@@ -2128,15 +2212,18 @@ class ChatAgent:
                 await self.session.push(
                     {"type": "error", "message": f"API error: {e.message}"}
                 )
+                last_error = f"API error: {e.message}"
                 break
             except Exception as e:
                 await self.session.push({"type": "error", "message": str(e)})
                 logger.exception("Chat agent error on iteration %d", iteration)
+                last_error = str(e)
                 break
 
             # Append assistant turn to history
             turn_content: list[dict[str, Any]] = []
             if full_text:
+                final_text = full_text
                 turn_content.append({"type": "text", "text": full_text})
             for tu in tool_uses:
                 turn_content.append(
@@ -2190,4 +2277,5 @@ class ChatAgent:
 
             self.session.history.append({"role": "user", "content": tool_results})
 
+        await self._memory_write_outcome(user_message, final_text, last_error)
         await self.session.push({"type": "done"})

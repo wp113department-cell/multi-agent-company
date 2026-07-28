@@ -209,16 +209,20 @@ class TestAgentSwitchWiredAtRealTransitions:
 
         with patch(
             "app.agents.backend_dev.run_backend_dev",
-            side_effect=lambda **kw: (["a.py"], None),
+            side_effect=lambda **kw: (["a.py"], None, 10, 5),
         ), patch(
             "app.agents.qa.run_qa",
             side_effect=lambda **kw: MagicMock(
-                status="passed", summary="ok", errors=[]
+                status="passed", summary="ok", errors=[], tokens_in=3, tokens_out=2
             ),
         ), patch(
             "app.agents.reviewer.run_reviewer",
             side_effect=lambda **kw: MagicMock(
-                summary="ok", findings=[], has_blocking=False
+                summary="ok",
+                findings=[],
+                has_blocking=False,
+                tokens_in=1,
+                tokens_out=1,
             ),
         ), patch(
             "app.repo_tools.worktree.get_diff", return_value=""

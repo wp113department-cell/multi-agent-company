@@ -118,7 +118,7 @@ async def dispatch_subtask(
     if subtask_type == "frontend":
         from app.agents.frontend_dev import run_frontend_dev
 
-        files_changed, error = run_frontend_dev(
+        files_changed, error, tokens_in, tokens_out = run_frontend_dev(
             task_id=task_id,
             subtask_id=subtask_id,
             plan=subtask_plan,
@@ -136,11 +136,17 @@ async def dispatch_subtask(
             repo_path=repo,
         )
         error = None if qa_result.status == "passed" else qa_result.summary
-        return {"files_changed": [], "error": error, "agent": "qa"}
+        return {
+            "files_changed": [],
+            "error": error,
+            "agent": "qa",
+            "tokens_in": qa_result.tokens_in,
+            "tokens_out": qa_result.tokens_out,
+        }
     else:
         from app.agents.backend_dev import run_backend_dev
 
-        files_changed, error = run_backend_dev(
+        files_changed, error, tokens_in, tokens_out = run_backend_dev(
             task_id=task_id,
             subtask_id=subtask_id,
             plan=subtask_plan,
@@ -148,4 +154,10 @@ async def dispatch_subtask(
             repo_path=repo,
         )
 
-    return {"files_changed": files_changed, "error": error, "agent": agent_name}
+    return {
+        "files_changed": files_changed,
+        "error": error,
+        "agent": agent_name,
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
+    }

@@ -47,11 +47,11 @@ async def test_dispatch_backend_subtask_calls_backend_dev(
         worktree_path: str,
         repo_path: object = None,
         **kw: object,
-    ) -> tuple[list[str], None]:
+    ) -> tuple[list[str], None, int, int]:
         called_with["task_id"] = task_id
         called_with["subtask_id"] = subtask_id
         called_with["agent"] = "backend_dev"
-        return ["app/api/foo.py"], None
+        return ["app/api/foo.py"], None, 100, 50
 
     monkeypatch.setattr("app.agents.backend_dev.run_backend_dev", fake_run_backend_dev)
     # dispatcher imports lazily, so patch at the source
@@ -70,6 +70,10 @@ async def test_dispatch_backend_subtask_calls_backend_dev(
     assert result["agent"] == "backend_dev"
     assert result["error"] is None
     assert "app/api/foo.py" in result["files_changed"]
+    # MASTER_AGENT_v2.md Phase 3.2 — real token counts must flow through to
+    # the dispatcher's result dict, not be dropped at the unpacking site.
+    assert result["tokens_in"] == 100
+    assert result["tokens_out"] == 50
 
 
 @pytest.mark.asyncio
@@ -86,9 +90,9 @@ async def test_dispatch_frontend_subtask_calls_frontend_dev(
         worktree_path: str,
         repo_path: object = None,
         **kw: object,
-    ) -> tuple[list[str], None]:
+    ) -> tuple[list[str], None, int, int]:
         called.append("frontend_dev")
-        return ["apps/web/components/Users.tsx"], None
+        return ["apps/web/components/Users.tsx"], None, 100, 50
 
     import app.agents.frontend_dev as frontend_dev_mod
 
@@ -103,6 +107,8 @@ async def test_dispatch_frontend_subtask_calls_frontend_dev(
 
     assert result["agent"] == "frontend_dev"
     assert "apps/web/components/Users.tsx" in result["files_changed"]
+    assert result["tokens_in"] == 100
+    assert result["tokens_out"] == 50
 
 
 @pytest.mark.asyncio
@@ -125,6 +131,8 @@ async def test_dispatch_test_subtask_calls_qa(monkeypatch: pytest.MonkeyPatch) -
             typecheck_clean=True,
             lint_clean=True,
             summary="All tests passed",
+            tokens_in=30,
+            tokens_out=15,
         )
 
     import app.agents.qa as qa_mod
@@ -140,6 +148,8 @@ async def test_dispatch_test_subtask_calls_qa(monkeypatch: pytest.MonkeyPatch) -
 
     assert result["agent"] == "qa"
     assert result["error"] is None
+    assert result["tokens_in"] == 30
+    assert result["tokens_out"] == 15
 
 
 @pytest.mark.asyncio

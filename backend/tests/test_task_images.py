@@ -322,7 +322,7 @@ class TestImagesForwardedToDevAgents:
         ), patch(
             "app.agents.frontend_dev._run_frontend_checks", return_value=None
         ):
-            files, error = run_frontend_dev(
+            files, error, _tokens_in, _tokens_out = run_frontend_dev(
                 1, 1, "Build the page", "/tmp/wt", images=images
             )
 

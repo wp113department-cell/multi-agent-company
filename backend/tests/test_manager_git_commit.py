@@ -60,7 +60,7 @@ def test_run_manager_commits_dev_agent_changes_to_real_worktree_branch(
     ) as mock_qa, patch("app.agents.reviewer.run_reviewer") as mock_reviewer, patch(
         "app.repo_tools.worktree.get_diff", return_value=""
     ):
-        mock_backend_dev.return_value = (["feature.py"], None)
+        mock_backend_dev.return_value = (["feature.py"], None, 100, 50)
         mock_qa.return_value = QAResult(
             status="passed",
             tests_run=1,
@@ -69,8 +69,12 @@ def test_run_manager_commits_dev_agent_changes_to_real_worktree_branch(
             typecheck_clean=True,
             lint_clean=True,
             summary="ok",
+            tokens_in=20,
+            tokens_out=10,
         )
-        mock_reviewer.return_value = ReviewResult(verdict="approved", summary="ok")
+        mock_reviewer.return_value = ReviewResult(
+            verdict="approved", summary="ok", tokens_in=15, tokens_out=5
+        )
 
         result = asyncio.run(
             run_manager(
@@ -90,6 +94,11 @@ def test_run_manager_commits_dev_agent_changes_to_real_worktree_branch(
         )
 
     assert result["status"] == "completed"
+    # MASTER_AGENT_v2.md Phase 3.2 — real per-agent tokens (dev + qa +
+    # reviewer) must be accumulated into the epic-wide total run_manager()
+    # returns: 100+20+15 in, 50+10+5 out.
+    assert result["tokens_in"] == 135
+    assert result["tokens_out"] == 65
 
     # The real assertion: the branch must have actually advanced with a real commit.
     log = subprocess.run(
@@ -136,7 +145,7 @@ def test_run_manager_continues_when_commit_fails(
     ) as mock_qa, patch("app.agents.reviewer.run_reviewer") as mock_reviewer, patch(
         "app.repo_tools.worktree.get_diff", return_value=""
     ):
-        mock_backend_dev.return_value = (["nonexistent_file.py"], None)
+        mock_backend_dev.return_value = (["nonexistent_file.py"], None, 100, 50)
         mock_qa.return_value = QAResult(
             status="passed",
             tests_run=1,

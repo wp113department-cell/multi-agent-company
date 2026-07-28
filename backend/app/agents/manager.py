@@ -50,6 +50,19 @@ from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 from app.config import get_settings  # noqa: E402
 
 
+def compute_actual_cost_usd(tokens_in: int, tokens_out: int, settings: Any) -> float:
+    """Real epic cost from real accumulated tokens — MASTER_AGENT_v2.md
+    Phase 3.2. Same $/token formula app/pipeline/cost_controller.py's own
+    estimate_epic_cost() uses, so the pre-run estimate and the post-run
+    actual are computed consistently. A pure function (no DB/async) so it's
+    directly unit-testable without mocking the rest of the epic pipeline.
+    """
+    cost: float = tokens_in * settings.cost_per_input_token + tokens_out * (
+        settings.cost_per_output_token
+    )
+    return round(cost, 6)
+
+
 @dataclass
 class SubtaskResult:
     subtask_id: int
@@ -136,6 +149,13 @@ async def run_manager(
     results: list[dict[str, Any]] = []
     overall_status = "completed"
     blocked_count = 0
+    # MASTER_AGENT_v2.md Phase 3.2 — real epic-wide token accumulation. Every
+    # dispatched agent below already computes real tokens_in/tokens_out
+    # (base_graph.py's final_state) — this is what makes run_epic_manager's
+    # cost_actual real instead of a placeholder that silently fell back to
+    # the pre-run estimate.
+    epic_tokens_in = 0
+    epic_tokens_out = 0
 
     # Gap-closure (Audit 04 fix, ORCH-04-011): the "id" field on each subtask
     # dict here is the decomposer's own transient numbering (e.g. 1, 2, 3),
@@ -262,26 +282,32 @@ async def run_manager(
 
             async with agent_run_slot():
                 if subtask_type == "frontend":
-                    files_changed, dev_error = await asyncio.to_thread(
-                        run_frontend_dev,
-                        task_id=task_id,
-                        subtask_id=subtask_id,
-                        plan=full_plan,
-                        worktree_path=worktree_path,
-                        repo_path=repo,
-                        images=images,
-                        extra_env=extra_env,
+                    files_changed, dev_error, dev_tokens_in, dev_tokens_out = (
+                        await asyncio.to_thread(
+                            run_frontend_dev,
+                            task_id=task_id,
+                            subtask_id=subtask_id,
+                            plan=full_plan,
+                            worktree_path=worktree_path,
+                            repo_path=repo,
+                            images=images,
+                            extra_env=extra_env,
+                        )
                     )
                 else:
-                    files_changed, dev_error = await asyncio.to_thread(
-                        run_backend_dev,
-                        task_id=task_id,
-                        subtask_id=subtask_id,
-                        plan=full_plan,
-                        worktree_path=worktree_path,
-                        repo_path=repo,
-                        extra_env=extra_env,
+                    files_changed, dev_error, dev_tokens_in, dev_tokens_out = (
+                        await asyncio.to_thread(
+                            run_backend_dev,
+                            task_id=task_id,
+                            subtask_id=subtask_id,
+                            plan=full_plan,
+                            worktree_path=worktree_path,
+                            repo_path=repo,
+                            extra_env=extra_env,
+                        )
                     )
+            epic_tokens_in += dev_tokens_in
+            epic_tokens_out += dev_tokens_out
 
             if dev_error:
                 qa_errors = [f"Dev agent error: {dev_error}"]
@@ -347,6 +373,8 @@ async def run_manager(
                     worktree_path=worktree_path,
                     repo_path=repo,
                 )
+            epic_tokens_in += qa_result.tokens_in
+            epic_tokens_out += qa_result.tokens_out
             qa_summary = qa_result.summary
 
             if qa_result.status == "failed":
@@ -398,6 +426,8 @@ async def run_manager(
                     repo_path=repo,
                     images=images,
                 )
+            epic_tokens_in += review_result.tokens_in
+            epic_tokens_out += review_result.tokens_out
             review_summary = review_result.summary
             review_findings = [
                 {
@@ -554,6 +584,8 @@ async def run_manager(
         "status": overall_status,
         "results": results,
         "blocked_count": blocked_count,
+        "tokens_in": epic_tokens_in,
+        "tokens_out": epic_tokens_out,
     }
 
 
@@ -772,14 +804,21 @@ async def _run_epic_manager_body(
     results: list[dict[str, Any]] = manager_result["results"]
     blocked_count: int = manager_result["blocked_count"]
 
-    # Collect tokens from agent_runs for cost_actual
-    from sqlalchemy import func as sqlfunc
-
-    token_result = await db.execute(  # noqa: F841
-        select(sqlfunc.sum(DevTask.id))  # placeholder — real token sum via agent_runs
-    )
-    # Approximate: use refined estimate as fallback
-    cost_actual = refined_estimate.estimated_cost_usd
+    # MASTER_AGENT_v2.md Phase 3.2 — real cost_actual from real accumulated
+    # tokens. Before this, the line below did a literal `SELECT SUM(DevTask.id)`
+    # (summing primary keys — meaningless), discarded the result unused, and
+    # fell back to `refined_estimate.estimated_cost_usd` — the pre-run
+    # *estimate* — silently mislabeled as the post-run "actual" cost. The real
+    # numbers were always available: run_manager() now returns the real
+    # tokens_in/tokens_out accumulated across every backend_dev/frontend_dev/
+    # qa/reviewer call made for this epic (each already computes them from
+    # base_graph.py's final_state — they were just being discarded at the
+    # function-return boundary before this fix). Same $/token formula
+    # cost_controller.py's own estimate_epic_cost() already uses, so the
+    # pre-run estimate and the post-run actual are computed consistently.
+    epic_tokens_in: int = manager_result.get("tokens_in", 0)
+    epic_tokens_out: int = manager_result.get("tokens_out", 0)
+    cost_actual = compute_actual_cost_usd(epic_tokens_in, epic_tokens_out, settings)
 
     await db.execute(
         sa_update(Epic)

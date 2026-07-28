@@ -16,9 +16,35 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.agent_result import AgentResult
-from app.memory.store import embed_failure, embed_task_outcome
+from app.memory.store import embed_architecture_note, embed_failure, embed_task_outcome
 
 logger = logging.getLogger(__name__)
+
+# MASTER_AGENT_v2.md Phase 1.1 — "any agent whose role produces a design/
+# architecture decision ... should call this [embed_architecture_note] when
+# it submits, not leave it dark." The spec also says "any agent tagged
+# capabilities=["architecture"]" — verified against the real capability
+# declarations (app/fleet/capability_registry.py) and no agent literally
+# tags "architecture" (architect.py tags "architecture_design"); the named
+# agents below are the real, confirmed criterion, and _has_architecture_capability
+# below covers the tag-based case with the real tag instead of a fabricated one.
+_ARCHITECTURE_AGENT_NAMES = frozenset(
+    {"architect", "database_architect", "security_architect", "api_designer_agent"}
+)
+
+
+def _is_architecture_agent(agent_name: str) -> bool:
+    if agent_name in _ARCHITECTURE_AGENT_NAMES:
+        return True
+    try:
+        from app.fleet.capability_registry import get_capability_registry
+
+        cap = get_capability_registry().get(agent_name)
+        return cap is not None and any(
+            "architecture" in c.lower() for c in cap.capabilities
+        )
+    except Exception:
+        return False
 
 
 async def record_agent_run_outcome(
@@ -72,6 +98,27 @@ async def record_agent_run_outcome(
         except Exception:
             logger.warning(
                 "record_agent_run_outcome: embed_failure failed for %s/%s",
+                agent_name,
+                task_id,
+                exc_info=True,
+            )
+
+    if outcome == "completed" and _is_architecture_agent(agent_name):
+        findings_text = "; ".join(str(f) for f in result.findings[:5])
+        content = (
+            f"{result.summary}\n{findings_text}" if findings_text else result.summary
+        )
+        try:
+            await embed_architecture_note(
+                task_id=task_id,
+                content=content,
+                db=db,
+                epic_id=epic_id,
+                agent_name=agent_name,
+            )
+        except Exception:
+            logger.warning(
+                "record_agent_run_outcome: embed_architecture_note failed for %s/%s",
                 agent_name,
                 task_id,
                 exc_info=True,

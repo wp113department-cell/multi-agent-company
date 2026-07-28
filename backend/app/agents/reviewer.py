@@ -92,6 +92,10 @@ class ReviewResult:
     verdict: str  # "approved" | "changes_required"
     findings: list[ReviewFinding] = field(default_factory=list)
     summary: str = ""
+    # MASTER_AGENT_v2.md Phase 3.2 — same fix as QAResult: real token usage,
+    # previously computed for a log line and then discarded.
+    tokens_in: int = 0
+    tokens_out: int = 0
 
     @property
     def blocking_count(self) -> int:
@@ -204,6 +208,8 @@ def run_reviewer(
         verdict=str(raw.get("verdict", "changes_required")),
         findings=findings,
         summary=str(raw.get("summary", "")),
+        tokens_in=int(final_state.get("tokens_in", 0)),
+        tokens_out=int(final_state.get("tokens_out", 0)),
     )
 
 

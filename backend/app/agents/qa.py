@@ -92,6 +92,11 @@ class QAResult:
     lint_clean: bool
     errors: list[str] = field(default_factory=list)
     summary: str = ""
+    # MASTER_AGENT_v2.md Phase 3.2 — real token usage, previously computed
+    # (see the "in=%d out=%d" log line below) and then discarded instead of
+    # being surfaced to the caller.
+    tokens_in: int = 0
+    tokens_out: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +181,8 @@ def run_qa(
         tests_failed=int(raw.get("tests_failed", 0)),
         typecheck_clean=bool(raw.get("typecheck_clean", False)),
         lint_clean=bool(raw.get("lint_clean", False)),
+        tokens_in=int(final_state.get("tokens_in", 0)),
+        tokens_out=int(final_state.get("tokens_out", 0)),
         errors=list(raw.get("errors", [])),
         summary=str(raw.get("summary", "")),
     )
