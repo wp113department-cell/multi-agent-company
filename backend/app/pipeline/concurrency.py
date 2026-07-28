@@ -21,6 +21,24 @@ _agent_run_sem: asyncio.Semaphore | None = None
 _subtask_sems: dict[str, asyncio.Semaphore] = {}
 
 
+class SlotAcquisitionTimeout(Exception):
+    """MASTER_AGENT_v2.md Phase 5.6 — raised when a slot can't be acquired
+    within slot_acquisition_timeout_seconds. A loud, specific failure
+    instead of a silent hang, for the bounded deadlock risk this project's
+    real concurrency model (in-process asyncio.Semaphore, not a distributed
+    lock manager) can actually produce: an epic holding a subtask slot while
+    waiting on another subtask that can never acquire one because the
+    epic's own concurrency cap is exhausted."""
+
+    def __init__(self, slot_kind: str, timeout_seconds: float) -> None:
+        self.slot_kind = slot_kind
+        self.timeout_seconds = timeout_seconds
+        super().__init__(
+            f"Timed out after {timeout_seconds}s waiting for a {slot_kind} slot "
+            "— possible deadlock (a slot that can never be freed)"
+        )
+
+
 def _get_epic_sem() -> asyncio.Semaphore:
     global _epic_sem
     if _epic_sem is None:
@@ -56,18 +74,36 @@ async def epic_slot() -> AsyncIterator[None]:
 
 @asynccontextmanager
 async def agent_run_slot() -> AsyncIterator[None]:
-    """Acquire a global agent-run slot before calling run_agent()."""
+    """Acquire a global agent-run slot before calling run_agent(). Bounded
+    wait (Phase 5.6) — raises SlotAcquisitionTimeout instead of hanging
+    forever if no slot frees up in time."""
     sem = _get_agent_run_sem()
-    async with sem:
+    timeout = get_settings().slot_acquisition_timeout_seconds
+    try:
+        await asyncio.wait_for(sem.acquire(), timeout=timeout)
+    except asyncio.TimeoutError:
+        raise SlotAcquisitionTimeout("agent_run", timeout) from None
+    try:
         yield
+    finally:
+        sem.release()
 
 
 @asynccontextmanager
 async def subtask_slot(epic_id: str) -> AsyncIterator[None]:
-    """Acquire a per-epic subtask slot before dispatching a subtask."""
+    """Acquire a per-epic subtask slot before dispatching a subtask. Bounded
+    wait (Phase 5.6) — raises SlotAcquisitionTimeout instead of hanging
+    forever if no slot frees up in time."""
     sem = _get_subtask_sem(epic_id)
-    async with sem:
+    timeout = get_settings().slot_acquisition_timeout_seconds
+    try:
+        await asyncio.wait_for(sem.acquire(), timeout=timeout)
+    except asyncio.TimeoutError:
+        raise SlotAcquisitionTimeout("subtask", timeout) from None
+    try:
         yield
+    finally:
+        sem.release()
 
 
 def reset_for_testing(

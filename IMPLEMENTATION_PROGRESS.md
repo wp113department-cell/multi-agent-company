@@ -557,26 +557,242 @@ side effect.
 
 ## Step 4 — Phase 4: Near-Claude-Code Capability Baseline (Day 10)
 
-- [ ] Apply the per-agent checklist (read broadly / verify / iterate / shared memory / workspace
-      awareness / clarification / honest role prompt) fleet-wide, cutting across Steps 2–3's work.
+**Status: PLANNED, not yet implemented.** Session paused here at owner's request ("if this is big
+work, plan and save it, we'll do it tomorrow") after a real, verified research/audit pass — zero code
+changes made yet this Step, only read-only investigation (grep/read). Everything below is real,
+gathered data, not assumption — safe to resume directly from "Next session: start here."
+
+Source: `MASTER_AGENT_v2.md` §Phase 4 (a 7-item checklist applied to every agent, not new subsystems).
+DoD: every agent's checklist filled in and true, with a citation (test name or file:line) proving it,
+recorded in a shared tracking table — plus full regression green.
+
+### Real agent count (verified, not assumed)
+`grep -rl "^AGENT_CONTRACT" app/agents/*.py` → **72 real agent modules**. Two are structurally special
+and need bespoke handling rather than the standard per-item check: `chat_agent.py` (no `run_agent_graph`
+— its own loop, memory-wired in Step 3's Gap 3) and `manager.py` (orchestrator, no LLM tool-calling loop
+of its own, no `AGENT_CONTRACT`-style tools list — its Phase-4 checklist doesn't map 1:1 the way a
+worker agent's does). The per-item audits below cover the other 70 unless noted.
+
+### Item 1 — "Can it read broadly?" (incl. repo intelligence layer)
+
+- **1b (repo intelligence layer — call graph/PageRank) is ALREADY satisfied fleet-wide, confirmed, no
+  fix needed.** `app/repo_tools/context_builder.py::build_context` (real PageRank-style ranking +
+  `cross_file_graph.py`'s call graph) is already called from `base_graph.py`'s `memory_hook_node`
+  (`enable_memory=True` is the fleet-wide default), so every agent that hasn't opted out already reaches
+  it. Just needs a citation in the tracking table, not new code.
+- **1a (broad-read tools) — real, narrow gap found, not yet fixed.** Checked actual tool presence (not
+  just "does it import the `READ_ONLY_TOOLS` constant," which produced false negatives for Tier-A
+  agents using differently-named curated tool lists like `CODER_TOOLS`/`QA_TOOLS`). The real signal:
+  `search_code` + `get_file_tree` present almost everywhere; `find_references` (a real, separately
+  wired tool per `app/agents/tools.py:173`, present on 59/72 agents already) is missing on exactly 12:
+  `agent_advisor`, `agent_debugger`, `agent_performance_reviewer`, `changelog_agent`,
+  `database_architect`, `evaluation_agent`, `knowledge_curator`, `quality_auditor`,
+  `rag_engineer_agent`, `release_notes_agent`, `research`, `user_story_generator`.
+  `executive` was also flagged by the raw grep but is a **confirmed, deliberate exception** — its real
+  role file (`roles/executive.md`) is a pure business-goal→epics translator with no codebase
+  interaction at all; it correctly has zero code tools, not a gap.
+  **Important nuance found mid-audit, not yet resolved**: 3 of the 12
+  (`agent_advisor`/`agent_debugger`/`agent_performance_reviewer`) are the "fleet self-improvement
+  agents" cohort and deliberately use an **index-sliced subset** of `READ_ONLY_TOOLS`
+  (`SCAN_TOOLS = [READ_ONLY_TOOLS[0], READ_ONLY_TOOLS[2], READ_ONLY_TOOLS[4]]` in
+  `agent_debugger.py`) rather than the full bundle — this looked like an intentional, narrower safety
+  scope for agents that audit/modify *other agents*, not an oversight. **Next-session first task**: read
+  why that index-slice was chosen (git history / any comment near it) before blindly adding
+  `find_references` to those 3 — the other 9 (which use the full `READ_ONLY_TOOLS` bundle or
+  individually curated lists, not an index-slice) are safe to fix the same way Step 2's dead-contract
+  codemod worked: verify the exact tool-list construction pattern per file first, then batch-add
+  `find_references` only where it's a real, byte-verified, low-risk addition.
+
+### Item 4 — "Does it benefit from and contribute to fleet memory?" (`record_learning`)
+
+**Real, well-precedented gap — mechanical fix, same codemod pattern as Step 1 / 1.4's original
+38-agent rollout.** Checked the real functional signal (`make_record_learning_handler` actually wired
++ `"record_learning"` in the real tool list — not just a schema-constant-name grep, which
+undercounted). Exactly **32 agents still lack it** (70 total minus the 38 that 1.4 already covered
+matches exactly, confirming this count is accurate): `agent_advisor`, `agent_debugger`,
+`agent_performance_reviewer`, `ai_engineer`, `api_docs_agent`, `architecture_reviewer`, `business_analyst`,
+`changelog_agent`, `cicd_agent`, `cleanup_agent`, `database_architect`, `dependency_agent`,
+`docker_agent`, `evaluation_agent`, `executive`, `knowledge_curator`, `migration_agent`,
+`monitoring_agent`, `performance_reviewer`, `quality_auditor`, `rag_engineer_agent`, `readme_agent`,
+`refactor_agent`, `release_notes_agent`, `schema_agent`, `security_architect`, `security_reviewer`,
+`sprint_planner`, `sql_agent`, `style_reviewer`, `tech_debt_agent`, `user_story_generator`.
+**Next-session plan**: same verified-byte-identical-before-writing codemod discipline as every prior
+rollout this session (1.4, 2.3, Step 3 Gap 4's 25-file fix) — check each file's real tool-list
+construction pattern (shared template vs. individually curated), wire
+`handlers["record_learning"] = make_record_learning_handler("<agent_name>")` + add `"record_learning"`
+to both `AGENT_CONTRACT["allowed_tools"]` and the real `_TOOLS`/tool-list, verify with
+`test_record_learning_rollout.py`-style tests (3 real checks per agent: declared in contract, present
+in real schema, wired to a real callable handler attributing the calling agent correctly) mirroring
+Step 1/1.4's own test file.
+
+### Item 5 — "Does it have real workspace awareness (git) where relevant?"
+
+**Not yet audited this session — starting point for next time.** Not universal by the spec's own
+text ("not every agent needs this... apply it where the role genuinely calls for it"). Plan: for
+every agent lacking `git_status`/`git_diff`/`git_log`/`git_blame`, read its real role file to judge
+whether its job genuinely depends on repo history/state (same evidence-based judgment call already
+used for `localization_agent`'s Editor-tier exception and `onboarding_agent`'s missing-validator
+decision in Steps 2/3) — do not blanket-add git tools to every agent.
+
+### Item 3 — "Can it iterate on failure?" (bounded retry, now via Phase 3's critique/quality-gate)
+
+**Not yet audited/decided this session.** The spec ties this explicitly to Phase 3's self-critique and
+quality-gate machinery, which is currently **opt-in, off by default fleet-wide**
+(`enable_critique=False`/`enable_replanning=False` — a deliberate Session-0-style rollout decision
+from Step 3, not an oversight). Open question to resolve next session: does Phase 4's "iterate on
+failure" checklist item require flipping `enable_critique=True` (at least) for Executor-tier agents
+now, or is "the mechanism exists and is real, tested, and available to opt into" sufficient to check
+this box, with the fleet-wide default-flip remaining its own explicitly-tracked future decision (as
+Step 3's own tracker entries already flagged it)? Leaning toward the latter (least blast radius,
+consistent with the rollout discipline already established) but not yet decided — **decide this
+first** before writing any tracking-table entries for this item.
+
+### Item 2 — "Can it verify its own output?"
+
+**Not yet audited this session.** Largely believed already true (Phase 2/3's core deliverable per the
+spec's own text) for the 38 agents Steps 2–3 already touched. Real open work: confirm the ~32 agents
+Item 4 above lists (mostly Analyzer/Advisor-style agents never touched by Phase 2's tiering pass) each
+have *some* real verification gate appropriate to their role (at minimum: submission gated on a real
+`"read"` flag from `state["verification"]`, matching the pattern already confirmed for every other
+Analyzer-tier agent in Step 2's Day 7 pass) — not a blanket trust-the-LLM submission. Needs the same
+per-agent `_CFG` inspection already done repeatedly this session, not new mechanism design.
+
+### Item 7 — "Is its role prompt specific and honest?"
+
+**Not yet audited this session.** Likely mostly fine for the 38 already-touched agents (Phase 2.4 +
+Day 7's role-file regeneration). Real open work: grep the ~32 untouched agents' role files for the
+generic 14-file boilerplate block (same check already used in Step 2's own DoD verification —
+`grep -l "All role-relevant checks pass with 0 errors" roles/*.md`) and confirm each remaining match's
+agent genuinely has the tools to back the claim, same reasoning already applied in Step 2.
+
+### Item 6 — "Can it ask for clarification instead of guessing?" — real forward-dependency, not a gap to silently skip
+
+The spec's own text cites **"(Phase 5.3)"** — a mechanism that doesn't exist yet; Phase 5 comes after
+Phase 4 in the roadmap. This is a genuine spec-ordering dependency, not an oversight: Phase 4's DoD
+can't be 100% true until *something* like Phase 5.3 exists. **Decision needed next session** (pick one,
+don't silently skip):
+(a) Pull forward a small, real, scoped `request_clarification` tool now (not all of Phase 5 — just this
+    one tool, wired into agents whose tasks can genuinely be underspecified), and note the rest of
+    Phase 5.3/Phase 5 remains for later, or
+(b) Document this checklist item as explicitly blocked-on-Phase-5 in the tracking table (real, honest,
+    not hidden) and revisit when Phase 5 starts.
+Leaning toward (a) for a small, well-scoped subset of agents (the ones most likely to face genuinely
+ambiguous tasks — e.g. `executive`, `pm`, `architect`) since a fully-blocked checklist item across all
+of Phase 4 feels like it undersells what's realistically buildable now, but this needs a real decision,
+not a default.
+
+### Next session: start here
+
+1. Resolve the 3 open decisions above (Item 1's index-slice-agent question, Item 3's critique-enablement
+   question, Item 6's build-now-vs-defer question) — quick judgment calls informed by reading real code,
+   not new research.
+2. Execute Item 1a's `find_references` rollout (12 agents, minus whichever of the 3 index-slice agents
+   turn out to be intentionally scoped) and Item 4's `record_learning` rollout (32 agents) as verified
+   batch codemods — the two most mechanical, lowest-risk, highest-confidence fixes, do these first.
+3. Then Items 5, 2, 7 (all require per-agent role-file reading — no shortcuts, same discipline as every
+   prior audit this session).
+4. Then Item 6 (clarification tool, scoped per the decision above).
+5. Build the Phase 4 tracking table (new file or a section here) — one row per agent, 7 columns, each
+   cell a real citation (test name or file:line), per the spec's own DoD wording.
+6. Write real tests for every fix (same standard as every prior step — real test, not smoke test).
+7. Full regression gate (`pytest tests/`, `mypy --strict`, `black`, `ruff`) — compare against this
+   session's own 3136/25 baseline, confirm zero new failures, same triage discipline as every prior gate.
+8. Update this section with `[x]` results, matching the exact format of Steps 1–3 above.
+
+- [ ] Step 4 implementation (see plan above).
 - [ ] Step 4 regression gate.
 
-## Step 5 — Phase 5: LangGraph Completion, HITL, Recovery Gaps (Day 11–13)
+## Already done, ahead of schedule (2026-07-29) — reference only, not pending
 
-- [ ] 5.1: `manager.py` → LangGraph supervisor graph.
-- [ ] 5.3 / 5.4: `request_clarification` tool; wire `thinking_budget_opus`.
-- [ ] 5.5: generalize HITL into one `request_human_input()` entry point.
-- [ ] 5.6: orphan-task recovery sweep; slot-acquisition timeout (deadlock fix).
-- [ ] 5.2 (last, highest risk): `chat_agent.py` → interrupt-based LangGraph graph.
-- [ ] Step 5 regression gate.
+Owner asked to check whether any Phase 5/6 items were small + independent enough to do before Step 4.
+Spec's own §8: only 5.2 (`chat_agent` conversion) must wait until Phase 1-4 finish; Phase 6 explicitly
+"can run in parallel with Phase 2-4." These 3 are DONE — implemented, tested, mypy --strict/black/ruff
+clean. Full-suite regression gate for them is folded into Step 5's own regression gate below (not run
+separately) to avoid a redundant full-suite pass.
 
-## Step 6 — Phase 6: Observability & Operational Maturity (Day 14–15)
+- **5.4 — `thinking_budget_opus` wired for real.** Was dead (zero real callers, confirmed by grep).
+  Scoped to real opus-tier agents via `ModelRouter.agents_by_tier("opus")` (live `agent_models.json`,
+  not a hardcoded list). Wired into `base_graph.py::_make_call_llm_node`. Tests:
+  `tests/test_phase54_thinking_budget.py` (4, inspects the real request payload).
+- **5.6a — orphan `agent_run` recovery.** New `app/fleet/failure_ladder.py::reconcile_orphaned_runs`/
+  `start_orphan_recovery_loop` (mirrors `retention.py`'s existing loop pattern), wired into `main.py`
+  lifespan. New config `agent_run_orphan_threshold_seconds` (900s default). Tests:
+  `tests/test_orphan_recovery.py` (6, real Postgres).
+- **5.6b — deadlock timeout on slot acquisition.** New `SlotAcquisitionTimeout` +
+  `asyncio.wait_for(...)` in `app/pipeline/concurrency.py`'s `agent_run_slot()`/`subtask_slot()`. New
+  config `slot_acquisition_timeout_seconds` (300s default). Tests: `tests/test_concurrency.py` (4 new).
+  **Known, documented follow-up (real, not hidden) — folded into Step 5's 5.6 entry below**:
+  `manager.py`'s subtask retry loop has a documented "nothing raises past this function" invariant that
+  a raised `SlotAcquisitionTimeout` would break; graceful handling there was not done in this pass
+  (high-blast-radius file, needs its own dedicated care) — tracked as pending work below, not skipped.
 
-- [ ] 6.1: bridge `run_span()` to OpenTelemetry-compatible spans.
-- [ ] 6.2: cost/health reporting endpoints over already-collected data.
-- [ ] 6.3: prompt-injection delimiting + malicious tool-output validation.
-- [ ] 6.4: class graph + package-dependency graph extensions to `scanner.py`/`cross_file_graph.py`.
-- [ ] Step 6 regression gate.
+## Step 5 — Phase 5 + Phase 6 (all remaining/pending work, merged into one step)
+
+Per owner instruction (2026-07-29): only 2 steps left to implement — Step 4 (Phase 4, entirely, plan
+above) and this Step 5 (everything still pending from Phase 5 + Phase 6, merged, completed items
+removed from the to-do list — see "Already done" section above for those). Nothing from Phase 5/6 may
+be silently dropped — every item below traces to a real `MASTER_AGENT_v2.md` §Phase 5/§Phase 6 bullet.
+
+### Phase 5 — remaining
+
+- [ ] **5.1** — Convert `manager.py` to a LangGraph supervisor graph. Preserve every existing behavior
+      exactly (retry counts, epic halting, git-commit-before-review, checkpointing) — structural
+      conversion only, not a rewrite of what the manager decides.
+- [ ] **5.2** — Convert `chat_agent.py` to an interrupt-based LangGraph graph. **Spec-mandated: do this
+      last**, only after Phase 1-4 and the rest of Phase 5 are stable — highest blast-radius item in the
+      whole document. Do not start this early even if time allows.
+- [ ] **5.3** — Add a real `request_clarification` tool (via the existing `PendingApproval`/
+      `interrupt()` pattern, A.11) for agents whose tasks can be genuinely underspecified (`pm`,
+      `architect`, `planner`, `decomposer`, loosely-specified Tier-B/C tasks). Gate to genuine blockers
+      via the `confidence` field (reuse, don't invent a second ambiguity metric) + Phase 3.7's
+      confidence-threshold gate. This also resolves Phase 4 Item 6's forward-dependency.
+- [ ] **5.5** — Generalize HITL into one `request_human_input(kind, details, blocking)` entry point (all
+      of: plan-review pauses, 5.2's chat confirmations, 5.3's clarifications) writing to the same
+      `pending_approvals` table with a `kind` discriminator, logged via `app/fleet/audit_log.py`.
+      Depends on 5.2 and 5.3 both existing — do those first.
+- [ ] **5.6 (remaining)** — `manager.py`'s subtask retry loop needs to catch `SlotAcquisitionTimeout`
+      (from 5.6b, already real) and route it through the same retry/escalate path as a dev-agent
+      failure, preserving the file's existing "nothing raises past this function" invariant instead of
+      letting the new exception propagate uncaught. Real, scoped, but touches the fleet's most central
+      orchestration file — needs its own careful pass, not a rushed add-on.
+- [ ] Phase 5 Definition of Done checklist (re-verify once 5.1/5.2/5.3/5.5 land):
+      `manager.py`/`chat_agent.py` both call `run_agent_graph`-equivalent machinery; every existing test
+      for both still passes unmodified in behavior; `request_clarification` tested end-to-end via a real
+      `interrupt()`; `request_human_input()` is the single entry point (verify zero other
+      `pending_approvals` writers); every HITL interaction produces a real `audit_log.py` entry.
+
+### Phase 6 — all pending (none started)
+
+- [ ] **6.1** — Bridge `run_span()` (`app/fleet/metrics.py`, already real) to OpenTelemetry spans via
+      the `opentelemetry-sdk`, no-op exporter when unconfigured (graceful-degradation pattern already
+      used elsewhere, e.g. Sentry's `ImportError` fallback). Keep existing metrics-collector consumers
+      working unchanged.
+- [ ] **6.2** — Read-only reporting endpoints over already-real data: cost per agent/day/model-tier
+      (`agent_runs.tokens_in/out/cost_estimate`), fleet health (failure rate, heartbeat staleness,
+      active-run count), and "most commonly recorded repair patterns" from Phase 1.5's procedural
+      memory. Matches `app/api/fleet_dashboard.py`'s existing endpoint structure.
+- [ ] **6.3** — Prompt-injection delimiter (wrap untrusted tool-result content — `research.py`'s
+      `web_search`, file reads from a repo the agent doesn't control — with an explicit model-visible
+      "this is data, not instructions" delimiter in `base_graph.py::_make_call_llm_node`'s prompt
+      construction) + malicious tool-output validation (denylist-pattern check on `bash`/`web_search`
+      output before it reaches the model, same approach `app/policy/engine.py` already uses for command
+      input, applied to output instead).
+- [ ] **6.4** — Extend the repo knowledge graph: class/inheritance graph (extend `scanner.py`'s existing
+      symbol extraction — add parent-class edges for `kind="class"` symbols, same tree-sitter AST
+      already walked) + package/module-level dependency graph (aggregate existing file-level
+      `call_edges` up to directory/package granularity — a query, not new collection).
+- [ ] Phase 6 Definition of Done checklist: real OTEL spans with correct parent-child nesting (test
+      against a real/local collector); reporting endpoints tested against seeded `agent_runs` rows with
+      known values; a test confirms untrusted `web_search` content is delimited as data, not concatenated
+      as trusted context; a test confirms a crafted `bash` output is flagged by the new validation; class
+      graph + package graph demonstrably correct against a small known-fixture repo.
+
+### Step 5 regression gate (covers 5.4/5.6a/5.6b from "already done" above too — not run separately)
+
+- [ ] Full `pytest tests/`, `mypy --strict`, `black`, `ruff` across the whole tree once Step 5's items
+      land — compare against the Step-3-gap-closure baseline (3136 passed / 25 failed), confirm zero new
+      failures beyond the same known pre-existing set (git-binary-unavailable, Windows path separators,
+      live-Postgres-required tests already triaged throughout this document).
 
 ---
 

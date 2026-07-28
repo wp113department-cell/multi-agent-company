@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import patch
 
+import pytest
 
 from app.pipeline.concurrency import (
+    SlotAcquisitionTimeout,
     agent_run_slot,
     epic_slot,
     reset_for_testing,
@@ -88,6 +90,107 @@ class TestSemaphoreSlots:
 
         await asyncio.gather(grab(1), grab(2))
         assert order == [1, 2] or order == [2, 1]
+
+
+class TestSlotAcquisitionTimeout:
+    """MASTER_AGENT_v2.md Phase 5.6 — a slot that can never be freed (the
+    real, bounded deadlock risk this project's asyncio.Semaphore-based
+    concurrency model can actually produce) must fail loudly within a
+    configured bound, not hang forever. Before this change, `agent_run_slot`/
+    `subtask_slot` had no timeout at all — confirmed by reading
+    app/pipeline/concurrency.py in full before adding one."""
+
+    def setup_method(self) -> None:
+        reset_for_testing(max_agent_runs=1, max_subtasks_per_epic=1)
+
+    @pytest.mark.asyncio
+    async def test_agent_run_slot_raises_on_timeout_not_hang_forever(self) -> None:
+        holder_ready = asyncio.Event()
+
+        async def hold_slot_forever() -> None:
+            async with agent_run_slot():
+                holder_ready.set()
+                await asyncio.sleep(10)
+
+        holder_task = asyncio.create_task(hold_slot_forever())
+        await holder_ready.wait()
+
+        with patch("app.pipeline.concurrency.get_settings") as mock_settings:
+            mock_settings.return_value.slot_acquisition_timeout_seconds = 0.05
+            start = asyncio.get_event_loop().time()
+            with pytest.raises(SlotAcquisitionTimeout) as exc_info:
+                async with agent_run_slot():
+                    pass  # pragma: no cover - must never be reached
+            elapsed = asyncio.get_event_loop().time() - start
+
+        holder_task.cancel()
+        try:
+            await holder_task
+        except asyncio.CancelledError:
+            pass
+
+        assert elapsed < 2.0, "must fail fast (bounded), not hang"
+        assert exc_info.value.slot_kind == "agent_run"
+
+    @pytest.mark.asyncio
+    async def test_subtask_slot_raises_on_timeout_not_hang_forever(self) -> None:
+        # _get_subtask_sem() lazily creates each epic's semaphore straight
+        # from get_settings().max_concurrent_subtasks_per_epic — unlike
+        # agent_run_slot's singleton, reset_for_testing()'s own
+        # max_subtasks_per_epic param never actually seeds it (a pre-existing
+        # gap, out of this fix's scope), so the real cap must come from a
+        # patched get_settings() for the whole test, not that param.
+        with patch("app.pipeline.concurrency.get_settings") as mock_settings:
+            mock_settings.return_value.max_concurrent_subtasks_per_epic = 1
+            mock_settings.return_value.slot_acquisition_timeout_seconds = 0.05
+
+            holder_ready = asyncio.Event()
+
+            async def hold_slot_forever() -> None:
+                async with subtask_slot("epic-deadlock-test"):
+                    holder_ready.set()
+                    await asyncio.sleep(10)
+
+            holder_task = asyncio.create_task(hold_slot_forever())
+            await holder_ready.wait()
+
+            with pytest.raises(SlotAcquisitionTimeout) as exc_info:
+                async with subtask_slot("epic-deadlock-test"):
+                    pass  # pragma: no cover - must never be reached
+
+        holder_task.cancel()
+        try:
+            await holder_task
+        except asyncio.CancelledError:
+            pass
+
+        assert exc_info.value.slot_kind == "subtask"
+
+    @pytest.mark.asyncio
+    async def test_slot_is_released_on_normal_exit_not_leaked(self) -> None:
+        """A timeout-capable acquire must still release cleanly on the
+        happy path — confirms the try/finally release wasn't broken by
+        adding the timeout wrapper."""
+        reset_for_testing(max_agent_runs=1)
+
+        async with agent_run_slot():
+            pass
+
+        # If the first slot leaked (never released), this would hang/timeout.
+        async with agent_run_slot():
+            pass
+
+    @pytest.mark.asyncio
+    async def test_slot_is_released_when_body_raises(self) -> None:
+        reset_for_testing(max_agent_runs=1)
+
+        with pytest.raises(ValueError):
+            async with agent_run_slot():
+                raise ValueError("boom")
+
+        # Must not be stuck held by the failed acquisition above.
+        async with agent_run_slot():
+            pass
 
 
 class TestWorktreeEpicNamespacing:

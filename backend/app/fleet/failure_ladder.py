@@ -29,6 +29,7 @@ settings.max_retries field rather than adding a duplicate config value.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from app.config import get_settings
@@ -38,6 +39,8 @@ from app.fleet.fleet_checkpoint import (
     rollback_to,
     save_checkpoint,
 )
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Checkpoint / Rollback — re-exported, no new logic
@@ -188,3 +191,99 @@ def request_human_review(
     except Exception:
         pass
     return transitioned
+
+
+# ---------------------------------------------------------------------------
+# Orphan Recovery — MASTER_AGENT_v2.md Phase 5.6. A process crash mid-run
+# stops AgentRun.last_heartbeat_at (A.9, already real) from updating, but
+# nothing previously noticed a stale heartbeat and reconciled that run's
+# status — it just sat in "running" forever, invisible to the failure
+# ladder's normal retry/escalate path. Periodic sweep, matching
+# app/services/retention.py's existing start_retention_loop() pattern
+# exactly, not a new scheduling mechanism.
+# ---------------------------------------------------------------------------
+
+_ORPHAN_SWEEP_INTERVAL_SECONDS = 300  # check every 5 minutes
+
+
+async def reconcile_orphaned_runs(threshold_seconds: int | None = None) -> int:
+    """Find agent_runs rows stuck in status="running" with a heartbeat older
+    than the threshold, transition them to "failed" with a clear orphan
+    error, and escalate each one through the existing failure-ladder path
+    (agent_registry.fail_task() + a health_updated event) so the run isn't
+    just marked dead in isolation — the rest of the fleet's normal recovery
+    machinery picks it up. Returns the number of runs reconciled.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import text
+
+    from app.db.session import get_session_factory
+
+    limit = (
+        threshold_seconds
+        if threshold_seconds is not None
+        else get_settings().agent_run_orphan_threshold_seconds
+    )
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff = now - timedelta(seconds=limit)
+
+    factory = get_session_factory()
+    async with factory() as db:
+        selected = await db.execute(
+            text(
+                "SELECT id, agent_type FROM agent_runs "
+                "WHERE status = 'running' AND last_heartbeat_at < :cutoff"
+            ),
+            {"cutoff": cutoff},
+        )
+        orphans = selected.fetchall()
+        if not orphans:
+            return 0
+
+        await db.execute(
+            text(
+                "UPDATE agent_runs SET status = 'failed', "
+                "error = 'orphaned — process died without a clean shutdown', "
+                "finished_at = :now "
+                "WHERE status = 'running' AND last_heartbeat_at < :cutoff"
+            ),
+            {"cutoff": cutoff, "now": now},
+        )
+        await db.commit()
+
+    for row in orphans:
+        try:
+            escalate(
+                str(row.agent_type),
+                "orphaned — process died without a clean shutdown",
+            )
+        except Exception:
+            pass
+
+    logger.warning("Orphan recovery: reconciled %d stale agent_runs", len(orphans))
+    return len(orphans)
+
+
+async def start_orphan_recovery_loop() -> None:
+    """Background task: periodic sweep for orphaned agent_runs. Mirrors
+    app/services/retention.py's start_retention_loop() — same "run on
+    startup, then every fixed interval, log and swallow errors" shape."""
+    settings = get_settings()
+    if settings.agent_run_orphan_threshold_seconds <= 0:
+        logger.info("Orphan recovery disabled (agent_run_orphan_threshold_seconds=0)")
+        return
+
+    logger.info(
+        "Orphan recovery started: agent_runs stuck 'running' with heartbeat "
+        "older than %ds, checked every %ds",
+        settings.agent_run_orphan_threshold_seconds,
+        _ORPHAN_SWEEP_INTERVAL_SECONDS,
+    )
+    while True:
+        try:
+            await reconcile_orphaned_runs()
+        except Exception as exc:
+            logger.warning("Orphan recovery sweep error: %s", exc)
+
+        await asyncio.sleep(_ORPHAN_SWEEP_INTERVAL_SECONDS)
