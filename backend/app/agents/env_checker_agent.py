@@ -145,7 +145,12 @@ def run_env_checker_agent(
         max_turns=20,
     )
 
-    raw = result if result else final_state["result"]
+    # MASTER_AGENT_v2.md Phase 3.4 gap-closure (2026-07-28) - final_state["result"]
+    # (graph-enforced, enforce_in_result-overridden) must win over the handler-
+    # captured `result` dict, which is the model's raw, un-overridden submit_*
+    # claim; the old priority let a false verification claim leak into
+    # AgentResult.raw even though .verified itself was already correct.
+    raw = final_state["result"] if final_state["result"] else result
     return AgentResult(
         summary=str(raw.get("summary", description[:100])),
         findings=list(raw.get("findings", [])),

@@ -135,7 +135,7 @@ async def test_dispatch_falls_back_when_db_raises() -> None:
     subtask = {"id": 1, "type": "backend", "description": "add a button"}
 
     # Patch run_backend_dev to avoid real LLM call
-    fake_return = (["backend/main.py"], None)
+    fake_return = (["backend/main.py"], None, 0, 0)
     with patch("app.agents.backend_dev.run_backend_dev", return_value=fake_return):
         result = await dispatch_subtask(
             task_id=1,

@@ -316,17 +316,23 @@ async def embed_architecture_note(
     content: str,
     db: AsyncSession,
     epic_id: str | None = None,
+    agent_name: str = "",
 ) -> MemoryEmbedding | None:
     """Store an architecture decision / note in memory as source_type='architecture'.
 
-    Uses the `outcome` field to tag the record type.
+    Uses the `outcome` field to tag the record type. agent_name (MASTER_AGENT_v2.md
+    Phase 1.1 — "every one of these writes must include agent_name in the stored
+    record") is prepended into the content itself, the same convention
+    `embed_procedure` already uses, since `MemoryEmbedding` has no dedicated
+    `agent_name` column.
     Returns the persisted row, or None on failure.
     """
     settings = get_settings()
     if not settings.memory_enabled:
         return None
 
-    vector = await _embed(content)
+    full_content = f"Agent: {agent_name}\n{content}" if agent_name else content
+    vector = await _embed(full_content)
 
     try:
         row = MemoryEmbedding(
@@ -334,8 +340,8 @@ async def embed_architecture_note(
             epic_id=epic_id,
             outcome="architecture",
             category="architecture",
-            description=content[:500],
-            summary=content[:300],
+            description=full_content[:500],
+            summary=full_content[:300],
             files_changed=[],
             embedding=vector,
         )
@@ -350,6 +356,49 @@ async def embed_architecture_note(
         )
         await db.rollback()
         return None
+
+
+def embed_architecture_note_sync(
+    task_id: str,
+    content: str,
+    agent_name: str = "",
+    epic_id: str | None = None,
+) -> bool:
+    """Sync bridge for embed_architecture_note — MASTER_AGENT_v2.md Phase 1.1.
+    `architect_node` (app/agents/architect.py) is a plain sync LangGraph-pipeline
+    function (app/pipeline/graph.py's own graph.invoke() is sync), so it cannot
+    await the DB-backed write directly — same reasoning and same
+    new_isolated_async_engine() pattern as embed_learning_signal_sync. Returns
+    True on a real write, False on any failure — never raises.
+    """
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> bool:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                row = await embed_architecture_note(
+                    task_id=task_id,
+                    content=content,
+                    db=session,
+                    epic_id=epic_id,
+                    agent_name=agent_name,
+                )
+                return row is not None
+        finally:
+            await engine.dispose()
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        logger.warning(
+            "embed_architecture_note_sync failed for %s: %s", agent_name, exc
+        )
+        return False
 
 
 async def query_architecture_notes(

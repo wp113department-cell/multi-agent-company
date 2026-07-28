@@ -329,7 +329,8 @@ class TestManagerTraceIdAndCheckpointWiring:
             return True
 
         with patch(
-            "app.agents.backend_dev.run_backend_dev", return_value=([], "always fails")
+            "app.agents.backend_dev.run_backend_dev",
+            return_value=([], "always fails", 0, 0),
         ), patch("app.event_bus.bus.publish_event"), patch(
             "app.fleet.failure_ladder.abort", side_effect=_fake_abort
         ):

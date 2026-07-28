@@ -509,9 +509,9 @@ class TestOrch04_008_015_RetryWiring:
         settings = get_settings()
         call_count = {"n": 0}
 
-        def _always_fails(**kwargs: object) -> tuple[list[str], str | None]:
+        def _always_fails(**kwargs: object) -> tuple[list[str], str | None, int, int]:
             call_count["n"] += 1
-            return [], "simulated persistent dev agent failure"
+            return [], "simulated persistent dev agent failure", 0, 0
 
         with patch(
             "app.agents.backend_dev.run_backend_dev", side_effect=_always_fails
@@ -531,8 +531,8 @@ class TestOrch04_008_015_RetryWiring:
     async def test_run_manager_backs_off_between_retries(self) -> None:
         from app.agents.manager import run_manager
 
-        def _always_fails(**kwargs: object) -> tuple[list[str], str | None]:
-            return [], "simulated failure"
+        def _always_fails(**kwargs: object) -> tuple[list[str], str | None, int, int]:
+            return [], "simulated failure", 0, 0
 
         with patch(
             "app.agents.backend_dev.run_backend_dev", side_effect=_always_fails
@@ -570,7 +570,7 @@ class TestOrch04_009_ConcurrencySlots:
 
         with patch(
             "app.agents.backend_dev.run_backend_dev",
-            return_value=(["f.py"], None),
+            return_value=(["f.py"], None, 0, 0),
         ), patch(
             "app.services.git_service.git_add",
             new=AsyncMock(return_value={"ok": True, "stdout": "", "stderr": ""}),
@@ -863,7 +863,7 @@ class TestOrch04_011_SubtaskStatusPersistence:
 
                 with patch(
                     "app.agents.backend_dev.run_backend_dev",
-                    return_value=(["f.py"], None),
+                    return_value=(["f.py"], None, 0, 0),
                 ), patch(
                     "app.services.git_service.git_add",
                     new=AsyncMock(

@@ -201,6 +201,28 @@ def architect_node(state: PipelineState) -> PipelineState:
 
     # Strip internal Fleet OS keys before storing in pipeline state
     clean_plan = {k: v for k, v in plan_result.items() if not k.startswith("_")}
+
+    # MASTER_AGENT_v2.md Phase 1.1 — architect is the one architecture-tagged
+    # agent that runs through this pipeline node rather than
+    # app/api/specialized_agents.py's dispatch (which the other 3 named
+    # architecture agents use, wired via app/memory/hooks.py instead), so it
+    # needs its own direct write here — this pipeline has no other memory-write
+    # hook to piggyback on.
+    technical_approach = str(clean_plan.get("technical_approach", ""))
+    if technical_approach:
+        try:
+            from app.memory.store import embed_architecture_note_sync
+
+            embed_architecture_note_sync(
+                task_id=stream_task_id or f"architect-{state['task_title'][:40]}",
+                content=technical_approach,
+                agent_name="architect",
+            )
+        except Exception:
+            logger.debug(
+                "architect_node: embed_architecture_note_sync skipped", exc_info=True
+            )
+
     return {**state, "architect_plan": clean_plan, "stage": "decomposer"}
 
 

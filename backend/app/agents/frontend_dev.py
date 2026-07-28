@@ -58,7 +58,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "record_learning",
     ],
     "input_types": ["task_id", "subtask_id", "plan", "worktree_path", "repo_path"],
-    "output_types": ["files_changed"],
+    "output_types": ["files_changed", "tokens_in", "tokens_out"],
     "side_effects": ["write_files", "execute_bash"],
     "permissions": ["read_repo", "write_worktree", "execute_bash"],
     "risk_level": "medium",
@@ -113,10 +113,13 @@ def run_frontend_dev(
     on_tool_call: Any = None,  # kept for backward compat — no-op
     images: list[dict[str, str]] | None = None,
     extra_env: dict[str, str] | None = None,
-) -> tuple[list[str], str | None]:
+) -> tuple[list[str], str | None, int, int]:
     """Run frontend developer agent with static-check retry loop.
 
-    Returns (files_changed, error). error is None on success.
+    Returns (files_changed, error, tokens_in, tokens_out). error is None on
+    success. tokens_in/tokens_out are accumulated across every retry attempt
+    (not just the last one) — MASTER_AGENT_v2.md Phase 3.2, same reasoning as
+    backend_dev.py's identical fix.
 
     images (Day 16): optional reference images (e.g. a website design
     screenshot) — build the UI to match what they show.
@@ -129,6 +132,8 @@ def run_frontend_dev(
     repo = repo_path or settings.target_repo_path
     max_retries = settings.max_retries
     check_error: str | None = None
+    total_in = 0
+    total_out = 0
     image_note = (
         f"\n\n{len(images)} reference image(s) are attached below — build the "
         "UI to match what they show exactly."
@@ -181,8 +186,11 @@ def run_frontend_dev(
                 subtask_id,
             )
             if not should_retry(attempt + 1, max_retries):
-                return [], f"Frontend dev agent error: {exc}"
+                return [], f"Frontend dev agent error: {exc}", total_in, total_out
             continue
+
+        total_in += final_state.get("tokens_in", 0)
+        total_out += final_state.get("tokens_out", 0)
 
         patch_result = handlers.get("_patch_result", {})
         files_changed: list[str] = patch_result.get("files_changed", [])
@@ -190,7 +198,7 @@ def run_frontend_dev(
         if not final_state.get("submitted"):
             logger.warning("Frontend dev did not submit on attempt %d", attempt + 1)
             if not should_retry(attempt + 1, max_retries):
-                return [], "Frontend dev did not submit a patch"
+                return [], "Frontend dev did not submit a patch", total_in, total_out
             continue
 
         check_error = _run_frontend_checks(worktree_path)
@@ -200,10 +208,10 @@ def run_frontend_dev(
                 subtask_id,
                 attempt + 1,
                 len(files_changed),
-                final_state.get("tokens_in", 0),
-                final_state.get("tokens_out", 0),
+                total_in,
+                total_out,
             )
-            return files_changed, None
+            return files_changed, None, total_in, total_out
 
         logger.warning(
             "Frontend dev typecheck failed on attempt %d: %s",
@@ -214,9 +222,11 @@ def run_frontend_dev(
             return (
                 [],
                 f"TypeScript errors persist after {max_retries} attempts:\n{check_error}",
+                total_in,
+                total_out,
             )
 
-    return [], f"Frontend dev blocked after {max_retries} attempts"
+    return [], f"Frontend dev blocked after {max_retries} attempts", total_in, total_out
 
 
 # ---------------------------------------------------------------------------

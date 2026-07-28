@@ -8425,9 +8425,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             if session is None:
                 return "[BLOCKED] docker_compose('up') requires interactive session for safety confirmation"
 
-            dc_cmd_preview = "docker compose up" + (
-                " -d" if dc_detach else ""
-            ) + (f" {' '.join(dc_services)}" if dc_services else "")
+            dc_cmd_preview = (
+                "docker compose up"
+                + (" -d" if dc_detach else "")
+                + (f" {' '.join(dc_services)}" if dc_services else "")
+            )
             dc_action_id = str(_uuid.uuid4())
             try:
                 dc_loop = asyncio.get_event_loop()

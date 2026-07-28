@@ -451,7 +451,9 @@ class TestRunBackendDevBehavior:
 
         mock_graph.side_effect = graph_side_effect
 
-        files, error = run_backend_dev(1, 1, "Add auth", "/tmp/wt")
+        files, error, _tokens_in, _tokens_out = run_backend_dev(
+            1, 1, "Add auth", "/tmp/wt"
+        )
         assert error is None
         assert "backend/app/auth.py" in files
 
@@ -467,7 +469,7 @@ class TestRunBackendDevBehavior:
         mock_settings.return_value = MagicMock(
             model_coder="claude-sonnet", target_repo_path="/repo", max_retries=1
         )
-        files, error = run_backend_dev(1, 1, "Plan", "/tmp/wt")
+        files, error, _tokens_in, _tokens_out = run_backend_dev(1, 1, "Plan", "/tmp/wt")
         assert files == []
         assert error is not None
 

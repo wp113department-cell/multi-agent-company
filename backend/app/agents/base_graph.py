@@ -91,6 +91,9 @@ class AgentRunState(_AgentRunStateBase, total=False):
     reflection_unsatisfied_count: (
         int  # times reflection_node judged its own tool output unsatisfactory
     )
+    critique_result: dict[str, Any]  # last critique_node score: {criteria, all_met}
+    critique_retries: int  # times critique_node sent work back for improvement
+    replan_count: int  # times replan_node actually revised the plan mid-execution
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +289,67 @@ def _policy_check(tool_name: str, tool_input: dict[str, Any]) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _gather_facts_and_plan(
+    client: anthropic.Anthropic,
+    model_haiku: str,
+    task: str,
+    extra_context: str = "",
+) -> tuple[str, str, float]:
+    """The real gather-facts -> create-plan two-call sequence. Shared by
+    planner_node (runs once at graph start) and replan_node (Phase 3.6,
+    MASTER_AGENT_v2.md — re-invoked mid-execution). extra_context, when
+    given, is the concrete evidence that triggered a replan (e.g. repeated
+    reflection dissatisfaction or a repeatedly-unmet critique criterion) —
+    folded into both prompts so the revised plan actually accounts for it.
+    """
+    facts_prompt = (
+        f"Analyze this task. Respond ONLY in JSON:\n"
+        f'{{ "given": [...], "to_look_up": [...], "to_derive": [...], "guesses": [...] }}\n\n'
+        f"Task: {task[:600]}"
+        + (
+            f"\n\nNew evidence since the last plan: {extra_context[:400]}"
+            if extra_context
+            else ""
+        )
+    )
+    facts_text = "{}"
+    try:
+        r = client.messages.create(
+            model=model_haiku,
+            max_tokens=512,
+            messages=[{"role": "user", "content": facts_prompt}],
+        )
+        facts_text = _text_from_content(_serialize_content(r.content))
+    except Exception as exc:
+        logger.warning("planner facts call failed: %s", exc)
+
+    plan_prompt = (
+        f"Create a step-by-step plan. Respond ONLY in JSON:\n"
+        f'{{ "steps": [...], "validation": [...], "confidence": 0.85, "risks": [...] }}\n\n'
+        f"Task: {task[:600]}\nFacts: {facts_text[:400]}"
+        + (
+            f"\n\nThis is a REVISED plan replacing the prior approach because: "
+            f"{extra_context[:400]}"
+            if extra_context
+            else ""
+        )
+    )
+    plan_text = "{}"
+    confidence = 0.8
+    try:
+        r2 = client.messages.create(
+            model=model_haiku,
+            max_tokens=512,
+            messages=[{"role": "user", "content": plan_prompt}],
+        )
+        plan_text = _text_from_content(_serialize_content(r2.content))
+        confidence = float(json.loads(plan_text).get("confidence", 0.8))
+    except Exception as exc:
+        logger.warning("planner plan call failed: %s", exc)
+
+    return facts_text, plan_text, confidence
+
+
 def _make_planner_node(
     model_haiku: str,
     task_description: str,
@@ -299,43 +363,9 @@ def _make_planner_node(
         task = task_description or str(
             (state["messages"][0].get("content", "") if state["messages"] else "")
         )
-
-        # Call 1: gather-facts survey
-        facts_prompt = (
-            f"Analyze this task. Respond ONLY in JSON:\n"
-            f'{{ "given": [...], "to_look_up": [...], "to_derive": [...], "guesses": [...] }}\n\n'
-            f"Task: {task[:600]}"
+        facts_text, plan_text, confidence = _gather_facts_and_plan(
+            client, model_haiku, task
         )
-        facts_text = "{}"
-        try:
-            r = client.messages.create(
-                model=model_haiku,
-                max_tokens=512,
-                messages=[{"role": "user", "content": facts_prompt}],
-            )
-            facts_text = _text_from_content(_serialize_content(r.content))
-        except Exception as exc:
-            logger.warning("planner_node facts call failed: %s", exc)
-
-        # Call 2: create structured plan
-        plan_prompt = (
-            f"Create a step-by-step plan. Respond ONLY in JSON:\n"
-            f'{{ "steps": [...], "validation": [...], "confidence": 0.85, "risks": [...] }}\n\n'
-            f"Task: {task[:600]}\nFacts: {facts_text[:400]}"
-        )
-        plan_text = "{}"
-        confidence = 0.8
-        try:
-            r2 = client.messages.create(
-                model=model_haiku,
-                max_tokens=512,
-                messages=[{"role": "user", "content": plan_prompt}],
-            )
-            plan_text = _text_from_content(_serialize_content(r2.content))
-            confidence = float(json.loads(plan_text).get("confidence", 0.8))
-        except Exception as exc:
-            logger.warning("planner_node plan call failed: %s", exc)
-
         logger.info("planner_node done (confidence=%.2f)", confidence)
         return {
             "facts": facts_text,
@@ -345,6 +375,87 @@ def _make_planner_node(
         }
 
     return planner_node
+
+
+# ---------------------------------------------------------------------------
+# Bounded continuous replanning — MASTER_AGENT_v2.md Phase 3.6.
+# A no-op (zero LLM calls) unless real, already-tracked state evidence
+# contradicts the current plan: reflection_node has repeatedly judged the
+# tool output unsatisfactory, or critique_node has repeatedly failed the
+# SAME quality-gate criterion across retries. Bounded by max_replans,
+# independent of max_turns, so this can never become a second, unbounded
+# loop layered on top of the first.
+# ---------------------------------------------------------------------------
+
+
+def _should_replan(state: AgentRunState, max_replans: int) -> tuple[bool, str]:
+    """Real, evidence-grounded trigger check — never a fabricated heuristic.
+    Returns (should_replan, human-readable reason citing the actual state)."""
+    if state.get("replan_count", 0) >= max_replans:
+        return False, ""
+
+    unsatisfied = state.get("reflection_unsatisfied_count", 0)
+    if unsatisfied >= 2:
+        return True, (
+            f"Self-review has judged your own tool output unsatisfactory "
+            f"{unsatisfied} times in a row — the current plan may not be working."
+        )
+
+    # critique_retries reaching 2 means critique_node has sent work back for
+    # improvement at least twice — i.e. the SAME evaluation cycle failed more
+    # than once, not merely once (a single failure is expected and handled by
+    # critique_node's own retry, not a replanning signal).
+    if state.get("critique_retries", 0) >= 2:
+        critique_result = state.get("critique_result") or {}
+        unmet = [
+            str(c.get("criterion", "?"))
+            for c in critique_result.get("criteria", [])
+            if not c.get("met", True)
+        ]
+        if unmet:
+            return True, (
+                "Quality-gate critique has repeatedly failed the same "
+                f"criteria across retries: {', '.join(unmet)}."
+            )
+
+    return False, ""
+
+
+def _make_replan_node(
+    model_haiku: str, task_description: str, max_replans: int
+) -> Callable[[AgentRunState], dict[str, Any]]:
+    def replan_node(state: AgentRunState) -> dict[str, Any]:
+        should, reason = _should_replan(state, max_replans)
+        if not should:
+            return {}
+
+        client = _make_client()
+        task = task_description or str(
+            (state["messages"][0].get("content", "") if state["messages"] else "")
+        )
+        facts_text, plan_text, confidence = _gather_facts_and_plan(
+            client, model_haiku, task, extra_context=reason
+        )
+        logger.info(
+            "replan_node: revising plan (reason=%s, confidence=%.2f)",
+            reason,
+            confidence,
+        )
+        return {
+            "facts": facts_text,
+            "plan": plan_text,
+            "confidence": confidence,
+            "replan_count": state.get("replan_count", 0) + 1,
+            "messages": list(state["messages"])
+            + [
+                {
+                    "role": "user",
+                    "content": f"[Replan] {reason} Revised plan:\n{plan_text}",
+                }
+            ],
+        }
+
+    return replan_node
 
 
 def _make_memory_hook_node(
@@ -566,6 +677,225 @@ def _make_reflection_node(model: str) -> Callable[[AgentRunState], dict[str, Any
     return reflection_node
 
 
+# ---------------------------------------------------------------------------
+# Formal self-critique — MASTER_AGENT_v2.md Phase 3.5.
+# Runs once per submission, after execute_tools sets submitted=True. Unlike
+# reflection_node (a generic 3-question check after every tool turn), this
+# scores the submitted work against the agent's OWN role file's concrete
+# "Quality Gates"/"Success Criteria" bullets, citing real state["verification"]
+# flags and the real submitted result — never a bare claim. When a criterion
+# is unmet, it resets submitted=False and feeds the gap back as a new
+# message, so the existing call_llm/execute_tools loop (and its max_turns
+# budget) does the "Improve" step — no separate control-flow mechanism.
+# ---------------------------------------------------------------------------
+
+
+def _extract_role_criteria(role_text: str) -> list[str]:
+    """Pull bullet lines out of the role file's own '## Quality Gates' and
+    '## Success Criteria' sections. Real text extraction from the role's
+    actual prompt — never a fabricated or hardcoded checklist per agent."""
+    target_headers = ("quality gates", "success criteria")
+    criteria: list[str] = []
+    in_target_section = False
+    for line in role_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            header_text = stripped.lstrip("#").strip().lower()
+            in_target_section = any(h in header_text for h in target_headers)
+            continue
+        if not in_target_section:
+            continue
+        if stripped.startswith("-"):
+            bullet = stripped.lstrip("-").strip()
+            if bullet.startswith("[ ]") or bullet.startswith("[x]"):
+                bullet = bullet[3:].strip()
+            if bullet:
+                criteria.append(bullet)
+    return criteria
+
+
+def _make_critique_node(
+    role_name: str, model: str, max_critique_retries: int
+) -> Callable[[AgentRunState], dict[str, Any]]:
+    """Structured self-assessment of a just-submitted result against the
+    agent's own role-file criteria. Bounded by max_critique_retries so an
+    unsatisfiable or flaky critique call can never loop forever — it also
+    only ever fires from a submission, which is itself bounded by max_turns.
+    """
+    role_text = load_role(role_name)
+    criteria = _extract_role_criteria(role_text)
+
+    def critique_node(state: AgentRunState) -> dict[str, Any]:
+        if not criteria:
+            # No concrete criteria to score against — fail open, no LLM
+            # call spent, submission stands as-is.
+            return {}
+
+        retries_so_far = state.get("critique_retries", 0)
+        verification = state.get("verification", {})
+        result = state.get("result", {})
+        criteria_list = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(criteria))
+
+        prompt = (
+            "You just submitted work for review. Score it against these "
+            "quality criteria, taken directly from your own role definition. "
+            "For each criterion, decide if it is met — cite REAL evidence: "
+            "either a specific flag from the observed verification state "
+            "below, or a specific field in the submitted result below. Never "
+            "mark something met without pointing to one of these.\n\n"
+            f"Criteria:\n{criteria_list}\n\n"
+            f"Observed verification state (ground truth, not your claim): "
+            f"{json.dumps(verification, default=str)}\n"
+            f"Submitted result: "
+            f"{json.dumps({k: v for k, v in result.items() if not k.startswith('_')}, default=str)}\n\n"
+            "Respond in JSON only: "
+            '{"criteria": [{"criterion": "...", "met": true/false, '
+            '"evidence": "..."}], "all_met": true/false}'
+        )
+
+        client = _make_client()
+        try:
+            r = client.messages.create(
+                model=model,
+                max_tokens=512,
+                messages=list(state["messages"])  # type: ignore[arg-type]
+                + [{"role": "user", "content": prompt}],
+                # No tools param → tool_choice=none equivalent
+            )
+            text = _text_from_content(_serialize_content(r.content))
+            data = json.loads(text)
+            all_met = bool(data.get("all_met", True))
+            critique_result = {
+                "criteria": data.get("criteria", []),
+                "all_met": all_met,
+            }
+
+            if all_met or retries_so_far >= max_critique_retries:
+                if not all_met:
+                    logger.warning(
+                        "critique_node: %s still unsatisfied after %d retries — "
+                        "accepting submission (retry budget exhausted)",
+                        role_name,
+                        retries_so_far,
+                    )
+                return {"critique_result": critique_result}
+
+            unmet = [c for c in critique_result["criteria"] if not c.get("met", True)]
+            unmet_text = "\n".join(
+                f"- {c.get('criterion', '?')}: {c.get('evidence', 'no evidence given')}"
+                for c in unmet
+            )
+            logger.info(
+                "critique_node: %s unmet criteria for %s — sending back for improvement",
+                len(unmet),
+                role_name,
+            )
+            return {
+                "messages": list(state["messages"])
+                + [
+                    {
+                        "role": "user",
+                        "content": (
+                            "[Critique] Your submission did not meet all quality "
+                            f"criteria:\n{unmet_text}\n\nAddress these and submit "
+                            "again."
+                        ),
+                    }
+                ],
+                "submitted": False,
+                "critique_retries": retries_so_far + 1,
+                "critique_result": critique_result,
+            }
+        except Exception as exc:
+            logger.warning("critique_node failed (non-fatal): %s", exc)
+            return {}
+
+    return critique_node
+
+
+@dataclass
+class QualityGateResult:
+    """Phase 3.7 (MASTER_AGENT_v2.md) — one explicit, auditable verdict for a
+    submit_* call, consolidating checks that were previously scattered
+    across execute_tools into a single named function and a single result
+    object attached to every submission as result["_quality_gate"]."""
+
+    passed: bool
+    checks: dict[str, bool]
+    warnings: list[str]
+    confidence: float
+
+
+def _run_quality_gate(
+    state: AgentRunState,
+    verification_cfg: VerificationConfig,
+    raw_result: dict[str, Any],
+    min_confidence: float,
+) -> QualityGateResult:
+    """Runs at the exact submit_* boundary in execute_tools. Audits the real
+    signals the graph already produces — never invents a new one:
+      - verification (3.1): the state["verification"] flags this role's
+        enforce_in_result contract cares about (informational here — which
+        flags are actually load-bearing vs. merely tracked is a legitimate
+        per-agent decision this shared, fleet-wide function doesn't own;
+        see tests/test_phase3_verification_audit.py).
+      - consistency: re-confirms enforce_in_result's own override actually
+        took (raw_result should already reflect verified truth by the time
+        this runs — this checks the invariant rather than just trusting it).
+      - evidence/critique (3.5): if critique_node ran and still found unmet
+        criteria when its retry budget was exhausted, that fact is
+        surfaced here instead of silently disappearing into an accepted
+        submission.
+      - confidence: the planner's own confidence score against a caller-set
+        floor (0.0 by default — inert unless a caller opts in).
+    Only confidence and critique are allowed to flip `passed` False —
+    verification/consistency stay informational for the reason above.
+    """
+    checks: dict[str, bool] = {}
+    warnings: list[str] = []
+    verification = state.get("verification", {})
+
+    for verif_key in sorted(set(verification_cfg.enforce_in_result.values())):
+        checks[f"verification:{verif_key}"] = bool(verification.get(verif_key, False))
+
+    for result_field, verif_key in verification_cfg.enforce_in_result.items():
+        expected = verification.get(verif_key, False)
+        checks[f"consistency:{result_field}"] = raw_result.get(result_field) == expected
+
+    if raw_result.get("_validation_warning"):
+        checks["policy:schema_valid"] = False
+        warnings.append(f"input_schema warning: {raw_result['_validation_warning']}")
+    else:
+        checks["policy:schema_valid"] = True
+
+    critique_result = state.get("critique_result") or {}
+    if critique_result:
+        all_met = bool(critique_result.get("all_met", True))
+        checks["critique:all_met"] = all_met
+        if not all_met:
+            unmet = [
+                str(c.get("criterion", "?"))
+                for c in critique_result.get("criteria", [])
+                if not c.get("met", True)
+            ]
+            warnings.append(
+                "submitted with unmet quality-gate criteria (critique retry "
+                f"budget exhausted): {', '.join(unmet)}"
+            )
+
+    confidence = float(state.get("confidence", 1.0))
+    checks["confidence:threshold"] = confidence >= min_confidence
+    if confidence < min_confidence:
+        warnings.append(
+            f"planner confidence {confidence:.2f} below required {min_confidence:.2f}"
+        )
+
+    passed = checks.get("critique:all_met", True) and checks["confidence:threshold"]
+    return QualityGateResult(
+        passed=passed, checks=checks, warnings=warnings, confidence=confidence
+    )
+
+
 def _make_execute_tools_node(
     tool_handlers: dict[str, Any],
     verification_cfg: VerificationConfig,
@@ -573,6 +903,7 @@ def _make_execute_tools_node(
     task_id: str = "",
     trace_id: str = "",
     tools: list[dict[str, Any]] | None = None,
+    quality_gate_min_confidence: float = 0.0,
 ) -> Callable[[AgentRunState], dict[str, Any]]:
     """Runs tool calls, enforces verification contract, resets stall counter.
     Pushes tool_call / tool_result / file_edit / terminal events to ActivityStream.
@@ -601,6 +932,7 @@ def _make_execute_tools_node(
         new_verification = dict(state["verification"])
         new_result = dict(state["result"])
         submitted = state["submitted"]
+        quality_gate_failed = False
         tool_results: list[dict[str, Any]] = []
 
         for tu in tool_uses:
@@ -693,7 +1025,29 @@ def _make_execute_tools_node(
                                     actual,
                                 )
                             raw_result[result_field] = actual
-                        raw_result["_requires_human_approval"] = human_approval_required
+
+                        gate = _run_quality_gate(
+                            state,
+                            verification_cfg,
+                            raw_result,
+                            quality_gate_min_confidence,
+                        )
+                        raw_result["_quality_gate"] = {
+                            "passed": gate.passed,
+                            "checks": gate.checks,
+                            "warnings": gate.warnings,
+                        }
+                        if not gate.passed:
+                            quality_gate_failed = True
+                            logger.warning(
+                                "quality gate failed for %s: %s",
+                                tu_name,
+                                gate.warnings,
+                            )
+
+                        raw_result["_requires_human_approval"] = (
+                            human_approval_required or not gate.passed
+                        )
                         new_result.update(raw_result)
 
             # Push tool_result + specialized events
@@ -735,7 +1089,8 @@ def _make_execute_tools_node(
             "result": new_result,
             "submitted": submitted,
             "turns": state["turns"] + 1,
-            "requires_human_approval": human_approval_required and submitted,
+            "requires_human_approval": (human_approval_required or quality_gate_failed)
+            and submitted,
             "n_stalls": 0,  # reset stall counter — tools were used this turn
         }
 
@@ -982,6 +1337,22 @@ def _make_router(
     return router
 
 
+def _post_execute_tools_router(state: AgentRunState) -> str:
+    """Route after execute_tools when critique is enabled: a fresh submission
+    goes to critique_node for scoring; anything else loops back to call_llm
+    exactly as it always has."""
+    return "critique_node" if state.get("submitted") else "call_llm"
+
+
+def _post_critique_router(state: AgentRunState) -> str:
+    """Route after critique_node. critique_node resets submitted=False when
+    it sends work back for improvement, so re-reading state["submitted"]
+    here (rather than critique_node returning a routing key directly) keeps
+    the node itself a plain state-update function, consistent with every
+    other node in this graph."""
+    return END if state.get("submitted") else "call_llm"
+
+
 # ---------------------------------------------------------------------------
 # Public builder
 # ---------------------------------------------------------------------------
@@ -1001,6 +1372,19 @@ def build_agent_graph(
     enable_planning: bool = True,
     enable_memory: bool = True,
     enable_reflection: bool = True,
+    # Phase 3.5 (2026-07-28) — off by default, same Session-0-style rollout
+    # already used once in this file (enable_reflection/planning/memory all
+    # launched False, then flipped True fleet-wide after dedicated testing).
+    # Pass True to opt an agent in ahead of the fleet-wide flip.
+    enable_critique: bool = False,
+    max_critique_retries: int = 1,
+    # Phase 3.6 (2026-07-28) — same off-by-default rollout as enable_critique.
+    enable_replanning: bool = False,
+    max_replans: int = 1,
+    # Phase 3.7 (2026-07-28) — 0.0 is inert (every confidence >= 0.0), so the
+    # quality gate always runs (cheap, no LLM call) but never changes
+    # behavior fleet-wide unless a caller opts in with a real floor.
+    quality_gate_min_confidence: float = 0.0,
     task_description: str = "",
     repo_path: str = "",
     model_haiku: str = "",
@@ -1025,6 +1409,7 @@ def build_agent_graph(
         task_id,
         trace_id,
         tools=tools,
+        quality_gate_min_confidence=quality_gate_min_confidence,
     )
     router = _make_router(max_turns, max_stalls, enable_reflection)
 
@@ -1040,6 +1425,16 @@ def build_agent_graph(
         )
     if enable_reflection:
         g.add_node("reflection_node", _make_reflection_node(model))  # type: ignore[call-overload]
+    if enable_critique:
+        g.add_node(  # type: ignore[call-overload]
+            "critique_node",
+            _make_critique_node(role_name, haiku, max_critique_retries),
+        )
+    if enable_replanning:
+        g.add_node(  # type: ignore[call-overload]
+            "replan_node",
+            _make_replan_node(haiku, task_description, max_replans),
+        )
 
     # --- Entry point ---
     if enable_planning and enable_memory:
@@ -1075,8 +1470,27 @@ def build_agent_graph(
             {"execute_tools": "execute_tools", END: END},
         )
 
-    # --- After execute_tools: loop back to call_llm ---
-    g.add_edge("execute_tools", "call_llm")
+    # --- After execute_tools: loop back to call_llm, or critique/replan first ---
+    # replan_node sits on every "loop back to call_llm" edge (not just
+    # critique's) since its own trigger also fires from reflection_node's
+    # signal, which is independent of whether critique is enabled at all.
+    loop_back_target = "replan_node" if enable_replanning else "call_llm"
+    if enable_replanning:
+        g.add_edge("replan_node", "call_llm")
+
+    if enable_critique:
+        g.add_conditional_edges(
+            "execute_tools",
+            _post_execute_tools_router,
+            {"critique_node": "critique_node", "call_llm": loop_back_target},
+        )
+        g.add_conditional_edges(
+            "critique_node",
+            _post_critique_router,
+            {"call_llm": loop_back_target, END: END},
+        )
+    else:
+        g.add_edge("execute_tools", loop_back_target)
 
     return g.compile()
 
@@ -1096,6 +1510,11 @@ def run_agent_graph(
     enable_memory: bool = True,
     enable_reflection: bool = True,
     enable_lesson: bool = True,
+    enable_critique: bool = False,
+    max_critique_retries: int = 1,
+    enable_replanning: bool = False,
+    max_replans: int = 1,
+    quality_gate_min_confidence: float = 0.0,
     task_description: str = "",
     repo_path: str = "",
     model_haiku: str = "",
@@ -1288,6 +1707,11 @@ def run_agent_graph(
             enable_planning=enable_planning,
             enable_memory=enable_memory,
             enable_reflection=enable_reflection,
+            enable_critique=enable_critique,
+            max_critique_retries=max_critique_retries,
+            enable_replanning=enable_replanning,
+            max_replans=max_replans,
+            quality_gate_min_confidence=quality_gate_min_confidence,
             task_description=task_description or initial_message,
             repo_path=repo_path,
             model_haiku=model_haiku,
@@ -1318,6 +1742,9 @@ def run_agent_graph(
             "memory_context": "",
             "repo_context": "",
             "reflection_unsatisfied_count": 0,
+            "critique_result": {},
+            "critique_retries": 0,
+            "replan_count": 0,
         }
 
         final_state: AgentRunState = graph.invoke(initial_state)

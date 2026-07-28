@@ -59,7 +59,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "record_learning",
     ],
     "input_types": ["task_id", "subtask_id", "plan", "worktree_path", "repo_path"],
-    "output_types": ["files_changed"],
+    "output_types": ["files_changed", "tokens_in", "tokens_out"],
     "side_effects": ["write_files", "execute_bash"],
     "permissions": ["read_repo", "write_worktree", "execute_bash"],
     "risk_level": "medium",
@@ -114,10 +114,16 @@ def run_backend_dev(
     on_heartbeat: Any = None,  # kept for backward compat — no-op
     on_tool_call: Any = None,  # kept for backward compat — no-op
     extra_env: dict[str, str] | None = None,
-) -> tuple[list[str], str | None]:
+) -> tuple[list[str], str | None, int, int]:
     """Run backend developer agent with static-check retry loop.
 
-    Returns (files_changed, error). error is None on success.
+    Returns (files_changed, error, tokens_in, tokens_out). error is None on
+    success. tokens_in/tokens_out are accumulated across every retry attempt
+    (not just the last one) — MASTER_AGENT_v2.md Phase 3.2: this is real data
+    the graph already computes per attempt; before this it was logged and
+    then discarded at every return point instead of being surfaced to the
+    caller, which is why manager.py's epic cost_actual had nothing real to
+    aggregate.
 
     extra_env (Day 17): custom secrets merged into the bash tool's
     subprocess env.
@@ -128,6 +134,8 @@ def run_backend_dev(
     repo = repo_path or settings.target_repo_path
     max_retries = settings.max_retries
     check_error: str | None = None
+    total_in = 0
+    total_out = 0
 
     for attempt in range(max_retries):
         handlers = make_coder_handlers(worktree_path, repo, extra_env=extra_env)
@@ -172,8 +180,11 @@ def run_backend_dev(
                 subtask_id,
             )
             if not should_retry(attempt + 1, max_retries):
-                return [], f"Backend dev agent error: {exc}"
+                return [], f"Backend dev agent error: {exc}", total_in, total_out
             continue
+
+        total_in += final_state.get("tokens_in", 0)
+        total_out += final_state.get("tokens_out", 0)
 
         patch_result = handlers.get("_patch_result", {})
         files_changed: list[str] = patch_result.get("files_changed", [])
@@ -181,7 +192,7 @@ def run_backend_dev(
         if not final_state.get("submitted"):
             logger.warning("Backend dev did not submit on attempt %d", attempt + 1)
             if not should_retry(attempt + 1, max_retries):
-                return [], "Backend dev did not submit a patch"
+                return [], "Backend dev did not submit a patch", total_in, total_out
             continue
 
         check_error = _run_backend_checks(worktree_path)
@@ -191,10 +202,10 @@ def run_backend_dev(
                 subtask_id,
                 attempt + 1,
                 len(files_changed),
-                final_state.get("tokens_in", 0),
-                final_state.get("tokens_out", 0),
+                total_in,
+                total_out,
             )
-            return files_changed, None
+            return files_changed, None, total_in, total_out
 
         logger.warning(
             "Backend dev checks failed on attempt %d: %s",
@@ -205,9 +216,11 @@ def run_backend_dev(
             return (
                 [],
                 f"Checks still failing after {max_retries} attempts:\n{check_error}",
+                total_in,
+                total_out,
             )
 
-    return [], f"Backend dev blocked after {max_retries} attempts"
+    return [], f"Backend dev blocked after {max_retries} attempts", total_in, total_out
 
 
 # ---------------------------------------------------------------------------
