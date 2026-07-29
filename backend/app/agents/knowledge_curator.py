@@ -18,8 +18,10 @@ from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
     FLEET_APPLY_TOOLS,
     READ_ONLY_TOOLS,
+    RECORD_LEARNING_TOOL,
     make_fleet_apply_handlers,
     make_read_only_handlers,
+    make_record_learning_handler,
     make_submit_enhancement_request_handler,
     memory_curate_read,
     memory_curate_write,
@@ -42,6 +44,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "edit_file",
         "git_commit_change",
         "submit_fix",
+        "record_learning",
     ],
     "input_types": ["scan_trigger", "enhancement_request_id"],
     "output_types": ["AgentResult"],
@@ -163,6 +166,7 @@ _APPLY_CFG = VerificationConfig(
 
 def make_scan_handlers(repo_path: str, trace_id: str = "") -> dict[str, Any]:
     handlers = make_read_only_handlers(repo_path)
+    handlers["record_learning"] = make_record_learning_handler("knowledge_curator")
     handlers["memory_search"] = memory_search
     handlers["memory_curate_read"] = memory_curate_read
     handlers["submit_enhancement_request"] = make_submit_enhancement_request_handler(
@@ -173,6 +177,7 @@ def make_scan_handlers(repo_path: str, trace_id: str = "") -> dict[str, Any]:
 
 def make_apply_handlers(repo_path: str) -> dict[str, Any]:
     handlers = make_fleet_apply_handlers(repo_path)
+    handlers["record_learning"] = make_record_learning_handler("knowledge_curator")
     handlers["memory_curate_write"] = memory_curate_write
     return handlers
 
@@ -182,7 +187,6 @@ def run_knowledge_curator_scan(trace_id: str = "") -> AgentResult:
     settings = get_settings()
     repo = settings.fleet_self_repo_path
     handlers = make_scan_handlers(repo, trace_id=trace_id)
-
     msg = (
         "Review the fleet's persistent engineering memory for curation issues: duplicate or "
         "near-duplicate entries, stale entries that no longer reflect reality, entries "
@@ -197,7 +201,7 @@ def run_knowledge_curator_scan(trace_id: str = "") -> AgentResult:
     final_state = run_agent_graph(
         role_name="knowledge_curator",
         model=settings.model_coder,
-        tools=SCAN_TOOLS,
+        tools=SCAN_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_SCAN_CFG,
         initial_message=msg,
@@ -258,7 +262,7 @@ def run_knowledge_curator_apply(
     final_state = run_agent_graph(
         role_name="knowledge_curator",
         model=settings.model_coder,
-        tools=APPLY_TOOLS,
+        tools=APPLY_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_APPLY_CFG,
         initial_message=msg,

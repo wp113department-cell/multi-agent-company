@@ -7,6 +7,8 @@ DELETE /api/repo/{id}       — remove a repo record from the database
 GET    /api/repo/reindex    — reindex status
 POST   /api/repo/reindex    — trigger reindex
 GET    /api/repo/context    — build context for a task description
+GET    /api/repo/class-graph   — class/inheritance graph (Phase 6.4)
+GET    /api/repo/package-graph — package/module-level dependency graph (Phase 6.4)
 """
 
 from __future__ import annotations
@@ -451,4 +453,65 @@ async def get_architecture() -> dict[str, object]:
     return {
         "summary": arch_map.summary,
         "components": [c.model_dump() for c in arch_map.components],
+    }
+
+
+@router.get("/class-graph")
+async def get_class_graph() -> dict[str, object]:
+    """Phase 6.4 — class/inheritance graph, resolved by the same
+    identifier-name-matching technique as the cross-file call graph. Uses
+    the maintained full index (same fallback-to-fresh-scan convention as
+    /context and /architecture above) rather than re-deriving from the
+    persisted call_edges table, since not every deployment necessarily runs
+    a background reindex before this is first called."""
+    from app.repo_tools.cross_file_graph import build_class_graph
+
+    repo_path = get_active_repo_path()
+    if _cached_index is not None:
+        idx = _cached_index
+    else:
+        from app.repo_tools.scanner import index_repository
+
+        idx = index_repository(repo_path)
+
+    edges = build_class_graph(idx)
+    return {
+        "edges": [
+            {
+                "subclassFile": e.subclass_file,
+                "subclassSymbol": e.subclass_symbol,
+                "superclassFile": e.superclass_file,
+                "superclassSymbol": e.superclass_symbol,
+            }
+            for e in edges
+        ]
+    }
+
+
+@router.get("/package-graph")
+async def get_package_graph() -> dict[str, object]:
+    """Phase 6.4 — package/module-level dependency graph: scanner.py's
+    existing file-level import edges aggregated up to directory
+    granularity. Pure aggregation over already-collected data."""
+    from app.repo_tools.scanner import build_call_graph, build_package_graph
+
+    repo_path = get_active_repo_path()
+    if _cached_index is not None:
+        idx = _cached_index
+    else:
+        from app.repo_tools.scanner import index_repository
+
+        idx = index_repository(repo_path)
+
+    import_edges = build_call_graph(idx)
+    package_edges = build_package_graph(import_edges)
+    return {
+        "edges": [
+            {
+                "callerPackage": e.caller_package,
+                "calleePackage": e.callee_package,
+                "weight": e.weight,
+            }
+            for e in package_edges
+        ]
     }

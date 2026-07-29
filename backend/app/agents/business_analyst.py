@@ -13,6 +13,7 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import BUSINESS_ANALYST_TOOLS, make_business_analyst_handlers
+from app.agents.tools import RECORD_LEARNING_TOOL, make_record_learning_handler
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "git_blame",
         "analyze_file",
         "submit_ba_result",
+        "record_learning",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -74,6 +76,7 @@ def run_business_analyst(
     repo = repo_path or str(settings.target_repo_path)
     handlers = make_business_analyst_handlers(repo)
 
+    handlers["record_learning"] = make_record_learning_handler("business_analyst")
     message = (
         f"Task #{task_id} — Business Analysis\n\n"
         f"{description}\n\n"
@@ -91,7 +94,7 @@ def run_business_analyst(
         task_id=str(task_id),
         role_name="business_analyst",
         model=settings.model_planner,
-        tools=BUSINESS_ANALYST_TOOLS,
+        tools=BUSINESS_ANALYST_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_VERIFICATION_CFG,
         initial_message=message,

@@ -16,6 +16,7 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import CICD_AGENT_TOOLS, make_cicd_agent_handlers
+from app.agents.tools import RECORD_LEARNING_TOOL, make_record_learning_handler
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "edit_file",
         "write_file",
         "submit_cicd_report",
+        "record_learning",
     ],
     "input_types": ["task_id", "task_description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -80,6 +82,7 @@ def run_cicd_agent(
     repo = repo_path or str(settings.target_repo_path)
     handlers = make_cicd_agent_handlers(repo)
 
+    handlers["record_learning"] = make_record_learning_handler("cicd_agent")
     message = (
         f"Task #{task_id} — CI/CD Task\n\n{task_description}\n\n"
         "Process:\n"
@@ -99,7 +102,7 @@ def run_cicd_agent(
         task_id=str(task_id),
         role_name="cicd_agent",
         model=settings.model_coder,
-        tools=CICD_AGENT_TOOLS,
+        tools=CICD_AGENT_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_VERIFICATION_CFG,
         initial_message=message,

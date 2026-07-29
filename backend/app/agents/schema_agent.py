@@ -13,6 +13,7 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import SCHEMA_AGENT_TOOLS, make_schema_agent_handlers
+from app.agents.tools import RECORD_LEARNING_TOOL, make_record_learning_handler
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "inspect_schema",
         "write_file",
         "submit_schema",
+        "record_learning",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -76,6 +78,7 @@ def run_schema_agent(
     repo = repo_path or str(settings.target_repo_path)
     handlers = make_schema_agent_handlers(repo)
 
+    handlers["record_learning"] = make_record_learning_handler("schema_agent")
     message = (
         f"Task #{task_id} — Schema Design / Review\n\n"
         f"{description}\n\n"
@@ -95,7 +98,7 @@ def run_schema_agent(
         task_id=str(task_id),
         role_name="schema_agent",
         model=settings.model_coder,
-        tools=SCHEMA_AGENT_TOOLS,
+        tools=SCHEMA_AGENT_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_VERIFICATION_CFG,
         initial_message=message,

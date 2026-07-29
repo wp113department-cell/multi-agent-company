@@ -13,6 +13,7 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import STYLE_REVIEWER_TOOLS, make_style_reviewer_handlers
+from app.agents.tools import RECORD_LEARNING_TOOL, make_record_learning_handler
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "list_functions",
         "list_classes",
         "submit_style_review",
+        "record_learning",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -74,6 +76,7 @@ def run_style_reviewer(
     repo = repo_path or str(settings.target_repo_path)
     handlers = make_style_reviewer_handlers(repo)
 
+    handlers["record_learning"] = make_record_learning_handler("style_reviewer")
     message = (
         f"Task #{task_id} — Style / Lint Review\n\n"
         f"{description}\n\n"
@@ -90,7 +93,7 @@ def run_style_reviewer(
         task_id=str(task_id),
         role_name="style_reviewer",
         model=settings.model_coder,
-        tools=STYLE_REVIEWER_TOOLS,
+        tools=STYLE_REVIEWER_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_VERIFICATION_CFG,
         initial_message=message,

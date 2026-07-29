@@ -38,6 +38,14 @@ def _make_demo_repo(tmp_path: Path) -> str:
     return str(tmp_path)
 
 
+def _make_demo_repo_with_inheritance(tmp_path: Path) -> str:
+    (tmp_path / "shapes.py").write_text("class Shape:\n    pass\n")
+    (tmp_path / "circle.py").write_text(
+        "from shapes import Shape\n\nclass Circle(Shape):\n    pass\n"
+    )
+    return str(tmp_path)
+
+
 def _cleanup(repo_path: str) -> None:
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -234,5 +242,49 @@ def test_persist_deleting_indexed_file_cascades_to_its_symbols(
     try:
         orphan_count = asyncio.run(_run())
         assert orphan_count == 0
+    finally:
+        _cleanup(repo_path)
+
+
+def test_persist_writes_real_inheritance_edges(tmp_path: Path) -> None:
+    """Phase 6.4 — build_class_graph() edges must actually reach the DB as
+    CallEdge rows with edge_type='inherits', reusing the same table the
+    'import'/'call' edge types already write to."""
+    repo_path = _make_demo_repo_with_inheritance(tmp_path)
+    idx = index_repository(repo_path)
+    graph_result = build_cross_file_graph(idx)
+
+    async def _run() -> list[CallEdge]:
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        engine = _new_isolated_db_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:  # type: ignore[arg-type]
+                await persist_repo_index(repo_path, idx, graph_result, session)
+                edges = (
+                    (
+                        await session.execute(
+                            select(CallEdge).where(
+                                CallEdge.repo_path == repo_path,
+                                CallEdge.edge_type == "inherits",
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                return list(edges)
+        finally:
+            await engine.dispose()  # type: ignore[attr-defined]
+
+    try:
+        inherit_edges = asyncio.run(_run())
+        assert any(
+            e.caller_file == "circle.py"
+            and e.caller_symbol == "Circle"
+            and e.callee_file == "shapes.py"
+            and e.callee_symbol == "Shape"
+            for e in inherit_edges
+        )
     finally:
         _cleanup(repo_path)

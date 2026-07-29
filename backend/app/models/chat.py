@@ -21,40 +21,23 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ChatSession:
+    """Note (MASTER_AGENT_v2.md Phase 5.2): confirmation pause/resume used
+    to live on this class via a bespoke asyncio.Event mechanism
+    (request_confirmation()/resolve_confirmation()). That's been replaced
+    by a real LangGraph interrupt()-based pause in
+    app/agents/chat_agent.py::ChatAgent (._confirm()/.resume()) — see that
+    module's docstring for the full design. This class now only owns what
+    every session genuinely needs regardless of pause mechanism: history,
+    the SSE event queue, and the "already processing a message" flag."""
+
     session_id: str
     repo_path: str
     history: list[dict[str, Any]] = field(default_factory=list)
     _queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
-    _pending: dict[str, asyncio.Event] = field(default_factory=dict)
-    _results: dict[str, bool] = field(default_factory=dict)
     active: bool = False
 
     async def push(self, event: dict[str, Any]) -> None:
         await self._queue.put(event)
-
-    async def request_confirmation(
-        self, action_id: str, description: str, details: str
-    ) -> bool:
-        """Pause the agent and ask the user to approve/deny an action."""
-        ev = asyncio.Event()
-        self._pending[action_id] = ev
-        await self.push(
-            {
-                "type": "confirmation_required",
-                "actionId": action_id,
-                "description": description,
-                "details": details,
-            }
-        )
-        await ev.wait()
-        return self._results.get(action_id, False)
-
-    def resolve_confirmation(self, action_id: str, approved: bool) -> None:
-        """Called by the confirm endpoint to resume the agent."""
-        self._results[action_id] = approved
-        ev = self._pending.pop(action_id, None)
-        if ev:
-            ev.set()
 
 
 _sessions: dict[str, ChatSession] = {}

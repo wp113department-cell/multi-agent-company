@@ -14,8 +14,10 @@ from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
     FLEET_APPLY_TOOLS,
+    RECORD_LEARNING_TOOL,
     _FLEET_BASH_TOOL,
     make_fleet_apply_handlers,
+    make_record_learning_handler,
     make_scoped_bash_handler,
     make_security_reviewer_handlers,
     make_submit_enhancement_request_handler,
@@ -44,6 +46,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "run_tests",
         "git_commit_change",
         "submit_fix",
+        "record_learning",
     ],
     "input_types": ["scan_trigger", "enhancement_request_id"],
     "output_types": ["AgentResult"],
@@ -115,6 +118,7 @@ _APPLY_CFG = VerificationConfig(
 
 def make_scan_handlers(repo_path: str, trace_id: str = "") -> dict[str, Any]:
     handlers = make_security_reviewer_handlers(repo_path)
+    handlers["record_learning"] = make_record_learning_handler("quality_auditor")
     handlers["bash"] = make_scoped_bash_handler(repo_path)
     handlers["submit_enhancement_request"] = make_submit_enhancement_request_handler(
         "quality_auditor", trace_id=trace_id
@@ -152,7 +156,6 @@ def run_quality_auditor_scan(trace_id: str = "") -> AgentResult:
     settings = get_settings()
     repo = settings.fleet_self_repo_path
     handlers = make_scan_handlers(repo, trace_id=trace_id)
-
     msg = (
         "Audit the platform for real issues, one at a time — never bundle multiple fixes "
         "into one request. Three lenses: (1) security — use secrets_scan/find_sql/"
@@ -167,7 +170,7 @@ def run_quality_auditor_scan(trace_id: str = "") -> AgentResult:
     final_state = run_agent_graph(
         role_name="quality_auditor",
         model=settings.model_coder,
-        tools=SCAN_TOOLS,
+        tools=SCAN_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_SCAN_CFG,
         initial_message=msg,
@@ -208,6 +211,8 @@ def run_quality_auditor_apply(
     repo = settings.fleet_self_repo_path
     handlers = make_fleet_apply_handlers(repo)
 
+    handlers["record_learning"] = make_record_learning_handler("quality_auditor")
+
     def submit_h(inp: dict[str, Any]) -> str:
         return "done"
 
@@ -223,7 +228,7 @@ def run_quality_auditor_apply(
     final_state = run_agent_graph(
         role_name="quality_auditor",
         model=settings.model_coder,
-        tools=APPLY_TOOLS,
+        tools=APPLY_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_APPLY_CFG,
         initial_message=msg,

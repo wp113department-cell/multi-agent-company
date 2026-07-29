@@ -13,6 +13,7 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import READ_ONLY_TOOLS, make_chat_handlers
+from app.agents.tools import RECORD_LEARNING_TOOL, make_record_learning_handler
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "generate_changelog",
         "write_file",
         "submit_release_notes",
+        "record_learning",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -143,6 +145,7 @@ def run_release_notes_agent(
     settings = get_settings()
     repo = repo_path or str(settings.target_repo_path)
     handlers = make_release_notes_handlers(repo)
+    handlers["record_learning"] = make_record_learning_handler("release_notes_agent")
     submitted = handlers["_release_notes_result"]
 
     message = (
@@ -159,7 +162,7 @@ def run_release_notes_agent(
         task_id=str(task_id),
         role_name="release_notes_agent",
         model=settings.model_planner,
-        tools=_RELEASE_NOTES_TOOLS,
+        tools=_RELEASE_NOTES_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_VERIFICATION_CFG,
         initial_message=message,

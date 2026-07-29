@@ -125,6 +125,106 @@ def test_record_decision_is_idempotent_only_against_pending_rows() -> None:
         _cleanup(thread_id)
 
 
+def test_request_human_input_writes_kind_as_action_and_blocking_in_details() -> None:
+    """MASTER_AGENT_v2.md Phase 5.5 — request_human_input() is the single
+    generalized entry point; kind becomes the row's real `action` (the
+    column app/api/approvals.py's dispatch already switches on by exact
+    value), and blocking is folded into details for API/dashboard
+    consumers, without request_human_input() owning any pause mechanics
+    itself."""
+    thread_id = "td_ag_request_human_input"
+    try:
+        rec = ag.request_human_input(
+            "plan_review",
+            {"risk_level": "high"},
+            agent_name="decomposer",
+            thread_id=thread_id,
+            task_id=99,
+            blocking=True,
+            description="Plan review for task 99",
+        )
+        assert rec.action == "plan_review"
+        assert rec.details["risk_level"] == "high"
+        assert rec.details["blocking"] is True
+
+        got = ag.get_pending(thread_id)
+        assert got is not None
+        assert got.id == rec.id
+    finally:
+        _cleanup(thread_id)
+
+
+def test_request_human_input_non_blocking_kind_records_blocking_false() -> None:
+    thread_id = "td_ag_request_human_input_nonblocking"
+    try:
+        rec = ag.request_human_input(
+            "clarification",
+            {"question": "Which provider?"},
+            agent_name="planner",
+            thread_id=thread_id,
+            task_id=None,
+            blocking=False,
+        )
+        assert rec.action == "clarification"
+        assert rec.details["blocking"] is False
+    finally:
+        _cleanup(thread_id)
+
+
+def test_request_human_input_logs_the_request_to_the_audit_log() -> None:
+    """Previously only DECISIONS were audit-logged (see
+    resume_planning_pipeline's get_audit_log().record_approval() call) — the
+    request itself never appeared in the audit trail until it was later
+    decided. request_human_input() closes that gap."""
+    from app.fleet.audit_log import get_audit_log
+
+    thread_id = "td_ag_request_human_input_audit"
+    try:
+        ag.request_human_input(
+            "plan_review",
+            {"risk_level": "low"},
+            agent_name="decomposer",
+            thread_id=thread_id,
+            task_id=123,
+            blocking=True,
+            description="Plan review for task 123",
+        )
+        matches = get_audit_log().by_trace(thread_id)
+        assert matches, "expected a request-time audit entry for this thread_id"
+        entry = matches[-1]
+        assert entry.action_type == "plan_review"
+        assert entry.outcome == "pending"
+        assert entry.requires_human_approval is True
+        assert entry.task_id == "123"
+    finally:
+        _cleanup(thread_id)
+
+
+def test_arequest_human_input_async_facade_round_trips() -> None:
+    thread_id = "td_ag_arequest_human_input"
+    try:
+
+        async def _run() -> ag.PendingApprovalRecord:
+            return await ag.arequest_human_input(
+                "git_push",
+                {"branch": "agent/task-7"},
+                agent_name="manager",
+                thread_id=thread_id,
+                task_id=7,
+                blocking=True,
+            )
+
+        rec = asyncio.run(_run())
+        assert rec.action == "git_push"
+        assert rec.details["blocking"] is True
+
+        got = ag.get_pending(thread_id)
+        assert got is not None
+        assert got.id == rec.id
+    finally:
+        _cleanup(thread_id)
+
+
 def test_record_pending_supersedes_prior_undecided_row_for_same_thread() -> None:
     """Gap-closure (2026-07-21): restarting a task via POST /tasks/{id}/restart
     while paused at human_review previously left the old row orphaned as

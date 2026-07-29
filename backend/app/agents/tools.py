@@ -343,6 +343,81 @@ def make_record_learning_handler(agent_name: str) -> Callable[[dict[str, Any]], 
     return _handler
 
 
+# ---------------------------------------------------------------------------
+# request_clarification — MASTER_AGENT_v2.md Phase 5.3. Real, but scoped to
+# what base_graph.py (the graph every worker agent besides pm/architect/
+# decomposer runs on) can actually support today: it has no checkpointer or
+# interrupt()/Command(resume=...) machinery of its own (that only exists in
+# app/pipeline/graph.py's separate pm->architect->decomposer pipeline — a
+# genuinely different graph). A true mid-run pause/resume for base_graph.py
+# agents is graph-level work (Phase 5.1/5.5's territory, not a single tool).
+# This is the real, working version that fits the existing shape instead:
+# the agent ends its run cleanly (status="needs_clarification", not a silent
+# hang or a crash) after recording a real PendingApproval row through the
+# same table/mechanism app/fleet/approval_gate.py already uses for the
+# pm/architect/decomposer pipeline's own human_review pause — a caller that
+# re-dispatches the agent with the human's answer folded into a fresh
+# initial_message is how "resume" works for this graph shape.
+# ---------------------------------------------------------------------------
+
+REQUEST_CLARIFICATION_TOOL: dict[str, Any] = {
+    "name": "request_clarification",
+    "description": (
+        "Use ONLY when the task is genuinely underspecified and continuing would "
+        "mean guessing at something a human should decide — not for every minor "
+        "judgment call (a reasonable, disclosed assumption is almost always "
+        "better than stopping to ask). Ends this run; a human or upstream agent "
+        "answers, and a future run receives that answer in its task context."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "question": {
+                "type": "string",
+                "description": "The specific, genuine blocker — not a vague 'is this ok?'",
+            },
+            "context": {
+                "type": "string",
+                "description": "What you already tried/considered, so the answer doesn't have to re-derive it.",
+            },
+        },
+        "required": ["question"],
+    },
+}
+
+
+def make_request_clarification_handler(
+    agent_name: str, task_id: str = ""
+) -> Callable[[dict[str, Any]], str]:
+    """Build the sync tool handler for request_clarification, scoped to the
+    calling agent's own name and task so the recorded row is correctly
+    attributed and findable by a real human/upstream-agent review flow."""
+
+    def _handler(inp: dict[str, Any]) -> str:
+        question = str(inp.get("question", "")).strip()
+        if not question:
+            return "[ERROR] question is required."
+        context = str(inp.get("context", "")).strip()
+
+        from app.fleet.approval_gate import request_human_input
+
+        try:
+            request_human_input(
+                kind="clarification",
+                details={"question": question, "context": context},
+                agent_name=agent_name,
+                thread_id=f"clarify-{task_id or 'notask'}-{agent_name}",
+                task_id=int(task_id) if str(task_id).isdigit() else None,
+                blocking=False,
+                description=f"{agent_name} requested clarification: {question[:200]}",
+            )
+        except Exception as exc:
+            return f"[ERROR] failed to record clarification request: {exc}"
+        return "Clarification request recorded. Ending this run to await an answer."
+
+    return _handler
+
+
 CODER_TOOLS = READ_ONLY_TOOLS + [
     {
         "name": "edit_file",
@@ -1399,10 +1474,19 @@ _SUBMIT_RESEARCH_TOOL = {
 
 # Research agent: minimal read tools + submit_research only (no AST tools, no web_search placeholder).
 # Kept small to stay within free-tier TPM limits — the agent can read files and search code.
+# MASTER_AGENT_v2.md Phase 4 Item 1 gap-closure (2026-07-30) — research.py's own role file explicitly
+# says "read the codebase, explore existing patterns" (general code exploration), but it was missing 2
+# of the 3 tools Phase 4's own checklist names for "read broadly": get_file_tree and find_references.
+# Both handlers already existed (make_research_handlers -> make_read_only_handlers wires every
+# READ_ONLY_TOOLS handler regardless of schema exposure — same dead-contract shape Step 2 already fixed
+# elsewhere), so this is a 2-line schema addition, not new capability — kept minimal, not the full
+# READ_ONLY_TOOLS bundle, to respect the original TPM-budget intent above.
 RESEARCH_TOOLS = [
     READ_ONLY_TOOLS[0],
     READ_ONLY_TOOLS[1],
     READ_ONLY_TOOLS[2],
+    READ_ONLY_TOOLS[4],  # get_file_tree
+    READ_ONLY_TOOLS[9],  # find_references
     _SUBMIT_RESEARCH_TOOL,
     RECORD_LEARNING_TOOL,
 ]

@@ -20,7 +20,7 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import CallEdge, IndexedFile, Symbol
-from app.repo_tools.cross_file_graph import CrossFileGraphResult
+from app.repo_tools.cross_file_graph import CrossFileGraphResult, build_class_graph
 from app.repo_tools.scanner import RepoIndex
 from app.repo_tools.scanner import build_call_graph as build_import_graph
 
@@ -86,11 +86,30 @@ async def persist_repo_index(
             )
         )
 
+    # Phase 6.4 — class/inheritance graph. Reuses the CallEdge table
+    # (edge_type="inherits") rather than a new one: subclass_file/symbol map
+    # onto caller_file/symbol, superclass_file/symbol onto callee_file/symbol
+    # — the same "who references whom" shape call edges already have.
+    class_edges = build_class_graph(index)
+    for cedge in class_edges:
+        db.add(
+            CallEdge(
+                repo_path=repo_path,
+                caller_file=cedge.subclass_file,
+                caller_symbol=cedge.subclass_symbol,
+                callee_file=cedge.superclass_file,
+                callee_symbol=cedge.superclass_symbol,
+                edge_type="inherits",
+            )
+        )
+
     await db.commit()
     logger.info(
-        "Persisted repo index for %s: %d files, %d import edges, %d call edges",
+        "Persisted repo index for %s: %d files, %d import edges, %d call edges, "
+        "%d inheritance edges",
         repo_path,
         len(index.files),
         sum(len(v) for v in import_edges.values()),
         len(graph_result.call_edges),
+        len(class_edges),
     )

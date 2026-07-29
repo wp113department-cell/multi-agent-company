@@ -25,6 +25,7 @@ Design decisions:
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 import uuid
@@ -33,6 +34,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Generator
+
+logger = logging.getLogger(__name__)
 
 _RING_CAPACITY = 1000
 
@@ -98,6 +101,11 @@ class RunMetrics:
     # Final outcome
     status: str = "running"
 
+    # Phase 6.1 — the real OTEL span for this run (opentelemetry.sdk.trace.Span
+    # or None if OTEL is unavailable/disabled). Not part of to_dict(); it's an
+    # internal handle so record_tool() can attach real child spans.
+    _otel_span: Any = field(default=None, repr=False, compare=False)
+
     def finish(self, status: str = "completed") -> None:
         self.finished_at = _now_iso()
         self.status = status
@@ -117,6 +125,7 @@ class RunMetrics:
                 error=error,
             )
         )
+        _record_tool_otel_span(self._otel_span, tool_name, success, duration_ms, error)
 
     def record_tokens(self, tokens_in: int, tokens_out: int) -> None:
         self.tokens_in += tokens_in
@@ -250,6 +259,174 @@ class MetricsCollector:
 
 
 # ---------------------------------------------------------------------------
+# OpenTelemetry bridge (MASTER_AGENT_v2.md Phase 6.1)
+# ---------------------------------------------------------------------------
+#
+# MetricsCollector/RunMetrics above remain the source of truth for the fleet
+# dashboard — nothing here changes their behaviour. This bridge additionally
+# emits the same run/tool-call timeline as real OTEL spans so trace_id
+# correlates with an external collector too. Every OTEL call is wrapped so a
+# broken or unconfigured OTEL setup can never break an agent run (same
+# graceful-degradation shape as Sentry's DSN-gated init in app/main.py):
+# the TracerProvider always records real spans once opentelemetry-sdk is
+# installed; it only additionally *exports* them when
+# settings.otel_exporter_endpoint is set.
+
+_tracer_provider: Any = None
+_tracer_lock = threading.Lock()
+
+
+def _get_tracer_provider() -> Any:
+    """Lazily build (and cache) the process TracerProvider. Returns False
+    if the OTEL SDK isn't usable — callers must treat False/None the same
+    (falsy) and skip span creation."""
+    global _tracer_provider
+    if _tracer_provider is not None:
+        return _tracer_provider
+    with _tracer_lock:
+        if _tracer_provider is not None:
+            return _tracer_provider
+        try:
+            from opentelemetry.sdk.resources import Resource
+            from opentelemetry.sdk.trace import TracerProvider
+        except Exception:
+            _tracer_provider = False
+            return _tracer_provider
+
+        try:
+            from app.config import get_settings
+
+            _settings = get_settings()
+            service_name = _settings.otel_service_name
+            endpoint = _settings.otel_exporter_endpoint
+        except Exception:
+            service_name, endpoint = "multi-agent-company", ""
+
+        provider = TracerProvider(
+            resource=Resource.create({"service.name": service_name})
+        )
+        if endpoint:
+            try:
+                from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+                    OTLPSpanExporter,
+                )
+                from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+                provider.add_span_processor(
+                    BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint))
+                )
+            except Exception:
+                logger.warning(
+                    "otel_exporter_endpoint=%s is set but the OTLP exporter "
+                    "could not be initialised; spans will be created but not "
+                    "exported.",
+                    endpoint,
+                )
+        _tracer_provider = provider
+    return _tracer_provider
+
+
+def configure_tracer_provider(provider: Any) -> None:
+    """Inject a specific TracerProvider — used by app startup (a real OTLP-
+    exporting provider) and by tests (a provider wired to an in-memory
+    exporter so span nesting can be asserted on directly)."""
+    global _tracer_provider
+    with _tracer_lock:
+        _tracer_provider = provider
+
+
+def reset_tracer_provider_for_testing() -> None:
+    """Clear the cached provider so the next _get_tracer_provider() call
+    rebuilds it from current settings. Test-only."""
+    global _tracer_provider
+    with _tracer_lock:
+        _tracer_provider = None
+
+
+def _start_otel_span(m: "RunMetrics") -> Any:
+    provider = _get_tracer_provider()
+    if not provider:
+        return None
+    try:
+        tracer = provider.get_tracer("multi_agent_company.fleet")
+        return tracer.start_span(
+            name=f"agent_run:{m.agent_name}",
+            attributes={
+                "agent.name": m.agent_name,
+                "run.trace_id": m.trace_id,
+                "run.task_id": m.task_id or "",
+            },
+        )
+    except Exception:
+        logger.debug(
+            "OTEL span start failed for agent_run:%s", m.agent_name, exc_info=True
+        )
+        return None
+
+
+def _end_otel_span(span: Any, status: str, exc: BaseException | None = None) -> None:
+    if span is None:
+        return
+    try:
+        from opentelemetry.trace import Status, StatusCode
+
+        span.set_attribute("run.status", status)
+        if exc is not None:
+            span.record_exception(exc)
+            span.set_status(Status(StatusCode.ERROR, str(exc)))
+        else:
+            span.set_status(Status(StatusCode.OK))
+        span.end()
+    except Exception:
+        logger.debug("OTEL span end failed", exc_info=True)
+
+
+def _record_tool_otel_span(
+    parent_span: Any,
+    tool_name: str,
+    success: bool,
+    duration_ms: float,
+    error: str | None,
+) -> None:
+    """Attach a real child span for one tool call under the run's span.
+    record_tool() is only called AFTER the tool already finished (see
+    execute_tools in base_graph.py), so this reconstructs the child span's
+    timing retrospectively via explicit start_time/end_time rather than
+    wrapping live execution — this still yields correct parent-child
+    nesting in the exported trace, just not live."""
+    if parent_span is None:
+        return
+    provider = _get_tracer_provider()
+    if not provider:
+        return
+    try:
+        from opentelemetry.trace import Status, StatusCode, set_span_in_context
+
+        tracer = provider.get_tracer("multi_agent_company.fleet")
+        parent_ctx = set_span_in_context(parent_span)
+        end_ns = time.time_ns()
+        start_ns = end_ns - max(int(duration_ms * 1_000_000), 0)
+        child = tracer.start_span(
+            name=f"tool_call:{tool_name}",
+            context=parent_ctx,
+            start_time=start_ns,
+            attributes={
+                "tool.name": tool_name,
+                "tool.success": success,
+                "tool.duration_ms": duration_ms,
+            },
+        )
+        if error:
+            child.set_attribute("tool.error", error[:200])
+        child.set_status(Status(StatusCode.OK if success else StatusCode.ERROR))
+        child.end(end_time=end_ns)
+    except Exception:
+        logger.debug(
+            "OTEL child span failed for tool_call:%s", tool_name, exc_info=True
+        )
+
+
+# ---------------------------------------------------------------------------
 # Context manager for automatic timing
 # ---------------------------------------------------------------------------
 
@@ -264,17 +441,23 @@ def run_span(
     with run_span("bug_fix", task_id=str(task_id)) as m:
         m.record_tokens(1000, 200)
         result = do_work()
+
+    Also opens a real OTEL span for the run (see the bridge above);
+    m.record_tool(...) attaches child spans for individual tool calls.
     """
     collector = get_metrics_collector()
     m = collector.start_run(agent_name, task_id=task_id, trace_id=trace_id)
+    m._otel_span = _start_otel_span(m)
     t0 = time.monotonic()
     try:
         yield m
         m.execution_time_ms = (time.monotonic() - t0) * 1000
         m.finish("completed")
-    except Exception:
+        _end_otel_span(m._otel_span, "completed")
+    except Exception as exc:
         m.execution_time_ms = (time.monotonic() - t0) * 1000
         m.finish("failed")
+        _end_otel_span(m._otel_span, "failed", exc)
         raise
 
 

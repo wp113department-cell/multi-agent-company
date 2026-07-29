@@ -12,6 +12,7 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import READ_ONLY_TOOLS, make_chat_handlers
+from app.agents.tools import RECORD_LEARNING_TOOL, make_record_learning_handler
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "run_python_snippet",
         "run_tests",
         "submit_eval_result",
+        "record_learning",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -133,6 +135,7 @@ def run_evaluation_agent(
     settings = get_settings()
     repo = repo_path or str(settings.target_repo_path)
     handlers = make_evaluation_handlers(repo)
+    handlers["record_learning"] = make_record_learning_handler("evaluation_agent")
     submitted = handlers["_eval_result"]
 
     message = (
@@ -150,7 +153,7 @@ def run_evaluation_agent(
         task_id=str(task_id),
         role_name="evaluation_agent",
         model=settings.model_coder,
-        tools=_EVAL_TOOLS,
+        tools=_EVAL_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_VERIFICATION_CFG,
         initial_message=message,

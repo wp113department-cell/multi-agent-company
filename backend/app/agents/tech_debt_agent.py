@@ -14,6 +14,7 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import TECH_DEBT_AGENT_TOOLS, make_tech_debt_agent_handlers
+from app.agents.tools import RECORD_LEARNING_TOOL, make_record_learning_handler
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "run_linter",
         "coverage_report",
         "submit_tech_debt",
+        "record_learning",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -79,6 +81,7 @@ def run_tech_debt_agent(
     repo = repo_path or str(settings.target_repo_path)
     handlers = make_tech_debt_agent_handlers(repo)
 
+    handlers["record_learning"] = make_record_learning_handler("tech_debt_agent")
     message = (
         f"Task #{task_id} — Technical Debt Analysis\n\n"
         f"{description}\n\n"
@@ -98,7 +101,7 @@ def run_tech_debt_agent(
         task_id=str(task_id),
         role_name="tech_debt_agent",
         model=settings.model_coder,
-        tools=TECH_DEBT_AGENT_TOOLS,
+        tools=TECH_DEBT_AGENT_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_VERIFICATION_CFG,
         initial_message=message,

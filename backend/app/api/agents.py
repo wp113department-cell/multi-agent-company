@@ -181,11 +181,10 @@ async def launch_planning_pipeline(
             # LangGraph re-runs the whole node body on resume, so a write there
             # would duplicate on every approve/reject cycle.
             try:
-                from app.fleet.approval_gate import arecord_pending
+                from app.fleet.approval_gate import arequest_human_input
 
-                await arecord_pending(
-                    thread_id=f"task-{task_id}",
-                    action="plan_review",
+                await arequest_human_input(
+                    kind="plan_review",
                     details={
                         "subtasks_count": len(subtasks),
                         "risk_level": architect_plan.get("risk_level", "unknown"),
@@ -194,7 +193,10 @@ async def launch_planning_pipeline(
                         )[:500],
                     },
                     agent_name="decomposer",
+                    thread_id=f"task-{task_id}",
                     task_id=task_id,
+                    blocking=True,
+                    description=f"Plan review for task {task_id}",
                 )
             except Exception:
                 logger.warning(
@@ -362,7 +364,7 @@ async def _record_git_push_approval(
 
         from app.db.models import Repo
         from app.db.repository import update_task_branch_name
-        from app.fleet.approval_gate import arecord_pending
+        from app.fleet.approval_gate import arequest_human_input
 
         branch_name = f"agent/task-{task_id}"
         await update_task_branch_name(db, task_id, branch_name)
@@ -370,9 +372,8 @@ async def _record_git_push_approval(
             await db.execute(select(Repo).where(Repo.local_path == effective_repo))
         ).scalar_one_or_none()
         if repo_row is not None and repo_row.github_url:
-            await arecord_pending(
-                thread_id=f"task-{task_id}-push",
-                action="git_push",
+            await arequest_human_input(
+                kind="git_push",
                 details={
                     "branch": branch_name,
                     "files_changed": list(dict.fromkeys(all_files))[:20],
@@ -380,7 +381,10 @@ async def _record_git_push_approval(
                     "diff_preview": diff[:500],
                 },
                 agent_name="manager",
+                thread_id=f"task-{task_id}-push",
                 task_id=task_id,
+                blocking=True,
+                description=f"Git push review for task {task_id} (branch {branch_name})",
             )
             # Day 18 — Real-Time Streaming.
             try:

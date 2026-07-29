@@ -231,6 +231,21 @@ class Settings(BaseSettings):
         default=0.1, description="Fraction of transactions sent to Sentry (0.0–1.0)"
     )
 
+    # Observability — OpenTelemetry tracing (MASTER_AGENT_v2.md Phase 6.1;
+    # optional, leave endpoint empty to disable and use the in-process
+    # no-op span exporter)
+    otel_exporter_endpoint: str = Field(
+        default="",
+        description=(
+            "OTLP HTTP endpoint (e.g. http://localhost:4318) to export agent-run "
+            "spans to. Leave empty to run with an in-process no-op exporter."
+        ),
+    )
+    otel_service_name: str = Field(
+        default="multi-agent-company",
+        description="service.name resource attribute reported on every OTEL span.",
+    )
+
     # Alerting — webhook fired when a task transitions to 'blocked' or 'failed'
     alert_webhook_url: str = Field(
         default="",

@@ -13,6 +13,7 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import AI_ENGINEER_TOOLS, make_ai_engineer_handlers
+from app.agents.tools import RECORD_LEARNING_TOOL, make_record_learning_handler
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "write_file",
         "fetch_url",
         "submit_ai_result",
+        "record_learning",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -80,6 +82,7 @@ def run_ai_engineer(
     repo = repo_path or str(settings.target_repo_path)
     handlers = make_ai_engineer_handlers(repo)
 
+    handlers["record_learning"] = make_record_learning_handler("ai_engineer")
     message = (
         f"Task #{task_id} — AI/ML Engineering\n\n"
         f"{description}\n\n"
@@ -98,7 +101,7 @@ def run_ai_engineer(
         task_id=str(task_id),
         role_name="ai_engineer",
         model=settings.model_coder,
-        tools=AI_ENGINEER_TOOLS,
+        tools=AI_ENGINEER_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_VERIFICATION_CFG,
         initial_message=message,

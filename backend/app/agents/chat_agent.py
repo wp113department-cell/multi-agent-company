@@ -1,4 +1,58 @@
-"""Interactive streaming chat agent — the core of the conversational interface."""
+"""Interactive streaming chat agent — the core of the conversational interface.
+
+MASTER_AGENT_v2.md Phase 5.2 — chat_agent.py is now a real, interrupt()-based
+LangGraph graph (`ChatAgent._build_chat_graph()`), replacing the old bespoke
+`asyncio.Event`-based pause mechanism.
+
+The first attempt at this (superseded) wrapped the whole `run()` loop as a
+single graph node and called `interrupt()` from inside
+`session.request_confirmation()`. That was rejected as unsafe: LangGraph
+re-runs a node's ENTIRE body from the top on `Command(resume=...)`, and a
+single node covering the whole loop would replay every tool call — including
+real side effects like `git push` and `bash` — that already ran earlier in
+that same node before the confirmation point. Confirmed directly (not by
+inference): a two-line reproduction script showed a side effect placed
+before `interrupt()` within one node executing twice across a pause/resume
+cycle, while a side effect in an *already-completed, separate* node never
+re-executes at all.
+
+That is the actual fix applied here: **every tool call is its own graph
+node**, not a Python `for` loop inside one node. `call_llm` (one LLM
+streaming turn) and `execute_tool` (one tool call, looping back to itself
+via a conditional edge until a turn's tool_use batch is drained, then
+handing back to `call_llm`) are separate, independently checkpointed steps.
+A confirmation-gated tool's handler calls `interrupt()` as the very first
+side-effecting-adjacent step of its branch (verified true for all 6 real
+call sites — `git_push`, dangerous `bash`, `git_reset --hard`,
+`undo_changes`, `run_migration`, `seed_database` — nothing before the
+confirmation point in any of them does real work, only cheap string/path
+prep). So when `execute_tool` replays after a resume: prior tool-call nodes
+never re-execute (proven, not assumed); nothing inside *this* node
+re-executes a side effect either, because there wasn't one before
+`interrupt()` to begin with — only after, on the resumed pass, does the
+node reach the actual git/bash/subprocess call, exactly once.
+
+The `tool_use_id` Anthropic assigns each tool call (stable across replay —
+it's an input read from checkpointed state, never regenerated) is reused as
+the confirmation's `action_id`, instead of a fresh `uuid.uuid4()` per
+attempt — a freshly generated id would itself have differed between the
+paused and resumed pass, silently orphaning the pending_approvals row and
+mismatching the id the client already has.
+
+Checkpointer: `MemorySaver` (in-process), matching `ChatSession`'s own
+documented "always held in-memory" design — this doesn't reduce durability
+versus the mechanism it replaces, and keeps `Popen` handles for background
+processes (`self._background_processes`) trivially checkpoint-compatible
+without a serialization story. One `ChatAgent` instance is kept alive per
+session (`get_or_create_chat_agent()`) and reused across the initial
+`run()` call and any later `resume()` calls for the same session, so
+`thread_id=session_id` always resolves to the same checkpointer state.
+
+Chat confirmations also still register into the generalized
+`request_human_input()`/`arecord_decision()` entry point (Phase 5.5) —
+`plan_review`/`git_push`/`clarification` already use, giving every human-
+in-the-loop pause in the fleet, chat included, the same audit trail.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +64,7 @@ import sys
 import threading
 import uuid
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
 import anthropic
 from anthropic.types import (
@@ -19,6 +73,10 @@ from anthropic.types import (
     TextDelta,
     ToolParam,
 )
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.errors import GraphBubbleUp
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, interrupt
 
 from app.agents.base import get_effective_api_key
 from app.agents.base_graph import VerificationConfig
@@ -28,6 +86,53 @@ from app.models.chat import ChatSession
 from app.repo_tools import ast_engine as _ast_engine
 
 logger = logging.getLogger(__name__)
+
+
+class ChatGraphState(TypedDict, total=False):
+    """MASTER_AGENT_v2.md Phase 5.2 — per-turn state for ChatAgent's graph.
+    Message history itself is deliberately NOT threaded through this state
+    — it lives on self.session.history (the durable, cross-turn store) and
+    is mutated directly by nodes, which is safe under LangGraph's replay
+    model precisely because every mutation happens either in a node that
+    never contains an interrupt() (so it only ever runs once, full stop)
+    or strictly after the interrupt() point within a node that does (see
+    this module's own docstring for why that ordering matters)."""
+
+    user_message: str
+    system_prompt: str
+    iteration: int
+    pending_tool_uses: list[dict[str, Any]]
+    tool_results: list[dict[str, Any]]
+    final_text: str
+    last_error: str | None
+    stop: bool
+
+
+# ---------------------------------------------------------------------------
+# Per-session ChatAgent registry — MASTER_AGENT_v2.md Phase 5.2. A single
+# ChatAgent instance (and its checkpointer/compiled graph) is kept alive for
+# the life of a session and reused across the initial run() call and any
+# later resume() calls, so thread_id=session_id always resolves to the same
+# in-process checkpointer state, and instance state (self._background_processes)
+# survives a pause/resume cycle exactly as it did under the old mechanism.
+# ---------------------------------------------------------------------------
+
+_chat_agents: dict[str, "ChatAgent"] = {}
+
+
+def get_or_create_chat_agent(session: ChatSession) -> "ChatAgent":
+    agent = _chat_agents.get(session.session_id)
+    if agent is None:
+        agent = ChatAgent(session=session)
+        _chat_agents[session.session_id] = agent
+    return agent
+
+
+def delete_chat_agent(session_id: str) -> None:
+    """Mirrors app.models.chat.delete_session() — called when a session is
+    closed, so its ChatAgent (and the checkpointer/graph it holds) doesn't
+    leak for the life of the process."""
+    _chat_agents.pop(session_id, None)
 
 
 def _read_stream_nonblocking(stream: Any, max_bytes: int = 8192) -> str | None:
@@ -190,8 +295,12 @@ class ChatAgent:
     Async streaming chat agent that runs a full agentic loop:
     LLM call → tool execution → LLM call → … until stop_reason == end_turn.
 
-    Dangerous operations pause and request user confirmation via
-    session.request_confirmation() before executing.
+    MASTER_AGENT_v2.md Phase 5.2 — this loop is a real LangGraph StateGraph
+    (self._graph, built by _build_chat_graph()), not a plain Python method.
+    Dangerous operations pause via a real interrupt() call (self._confirm())
+    instead of a bespoke asyncio.Event. See this module's own docstring for
+    the full design and why per-tool-call node granularity is what makes
+    that safe.
     """
 
     MAX_ITERATIONS = 30
@@ -203,10 +312,88 @@ class ChatAgent:
         # Per-session background process table (one ChatAgent per ChatSession) —
         # mirrors make_chat_handlers()'s per-session isolation in tools.py so one
         # session cannot kill or read another session's background process.
+        # Kept on the instance (not in graph state) since a Popen handle isn't
+        # meaningfully "checkpointed" data — get_or_create_chat_agent() keeps
+        # this same instance alive across a pause/resume, so it survives one
+        # exactly as it did under the old mechanism.
         self._background_processes: dict[int, subprocess.Popen[str]] = {}
+        # The Anthropic tool_use_id of whichever tool call _execute_tool_node
+        # is currently dispatching — read by _confirm() as a REPLAY-STABLE
+        # confirmation action_id (see module docstring: a freshly generated
+        # uuid4() would differ between the paused and resumed pass of the
+        # same node, since node bodies re-run from the top on resume).
+        self._current_tool_use_id: str = ""
+        self._checkpointer = MemorySaver()
+        self._graph = self._build_chat_graph()
 
     def _client(self) -> anthropic.AsyncAnthropic:
         return anthropic.AsyncAnthropic(api_key=get_effective_api_key())
+
+    # ------------------------------------------------------------------
+    # Human confirmation — MASTER_AGENT_v2.md Phase 5.2, real interrupt().
+    # ------------------------------------------------------------------
+
+    async def _confirm(self, description: str, details: str) -> bool:
+        """Pause the current tool-call node and ask the user to approve or
+        deny an action, via a real LangGraph interrupt(). Only ever called
+        from inside _execute_tool()'s dispatch, itself only ever called
+        from _execute_tool_node() — i.e. always from within exactly one
+        tool call's own graph node, and always as the first side-effecting-
+        adjacent thing that node does (verified true for every real call
+        site — see this module's docstring)."""
+        action_id = self._current_tool_use_id or str(uuid.uuid4())
+        thread_id = f"chat-{self.session.session_id}-{action_id}"
+
+        try:
+            from app.fleet.approval_gate import arequest_human_input
+
+            await arequest_human_input(
+                kind="chat_confirmation",
+                details={"description": description, "details": details},
+                agent_name="chat_agent",
+                thread_id=thread_id,
+                blocking=True,
+                description=description,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to record chat confirmation request for session %s",
+                self.session.session_id,
+                exc_info=True,
+            )
+
+        await self.session.push(
+            {
+                "type": "confirmation_required",
+                "actionId": action_id,
+                "description": description,
+                "details": details,
+            }
+        )
+
+        decision = interrupt(
+            {"action_id": action_id, "description": description, "details": details}
+        )
+        approved = (
+            bool(decision.get("approved", False))
+            if isinstance(decision, dict)
+            else bool(decision)
+        )
+
+        try:
+            from app.fleet.approval_gate import arecord_decision
+
+            await arecord_decision(
+                thread_id=thread_id, approved=approved, decided_by="user"
+            )
+        except Exception:
+            logger.warning(
+                "Failed to record chat confirmation decision for session %s",
+                self.session.session_id,
+                exc_info=True,
+            )
+
+        return approved
 
     # ------------------------------------------------------------------
     # Unified memory read/write — MASTER_AGENT_v2.md Phase 1.1/3.3.
@@ -792,8 +979,7 @@ class ChatAgent:
             cmd_preview = (
                 f"git push {remote} {branch}{'  --force' if force else ''}".strip()
             )
-            approved = await self.session.request_confirmation(
-                action_id=str(uuid.uuid4()),
+            approved = await self._confirm(
                 description="Push commits to remote repository",
                 details=cmd_preview,
             )
@@ -812,8 +998,7 @@ class ChatAgent:
             command = str(inp["command"])
             cwd = str(inp.get("cwd") or repo)
             if _is_dangerous_command(command):
-                approved = await self.session.request_confirmation(
-                    action_id=str(uuid.uuid4()),
+                approved = await self._confirm(
                     description="Run potentially destructive command",
                     details=command,
                 )
@@ -1211,8 +1396,7 @@ class ChatAgent:
             gr_ref = str(inp.get("ref", "HEAD"))
             gr_mode = str(inp.get("mode", "mixed"))
             if gr_mode == "hard":
-                approved = await self.session.request_confirmation(
-                    action_id=str(uuid.uuid4()),
+                approved = await self._confirm(
                     description="git reset --hard — discards ALL uncommitted changes",
                     details=f"git reset --hard {gr_ref}",
                 )
@@ -2068,8 +2252,7 @@ class ChatAgent:
             undo_fp = root / undo_rel
             if not undo_fp.exists():
                 return f"[ERROR] File not found: {undo_rel}"
-            confirmed_undo = await self.session.request_confirmation(
-                action_id=str(uuid.uuid4()),
+            confirmed_undo = await self._confirm(
                 description=f"git checkout -- {undo_rel}",
                 details="DISCARDS all uncommitted changes to this file — irreversible",
             )
@@ -2111,8 +2294,7 @@ class ChatAgent:
             rmig_rev = str(
                 inp.get("revision", "head" if rmig_dir == "upgrade" else "-1")
             )
-            rmig_confirmed = await self.session.request_confirmation(
-                action_id=str(uuid.uuid4()),
+            rmig_confirmed = await self._confirm(
                 description=f"alembic {rmig_dir} {rmig_rev}",
                 details="Modifies the database schema — review migration file before confirming",
             )
@@ -2134,8 +2316,7 @@ class ChatAgent:
             seeddb_fp = root / seeddb_script
             if not seeddb_fp.exists():
                 return f"[ERROR] Seed script not found: {seeddb_script}"
-            seeddb_confirmed = await self.session.request_confirmation(
-                action_id=str(uuid.uuid4()),
+            seeddb_confirmed = await self._confirm(
                 description=f"Run seed script: {seeddb_script}",
                 details="Modifies database data — will insert/update rows",
             )
@@ -2148,134 +2329,240 @@ class ChatAgent:
         return f"[ERROR] Unknown tool: {tool_name}"
 
     # ------------------------------------------------------------------
-    # Main agentic loop
+    # Main agentic loop — MASTER_AGENT_v2.md Phase 5.2, a real LangGraph
+    # StateGraph. Every tool call is its own node (see module docstring for
+    # why that granularity is what makes interrupt()-based confirmation
+    # safe here); call_llm/execute_tool loop via conditional edges instead
+    # of Python for-loops.
     # ------------------------------------------------------------------
+
+    async def _call_llm_node(self, state: ChatGraphState) -> dict[str, Any]:
+        iteration = state.get("iteration", 0)
+        if iteration >= self.MAX_ITERATIONS:
+            return {"stop": True}
+
+        await self.session.push({"type": "thinking", "iteration": iteration})
+
+        client = self._client()
+        settings = get_settings()
+        system_prompt = state.get("system_prompt", self._system)
+
+        full_text = ""
+        tool_uses: list[dict[str, Any]] = []
+        stop_reason = "end_turn"
+
+        # Cast our dict-based messages/tools to what the SDK expects
+        sdk_messages = cast(list[MessageParam], self.session.history)
+        sdk_tools = cast(list[ToolParam], CHAT_TOOLS)
+
+        try:
+            async with client.messages.stream(
+                model=settings.model_coder,
+                max_tokens=8192,
+                system=system_prompt,
+                messages=sdk_messages,
+                tools=sdk_tools,
+            ) as stream:
+                async for event in stream:
+                    if isinstance(event, RawContentBlockDeltaEvent):
+                        delta = event.delta
+                        if isinstance(delta, TextDelta):
+                            full_text += delta.text
+                            await self.session.push(
+                                {"type": "text_delta", "text": delta.text}
+                            )
+
+                final = await stream.get_final_message()
+                stop_reason = final.stop_reason or "end_turn"
+                for block in final.content:
+                    if block.type == "tool_use":
+                        tool_uses.append(
+                            {
+                                "id": block.id,
+                                "name": block.name,
+                                "input": block.input,
+                            }
+                        )
+
+        except anthropic.APIStatusError as e:
+            await self.session.push(
+                {"type": "error", "message": f"API error: {e.message}"}
+            )
+            return {"stop": True, "last_error": f"API error: {e.message}"}
+        except Exception as e:
+            await self.session.push({"type": "error", "message": str(e)})
+            logger.exception("Chat agent error on iteration %d", iteration)
+            return {"stop": True, "last_error": str(e)}
+
+        # Append assistant turn to history
+        turn_content: list[dict[str, Any]] = []
+        update: dict[str, Any] = {}
+        if full_text:
+            update["final_text"] = full_text
+            turn_content.append({"type": "text", "text": full_text})
+        for tu in tool_uses:
+            turn_content.append(
+                {
+                    "type": "tool_use",
+                    "id": tu["id"],
+                    "name": tu["name"],
+                    "input": tu["input"],
+                }
+            )
+        if turn_content:
+            self.session.history.append({"role": "assistant", "content": turn_content})
+
+        if stop_reason != "tool_use" or not tool_uses:
+            update["stop"] = True
+            return update
+
+        update["stop"] = False
+        update["pending_tool_uses"] = tool_uses
+        update["tool_results"] = []
+        update["iteration"] = iteration + 1
+        return update
+
+    async def _execute_tool_node(self, state: ChatGraphState) -> dict[str, Any]:
+        pending = list(state.get("pending_tool_uses", []))
+        tu = pending.pop(0)
+        # Read by _confirm() as a replay-stable action_id — see this
+        # module's docstring for why it must be the Anthropic tool_use_id,
+        # not a freshly generated uuid4().
+        self._current_tool_use_id = tu["id"]
+
+        await self.session.push(
+            {
+                "type": "tool_call",
+                "tool_name": tu["name"],
+                "tool_input": tu["input"],
+                "tool_use_id": tu["id"],
+            }
+        )
+        try:
+            result = await self._execute_tool(tu["name"], tu["input"])
+        except GraphBubbleUp:
+            # Real bug caught by testing: interrupt() (called deep inside
+            # _execute_tool, from _confirm()) signals a pause by raising
+            # GraphInterrupt, a genuine subclass of Exception — a blanket
+            # `except Exception` here would silently swallow it, turning
+            # every confirmation pause into a fake "[ERROR] Tool ... failed"
+            # result and permanently breaking the graph's ability to pause
+            # at all. Must propagate uncaught for LangGraph's own execution
+            # engine to catch and handle.
+            raise
+        except Exception as e:
+            result = f"[ERROR] Tool {tu['name']} failed: {e}"
+            logger.exception("Tool %s failed", tu["name"])
+
+        await self.session.push(
+            {
+                "type": "tool_result",
+                "tool_name": tu["name"],
+                "tool_use_id": tu["id"],
+                "output": result[:3000],
+            }
+        )
+
+        tool_results = list(state.get("tool_results", [])) + [
+            {"type": "tool_result", "tool_use_id": tu["id"], "content": result}
+        ]
+
+        if pending:
+            return {"pending_tool_uses": pending, "tool_results": tool_results}
+
+        # Last tool in this LLM turn's batch — flush to history, matching
+        # the original loop's post-for-loop history.append() exactly.
+        self.session.history.append({"role": "user", "content": tool_results})
+        return {"pending_tool_uses": [], "tool_results": []}
+
+    async def _finalize_node(self, state: ChatGraphState) -> dict[str, Any]:
+        await self._memory_write_outcome(
+            state.get("user_message", ""),
+            state.get("final_text", ""),
+            state.get("last_error"),
+        )
+        await self.session.push({"type": "done"})
+        return {}
+
+    def _route_after_llm(self, state: ChatGraphState) -> str:
+        return "finalize" if state.get("stop") else "execute_tool"
+
+    def _route_after_tool(self, state: ChatGraphState) -> str:
+        return "execute_tool" if state.get("pending_tool_uses") else "call_llm"
+
+    def _build_chat_graph(self) -> Any:
+        graph: StateGraph[ChatGraphState] = StateGraph(ChatGraphState)
+
+        graph.add_node("call_llm", self._call_llm_node)
+        graph.add_node("execute_tool", self._execute_tool_node)
+        graph.add_node("finalize", self._finalize_node)
+
+        graph.add_edge(START, "call_llm")
+        graph.add_conditional_edges(
+            "call_llm",
+            self._route_after_llm,
+            {"execute_tool": "execute_tool", "finalize": "finalize"},
+        )
+        graph.add_conditional_edges(
+            "execute_tool",
+            self._route_after_tool,
+            {"execute_tool": "execute_tool", "call_llm": "call_llm"},
+        )
+        graph.add_edge("finalize", END)
+
+        return graph.compile(checkpointer=self._checkpointer)
 
     async def run(self, user_message: str) -> None:
         """
         Process user_message through the full agentic loop.
         Events are pushed to session.push() for SSE delivery.
+
+        If a confirmation is required, this returns early (the graph
+        paused via a real interrupt()) WITHOUT pushing a 'done' event —
+        _finalize_node is only reached when the graph actually completes.
+        resume() continues a paused turn later.
         """
         self.session.history.append({"role": "user", "content": user_message})
-        client = self._client()
-        settings = get_settings()
-
         memory_block = await self._memory_read_context(user_message)
         system_prompt = (
             f"{self._system}\n\n{memory_block}" if memory_block else self._system
         )
 
-        last_error: str | None = None
-        final_text = ""
+        config = {"configurable": {"thread_id": self.session.session_id}}
+        initial_state: ChatGraphState = {
+            "user_message": user_message,
+            "system_prompt": system_prompt,
+            "iteration": 0,
+            "pending_tool_uses": [],
+            "tool_results": [],
+            "final_text": "",
+            "last_error": None,
+            "stop": False,
+        }
+        await self._graph.ainvoke(initial_state, config=config)
 
-        for iteration in range(self.MAX_ITERATIONS):
-            await self.session.push({"type": "thinking", "iteration": iteration})
+    async def resume(self, action_id: str, approved: bool) -> bool:
+        """Resume a turn paused at a real interrupt() after a human
+        answered a confirmation. Returns False (a safe no-op — nothing is
+        re-run) if action_id doesn't match the currently pending
+        confirmation, e.g. a stale or duplicate confirm call; True if a
+        real resume happened."""
+        config = {"configurable": {"thread_id": self.session.session_id}}
+        snapshot = await self._graph.aget_state(config)
 
-            full_text = ""
-            tool_uses: list[dict[str, Any]] = []
-            stop_reason = "end_turn"
+        pending_action_id: str | None = None
+        for task in snapshot.tasks:
+            for i in task.interrupts:
+                pending_action_id = i.value.get("action_id")
 
-            # Cast our dict-based messages/tools to what the SDK expects
-            sdk_messages = cast(list[MessageParam], self.session.history)
-            sdk_tools = cast(list[ToolParam], CHAT_TOOLS)
+        if pending_action_id != action_id:
+            logger.warning(
+                "Chat confirmation action_id mismatch for session %s: got %r, pending %r",
+                self.session.session_id,
+                action_id,
+                pending_action_id,
+            )
+            return False
 
-            try:
-                async with client.messages.stream(
-                    model=settings.model_coder,
-                    max_tokens=8192,
-                    system=system_prompt,
-                    messages=sdk_messages,
-                    tools=sdk_tools,
-                ) as stream:
-                    async for event in stream:
-                        if isinstance(event, RawContentBlockDeltaEvent):
-                            delta = event.delta
-                            if isinstance(delta, TextDelta):
-                                full_text += delta.text
-                                await self.session.push(
-                                    {"type": "text_delta", "text": delta.text}
-                                )
-
-                    final = await stream.get_final_message()
-                    stop_reason = final.stop_reason or "end_turn"
-                    for block in final.content:
-                        if block.type == "tool_use":
-                            tool_uses.append(
-                                {
-                                    "id": block.id,
-                                    "name": block.name,
-                                    "input": block.input,
-                                }
-                            )
-
-            except anthropic.APIStatusError as e:
-                await self.session.push(
-                    {"type": "error", "message": f"API error: {e.message}"}
-                )
-                last_error = f"API error: {e.message}"
-                break
-            except Exception as e:
-                await self.session.push({"type": "error", "message": str(e)})
-                logger.exception("Chat agent error on iteration %d", iteration)
-                last_error = str(e)
-                break
-
-            # Append assistant turn to history
-            turn_content: list[dict[str, Any]] = []
-            if full_text:
-                final_text = full_text
-                turn_content.append({"type": "text", "text": full_text})
-            for tu in tool_uses:
-                turn_content.append(
-                    {
-                        "type": "tool_use",
-                        "id": tu["id"],
-                        "name": tu["name"],
-                        "input": tu["input"],
-                    }
-                )
-            if turn_content:
-                self.session.history.append(
-                    {"role": "assistant", "content": turn_content}
-                )
-
-            if stop_reason != "tool_use" or not tool_uses:
-                break
-
-            # Execute tools and collect results
-            tool_results: list[dict[str, Any]] = []
-            for tu in tool_uses:
-                await self.session.push(
-                    {
-                        "type": "tool_call",
-                        "tool_name": tu["name"],
-                        "tool_input": tu["input"],
-                        "tool_use_id": tu["id"],
-                    }
-                )
-                try:
-                    result = await self._execute_tool(tu["name"], tu["input"])
-                except Exception as e:
-                    result = f"[ERROR] Tool {tu['name']} failed: {e}"
-                    logger.exception("Tool %s failed", tu["name"])
-
-                await self.session.push(
-                    {
-                        "type": "tool_result",
-                        "tool_name": tu["name"],
-                        "tool_use_id": tu["id"],
-                        "output": result[:3000],
-                    }
-                )
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tu["id"],
-                        "content": result,
-                    }
-                )
-
-            self.session.history.append({"role": "user", "content": tool_results})
-
-        await self._memory_write_outcome(user_message, final_text, last_error)
-        await self.session.push({"type": "done"})
+        await self._graph.ainvoke(Command(resume={"approved": approved}), config=config)
+        return True

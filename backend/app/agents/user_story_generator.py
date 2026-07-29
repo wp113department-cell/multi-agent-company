@@ -13,6 +13,7 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import READ_ONLY_TOOLS, make_chat_handlers
+from app.agents.tools import RECORD_LEARNING_TOOL, make_record_learning_handler
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "find_todos",
         "write_file",
         "submit_user_stories",
+        "record_learning",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -144,6 +146,7 @@ def run_user_story_generator(
     settings = get_settings()
     repo = repo_path or str(settings.target_repo_path)
     handlers = make_user_story_handlers(repo)
+    handlers["record_learning"] = make_record_learning_handler("user_story_generator")
     submitted = handlers["_user_story_result"]
 
     message = (
@@ -163,7 +166,7 @@ def run_user_story_generator(
         task_id=str(task_id),
         role_name="user_story_generator",
         model=settings.model_planner,
-        tools=_USER_STORY_TOOLS,
+        tools=_USER_STORY_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_VERIFICATION_CFG,
         initial_message=message,

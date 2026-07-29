@@ -15,9 +15,11 @@ from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
     READ_ONLY_TOOLS,
+    RECORD_LEARNING_TOOL,
     audit_log_read,
     fleet_metrics_read,
     make_read_only_handlers,
+    make_record_learning_handler,
     make_submit_enhancement_request_handler,
     task_history_query,
 )
@@ -35,6 +37,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "fleet_metrics_read",
         "audit_log_read",
         "submit_enhancement_request",
+        "record_learning",
     ],
     "input_types": ["scan_trigger"],
     "output_types": ["AgentResult"],
@@ -126,6 +129,7 @@ _SCAN_CFG = VerificationConfig(
 
 def make_scan_handlers(repo_path: str, trace_id: str = "") -> dict[str, Any]:
     handlers = make_read_only_handlers(repo_path)
+    handlers["record_learning"] = make_record_learning_handler("agent_advisor")
     handlers["task_history_query"] = task_history_query
     handlers["fleet_metrics_read"] = fleet_metrics_read
     handlers["audit_log_read"] = audit_log_read
@@ -143,7 +147,6 @@ def run_agent_advisor_scan(trace_id: str = "") -> AgentResult:
     settings = get_settings()
     repo = settings.fleet_self_repo_path
     handlers = make_scan_handlers(repo, trace_id=trace_id)
-
     msg = (
         "Review recent task/pipeline history for orchestration problems: did the right "
         "agent(s) run for what the task actually needed, was anything over-provisioned "
@@ -159,7 +162,7 @@ def run_agent_advisor_scan(trace_id: str = "") -> AgentResult:
     final_state = run_agent_graph(
         role_name="agent_advisor",
         model=settings.model_coder,
-        tools=SCAN_TOOLS,
+        tools=SCAN_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_SCAN_CFG,
         initial_message=msg,

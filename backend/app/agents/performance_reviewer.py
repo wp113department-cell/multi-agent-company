@@ -14,7 +14,9 @@ from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
     PERFORMANCE_REVIEWER_TOOLS,
+    RECORD_LEARNING_TOOL,
     make_performance_reviewer_handlers,
+    make_record_learning_handler,
 )
 from app.config import get_settings
 
@@ -48,6 +50,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "explain_query",
         "list_functions",
         "submit_perf_review",
+        "record_learning",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -80,6 +83,7 @@ def run_performance_reviewer(
     repo = repo_path or str(settings.target_repo_path)
     handlers = make_performance_reviewer_handlers(repo)
 
+    handlers["record_learning"] = make_record_learning_handler("performance_reviewer")
     message = (
         f"Task #{task_id} — Performance Review\n\n"
         f"{description}\n\n"
@@ -96,7 +100,7 @@ def run_performance_reviewer(
         task_id=str(task_id),
         role_name="performance_reviewer",
         model=settings.model_coder,
-        tools=PERFORMANCE_REVIEWER_TOOLS,
+        tools=PERFORMANCE_REVIEWER_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_VERIFICATION_CFG,
         initial_message=message,
