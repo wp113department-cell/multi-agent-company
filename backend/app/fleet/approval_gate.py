@@ -24,6 +24,20 @@ from typing import Any
 
 from app.config import get_settings
 
+# MASTER_AGENT_v2.md Phase 5.5 — `kind` is deliberately a plain str, not a
+# fixed 3-way Literal ("approval"/"clarification"/"review"): it becomes the
+# pending_approvals row's `action` column, which app/api/approvals.py's
+# _dispatch_decision() switches on by its EXACT value ("plan_review",
+# "git_push") to route a decision to the flow that actually owns it. That
+# routing needs the specific, existing action names to keep working
+# unchanged — collapsing them into a coarser generic taxonomy would silently
+# break dispatch (two distinct flows both mapping to "approval" would become
+# indistinguishable). The 3 kinds this fleet actually has today are
+# "plan_review" and "git_push" (real blocking LangGraph interrupt()s) and
+# "clarification" (Phase 5.3's non-blocking "clean stop, await a fresh run"
+# pattern — base_graph.py-based agents have no interrupt()/resume machinery
+# of their own).
+
 
 @dataclass
 class PendingApprovalRecord:
@@ -264,3 +278,95 @@ async def arecord_decision(
 ) -> PendingApprovalRecord | None:
     row = await _record_decision(thread_id, approved, decided_by)
     return _to_record(row) if row is not None else None
+
+
+# ---------------------------------------------------------------------------
+# request_human_input — MASTER_AGENT_v2.md Phase 5.5. Single entry point for
+# every HITL pause in the fleet, generalizing what plan_review/git_push/
+# request_clarification each previously did by hand: call record_pending
+# (or arecord_pending) directly with their own action string, then
+# separately (only plan_review/git_push did this) log the DECISION to the
+# audit log — never the request itself. This wraps both in one place and
+# additionally audit-logs the REQUEST (a real, previously-open gap: the
+# audit trail showed a decision but never that a pause had been requested).
+#
+# `kind` becomes the pending_approvals row's existing `action` column — not
+# a new column. `action` already discriminates rows exactly the way the
+# spec's `kind` was meant to; adding a second, redundant discriminator
+# column would just be two names for the same fact.
+#
+# blocking is recorded into `details` for API/dashboard consumers to
+# distinguish a real interrupt()-paused thread from a "clean stop, awaiting
+# a fresh run" one — this function only owns the bookkeeping common to both,
+# never the pause mechanics themselves (matching this module's own
+# documented "pure tracking/indexing, does NOT call interrupt()" scope).
+# ---------------------------------------------------------------------------
+
+
+def _audit_request(
+    kind: str,
+    agent_name: str,
+    description: str,
+    details: dict[str, Any],
+    task_id: int | None,
+    thread_id: str,
+) -> None:
+    try:
+        from app.fleet.audit_log import get_audit_log
+
+        get_audit_log().append(
+            action_type=kind,
+            agent_name=agent_name,
+            description=description or f"{kind} requested",
+            task_id=str(task_id) if task_id is not None else None,
+            details=details,
+            outcome="pending",
+            requires_human_approval=True,
+            trace_id=thread_id,
+        )
+    except Exception:
+        pass  # audit is best-effort — must never fail the actual HITL request
+
+
+def request_human_input(
+    kind: str,
+    details: dict[str, Any],
+    *,
+    agent_name: str,
+    thread_id: str,
+    task_id: int | None = None,
+    blocking: bool = True,
+    description: str = "",
+) -> PendingApprovalRecord:
+    full_details = {**details, "blocking": blocking}
+    record = record_pending(
+        thread_id=thread_id,
+        action=kind,
+        details=full_details,
+        agent_name=agent_name,
+        task_id=task_id,
+    )
+    _audit_request(kind, agent_name, description, full_details, task_id, thread_id)
+    return record
+
+
+async def arequest_human_input(
+    kind: str,
+    details: dict[str, Any],
+    *,
+    agent_name: str,
+    thread_id: str,
+    task_id: int | None = None,
+    blocking: bool = True,
+    description: str = "",
+) -> PendingApprovalRecord:
+    full_details = {**details, "blocking": blocking}
+    record = await arecord_pending(
+        thread_id=thread_id,
+        action=kind,
+        details=full_details,
+        agent_name=agent_name,
+        task_id=task_id,
+    )
+    _audit_request(kind, agent_name, description, full_details, task_id, thread_id)
+    return record

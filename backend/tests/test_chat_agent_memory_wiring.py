@@ -197,12 +197,21 @@ async def test_run_calls_memory_read_before_and_write_after() -> None:
 
 
 def test_run_uses_memory_augmented_system_prompt_not_static_one() -> None:
-    """Source-inspection guard: run() must pass the per-call system_prompt
-    (built from self._system + memory_block) to the streaming call, not the
-    static self._system directly — otherwise the memory read above would be
-    computed and then silently discarded."""
-    source = inspect.getsource(ChatAgent.run)
-    assert "system_prompt" in source
-    assert "system=system_prompt" in source
-    assert "self._memory_read_context" in source
-    assert "self._memory_write_outcome" in source
+    """Source-inspection guard: run() must build the per-call system_prompt
+    (self._system + memory_block) and thread it into the graph's initial
+    state, and _call_llm_node must pass THAT (not the static self._system
+    directly) to the streaming call — otherwise the memory read would be
+    computed and then silently discarded. Split across two methods since
+    MASTER_AGENT_v2.md Phase 5.2 moved the streaming call into a real
+    LangGraph node (_call_llm_node); run() itself only seeds initial state
+    now."""
+    run_source = inspect.getsource(ChatAgent.run)
+    assert "system_prompt" in run_source
+    assert '"system_prompt": system_prompt' in run_source
+    assert "self._memory_read_context" in run_source
+
+    node_source = inspect.getsource(ChatAgent._call_llm_node)
+    assert "system=system_prompt" in node_source
+
+    finalize_source = inspect.getsource(ChatAgent._finalize_node)
+    assert "self._memory_write_outcome" in finalize_source

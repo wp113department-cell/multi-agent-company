@@ -80,6 +80,54 @@ class CrossFileGraphResult:
     file_rank: dict[str, float] = field(default_factory=dict)
 
 
+@dataclass
+class InheritanceEdge:
+    subclass_file: str
+    subclass_symbol: str
+    superclass_file: str
+    superclass_symbol: str
+
+
+def _build_defines_index(index: RepoIndex) -> dict[str, set[str]]:
+    """symbol name -> set of files that define it. Shared by
+    build_cross_file_graph() (call edges) and build_class_graph()
+    (inheritance edges) — same name-matching resolution, two different
+    reference sources."""
+    defines: dict[str, set[str]] = {}
+    for rel_path, fi in index.files.items():
+        for sym in fi.symbols:
+            defines.setdefault(sym.name, set()).add(rel_path)
+    return defines
+
+
+def build_class_graph(index: RepoIndex) -> list[InheritanceEdge]:
+    """Resolve class base-class references (scanner.py's SymbolInfo.bases,
+    Phase 6.4) into edges by the same identifier-name-matching technique
+    build_cross_file_graph() uses for function calls. A base class not
+    defined in any indexed file (stdlib/3rd-party, e.g. `Exception`,
+    pydantic's `BaseModel`) simply resolves to no edge — same "referenced
+    but not defined here" behaviour as unresolved call references."""
+    defines = _build_defines_index(index)
+    edges: list[InheritanceEdge] = []
+    for rel_path, fi in index.files.items():
+        for sym in fi.symbols:
+            if sym.kind != "class":
+                continue
+            for base_name in sym.bases:
+                for def_file in defines.get(base_name, set()):
+                    if def_file == rel_path and base_name == sym.name:
+                        continue  # a class can't inherit from itself
+                    edges.append(
+                        InheritanceEdge(
+                            subclass_file=rel_path,
+                            subclass_symbol=sym.name,
+                            superclass_file=def_file,
+                            superclass_symbol=base_name,
+                        )
+                    )
+    return edges
+
+
 def _extract_calls_by_function(abs_path: Path) -> dict[str, set[str]]:
     """{function_name: {called_identifier, ...}} for one .py file. Calls made
     outside any function body are attributed to _MODULE_LEVEL_CALLER. Method
@@ -141,10 +189,7 @@ def build_cross_file_graph(
     base = Path(index.repo_path)
 
     # ---- defines: symbol name -> set of files that define it ----
-    defines: dict[str, set[str]] = {}
-    for rel_path, fi in index.files.items():
-        for sym in fi.symbols:
-            defines.setdefault(sym.name, set()).add(rel_path)
+    defines = _build_defines_index(index)
 
     # ---- references: called identifier -> [(file, calling_function), ...] ----
     references: dict[str, list[tuple[str, str]]] = {}

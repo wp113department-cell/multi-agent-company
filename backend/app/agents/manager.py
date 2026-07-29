@@ -12,7 +12,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
+from typing import Any, TypedDict
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,7 @@ AGENT_CONTRACT: dict[str, Any] = {
     "dependencies": ["backend_dev", "frontend_dev", "qa", "reviewer"],
 }
 
+from langgraph.graph import END, START, StateGraph  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
@@ -118,12 +119,16 @@ async def run_manager(
     """
     from app.agents.backend_dev import run_backend_dev
     from app.agents.frontend_dev import run_frontend_dev
-    from app.agents.qa import run_qa
-    from app.agents.reviewer import run_reviewer
+    from app.agents.qa import QAResult, run_qa
+    from app.agents.reviewer import ReviewFinding, ReviewResult, run_reviewer
     from app.event_bus.bus import publish_event
     from app.event_bus.models import GridironEvent
     from app.fleet.failure_ladder import should_retry
-    from app.pipeline.concurrency import agent_run_slot, subtask_slot
+    from app.pipeline.concurrency import (
+        SlotAcquisitionTimeout,
+        agent_run_slot,
+        subtask_slot,
+    )
     from app.repo_tools.worktree import get_diff
 
     settings = get_settings()
@@ -256,7 +261,33 @@ async def run_manager(
         # exceptions, matching this module's established no-raise convention
         # for the per-subtask loop).
         _subtask_slot_cm = subtask_slot(epic_id or f"task-{task_id}")
-        await _subtask_slot_cm.__aenter__()
+        try:
+            await _subtask_slot_cm.__aenter__()
+        except SlotAcquisitionTimeout as exc:
+            # MASTER_AGENT_v2.md Phase 5.6 — a slot that can never free up must
+            # fail loudly (already real, concurrency.py), and this loop's own
+            # "nothing raises past this function" invariant must still hold —
+            # route it through the exact same blocked-subtask path every other
+            # subtask failure already uses, via `continue` to the next subtask
+            # (no __aexit__ call: __aenter__ never actually acquired anything).
+            logger.warning(
+                "Could not acquire subtask slot for subtask %d: %s", subtask_id, exc
+            )
+            results.append(
+                {
+                    "subtask_id": subtask_id,
+                    "type": subtask_type,
+                    "status": "blocked",
+                    "files_changed": [],
+                    "review_summary": "",
+                    "qa_summary": f"Could not acquire an agent-run slot in time: {exc}",
+                    "review_findings": [],
+                    "diff": "",
+                }
+            )
+            blocked_count += 1
+            overall_status = "blocked"
+            continue
 
         for attempt in range(max_retries):
             retry_context = ""
@@ -280,32 +311,39 @@ async def run_manager(
             except Exception:
                 pass
 
-            async with agent_run_slot():
-                if subtask_type == "frontend":
-                    files_changed, dev_error, dev_tokens_in, dev_tokens_out = (
-                        await asyncio.to_thread(
-                            run_frontend_dev,
-                            task_id=task_id,
-                            subtask_id=subtask_id,
-                            plan=full_plan,
-                            worktree_path=worktree_path,
-                            repo_path=repo,
-                            images=images,
-                            extra_env=extra_env,
+            try:
+                async with agent_run_slot():
+                    if subtask_type == "frontend":
+                        files_changed, dev_error, dev_tokens_in, dev_tokens_out = (
+                            await asyncio.to_thread(
+                                run_frontend_dev,
+                                task_id=task_id,
+                                subtask_id=subtask_id,
+                                plan=full_plan,
+                                worktree_path=worktree_path,
+                                repo_path=repo,
+                                images=images,
+                                extra_env=extra_env,
+                            )
                         )
-                    )
-                else:
-                    files_changed, dev_error, dev_tokens_in, dev_tokens_out = (
-                        await asyncio.to_thread(
-                            run_backend_dev,
-                            task_id=task_id,
-                            subtask_id=subtask_id,
-                            plan=full_plan,
-                            worktree_path=worktree_path,
-                            repo_path=repo,
-                            extra_env=extra_env,
+                    else:
+                        files_changed, dev_error, dev_tokens_in, dev_tokens_out = (
+                            await asyncio.to_thread(
+                                run_backend_dev,
+                                task_id=task_id,
+                                subtask_id=subtask_id,
+                                plan=full_plan,
+                                worktree_path=worktree_path,
+                                repo_path=repo,
+                                extra_env=extra_env,
+                            )
                         )
-                    )
+            except SlotAcquisitionTimeout as exc:
+                # Phase 5.6 — same treatment as a real dev-agent error, reusing
+                # the existing retry/escalate path rather than a new one.
+                files_changed = []
+                dev_error = f"Could not acquire an agent-run slot in time: {exc}"
+                dev_tokens_in = dev_tokens_out = 0
             epic_tokens_in += dev_tokens_in
             epic_tokens_out += dev_tokens_out
 
@@ -364,14 +402,26 @@ async def run_manager(
             except Exception:
                 pass
 
-            async with agent_run_slot():
-                qa_result = await asyncio.to_thread(
-                    run_qa,
-                    task_id=task_id,
-                    subtask_id=subtask_id,
-                    files_changed=files_changed,
-                    worktree_path=worktree_path,
-                    repo_path=repo,
+            try:
+                async with agent_run_slot():
+                    qa_result = await asyncio.to_thread(
+                        run_qa,
+                        task_id=task_id,
+                        subtask_id=subtask_id,
+                        files_changed=files_changed,
+                        worktree_path=worktree_path,
+                        repo_path=repo,
+                    )
+            except SlotAcquisitionTimeout as exc:
+                qa_result = QAResult(
+                    status="failed",
+                    tests_run=0,
+                    tests_passed=0,
+                    tests_failed=0,
+                    typecheck_clean=False,
+                    lint_clean=False,
+                    errors=[f"Could not acquire an agent-run slot in time: {exc}"],
+                    summary=f"Could not acquire an agent-run slot in time: {exc}",
                 )
             epic_tokens_in += qa_result.tokens_in
             epic_tokens_out += qa_result.tokens_out
@@ -416,15 +466,30 @@ async def run_manager(
             except Exception:
                 pass
 
-            async with agent_run_slot():
-                review_result = await asyncio.to_thread(
-                    run_reviewer,
-                    task_id=task_id,
-                    subtask_id=subtask_id,
-                    diff=subtask_diff,
-                    plan=subtask_plan,
-                    repo_path=repo,
-                    images=images,
+            try:
+                async with agent_run_slot():
+                    review_result = await asyncio.to_thread(
+                        run_reviewer,
+                        task_id=task_id,
+                        subtask_id=subtask_id,
+                        diff=subtask_diff,
+                        plan=subtask_plan,
+                        repo_path=repo,
+                        images=images,
+                    )
+            except SlotAcquisitionTimeout as exc:
+                review_result = ReviewResult(
+                    verdict="changes_required",
+                    findings=[
+                        ReviewFinding(
+                            severity="blocking",
+                            file="",
+                            line=None,
+                            finding=f"Could not acquire an agent-run slot in time: {exc}",
+                            recommendation="Retry once fleet load decreases.",
+                        )
+                    ],
+                    summary=f"Could not acquire an agent-run slot in time: {exc}",
                 )
             epic_tokens_in += review_result.tokens_in
             epic_tokens_out += review_result.tokens_out
@@ -611,39 +676,52 @@ async def run_epic_manager(
         return await _run_epic_manager_body(epic_id, goal, db, repo_path)
 
 
-async def _run_epic_manager_body(
-    epic_id: str,
-    goal: str,
-    db: AsyncSession,
-    repo_path: str | None = None,
-) -> EpicApprovalPackage:
-    """The real epic orchestration logic — see run_epic_manager()'s docstring
-    for the flow. Split out so run_epic_manager() can hold epic_slot() for
-    the whole call via `async with` regardless of how this returns/raises.
+class EpicManagerState(TypedDict, total=False):
+    """MASTER_AGENT_v2.md Phase 5.1 — supervisor-graph state for the epic
+    orchestration flow. Threads exactly the same values the old imperative
+    _run_epic_manager_body() held as local variables; `db` is a live
+    AsyncSession carried through state (safe: this graph is compiled with NO
+    checkpointer, so state never needs to be serialized — it only ever lives
+    in-process for the duration of one ainvoke() call)."""
 
-    Flow:
-    1. Cost estimate → if over threshold → mark epic 'pending_cost_approval' and return early
-    2. Mark epic 'planning' → run PM→Arch→Decomp planning pipeline
-    3. Mark epic 'coding' → run per-subtask Dev→QA→Review pipeline
-    4. If ≥ MANAGER_MAX_EPIC_FAILURES blocked → emit epic.halted, mark epic 'halted'
-    5. On all complete → assemble batched approval package → emit epic.ready_for_review
-    """
+    epic_id: str
+    goal: str
+    db: AsyncSession
+    repo_path: str | None
+    settings: Any
+    repo: str
+    stage: str  # "pending_cost_approval" | "halted_conflict" | "" (routing signal)
+    task_id: int
+    plan_text: str
+    subtasks: list[dict[str, Any]]
+    architect_plan: dict[str, Any]
+    worktree_path: str
+    manager_result: dict[str, Any]
+    package: EpicApprovalPackage
+
+
+async def _cost_estimate_node(state: EpicManagerState) -> dict[str, Any]:
+    """Step 1 of _run_epic_manager_body()'s original flow — rough cost
+    estimate (subtask count unknown yet; use 5 as baseline). Sets
+    stage="pending_cost_approval" (routed to END by
+    _route_after_cost_estimate) with the exact same early-return
+    EpicApprovalPackage the imperative version returned."""
     from sqlalchemy import select, update as sa_update
-    from app.db.models import Epic, DevTask
+
+    from app.db.models import Epic
     from app.event_bus.bus import publish_event
     from app.event_bus.models import GridironEvent
     from app.pipeline.cost_controller import estimate_epic_cost
-    from app.pipeline.graph import run_planning_pipeline
-    from app.repo_tools.worktree import create_worktree
 
+    epic_id = state["epic_id"]
+    db = state["db"]
     settings = get_settings()
-    repo = repo_path or settings.target_repo_path
+    repo = state.get("repo_path") or settings.target_repo_path
 
     # Load the epic
     result = await db.execute(select(Epic).where(Epic.epic_id == epic_id))
     epic = result.scalar_one()  # noqa: F841
 
-    # --- Step 1: Rough cost estimate (subtask count unknown yet; use 5 as baseline) ---
     estimate = await estimate_epic_cost(subtask_count=5, db=db)
     await db.execute(
         sa_update(Epic)
@@ -671,19 +749,42 @@ async def _run_epic_manager_body(
             ),
             db=db,
         )
-        return EpicApprovalPackage(
-            epic_id=epic_id,
-            status="pending_cost_approval",
-            subtask_results=[],
-            total_files_changed=[],
-            all_diffs="",
-            all_qa_summaries=[],
-            all_review_findings=[],
-            cost_actual_usd=0.0,
-            halt_reason="Cost estimate exceeds approval threshold",
-        )
+        return {
+            "stage": "pending_cost_approval",
+            "settings": settings,
+            "repo": repo,
+            "package": EpicApprovalPackage(
+                epic_id=epic_id,
+                status="pending_cost_approval",
+                subtask_results=[],
+                total_files_changed=[],
+                all_diffs="",
+                all_qa_summaries=[],
+                all_review_findings=[],
+                cost_actual_usd=0.0,
+                halt_reason="Cost estimate exceeds approval threshold",
+            ),
+        }
 
-    # --- Step 2: Planning pipeline ---
+    return {"stage": "", "settings": settings, "repo": repo}
+
+
+async def _planning_node(state: EpicManagerState) -> dict[str, Any]:
+    """Step 2 — mark epic 'planning', run the PM→Arch→Decomp pipeline,
+    refine the cost estimate now that subtask count is known."""
+    from sqlalchemy import update as sa_update
+
+    from app.db.models import DevTask, Epic
+    from app.event_bus.bus import publish_event
+    from app.event_bus.models import GridironEvent
+    from app.pipeline.cost_controller import estimate_epic_cost
+    from app.pipeline.graph import run_planning_pipeline
+
+    epic_id = state["epic_id"]
+    goal = state["goal"]
+    db = state["db"]
+    repo = state["repo"]
+
     await db.execute(
         sa_update(Epic).where(Epic.epic_id == epic_id).values(status="planning")
     )
@@ -737,13 +838,33 @@ async def _run_epic_manager_body(
     )
     await db.commit()
 
-    # Gap-closure (Audit 04 fix, ORCH-04-010): conflict_guard.check_file_conflicts()
-    # was fully built with a docstring claiming it's "called before dispatching
-    # a coder/backend-dev/frontend-dev subtask" but had zero real callers.
-    # Checked here, right before coding starts, using the architect plan's
-    # impacted_files — the same field conflict_guard.py's own
-    # _get_epic_files() reads from PipelineState.architect_plan.
     architect_plan = pipeline_result.get("architect_plan") or {}
+
+    return {
+        "task_id": task_id,
+        "plan_text": plan_text,
+        "subtasks": subtasks,
+        "architect_plan": architect_plan,
+    }
+
+
+async def _conflict_check_node(state: EpicManagerState) -> dict[str, Any]:
+    """Gap-closure (Audit 04 fix, ORCH-04-010): conflict_guard.check_file_conflicts()
+    was fully built with a docstring claiming it's "called before dispatching
+    a coder/backend-dev/frontend-dev subtask" but had zero real callers.
+    Checked here, right before coding starts, using the architect plan's
+    impacted_files — the same field conflict_guard.py's own
+    _get_epic_files() reads from PipelineState.architect_plan."""
+    from sqlalchemy import update as sa_update
+
+    from app.db.models import Epic
+    from app.event_bus.bus import publish_event
+    from app.event_bus.models import GridironEvent
+
+    epic_id = state["epic_id"]
+    db = state["db"]
+    architect_plan = state["architect_plan"]
+
     candidate_files = [
         f.get("path", "")
         for f in architect_plan.get("impacted_files", [])
@@ -770,19 +891,40 @@ async def _run_epic_manager_body(
                 ),
                 db=db,
             )
-            return EpicApprovalPackage(
-                epic_id=epic_id,
-                status="halted",
-                subtask_results=[],
-                total_files_changed=[],
-                all_diffs="",
-                all_qa_summaries=[],
-                all_review_findings=[],
-                cost_actual_usd=0.0,
-                halt_reason=conflict,
-            )
+            return {
+                "stage": "halted_conflict",
+                "package": EpicApprovalPackage(
+                    epic_id=epic_id,
+                    status="halted",
+                    subtask_results=[],
+                    total_files_changed=[],
+                    all_diffs="",
+                    all_qa_summaries=[],
+                    all_review_findings=[],
+                    cost_actual_usd=0.0,
+                    halt_reason=conflict,
+                ),
+            }
 
-    # --- Step 3: Coding pipeline ---
+    return {"stage": ""}
+
+
+async def _coding_node(state: EpicManagerState) -> dict[str, Any]:
+    """Step 3 — mark epic 'coding', create the worktree, run the per-subtask
+    Dev→QA→Review pipeline. run_manager() itself is UNCHANGED by this
+    conversion — its own retry loop, SlotAcquisitionTimeout handling, and
+    git-commit-before-review fix all stay exactly as they were, called here
+    the same way _run_epic_manager_body() always called them."""
+    from sqlalchemy import update as sa_update
+
+    from app.db.models import Epic
+    from app.repo_tools.worktree import create_worktree
+
+    epic_id = state["epic_id"]
+    db = state["db"]
+    task_id = state["task_id"]
+    repo = state["repo"]
+
     await db.execute(
         sa_update(Epic).where(Epic.epic_id == epic_id).values(status="coding")
     )
@@ -792,30 +934,46 @@ async def _run_epic_manager_body(
 
     manager_result = await run_manager(
         task_id=task_id,
-        subtasks=subtasks,
+        subtasks=state["subtasks"],
         worktree_path=worktree_path,
-        plan=plan_text,
+        plan=state["plan_text"],
         repo_path=repo,
         epic_id=epic_id,
         db=db,
     )
+
+    return {"worktree_path": worktree_path, "manager_result": manager_result}
+
+
+async def _finalize_node(state: EpicManagerState) -> dict[str, Any]:
+    """Steps 4/5 — assemble the batched approval package (or halt), store
+    the outcome in engineering memory, clear the epic's scratchpad."""
+    from sqlalchemy import update as sa_update
+
+    from app.db.models import Epic
+    from app.event_bus.bus import publish_event
+    from app.event_bus.models import GridironEvent
+    from app.memory.store import embed_task_outcome
+
+    epic_id = state["epic_id"]
+    goal = state["goal"]
+    db = state["db"]
+    task_id = state["task_id"]
+    subtasks = state["subtasks"]
+    settings = state["settings"]
+    manager_result = state["manager_result"]
 
     final_status = manager_result["status"]
     results: list[dict[str, Any]] = manager_result["results"]
     blocked_count: int = manager_result["blocked_count"]
 
     # MASTER_AGENT_v2.md Phase 3.2 — real cost_actual from real accumulated
-    # tokens. Before this, the line below did a literal `SELECT SUM(DevTask.id)`
-    # (summing primary keys — meaningless), discarded the result unused, and
-    # fell back to `refined_estimate.estimated_cost_usd` — the pre-run
-    # *estimate* — silently mislabeled as the post-run "actual" cost. The real
-    # numbers were always available: run_manager() now returns the real
-    # tokens_in/tokens_out accumulated across every backend_dev/frontend_dev/
-    # qa/reviewer call made for this epic (each already computes them from
-    # base_graph.py's final_state — they were just being discarded at the
-    # function-return boundary before this fix). Same $/token formula
-    # cost_controller.py's own estimate_epic_cost() already uses, so the
-    # pre-run estimate and the post-run actual are computed consistently.
+    # tokens. run_manager() returns the real tokens_in/tokens_out accumulated
+    # across every backend_dev/frontend_dev/qa/reviewer call made for this
+    # epic (each already computes them from base_graph.py's final_state).
+    # Same $/token formula cost_controller.py's own estimate_epic_cost()
+    # already uses, so the pre-run estimate and the post-run actual are
+    # computed consistently.
     epic_tokens_in: int = manager_result.get("tokens_in", 0)
     epic_tokens_out: int = manager_result.get("tokens_out", 0)
     cost_actual = compute_actual_cost_usd(epic_tokens_in, epic_tokens_out, settings)
@@ -826,7 +984,6 @@ async def _run_epic_manager_body(
         .values(cost_actual=Decimal(str(cost_actual)))
     )
 
-    # --- Step 4/5: Assemble approval package or halt ---
     subtask_result_objs = [
         SubtaskResult(
             subtask_id=r["subtask_id"],
@@ -852,8 +1009,6 @@ async def _run_epic_manager_body(
     for raw in results:
         all_findings.extend(raw.get("review_findings", []))
 
-    from app.memory.store import embed_task_outcome
-
     if final_status == "halted":
         halt_reason = f"{blocked_count} subtasks exhausted all retries"
         await db.execute(
@@ -871,7 +1026,6 @@ async def _run_epic_manager_body(
             ),
             db=db,
         )
-        # Store outcome in engineering memory
         await embed_task_outcome(
             task_id=str(task_id),
             description=goal,
@@ -886,17 +1040,19 @@ async def _run_epic_manager_body(
         from app.fleet.scratchpad import clear_epic_scratchpad
 
         await clear_epic_scratchpad(epic_id, db)
-        return EpicApprovalPackage(
-            epic_id=epic_id,
-            status="halted",
-            subtask_results=subtask_result_objs,
-            total_files_changed=list(set(all_files)),
-            all_diffs=all_diffs,
-            all_qa_summaries=all_qa,
-            all_review_findings=all_findings,
-            cost_actual_usd=cost_actual,
-            halt_reason=halt_reason,
-        )
+        return {
+            "package": EpicApprovalPackage(
+                epic_id=epic_id,
+                status="halted",
+                subtask_results=subtask_result_objs,
+                total_files_changed=list(set(all_files)),
+                all_diffs=all_diffs,
+                all_qa_summaries=all_qa,
+                all_review_findings=all_findings,
+                cost_actual_usd=cost_actual,
+                halt_reason=halt_reason,
+            )
+        }
 
     await db.execute(
         sa_update(Epic).where(Epic.epic_id == epic_id).values(status="ready_for_review")
@@ -916,7 +1072,6 @@ async def _run_epic_manager_body(
         db=db,
     )
 
-    # Store outcome in engineering memory
     summary = "; ".join(all_qa[:3]) or f"Epic completed with {len(subtasks)} subtasks"
     await embed_task_outcome(
         task_id=str(task_id),
@@ -935,16 +1090,119 @@ async def _run_epic_manager_body(
 
     await clear_epic_scratchpad(epic_id, db)
 
-    return EpicApprovalPackage(
-        epic_id=epic_id,
-        status="ready_for_review",
-        subtask_results=subtask_result_objs,
-        total_files_changed=list(set(all_files)),
-        all_diffs=all_diffs,
-        all_qa_summaries=all_qa,
-        all_review_findings=all_findings,
-        cost_actual_usd=cost_actual,
+    return {
+        "package": EpicApprovalPackage(
+            epic_id=epic_id,
+            status="ready_for_review",
+            subtask_results=subtask_result_objs,
+            total_files_changed=list(set(all_files)),
+            all_diffs=all_diffs,
+            all_qa_summaries=all_qa,
+            all_review_findings=all_findings,
+            cost_actual_usd=cost_actual,
+        )
+    }
+
+
+def _route_after_cost_estimate(state: EpicManagerState) -> str:
+    if state.get("stage") == "pending_cost_approval":
+        return "END"
+    return "planning"
+
+
+def _route_after_conflict_check(state: EpicManagerState) -> str:
+    if state.get("stage") == "halted_conflict":
+        return "END"
+    return "coding"
+
+
+_compiled_epic_manager_graph: Any = None
+
+
+def build_epic_manager_graph() -> Any:
+    """MASTER_AGENT_v2.md Phase 5.1 — the epic-level orchestration flow
+    (cost check → planning → conflict check → coding → finalize) as a real
+    LangGraph StateGraph. Deliberately does NOT convert run_manager()'s own
+    per-subtask retry loop (dev→QA→review with backoff) into graph nodes:
+    that loop is a poor structural fit for LangGraph's node/edge model (deep
+    per-attempt state, many early-exit/continue paths) and — far more
+    importantly — is the single most heavily-tested piece of this file
+    across 180+ tests spanning 13 test modules. A "structural conversion
+    only, not a rewrite of what the manager decides" is safest applied where
+    it's a natural fit: the epic flow's 5 steps were already a linear/
+    branching sequence of async function calls; run_manager() is called
+    from the "coding" node exactly as before, completely unchanged, so every
+    one of its existing behaviors (retry counts, SlotAcquisitionTimeout
+    handling, the git-commit-before-review fix, checkpointing) is preserved
+    with zero risk rather than re-derived.
+
+    No checkpointer: this graph never pauses (no interrupt()), runs start-
+    to-finish within one run_epic_manager() call — unlike
+    app/pipeline/graph.py's pm/architect/decomposer graph, there's nothing
+    here that needs to survive a real process-level pause/resume.
+    """
+    graph: StateGraph[EpicManagerState] = StateGraph(EpicManagerState)
+
+    graph.add_node("cost_estimate", _cost_estimate_node)
+    graph.add_node("planning", _planning_node)
+    graph.add_node("conflict_check", _conflict_check_node)
+    graph.add_node("coding", _coding_node)
+    graph.add_node("finalize", _finalize_node)
+
+    graph.add_edge(START, "cost_estimate")
+    graph.add_conditional_edges(
+        "cost_estimate",
+        _route_after_cost_estimate,
+        {"planning": "planning", "END": END},
     )
+    graph.add_edge("planning", "conflict_check")
+    graph.add_conditional_edges(
+        "conflict_check",
+        _route_after_conflict_check,
+        {"coding": "coding", "END": END},
+    )
+    graph.add_edge("coding", "finalize")
+    graph.add_edge("finalize", END)
+
+    return graph.compile()
+
+
+def get_epic_manager_graph() -> Any:
+    global _compiled_epic_manager_graph
+    if _compiled_epic_manager_graph is None:
+        _compiled_epic_manager_graph = build_epic_manager_graph()
+    return _compiled_epic_manager_graph
+
+
+async def _run_epic_manager_body(
+    epic_id: str,
+    goal: str,
+    db: AsyncSession,
+    repo_path: str | None = None,
+) -> EpicApprovalPackage:
+    """The real epic orchestration logic — now a LangGraph supervisor graph
+    (build_epic_manager_graph() above). Split out so run_epic_manager() can
+    hold epic_slot() for the whole call via `async with` regardless of how
+    this returns/raises — unchanged from before this conversion.
+
+    Flow (identical to the pre-conversion imperative version, just expressed
+    as graph nodes/edges instead of a single function body):
+    1. Cost estimate → if over threshold → mark epic 'pending_cost_approval' and return early
+    2. Mark epic 'planning' → run PM→Arch→Decomp planning pipeline
+    3. Mark epic 'coding' → run per-subtask Dev→QA→Review pipeline
+    4. If ≥ MANAGER_MAX_EPIC_FAILURES blocked → emit epic.halted, mark epic 'halted'
+    5. On all complete → assemble batched approval package → emit epic.ready_for_review
+    """
+    graph = get_epic_manager_graph()
+    initial_state: EpicManagerState = {
+        "epic_id": epic_id,
+        "goal": goal,
+        "db": db,
+        "repo_path": repo_path,
+    }
+    final_state = await graph.ainvoke(initial_state)
+    package: EpicApprovalPackage = final_state["package"]
+    return package
 
 
 # ---------------------------------------------------------------------------

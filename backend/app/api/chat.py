@@ -119,7 +119,7 @@ async def send_message(
       - done                     : {"type": "done"}
       - error                    : {"type": "error", "message": "..."}
     """
-    from app.agents.chat_agent import ChatAgent  # local import to avoid circular
+    from app.agents.chat_agent import get_or_create_chat_agent  # avoid circular import
     from app.db.session import get_session_factory
 
     session = _require_session(session_id)
@@ -131,8 +131,12 @@ async def send_message(
 
     session.active = True
 
-    # Launch agent in background — it pushes events to the queue
-    agent = ChatAgent(session=session)
+    # Launch agent in background — it pushes events to the queue. Reused
+    # (not freshly constructed) so the same ChatAgent instance — and thus
+    # the same in-process LangGraph checkpointer/thread_id — is available
+    # if this turn pauses at a confirmation and confirm_action() needs to
+    # resume() it later (MASTER_AGENT_v2.md Phase 5.2).
+    agent = get_or_create_chat_agent(session)
     factory = get_session_factory()
     asyncio.create_task(_run_agent(agent, body.message, session, factory))
 
@@ -147,20 +151,14 @@ async def send_message(
     )
 
 
-async def _run_agent(
-    agent: Any, message: str, session: ChatSession, db_factory: Any
+async def _persist_new_messages(
+    session: ChatSession, history_len_before: int, db_factory: Any
 ) -> None:
-    """Background task: run the agent, then persist user message + assistant reply to DB."""
-    history_len_before = len(session.history)
-    try:
-        await agent.run(message)
-    except Exception as e:
-        logger.exception("Unhandled error in chat agent")
-        await session.push({"type": "error", "message": f"Internal error: {e}"})
-        session.active = False
-        return
-
-    # Persist any new messages added during this turn
+    """Persist whatever messages were appended to session.history since
+    history_len_before. Shared by the initial dispatch and by a resumed-
+    after-confirmation continuation (MASTER_AGENT_v2.md Phase 5.2) — a
+    turn can now legitimately produce history in more than one dispatch
+    if it paused at a confirmation in between."""
     new_messages = session.history[history_len_before:]
     if new_messages and db_factory is not None:
         try:
@@ -180,6 +178,45 @@ async def _run_agent(
             )
 
 
+async def _run_agent(
+    agent: Any, message: str, session: ChatSession, db_factory: Any
+) -> None:
+    """Background task: run the agent, then persist user message + assistant reply to DB."""
+    history_len_before = len(session.history)
+    try:
+        await agent.run(message)
+    except Exception as e:
+        logger.exception("Unhandled error in chat agent")
+        await session.push({"type": "error", "message": f"Internal error: {e}"})
+        session.active = False
+        return
+
+    await _persist_new_messages(session, history_len_before, db_factory)
+
+
+async def _resume_agent(
+    agent: Any, action_id: str, approved: bool, session: ChatSession, db_factory: Any
+) -> None:
+    """Background task: resume a paused turn after a confirmation decision,
+    then persist any messages the continuation produced. Mirrors
+    _run_agent()'s error handling exactly (MASTER_AGENT_v2.md Phase 5.2)."""
+    history_len_before = len(session.history)
+    try:
+        resumed = await agent.resume(action_id, approved)
+        if not resumed:
+            # Stale/mismatched confirm — nothing ran, nothing to persist,
+            # and the turn is still genuinely paused: leave session.active
+            # as-is rather than guessing at a terminal state.
+            return
+    except Exception as e:
+        logger.exception("Unhandled error resuming chat agent")
+        await session.push({"type": "error", "message": f"Internal error: {e}"})
+        session.active = False
+        return
+
+    await _persist_new_messages(session, history_len_before, db_factory)
+
+
 @router.post("/sessions/{session_id}/confirm")
 async def confirm_action(
     session_id: str,
@@ -189,9 +226,24 @@ async def confirm_action(
     """
     Resolve a pending confirmation request (approve or deny a dangerous action).
     Called when the user clicks Approve/Deny in the UI.
+
+    MASTER_AGENT_v2.md Phase 5.2 — this now resumes a real LangGraph
+    interrupt() (app/agents/chat_agent.py::ChatAgent.resume()) rather than
+    setting an asyncio.Event. Fired as a background task, same as the
+    initial send: the client's existing SSE stream (opened by
+    POST /messages, still listening on session._queue) keeps receiving
+    whatever further events the resumed turn produces, all the way to a
+    real 'done'.
     """
+    from app.agents.chat_agent import get_or_create_chat_agent
+    from app.db.session import get_session_factory
+
     session = _require_session(session_id)
-    session.resolve_confirmation(body.action_id, body.approved)
+    agent = get_or_create_chat_agent(session)
+    factory = get_session_factory()
+    asyncio.create_task(
+        _resume_agent(agent, body.action_id, body.approved, session, factory)
+    )
     return {"status": "ok"}
 
 
@@ -235,6 +287,9 @@ async def close_session(
     session_id: str, _actor: str = Depends(require_authenticated)
 ) -> dict[str, str]:
     """Close and clean up a chat session."""
+    from app.agents.chat_agent import delete_chat_agent
+
     _require_session(session_id)
     delete_session(session_id)
+    delete_chat_agent(session_id)
     return {"status": "deleted"}

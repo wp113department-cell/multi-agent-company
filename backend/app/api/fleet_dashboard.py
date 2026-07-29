@@ -22,17 +22,17 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator, Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.db.models import EnhancementRequest
+from app.db.models import AgentRun, EnhancementRequest, MemoryEmbedding
 from app.middleware.rbac import require_approver
 from app.services.activity_stream import get_activity_registry
 
@@ -266,6 +266,157 @@ async def reject_request(
     _push_dashboard_event("status_changed", {"id": request_id, "status": "rejected"})
 
     return {"ok": True, "id": request_id, "status": "rejected"}
+
+
+# ---------------------------------------------------------------------------
+# Read-only reporting (MASTER_AGENT_v2.md Phase 6.2) — cost, fleet health,
+# and recorded repair patterns, all over data other agents already write
+# (agent_runs / memory_embeddings). No new collection, no new tables.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/reports/cost")
+async def cost_report(
+    days: int = Query(default=30, ge=1, le=365),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Cost per agent/day, plus a per-model-tier rollup. Tier is resolved via
+    ModelRouter (agent_models.json is the one live source of truth for tier —
+    agent_runs.model_id is a raw model string, not stored redundantly here)."""
+    from app.fleet.model_router import get_model_router
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    day_col = func.date_trunc("day", AgentRun.started_at)
+    q = (
+        select(
+            AgentRun.agent_type,
+            day_col.label("day"),
+            func.coalesce(func.sum(AgentRun.tokens_in), 0),
+            func.coalesce(func.sum(AgentRun.tokens_out), 0),
+            func.coalesce(func.sum(AgentRun.cost_estimate), 0),
+            func.count(AgentRun.id),
+        )
+        .where(AgentRun.started_at >= since)
+        .group_by(AgentRun.agent_type, day_col)
+        .order_by(day_col.desc())
+    )
+    result = await db.execute(q)
+    router_ = get_model_router()
+
+    by_agent_day: list[dict[str, Any]] = []
+    tier_totals: dict[str, float] = {}
+    for agent_type, day, tokens_in, tokens_out, cost_usd, run_count in result.all():
+        tier = router_.route(agent_type).tier
+        cost = float(cost_usd or 0)
+        tier_totals[tier] = tier_totals.get(tier, 0.0) + cost
+        by_agent_day.append(
+            {
+                "agentName": agent_type,
+                "day": day.isoformat() if day else None,
+                "tier": tier,
+                "tokensIn": int(tokens_in or 0),
+                "tokensOut": int(tokens_out or 0),
+                "costUsd": cost,
+                "runCount": int(run_count),
+            }
+        )
+
+    return {
+        "sinceDays": days,
+        "byAgentDay": by_agent_day,
+        "byTier": [
+            {"tier": tier, "costUsd": cost}
+            for tier, cost in sorted(tier_totals.items(), key=lambda kv: -kv[1])
+        ],
+    }
+
+
+@router.get("/reports/health")
+async def health_report(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+    """Failure rate, active-run count, and average heartbeat staleness (for
+    currently-running runs) per agent — all real agent_runs aggregates, no
+    synthetic/estimated fields.
+
+    Staleness is computed entirely server-side (`func.now() -
+    last_heartbeat_at`, both real timestamptz values Postgres compares in
+    its own consistent internal representation) rather than reading
+    last_heartbeat_at back into Python and subtracting against a
+    Python-side `datetime.now(timezone.utc)` — the two conversion paths
+    (asyncpg's naive-input write path vs. its tz-aware read path) don't
+    agree on the session's UTC offset, which silently skewed every
+    staleness value by that offset when tried that way (caught by this
+    endpoint's own real-DB test asserting an exact expected staleness)."""
+    from sqlalchemy import case
+
+    staleness_seconds = func.extract("epoch", func.now() - AgentRun.last_heartbeat_at)
+    q = (
+        select(
+            AgentRun.agent_type,
+            func.count(AgentRun.id),
+            func.coalesce(func.sum(case((AgentRun.status == "failed", 1), else_=0)), 0),
+            func.coalesce(
+                func.sum(case((AgentRun.status == "running", 1), else_=0)), 0
+            ),
+            func.avg(case((AgentRun.status == "running", staleness_seconds))),
+        )
+        .group_by(AgentRun.agent_type)
+        .order_by(AgentRun.agent_type)
+    )
+    result = await db.execute(q)
+
+    report = []
+    for agent_type, total, failed, active, avg_staleness in result.all():
+        total = int(total)
+        failed = int(failed or 0)
+        report.append(
+            {
+                "agentName": agent_type,
+                "totalRuns": total,
+                "failedRuns": failed,
+                "failureRate": round(failed / total, 4) if total else 0.0,
+                "activeRuns": int(active or 0),
+                "avgHeartbeatStalenessSeconds": (
+                    round(float(avg_staleness), 1)
+                    if avg_staleness is not None
+                    else None
+                ),
+            }
+        )
+    report.sort(key=lambda r: -r["failureRate"])
+    return report
+
+
+@router.get("/reports/repair-patterns")
+async def repair_patterns_report(
+    limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Most commonly recorded repair patterns — Phase 1.5's procedural
+    memory (`embed_failure()` writes MemoryEmbedding rows with
+    category='failure'; `summary` holds the diagnosed root cause / repair).
+    Grouped by exact summary text — real occurrence counts, not a synthetic
+    clustering pass."""
+    q = (
+        select(
+            MemoryEmbedding.summary,
+            func.count(MemoryEmbedding.id),
+            func.max(MemoryEmbedding.created_at),
+        )
+        .where(MemoryEmbedding.category == "failure")
+        .where(MemoryEmbedding.archived.is_(False))
+        .group_by(MemoryEmbedding.summary)
+        .order_by(func.count(MemoryEmbedding.id).desc())
+        .limit(limit)
+    )
+    result = await db.execute(q)
+    return [
+        {
+            "repairPattern": summary,
+            "occurrences": int(occurrences),
+            "lastSeen": last_seen.isoformat() if last_seen else None,
+        }
+        for summary, occurrences, last_seen in result.all()
+    ]
 
 
 @router.get("/requests/stream")

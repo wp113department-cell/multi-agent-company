@@ -1299,6 +1299,20 @@ TOOL_MANIFEST: dict[str, ToolManifestEntry] = {
         risk_level="low",
         notes="Never raises — a broken memory backend returns an [ERROR] string, not an exception.",
     ),
+    "request_clarification": ToolManifestEntry(
+        purpose=(
+            "Flag a genuinely underspecified task for human/upstream-agent review "
+            "(MASTER_AGENT_v2.md Phase 5.3) — records a real pending_approvals row "
+            "via app/fleet/approval_gate.py and ends the run with "
+            "status='needs_clarification'."
+        ),
+        permissions=["write_memory"],
+        timeout_s=5,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+        notes="Never raises — a failed write returns an [ERROR] string, not an exception.",
+    ),
     "decision_log_append": ToolManifestEntry(
         purpose="Append a decision record to the project decision log",
         permissions=["write_repo"],

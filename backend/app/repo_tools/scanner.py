@@ -47,6 +47,11 @@ class SymbolInfo:
     kind: str  # function | class | method
     line_start: int
     line_end: int
+    # Base-class names for kind="class" symbols (Phase 6.4) — bare identifier
+    # or the last dotted component (e.g. "Base" from "pkg.Base", matching how
+    # cross_file_graph.py already resolves method calls by bare name).
+    # Always empty for function/method symbols.
+    bases: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -68,6 +73,27 @@ def _content_hash(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def _extract_base_class_names(node: Node) -> list[str]:
+    """class_definition's `superclasses` field is an argument_list —
+    identifier children are plain base names, attribute children are dotted
+    (e.g. `pkg.Base`, reduced to `Base` — the same bare-name convention
+    cross_file_graph.py already uses for method calls); keyword_argument
+    children (e.g. `metaclass=Meta`) are never base classes and are skipped.
+    """
+    superclasses = node.child_by_field_name("superclasses")
+    if superclasses is None:
+        return []
+    bases: list[str] = []
+    for child in superclasses.children:
+        if child.type == "identifier" and child.text:
+            bases.append(child.text.decode())
+        elif child.type == "attribute":
+            attr_node = child.child_by_field_name("attribute")
+            if attr_node and attr_node.text:
+                bases.append(attr_node.text.decode())
+    return bases
+
+
 def _extract_python_symbols(root: Node) -> list[SymbolInfo]:
     symbols: list[SymbolInfo] = []
 
@@ -82,6 +108,7 @@ def _extract_python_symbols(root: Node) -> list[SymbolInfo]:
                         kind="class",
                         line_start=node.start_point[0],
                         line_end=node.end_point[0],
+                        bases=_extract_base_class_names(node),
                     )
                 )
                 for child in node.children:
@@ -261,3 +288,35 @@ def build_call_graph(index: RepoIndex) -> dict[str, list[str]]:
             edges[rel_path] = callees
 
     return edges
+
+
+@dataclass
+class PackageEdge:
+    caller_package: str  # directory containing the importing file ("." for repo root)
+    callee_package: str
+    weight: int  # number of file-level import edges aggregated into this edge
+
+
+def _package_of(rel_path: str) -> str:
+    parent = str(Path(rel_path).parent)
+    return "." if parent == "." else parent.replace("\\", "/")
+
+
+def build_package_graph(import_edges: dict[str, list[str]]) -> list[PackageEdge]:
+    """Aggregate scanner.build_call_graph()'s existing file-level import
+    edges up to directory/package granularity (Phase 6.4) — a pure
+    aggregation over already-collected data, no new AST walking. Same-
+    package edges are dropped: this is a *cross*-package dependency graph."""
+    counts: dict[tuple[str, str], int] = {}
+    for caller_file, callees in import_edges.items():
+        caller_pkg = _package_of(caller_file)
+        for callee_file in callees:
+            callee_pkg = _package_of(callee_file)
+            if caller_pkg == callee_pkg:
+                continue
+            key = (caller_pkg, callee_pkg)
+            counts[key] = counts.get(key, 0) + 1
+    return [
+        PackageEdge(caller_package=c, callee_package=e, weight=w)
+        for (c, e), w in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    ]

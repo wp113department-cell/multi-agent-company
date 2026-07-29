@@ -8,6 +8,7 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import ARCH_REVIEWER_TOOLS, make_arch_reviewer_handlers
+from app.agents.tools import RECORD_LEARNING_TOOL, make_record_learning_handler
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "call_graph",
         "parse_ast",
         "submit_arch_review",
+        "record_learning",
     ],
     "input_types": ["task_id", "focus", "repo_path"],
     "output_types": ["AgentResult"],
@@ -85,6 +87,7 @@ def run_arch_review(
     repo = repo_path or str(settings.target_repo_path)
     handlers = make_arch_reviewer_handlers(repo)
 
+    handlers["record_learning"] = make_record_learning_handler("architecture_reviewer")
     message = (
         f"Task #{task_id} — Architecture Review\n\nFocus: {focus}\n\n"
         "Process (read-only):\n"
@@ -103,7 +106,7 @@ def run_arch_review(
         task_id=str(task_id),
         role_name="architecture_reviewer",
         model=settings.model_coder,
-        tools=ARCH_REVIEWER_TOOLS,
+        tools=ARCH_REVIEWER_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_VERIFICATION_CFG,
         initial_message=message,

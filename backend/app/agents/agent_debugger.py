@@ -17,11 +17,13 @@ from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
     FLEET_APPLY_TOOLS,
     READ_ONLY_TOOLS,
+    RECORD_LEARNING_TOOL,
     _FLEET_BASH_TOOL,
     audit_log_read,
     fleet_metrics_read,
     make_fleet_apply_handlers,
     make_read_only_handlers,
+    make_record_learning_handler,
     make_scoped_bash_handler,
     make_submit_enhancement_request_handler,
 )
@@ -45,6 +47,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "run_tests",
         "git_commit_change",
         "submit_fix",
+        "record_learning",
     ],
     "input_types": ["scan_trigger", "enhancement_request_id"],
     "output_types": ["AgentResult"],
@@ -148,6 +151,7 @@ _APPLY_CFG = VerificationConfig(
 
 def make_scan_handlers(repo_path: str, trace_id: str = "") -> dict[str, Any]:
     handlers = make_read_only_handlers(repo_path)
+    handlers["record_learning"] = make_record_learning_handler("agent_debugger")
     handlers["bash"] = make_scoped_bash_handler(repo_path)
     handlers["audit_log_read"] = audit_log_read
     handlers["fleet_metrics_read"] = fleet_metrics_read
@@ -162,7 +166,6 @@ def run_agent_debugger_scan(trace_id: str = "") -> AgentResult:
     settings = get_settings()
     repo = settings.fleet_self_repo_path
     handlers = make_scan_handlers(repo, trace_id=trace_id)
-
     msg = (
         "Check the fleet for failing agents or platform bugs. Use audit_log_read and "
         "fleet_metrics_read to find real evidence of failures, errors, or repeated problems — "
@@ -175,7 +178,7 @@ def run_agent_debugger_scan(trace_id: str = "") -> AgentResult:
     final_state = run_agent_graph(
         role_name="agent_debugger",
         model=settings.model_coder,
-        tools=SCAN_TOOLS,
+        tools=SCAN_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_SCAN_CFG,
         initial_message=msg,
@@ -215,6 +218,7 @@ def run_agent_debugger_apply(
     settings = get_settings()
     repo = settings.fleet_self_repo_path
     handlers = make_fleet_apply_handlers(repo)
+    handlers["record_learning"] = make_record_learning_handler("agent_debugger")
     handlers["bash"] = make_scoped_bash_handler(repo)
 
     def submit_h(inp: dict[str, Any]) -> str:
@@ -233,7 +237,7 @@ def run_agent_debugger_apply(
     final_state = run_agent_graph(
         role_name="agent_debugger",
         model=settings.model_coder,
-        tools=APPLY_TOOLS,
+        tools=APPLY_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_APPLY_CFG,
         initial_message=msg,

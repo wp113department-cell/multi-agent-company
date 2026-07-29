@@ -19,8 +19,10 @@ from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
     READ_ONLY_TOOLS,
     RECORD_LEARNING_TOOL,
+    REQUEST_CLARIFICATION_TOOL,
     make_read_only_handlers,
     make_record_learning_handler,
+    make_request_clarification_handler,
 )
 from app.config import get_settings
 
@@ -52,6 +54,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "analyze_file",
         "submit_plan",
         "record_learning",
+        "request_clarification",
     ],
     "input_types": ["task_id", "title", "description", "repo_path"],
     "output_types": ["plan_text"],
@@ -134,6 +137,9 @@ def run_planner(
     handlers = make_read_only_handlers(repo)
     handlers["submit_plan"] = lambda inp: "Plan submitted"
     handlers["record_learning"] = make_record_learning_handler("planner")
+    handlers["request_clarification"] = make_request_clarification_handler(
+        "planner", str(task_id)
+    )
 
     initial_message = (
         f"Task ID: {task_id}\n"
@@ -148,7 +154,8 @@ def run_planner(
             task_id=str(task_id),
             role_name="planner",
             model=settings.model_coder,
-            tools=READ_ONLY_TOOLS + [_SUBMIT_TOOL, RECORD_LEARNING_TOOL],
+            tools=READ_ONLY_TOOLS
+            + [_SUBMIT_TOOL, RECORD_LEARNING_TOOL, REQUEST_CLARIFICATION_TOOL],
             tool_handlers=handlers,
             verification_cfg=_VERIFICATION_CFG,
             initial_message=initial_message,
@@ -171,6 +178,20 @@ def run_planner(
 
     if not final_state.get("submitted"):
         return "", "Planner agent did not submit a plan", tokens_in, tokens_out
+
+    result = final_state.get("result", {})
+    if result.get("status") == "needs_clarification":
+        # Phase 5.3 — external interface (return shape) deliberately
+        # unchanged; the real signal is this parseable prefix in the
+        # existing error slot, not a new return value every caller of
+        # run_planner would need to be updated for.
+        question = str(result.get("question", "")).strip()
+        return (
+            "",
+            f"[NEEDS_CLARIFICATION] {question}",
+            tokens_in,
+            tokens_out,
+        )
 
     plan = str(final_state.get("result", {}).get("plan", ""))
     error = _validate_plan(plan)

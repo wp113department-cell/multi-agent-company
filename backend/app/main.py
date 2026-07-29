@@ -81,6 +81,32 @@ def _init_sentry(settings: "Settings") -> None:  # type: ignore[name-defined]  #
         logger.warning("Sentry init failed: %s", exc)
 
 
+def _init_otel(settings: "Settings") -> None:  # type: ignore[name-defined]  # noqa: F821
+    """Eagerly build the process TracerProvider (MASTER_AGENT_v2.md Phase
+    6.1). Spans are recorded in-process either way; this just logs whether
+    export to OTEL_EXPORTER_ENDPOINT is actually wired, and makes startup
+    fail loudly-but-non-fatally instead of silently on the first agent run."""
+    from app.fleet.metrics import _get_tracer_provider
+
+    provider = _get_tracer_provider()
+    if not provider:
+        logger.warning(
+            "OpenTelemetry SDK unavailable — run_span() will collect metrics "
+            "as usual but no OTEL spans will be created."
+        )
+    elif settings.otel_exporter_endpoint:
+        logger.info(
+            "OpenTelemetry tracing initialised (service=%s, endpoint=%s)",
+            settings.otel_service_name,
+            settings.otel_exporter_endpoint,
+        )
+    else:
+        logger.info(
+            "OpenTelemetry tracing initialised in-process only "
+            "(set OTEL_EXPORTER_ENDPOINT to export spans)."
+        )
+
+
 async def _weekly_reindex_loop() -> None:
     """Reindex the active repo every 7 days so context/repo-intelligence
     persistence stays fresh.
@@ -244,6 +270,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Sentry — must happen before any request processing
     _init_sentry(settings)
+
+    # OpenTelemetry — same "must happen before any request processing" reason
+    _init_otel(settings)
 
     # Day 19 — Cloud Deployment prep. Every real agent's _register() only
     # fires once its module is imported; before this, only pm/architect/

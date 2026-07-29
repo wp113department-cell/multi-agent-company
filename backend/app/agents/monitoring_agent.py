@@ -13,6 +13,7 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import MONITORING_AGENT_TOOLS, make_monitoring_agent_handlers
+from app.agents.tools import RECORD_LEARNING_TOOL, make_record_learning_handler
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "task_progress",
         "read_logs",
         "submit_monitoring_report",
+        "record_learning",
     ],
     "input_types": ["task_id", "task_description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -91,6 +93,7 @@ def run_monitoring_agent(
     repo = repo_path or str(settings.target_repo_path)
     handlers = make_monitoring_agent_handlers(repo)
 
+    handlers["record_learning"] = make_record_learning_handler("monitoring_agent")
     message = (
         f"Task #{task_id} — System Health Check\n\n{task_description}\n\n"
         "Process:\n"
@@ -108,7 +111,7 @@ def run_monitoring_agent(
         task_id=str(task_id),
         role_name="monitoring_agent",
         model=settings.model_coder,
-        tools=MONITORING_AGENT_TOOLS,
+        tools=MONITORING_AGENT_TOOLS + [RECORD_LEARNING_TOOL],
         tool_handlers=handlers,
         verification_cfg=_VERIFICATION_CFG,
         initial_message=message,
