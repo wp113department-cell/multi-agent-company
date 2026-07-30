@@ -191,24 +191,72 @@ for this kind of process transparency.
 ## Q2. Complete Orchestration
 
 - Who receives the user request first: **YES** — `POST /api/tasks` (`backend/app/api/tasks.py`) creates the `DevTask` row (plain CRUD, no agent involved yet). `POST /api/tasks/{task_id}/run` (`backend/app/api/tasks.py:177`) is the real trigger: it calls `background_tasks.add_task(launch_planning_pipeline, ...)` (`backend/app/api/agents.py:62` `launch_planning_pipeline`). The first *agent* to touch the request is `pm_node` inside `run_planning_pipeline()` (`backend/app/pipeline/graph.py:144`, graph built in `build_graph()` lines 112-134: `START → pm → architect → decomposer → human_review(interrupt) → END`).
-- Who decides which agents work: **PARTIAL** — For the core pipeline it's hardcoded, not decided dynamically: `build_graph()` (`backend/app/pipeline/graph.py:112`) always runs pm→architect→decomposer in a fixed sequence; `run_manager()` (`backend/app/agents/manager.py:187-341`) always dispatches exactly `frontend_dev` (if `subtask_type=="frontend"`) or `backend_dev` (else), then always `qa`, then always `reviewer` — an `if/else` on a string field, not a capability query. A parallel, registry-driven selector exists (`FleetManager.select()`, `backend/app/fleet/fleet_manager.py:65-165`, scoring by `health_weight * success_rate * 1/(1+error_count)`) and is invoked from `run_manager()` (lines 206-227) but is explicitly additive/non-blocking ("alongside — not replacing — the existing direct dispatch," comment at line 200-205); its result is discarded, not used to pick the real dispatch target.
-  Plan: make `FleetManager.select()`'s output the actual dispatch decision in `run_manager()`, not a side-channel event.
+- Who decides which agents work: **YES for the backend_dev/frontend_dev pair — gap-closure Days 11-14
+  (2026-07-30).** `build_graph()`'s pm→architect→decomposer sequence is still fixed by design (not a
+  capability query — that's a different, orthogonal question). But `run_manager()`'s dev-agent
+  dispatch is no longer a discarded side-channel: `FleetManager.select()`'s real `DispatchPlan.agent_name`
+  is captured into `selected_agent_name` and is what the dispatch `if selected_agent_name ==
+  "frontend_dev": ... else: ...` branch actually checks (`app/agents/manager.py`), replacing the old
+  `if subtask_type == "frontend"` check. Falls back to the subtask_type heuristic only if `select()`
+  itself fails/returns `None` (registry unavailable) — the scheduler's own health never blocks a
+  subtask. Since exactly one concrete agent is registered per capability today, this produces
+  identical routing to the old check in the common case; the real change is that `select()`'s
+  negative signal (an unhealthy/unavailable instance) is now actually honored, and this is the real
+  hook a second agent registered for the same capability would need to ever get dispatched — `qa`/
+  `reviewer` dispatch is still unconditional (no capability alternatives exist for those roles today).
+  Proven live: `backend/tests/test_gap11_14_fleet_manager_dispatch.py` (2 tests) — one deliberately
+  makes `select()` disagree with the subtask_type default and confirms the disagreeing choice is what
+  actually runs; one confirms graceful fallback when `select()` fails.
 - Is task routing automatic: **YES** — no human picks an agent per subtask; `_TYPE_TO_TAG`/`_FALLBACK_ROUTING` (`backend/app/pipeline/dispatcher.py:24-39`) and `manager.py`'s type check both route without human input.
-- Is routing rule-based: **YES** — confirmed rule-based (string match on `subtask.type`), not AI-based, for the actual dispatch. `backend/app/pipeline/dispatcher.py:42-45` `get_agent_for_type()` and `manager.py:316-340` are literal `if subtask_type == "frontend": ... else: ...`.
+- Is routing rule-based: **YES** — rule-based, not AI-based, for the actual dispatch: `backend/app/pipeline/dispatcher.py:42-45` `get_agent_for_type()` is a literal `if subtask_type == "frontend": ... else: ...`. `manager.py`'s dev-agent dispatch (gap-closure Days 11-14) is now `if selected_agent_name == "frontend_dev": ... else: ...` — still a deterministic rule, just fed by `FleetManager.select()`'s real output (itself a deterministic scoring formula, not AI) rather than the raw `subtask_type` string directly.
 - Is routing AI-based: **NO** — no LLM call decides which agent handles a subtask; the LLM only decides *within* an agent run which tool to call. `FleetManager.select()`'s score is a deterministic formula (health × success_rate × 1/(1+errors)), not a model call.
   Plan: N/A unless AI-based capability matching is a stated requirement; current formula-based fleet_manager could be wired in as a middle ground (see above).
 - Can multiple agents work simultaneously: **PARTIAL** — within one epic, subtasks run sequentially in a `for` loop (`manager.py:187`, one subtask at a time — dev→QA→review must finish before the next subtask starts). Concurrency exists only *across* epics/agent-runs via semaphores: `epic_slot()`, `agent_run_slot()`, `subtask_slot()` (`backend/app/pipeline/concurrency.py:64-106`, capped by `max_concurrent_epics`/`max_concurrent_agent_runs`/`max_concurrent_subtasks_per_epic`). Also confirmed as a real, in-process-only, single-process concurrency model by `MASTER_AGENT_v2.md:411-421` (A.13).
-  Plan: parallelize independent subtasks within one epic (currently strictly sequential) once dependency graph edges (`depends_on`) are honored at dispatch time.
+  Plan: `depends_on` is now honored at dispatch time (gap-closure Days 11-14, see Q2's "How are
+  dependencies managed" above) — that precondition is met. Still sequential within the loop itself
+  (dispatch order is now correct, but subtasks are not yet dispatched concurrently); parallelizing
+  independent subtasks within one epic remains a distinct, unstarted piece of work.
 - Can agents create subtasks: **PARTIAL** — the `decomposer` agent creates the subtask list once, up front (`backend/app/agents/decomposer.py:115-194`, `submit_subtasks` tool). No worker agent (backend_dev, qa, reviewer, etc.) can create a *new* subtask mid-run; there is no `create_subtask` tool anywhere in `backend/app/agents/tools.py` (grepped, not found). Replanning (`_make_replan_node`, `base_graph.py:425-459`) revises the *plan text*, not the subtask list.
   Plan: add a `create_subtask` tool for worker agents (or route replan output back into the decomposer) if dynamic subtask creation is required.
 - Can agents request help from other agents: **NO** — grepped `backend/app/agents/tools.py` and `backend/app/fleet/` for any `call_agent`/`delegate_to_agent`/`ask_agent`/`invoke_agent`-style tool; none exists. `fleet_events.py` publishes `TaskCreated`/lifecycle events (pub/sub for observability) but no agent can invoke another agent's run from inside its own tool loop. `MASTER_AGENT_v2.md:1112-1132` (D.2) explicitly confirms formal cross-agent negotiation/consultation/recursive delegation is deferred, not built.
   Plan: add an `invoke_agent(agent_name, task)` tool gated by the capability_registry + human-approval for high-risk agents.
 - Can agents reject tasks they are not suitable for: **PARTIAL** — no agent can decline "I'm not the right agent for this" and hand it back for re-routing. The closest real mechanism is `request_clarification` (`backend/app/agents/tools.py:363-410`, Phase 5.3), which ends the run with `status="needs_clarification"` when the task is *underspecified*, not when it's the wrong agent. `fleet_manager.select()` can return `None` ("no healthy available agent") which blocks dispatch, but that's availability/health-based, not a self-assessed suitability rejection by the agent itself.
   Plan: distinguish "wrong agent for this" from "underspecified" as a second clarification/rejection reason routed back through `fleet_manager.select()` for re-dispatch.
-- Can orchestration dynamically change during execution: **PARTIAL** — `replan_node` (`backend/app/agents/base_graph.py:425-459`) can revise a single agent's own plan mid-run, triggered by real evidence (`_should_replan`, lines 392-422: reflection dissatisfaction ≥2 or repeated critique failure ≥2). But per `IMPLEMENTATION_PROGRESS.md:400-401` and confirmed by grep (`enable_replanning=True` / `enable_critique=True` appear nowhere in any real agent file), this is opt-in and **off by default fleet-wide** — no shipped agent currently has it enabled. At the epic level, `_conflict_check_node` (`manager.py:851-909`) can halt an epic before coding starts, which is a form of dynamic re-orchestration (abort), not re-routing.
-  Plan: flip `enable_replanning`/`enable_critique` on for at least the high-risk agent tier per the documented rollout plan.
-- How are dependencies managed: **PARTIAL** — `decomposer`'s `submit_subtasks` schema includes a `depends_on: list[int]` field per subtask (`backend/app/agents/decomposer.py:70-96`), so the data model captures dependencies. But `run_manager()`'s dispatch loop (`manager.py:187`) is a plain `for _subtask_idx, subtask in enumerate(subtasks)` — it never reads or enforces `depends_on`; subtasks run strictly in list order regardless of declared dependencies.
-  Plan: topologically sort subtasks by `depends_on` before the dispatch loop, or block a subtask's dispatch until its dependencies show `status="completed"`.
+- Can orchestration dynamically change during execution: **PARTIAL, real progress — gap-closure Days
+  11-14 (2026-07-30).** `replan_node` (`backend/app/agents/base_graph.py:425-459`) can revise a single
+  agent's own plan mid-run, triggered by real evidence (`_should_replan`: reflection dissatisfaction
+  ≥2 or repeated critique failure ≥2). `enable_critique=True` is now real and wired for the 5
+  highest-output-risk agents (coder, backend_dev, frontend_dev, qa, reviewer — chosen by role, not
+  the unrelated `risk_level` operational-danger tag), proven live by
+  `backend/tests/test_gap11_14_agent_critique.py` (7 tests, including a negative control on `devops`
+  proving the rollout is precisely scoped, not an accidental fleet-wide flip). `enable_replanning`
+  is deliberately still `False` fleet-wide — the plan's own sequencing makes flipping it conditional
+  on critique first being validated as stable in real use ("once critique is stable and approved"),
+  which requires live LLM-call observation this sandbox cannot currently do (no real
+  `ANTHROPIC_API_KEY` configured, zero historical `agent_runs` telemetry in this dev DB to substitute
+  for it) — tracked as an explicit, named follow-up, not silently skipped. At the epic level,
+  `_conflict_check_node` (`manager.py:851-909`) can halt an epic before coding starts (abort, not
+  re-routing).
+  Plan: flip `enable_replanning=True` for the same 5 agents once the critique rollout above has been
+  observed in real runs (cost/latency delta reviewed, no regressions) — the owner-required stop
+  condition before proceeding further into Stage 1.
+- How are dependencies managed: **YES — gap-closure Days 11-14 (2026-07-30).** `decomposer`'s
+  `submit_subtasks` schema includes a `depends_on: list[int]` field per subtask (0-based indices into
+  the same submitted list, per `roles/decomposer.md`'s own documented convention — not a `Subtask.id`
+  DB primary key, which doesn't exist yet at this point in the pipeline). `run_manager()`'s dispatch
+  loop now honors it for real: new `_topological_subtask_order()` (`app/agents/manager.py`, Kahn's
+  algorithm with a min-heap for deterministic tie-breaking) computes a dependency-respecting
+  dispatch order before the loop begins, replacing the old `for _subtask_idx, subtask in
+  enumerate(subtasks)` that ignored `depends_on` entirely. Iterates by ORIGINAL index (not a
+  reordered list) specifically so the loop's existing position-based `_db_subtask_rows` status-update
+  correlation (see Q94/ORCH-04-011) still lands on the correct DB row despite the reordered dispatch
+  — this was checked and deliberately preserved, not an accidental side effect. Falls back to the
+  original order on any inconsistency (out-of-range index, a genuine cycle) — logged, never raised,
+  so a malformed dependency graph from one decomposer run can never block the whole epic. Proven live
+  by `backend/tests/test_gap11_14_topological_subtask_order.py` (10 tests: 9 unit tests on the sort
+  function itself — linear chains, diamonds, cycles, out-of-range indices, self-references — plus 1
+  full `run_manager()` integration test proving a subtask deliberately listed *before* its
+  dependency is actually dispatched *after* it).
 - How are priorities managed: **PARTIAL** — `CreateTaskRequest.priority` exists as a field (`backend/app/api/tasks.py:39-44`, default `"medium"`) and is persisted, but nothing in `run_manager()`, `dispatcher.py`, or `FleetManager` reads task priority to reorder or preempt dispatch — grepped, no `priority` reference in any of those three files. It is stored metadata, not an active scheduling input.
   Plan: use `DevTask.priority` to order the epic queue / subtask dispatch loop, or explicitly document it as informational-only today.
 - How are conflicts resolved: **PARTIAL** — only one real conflict class is handled: **file-path conflicts between concurrently-running epics**, via `check_file_conflicts()` (`backend/app/pipeline/conflict_guard.py:21-54`), called from `_conflict_check_node` (`manager.py:851-909`) before coding starts; on overlap the epic is halted (`status="halted"`, `halt_reason=conflict`). There is no arbitration/voting/consensus mechanism for two agents producing *conflicting recommendations* — `MASTER_AGENT_v2.md:1112-1132` (D.2) explicitly confirms this is deferred/not built, citing no evidence the (sequential dev→qa→review) pipeline shape produces that scenario.
@@ -374,8 +422,20 @@ exists (see Project Memory finding above), so sharing is effectively "everything
 - Planning Engine: **YES, 70/72** — `planner_node` (`base_graph.py:354-378`) runs a real gather-facts → create-plan two-LLM-call sequence, default `enable_planning=True` in `run_agent_graph` (`base_graph.py:1617`). Applies to all 70 agents calling `run_agent_graph`; `chat_agent`/`manager` are the 2 exceptions (custom loop / supervisor pattern, both documented in `MASTER_AGENT_v2.md` §A.1 as deliberate, not bugs).
 - Reasoning Loop: **YES, 70/72** — `call_llm` node + conditional-edge `router` (`base_graph.py:572-650`, `1414-1445`) is a real `langgraph.graph.StateGraph` loop with stall detection (`n_stalls`/`max_stalls`) and `max_turns` enforcement.
 - Verification Loop: **YES, 71/72** — `VerificationConfig(...)` is used in 71/72 modules (script: `uses VerificationConfig: 71`; only `manager` doesn't). `execute_tools` (`base_graph.py:1003-1205`) overrides the model's own claims in `submit_*` calls with actually-observed tool-run state (`state["verification"]`), plus a `_run_quality_gate` (`base_graph.py:853-920`) that also validates the submitted payload against its declared JSON schema (`jsonschema.validate`).
-- Self Critique: **PARTIAL** — the mechanism is real (`critique_node`, `base_graph.py:741-837`, scores a submission against the role file's own "Quality Gates" bullets, sends work back up to `max_critique_retries` times) and is tested (`tests/test_phase35_self_critique.py`, `test_phase35_per_tier_critique.py`), but `enable_critique` defaults `False` and **grep across the entire `backend/` tree found `enable_critique=True` in zero production agent files** — only in the 3 test files above. The audit script independently confirmed 0/72 agent modules pass `enable_critique=True`.
-  Plan: flip `enable_critique=True` for at least the Tier-A agents (coder/backend_dev/frontend_dev/qa/reviewer) now that Phase 3 testing is complete, per `MASTER_AGENT_v2.md`'s own stated intent.
+- Self Critique: **YES for the 5 Tier-A agents — gap-closure Days 11-14 (2026-07-30).** The mechanism
+  is real (`critique_node`, `base_graph.py:741-837`, scores a submission against the role file's own
+  "Quality Gates"/"Success Criteria" bullets via `_extract_role_criteria`, sends work back up to
+  `max_critique_retries` times) and is tested. `enable_critique=True` is now genuinely wired for
+  coder/backend_dev/frontend_dev/qa/reviewer (`app/agents/{coder,backend_dev,frontend_dev,qa,
+  reviewer}.py`) — verified against the current code, not assumed: all 5 role files
+  (`roles/{coder,backend_dev,frontend_dev,qa,reviewer}.md`) confirmed to actually have extractable
+  "## Quality Gates"/"## Success Criteria" bullets, so critique does real scoring work for each, not
+  a silent fail-open no-op. Remaining fleet-wide default is still `False` — this was a deliberately
+  scoped 5-agent rollout, not a blanket flip, per the plan's own "at least the high-risk agent tier"
+  phrasing. Proven live by `backend/tests/test_gap11_14_agent_critique.py` (7 tests) — including a
+  negative control on `devops` (never named in this rollout) confirming the scoping is precise.
+  Plan: flip fleet-wide once this 5-agent rollout is observed stable in real runs (see
+  `enable_replanning`'s note above — the same observation-before-wider-rollout gate applies).
 - Recovery System: **PARTIAL** — same pattern as Self Critique: `replan_node` (`base_graph.py:425-459`) is real, evidence-gated (only fires on repeated reflection-dissatisfaction or repeated critique failure, `_should_replan`), and tested (`test_phase36_continuous_replanning.py`), but `enable_replanning=True` appears in **zero** of the 72 agent modules (only in the test file). Separately, `app/fleet/fleet_checkpoint.py` provides mid-run failure checkpointing (`_last_known_state` salvage-on-exception pattern, `base_graph.py:1649-1659`), which IS live for all 70 graph-based agents regardless of the opt-in replanning flag.
   Plan: same as Self Critique — turn on `enable_replanning` fleet-wide or for a named subset; currently shipped-but-dormant.
 - Safety Layer: **YES** — `app/policy/engine.py` denies writes to `.env*`, `secrets/**`, `*.pem`/`*.key`/`id_rsa`, and dangerous bash commands (`_policy_check`, `base_graph.py:273-285`, enforced at every tool call in `execute_tools`); prompt-injection defense on untrusted tool output (`_wrap_untrusted_tool_content`/`_flag_suspicious_tool_output`, `base_graph.py:933-974`, Phase 6.3); `requires_human_approval` gating set centrally at the `submit_*` boundary (`base_graph.py:1140-1142`) for every one of the 70 graph agents regardless of whether the agent's own module text references the field (per-module grep undercounts this: only 57/72 modules reference `requires_human_approval` in their own source, but the flag is enforced fleet-wide by the shared `execute_tools` node all 70 of them run through).
@@ -842,8 +902,10 @@ today even as a stub.
   (`app/db/models.py:495-519`) — memory is global across every repo ever worked on, not scoped.
 - Agent Intelligence: 65% — 72 agents with tiered tool access (Executor/Editor/Analyzer, Step 2),
   `record_learning` rolled out fleet-wide (Phase 4 Item 4), context builder with call-graph ranking.
-  Self-critique/replanning exist but default OFF fleet-wide (`enable_critique=False`,
-  `enable_replanning=False` — Session-0-style opt-in per IMPLEMENTATION_PROGRESS.md 3.5/3.6).
+  Self-critique now real for the 5 Tier-A agents (`enable_critique=True` — coder/backend_dev/
+  frontend_dev/qa/reviewer, gap-closure Days 11-14, 2026-07-30); still `False` for the rest of the
+  fleet. Replanning still `False` everywhere, deliberately deferred pending critique's real-run
+  validation (Session-0-style opt-in per IMPLEMENTATION_PROGRESS.md 3.5/3.6).
 - Reasoning: 55% — planning/reflection nodes exist (`planner_node`, `reflection_node`,
   `_gather_facts_and_plan`), but continuous replanning (3.6) and self-critique (3.5) are both
   fleet-default-disabled, so the "reasons about its own output and iterates" capability is real but
@@ -946,12 +1008,14 @@ today even as a stub.
   permissions exist. Claude Code: N/A (single-user local tool) but Cursor/enterprise comparisons expect
   this. Should be implemented: real `users` table + `project_memberships` join table. Complexity:
   Medium. Dependencies: multi-project isolation. Order: 4th.
-- **Fleet-wide default-on iteration (critique/replanning).** Why it matters: the actual "iterate on
-  failure like Claude Code does" machinery is built and tested (3.5/3.6/3.7) but ships
-  `enable_critique=False`/`enable_replanning=False` by default — so most real runs today don't use it.
-  Should be implemented: flip the defaults after a dedicated full-suite regression pass (explicitly
-  flagged as the next decision in `IMPLEMENTATION_PROGRESS.md` itself). Complexity: Low (the mechanism
-  exists) but Medium risk (cost/latency impact on every run). Order: 5th.
+- ~~**Fleet-wide default-on iteration (critique/replanning).**~~ **PARTIALLY DONE (gap-closure Days
+  11-14, 2026-07-30).** `enable_critique=True` now real for the 5 Tier-A agents (coder/backend_dev/
+  frontend_dev/qa/reviewer); `enable_replanning` still `False` fleet-wide, deliberately deferred
+  pending real-run validation of critique first (no live `ANTHROPIC_API_KEY` in this environment to
+  produce that validation directly — a real, named blocker, not silently skipped). Full fleet-wide
+  default flip (beyond these 5) still not done. Complexity: Low (the mechanism exists) but Medium
+  risk (cost/latency impact on every run) — exactly why this was scoped to 5 agents first rather than
+  flipped everywhere at once.
 
 ### Medium Priority
 - **Load/stress/scale test suite.** Why it matters: zero load-test files exist for the platform's own
@@ -1036,8 +1100,32 @@ today even as a stub.
 - Whether it conflicts with architecture: **PARTIAL** — `architect.md`/`decomposer.md` Quality Gates language ("Contradicting existing routes, schemas, or configs found in the repo" is listed as a Failure Condition in both files) — prompt-enforced via the Output Contract, not code-checked.
 - Whether it violates project rules: **YES (for the fixed safety subset)** — `backend/app/policy/engine.py` (via `backend/app/agents/guardrails.py:1-71`, confirmed a real delegation, not a duplicate/weaker copy per its own gap-closure note) code-enforces protected-path and dangerous-command denylists on every tool call in `base_graph.py`'s `execute_tools` gate. This covers hardcoded safety rules only (secrets, `.github/workflows/**`, destructive commands) — not general "project rules" like architectural conventions, which remain prompt-level.
 - Whether another module already solves it: **PARTIAL** — same as "similar implementation exists" above; `search_code`/`search_symbols` tools make this checkable, but nothing forces the check.
-- "Only then implement" ordering actually followed: **PARTIAL** — `coder.md`/`architect.md` prescribe a fixed read-then-write sequence, and `chat_agent.py`'s own `VerificationConfig` (`chat_agent.py:206-223`) tracks a `"read"` flag set by `read_file`/`search_code`, declared in `AGENT_CONTRACT["expected_verification"]` ("read_file or search_code must run before write/bash tools", `chat_agent.py:200-202`) — but this is descriptive metadata/tracked state, not a blocking gate: nothing in `_execute_tool` actually refuses a `write_file`/`edit_file` call if `read` is still `False`.
-  Plan: make the `chat_agent` (and `base_graph.py`'s `execute_tools`) actually deny a write/bash tool call when its `VerificationConfig`-tracked read flag is unset, turning the declared contract into a real gate.
+- "Only then implement" ordering actually followed: **PARTIAL, mechanism now real — gap-closure Day 15
+  (2026-07-30), one specific case still open.** `coder.md`/`architect.md` prescribe a fixed
+  read-then-write sequence. New `VerificationConfig.blocking_until` ({tool_name: verification_key})
+  in `base_graph.py` — used by every worker agent routed through the shared, reusable
+  `_make_execute_tools_node` (~74 of 76 agent modules, per Day 9's own citation count) — makes a
+  declared `expected_verification` prerequisite an actual, enforced refusal: a tool named in
+  `blocking_until` gets a real `[POLICY DENIED]` result and its handler never runs while the required
+  flag is still `False`. Wired live to `dependency_security_agent` (`bash` refused until `read` is
+  True) as the concrete proof, not just the primitive. Proven by
+  `backend/tests/test_gap15_blocking_verification.py` (6 tests) — including same-turn ordering (a
+  prior setter call in the same LLM turn satisfies a later gate in that same batch) and a negative
+  control confirming tools absent from `blocking_until` are never gated.
+  **`chat_agent.py`'s own specific case — the one this exact audit item names — is NOT yet wired,
+  found and flagged honestly rather than silently left stale**: `chat_agent.py` has its own separate
+  `_execute_tool_node`/graph implementation (interrupt-based pause-resume, its own `ChatGraphState`),
+  architecturally distinct from `base_graph.py`'s shared node my new mechanism hooks into. Investigated
+  before claiming anything: `chat_agent.py`'s `_VERIFICATION_CFG` (`chat_agent.py:207-223`,
+  `expected_verification` at `chat_agent.py:201-203`) is grepped-confirmed **entirely dead code** —
+  referenced nowhere else in the file, no `state["verification"]` key exists in `ChatGraphState` at
+  all. Closing this specific case needs building the flag-tracking mechanism from scratch for
+  `chat_agent`'s distinct architecture (not just adding a blocking check to an existing live one, as
+  was true for every other agent), a real, separate, correctly-scoped follow-up.
+  Plan: build `state["verification"]` tracking for `ChatGraphState` (set by `read_file`/`search_code`,
+  matching `_VERIFICATION_CFG.set_by`'s already-declared intent), then apply the same
+  `blocking_until`-style refusal to `chat_agent`'s own `_execute_tool_node` for `write_file`/
+  `edit_file`/`bash` — tracked as a named next step, not silently dropped.
 
 ---
 
@@ -1485,10 +1573,12 @@ existing pattern), and wire a lightweight trigger (a periodic loop, matching the
   (confirmed 72/72 agents have a real `VerificationConfig` instance, Phase 4 Item 2). Real bug found
   and fixed fleet-wide in this same engagement: `AgentResult.raw` used to prefer the model's unverified
   claim over the graph-enforced dict (Gap 4, fixed across 25 agent files).
-- Self-critique / iterate on failure: Partial (50%) — real, tested mechanism (critique_node,
-  replan_node, quality_gate, Phase 3.5/3.6/3.7) but defaults OFF fleet-wide
-  (`enable_critique=False`, `enable_replanning=False`).
-  Priority: High (flip the default — mechanism already built and tested).
+- Self-critique / iterate on failure: Partial, real progress (gap-closure Days 11-14, 2026-07-30) —
+  real, tested mechanism (critique_node, replan_node, quality_gate, Phase 3.5/3.6/3.7).
+  `enable_critique=True` now real for 5 Tier-A agents; `enable_replanning` still `False` fleet-wide,
+  deferred pending critique's real-run validation.
+  Priority: High (flip `enable_replanning` for the same 5, then both fleet-wide, once observed
+  stable in real runs — mechanism already built and tested, just not yet fully rolled out).
 - Clarifying questions instead of guessing: Partial (55%) — `request_clarification` tool
   (Phase 5.3) exists, wired onto `planner.py` only; not fleet-reusable-by-default across all 72 agents
   yet (tool is available for opt-in, but not adopted broadly).
@@ -1615,8 +1705,33 @@ under real outage), it is explicitly marked NOT VERIFIED rather than estimated.
 - Distinguish facts from assumptions: **PARTIAL** — `_GLOBAL_STANDARDS.md` §2 ("label 'unverified' — do not guess") and §9 ("Report uncertainty explicitly") are prompt rules every agent inherits; no code classifies a claim as fact-vs-assumption.
 - Verify before answering: **PARTIAL (prompt) / YES (structurally, for submit-tool outputs)** — see the `enforce_in_result` override below, which is real code, not prompt text.
 - Refuse to invent APIs/files/functions/classes: **PARTIAL** — `chat.md` Anti-Hallucination Rules 1-4 ("Verify before you name... Never guess at APIs") and `architect.md` same; enforced only by the model choosing to follow instructions, not by a code-level fact-checker.
-- Refuse to invent test results / execution results / performance claims: **YES, for the specific class of claims a wired `VerificationConfig` tracks** — real code: `backend/app/agents/base_graph.py:1107-1119` — at the moment a `submit_*` tool fires, for every `(result_field, verif_key)` in `verification_cfg.enforce_in_result`, the code does `raw_result[result_field] = actual` where `actual` comes from `new_verification` (state actually observed from real tool calls in this run), **overwriting whatever the model itself put in that field**. Proven end-to-end (not just wiring-tested) by `backend/tests/test_phase34_real_output_verification.py`, which feeds a mock LLM that "submits immediately, falsely claiming its tracked verification field is True" and asserts the graph corrects it. Important nuance: the tracked flag (e.g. `qa.py`'s `checks_run`, `set_by={"bash": "checks_run", ...}`, `qa.py:76-79`) records that the verification *tool ran without an `[ERROR]`/`[POLICY]` prefix* — it does not itself parse pytest/test output to confirm tests passed content-wise. So the gate reliably prevents "claimed tests ran when they didn't," but a model could still misreport pass/fail *content* from real tool output it did read (weaker guarantee than the audit's literal ask, worth flagging).
-  Plan: for agents where content-level truth matters (e.g. `tests_passed` specifically), extend the tool handler to programmatically parse the runner's exit code/summary line into the verification flag instead of "tool ran cleanly," closing the content-vs-invocation gap.
+- Refuse to invent test results / execution results / performance claims: **YES, and now content-level
+  true for `run_tests` specifically — gap-closure Day 15 (2026-07-30).** Real code:
+  `backend/app/agents/base_graph.py` — at the moment a `submit_*` tool fires, for every
+  `(result_field, verif_key)` in `verification_cfg.enforce_in_result`, the code does
+  `raw_result[result_field] = actual` where `actual` comes from `new_verification` (state actually
+  observed from real tool calls in this run), **overwriting whatever the model itself put in that
+  field**. Proven end-to-end by `backend/tests/test_phase34_real_output_verification.py`.
+  The previously-real nuance — the tracked flag only proved the tool *ran*, not that pytest's real
+  pass/fail *content* was reflected — is now closed for `run_tests` specifically: both real
+  implementations (`app/agents/tools.py`'s `make_chat_handlers.run_tests` and
+  `make_fleet_apply_handlers.run_tests_h`) now inspect the real subprocess exit code and prefix
+  `[ERROR]` on any nonzero exit, flowing through the SAME `[ERROR]`-prefix check that already
+  withholds every other verification flag — `tests_passed`/`tests_run` now genuinely means the exit
+  code was 0, not merely "the tool call didn't crash." **A second, real bug was found and fixed while
+  making this change, not introduced by it**: both commands ended with `| head -100`/`| tail -50` —
+  in a shell pipeline, `subprocess.run`'s returncode reflects the LAST command (`head`/`tail`, which
+  always exits 0), so the real pytest exit code was being silently destroyed before any check could
+  see it, regardless of this fix. Removed (output truncation moved to the Python side); this also
+  surfaced and fixed a Windows-specific shell-portability bug in `make_fleet_apply_handlers.run_tests_h`
+  (`;` after a failed `source .venv/bin/activate` aborts the whole command line under `cmd.exe`,
+  meaning pytest never ran at all on Windows before this fix — real, reproduced live, not assumed).
+  Proven by `backend/tests/test_gap15_test_runner_exit_code.py` (8 tests, real pytest subprocesses
+  against real passing/failing test files — not mocked — including one full
+  `_make_execute_tools_node` integration test proving a real failing run genuinely fails to set
+  `tests_passed`).
+  Still an open, honestly-scoped nuance: this closes it for `run_tests` specifically, not every
+  tool that could carry content-level truth (e.g. a linter's real error count vs. "ran cleanly").
 - "I cannot verify this" phrasing: **NOT VERIFIED as a literal string** — grepped the full `backend/` tree case-insensitively for `I cannot verify|cannot verify this|unverified`: real code hits are in `readme_agent.py` and `base_graph.py`/`tools.py` context (labeling fields "unverified"), and pervasive "unverified"/"UNVERIFIED" language across nearly every role prompt (`_GLOBAL_STANDARDS.md` §2, `decomposer.md`, `architect.md`, etc: "flag it... as UNVERIFIED") — the concept and the literal word are real and widespread, but the exact phrase "I cannot verify this" as specified in the audit was not found verbatim; "unverified" labeling is the actual, real convention used instead.
 
 ---
@@ -1625,7 +1740,12 @@ under real outage), it is explicitly marked NOT VERIFIED rather than estimated.
 
 - Never lies / never fabricates: **PARTIAL** — prompt-level (`_GLOBAL_STANDARDS.md` §2, §7: "Never hide failures or hallucinate success"), reinforced by the real `enforce_in_result` override (Q54) for the specific fields a `VerificationConfig` tracks.
 - Never promises unsupported functionality: **NOT VERIFIED** — no dedicated code or prompt check found beyond general anti-hallucination language.
-- Never claims code works without testing: **PARTIAL** — same `enforce_in_result` mechanism as Q54 provides a real, code-level backstop for the specific tracked fields of agents that wire a `run_tests`→verification-key mapping (e.g. `chat_agent.py`'s own `_VERIFICATION_CFG`, `chat_agent.py:206-223`, maps `run_tests`→`tests_passed`) — but as noted in Q54, this proves the *tool ran*, not that the reported pass/fail content was read correctly by the model.
+- Never claims code works without testing: **YES for `run_tests` specifically (gap-closure Day 15,
+  2026-07-30), PARTIAL for other content-bearing tools** — same `enforce_in_result` mechanism as Q54
+  provides a real, code-level backstop for the specific tracked fields of agents that wire a
+  `run_tests`→verification-key mapping (`chat_agent.py`'s own `_VERIFICATION_CFG`,
+  `chat_agent.py:207-223`, maps `run_tests`→`tests_passed`) — see Q54 for the exit-code-parsing fix
+  that closed the "proves the tool ran, not that tests actually passed" gap for `run_tests`.
 - Never claims deployment succeeded without verification: **YES structurally, by design exclusion** — `CLAUDE.md`'s "Deploy is a human action forever" rule is reflected in the shipped product's actual permission model: no agent tool in `chat_agent.py`'s 36+ tools or any `AGENT_CONTRACT` grants deploy credentials or a deploy action (confirmed by the full tool list read in this review — git/bash/test/lint tools only, `git_push` itself gated behind `_confirm()`/`interrupt()`, `chat_agent.py:975-993`). An agent cannot claim a deploy succeeded via a tool call because no deploy tool exists for it to call.
 - Never claims files exist unless confirmed: **PARTIAL** — `chat.md` Rule 3 ("Check file paths... before reading or editing") and `architect.md` Rule 1 ("Never name a file from memory") — prompt-level; the actual filesystem tools (`file_exists`, `read_file`) do return real `[ERROR] File not found` (`chat_agent.py:486-489`) when a path is wrong, so a model that calls them cannot successfully fabricate a file's contents, but nothing forces it to call them first.
 - Never claims tests passed unless actually executed: **YES (for the invocation, PARTIAL for the content)** — see Q54's `enforce_in_result` evidence; this is the strongest, most concretely code-backed item in this whole cluster, with a real regression test (`test_phase34_real_output_verification.py`) proving the override fires against a lying mock LLM.
@@ -1728,8 +1848,9 @@ Plan: if MCP-based tool access becomes a real requirement (vs. today's deliberat
 
 ## Q62. Runtime Decision Making
 
-- Switch strategies: **PARTIAL** — `replan_node` (`backend/app/agents/base_graph.py:425-459`) genuinely revises an agent's own plan mid-run, triggered by real state (`_should_replan`, lines 392-422: reflection dissatisfaction ≥2 turns, or the same critique criterion unmet ≥2 retries) — not a fabricated heuristic, it cites the actual evidence in the injected message (`"[Replan] {reason}..."`, line 454). But confirmed **opt-in and off by default fleet-wide**: `enable_replanning` defaults `False` in `build_agent_graph()` (line 1490) and `run_agent_graph()` (line 1623); grepped every agent file for `enable_replanning=True` — zero matches. `IMPLEMENTATION_PROGRESS.md:400-401,631-634` confirms this is a deliberate, documented rollout decision, not a bug, but as of today no shipped agent has this switched on.
-  Plan: flip `enable_replanning=True` (and `enable_critique=True`) for at least the high-risk/high-cost agent tier, per the doc's own stated next step.
+- Switch strategies: **PARTIAL** — `replan_node` (`backend/app/agents/base_graph.py:425-459`) genuinely revises an agent's own plan mid-run, triggered by real state (`_should_replan`: reflection dissatisfaction ≥2 turns, or the same critique criterion unmet ≥2 retries) — not a fabricated heuristic, it cites the actual evidence in the injected message. Still confirmed **opt-in and off by default fleet-wide** — `enable_replanning=True` appears in zero agent files, grepped fresh (gap-closure Days 11-14, 2026-07-30) — deliberately not flipped yet, pending real-run validation of `enable_critique` (now `True` for 5 agents — see Q6/Q2) first, per the plan's own stated sequencing.
+  Plan: flip `enable_replanning=True` for the same 5 agents (coder/backend_dev/frontend_dev/qa/
+  reviewer) `enable_critique` now covers, once critique is observed stable in real runs.
 - Switch tools: **YES** — inherent to the per-turn LLM tool-choice loop (`call_llm`→`execute_tools`→`call_llm`..., `base_graph.py:1561-1601`); the model can call a different tool on the next turn based on the previous tool's real result, with no hardcoded tool sequence enforced by the graph (only `submitted`/`max_turns`/stall detection gate the loop).
 - Call additional agents: **NO** — confirmed by the same evidence as Q2's "request help from other agents": no `invoke_agent`/`call_agent` tool exists anywhere in `backend/app/agents/tools.py`, and `MASTER_AGENT_v2.md:1112-1132` (D.2) explicitly states recursive delegation/specialist consultation is deferred pending a real LangGraph supervisor upgrade to `manager.py` (Phase 5.1, which today only sequences dev→qa→review, not arbitrary agent calls).
   Plan: same as Q2 — add a gated `invoke_agent` tool once cross-agent delegation is a real, recurring need.

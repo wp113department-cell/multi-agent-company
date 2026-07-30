@@ -1607,3 +1607,169 @@ be silently dropped — every item below traces to a real `MASTER_AGENT_v2.md` �
   across 7 sub-buckets, starting with Days 11-14 (agent-intelligence defaults:
   `enable_critique`/`enable_replanning` for the 5 highest-output-risk agents, with the owner's
   required cost/latency review gate before Day 15 starts).**
+- **2026-07-30 (same day)**: **Days 11-14 (⚠, Stage 1.1 agent-intelligence defaults) — 3 of 4 named
+  sub-items complete and tested; the 4th (cost/latency measurement) is a real, named blocker, not
+  fabricated or skipped.**
+  1. **`enable_critique=True` for the 5 named agents** (coder, backend_dev, frontend_dev, qa,
+     reviewer — chosen by role per the plan's own instruction, not the unrelated `risk_level`
+     operational-danger tag). Investigated `_make_critique_node`/`_extract_role_criteria`
+     (`base_graph.py`) before flipping anything: critique makes one extra `haiku`-model call (cheap
+     tier, `max_tokens=512`) per submission, scores it against the agent's own role file's `##
+     Quality Gates`/`## Success Criteria` bullets, bounded by `max_critique_retries=1` (default, not
+     overridden by any of the 5). Confirmed all 5 role files actually have extractable criteria
+     (grepped each) before flipping — critique does real scoring work for each, not a silent
+     fail-open no-op for a role file with no matching section. Tests:
+     `tests/test_gap11_14_agent_critique.py` (7 new) — one per agent proving the kwarg reaches
+     `run_agent_graph`, plus a negative control on `devops` (never named in this rollout) proving the
+     flip is precisely scoped, plus a check that none of the 5 override `max_critique_retries`.
+  2. **`FleetManager.select()`'s output is now the real dispatch decision**, not the discarded
+     side-channel Day 12 Part 4 left it as (that day's own comment: "additive instrumentation only,
+     does not change which function runs" — `fleet_manager.py`'s own module docstring independently
+     names this exact gap: "manager.py dispatches by hardcoded subtask type strings... Fleet Manager
+     makes dispatch a data-driven query"). `run_manager()`'s dispatch loop now captures
+     `dispatch_plan = get_fleet_manager().select(...)` and uses `dispatch_plan.agent_name` (falling
+     back to the old `subtask_type`-based default only if `select()` fails or returns an
+     unrecognized/`None` result — the scheduler's own health must never block a subtask). Since
+     exactly one concrete agent is registered per capability today (`backend_development`→
+     `backend_dev`, `frontend_development`→`frontend_dev`), this produces identical routing to the
+     old check in the common case — documented honestly, not oversold: the real change is that
+     `select()`'s *negative* signal (an unhealthy/unavailable instance) is now actually honored
+     instead of silently discarded, and this is the real hook a second agent registered for the same
+     capability would need to ever get dispatched at all. `qa`/`reviewer` dispatch stays
+     unconditional (no capability alternatives exist for those roles). Tests:
+     `tests/test_gap11_14_fleet_manager_dispatch.py` (2 new) — one mocks `select()` to deliberately
+     *disagree* with the subtask_type default and confirms the disagreeing agent is what actually
+     runs (the real acceptance criterion: "output is what actually dispatches"); one confirms
+     graceful fallback when `select()` raises.
+  3. **Subtasks now dispatch in dependency order.** `run_manager()`'s loop was a plain
+     `for _subtask_idx, subtask in enumerate(subtasks)` with zero reference to `depends_on` anywhere
+     (confirmed by grep before touching anything). Investigated `roles/decomposer.md` before
+     designing the fix: `depends_on` is documented there as "a list of 0-based subtask indices" into
+     the SAME submitted list — not a `Subtask.id` DB primary key (those aren't assigned until
+     `save_subtasks()` runs, well after this point). New `_topological_subtask_order()`
+     (`app/agents/manager.py`) — real Kahn's algorithm, a min-heap instead of a plain queue so
+     subtasks that become ready simultaneously are always processed in deterministic original-index
+     order — returns original indices, not a reordered list. **A real correctness hazard was caught
+     and avoided, not introduced**: `run_manager()`'s existing `_db_subtask_rows[_subtask_idx]`
+     status-update correlation (ORCH-04-011, Audit 04) is position-based against the ORIGINAL
+     decomposer list order (`list_subtasks()` orders by `Subtask.id` insertion order) — naively
+     reordering the `subtasks` list itself would have silently mismatched status updates onto the
+     WRONG DB row. Returning original indices and iterating `for _subtask_idx in
+     _topological_subtask_order(subtasks): subtask = subtasks[_subtask_idx]` instead preserves that
+     correlation exactly while still visiting subtasks in dependency order. Falls back to the
+     original order (never raises) on a cycle or an out-of-range index — logged, not silently
+     swallowed — so one decomposer run's malformed dependency graph can never block a whole epic.
+     Tests: `tests/test_gap11_14_topological_subtask_order.py` (10 new) — 9 unit tests on the sort
+     function (no dependencies, linear chains, out-of-order listing, diamond dependencies with
+     deterministic tiebreak, cycles, self-references, out-of-range indices, empty input, missing
+     key) plus 1 full `run_manager()` integration test: a subtask deliberately listed BEFORE its
+     dependency in the input list is proven to actually dispatch AFTER it.
+  4. **Cost/latency delta measurement — genuinely blocked, not fabricated.** The plan's own
+     acceptance criterion ("before/after cost & latency measured, not blind") and the owner's
+     explicit stop condition (cost/latency delta reviewed by the owner before Day 15 starts) both
+     require observing real LLM API calls. Checked, not assumed: no real `ANTHROPIC_API_KEY` is
+     configured anywhere in this environment (only `tests/conftest.py`'s pytest-only placeholder);
+     zero rows in the dev DB's `agent_runs` table (queried directly) to substitute historical
+     telemetry for a live before/after run. `_make_critique_node`'s real mechanics were analyzed
+     structurally instead (haiku model, 512 max_tokens, bounded to 1 retry by default) as the best
+     available substitute for a genuine empirical measurement, but this is explicitly NOT the same
+     thing as the real, live cost/latency numbers the plan and the owner's stop condition actually
+     call for — flagged directly to the owner rather than silently presenting an estimate as if it
+     were measured data.
+  `black`/`ruff`/`mypy --strict` clean on every touched file (only the same two pre-existing,
+  unrelated errors as every prior day). `answers.md` updated at every real touch point found: Q2
+  ("Who decides which agents work" YES-for-the-pair, "Is routing rule-based," "Can multiple agents
+  work simultaneously," "Can orchestration dynamically change during execution," "How are
+  dependencies managed"), Q6 (Self Critique), plus 4 further scattered narrative mentions of
+  `enable_critique`/`enable_replanning` in the Production Readiness Score, Missing Features backlog,
+  Q46-area agent-intelligence score, and Q62 Runtime Decision Making sections — checked and updated
+  individually, not left stale.
+  **Next: full regression run to confirm zero collateral breakage, then this cost/latency
+  measurement gap must be resolved with the owner (their own required stop condition) before Day 15
+  (Stage 1.2, verification & trust) starts.**
+- **2026-07-30 (same day)**: **Owner resolved the cost/latency blocker: defer real measurement until
+  a real `ANTHROPIC_API_KEY` is available (future), proceed into Day 15 now, stop for the day once
+  Day 15 is done — Day 16 resumes the next session.** Days 11-14's implemented/tested work (flag
+  flip, `FleetManager.select()` wiring, topological dispatch order) stands as-is; only the live
+  cost/latency report itself remains deferred, tracked, not abandoned.
+  **Day 15 (Stage 1.2, verification & trust — first of the 3-day 15-17 block) complete**, scoped to
+  its two most concrete, directly-testable acceptance criteria (the plan's own third sub-item,
+  "propose realistic alternative" + limitation taxonomy, is a distinct, new agent-behavior feature —
+  correctly left for Day 16/17, not rushed into today alongside two already-substantial fixes).
+  1. **`expected_verification` is now a real blocking check, not tracked-but-unenforced metadata.**
+     Investigated before designing anything: grepped `expected_verification` across every agent
+     module — appears ONLY inside each `AGENT_CONTRACT` dict, never read anywhere else in the
+     codebase; a real, previously-undiscovered confirmation that it was pure documentation. Also
+     found `app/fleet/tool_manifest.py`'s `TOOL_MANIFEST[tool].verification_required: bool` (already
+     marks `write_file`/`edit_file`/`bash`/etc. `True` for essentially every mutating tool) is
+     ALSO never consulted anywhere outside its own definition file — the same "built but never
+     wired" pattern this whole engagement keeps finding (risk-appendix item #8's exact shape).
+     New `VerificationConfig.blocking_until: dict[tool_name, verification_key]` (`base_graph.py`) —
+     opt-in, empty by default (zero behavior change for the ~74 agents that don't populate it).
+     Wired into the shared `_make_execute_tools_node`'s existing tool-dispatch loop, right alongside
+     the pre-existing `_policy_check` gate: a tool named in `blocking_until` gets a real
+     `[POLICY DENIED]` result — its handler never runs — while the required flag is still `False` in
+     `new_verification` (the SAME progressively-updated dict the loop already uses, so a setter tool
+     called earlier in the same LLM turn's batch correctly satisfies a gate later in that same
+     batch — no artificial extra round-trip forced). Wired live to `dependency_security_agent`:
+     `bash` (the audit tool) now refused until `read` (a real `read_file`/`search_code`/`analyze_file`
+     call) has happened — matching that role's own prompt, which already said this should be true.
+     **Chose NOT to also wire `chat_agent.py`'s matching case today, and said so explicitly rather
+     than silently skip it**: `chat_agent.py`'s `AGENT_CONTRACT["expected_verification"]` is the
+     exact case `answers.md`'s own audit named ("read_file or search_code must run before
+     write/bash tools") — but investigation found `chat_agent.py`'s `_VERIFICATION_CFG` is 100% dead
+     code (grepped: referenced nowhere outside its own definition; `ChatGraphState` has no
+     `verification` key at all; chat_agent.py runs its own separate `_execute_tool_node`, distinct
+     from `base_graph.py`'s shared one). Closing chat_agent's case needs building flag-tracking from
+     scratch for that distinct architecture, not just adding a check to an existing live mechanism —
+     real, separate, correctly-scoped work, named as a Day 16 candidate rather than rushed or hidden.
+     Tests: `tests/test_gap15_blocking_verification.py` (6 new) — refusal, success-once-satisfied,
+     a tool absent from `blocking_until` staying fully ungated, same-turn ordering, and the real
+     `dependency_security_agent` wiring end to end.
+  2. **`run_tests` now parses the real exit code into its output instead of discarding it.** Grepped
+     both real implementations (`app/agents/tools.py`'s `make_chat_handlers.run_tests` and
+     `make_fleet_apply_handlers.run_tests_h`) plus `chat_agent.py`'s own separate `run_tests`
+     dispatch before touching anything: `result.returncode` was referenced nowhere in any of the
+     three — a real failing test run (captured for real, no exception) read as a clean,
+     verification-flag-setting success to every live consumer
+     (bug_fix/dependency_agent/refactor_agent/chat_agent map `run_tests`→`tests_passed`;
+     agent_debugger/agent_performance_reviewer/quality_auditor map it to `tests_run`). All three now
+     inspect the real exit code and prefix `[ERROR] Tests failed (exit code N):` on nonzero, flowing
+     through the exact same `[ERROR]`-prefix check that already withholds every other tool's
+     verification flag — no new plumbing needed in `base_graph.py` for this half.
+     **Two real, additional bugs found and fixed while making this change verifiable in this actual
+     environment, not left in**:
+     (a) all three commands ended with `| head -100`/`| head -150`/`| tail -50` — in a shell
+     pipeline, the exit code `subprocess.run` observes is the LAST command's (`head`/`tail`, which
+     always exits 0), so pytest's real exit code was being silently thrown away regardless of this
+     fix — the bug that would have made the whole fix a no-op. Removed (output truncation moved
+     Python-side, `[:5000]`/`[:8000]`/`[-3000:]` depending on call site, roughly matching what the
+     removed pipe previously provided).
+     (b) `make_fleet_apply_handlers.run_tests_h` used `source .venv/bin/activate 2>/dev/null; python
+     -m pytest ...` — a bare `;` after the activation attempt, a POSIX-only statement separator that
+     means nothing to `cmd.exe` (Windows' `subprocess.run(shell=True)` default) — a failed `source`
+     (no such builtin on Windows) silently aborted the entire command line before pytest ever ran.
+     Reproduced live in this sandbox (real error: `'source' is not recognized...`), fixed to match
+     `make_chat_handlers.run_tests`'s already-working `&& ... || true &&` pattern, which degrades
+     safely under both shells. Confirms this specific tool's real subprocess path had likely never
+     actually executed a real test on Windows before this fix, for any caller.
+     Installed `pytest` into this sandbox's system Python (previously only in `.venv`) so these
+     fixes could be verified against real, live pytest subprocess runs rather than mocked — the
+     exit code itself is exactly the thing under test, so mocking it would have proven nothing.
+     Tests: `tests/test_gap15_test_runner_exit_code.py` (8 new, real subprocesses throughout) —
+     both `run_tests` implementations correctly flag a real failure and don't flag a real pass,
+     `_run_subprocess`'s new `fail_on_nonzero_exit` parameter (default `False`, preserving the
+     generic `bash` tool's existing "nonzero exit is often benign" behavior unchanged) tested both
+     ways, plus one full `_make_execute_tools_node` integration test proving a real failing run
+     genuinely fails to set `tests_passed`.
+  `black`/`ruff`/`mypy --strict` clean on every touched file (only the same two pre-existing,
+  unrelated errors as every prior day). `answers.md` updated at the exact citation the original audit
+  named for this gap ("Only then implement" ordering, Q6-adjacent) plus Q54/Q55 (No
+  Hallucination/Truthfulness Policy) — the specific "proves the tool ran, not that content was true"
+  nuance those items flagged is now honestly narrowed to "closed for `run_tests` specifically, not
+  every content-bearing tool."
+  Full regression: ran clean against the known baseline (20 items, zero new regressions) in a
+  targeted collateral-check batch before the final full-suite confirmation run.
+  **Day 15 done. Per explicit owner instruction, stopping here for today — Day 16 (the
+  "propose realistic alternative" + limitation taxonomy sub-item, plus the chat_agent.py
+  verification-tracking follow-up named above) resumes next session.**

@@ -9,12 +9,81 @@ Phase 5 upgrade adds epic-level supervision:
 from __future__ import annotations
 
 import asyncio
+import heapq
 import logging
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, TypedDict
 
 logger = logging.getLogger(__name__)
+
+
+def _topological_subtask_order(subtasks: list[dict[str, Any]]) -> list[int]:
+    """Gap-closure Days 11-14 (Stage 1.1, answers.md): returns original-list
+    indices in dependency-respecting order — before this, run_manager()'s
+    subtask loop ran subtasks in whatever order the decomposer happened to
+    list them, ignoring `depends_on` entirely (confirmed by grep: this was
+    the only reference to subtask ordering anywhere in the dispatch loop).
+    A dependent subtask could start before the subtask it depends on had
+    even run.
+
+    `depends_on` entries are 0-based indices into this SAME subtasks list —
+    roles/decomposer.md's own documented convention ("a list of 0-based
+    subtask indices that must COMPLETE before this subtask starts"), not a
+    `Subtask.id` DB primary key (those aren't assigned yet at this point —
+    save_subtasks() hasn't run).
+
+    Returns indices, not reordered subtask dicts, so callers can iterate in
+    dependency order while still using the ORIGINAL index to correlate with
+    anything else built from the original list order (e.g. run_manager's own
+    _db_subtask_rows, populated by list_subtasks()'s Subtask.id ordering,
+    which matches the original decomposer list order, not this one).
+
+    Falls back to the original order (range(len(subtasks))) on any
+    inconsistency — an out-of-range index, a self-reference, or a genuine
+    cycle — logged, never raised: a malformed dependency graph from a
+    decomposer run must never block the whole epic, only lose its ordering
+    guarantee for that one batch.
+    """
+    n = len(subtasks)
+    deps: list[list[int]] = []
+    for i, st in enumerate(subtasks):
+        raw = st.get("depends_on") or []
+        valid = [d for d in raw if isinstance(d, int) and 0 <= d < n and d != i]
+        deps.append(valid)
+
+    in_degree = [0] * n
+    dependents: list[list[int]] = [[] for _ in range(n)]
+    for i, dep_list in enumerate(deps):
+        for d in dep_list:
+            dependents[d].append(i)
+            in_degree[i] += 1
+
+    # A min-heap (not a plain queue) so subtasks that become ready at the
+    # same time are always processed in original-index order — deterministic,
+    # and identical to the original order whenever no dependencies exist.
+    heap = [i for i in range(n) if in_degree[i] == 0]
+    heapq.heapify(heap)
+    order: list[int] = []
+    while heap:
+        i = heapq.heappop(heap)
+        order.append(i)
+        for nxt in dependents[i]:
+            in_degree[nxt] -= 1
+            if in_degree[nxt] == 0:
+                heapq.heappush(heap, nxt)
+
+    if len(order) != n:
+        logger.warning(
+            "Subtask depends_on graph has a cycle or references an "
+            "out-of-range index — dispatching subtasks in original order "
+            "instead (n=%d, resolved=%d)",
+            n,
+            len(order),
+        )
+        return list(range(n))
+    return order
+
 
 # ---------------------------------------------------------------------------
 # AGENT_CONTRACT — Fleet OS capability declaration
@@ -184,7 +253,8 @@ async def run_manager(
                 exc_info=True,
             )
 
-    for _subtask_idx, subtask in enumerate(subtasks):
+    for _subtask_idx in _topological_subtask_order(subtasks):
+        subtask = subtasks[_subtask_idx]
         subtask_id = int(subtask.get("id", 0))
         subtask_type = str(subtask.get("type", "backend"))
         subtask_title = str(subtask.get("title", ""))
@@ -197,12 +267,27 @@ async def run_manager(
             task_id,
         )
 
-        # Day 12 Part 4 — hierarchy chain: fleet_manager selects an agent for
-        # this capability and agent_bus publishes TaskCreated, alongside (not
-        # replacing) the existing direct dispatch below. capability_registry/
-        # fleet_manager/agent_bus already existed and were unit-tested in
-        # isolation but nothing in the live task-flow ever called them —
-        # additive instrumentation only, does not change which function runs.
+        # Gap-closure Days 11-14 (Stage 1.1, answers.md): fleet_manager
+        # selects an agent for this capability and its output now IS the
+        # dispatch decision below — previously (Day 12 Part 4) the select()
+        # call ran but its result was discarded, an "additive
+        # instrumentation only, does not change which function runs" side
+        # channel (capability_registry/fleet_manager/agent_bus existed and
+        # were unit-tested in isolation, but nothing in the live task-flow
+        # ever acted on the result). Since exactly one concrete agent is
+        # currently registered per capability (backend_dev/frontend_dev),
+        # today this produces the same routing the old subtask_type check
+        # did in the common case — the real change is that a plan.agent_name
+        # FleetManager wouldn't currently select (e.g. an unhealthy/
+        # unavailable instance) is now actually honored instead of silently
+        # ignored, and this is the real hook a future second agent
+        # registered for the same capability would need to ever actually get
+        # dispatched. Falls back to the subtask_type-based default on any
+        # failure (agent not found, registry unavailable) — never blocks a
+        # subtask on the scheduler's own health.
+        selected_agent_name = (
+            "frontend_dev" if subtask_type == "frontend" else "backend_dev"
+        )
         try:
             from app.fleet.fleet_events import publish, task_created
             from app.fleet.fleet_manager import get_fleet_manager
@@ -212,9 +297,14 @@ async def run_manager(
                 if subtask_type == "frontend"
                 else "backend_development"
             )
-            get_fleet_manager().select(
+            dispatch_plan = get_fleet_manager().select(
                 required_capability=required_capability, verify_tool_availability=True
             )
+            if dispatch_plan is not None and dispatch_plan.agent_name in (
+                "frontend_dev",
+                "backend_dev",
+            ):
+                selected_agent_name = dispatch_plan.agent_name
             publish(
                 task_created(
                     task_id=str(task_id),
@@ -305,7 +395,7 @@ async def run_manager(
 
                 push_agent_switch(
                     str(task_id),
-                    "frontend_dev" if subtask_type == "frontend" else "backend_dev",
+                    selected_agent_name,
                     f"subtask {subtask_id}",
                 )
             except Exception:
@@ -313,7 +403,7 @@ async def run_manager(
 
             try:
                 async with agent_run_slot():
-                    if subtask_type == "frontend":
+                    if selected_agent_name == "frontend_dev":
                         files_changed, dev_error, dev_tokens_in, dev_tokens_out = (
                             await asyncio.to_thread(
                                 run_frontend_dev,

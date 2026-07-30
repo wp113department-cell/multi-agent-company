@@ -170,6 +170,11 @@ def run_backend_dev(
                 enable_memory=True,
                 enable_reflection=True,
                 enable_lesson=True,
+                # Gap-closure Days 11-14 (Stage 1.1, answers.md): one of the 5
+                # highest output-risk agents opted into self-critique ahead of
+                # a fleet-wide default flip — see coder.py's identical comment
+                # for the mechanism.
+                enable_critique=True,
                 max_turns=30,
                 task_id=str(task_id),
             )

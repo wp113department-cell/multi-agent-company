@@ -255,8 +255,22 @@ def _load_role(name: str) -> str:
     return p.read_text(encoding="utf-8") if p.exists() else f"You are the {name} agent."
 
 
-def _run_subprocess(command: str, cwd: str, timeout: int = 120) -> str:
-    """Run a shell command synchronously (safe to call from a thread pool)."""
+def _run_subprocess(
+    command: str, cwd: str, timeout: int = 120, *, fail_on_nonzero_exit: bool = False
+) -> str:
+    """Run a shell command synchronously (safe to call from a thread pool).
+
+    fail_on_nonzero_exit (gap-closure Day 15, Stage 1.2, answers.md):
+    default False preserves the existing behavior for the generic `bash`
+    tool, where a nonzero exit is often expected/benign (e.g. grep finding
+    no matches) — not something the verification system should treat as a
+    failure. True is for run_tests specifically, where a nonzero exit
+    genuinely means the tests failed: prefixes [ERROR] so it flows through
+    the same "don't set the verification flag on an [ERROR]-prefixed
+    result" check every other tool already goes through, instead of the
+    real exit code being silently discarded as a `[exit N]` suffix on
+    output that still reads as a clean, flag-setting success.
+    """
     try:
         result = subprocess.run(
             command,
@@ -270,6 +284,8 @@ def _run_subprocess(command: str, cwd: str, timeout: int = 120) -> str:
         if result.stderr:
             out += "\n[stderr]\n" + result.stderr
         if result.returncode != 0:
+            if fail_on_nonzero_exit:
+                return f"[ERROR] Tests failed (exit code {result.returncode}):\n{out.strip() or '(no output)'}"
             out += f"\n[exit {result.returncode}]"
         return out.strip() or "(no output)"
     except subprocess.TimeoutExpired:
@@ -1037,17 +1053,26 @@ class ChatAgent:
             runner = str(inp.get("runner", "pytest"))
             test_path = str(inp.get("path", ""))
             flags = str(inp.get("flags", ""))
+            # Gap-closure Day 15 (Stage 1.2, answers.md): these used to end
+            # with `| head -N` — in a shell pipeline, the exit code
+            # subprocess.run sees is the LAST command's (head always exits
+            # 0), which silently destroyed the test runner's real exit code
+            # before fail_on_nonzero_exit below could ever see it. Removed;
+            # truncated in Python instead, after _run_subprocess returns.
             if runner == "pytest":
-                cmd_str = f"cd {repo} && source .venv/bin/activate 2>/dev/null; python -m pytest {test_path} {flags} --tb=short -q 2>&1 | head -150"
+                cmd_str = f"cd {repo} && source .venv/bin/activate 2>/dev/null; python -m pytest {test_path} {flags} --tb=short -q 2>&1"
             elif runner == "npm_test":
                 web = str(root.parent / "apps" / "web")
-                cmd_str = f"cd {web} && npm test {flags} 2>&1 | head -100"
+                cmd_str = f"cd {web} && npm test {flags} 2>&1"
             elif runner == "tsc":
                 web = str(root.parent / "apps" / "web")
-                cmd_str = f"cd {web} && npx tsc --noEmit {flags} 2>&1 | head -100"
+                cmd_str = f"cd {web} && npx tsc --noEmit {flags} 2>&1"
             else:
                 return f"[ERROR] Unknown runner: {runner}"
-            return await asyncio.to_thread(_run_subprocess, cmd_str, repo, 180)
+            output = await asyncio.to_thread(
+                _run_subprocess, cmd_str, repo, 180, fail_on_nonzero_exit=True
+            )
+            return output[:8000]
 
         if tool_name == "run_linter":
             lint_tool = str(inp.get("tool", "all"))
