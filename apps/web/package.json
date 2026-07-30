@@ -2,6 +2,8 @@
   "name": "@gridiron/web",
   "version": "0.1.0",
   "private": true,
+  "license": "UNLICENSED",
+  "author": "Bhaskar Barot, AI/ML Engineer",
   "type": "module",
   "scripts": {
     "dev": "next dev",
