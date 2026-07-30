@@ -200,15 +200,13 @@ jobs:
         # explicitly (matching the existing GHSA-jfh8-c2jp-5 entry) rather
         # than reintroducing a blanket suppression.
         #
-        # PYSEC-2026-1325 (ecdsa 0.19.2, no fix version exists): a known,
-        # long-standing upstream won't-fix in python-ecdsa — the library is
-        # pure Python and its maintainers have stated timing/side-channel
-        # resistance is out of scope for a from-scratch rewrite they don't
-        # intend to do. `ecdsa` is a transitive dependency of
-        # `python-jose[cryptography]`, not a direct one, and this project's
-        # JWT layer (backend/app/auth/jwt.py) signs with HS256 (HMAC, see
-        # config.py's jwt_algorithm default) — it never calls into ecdsa's
-        # actual sign/verify code paths for ES256, so the exploitable surface
-        # for this specific timing attack is dormant here, not reachable.
-        # Revisit if jwt_algorithm ever changes to an ES* algorithm.
-        run: pip-audit -r requirements.txt --ignore-vuln GHSA-jfh8-c2jp-5 --ignore-vuln PYSEC-2026-1325
+        # Gap-closure Day 7 (answers.md Q24): PYSEC-2026-1325 (ecdsa
+        # 0.19.2, no fix version — an upstream won't-fix) used to be
+        # --ignore-vuln'd here because it was a dormant transitive
+        # dependency of python-jose[cryptography], never actually reachable
+        # since this project's JWT layer only signs HS256. Rather than carry
+        # that exception forward indefinitely, backend/app/auth/jwt.py was
+        # migrated off python-jose onto PyJWT (requirements.txt), which has
+        # no such transitive dependency at all — pip-audit is clean without
+        # an ignore for it now.
+        run: pip-audit -r requirements.txt --ignore-vuln GHSA-jfh8-c2jp-5

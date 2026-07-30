@@ -8,24 +8,39 @@ Falls back gracefully when:
 - MEMORY_ENABLED is false (all operations are no-ops)
 - pgvector extension is not installed (DB error caught, logged, not raised)
 
-Context tiering (MASTER_AGENT_v2.md Phase 1.6) — where each named tier is
-actually backed, verified against the real schema rather than assumed:
+Context tiering (MASTER_AGENT_v2.md Phase 1.6, revised gap-closure Day 3
+2026-07-30) — where each named tier is actually backed, verified against the
+real schema rather than assumed:
   working   — a single run_agent_graph() invocation's AgentRunState (base_graph.py).
   session   — LessonStore (base_graph.py), in-process, cleared on restart.
-  project   — this module: memory_embeddings, scoped by task_id/epic_id.
-  fleet     — ALSO this module, today. MemoryEmbedding (app/db/models.py) has no
-              repo_id/project_id column — confirmed by direct schema inspection —
-              so every query here is already unscoped across whatever tasks exist
-              in the table, regardless of which repo produced them. "Project" and
-              "fleet" tiers are the same implementation until this system manages
-              more than one repo's memory in the same database; a `cross_project=
-              True` query flag would be a no-op against the current schema, so one
-              was deliberately not added — it would be dead code with nothing to
-              toggle. Add real repo scoping (a migration + a filter column) the
-              first time cross-repo memory bleed is an actual observed problem,
-              not speculatively.
+  project   — this module: memory_embeddings, scoped by task_id/epic_id, AND
+              (as of migration 024) by repo_id when a caller passes one.
+  fleet     — ALSO this module. Every embed_*/query_* function below now takes
+              an optional `repo_id` (app/db/models.py: MemoryEmbedding.repo_id,
+              VersionedLesson.repo_id, nullable FK to repos.id, ondelete=SET
+              NULL). Passing repo_id restricts a query to that repo's own rows
+              PLUS legacy/unscoped rows (repo_id IS NULL) — every row written
+              before this migration, and any not-yet-updated caller, keeps
+              showing up everywhere as general fallback knowledge, since there
+              is no way to retroactively attribute it to one repo. What this
+              actually fixes: repo A's own newly-scoped memories no longer
+              appear in repo B's filtered results, and vice versa — the real
+              cross-project bleed this system's own audit (answers.md Q95)
+              flagged. Callers that don't pass repo_id keep the old, fully
+              unscoped behavior unchanged (this is an additive, backward-
+              compatible capability — wiring every real call site to pass its
+              live repo id is gap-closure Day 4's job, alongside replacing the
+              `_active_repo_path` global those call sites currently resolve
+              their repo from).
   long-term — the same store as "project"/"fleet" — not a fifth system.
-  archived  — `archived`/`archived_at` columns on MemoryEmbedding, below.
+  archived  — `archived`/`archived_at` columns on MemoryEmbedding
+              (app/services/retention.py flips `archived=true` past
+              MEMORY_EMBEDDINGS_RETENTION_DAYS). Gap-closure Day 7
+              (answers.md Q120): every query_* below now filters
+              `archived = false` — before this, the flag was written but
+              never read, so an archived row kept surfacing in every live
+              agent's context injection forever, making the retention
+              policy purely cosmetic.
 """
 
 from __future__ import annotations
@@ -86,8 +101,14 @@ async def embed_task_outcome(
     files_changed: list[str],
     db: AsyncSession,
     epic_id: str | None = None,
+    repo_id: int | None = None,
 ) -> MemoryEmbedding | None:
     """Embed a task outcome and store it in memory_embeddings.
+
+    repo_id (gap-closure Day 3, answers.md Q5/Q51/Q94/Q95/Q114/Q120): the repo
+    this outcome was produced against. None (the default) means unscoped —
+    every pre-Day-2 row, and any caller not yet updated to pass its resolved
+    repo id, keeps working exactly as before.
 
     Returns the persisted row, or None if memory is disabled or embedding fails.
     """
@@ -102,6 +123,7 @@ async def embed_task_outcome(
         row = MemoryEmbedding(
             task_id=task_id,
             epic_id=epic_id,
+            repo_id=repo_id,
             outcome=outcome,
             description=description,
             summary=summary,
@@ -123,8 +145,17 @@ async def query_similar_tasks(
     description: str,
     db: AsyncSession,
     top_k: int | None = None,
+    repo_id: int | None = None,
 ) -> list[dict[str, Any]]:
     """Find the most similar past task outcomes to the given description.
+
+    repo_id (gap-closure Day 3): when given, restricts results to rows scoped
+    to that repo PLUS legacy/unscoped rows (repo_id IS NULL) — pre-Day-2 rows
+    and any not-yet-updated caller's writes stay visible everywhere as general
+    fallback knowledge (no way to retroactively attribute them to one repo),
+    but repo A's own scoped rows never appear in repo B's filtered results.
+    When repo_id is None (the default — an unmigrated caller), behaves exactly
+    as before: fully unscoped.
 
     Returns a list of dicts with keys: task_id, outcome, description, summary,
     files_changed, similarity.
@@ -156,11 +187,13 @@ async def query_similar_tasks(
                 1 - (embedding <=> CAST(:vec AS vector)) AS similarity
             FROM memory_embeddings
             WHERE embedding IS NOT NULL
+              AND archived = false
+              AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
             ORDER BY embedding <=> CAST(:vec AS vector)
             LIMIT :k
         """)
         vec_str = "[" + ",".join(str(v) for v in vector) + "]"
-        result = await db.execute(sql, {"vec": vec_str, "k": k})
+        result = await db.execute(sql, {"vec": vec_str, "k": k, "repo_id": repo_id})
         rows = result.fetchall()
         return [
             {
@@ -183,17 +216,21 @@ async def query_memory_context(
     description: str,
     db: AsyncSession,
     top_k: int | None = None,
+    repo_id: int | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Fetch similar tasks, past failures, fleet learning signals, and past
     repair procedures for a single query text in one call. Returns
     {"tasks": [...], "failures": [...], "learnings": [...], "procedures": [...]}
     — each list uses the same shape its own query_* function already returns.
+
+    repo_id (gap-closure Day 3): threaded through to every sub-query unchanged
+    — see query_similar_tasks's docstring for the exact filtering semantics.
     """
     k = top_k if top_k is not None else get_settings().memory_top_k
-    tasks = await query_similar_tasks(description, db, top_k=k)
-    failures = await query_failures(description, db, top_k=k)
-    learnings = await query_learning_signals(description, db, top_k=k)
-    procedures = await query_procedures(description, db, top_k=k)
+    tasks = await query_similar_tasks(description, db, top_k=k, repo_id=repo_id)
+    failures = await query_failures(description, db, top_k=k, repo_id=repo_id)
+    learnings = await query_learning_signals(description, db, top_k=k, repo_id=repo_id)
+    procedures = await query_procedures(description, db, top_k=k, repo_id=repo_id)
     return {
         "tasks": tasks,
         "failures": failures,
@@ -205,6 +242,7 @@ async def query_memory_context(
 def query_memory_context_sync(
     description: str,
     top_k: int | None = None,
+    repo_id: int | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Sync bridge for query_memory_context, for callers that cannot await —
     MASTER_AGENT_v2.md Phase 1.3: base_graph.py's memory_hook_node is a plain
@@ -229,7 +267,9 @@ def query_memory_context_sync(
         engine = new_isolated_async_engine()
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                return await query_memory_context(description, session, top_k=top_k)
+                return await query_memory_context(
+                    description, session, top_k=top_k, repo_id=repo_id
+                )
         finally:
             await engine.dispose()
 
@@ -317,6 +357,7 @@ async def embed_architecture_note(
     db: AsyncSession,
     epic_id: str | None = None,
     agent_name: str = "",
+    repo_id: int | None = None,
 ) -> MemoryEmbedding | None:
     """Store an architecture decision / note in memory as source_type='architecture'.
 
@@ -338,6 +379,7 @@ async def embed_architecture_note(
         row = MemoryEmbedding(
             task_id=task_id,
             epic_id=epic_id,
+            repo_id=repo_id,
             outcome="architecture",
             category="architecture",
             description=full_content[:500],
@@ -363,6 +405,7 @@ def embed_architecture_note_sync(
     content: str,
     agent_name: str = "",
     epic_id: str | None = None,
+    repo_id: int | None = None,
 ) -> bool:
     """Sync bridge for embed_architecture_note — MASTER_AGENT_v2.md Phase 1.1.
     `architect_node` (app/agents/architect.py) is a plain sync LangGraph-pipeline
@@ -387,6 +430,7 @@ def embed_architecture_note_sync(
                     db=session,
                     epic_id=epic_id,
                     agent_name=agent_name,
+                    repo_id=repo_id,
                 )
                 return row is not None
         finally:
@@ -405,8 +449,14 @@ async def query_architecture_notes(
     query: str,
     db: AsyncSession,
     top_k: int = 3,
+    repo_id: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Find the most similar architecture notes to the given query text."""
+    """Find the most similar architecture notes to the given query text.
+
+    repo_id (gap-closure Day 3): see query_similar_tasks's docstring for the
+    exact filtering semantics (own repo + legacy-unscoped, or unfiltered when
+    None).
+    """
     settings = get_settings()
     if not settings.memory_enabled:
         return []
@@ -428,11 +478,13 @@ async def query_architecture_notes(
             FROM memory_embeddings
             WHERE outcome = 'architecture'
               AND embedding IS NOT NULL
+              AND archived = false
+              AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
             ORDER BY embedding <=> CAST(:vec AS vector)
             LIMIT :k
         """)
         vec_str = "[" + ",".join(str(v) for v in vector) + "]"
-        result = await db.execute(sql, {"vec": vec_str, "k": top_k})
+        result = await db.execute(sql, {"vec": vec_str, "k": top_k, "repo_id": repo_id})
         rows = result.fetchall()
         return [
             {
@@ -459,6 +511,7 @@ async def embed_failure(
     root_cause: str,
     db: AsyncSession,
     epic_id: str | None = None,
+    repo_id: int | None = None,
 ) -> MemoryEmbedding | None:
     """Store a failure record so future agents can learn from past blocked tasks.
 
@@ -475,6 +528,7 @@ async def embed_failure(
         row = MemoryEmbedding(
             task_id=task_id,
             epic_id=epic_id,
+            repo_id=repo_id,
             outcome="failure",
             category="failure",
             description=error_description[:500],
@@ -497,8 +551,12 @@ async def query_failures(
     description: str,
     db: AsyncSession,
     top_k: int = 3,
+    repo_id: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Find similar past failures to the given task description."""
+    """Find similar past failures to the given task description.
+
+    repo_id (gap-closure Day 3): see query_similar_tasks's docstring.
+    """
     settings = get_settings()
     if not settings.memory_enabled:
         return []
@@ -518,11 +576,13 @@ async def query_failures(
             FROM memory_embeddings
             WHERE outcome = 'failure'
               AND embedding IS NOT NULL
+              AND archived = false
+              AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
             ORDER BY embedding <=> CAST(:vec AS vector)
             LIMIT :k
         """)
         vec_str = "[" + ",".join(str(v) for v in vector) + "]"
-        result = await db.execute(sql, {"vec": vec_str, "k": top_k})
+        result = await db.execute(sql, {"vec": vec_str, "k": top_k, "repo_id": repo_id})
         rows = result.fetchall()
         return [
             {
@@ -544,6 +604,7 @@ async def embed_learning_signal(
     description: str,
     outcome_summary: str,
     db: AsyncSession,
+    repo_id: int | None = None,
 ) -> MemoryEmbedding | None:
     """Store a fleet self-improvement learning signal — Doc 11's 4th memory
     category ("which prompts/tool combos correlated with retries/failures"),
@@ -566,6 +627,7 @@ async def embed_learning_signal(
     try:
         row = MemoryEmbedding(
             task_id=f"fleet-{agent_name}",
+            repo_id=repo_id,
             outcome="learning",
             category="learning",
             description=description[:500],
@@ -590,6 +652,7 @@ def embed_learning_signal_sync(
     agent_name: str,
     description: str,
     outcome_summary: str,
+    repo_id: int | None = None,
 ) -> bool:
     """Sync bridge for embed_learning_signal — MASTER_AGENT_v2.md Phase 1.4:
     the record_learning tool (app/agents/tools.py) is called from a plain sync
@@ -613,6 +676,7 @@ def embed_learning_signal_sync(
                     description=description,
                     outcome_summary=outcome_summary,
                     db=session,
+                    repo_id=repo_id,
                 )
                 return row is not None
         finally:
@@ -629,8 +693,12 @@ async def query_learning_signals(
     description: str,
     db: AsyncSession,
     top_k: int = 3,
+    repo_id: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Find past fleet learning signals similar to the given description."""
+    """Find past fleet learning signals similar to the given description.
+
+    repo_id (gap-closure Day 3): see query_similar_tasks's docstring.
+    """
     settings = get_settings()
     if not settings.memory_enabled:
         return []
@@ -649,11 +717,13 @@ async def query_learning_signals(
             FROM memory_embeddings
             WHERE category = 'learning'
               AND embedding IS NOT NULL
+              AND archived = false
+              AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
             ORDER BY embedding <=> CAST(:vec AS vector)
             LIMIT :k
         """)
         vec_str = "[" + ",".join(str(v) for v in vector) + "]"
-        result = await db.execute(sql, {"vec": vec_str, "k": top_k})
+        result = await db.execute(sql, {"vec": vec_str, "k": top_k, "repo_id": repo_id})
         rows = result.fetchall()
         return [
             {
@@ -690,6 +760,7 @@ async def embed_procedure(
     agent_name: str,
     db: AsyncSession,
     epic_id: str | None = None,
+    repo_id: int | None = None,
 ) -> MemoryEmbedding | None:
     """Store a repair procedure: what the problem looked like, the ordered
     real steps taken to fix it, and how it was resolved.
@@ -724,6 +795,7 @@ async def embed_procedure(
         row = MemoryEmbedding(
             task_id=task_id,
             epic_id=epic_id,
+            repo_id=repo_id,
             outcome="procedure",
             category="procedure",
             description=symptom[:500],
@@ -753,9 +825,13 @@ async def query_procedures(
     description: str,
     db: AsyncSession,
     top_k: int = 3,
+    repo_id: int | None = None,
 ) -> list[dict[str, Any]]:
     """Find past repair procedures whose symptom is similar to the given
-    description — the retrieval half of procedural memory."""
+    description — the retrieval half of procedural memory.
+
+    repo_id (gap-closure Day 3): see query_similar_tasks's docstring.
+    """
     settings = get_settings()
     if not settings.memory_enabled:
         return []
@@ -775,11 +851,13 @@ async def query_procedures(
             FROM memory_embeddings
             WHERE category = 'procedure'
               AND embedding IS NOT NULL
+              AND archived = false
+              AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
             ORDER BY embedding <=> CAST(:vec AS vector)
             LIMIT :k
         """)
         vec_str = "[" + ",".join(str(v) for v in vector) + "]"
-        result = await db.execute(sql, {"vec": vec_str, "k": top_k})
+        result = await db.execute(sql, {"vec": vec_str, "k": top_k, "repo_id": repo_id})
         rows = result.fetchall()
         return [
             {

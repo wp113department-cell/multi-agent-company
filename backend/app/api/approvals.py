@@ -66,8 +66,26 @@ async def _dispatch_decision(row: PendingApprovalRecord, approved: bool) -> None
     the actual push+PR creation (Day 14)."""
     if row.action == "plan_review" and row.task_id is not None:
         from app.api.agents import resume_planning_pipeline
+        from app.db.repository import get_task, resolve_task_repo_path
+        from app.db.session import get_session_factory
 
-        await resume_planning_pipeline(task_id=row.task_id, approved=approved)
+        # Gap-closure Day 4 (root cause 1c, answers.md Q51/Q94/Q95): this was
+        # the one real remaining gap in an otherwise-consistent pattern —
+        # resume_planning_pipeline was always called with repo_path=None
+        # here, so it (and launch_manager downstream of it) fell back to
+        # whichever repo happens to be globally active at the arbitrarily
+        # later moment a human clicks Approve, not the repo the task was
+        # actually created against. See resolve_task_repo_path's docstring.
+        repo_path: str | None = None
+        factory = get_session_factory()
+        async with factory() as db:
+            task = await get_task(db, row.task_id)
+            if task is not None:
+                repo_path = resolve_task_repo_path(task)
+
+        await resume_planning_pipeline(
+            task_id=row.task_id, approved=approved, repo_path=repo_path
+        )
     elif row.action == "git_push" and row.task_id is not None:
         await dispatch_git_push_decision(row.task_id, approved)
 

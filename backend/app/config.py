@@ -306,15 +306,46 @@ class Settings(BaseSettings):
         description="GitHub REST API base URL — override for GitHub Enterprise.",
     )
 
-    # Day 17 — Credential Vault. Optional-but-strongly-recommended: when unset,
-    # SystemSetting-backed credentials (Anthropic/OpenAI/GitHub keys, custom
-    # secrets) are stored in plaintext — the same status quo as before this
-    # day — and a startup warning is logged. Never a silently hardcoded
-    # fallback key. Generate with: python -c "from cryptography.fernet import
-    # Fernet; print(Fernet.generate_key().decode())"
+    # Gap-closure Day 7 (answers.md Q21): the deployment profile. Defaults to
+    # "development" so every existing local/test/docker-compose setup keeps
+    # working with zero new required config — a production deploy must
+    # explicitly opt in by setting DEPLOYMENT_ENV=production, at which point
+    # _require_credential_encryption_in_production below starts enforcing.
+    deployment_env: str = Field(
+        default="development",
+        description="Deployment profile: development | staging | production. production hard-requires CREDENTIAL_ENCRYPTION_KEY to be set.",
+    )
+
+    # Day 17 — Credential Vault. Optional in development (falls back to
+    # plaintext with a startup warning when unset) but hard-required when
+    # DEPLOYMENT_ENV=production (gap-closure Day 7, answers.md Q21) — never a
+    # silently hardcoded fallback key. Generate with: python -c "from
+    # cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     credential_encryption_key: str = Field(
         default="",
-        description="Fernet key encrypting SystemSetting-backed credentials at rest. Strongly recommended in production; falls back to plaintext (with a startup warning) when unset.",
+        description="Fernet key encrypting SystemSetting-backed credentials at rest. Required when DEPLOYMENT_ENV=production; falls back to plaintext (with a startup warning) when unset outside production.",
+    )
+
+    # Gap-closure Day 9 (answers.md Q21) — real per-command sandboxing for
+    # the fully-generic, denylist-only bash tools (app/policy/sandbox.py),
+    # replacing/augmenting the regex denylist the policy engine's own
+    # docstring already admitted was incomplete containment. Enabled by
+    # default (secure-by-default); the escape hatch exists for environments
+    # that genuinely cannot run Docker — an explicit, operator-acknowledged
+    # opt-out, never a silent fallback (run_sandboxed() itself fails closed,
+    # raising rather than silently running unsandboxed, when Docker is
+    # unreachable and this flag is still True).
+    bash_sandbox_enabled: bool = Field(
+        default=True,
+        description="Run the fully-generic bash tools inside an isolated, ephemeral Docker container instead of directly on the host process. Explicit opt-out only — set False if this deployment truly cannot run Docker.",
+    )
+    bash_sandbox_image: str = Field(
+        default="alpine:latest",
+        description="Docker image used for sandboxed bash execution. The minimal default has basic coreutils only (no python/node/git) — deployments whose agents routinely need a language toolchain should build and point this at a custom image with it preinstalled.",
+    )
+    bash_sandbox_network: str = Field(
+        default="bridge",
+        description="Docker --network mode for sandboxed bash execution: 'bridge' (default, egress allowed — most real commands, e.g. package installs, need it) or 'none' (strictest, blocks all network egress/exfiltration for deployments that can accept losing network-dependent commands).",
     )
 
     # Day 10 — Fleet OS Budget Manager (live enforcement, per-run + daily cumulative)
@@ -450,6 +481,22 @@ class Settings(BaseSettings):
                     'Generate one with: python -c "from cryptography.fernet import '
                     f'Fernet; print(Fernet.generate_key().decode())"  ({exc})'
                 ) from exc
+        return self
+
+    @model_validator(mode="after")
+    def _require_credential_encryption_in_production(self) -> "Settings":
+        # Gap-closure Day 7 (answers.md Q21): plaintext-fallback credential
+        # storage is acceptable for local dev/test (the pre-Day-17 status
+        # quo) but must never be the silent default for a real production
+        # deployment — hard-fail at startup instead of only logging a
+        # warning that's easy to miss in a deploy pipeline.
+        if self.deployment_env == "production" and not self.credential_encryption_key:
+            raise ValueError(
+                "CREDENTIAL_ENCRYPTION_KEY must be set when DEPLOYMENT_ENV=production "
+                "(plaintext credential storage is not permitted in production). "
+                'Generate one with: python -c "from cryptography.fernet import '
+                'Fernet; print(Fernet.generate_key().decode())"'
+            )
         return self
 
     @model_validator(mode="after")

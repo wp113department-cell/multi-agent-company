@@ -64,12 +64,13 @@ async def test_sync_failure_is_non_fatal() -> None:
 
 
 @pytest.mark.asyncio
-async def test_publish_fresh_topic_triggers_sync_to_memory_embeddings() -> None:
-    """_publish's fresh-topic path (no similar PUBLISHED lesson found) must
-    call the memory_embeddings bridge exactly once, with the real lesson
-    content and the real agent_name — proving the agent_name parameter
-    (previously silently dropped between publish() and _publish()) now
-    actually reaches the sync call."""
+async def test_publish_fresh_topic_never_triggers_sync_to_memory_embeddings() -> None:
+    """Gap-closure Day 6 (root cause 3, answers.md Q75/Q93): _publish() must
+    NEVER call the memory_embeddings bridge itself anymore — every lesson
+    lands as a draft, invisible to the fleet, until an explicit, human-
+    approved promote() call. This is the mocked-level negative proof; the
+    real-DB version lives in test_versioned_memory.py::
+    test_unpromoted_draft_never_reaches_memory_embeddings."""
     store = VersionedMemoryStore()
 
     fake_row = AsyncMock()
@@ -78,7 +79,7 @@ async def test_publish_fresh_topic_triggers_sync_to_memory_embeddings() -> None:
     fake_row.topic = "td_sync_topic"
     fake_row.content = "a brand new lesson"
     fake_row.version = 1
-    fake_row.state = "published"
+    fake_row.state = "draft"
     fake_row.supersedes_id = None
     fake_row.created_at = None
 
@@ -99,7 +100,42 @@ async def test_publish_fresh_topic_triggers_sync_to_memory_embeddings() -> None:
             "td_sync_topic", "a brand new lesson", agent_name="debugger_agent"
         )
 
+    assert result.state == "draft"
+    mock_sync.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_promote_triggers_sync_to_memory_embeddings_with_real_content() -> None:
+    """The other half of the Day 6 gate: promote() — and only promote() —
+    must call the memory_embeddings bridge, with the draft's real content
+    and the real agent_name doing the promoting (proving the agent_name
+    parameter, previously silently dropped between publish() and
+    _publish(), still reaches the sync call from its new call site)."""
+    store = VersionedMemoryStore()
+
+    fake_draft = AsyncMock()
+    fake_draft.id = 42
+    fake_draft.lesson_id = "lesson-abc"
+    fake_draft.topic = "td_sync_topic"
+    fake_draft.content = "a brand new lesson"
+    fake_draft.version = 1
+    fake_draft.state = "draft"
+    fake_draft.supersedes_id = None
+    fake_draft.created_at = None
+
+    with (
+        patch(
+            "app.fleet.versioned_memory._most_recent_draft_for_lineage",
+            new=AsyncMock(return_value=fake_draft),
+        ),
+        patch("app.fleet.versioned_memory._set_state", new=AsyncMock()),
+        patch(
+            "app.fleet.versioned_memory._sync_to_memory_embeddings", new=AsyncMock()
+        ) as mock_sync,
+    ):
+        result = await store._promote("lesson-abc", agent_name="knowledge_curator")
+
     assert result.state == "published"
     mock_sync.assert_awaited_once_with(
-        "td_sync_topic", "a brand new lesson", "debugger_agent"
+        "td_sync_topic", "a brand new lesson", "knowledge_curator"
     )

@@ -8,11 +8,13 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
+    DEPENDENCY_AUDIT_BASH_TOOL,
     _LIST_FUNCTIONS_TOOL,
     _PARSE_AST_TOOL,
     READ_ONLY_TOOLS,
     RECORD_LEARNING_TOOL,
     make_chat_handlers,
+    make_dependency_audit_bash_handler,
     make_record_learning_handler,
 )
 from app.config import get_settings
@@ -38,6 +40,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "find_todos",
         "search_imports",
         "write_file",
+        "bash",
         "submit_dependency_security_agent",
         "record_learning",
     ],
@@ -46,7 +49,10 @@ AGENT_CONTRACT: dict[str, Any] = {
     "side_effects": ["writes vulnerability reports"],
     "permissions": ["read_repo", "write_docs"],
     "risk_level": "low",
-    "expected_verification": {"read": "read_file must run to inspect dependency files"},
+    "expected_verification": {
+        "read": "read_file must run to inspect dependency files",
+        "audited": "bash (pip-audit/npm audit) must actually run before a CVE claim — gap-closure Day 7, answers.md Q92",
+    },
     "dependencies": [],
 }
 
@@ -74,6 +80,7 @@ _WRITE = {
 }
 _TOOLS = READ_ONLY_TOOLS + [
     _WRITE,
+    DEPENDENCY_AUDIT_BASH_TOOL,
     _SUBMIT,
     RECORD_LEARNING_TOOL,
     _LIST_FUNCTIONS_TOOL,
@@ -81,11 +88,16 @@ _TOOLS = READ_ONLY_TOOLS + [
 ]
 
 _CFG = VerificationConfig(
-    set_by={"read_file": "read", "search_code": "read", "analyze_file": "read"},
+    set_by={
+        "read_file": "read",
+        "search_code": "read",
+        "analyze_file": "read",
+        "bash": "audited",
+    },
     reset_by=(),
     reset_keys=(),
-    enforce_in_result={"read": "read"},
-    initial={"read": False},
+    enforce_in_result={"read": "read", "audited": "audited"},
+    initial={"read": False, "audited": False},
 )
 
 
@@ -100,6 +112,7 @@ def make_dependency_security_agent_handlers(repo_path: str) -> dict[str, Any]:
     base["submit_dependency_security_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
+    base["bash"] = make_dependency_audit_bash_handler(repo_path)
     return base
 
 
@@ -152,7 +165,8 @@ def run_dependency_security_agent(
         summary=str(raw.get("summary", description[:100])),
         findings=list(raw.get("findings", [])),
         files_touched=[],
-        verified=bool(final_state["verification"].get("read")),
+        verified=bool(final_state["verification"].get("read"))
+        and bool(final_state["verification"].get("audited")),
         requires_human_approval=False,
         tokens_in=final_state["tokens_in"],
         tokens_out=final_state["tokens_out"],

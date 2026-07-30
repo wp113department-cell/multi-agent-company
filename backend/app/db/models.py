@@ -493,13 +493,23 @@ class SystemSetting(Base):
 
 
 class MemoryEmbedding(Base):
-    """pgvector store: task outcome embeddings for engineering memory."""
+    """pgvector store: task outcome embeddings for engineering memory.
+
+    Gap-closure (2026-07-30): repo_id scopes a memory row to the repo it was
+    produced against. NULL means "unscoped/legacy" (every row written before
+    this migration, plus any future row where scoping genuinely doesn't apply)
+    — not a magic sentinel value, real SQL NULL semantics. query_* functions in
+    app/memory/store.py filter by it (Day 3 of the same gap-closure effort).
+    """
 
     __tablename__ = "memory_embeddings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     task_id: Mapped[str] = mapped_column(String(100), index=True)
     epic_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("repos.id", ondelete="SET NULL"), nullable=True
+    )
     outcome: Mapped[str] = mapped_column(
         String(50)
     )  # completed | blocked | architecture | failure
@@ -625,6 +635,10 @@ class VersionedLesson(Base):
     in-process fast-read cache for prompt injection) — this is the durable,
     versioned lifecycle layer: DRAFT -> PUBLISHED -> SUPERSEDED / MERGED_INTO ->
     ARCHIVED. supersedes_id gives lineage when a merge happens.
+
+    Gap-closure (2026-07-30): repo_id scopes a lesson to the repo it was
+    produced against, same NULL-means-unscoped convention as
+    MemoryEmbedding.repo_id (see that model's docstring).
     """
 
     __tablename__ = "versioned_lessons"
@@ -635,6 +649,9 @@ class VersionedLesson(Base):
     )  # stable across versions of "the same lesson"
     topic: Mapped[str] = mapped_column(String(200), index=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("repos.id", ondelete="SET NULL"), nullable=True
+    )
     embedding: Mapped[Any] = mapped_column(Vector(1536), nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     state: Mapped[str] = mapped_column(

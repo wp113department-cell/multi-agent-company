@@ -1,7 +1,14 @@
 """JWT token creation and verification.
 
-Uses python-jose for signing and bcrypt directly for password hashing.
+Uses PyJWT for signing and bcrypt directly for password hashing.
 All configuration reads from Settings — no literals in this module.
+
+Gap-closure Day 7 (answers.md Q24): previously used python-jose, which
+unconditionally pulls in `ecdsa` (PYSEC-2026-1325, a Minerva timing-attack
+CVE the ecdsa maintainers have declared out of scope with no planned fix)
+even though this module only ever signs/verifies HS256 (jwt_algorithm's
+only configured value — see app/config.py), which needs no elliptic-curve
+code at all. PyJWT has no such transitive dependency for HS256.
 
 When JWT_AUTH_ENABLED=false (default), the RBAC middleware falls back to
 the legacy X-User-Role header so existing integrations keep working.
@@ -13,7 +20,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import bcrypt
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError as JWTError
 
 from app.config import get_settings
 
@@ -41,7 +49,7 @@ def create_access_token(data: dict[str, Any]) -> str:
     )
     payload["exp"] = expire
     payload["iat"] = datetime.now(timezone.utc)
-    return jwt.encode(  # type: ignore[no-any-return]
+    return jwt.encode(
         payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm
     )
 
