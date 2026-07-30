@@ -98,6 +98,15 @@ _CFG = VerificationConfig(
     reset_keys=(),
     enforce_in_result={"read": "read", "audited": "audited"},
     initial={"read": False, "audited": False},
+    # Gap-closure Day 15 (Stage 1.2, answers.md): expected_verification's
+    # "read" requirement is now a real blocking check, not just tracked
+    # metadata — bash (the audit tool) is refused with a real
+    # [POLICY DENIED] result, the sandboxed subprocess never runs, until at
+    # least one real read (read_file/search_code/analyze_file) has
+    # happened first. Matches this role's own prompt
+    # (roles/dependency_security_agent.md Process step 1: "Read relevant
+    # files... to identify manifests in scope" before step 2's audit run).
+    blocking_until={"bash": "read"},
 )
 
 

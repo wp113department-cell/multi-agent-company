@@ -7591,14 +7591,22 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[POLICY DENIED] {flags_reason}"
         qpath = _shlex.quote(path) if path else ""
 
+        # Gap-closure Day 15 (Stage 1.2, answers.md): these used to end with
+        # `| head -100` — harmless for the OUTPUT (still truncated below via
+        # Python slicing) but fatal for the exit code: in a shell pipeline,
+        # `$?`/subprocess.run's returncode reflects the LAST command
+        # (`head`, which always exits 0), not the test runner. That silently
+        # meant every run "succeeded" regardless of whether tests actually
+        # passed — the real bug the exit-code check below was written to
+        # fix. Removed; output truncation is Python-side only now.
         if runner == "pytest":
-            cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true && python -m pytest {qpath} {flags} --tb=short -q 2>&1 | head -100"
+            cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true && python -m pytest {qpath} {flags} --tb=short -q 2>&1"
         elif runner == "npm_test":
             web_path = str(root.parent / "apps" / "web") if not path else qpath
-            cmd = f"cd {web_path} && npm test {flags} 2>&1 | head -100"
+            cmd = f"cd {web_path} && npm test {flags} 2>&1"
         elif runner == "tsc":
             web_path = str(root.parent / "apps" / "web") if not path else qpath
-            cmd = f"cd {web_path} && npx tsc --noEmit {flags} 2>&1 | head -100"
+            cmd = f"cd {web_path} && npx tsc --noEmit {flags} 2>&1"
         else:
             return f"[ERROR] Unknown runner: {runner}"
 
@@ -7607,6 +7615,19 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 cmd, shell=True, capture_output=True, text=True, timeout=180
             )
             out = (result.stdout + result.stderr)[:5000]
+            # Gap-closure Day 15 (Stage 1.2, answers.md): the real exit code
+            # used to be discarded entirely — any non-crashing run (all
+            # tests failing included) returned plain text, which every
+            # verification_cfg.set_by consumer of this tool
+            # (bug_fix/dependency_agent/refactor_agent/chat_agent map
+            # "run_tests" -> "tests_passed") reads as "ran cleanly" =
+            # verified True. A run with real failing output now surfaces as
+            # [ERROR]-prefixed, so it flows through the SAME existing
+            # "don't set the flag on an [ERROR]-prefixed result" check
+            # _execute_tool_node already applies to every other tool —
+            # tests_passed now means the exit code was actually 0.
+            if result.returncode != 0:
+                return f"[ERROR] Tests failed (exit code {result.returncode}):\n{out.strip() or '(no output)'}"
             return out.strip() or "(no output)"
         except subprocess.TimeoutExpired:
             return "[ERROR] Tests timed out after 3 minutes"
@@ -11840,12 +11861,32 @@ def make_fleet_apply_handlers(repo_path: str) -> dict[str, Any]:
         flags_reason = _shell_metachar_reason(flags, "flags")
         if flags_reason:
             return f"[POLICY DENIED] {flags_reason}"
-        cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null; python -m pytest {_shlex.quote(path)} {flags} -q --tb=short 2>&1 | tail -50"
+        # Gap-closure Day 15: no trailing `| tail -50` — a shell pipeline's
+        # exit code is the LAST command's (tail always exits 0), which was
+        # silently destroying pytest's real exit code before the check
+        # below could ever see it. Output truncation is Python-side only.
+        # Gap-closure Day 15: `;` after the activation attempt is a POSIX-only
+        # separator — under cmd.exe (Windows' subprocess.run(shell=True)
+        # default), it isn't a statement separator at all, so a failed
+        # `source` (no such builtin on Windows) aborts the whole line before
+        # pytest ever runs. `&& ... || true &&` matches
+        # make_chat_handlers.run_tests's already-working pattern, which
+        # degrades safely on both shells.
+        cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true && python -m pytest {_shlex.quote(path)} {flags} -q --tb=short 2>&1"
         try:
             r = subprocess.run(
                 cmd, shell=True, capture_output=True, text=True, timeout=180
             )
-            return r.stdout or r.stderr or "(no output)"
+            out = (r.stdout or r.stderr or "(no output)")[-3000:]
+            # Gap-closure Day 15 (Stage 1.2, answers.md) — same fix as
+            # make_chat_handlers.run_tests above: agent_debugger/
+            # agent_performance_reviewer/quality_auditor all map
+            # "run_tests" -> "tests_run"/"tests_passed" in their APPLY-mode
+            # VerificationConfig; without this, a real failing test run was
+            # indistinguishable from a passing one to that flag.
+            if r.returncode != 0:
+                return f"[ERROR] Tests failed (exit code {r.returncode}):\n{out}"
+            return out
         except subprocess.TimeoutExpired:
             return "[ERROR] tests timed out"
 

@@ -116,6 +116,15 @@ class VerificationConfig:
         When submit_* runs, override result[field] with state["verification"][key].
     initial: dict[str, Any]
         Initial values for the verification dict.
+    blocking_until: {tool_name: verification_key}
+        Gap-closure Day 15 (Stage 1.2, answers.md) — makes `expected_verification`
+        a REAL blocking check instead of tracked-but-unenforced metadata:
+        tool_name is refused (a real [POLICY DENIED] result, the handler
+        never runs) until state["verification"][verification_key] is True.
+        Opt-in, empty by default — every existing agent's VerificationConfig
+        keeps its exact current behavior unless it explicitly populates
+        this. The everyday example this closes: a "write/bash call refused
+        because its declared read-flag is unset."
     """
 
     set_by: dict[str, str] = field(default_factory=dict)
@@ -123,6 +132,7 @@ class VerificationConfig:
     reset_keys: tuple[str, ...] = field(default_factory=tuple)
     enforce_in_result: dict[str, str] = field(default_factory=dict)
     initial: dict[str, Any] = field(default_factory=dict)
+    blocking_until: dict[str, str] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -1029,6 +1039,13 @@ def _make_execute_tools_node(
                     pass
 
             denial = _policy_check(tu_name, tu_input)
+            if not denial and tu_name in verification_cfg.blocking_until:
+                required_key = verification_cfg.blocking_until[tu_name]
+                if not new_verification.get(required_key, False):
+                    denial = (
+                        f"{tu_name} is refused until '{required_key}' is "
+                        "satisfied first (see this agent's expected_verification)."
+                    )
             if denial:
                 result_content = f"[POLICY DENIED] {denial}"
                 logger.warning("Policy denied %s: %s", tu_name, denial)

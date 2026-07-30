@@ -161,6 +161,14 @@ def run_coder(
                 enable_memory=True,
                 enable_reflection=True,
                 enable_lesson=True,
+                # Gap-closure Days 11-14 (Stage 1.1, answers.md): coder is one
+                # of the 5 highest output-risk agents opted into self-critique
+                # ahead of a fleet-wide default flip — scores the submission
+                # against roles/coder.md's own Quality Gates/Success Criteria
+                # bullets (app/agents/base_graph.py::_make_critique_node),
+                # bounded to max_critique_retries=1 (default) so a flaky/
+                # unsatisfiable critique can't loop forever.
+                enable_critique=True,
                 max_turns=30,
                 task_id=str(task_id),
             )
