@@ -56,6 +56,34 @@ async def get_task(db: AsyncSession, task_id: int) -> DevTask | None:
     return result.scalar_one_or_none()
 
 
+def resolve_task_repo_path(task: DevTask) -> str | None:
+    """Gap-closure Day 4 (root cause 1c, answers.md Q51/Q94/Q95): the repo
+    path a task's own dispatch should use, resolved from its DB-persisted
+    `repo_id` — NOT from the mutable `app.api.repo._active_repo_path`
+    global. get_task() already eager-loads `.repo` (selectinload above), so
+    this needs no extra query.
+
+    This is the exact pattern `tasks.py::run_task`/`restart_task`/
+    `approve_task` independently arrived at 3 separate times (the last one
+    with its own "Gap-closure... this endpoint never resolved the task's
+    assigned repo" comment) — factored out here so `approvals.py`'s
+    `_dispatch_decision` and `specialized_agents.py`'s dispatch endpoint can
+    use the same correct logic instead of falling through to the global,
+    which is the real race: a background task scheduled against Task A
+    (created against Repo X) that doesn't resolve repo_path until it
+    actually executes — arbitrarily later, e.g. after a human clicks
+    Approve — would silently pick up whichever repo happens to be globally
+    active *at that later moment*, not the one Task A was created for.
+
+    Returns None (the caller's existing "fall back to the global" behavior
+    stays intact) only when the task genuinely has no ready, resolvable repo
+    — not as a first resort.
+    """
+    if task.repo is not None and task.repo.status == "ready":
+        return task.repo.local_path
+    return None
+
+
 async def list_tasks(
     db: AsyncSession,
     status: str | None = None,

@@ -419,6 +419,13 @@ class TestDependencyAgentFlags:
             )
             kwargs = mock_run.call_args_list[0][1]
             _assert_all_flags(kwargs, "dependency_agent")
+            # Gap-closure Day 5 (root cause 2, answers.md Q39): dependency_agent
+            # has real edit_file access to requirements.txt/package.json with
+            # no gate before this — must require human review of the result.
+            assert kwargs["human_approval_required"] is True, (
+                "dependency_agent edits manifest files with real side effects "
+                "and must require human_approval_required=True"
+            )
 
 
 class TestMonitoringAgentFlags:

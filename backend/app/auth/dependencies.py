@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from fastapi import HTTPException, Request
-from jose import JWTError
+from jwt import PyJWTError as JWTError
 
 from app.config import get_settings
 

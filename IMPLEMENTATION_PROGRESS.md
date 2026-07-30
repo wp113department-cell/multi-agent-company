@@ -1082,3 +1082,528 @@ be silently dropped — every item below traces to a real `MASTER_AGENT_v2.md` �
   re-run (2927 passed / 138 failed, zero new regressions vs. the pre-Step-2 baseline).
   **Step 1 and Step 2 are both complete. Next: Step 3 (verification, self-critique, continuous
   replanning), starting a future session per explicit instruction to stop here for today.**
+- **2026-07-30**: New engagement started — `answers.md` (a real, evidence-cited 120-question/
+  811-sub-answer production audit of this repo, built via 12 parallel research passes) and
+  `Questions_implement.md` (owner's gap-closure spec derived from it) together define a 4-stage,
+  65-working-day plan (`~/.claude/plans/melodic-gliding-moore.md`), approved by the owner. **Day 1
+  (baseline, no code) complete**: confirmed via direct grep that `get_active_repo_path()`'s
+  global-fallback problem has exactly 8 call sites (smaller than an earlier report's ~75-file
+  estimate, which was a different, broader grep); confirmed 76 of 78 agent modules have no
+  checkpointer reference, and that the fix belongs in the shared `base_graph.py`/
+  `build_agent_graph()` (~74 of those 76 route through it), not 76 separate implementations;
+  confirmed `enable_critique=True`/`enable_replanning=True` are 0/72 in `app/agents/*.py`, exact,
+  not approximate. **Real baseline test run** (this sandbox's Postgres/Docker daemon was not
+  running at session start — a first attempt without it produced 155 failures, all
+  `ConnectionRefusedError` in DB-backed tests; started Docker Desktop, brought up
+  `docker compose up -d db`, re-ran twice for stability): **3321 passed / 21 failed / 55 skipped /
+  17 deselected** (378-380s both runs, identical failure set both times). All 21 failures
+  independently spot-checked (not assumed pre-existing from memory) — e.g.
+  `test_git_service.py::test_git_status` fails with `ValueError: Path '...' is outside allowed
+  workspace parent '/home'` (`app/services/git_service.py::_validate_workspace`) — a Windows-vs-
+  container path-allowlist mismatch, matching the same pre-existing environment-gap class this file
+  has documented since Step 1 (no Docker/live Postgres at the time, Windows path separators, etc.),
+  not a new regression. Frontend baseline: pnpm workspace had never been installed in this sandbox
+  (`pnpm install`, 55.7s, 611 packages) — `vitest run`: **16 passed / 16, 2 test files**. This
+  3321/21/55/17 backend count and 16/16 frontend count are the reference baseline for every
+  subsequent day's before/after diff. **Next: Day 2 (repo/project-scoping migration on
+  `MemoryEmbedding`/`VersionedLesson`) — requires explicit owner go-ahead before any schema code is
+  written, per the plan's own rule.**
+- **2026-07-30 (same day)**: Owner waived the per-⚠-day go-ahead pause ("no need to give my
+  permission... start when prior day completes") — recorded in the plan file itself
+  (`~/.claude/plans/melodic-gliding-moore.md`, operating-mode note). **Day 2 (root cause 1a,
+  schema) complete.** Added a real, nullable `repo_id` FK (`ondelete=SET NULL`, same convention
+  `dev_tasks.repo_id` already uses) to `MemoryEmbedding` and `VersionedLesson`
+  (`app/db/models.py`), migration `migrations/versions/024_memory_project_scoping.py` (023→024,
+  no branching, confirmed via `alembic heads`). NULL means unscoped/legacy — real SQL NULL, not a
+  magic sentinel string. Applied and verified live against Postgres both directions (upgrade,
+  downgrade, re-upgrade) before writing any test: all 125 pre-existing `memory_embeddings` rows
+  survived untouched with `repo_id=NULL`. New: `tests/test_memory_project_scoping_migration.py`
+  (4 tests) — schema-shape check, and a real FK-cascade proof for both tables (delete the parent
+  `Repo` row, confirm the memory/lesson row survives with `repo_id` set to NULL, not deleted).
+  **Caught and fixed a real bug in the test itself while writing it**: the first version re-queried
+  the row after the delete inside the same session, but with `expire_on_commit=False` SQLAlchemy's
+  identity map handed back the already-loaded, stale in-memory object instead of a fresh read —
+  the assertion would have silently passed regardless of whether the FK actually worked. Fixed with
+  `session.expire_all()` before the post-delete re-query, which is what surfaced the (correct)
+  behavior for real. Full regression: **3325 passed / 21 failed / 55 skipped / 17 deselected**
+  (383s) — failed-test-name set diffed byte-for-byte identical to Day 1's baseline (`diff` exit 0);
+  passed count rose by exactly 4 (the new tests). `answers.md` Q5's "Project Memory" item flipped
+  NO → PARTIAL (schema now real; query-level filtering is Day 3). **Next: Day 3 — filter every
+  `query_*` function in `app/memory/store.py` by `repo_id`, which is what will let the downstream
+  Q51/Q94/Q95/Q114/Q120 items flip for real.**
+- **2026-07-30 (same day)**: **Day 3 (root cause 1b, query filtering) complete.** Added an
+  optional `repo_id` parameter to every write function (`embed_task_outcome`,
+  `embed_architecture_note[_sync]`, `embed_failure`, `embed_learning_signal[_sync]`,
+  `embed_procedure`) and every read function (`query_similar_tasks`, `query_memory_context[_sync]`,
+  `query_architecture_notes`, `query_failures`, `query_learning_signals`, `query_procedures`) in
+  `app/memory/store.py` — 11 functions total. Filter semantics (documented in the module docstring
+  and every touched function): when `repo_id` is passed, a query returns that repo's own rows PLUS
+  legacy/unscoped rows (`repo_id IS NULL`) — pre-Day-2 rows and any not-yet-updated caller's writes
+  stay visible everywhere as general fallback knowledge (no way to retroactively attribute them to
+  one repo), but repo A's own scoped rows never appear in repo B's filtered results. Callers passing
+  nothing (every real caller today) get the exact old, fully-unscoped behavior — purely additive.
+  **Two real bugs found and fixed while writing the tests, not left broken:**
+  (1) `query_similar_tasks("...", session, repo_id=repo_a)` initially always returned `[]` — traced
+  to the *query text's own* embedding also being the zero-vector fallback (no `VOYAGE_API_KEY` in
+  this environment) and hitting `query_similar_tasks`'s existing short-circuit
+  (`if vector == _ZERO_VECTOR_1536: return []`) before ever reaching the new WHERE clause; fixed the
+  test (not the code — the short-circuit is correct production behavior) by patching
+  `app.memory.store._embed` directly, the same pattern `test_versioned_memory.py` already
+  established for this exact limitation. (2) the new SQL filter
+  (`AND (:repo_id IS NULL OR repo_id IS NULL OR repo_id = :repo_id)`) raised a real asyncpg
+  `AmbiguousParameterError: could not determine data type of parameter $2` — `:repo_id IS NULL`
+  alone doesn't give asyncpg's prepared-statement planner enough type context. Fixed in the
+  production code (all 5 occurrences) with an explicit `CAST(:repo_id AS BIGINT)`, not worked around
+  in the test. New: `tests/test_memory_project_scoping_queries.py` (3 tests) — the exact
+  acceptance criterion from the gap-closure plan (two real seeded repos, repo A's row never in repo
+  B's filtered query and vice versa), the legacy-row-stays-visible guarantee, and one representative
+  second query function (`query_failures`) proving the pattern was applied consistently, not just to
+  the first function. `black`/`ruff`/`mypy --strict` clean on every touched file (also fixed 2 real,
+  pre-existing-style typing gaps surfaced by adding proper `AsyncEngine`/`AsyncSession` type hints
+  to the new test files instead of leaving `-> object` + `# type: ignore` band-aids: a
+  comparison-overlap error from comparing SQLAlchemy `Row` objects to plain tuples, fixed by
+  explicit `tuple(row)` conversion).
+  Full regression: **3327 passed / 22 failed / 55 skipped / 17 deselected** (382s) — diffed against
+  the Day 1/2 baseline: 21 of 22 are the identical known pre-existing set; the 1 new name
+  (`test_fleet_metrics.py::TestRunSpan::test_run_span_times_execution`) is a `time.sleep(0.01)`-vs-
+  wall-clock timing assertion in a completely unrelated module (never touched by this change) —
+  independently confirmed flaky, not a regression, by running it in isolation 3 times (3/3 passed).
+  `answers.md` Q5 and Q95 both updated (NO → PARTIAL) with the honest caveat that this capability is
+  real and tested but not yet load-bearing in production, since no real call site passes `repo_id`
+  yet — that's Day 4. **Next: Day 4 — replace the `_active_repo_path` global with per-request/
+  session repo context (exactly 8 call sites of `get_active_repo_path()`, confirmed Day 1), and
+  thread the resolved repo id into real `embed_*`/`query_*` calls, which is what makes Days 2-3's
+  work actually take effect on real traffic.**
+- **2026-07-30 (same day)**: **Day 4 (root cause 1c, dispatch-race fix) complete.** Investigated all
+  11 real `get_active_repo_path()` call sites (not the ~75-file figure an earlier report used for a
+  different, broader grep): 6 are inside `app/api/repo.py` itself (repo-management/reindex/context/
+  architecture endpoints — legitimately global-scoped by design, no per-task concept applies, left
+  untouched) and 5 are inside background-task bodies in `app/api/agents.py`(4)/
+  `specialized_agents.py`(1). Found the real bug the plan targeted: `app/api/approvals.py::
+  _dispatch_decision` (the `/api/approvals/{id}/approve` route, confirmed the current primary
+  approval path) called `resume_planning_pipeline(task_id=..., approved=...)` with **no repo_path
+  argument at all** — meaning a plan approved for a task created against Repo A, if dispatched after
+  someone else activated Repo B in the meantime, would silently run that task's coding agents
+  against Repo B. A live, real bug, not hypothetical — directly matching Q94/Q95's flagged risk.
+  Also found (nice surprise, not assumed): `tasks.py::run_task`/`restart_task`/`approve_task` had
+  each independently arrived at the *correct* fix already (resolve `task.repo_id` from the DB before
+  scheduling), including one with its own prior "Gap-closure... this endpoint never resolved the
+  task's assigned repo" comment — three correct but duplicated implementations, each also making a
+  redundant DB query despite `get_task()` already eager-loading `.repo` via `selectinload`.
+  New: `app/db/repository.py::resolve_task_repo_path(task) -> str | None` — one shared, correct
+  implementation (no extra query, reads the already-loaded `task.repo` relationship), used by all 5
+  real call sites now: the 3 existing `tasks.py` endpoints (refactored to remove the duplication),
+  plus the 2 real gaps fixed for the first time — `approvals.py::_dispatch_decision` (resolves
+  `task.repo_id` via a fresh DB session before calling `resume_planning_pipeline`) and
+  `specialized_agents.py::run_specialized_agent` (resolves before scheduling
+  `_run_specialized_agent_bg`, only when the caller didn't explicitly supply `repo_path`). The
+  `get_active_repo_path()` fallback inside the 5 background-task bodies themselves is left in place
+  as a last-resort safety net (e.g. a task with no repo_id at all) — it's just no longer the primary
+  path for any real dispatch.
+  Tests: `tests/test_repo_scoping_race_fix.py` (3 new) — a direct unit proof that
+  `resolve_task_repo_path` reads `task.repo_id` and never imports the global module at all; a
+  not-ready-repo edge case; and the real acceptance criterion reproduced end to end — create Task 1
+  against Repo A, activate Repo B globally *after* Task 1 exists (the exact race), dispatch the
+  approval decision with `resume_planning_pipeline` intercepted, assert the call still received
+  Repo A's path. All 3 passing. `black`/`ruff`/`mypy --strict` clean on every touched file
+  (`app/db/repository.py`, `app/api/tasks.py`, `app/api/approvals.py`,
+  `app/api/specialized_agents.py`, the new test file).
+  Full regression: **3331 passed / 21 failed / 55 skipped / 17 deselected** (377s) — failed-test-name
+  set diffed byte-for-byte identical to the Day 1 baseline (`diff` exit 0); the 1 timing-flaky test
+  from Day 3's run (`test_run_span_times_execution`) simply didn't flake this time, accounting for
+  the pass-count delta beyond the 3 new tests. `answers.md` Q95's "Agents never modify the wrong
+  project" flipped PARTIAL → YES for the confirmed-and-fixed dispatch race (the wider Q94/Q95
+  questions stay PARTIAL — memory-call wiring, the other Day-4-adjacent piece, is still open).
+  **Stage 0's root-cause cluster (Days 2-4) is now fully closed for the 3 tasks
+  `Questions_implement.md` named. Next: Day 5 — root cause 2, gate destructive file/dependency
+  operations behind confirmation.**
+- **2026-07-30 (same day)**: **Day 5 (root cause 2, destructive-op gating) complete.** Design
+  decision made deliberately, not assumed from the plan's literal wording: gating *every* file
+  mutation the way `git_push` is gated (a rare, high-stakes action) would make `chat_agent.py`
+  unusable for normal coding work, since `write_file`/`edit_file` are its core, extremely frequent
+  operations. Scoped instead to the two genuinely silent-data-loss cases — `delete_file` (always
+  gated, irreversible) and `write_file` specifically when it would overwrite a file that **already
+  exists** (full-content, no-diff overwrite; creating a brand-new file stays ungated, nothing at
+  risk). `edit_file` (precise, unique old_string→new_string, git-diffable, can't silently clobber
+  unrelated content) and `append_file`/`rename_file`/`copy_file` were deliberately left ungated for
+  the same reason. Both new gates use the exact same `self._confirm()`/`interrupt()` pattern as the
+  existing `git_push`/`git_reset --hard` gates.
+  For `dependency_agent` (a `base_graph.py` worker agent, not the interactive chat agent — no
+  checkpointer exists for that graph yet): added `human_approval_required=True` to its
+  `run_agent_graph()` call, the same real, existing flag `docker_agent`/`cicd_agent` already use.
+  Documented honestly, not glossed over: this is a **post-hoc** review flag, not a pre-action pause
+  — the manifest edit has already happened by the time a human reviews the flagged result, because
+  `base_graph.py` has no checkpointer for worker agents (that's Stage 1.3's job — extending the same
+  `AsyncPostgresSaver` mechanism `chat_agent.py` already has). A genuine pre-edit pause for
+  `dependency_agent` depends on that landing first.
+  Tests: `tests/test_phase52_file_mutation_confirmation.py` (5 new) — confirmed delete-file runs
+  exactly once across pause/resume with a real file on disk (not mocked); denied delete leaves the
+  real file untouched; confirmed write-overwrite changes real file content exactly once; denied
+  write-overwrite leaves old content untouched; creating a brand-new file completes in one turn with
+  no pause, proving normal coding work isn't disrupted. Plus 1 new assertion added to the existing
+  `tests/test_day2_agent_contracts.py::TestDependencyAgentFlags::test_fleet_flags` confirming
+  `human_approval_required=True` reaches `run_agent_graph`. `black`/`ruff`/`mypy --strict` clean on
+  every touched file.
+  Full regression: **3336 passed / 21 failed / 55 skipped / 17 deselected** (372s) — failed-test-name
+  set diffed byte-for-byte identical to the Day 1 baseline (`diff` exit 0); pass count rose by
+  exactly 5, the new tests. `answers.md` Q39's delete-files item flipped NOT-gated → YES;
+  overwrite-files and dependency-upgrades items flipped NOT-gated → PARTIAL with the honest
+  post-hoc-vs-pre-action distinction documented in place.
+  **Next: Day 6 — root cause 3, gate `versioned_memory.publish()` behind a confidence threshold or
+  `knowledge_curator` review.**
+- **2026-07-30 (same day)**: **Day 6 (root cause 3, unvalidated auto-publish) complete.** Investigated
+  the real call chain first: `_extract_and_store_lesson` (`base_graph.py`, fires automatically after
+  every agent run when `enable_lesson=True` and a Voyage API key is configured) calls
+  `get_versioned_memory_store().publish()` — the ONLY real caller of `publish()` anywhere in the
+  codebase (confirmed by grep). `publish()` had zero validation: a single LLM call's self-reported
+  "lesson," immediately `state="published"`, immediately synced into `memory_embeddings` and
+  injected into every future agent's prompt via `query_learning_signals`. No `confidence` field
+  exists anywhere on this path to gate on (checked before assuming a threshold was viable) — chose
+  the plan's other named option, `knowledge_curator`-mediated review, since fabricating a numeric
+  confidence heuristic here would itself be exactly the kind of unverified claim this whole
+  engagement's standing rule prohibits.
+  Real fix: `publish()` now always writes `state="draft"` (the schema's own DRAFT→PUBLISHED→
+  SUPERSEDED/MERGED_INTO→ARCHIVED lifecycle already modeled this state — `publish()` was simply
+  skipping past it every time) and no longer syncs to `memory_embeddings` at all. New
+  `VersionedMemoryStore.promote(lesson_id, agent_name)` is the only path to `state="published"` and
+  to the `memory_embeddings` sync — refactored to use a new `_most_recent_draft_for_lineage()`
+  helper (matching the file's existing `_most_recent_superseded_for_lineage` pattern) instead of
+  inline SQL, both for consistency and so it's cleanly mockable in tests. New tools in
+  `app/agents/tools.py`: `memory_promote_lesson` (calls `promote()`) and
+  `memory_list_draft_lessons` (lets a curator actually discover what's pending — without this,
+  the gate would exist but nothing could find what to review). Both wired into
+  `knowledge_curator.py`: `memory_list_draft_lessons` in SCAN_TOOLS/`make_scan_handlers` (discovery,
+  autonomous, read-only), `memory_promote_lesson` in APPLY_TOOLS/`make_apply_handlers` (the actual
+  gate — only reachable after a human approves that specific curation action on the Fleet
+  Enhancement Dashboard, same two-phase scan/apply/approval pattern H1's audit found real for this
+  5-agent subsystem), and added to `_APPLY_CFG.set_by` so a promotion-only APPLY run isn't wrongly
+  blocked as unverified. `backend/roles/knowledge_curator.md` updated (Process sections, tool list)
+  to match — left stale otherwise, which this engagement has previously treated as a real gap in
+  its own right (Step 4/2.1's "17 role files' stale `## Tools` lines" fix).
+  **A real test-design bug was caught and fixed while writing tests, not left in**: the promote-
+  and-sync test initially put its post-action assertions inside the `with patch():` block but
+  cleanup in a separate, later `try/finally` — an assertion failure there skipped cleanup entirely;
+  reproduced for real (2 genuine orphaned rows found by directly querying `memory_embeddings`, not
+  assumed), fixed by wrapping the whole body in one `try/finally` from the start.
+  Updating the 7 pre-existing tests this behavioral change correctly broke (not reverted — the
+  change was the whole point) required recomputing every mocked `_embed` call-count sequence by
+  hand, since sync moved from inside `publish()` to inside the new `promote()`, and the merge path
+  (which only makes sense against an already-*published* prior lesson) now requires an explicit
+  `promote()` in test setup before a merge can trigger at all — this is itself confirmed correct,
+  not just a test inconvenience: an unpromoted, still-draft lesson is no longer a valid merge
+  candidate, exactly as intended.
+  Tests: 11 new/updated across `tests/test_versioned_memory.py` (13 total, 2 new — including
+  `test_unpromoted_draft_never_reaches_memory_embeddings`, the actual safety proof), 
+  `tests/test_versioned_memory_sync.py` (5 total, 1 renamed to prove the negative + 1 new for
+  `promote()`), `tests/test_lesson_versioned_memory_wiring.py` (1 assertion updated),
+  `tests/test_phase_gap6_memory_promote_lesson.py` (8 new — tool delegation, error handling, and
+  full contract/schema/handler wiring proof). `black`/`ruff`/`mypy --strict` clean on every touched
+  file. Full regression: **3347 passed / 21 failed / 55 skipped / 17 deselected** (379s) —
+  failed-test-name set diffed byte-for-byte identical to the Day 1 baseline (`diff` exit 0); pass
+  count rose by exactly 11. `answers.md` Q75/Q93 updated — the "no human approval before
+  organization-wide learning" finding flipped NO → YES, with the honest remaining gap noted (a bad
+  lesson can still be *proposed* as a draft, it just can no longer *spread* without review).
+  **Stage 0 section A (all 3 root-cause clusters, Days 2-6) is now fully closed. Next: Day 7 —
+  the cheap-fix batch (credential encryption enforcement, ecdsa CVE, missing audit_log migration,
+  live CVE-check gate, archived-memory filter bug).**
+- **2026-07-30 (same day)**: **Day 7 (cheap-fix batch, 5 sub-items) complete.** All 5 real, not
+  superficial — each investigated against live code/live tooling before fixing, not assumed from the
+  plan's one-line description.
+  1. **Mandatory credential encryption in production.** New `Settings.deployment_env` field
+     (`app/config.py`, default `"development"` — every existing local/test/docker-compose setup
+     keeps working unchanged with zero new required config). New model validator
+     `_require_credential_encryption_in_production`: raises `ValidationError` at `Settings`
+     construction time when `DEPLOYMENT_ENV=production` and `CREDENTIAL_ENCRYPTION_KEY` is unset —
+     a real startup hard-fail, not just `credential_vault.py`'s existing one-time warning log (which
+     stays exactly as-is for development/staging). Tests:
+     `tests/test_credential_encryption_production_gate.py` (5 new).
+  2. **`ecdsa` CVE (PYSEC-2026-1325) — actually eliminated, not ignored.** Root cause: `python-jose
+     [cryptography]==3.5.0` unconditionally pulls in `ecdsa` even though this codebase's JWT layer
+     (`app/auth/jwt.py`) only ever signs/verifies HS256 (`jwt_algorithm` default, confirmed no other
+     algorithm configured anywhere — grepped). `pip-audit` confirmed live: PYSEC-2026-1325, no fix
+     version exists (upstream `ecdsa` maintainers have declared timing-side-channel resistance out
+     of scope, won't-fix). Migrated `app/auth/jwt.py`/`app/auth/dependencies.py` from python-jose to
+     PyJWT 2.13.0 (`requirements.txt`) — same `jwt.encode`/`jwt.decode` call shape, `JWTError` →
+     `PyJWTError`. Uninstalled `python-jose`/`ecdsa`/`rsa`/`pyasn1` from the venv and re-ran
+     `pip-audit -r requirements.txt` with zero ignore flags: **0 known vulnerabilities**, verified
+     live twice (once right after the swap at PyJWT 2.10.1, which itself turned up 12 *different*,
+     newer PyJWT CVEs — bumped to the actual latest, 2.13.0, before re-confirming clean). Removed the
+     now-dead `--ignore-vuln PYSEC-2026-1325` carve-out from `.github/workflows/ci.yml`'s security
+     job (its long inline justification comment is gone with it — nothing left to justify).
+  3. **Missing `audit_log` table.** `app/fleet/audit_log.py::AuditLog._write_to_db()` has always
+     attempted a raw-SQL `INSERT INTO audit_log` on every `append()`, but no migration ever created
+     that table — confirmed by grep across `migrations/versions/`, zero hits. Every durable-
+     persistence attempt was silently swallowed by the module's own intentional
+     `except Exception: pass` (a broken audit sink must never block the caller — that design stays).
+     New `migrations/versions/025_audit_log_table.py`: column set matches the existing INSERT
+     exactly (`entry_id` PK, `trace_id`/`task_id`/`timestamp` indexed, `details` JSONB,
+     `requires_human_approval` boolean). `timestamp` deliberately typed `String`, not `TIMESTAMPTZ`
+     — the app writes `datetime.isoformat()` strings, not datetime objects, and matching the column
+     to what's actually sent avoids the same asyncpg parameter-type mismatch already hit once on Day
+     3 (the `repo_id` CAST fix). Verified live: migration applies/downgrades/re-applies cleanly; a
+     real `AuditLog._write_to_db()` call round-trips a row with JSONB `details` intact; `ON CONFLICT
+     (entry_id) DO NOTHING` confirmed idempotent. Tests: `tests/test_audit_log_migration.py`
+     (3 new).
+  4. **Force a live CVE-audit tool before `dependency_security_agent` can claim a CVE.**
+     `roles/dependency_security_agent.md` has always claimed "using LIVE audit tooling only... never
+     relies on training-data CVE recall" — but the agent had **no tool capable of running one**
+     (`_TOOLS` was read-only + `write_file` + submit, confirmed by reading the file — every prior
+     CVE claim was necessarily the model's own possibly-stale, possibly-invented training knowledge).
+     New `DEPENDENCY_AUDIT_BASH_TOOL`/`make_dependency_audit_bash_handler` in `app/agents/tools.py`
+     — same allowlist-then-denylist scoped-bash pattern `make_test_runner_bash_handler`/
+     `make_load_test_bash_handler` already established, scoped to `pip-audit`/`npm audit` prefixes
+     only via `check_allowlisted_command` (everything else `[POLICY DENIED]`, confirmed a chained
+     `pip-audit; rm -rf /` is rejected). Wired into `dependency_security_agent.py`: added to
+     `AGENT_CONTRACT["allowed_tools"]`/`_TOOLS`; `_CFG.set_by["bash"] = "audited"` and
+     `enforce_in_result={"read": "read", "audited": "audited"}` — `AgentResult.verified` is now
+     graph-enforced `False` whenever the audit tool never actually ran, the same real (not
+     model-claimed) verification discipline `dependency_agent`'s `registry_checked` flag already
+     uses. `roles/dependency_security_agent.md` Process/Tools sections updated to match reality.
+     `tests/test_analyzer_tier_confirmed.py` updated: `dependency_security_agent` is now a documented,
+     narrow exception to the "Analyzer tier never gets bash" lock-in (new
+     `test_dependency_security_agent_bash_is_scoped_to_audit_only` proves the bash it gained is the
+     scoped one, not a general shell escape). Tests:
+     `tests/test_dependency_security_agent_audit_gate.py` (8 new, including a real, non-mocked
+     `pip-audit` subprocess call — not just a mocked policy check).
+  5. **Archived-memory filter bug.** Confirmed live: `app/services/retention.py::_archive_table`
+     really does flip `archived=true` on `memory_embeddings` rows past
+     `MEMORY_EMBEDDINGS_RETENTION_DAYS`, but all 5 `query_*` functions in `app/memory/store.py`
+     (`query_similar_tasks`, `query_architecture_notes`, `query_failures`, `query_learning_signals`,
+     `query_procedures`) never filtered on it — grepped, "archived" appeared exactly once in the
+     whole file (the module docstring) before this fix. An archived row kept surfacing in every live
+     agent's context injection forever, making the retention policy purely cosmetic. Added
+     `AND archived = false` to all 5, same style as the `repo_id` scoping filter added Days 2-3.
+     **A real cross-test hazard was caught and fixed while writing the end-to-end test, not left
+     flaky**: the first version called `_archive_table` from inside an `@pytest.mark.asyncio` test,
+     which failed intermittently in the full suite (`RuntimeError: Event loop is closed`) because
+     `_archive_table` uses the process-wide `get_session_factory()` singleton, which — once some
+     earlier test in the 3300+-test suite has already initialized it — stays bound to that earlier
+     test's now-closed event loop. Fixed by following `test_retention_archive.py`'s own documented
+     convention for this exact hazard: a plain sync test using `asyncio.run()` per step, resetting
+     `app.db.session._engine`/`_session_factory` to `None` immediately before calling
+     `_archive_table`. Reproduced the failure once, confirmed the fix by re-running immediately after
+     other `get_session_factory()`-touching tests (`test_bootstrap_wiring.py`,
+     `test_orphan_recovery.py`, `test_retention_archive.py`) — all pass together now. Tests:
+     `tests/test_memory_archived_filter.py` (6 new).
+  `black`/`ruff`/`mypy --strict` clean on every touched file (the only mypy findings were two
+  pre-existing, unrelated errors — `app/fleet/budget_manager.py`'s Windows-incompatible `resource`
+  import and `test_pending_gaps.py`'s `BaseRoute.path` — confirmed via `git diff` neither file was
+  touched this session).
+  Full regression: **3369 passed / 21 failed / 55 skipped / 17 deselected** (~421-441s across two
+  full runs) — failed-test-name set diffed byte-for-byte identical to the Day 1 baseline; one extra,
+  known-flaky timing test (`test_fleet_metrics.py::TestRunSpan::test_run_span_times_execution`,
+  first flagged Day 3) flaked on one of the two full runs and was independently re-confirmed flaky
+  (not caused by today's changes) by running it 3x in isolation: 1 fail / 2 pass. `answers.md`
+  updated: Q21 (credential encryption — YES, was PARTIAL-with-plan), Q24 (`ecdsa` CVE — DONE, moved
+  out of Low Priority backlog), Q92 (dependency-CVE detection — YES, was PARTIAL), Q96 (audit
+  logs — REAL for durable persistence too, was "likely BROKEN"), Q120 (archived-memory filter — bug
+  marked fixed in both the Memory Retrieval and Automatic Cleanup subsections), plus the two
+  now-resolved rows (#4 audit-log persistence, #7 archived-filter bug) in the Hidden Architectural
+  Risk Audit appendix table marked **RESOLVED**.
+  **Stage 0's cheap-fix batch is fully closed. Next: Day 8 — sandbox design + prototype (a
+  standalone repro proving a real isolation mechanism actually blocks a destructive command attempt,
+  before any production wiring) — explicitly NOT rushed despite being grouped with Day 7 in the
+  original spec; the plan gives it 2 dedicated days precisely so it isn't.**
+- **2026-07-30 (same day)**: **Day 8 (sandbox design + standalone prototype) complete.** No
+  production code touched, per the plan's own explicit scoping for this day — scratch/prototype
+  only; Day 9 does the real wiring.
+  **Mechanism chosen: per-command ephemeral Docker container**, not seccomp or Windows AppContainer.
+  Reasoning, not a coin flip: this dev sandbox is Windows, but production deploys via
+  `backend/Dockerfile`/`docker-compose.yml` on Linux — seccomp isn't usable from Windows dev without
+  WSL, and AppContainer is Windows-only, so either alone would mean prototyping against a mechanism
+  that doesn't match production. Docker is the one mechanism that's genuinely identical in both
+  places, and it's already the established substrate this whole engagement already depends on
+  (Postgres/Redis via `docker compose up -d db` since Day 1).
+  **Real, live-tested design**: `docker run --rm --network=<none|bridge> --memory=256m
+  --pids-limit=128 --cpus=0.5 -v <workdir>:/workspace:rw -w /workspace alpine:latest sh -c
+  "<command>"` — no `docker.sock` mount (would be a full escape back to the host engine, deliberately
+  never done), only the one repo-worktree directory made visible/writable, real cgroup-enforced
+  resource caps rather than a wall-clock timeout guess, `--rm` so every run starts from a known-clean
+  image layer.
+  **First found a genuine, live, reproducible denylist bypass to test against** (not a hypothetical):
+  ran `app.policy.engine.check_command("find /workspace -mindepth 1 -delete", strict=True)` directly
+  — returned `allowed=True`. None of `_DENIED_COMMAND_PATTERNS` match `find ... -delete`, only
+  `rm -rf` (and its already-normalized flag variants). This is risk-appendix item #1
+  ("a sufficiently novel command phrasing bypasses the denylist") made concrete and real, not
+  theoretical — exactly the case Day 9's acceptance criterion names.
+  Standalone repro script (`sandbox_prototype.py`, scratchpad, not committed — this day's output is
+  the design decision + evidence below, not a permanent artifact; Day 9 is where the real,
+  permanently-tested integration lands) — 6 checks, run twice for stability, all passing both times:
+  1. Sanity: a plain command executes for real inside the sandbox and returns real output.
+  2. **The core proof**: the denylist-bypassing `find -mindepth 1 -delete` command run inside the
+     sandbox, scoped to a throwaway "workspace" directory sitting next to a sibling "host_secret"
+     directory (simulating the rest of the host filesystem) — the workspace's contents were really
+     deleted (not a silent no-op), while the sibling directory was completely untouched. Containment
+     held even though the denylist itself never would have caught this phrasing.
+  3. Filesystem escape attempt: the container's `/etc/os-release` reports Alpine (its own minimal
+     root filesystem), proving no access to the host's real filesystem outside the one bind-mount.
+  4. Network isolation: the identical `wget` command against `example.com` failed under
+     `--network=none` and succeeded under `--network=bridge` (the second case confirming the first
+     failure was genuinely caused by the network flag, not an unrelated environment issue) — proving
+     `--network=none` is a real exfiltration/SSRF block, not just documentation.
+  5. No docker-socket escape: no `docker` binary and no `/var/run/docker.sock` inside the sandbox —
+     no path to control the host's Docker engine from within a sandboxed command.
+  6. Resource limits are real: a `dd`-based allocation into `/dev/shm` genuinely failed ("No space
+     left on device") under the memory cap rather than being silently permitted to consume host
+     memory — real kernel/cgroup enforcement, not an assumption.
+  Two test-assertion bugs were caught and fixed while writing this (not left in): the docker-socket
+  check's "docker" substring search false-matched the literal path `/var/run/docker.sock` itself; the
+  memory-bomb check read the wrapping shell's exit code (always 0 because of a trailing `echo`) instead
+  of `dd`'s own exit code via an explicit `DD_EXIT=$?` marker — same "verify empirically, don't trust
+  the first assertion that happens to pass" discipline this whole engagement has applied throughout.
+  **Next: Day 9 (⚠, fleet-wide execution-behavior change) — wire this proven mechanism into
+  `policy/engine.py` and the bash-tool handlers in `app/agents/tools.py`, replacing/augmenting the
+  regex `cd`-boundary check for every agent's bash calls. Acceptance test: the exact
+  `find /workspace -mindepth 1 -delete` bypass proven here must still be blocked/contained after
+  wiring, live, not just asserted.**
+- **2026-07-30 (same day)**: **Day 9 (⚠ real fleet-wide execution-behavior change) complete —
+  honestly scoped, not overclaimed.** Before writing any code, asked the owner about a genuine
+  security-architecture fork the plan doesn't resolve: the sandbox primitive itself works today in
+  this dev environment with no changes needed, but the *production* deployment
+  (`docker-compose.yml`'s `backend` service, itself running inside a container) has no path to
+  reach a Docker daemon to spawn sandboxed sibling containers — giving it one requires picking
+  between a raw `docker.sock` mount (simplest, but backend-compromise-then-means-host-compromise),
+  a docker-socket-proxy service (safer, narrower API, more setup), or a dedicated sandbox-executor
+  sidecar (safest, most work). Owner chose: document the tradeoff, don't touch `docker-compose.yml`
+  yet — build/wire/test the real mechanism now, leave the production-topology choice as its own
+  named follow-up. This is the correct call given the same "no docker.sock mount inside the
+  sandbox" principle Day 8's own design already established — extending raw docker.sock access to
+  the *backend* container itself would have directly contradicted that.
+  **New `app/policy/sandbox.py`**: `run_sandboxed(command, cwd, *, image, network, memory,
+  pids_limit, cpus, timeout, env)` — the exact Day 8 prototype design turned into real code.
+  Fails **closed**: `SandboxUnavailableError` when Docker can't be reached, never a silent fallback
+  to unsandboxed host execution. New `Settings` fields (`app/config.py`): `bash_sandbox_enabled`
+  (default `True` — secure by default; the *only* legitimate way to run unsandboxed is this
+  explicit, operator-set opt-out), `bash_sandbox_image` (default `alpine:latest` — deliberately not
+  a hardcoded guess at what any given deployment's target repos need), `bash_sandbox_network`
+  (default `bridge` — network egress allowed by default, since real commands like package installs
+  genuinely need it; `none` available for the strictest posture).
+  **Wired into exactly the three fully-generic, denylist-only bash tools** —
+  `make_chat_handlers.bash`, `make_coder_handlers.bash` (including its `extra_env` — task-scoped
+  secrets now passed as real `-e KEY=VALUE` Docker flags, since a container does NOT inherit the
+  host process's environment automatically, a real functional-parity concern caught before it
+  became a silent regression), `make_scoped_bash_handler.bash_h` — via one new shared primitive,
+  `_run_bash_command()` in `app/agents/tools.py`, so all three call sites changed by only a few
+  lines each and share one execution/fallback/error-surfacing path.
+  **A genuine scoping investigation, not a rubber stamp**: before wiring, classified all 30
+  `shell=True` call sites in `tools.py` (via a research pass) into 15 "agent supplies the whole
+  command" sites (the real risk surface, gated only by a prefix-allowlist or denylist) and 15
+  "fixed-template, narrowly-parameterized" sites (test/lint runners building `f"pytest {quoted_path}
+  {flags}"`-shaped commands, not raw agent text). Of the 15 arbitrary-command sites, only 3 have NO
+  allowlist at all (denylist-only) — those are today's real fix. The other 12 (test-runner,
+  dependency-audit, QA, devops, cicd, refactor, dependency-agent, migration-agent, ai-engineer,
+  cleanup-agent, infra-dry-run) were deliberately NOT wired today: they need the TARGET repo's own
+  installed toolchain (venv/node_modules) inside the sandbox, which a minimal generic image doesn't
+  have — sandboxing them correctly needs either a per-repo sandbox image or an install-then-run
+  flow, real additional work that would have meant shipping an unverified partial if rushed today.
+  Named as an explicit, tracked follow-up in `answers.md`, not silently left unmentioned.
+  Tests: `tests/test_sandbox.py` (8 new, real Docker calls throughout except the one
+  Docker-unavailable branch — proves the primitive itself: real command execution, env passthrough,
+  no host-env leakage into the container, the exact `find -mindepth 1 -delete` bypass contained to
+  the mounted workspace, `--network=none` genuinely blocking egress, fail-closed on Docker
+  unavailability). `tests/test_bash_sandbox_wiring.py` (9 new — the same bypass proven through all
+  3 real wired handlers, `extra_env` reaching the sandboxed container, the explicit
+  `BASH_SANDBOX_ENABLED=false` opt-out genuinely bypassing the sandbox, Docker-unavailable
+  surfacing `[SANDBOX UNAVAILABLE]` rather than a silent host fallback).
+  **Two real, expected fallout items found and fixed, not left broken**:
+  1. `tests/test_audit05_security_fixes.py::TestChatBashCwd::test_bash_ignores_inp_cwd_override` —
+     this test's SECURITY INTENT (an LLM-supplied `cwd` override can never escape the repo
+     worktree) is still fully upheld, actually more strongly than before (the sandboxed container
+     literally cannot see anything outside the one mount, not just "cwd defaults elsewhere"), but
+     its verification MECHANISM (asserting a `cwd=` kwarg on a direct `subprocess.run` call) no
+     longer matches how the code enforces the boundary — updated to assert `run_sandboxed()` itself
+     receives the real worktree path, never the LLM-supplied override, matching this engagement's
+     established "update the test to match an intentionally strengthened contract" principle.
+  2. `tests/test_credential_vault.py::TestBashToolExtraEnv::test_bash_tool_sees_injected_custom_secret`
+     — was already a known, pre-existing baseline failure (Windows `cmd.exe` doesn't expand POSIX
+     `$VAR` syntax the test's command used) — now genuinely PASSES as a real, understood, positive
+     side effect: the command now always runs inside a Linux container's real `sh`, regardless of
+     host OS. Confirmed by reasoning through the actual mechanism, not assumed lucky.
+  Full regression (final confirmation run): **3388 passed / 20 failed / 55 skipped / 17 deselected**
+  (432s) — the 21-item baseline minus exactly the one item explained above as a genuine fix, zero
+  new regressions; an intermediate run before the `TestChatBashCwd` fix had shown 21 failed (1 new,
+  1 fixed — net same count, investigated rather than assumed pre-existing, per this engagement's
+  standing rule). `black`/`ruff`/`mypy --strict` clean on every touched file (only the same two
+  pre-existing, unrelated errors as every prior day — `budget_manager.py`'s `resource` import,
+  `test_pending_gaps.py`'s `BaseRoute.path`). `answers.md` Q21's Sandboxing item flipped
+  NOT REAL → REAL-for-3-tools-honestly-scoped (not a blanket YES); risk-appendix item #1 marked
+  PARTIALLY RESOLVED with the exact same honest scope note.
+  **Stage 0's sandbox work (Days 8-9) is closed within its today-provable scope. Two named,
+  tracked follow-ups remain open (the other 12 bash handlers; the production Docker-daemon-access
+  topology) — not silently dropped. Next: Day 10 — Stage 0 regression + Gap Audit Protocol run
+  (the first of the 4 built-in checkpoints).**
+- **2026-07-30 (same day)**: **Day 10 (Stage 0 regression + Gap Audit Protocol, first of 4 built-in
+  checkpoints) complete.** Ran the Protocol as specified — re-derived, not summarized from memory:
+  **Step 1-2 (re-run every cited test, re-check every cited file:line)**: re-ran, live, the full
+  20 test files cited as evidence across Days 2-9 (297 individual test cases: everything under
+  `test_memory_project_scoping_migration/queries`, `test_repo_scoping_race_fix`,
+  `test_phase52_file_mutation_confirmation`, `test_versioned_memory`/`_sync`,
+  `test_lesson_versioned_memory_wiring`, `test_phase_gap6_memory_promote_lesson`,
+  `test_credential_encryption_production_gate`, `test_audit_log_migration`,
+  `test_dependency_security_agent_audit_gate`, `test_analyzer_tier_confirmed`,
+  `test_memory_archived_filter`, `test_sandbox`, `test_bash_sandbox_wiring`,
+  `test_audit05_security_fixes`, `test_credential_vault`, `test_day2_agent_contracts`,
+  `test_pending_gaps`, `test_retention_archive`). Also re-ran, live, two specific claimed-behavior
+  assertions directly (not just via their test files): `check_command("find /workspace -mindepth 1
+  -delete", strict=True)` still returns `allowed=True` (Day 8/9's core finding still holds), and
+  `pip-audit -r requirements.txt` (no ignore flags) is still fully clean (Day 7's ecdsa fix still
+  holds) — both re-confirmed, not assumed stable since being fixed.
+  **One stale citation found and fixed**: answers.md's Q21 update cited
+  `_require_credential_encryption_in_production` at `app/config.py:456-469` — re-checking against
+  current code found that function actually at line 487-499 now (Day 9's new sandbox settings
+  fields, added *after* `credential_encryption_key` in the same file, pushed everything below them
+  down 31 lines). Fixed in place, with a note explaining the drift rather than silently
+  re-numbering. **One broader, known-but-deliberately-out-of-scope citation-drift risk flagged,
+  not silently ignored**: Day 9's new `_run_bash_command` helper was inserted early in
+  `app/agents/tools.py` (~55 lines, right after the top imports), which shifted every citation to a
+  `tools.py` line number below that point throughout the rest of the (pre-existing, much larger)
+  original 120-question audit document by a similar amount. Re-numbering every such citation
+  fleet-wide is a large, separate undertaking more properly scoped to Day 65's Final Full-System
+  Gap Audit (which re-derives the whole document fresh) than to this checkpoint — flagged here as a
+  real, known gap rather than quietly left for a future reader to discover.
+  **Three real, reproducible bugs found and fixed — this checkpoint's actual value, not a rubber
+  stamp**: the first full re-run surfaced an intermittent failure in
+  `test_repo_scoping_race_fix.py::test_dispatch_decision_uses_tasks_own_repo_even_if_global_changed_meanwhile`
+  (Day 4's own test) that passed every time in isolation but failed in full-suite runs — investigated
+  rather than dismissed as flaky. Bisection (splitting the 20-file batch in half repeatedly against
+  this one target test) found not one but **three independent, real pollution sources**, all the
+  same root cause: `app.db.session.get_session_factory()` caches a process-wide `AsyncEngine`
+  singleton; any test whose code path touches it (directly, or indirectly via
+  `with TestClient(app) as client:` running `app.main`'s real lifespan) binds that singleton to
+  *that test's own* pytest-asyncio event loop; the next test to touch it inherits a reference bound
+  to an already-closed loop and fails with `RuntimeError: Event loop is closed`. Found via
+  bisection: (1) `test_audit_log_migration.py` (Day 7 — `AuditLog._write_to_db()` uses
+  `get_session_factory()` internally), (2) `test_credential_vault.py::TestCustomSecretsApi` (a
+  **pre-existing file, not written this engagement** — its `TestClient(app)`-based tests trigger
+  `app.main`'s lifespan, which calls `get_session_factory()` directly and spawns
+  `start_retention_loop()` as a background task), (3) `test_memory_archived_filter.py` (Day 7 — its
+  own already-partial fix for this exact hazard reset the global engine *before* calling
+  `_archive_table()` but never *after*, leaving it bound to the test's loop for the rest of the run).
+  After fixing (1) and (3) individually and finding the pollution persisted from (2), stopped
+  patching files one at a time and fixed the class of bug at its root instead: new
+  `tests/conftest.py::reset_db_engine` — an autouse, function-scoped fixture that resets
+  `app.db.session._engine`/`_session_factory` to `None` after every single test in the suite. A
+  no-op for the vast majority of tests that never touch the global engine at all; guarantees
+  whichever test runs next always gets one freshly bound to its own event loop. Confirmed this
+  eliminates the whole class, not just the 3 found instances: re-ran the 20-file gap-audit batch
+  (297 tests, all pass) and the full backend suite.
+  `black`/`ruff`/`mypy --strict` clean on every touched file (`tests/test_audit_log_migration.py`,
+  `tests/test_credential_vault.py`, `tests/test_memory_archived_filter.py`, `tests/conftest.py`) —
+  only the same two pre-existing, unrelated errors as every prior day.
+  Full regression (final, with the new autouse fixture active for the whole suite): **3388 passed /
+  20 failed / 55 skipped / 17 deselected** (417s) — the established clean baseline exactly (the
+  21-item baseline minus the one item Day 9 genuinely fixed as a side effect), zero new
+  regressions, and notably the intermittent `test_dispatch_decision_uses_tasks_own_repo...` failure
+  did not recur even once across this run or the prior 20-file-batch re-runs, consistent with the
+  fix addressing a real, systemic cause rather than coincidentally passing this time.
+  **Gap Audit Protocol result: of the ~17 distinct answers.md verdict-flip claims made across Days
+  2-9 (Q5/Q51/Q94/Q95×2/Q114/Q120×2/Q39×3/Q75/Q93/Q21×2/Q24/Q92/Q96), all independently
+  re-confirmed against current code and live test runs — 0 regressed, 0 found incomplete. 3 real,
+  previously-undiscovered test-infrastructure bugs found and fixed as a direct result of running
+  this Protocol for real rather than treating it as a status summary, exactly the "produces a
+  specific, evidenced punch list, nothing is ever probably fine" standard this Protocol was defined
+  to meet.** Stage 0 (Days 1-10, all 3 root-cause clusters + cheap-fix batch + honestly-scoped
+  sandboxing) is fully closed. **Next: Stage 1 (Days 11-34) — converting the 255 PARTIAL items
+  across 7 sub-buckets, starting with Days 11-14 (agent-intelligence defaults:
+  `enable_critique`/`enable_replanning` for the 5 highest-output-risk agents, with the owner's
+  required cost/latency review gate before Day 15 starts).**

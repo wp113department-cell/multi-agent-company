@@ -28,6 +28,7 @@ from app.db.repository import (
     list_tasks,
     transition_task,
     get_or_create_pipeline_state,
+    resolve_task_repo_path,
 )
 from app.config import get_settings
 from app.middleware.rbac import require_approver, require_authenticated
@@ -184,8 +185,6 @@ async def run_task(
 ) -> dict[str, Any]:
     """Trigger planning pipeline or simple planner for a pending/blocked/rejected task."""
     from app.api.agents import launch_planning_pipeline, launch_planner
-    from app.db.models import Repo
-    from sqlalchemy import select
 
     task = await get_task(db, task_id)
     if not task:
@@ -196,12 +195,7 @@ async def run_task(
         )
 
     # Resolve which repo path agents should use for this task
-    repo_path: str | None = None
-    if task.repo_id:
-        result = await db.execute(select(Repo).where(Repo.id == task.repo_id))
-        repo_obj = result.scalar_one_or_none()
-        if repo_obj and repo_obj.status == "ready":
-            repo_path = repo_obj.local_path
+    repo_path = resolve_task_repo_path(task)
 
     await transition_task(db, task_id, "planning")
     await append_log(db, task_id, "pipeline", "Planning triggered")
@@ -234,8 +228,8 @@ async def restart_task(
 ) -> dict[str, Any]:
     """Reset a failed/blocked/error task back to pending and re-trigger the planning pipeline."""
     from app.api.agents import launch_planning_pipeline
-    from app.db.models import Repo, DevTask
-    from sqlalchemy import select, update
+    from app.db.models import DevTask
+    from sqlalchemy import update
 
     task = await get_task(db, task_id)
     if not task:
@@ -273,12 +267,7 @@ async def restart_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found after reset")
 
-    repo_path: str | None = None
-    if task.repo_id:
-        result = await db.execute(select(Repo).where(Repo.id == task.repo_id))
-        repo_obj = result.scalar_one_or_none()
-        if repo_obj and repo_obj.status == "ready":
-            repo_path = repo_obj.local_path
+    repo_path = resolve_task_repo_path(task)
 
     await transition_task(db, task_id, "planning")
     await append_log(
@@ -305,8 +294,6 @@ async def approve_task(
 ) -> dict[str, Any]:
     """Approve diff after coding — start coder or mark completed."""
     from app.api.agents import launch_coder
-    from app.db.models import Repo
-    from sqlalchemy import select
 
     task = await get_task(db, task_id)
     if not task:
@@ -338,12 +325,7 @@ async def approve_task(
     # the task's assigned repo (task.repo_id), unlike /run, /restart, and
     # /pipeline/approve — launch_coder silently fell back to the single
     # global active repo, ignoring per-task repo selection entirely.
-    repo_path: str | None = None
-    if task.repo_id:
-        result = await db.execute(select(Repo).where(Repo.id == task.repo_id))
-        repo_obj = result.scalar_one_or_none()
-        if repo_obj and repo_obj.status == "ready":
-            repo_path = repo_obj.local_path
+    repo_path = resolve_task_repo_path(task)
 
     plan = str(task.plan or "")
     task = await transition_task(db, task_id, "coding")

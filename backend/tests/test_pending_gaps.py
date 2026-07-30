@@ -332,7 +332,7 @@ class TestJWTModule:
 
     def test_expired_token_raises_jwterror(self) -> None:
         from app.auth.jwt import create_access_token, decode_access_token
-        from jose import JWTError
+        from jwt import PyJWTError as JWTError
 
         with patch("app.auth.jwt.get_settings") as mock_s:
             s = MagicMock()

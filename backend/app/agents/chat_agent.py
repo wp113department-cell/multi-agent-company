@@ -22,10 +22,11 @@ streaming turn) and `execute_tool` (one tool call, looping back to itself
 via a conditional edge until a turn's tool_use batch is drained, then
 handing back to `call_llm`) are separate, independently checkpointed steps.
 A confirmation-gated tool's handler calls `interrupt()` as the very first
-side-effecting-adjacent step of its branch (verified true for all 6 real
+side-effecting-adjacent step of its branch (verified true for all 8 real
 call sites — `git_push`, dangerous `bash`, `git_reset --hard`,
-`undo_changes`, `run_migration`, `seed_database` — nothing before the
-confirmation point in any of them does real work, only cheap string/path
+`undo_changes`, `run_migration`, `seed_database`, and, as of gap-closure
+Day 5, `delete_file` and `write_file`-on-an-existing-file — nothing before
+the confirmation point in any of them does real work, only cheap string/path
 prep). So when `execute_tool` replays after a resume: prior tool-call nodes
 never re-execute (proven, not assumed); nothing inside *this* node
 re-executes a side effect either, because there wasn't one before
@@ -789,6 +790,23 @@ class ChatAgent:
             if _is_protected_path(rel):
                 return f"[POLICY DENIED] Cannot write to protected path: {rel}"
             target = root / rel
+            # Gap-closure Day 5 (root cause 2, answers.md Q39): write_file
+            # replaces a file's ENTIRE content with no diff-awareness, unlike
+            # edit_file's precise, unique old_string->new_string replacement
+            # (inherently safer, git-diffable, and left ungated — matching
+            # how coding agents normally operate without per-edit
+            # confirmation). Gating creation of a brand-new file would
+            # disrupt the agent's core, extremely frequent workflow for no
+            # real safety benefit (nothing existing is at risk); gating a
+            # silent full-content overwrite of a file that already has real
+            # content is the actual destructive case this closes.
+            if target.exists():
+                approved = await self._confirm(
+                    description="Overwrite an existing file's entire content",
+                    details=rel,
+                )
+                if not approved:
+                    return f"[DENIED] User declined to overwrite: {rel}"
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(str(inp["content"]), encoding="utf-8")
             return f"Written {rel} ({len(str(inp['content']))} bytes)"
@@ -861,6 +879,13 @@ class ChatAgent:
                 return (
                     f"[ERROR] {rel} is a directory — use bash 'rm -rf' for directories"
                 )
+            # Gap-closure Day 5 (root cause 2, answers.md Q39): deletion is
+            # irreversible and, unlike write_file/edit_file, not something a
+            # coding agent does dozens of times per turn — same confirmation
+            # pattern as git_push/dangerous-bash/git_reset --hard below.
+            approved = await self._confirm(description="Delete a file", details=rel)
+            if not approved:
+                return f"[DENIED] User declined to delete: {rel}"
             target.unlink()
             return f"Deleted {rel}"
 

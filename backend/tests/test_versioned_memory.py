@@ -69,7 +69,13 @@ def _patched_embed(vectors: list[list[float]]) -> Any:
     return _fake_embed
 
 
-def test_publish_fresh_topic_creates_version_1_published() -> None:
+def test_publish_fresh_topic_creates_version_1_draft() -> None:
+    """Gap-closure Day 6 (root cause 3, answers.md Q75/Q93): publish() no
+    longer directly publishes — every lesson lands as a draft, invisible to
+    the rest of the fleet, until knowledge_curator's APPLY phase calls
+    promote() (only reachable after a human approves that specific
+    curation action). See test_promote_moves_a_draft_to_published_and_syncs_
+    to_memory_embeddings below for the promotion half."""
     with patch("app.memory.store._embed", _patched_embed([_DIFFERENT_VECTOR])):
         store = VersionedMemoryStore()
         result = store.publish(
@@ -77,27 +83,26 @@ def test_publish_fresh_topic_creates_version_1_published() -> None:
         )
     try:
         assert result.version == 1
-        assert result.state == "published"
+        assert result.state == "draft"
         assert result.supersedes_id is None
     finally:
         _cleanup(result.lesson_id)
 
 
-def test_publish_similar_content_triggers_merge_not_duplicate() -> None:
+def test_publish_similar_content_after_promotion_creates_a_merge_draft() -> None:
+    """Gap-closure Day 6: merging only makes sense against an already-
+    PUBLISHED prior lesson (_find_most_similar_published only ever looks at
+    state='published' rows) — so v1 must be explicitly promoted first, same
+    as any real curator-approved lesson would be. The merge result itself is
+    now a DRAFT too (not immediately published) — it needs its own
+    promotion, proven separately below."""
     with patch(
         "app.memory.store._embed",
-        # v1: content embed, sync-to-memory-embeddings embed.
-        # v2 (merge): content embed (must be similar to v1's), merged-content
-        # embed, sync-to-memory-embeddings embed. The sync embeds don't feed
-        # the versioned_lessons similarity search, so their value is a don't-care.
+        # v1 content, v1 promote's sync embed, v2 content (similar, to match
+        # the now-published v1), merged-content embed. The sync embed's
+        # value is a don't-care.
         _patched_embed(
-            [
-                _BASE_VECTOR,
-                _DIFFERENT_VECTOR,
-                _SIMILAR_VECTOR,
-                _DIFFERENT_VECTOR,
-                _DIFFERENT_VECTOR,
-            ]
+            [_BASE_VECTOR, _DIFFERENT_VECTOR, _SIMILAR_VECTOR, _DIFFERENT_VECTOR]
         ),
     ), patch("anthropic.Anthropic") as MockAnthropic:
         mock_client = MagicMock()
@@ -112,6 +117,7 @@ def test_publish_similar_content_triggers_merge_not_duplicate() -> None:
             "v1: validate inputs at the boundary",
             agent_name="tester",
         )
+        store.promote(v1.lesson_id, agent_name="tester")
         try:
             v2_result = store.publish(
                 "td_vm_merge_topic",
@@ -122,20 +128,27 @@ def test_publish_similar_content_triggers_merge_not_duplicate() -> None:
             assert (
                 v2_result.lesson_id == v1.lesson_id
             )  # same lineage — merged, not a fresh publish
-            assert v2_result.state == "published"
+            assert v2_result.state == "draft"
             assert v2_result.content == "MERGED best-of-both content"
-            assert v2_result.version == 3  # v1=1, v2(draft)=2, merged=3
+            assert v2_result.version == 2  # v1=1 (published), merged draft=2
 
             mock_client.messages.create.assert_called_once()
         finally:
             _cleanup(v1.lesson_id)
 
 
-def test_publish_similar_content_flips_prior_states_correctly() -> None:
+def test_promoting_a_merge_draft_flips_the_prior_published_version_to_superseded() -> (
+    None
+):
+    """Gap-closure Day 6: the merge draft sits inert (state='draft',
+    v1 stays 'published' exactly as it was) until a human-approved
+    knowledge_curator promotion flips both — proven here by calling
+    promote() twice: once to publish v1, once to promote the merge draft
+    that supersedes it."""
     with patch(
         "app.memory.store._embed",
-        # Same 5-call shape as test_publish_similar_content_triggers_merge_not_duplicate:
-        # v1 content+sync, then v2 content (similar, to force the merge)+merged+sync.
+        # v1 content, v1-promote sync, v2 content (similar), merged content,
+        # merge-promote sync.
         _patched_embed(
             [
                 _BASE_VECTOR,
@@ -154,8 +167,10 @@ def test_publish_similar_content_flips_prior_states_correctly() -> None:
 
         store = VersionedMemoryStore()
         v1 = store.publish("td_vm_state_flip", "v1 content", agent_name="tester")
+        store.promote(v1.lesson_id, agent_name="tester")
         try:
             store.publish("td_vm_state_flip", "v2 content", agent_name="tester")
+            store.promote(v1.lesson_id, agent_name="tester")
 
             from sqlalchemy import select
             from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -187,31 +202,34 @@ def test_publish_similar_content_flips_prior_states_correctly() -> None:
                     await engine.dispose()
 
             states = asyncio.run(_query())
-            assert states == [(1, "superseded"), (2, "merged_into"), (3, "published")]
+            assert states == [(1, "superseded"), (2, "published")]
         finally:
             _cleanup(v1.lesson_id)
 
 
 def test_publish_different_topic_does_not_merge() -> None:
+    """Gap-closure Day 6: v1 is promoted first (see the merge test above for
+    why — an unpromoted draft is never a merge candidate at all, which would
+    otherwise make this test pass for the wrong reason). With v1 genuinely
+    published, a dissimilar-vector v2 must still NOT merge — isolating topic
+    similarity, not promotion state, as what this test actually checks."""
     with patch(
         "app.memory.store._embed",
-        # v1: content embed, sync embed. v2: content embed (dissimilar, so no
-        # merge), sync embed.
-        _patched_embed(
-            [_BASE_VECTOR, _BASE_VECTOR, _DIFFERENT_VECTOR, _DIFFERENT_VECTOR]
-        ),
+        # v1 content, v1-promote sync, v2 content (dissimilar, so no merge).
+        _patched_embed([_BASE_VECTOR, _DIFFERENT_VECTOR, _DIFFERENT_VECTOR]),
     ):
         store = VersionedMemoryStore()
         v1 = store.publish(
             "td_vm_topic_a", "content about topic A", agent_name="tester"
         )
+        store.promote(v1.lesson_id, agent_name="tester")
         try:
             v2 = store.publish(
                 "td_vm_topic_b", "content about topic B", agent_name="tester"
             )
             assert v2.lesson_id != v1.lesson_id
             assert v2.version == 1
-            assert v2.state == "published"
+            assert v2.state == "draft"
         finally:
             _cleanup(v1.lesson_id, v2.lesson_id)
 
@@ -237,7 +255,8 @@ def test_publish_with_zero_vector_never_merges() -> None:
 def test_rollback_restores_previous_published_version_and_state() -> None:
     with patch(
         "app.memory.store._embed",
-        # v1 content+sync, then v2 content (similar, forces merge)+merged+sync.
+        # v1 content, v1-promote sync, v2 content (similar), merged content,
+        # merge-promote sync.
         _patched_embed(
             [
                 _BASE_VECTOR,
@@ -256,8 +275,10 @@ def test_rollback_restores_previous_published_version_and_state() -> None:
 
         store = VersionedMemoryStore()
         v1 = store.publish("td_vm_rollback", "original content", agent_name="tester")
+        store.promote(v1.lesson_id, agent_name="tester")
         try:
             store.publish("td_vm_rollback", "conflicting content", agent_name="tester")
+            store.promote(v1.lesson_id, agent_name="tester")
 
             restored = store.rollback(v1.lesson_id)
             assert restored.content == "original content"
@@ -276,7 +297,8 @@ def test_rollback_with_no_superseded_version_raises() -> None:
 def test_archive_expired_marks_old_superseded_rows_archived() -> None:
     with patch(
         "app.memory.store._embed",
-        # v1 content+sync, then v2 content (similar, forces merge)+merged+sync.
+        # v1 content, v1-promote sync, v2 content (similar), merged content,
+        # merge-promote sync.
         _patched_embed(
             [
                 _BASE_VECTOR,
@@ -295,8 +317,10 @@ def test_archive_expired_marks_old_superseded_rows_archived() -> None:
 
         store = VersionedMemoryStore()
         v1 = store.publish("td_vm_archive", "original content", agent_name="tester")
+        store.promote(v1.lesson_id, agent_name="tester")
         try:
             store.publish("td_vm_archive", "conflicting content", agent_name="tester")
+            store.promote(v1.lesson_id, agent_name="tester")
 
             from datetime import datetime, timezone
 
@@ -328,9 +352,7 @@ def test_archive_expired_marks_old_superseded_rows_archived() -> None:
             asyncio.run(_backdate())
 
             archived_count = store.archive_expired()
-            assert (
-                archived_count >= 2
-            )  # the superseded v1 row and the merged_into v2 row
+            assert archived_count >= 1  # the superseded v1 row
         finally:
             _cleanup(v1.lesson_id)
 
@@ -378,26 +400,39 @@ def _cleanup_memory_embeddings(task_id: str) -> None:
     asyncio.run(_run())
 
 
-def test_publish_syncs_published_lesson_into_memory_embeddings() -> None:
+def test_promote_moves_a_draft_to_published_and_syncs_to_memory_embeddings() -> None:
     """A PUBLISHED versioned lesson must land in memory_embeddings
     (category="learning") too, so it's reachable by the same query path
     (query_learning_signals) a live agent run reads through — before this,
     versioned_lessons' whole DRAFT -> PUBLISHED lifecycle was confirmed
-    disconnected from live inference (MASTER_AGENT_v2.md §A.4, System 3)."""
-    with patch(
-        "app.memory.store._embed",
-        # Two _embed calls happen inside this one publish(): the lesson's own
-        # embedding, then the memory_embeddings sync's embedding.
-        _patched_embed([_DIFFERENT_VECTOR, _DIFFERENT_VECTOR]),
-    ):
-        store = VersionedMemoryStore()
-        result = store.publish(
-            "td_vm_sync_topic",
-            "td_vm_sync_marker: exponential backoff caps retries at 30s",
-            agent_name="td_vm_sync_agent",
-        )
-
+    disconnected from live inference (MASTER_AGENT_v2.md §A.4, System 3).
+    Gap-closure Day 6: this sync now fires on promote(), not publish() —
+    a draft that's never promoted must never reach memory_embeddings at
+    all, which is exactly what makes the new gate real."""
+    # Everything, including the assertions right after publish()/promote(),
+    # is inside this one try/finally — an assertion failing partway through
+    # must never orphan real rows the way a bare `with:` block followed by
+    # a separate `try/finally` would (caught for real: an earlier version
+    # of this test left 2 real rows behind in exactly this way).
+    store = VersionedMemoryStore()
+    lesson_id: str | None = None
     try:
+        with patch(
+            "app.memory.store._embed",
+            # One _embed call for publish() (the lesson's own embedding),
+            # one more for promote()'s sync-to-memory-embeddings call.
+            _patched_embed([_DIFFERENT_VECTOR, _DIFFERENT_VECTOR]),
+        ):
+            result = store.publish(
+                "td_vm_sync_topic",
+                "td_vm_sync_marker: exponential backoff caps retries at 30s",
+                agent_name="td_vm_sync_agent",
+            )
+            lesson_id = result.lesson_id
+            assert result.state == "draft"
+            promoted = store.promote(lesson_id, agent_name="td_vm_sync_agent")
+            assert promoted.state == "published"
+
         from sqlalchemy import select
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -432,5 +467,66 @@ def test_publish_syncs_published_lesson_into_memory_embeddings() -> None:
         assert rows[0].category == "learning"
         assert "td_vm_sync_marker" in rows[0].description
     finally:
+        if lesson_id is not None:
+            _cleanup(lesson_id)
+        _cleanup_memory_embeddings("fleet-td_vm_sync_agent")
+
+
+def test_unpromoted_draft_never_reaches_memory_embeddings() -> None:
+    """The actual safety proof of gap-closure Day 6's gate: publish() alone
+    — with no promote() call — must leave zero trace in memory_embeddings.
+    Before this change, a single publish() call was enough to make a lesson
+    real, fleet-wide, immediately-injected-into-every-agent-prompt memory;
+    now it takes an explicit, human-approved promotion."""
+    with patch("app.memory.store._embed", _patched_embed([_DIFFERENT_VECTOR])):
+        store = VersionedMemoryStore()
+        result = store.publish(
+            "td_vm_unpromoted_topic",
+            "td_vm_unpromoted_marker: this must never become real memory",
+            agent_name="td_vm_unpromoted_agent",
+        )
+
+    try:
+        assert result.state == "draft"
+
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        from app.config import get_settings
+        from app.db.models import MemoryEmbedding
+
+        async def _query() -> list[Any]:
+            engine = create_async_engine(
+                get_settings().database_url, pool_pre_ping=True
+            )
+            try:
+                async with async_sessionmaker(
+                    engine, expire_on_commit=False
+                )() as session:
+                    rows = (
+                        (
+                            await session.execute(
+                                select(MemoryEmbedding).where(
+                                    MemoryEmbedding.task_id
+                                    == "fleet-td_vm_unpromoted_agent"
+                                )
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    return list(rows)
+            finally:
+                await engine.dispose()
+
+        rows = asyncio.run(_query())
+        assert rows == []
+    finally:
         _cleanup(result.lesson_id)
+        _cleanup_memory_embeddings("fleet-td_vm_unpromoted_agent")
+
+
+def test_promote_raises_when_no_draft_exists() -> None:
+    with pytest.raises(ValueError, match="No draft version to promote"):
+        VersionedMemoryStore().promote("td_vm_never_existed_lesson_id")
         _cleanup_memory_embeddings("fleet-td_vm_sync_agent")

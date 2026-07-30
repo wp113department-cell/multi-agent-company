@@ -113,6 +113,22 @@ def run_dependency_agent(
         enable_memory=True,
         enable_reflection=True,
         enable_lesson=True,
+        # Gap-closure Day 5 (root cause 2, answers.md Q39): dependency_agent
+        # has real edit_file access to requirements.txt/package.json with no
+        # gate at all before this — the role prompt asks it not to modify
+        # files unless explicitly asked, but nothing in code enforced that.
+        # Same flag docker_agent/cicd_agent already use for their own
+        # real-side-effect risk. Honest limitation, not glossed over: unlike
+        # chat_agent.py's self._confirm()/interrupt(), this does NOT pause
+        # before the edit happens — base_graph.py's run_agent_graph has no
+        # checkpointer for worker agents yet (that's gap-closure Stage 1.3,
+        # extending the same AsyncPostgresSaver mechanism chat_agent.py
+        # already has). What this actually does today: marks the result
+        # requires_human_approval=True so a human must review before
+        # whatever consumed this agent's output treats it as final — a
+        # real, but after-the-fact, review gate. A genuine pre-edit pause
+        # for this agent depends on Stage 1.3 landing first.
+        human_approval_required=True,
         max_turns=20,
     )
 

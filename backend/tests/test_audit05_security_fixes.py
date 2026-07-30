@@ -324,6 +324,15 @@ class TestCommandOverrideEligibility:
 
 class TestChatBashCwd:
     def test_bash_ignores_inp_cwd_override(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        """Gap-closure Day 9 (answers.md Q21): bash's execution primitive
+        moved from a direct subprocess.run(cwd=...) call to
+        app.policy.sandbox.run_sandboxed(cwd=...) (a Docker bind-mount, not
+        a subprocess cwd kwarg) — same invariant this test always checked
+        (inp["cwd"] can never override the real worktree), verified against
+        the new mechanism instead of the retired one. The sandboxed
+        containment is actually a stronger guarantee than the old subprocess
+        cwd check: `outside` isn't just unused as a starting directory, it's
+        never visible inside the container at all."""
         from app.agents.tools import make_chat_handlers
 
         repo = tmp_path / "repo"
@@ -335,13 +344,18 @@ class TestChatBashCwd:
         handlers = make_chat_handlers(str(repo))
         bash = handlers["bash"]
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout="", stderr="", returncode=0)
+        with patch("app.policy.sandbox.run_sandboxed") as mock_run_sandboxed:
+            from app.policy.sandbox import SandboxResult
+
+            mock_run_sandboxed.return_value = SandboxResult(
+                stdout="", stderr="", returncode=0
+            )
             bash({"command": "pwd", "cwd": str(outside)})
 
-        assert mock_run.call_count == 1
-        _, kwargs = mock_run.call_args
-        assert kwargs["cwd"] == str(repo)
+        assert mock_run_sandboxed.call_count == 1
+        args, _kwargs = mock_run_sandboxed.call_args
+        assert args[1] == str(repo)  # run_sandboxed(command, cwd, ...)
+        assert args[1] != str(outside)
 
 
 # ---------------------------------------------------------------------------

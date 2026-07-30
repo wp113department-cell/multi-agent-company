@@ -25,6 +25,8 @@ from app.agents.tools import (
     make_submit_enhancement_request_handler,
     memory_curate_read,
     memory_curate_write,
+    memory_list_draft_lessons,
+    memory_promote_lesson,
     memory_search,
 )
 from app.config import get_settings
@@ -38,8 +40,10 @@ AGENT_CONTRACT: dict[str, Any] = {
         "read_file",
         "memory_search",
         "memory_curate_read",
+        "memory_list_draft_lessons",
         "submit_enhancement_request",
         "memory_curate_write",
+        "memory_promote_lesson",
         "write_file",
         "edit_file",
         "git_commit_change",
@@ -78,6 +82,15 @@ _MEMORY_CURATE_READ_TOOL_SPEC = {
         "required": [],
     },
 }
+_MEMORY_LIST_DRAFT_LESSONS_TOOL_SPEC = {
+    "name": "memory_list_draft_lessons",
+    "description": "List versioned lessons in draft state, awaiting review — gap-closure Day 6's discovery tool.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"limit": {"type": "integer"}},
+        "required": [],
+    },
+}
 _MEMORY_CURATE_WRITE_TOOL_SPEC = {
     "name": "memory_curate_write",
     "description": "Update a memory entry during curation (recategorize, or note a supersession).",
@@ -89,6 +102,15 @@ _MEMORY_CURATE_WRITE_TOOL_SPEC = {
             "note": {"type": "string"},
         },
         "required": ["id"],
+    },
+}
+_MEMORY_PROMOTE_LESSON_TOOL_SPEC = {
+    "name": "memory_promote_lesson",
+    "description": "Promote a draft versioned lesson to published, real fleet memory — gap-closure Day 6's gate.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"lesson_id": {"type": "string"}},
+        "required": ["lesson_id"],
     },
 }
 _SUBMIT_ENHANCEMENT_TOOL_SPEC = {
@@ -130,6 +152,7 @@ SCAN_TOOLS = [
     READ_ONLY_TOOLS[0],
     _MEMORY_SEARCH_TOOL_SPEC,
     _MEMORY_CURATE_READ_TOOL_SPEC,
+    _MEMORY_LIST_DRAFT_LESSONS_TOOL_SPEC,
     _SUBMIT_ENHANCEMENT_TOOL_SPEC,
 ]
 _WRITE_FILE_SPEC, _EDIT_FILE_SPEC, _RUN_TESTS_SPEC, _GIT_COMMIT_SPEC = (
@@ -138,6 +161,7 @@ _WRITE_FILE_SPEC, _EDIT_FILE_SPEC, _RUN_TESTS_SPEC, _GIT_COMMIT_SPEC = (
 APPLY_TOOLS = [
     READ_ONLY_TOOLS[0],
     _MEMORY_CURATE_WRITE_TOOL_SPEC,
+    _MEMORY_PROMOTE_LESSON_TOOL_SPEC,
     _WRITE_FILE_SPEC,
     _EDIT_FILE_SPEC,
     _GIT_COMMIT_SPEC,
@@ -156,7 +180,11 @@ _SCAN_CFG = VerificationConfig(
 )
 
 _APPLY_CFG = VerificationConfig(
-    set_by={"memory_curate_write": "curated", "git_commit_change": "committed"},
+    set_by={
+        "memory_curate_write": "curated",
+        "memory_promote_lesson": "curated",
+        "git_commit_change": "committed",
+    },
     reset_by=(),
     reset_keys=(),
     enforce_in_result={"curated": "curated"},
@@ -169,6 +197,7 @@ def make_scan_handlers(repo_path: str, trace_id: str = "") -> dict[str, Any]:
     handlers["record_learning"] = make_record_learning_handler("knowledge_curator")
     handlers["memory_search"] = memory_search
     handlers["memory_curate_read"] = memory_curate_read
+    handlers["memory_list_draft_lessons"] = memory_list_draft_lessons
     handlers["submit_enhancement_request"] = make_submit_enhancement_request_handler(
         "knowledge_curator", trace_id=trace_id
     )
@@ -179,6 +208,7 @@ def make_apply_handlers(repo_path: str) -> dict[str, Any]:
     handlers = make_fleet_apply_handlers(repo_path)
     handlers["record_learning"] = make_record_learning_handler("knowledge_curator")
     handlers["memory_curate_write"] = memory_curate_write
+    handlers["memory_promote_lesson"] = memory_promote_lesson
     return handlers
 
 
@@ -193,9 +223,15 @@ def run_knowledge_curator_scan(trace_id: str = "") -> AgentResult:
         "mis-categorized (task | architecture | failure | learning), or gaps where an obvious "
         "lesson was never recorded. Use memory_curate_read to browse recent entries and "
         "memory_search to check whether a topic already has coverage before assuming it's "
-        "missing. If you find a real curation issue, file submit_enhancement_request with "
-        "category=knowledge, describing the specific entries involved and the proposed "
-        "action. If memory looks clean, that's a normal outcome — don't invent an issue."
+        "missing. Also use memory_list_draft_lessons — every lesson any agent records now "
+        "lands as a draft, invisible to the rest of the fleet, until explicitly promoted. "
+        "Read each draft's real content before judging it; if it's genuine and worth making "
+        "real fleet memory, file submit_enhancement_request with category=knowledge "
+        "proposing exactly that promotion (cite the lesson_id) — never propose promoting a "
+        "draft you haven't actually read. If you find a real curation issue, file "
+        "submit_enhancement_request with category=knowledge, describing the specific "
+        "entries involved and the proposed action. If memory looks clean, that's a normal "
+        "outcome — don't invent an issue."
     )
 
     final_state = run_agent_graph(
@@ -253,10 +289,11 @@ def run_knowledge_curator_apply(
 
     msg = (
         f"Approved curation action #{request_id}: {description}\n\n"
-        "Carry out this specific curation action using memory_curate_write. Only use "
-        "write_file/edit_file/git_commit_change if the action specifically calls for a "
-        "role-prompt change — most curation actions only touch memory rows. Call submit_fix "
-        "when done."
+        "Carry out this specific curation action using memory_curate_write, or, if this "
+        "approved action is a lesson promotion, memory_promote_lesson with the exact "
+        "lesson_id named in the request. Only use write_file/edit_file/git_commit_change "
+        "if the action specifically calls for a role-prompt change — most curation actions "
+        "only touch memory rows. Call submit_fix when done."
     )
 
     final_state = run_agent_graph(

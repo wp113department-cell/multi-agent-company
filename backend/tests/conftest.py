@@ -54,3 +54,32 @@ def reset_settings_cache() -> None:
     import app.config as cfg
 
     cfg._settings = None
+
+
+@pytest.fixture(autouse=True)
+def reset_db_engine():  # type: ignore[no-untyped-def]
+    """Gap-closure Day 10 (Gap Audit Protocol, first checkpoint) — real,
+    reproducible, pre-existing hazard this audit surfaced, not invented:
+    app.db.session.get_session_factory()/get_engine() cache a process-wide
+    AsyncEngine singleton. Any test whose code path touches it (directly, or
+    indirectly via `with TestClient(app) as client:` running app.main's real
+    lifespan) binds that singleton to *that test's own* event loop. Because
+    pytest-asyncio gives async tests (and asyncio.run()-based sync tests)
+    their own event loop each, the NEXT test to touch get_session_factory()
+    inherits a reference bound to an already-closed loop and fails with
+    "RuntimeError: Event loop is closed" — reproduced live via bisection
+    across three separate, unrelated test files before this fixture existed
+    (see the per-file comments this replaced in test_audit_log_migration.py,
+    test_credential_vault.py, test_memory_archived_filter.py — kept in place
+    since this fixture doesn't retroactively explain history, it prevents
+    recurrence). Resetting to None after every test — not disposing the old
+    engine, matching this codebase's own established convention for this
+    exact reset (test_retention_archive.py originally established it) — is
+    a no-op for the vast majority of tests that never touch it at all, and
+    guarantees whichever test runs next gets one freshly bound to its own
+    event loop instead of inheriting a stale one."""
+    yield
+    import app.db.session as _sess
+
+    _sess._engine = None
+    _sess._session_factory = None

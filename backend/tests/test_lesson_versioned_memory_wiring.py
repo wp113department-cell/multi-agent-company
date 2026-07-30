@@ -153,7 +153,11 @@ def test_lesson_flows_into_versioned_memory_when_voyage_key_configured(
         rows = asyncio.run(_query())
         assert len(rows) == 1, "lesson never reached versioned_memory"
         assert "td_lvm_gap_closure_test" in rows[0].content
-        assert rows[0].state == "published"
+        # Gap-closure Day 6 (root cause 3, answers.md Q75/Q93): the lesson
+        # reaches versioned_memory as a DRAFT now, not immediately published
+        # — it takes an explicit, human-approved knowledge_curator promotion
+        # (memory_promote_lesson) to become real, queryable fleet memory.
+        assert rows[0].state == "draft"
     finally:
         _cleanup("lesson_versioned_memory_wiring_test_agent")
 

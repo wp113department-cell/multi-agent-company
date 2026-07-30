@@ -337,6 +337,28 @@ class TestBashToolExtraEnv:
 
 
 class TestCustomSecretsApi:
+    @pytest.fixture(autouse=True)
+    def _reset_global_session_factory(self):  # type: ignore[no-untyped-def]
+        """Gap-closure Day 10 (Gap Audit Protocol, first checkpoint): each
+        test here uses `with TestClient(app) as client:`, which runs
+        app.main's real lifespan startup/shutdown — that lifespan calls
+        app.db.session.get_session_factory() directly and also spawns
+        start_retention_loop() (itself get_session_factory()-backed) as a
+        background task, binding the process-wide engine singleton to this
+        test's own pytest-asyncio-independent event loop. Reproduced live:
+        running this class's tests before test_repo_scoping_race_fix.py
+        (whose _dispatch_decision also calls get_session_factory()) left
+        that later test's global engine bound to this class's already-torn-
+        -down TestClient loop, failing with "RuntimeError: Event loop is
+        closed" — bisected down to this exact class before fixing. Resetting
+        after every test here means whichever test runs next always gets a
+        freshly bound engine for its own event loop."""
+        yield
+        import app.db.session as _sess
+
+        _sess._engine = None
+        _sess._session_factory = None
+
     def test_full_lifecycle_via_http(self) -> None:
         from fastapi.testclient import TestClient
 

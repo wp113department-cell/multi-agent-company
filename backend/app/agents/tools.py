@@ -17,6 +17,61 @@ from app.policy.engine import (
     check_path_in_worktree,
 )
 
+# ---------------------------------------------------------------------------
+# Shared sandboxed-execution primitive — gap-closure Day 9 (answers.md Q21).
+# Used by the three fully-generic, denylist-only bash tools (chat_agent's
+# `bash`, coder's `bash`, make_scoped_bash_handler) — see
+# app/policy/sandbox.py's module docstring for the rollout-scope reasoning
+# (why the other ~12 already-allowlist-scoped bash handlers aren't wired to
+# this yet).
+# ---------------------------------------------------------------------------
+
+
+def _run_bash_command(
+    command: str,
+    cwd: str,
+    *,
+    timeout: int,
+    extra_env: dict[str, str] | None = None,
+) -> tuple[str, str, int, bool]:
+    """Returns (stdout, stderr, returncode, timed_out) regardless of which
+    path ran the command — each call site keeps its own existing output
+    formatting unchanged, only the execution primitive underneath it moves.
+
+    Routes through the real Docker sandbox (app.policy.sandbox.run_sandboxed)
+    when Settings.bash_sandbox_enabled is True (the default). Falls back to
+    direct host subprocess execution ONLY when an operator has explicitly
+    set BASH_SANDBOX_ENABLED=false — never silently, and never merely
+    because Docker itself is unreachable (that raises
+    SandboxUnavailableError inside run_sandboxed, surfaced here as a
+    [SANDBOX UNAVAILABLE] result instead of a quiet fallback).
+    """
+    settings = get_settings()
+    if settings.bash_sandbox_enabled:
+        from app.policy.sandbox import SandboxUnavailableError, run_sandboxed
+
+        try:
+            result = run_sandboxed(command, cwd, timeout=timeout, env=extra_env)
+            return result.stdout, result.stderr, result.returncode, result.timed_out
+        except SandboxUnavailableError as exc:
+            return "", f"[SANDBOX UNAVAILABLE] {exc}", -1, False
+
+    env = {**os.environ, **extra_env} if extra_env else None
+    try:
+        proc = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            timeout=timeout,
+            env=env,
+        )
+        return proc.stdout, proc.stderr, proc.returncode, False
+    except subprocess.TimeoutExpired:
+        return "", f"Command timed out after {timeout}s", -1, True
+
+
 # --- Tool specs (Anthropic input_schema format) ---
 
 READ_ONLY_TOOLS = [
@@ -793,6 +848,74 @@ def make_load_test_bash_handler(repo_path: str) -> Callable[[dict[str, Any]], st
 
 
 # ---------------------------------------------------------------------------
+# Scoped dependency-audit bash — gap-closure Day 7 (answers.md Q92).
+# roles/dependency_security_agent.md has always claimed "using LIVE audit
+# tooling only" / "never relies on training-data CVE recall", but the agent
+# had no tool capable of actually running one — every prior CVE claim was
+# necessarily the model's own (possibly stale, possibly invented) training
+# knowledge with no live tool call behind it. Same allowlist-then-denylist
+# pattern as make_test_runner_bash_handler/make_load_test_bash_handler,
+# scoped to pip-audit/npm audit only.
+# ---------------------------------------------------------------------------
+
+DEPENDENCY_AUDIT_ALLOWED_PREFIXES = (
+    "pip-audit",
+    "pip_audit",
+    "python -m pip_audit",
+    "python3 -m pip_audit",
+    "npm audit",
+)
+
+DEPENDENCY_AUDIT_BASH_TOOL: dict[str, Any] = {
+    "name": "bash",
+    "description": (
+        "Run a live dependency-vulnerability audit. Allowed: pip-audit (Python, "
+        "requirements.txt), npm audit (Node, package.json). Must be called at "
+        "least once before reporting any CVE — a finding not backed by this "
+        "run's real tool output is not a verified finding. No write operations."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "description": "pip-audit/npm audit command to run",
+            },
+        },
+        "required": ["command"],
+    },
+}
+
+
+def make_dependency_audit_bash_handler(
+    repo_path: str,
+) -> Callable[[dict[str, Any]], str]:
+    """Scoped bash handler for dependency_security_agent — the one real tool
+    call its role prompt's "LIVE audit tooling only" promise depends on."""
+
+    def bash(inp: dict[str, Any]) -> str:
+        cmd = str(inp["command"])
+        policy = check_allowlisted_command(cmd, DEPENDENCY_AUDIT_ALLOWED_PREFIXES)
+        if not policy.allowed:
+            return f"[POLICY DENIED] {policy.reason}"
+        try:
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=repo_path,
+                timeout=120,
+            )
+            out = (result.stdout + result.stderr)[:6000]
+            return out if out else "(no output — no known vulnerabilities found)"
+        except subprocess.TimeoutExpired:
+            return "[ERROR] Command timed out after 120s"
+
+    return bash
+
+
+# ---------------------------------------------------------------------------
 # Scoped infra dry-run bash — MASTER_AGENT_v2.md Phase 2.1 (Executor tier).
 # Validate/lint/build only — no apply, no deploy, no push. This is the exact
 # boundary the spec calls for: "must be able to apply and verify an infra
@@ -1263,21 +1386,13 @@ def make_coder_handlers(
         boundary_policy = check_command_stays_in_boundary(cmd, worktree_path)
         if not boundary_policy.allowed:
             return f"[POLICY DENIED] {boundary_policy.reason}"
-        env = {**os.environ, **extra_env} if extra_env else None
-        try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                cwd=worktree_path,
-                timeout=60,
-                env=env,
-            )
-            out = (result.stdout + result.stderr)[:4000]
-            return out if out else "(no output)"
-        except subprocess.TimeoutExpired:
+        stdout, stderr, _returncode, timed_out = _run_bash_command(
+            cmd, worktree_path, timeout=60, extra_env=extra_env
+        )
+        if timed_out:
             return "[ERROR] Command timed out after 60s"
+        out = (stdout + stderr)[:4000]
+        return out if out else "(no output)"
 
     def edit_file(inp: dict[str, Any]) -> str:
         rel_path = str(inp["path"])
@@ -7129,22 +7244,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 return f"[DENIED] User declined to run: {command!r}"
 
         try:
-            result = subprocess.run(
-                command,
-                shell=True,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=120,
+            stdout, stderr, returncode, timed_out = _run_bash_command(
+                command, cwd, timeout=120
             )
-            output = result.stdout + (
-                ("\n[stderr]\n" + result.stderr) if result.stderr else ""
-            )
-            if result.returncode != 0:
-                output += f"\n[exit code: {result.returncode}]"
+            if timed_out:
+                return "[ERROR] Command timed out after 120s"
+            output = stdout + (("\n[stderr]\n" + stderr) if stderr else "")
+            if returncode != 0:
+                output += f"\n[exit code: {returncode}]"
             return output.strip() or "(no output)"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] Command timed out after 120s"
         except Exception as e:
             return f"[ERROR] {e}"
 
@@ -11457,6 +11565,72 @@ def memory_curate_read(inp: dict[str, Any]) -> str:
     )
 
 
+_MEMORY_LIST_DRAFT_LESSONS_TOOL: dict[str, Any] = {
+    "name": "memory_list_draft_lessons",
+    "description": (
+        "List versioned lessons currently in draft state, awaiting review. "
+        "Gap-closure Day 6: every record_learning call now files a draft, "
+        "not a published lesson — this is how a curation pass finds what's "
+        "actually pending, distinct from memory_curate_read (which only "
+        "ever sees the older, unversioned memory_embeddings table)."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "limit": {"type": "integer", "description": "Max rows (default 20)."},
+        },
+        "required": [],
+    },
+}
+
+
+def memory_list_draft_lessons(inp: dict[str, Any]) -> str:
+    import asyncio
+
+    limit = int(inp.get("limit", 20))
+
+    async def _list() -> list[dict[str, Any]]:
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        from app.db.models import VersionedLesson
+
+        engine = _new_isolated_db_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                result = await session.execute(
+                    select(VersionedLesson)
+                    .where(VersionedLesson.state == "draft")
+                    .order_by(VersionedLesson.created_at.desc())
+                    .limit(limit)
+                )
+                rows = result.scalars().all()
+                return [
+                    {
+                        "lesson_id": r.lesson_id,
+                        "topic": r.topic,
+                        "version": r.version,
+                        "content": r.content[:300],
+                        "created_at": r.created_at.isoformat() if r.created_at else "",
+                    }
+                    for r in rows
+                ]
+        finally:
+            await engine.dispose()
+
+    try:
+        rows = asyncio.run(_list())
+    except Exception as exc:
+        return f"[ERROR] memory_list_draft_lessons failed: {exc}"
+    if not rows:
+        return "(no draft lessons pending review)"
+    return "\n".join(
+        f"lesson_id={r['lesson_id']} v{r['version']} [{r['topic']}] "
+        f"({r['created_at']}) — {r['content']}"
+        for r in rows
+    )
+
+
 _MEMORY_CURATE_WRITE_TOOL: dict[str, Any] = {
     "name": "memory_curate_write",
     "description": "Update a memory entry during curation (recategorize, or mark as a superseded duplicate by rewriting its summary to note the supersession). Precursor to the full versioned-lesson lifecycle — light-touch, not a rewrite of history.",
@@ -11514,6 +11688,44 @@ def memory_curate_write(inp: dict[str, Any]) -> str:
     if not found:
         return f"[ERROR] No memory entry with id={row_id}"
     return f"Memory entry #{row_id} updated."
+
+
+_MEMORY_PROMOTE_LESSON_TOOL: dict[str, Any] = {
+    "name": "memory_promote_lesson",
+    "description": (
+        "Promote a DRAFT versioned lesson to PUBLISHED, making it real, "
+        "queryable fleet memory. Gap-closure Day 6: every lesson any agent "
+        "records now lands in draft state, invisible to the fleet, until "
+        "this is called — only ever call it after actually reading the "
+        "draft's real content (via memory_curate_read or the lesson's own "
+        "id) and judging it genuinely worth promoting, never reflexively."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "lesson_id": {
+                "type": "string",
+                "description": "The stable lesson_id (not the row id) of the draft to promote.",
+            },
+        },
+        "required": ["lesson_id"],
+    },
+}
+
+
+def memory_promote_lesson(inp: dict[str, Any]) -> str:
+    from app.fleet.versioned_memory import get_versioned_memory_store
+
+    lesson_id = str(inp["lesson_id"])
+    try:
+        record = get_versioned_memory_store().promote(
+            lesson_id, agent_name="knowledge_curator"
+        )
+    except ValueError as exc:
+        return f"[ERROR] {exc}"
+    except Exception as exc:
+        return f"[ERROR] memory_promote_lesson failed: {exc}"
+    return f"Lesson {lesson_id!r} (row #{record.id}) promoted to published."
 
 
 _GIT_COMMIT_CHANGE_TOOL: dict[str, Any] = {
@@ -11674,18 +11886,12 @@ def make_scoped_bash_handler(repo_path: str) -> Any:
         policy = check_command(cmd)
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
-        try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                cwd=repo_path,
-                timeout=60,
-            )
-            out = (result.stdout + result.stderr)[:4000]
-            return out if out else "(no output)"
-        except subprocess.TimeoutExpired:
+        stdout, stderr, _returncode, timed_out = _run_bash_command(
+            cmd, repo_path, timeout=60
+        )
+        if timed_out:
             return "[ERROR] Command timed out after 60s"
+        out = (stdout + stderr)[:4000]
+        return out if out else "(no output)"
 
     return bash_h

@@ -309,12 +309,26 @@ async def run_specialized_agent(
         db, body.task_id, "dispatch", f"Queuing {agent_name} on task {body.task_id}"
     )
 
+    # Gap-closure Day 4 (root cause 1c, answers.md Q51/Q94/Q95): resolve the
+    # task's own repo_id here, synchronously, before scheduling — same
+    # reasoning as tasks.py's run_task/restart_task/approve_task and
+    # approvals.py's _dispatch_decision. An explicit body.repo_path always
+    # wins; only fall back to the task's stored repo (never straight to the
+    # mutable global) when the caller didn't supply one.
+    repo_path = body.repo_path
+    if repo_path is None:
+        from app.db.repository import get_task, resolve_task_repo_path
+
+        task = await get_task(db, body.task_id)
+        if task is not None:
+            repo_path = resolve_task_repo_path(task)
+
     background_tasks.add_task(
         _run_specialized_agent_bg,
         agent_name=agent_name,
         task_id=body.task_id,
         description=body.description,
-        repo_path=body.repo_path,
+        repo_path=repo_path,
     )
 
     return {"status": "queued", "agent": agent_name, "task_id": str(body.task_id)}

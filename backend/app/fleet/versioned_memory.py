@@ -162,6 +162,35 @@ async def _most_recent_superseded_for_lineage(lesson_id: str) -> Any:
         await engine.dispose()
 
 
+async def _most_recent_draft_for_lineage(lesson_id: str) -> Any:
+    """Gap-closure Day 6: the query promote() uses to find what a human
+    actually approved promoting — same shape as
+    _most_recent_superseded_for_lineage, a separate mockable helper rather
+    than inline SQL inside promote() itself, for the same reason every
+    other query in this module already is one."""
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.models import VersionedLesson
+
+    engine = _new_isolated_db_engine()
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            return (
+                await session.execute(
+                    select(VersionedLesson)
+                    .where(
+                        VersionedLesson.lesson_id == lesson_id,
+                        VersionedLesson.state == "draft",
+                    )
+                    .order_by(VersionedLesson.version.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+    finally:
+        await engine.dispose()
+
+
 async def _archive_expired(cutoff: datetime) -> int:
     from sqlalchemy import select, update
     from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -255,9 +284,30 @@ class VersionedMemoryStore:
     def publish(
         self, topic: str, content: str, agent_name: str = ""
     ) -> VersionedLessonRecord:
-        """Publish a lesson. If an existing PUBLISHED lesson is semantically
-        similar (cosine similarity >= MEMORY_MERGE_SIMILARITY_THRESHOLD),
-        merges instead of silently overwriting or duplicating."""
+        """File a lesson as a DRAFT — never directly published. Gap-closure
+        Day 6 (root cause 3, answers.md Q75/Q93): before this, a single
+        agent's self-reported "lesson" from one interaction reached
+        state="published" (immediately fleet-wide-searchable, injected into
+        every future agent's prompt) with no validation and no human in the
+        loop at all. The schema's own DRAFT -> PUBLISHED -> SUPERSEDED /
+        MERGED_INTO -> ARCHIVED lifecycle already modeled this distinction —
+        publish() simply skipped straight past DRAFT every time. Now it
+        doesn't: every call here lands in state="draft" and is invisible to
+        both _find_most_similar_published (already filters state='published')
+        and query_learning_signals (only ever sees published rows, via
+        promote()'s call to _sync_to_memory_embeddings below — not called
+        here anymore). A draft only becomes real, queryable fleet memory via
+        promote(), which knowledge_curator's APPLY phase calls — itself only
+        reachable after a human approves that specific curation action on
+        the Fleet Enhancement Dashboard, the same two-phase scan/apply/
+        approval gate the platform's other 4 self-improvement agents use.
+
+        If an existing PUBLISHED lesson is semantically similar (cosine
+        similarity >= MEMORY_MERGE_SIMILARITY_THRESHOLD), the merge is
+        proposed as a new draft version instead of silently overwriting or
+        duplicating — the existing published lesson stays exactly as-is,
+        visible and in use, until a human approves promoting the merged
+        draft, at which point promote() flips the old one to superseded."""
         return asyncio.run(self._publish(topic, content, agent_name))
 
     async def _publish(
@@ -277,22 +327,12 @@ class VersionedMemoryStore:
                 content=content,
                 embedding=vector,
                 version=1,
-                state="published",
+                state="draft",
                 supersedes_id=None,
             )
-            await _sync_to_memory_embeddings(topic, content, agent_name)
             return _to_record(row)
 
         existing_row, _similarity = match
-        v2 = await _insert(
-            lesson_id=existing_row.lesson_id,
-            topic=topic,
-            content=content,
-            embedding=vector,
-            version=existing_row.version + 1,
-            state="draft",
-            supersedes_id=existing_row.id,
-        )
         merged_content = await _merge_via_llm(
             existing_row.content, content, get_settings().model_router
         )
@@ -302,14 +342,35 @@ class VersionedMemoryStore:
             topic=topic,
             content=merged_content,
             embedding=merged_vector,
-            version=v2.version + 1,
-            state="published",
+            version=existing_row.version + 1,
+            state="draft",
             supersedes_id=existing_row.id,
         )
-        await _set_state(existing_row.id, "superseded")
-        await _set_state(v2.id, "merged_into")
-        await _sync_to_memory_embeddings(topic, merged_content, agent_name)
         return _to_record(merged_row)
+
+    def promote(self, lesson_id: str, agent_name: str = "") -> VersionedLessonRecord:
+        """Gap-closure Day 6: the explicit gate a draft must pass through to
+        become real, queryable fleet memory. Called by knowledge_curator's
+        APPLY phase (memory_promote_lesson tool) — only reachable after a
+        human approves that specific curation action, never autonomously."""
+        return asyncio.run(self._promote(lesson_id, agent_name))
+
+    async def _promote(
+        self, lesson_id: str, agent_name: str = ""
+    ) -> VersionedLessonRecord:
+        row = await _most_recent_draft_for_lineage(lesson_id)
+
+        if row is None:
+            raise ValueError(f"No draft version to promote for lesson_id={lesson_id!r}")
+
+        if row.supersedes_id is not None:
+            await _set_state(row.supersedes_id, "superseded")
+        await _set_state(row.id, "published")
+        await _sync_to_memory_embeddings(row.topic, row.content, agent_name)
+
+        record = _to_record(row)
+        record.state = "published"
+        return record
 
     def rollback(self, lesson_id: str) -> VersionedLessonRecord:
         prior = asyncio.run(_most_recent_superseded_for_lineage(lesson_id))
