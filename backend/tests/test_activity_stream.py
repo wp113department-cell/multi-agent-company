@@ -19,6 +19,8 @@ from app.services.activity_stream import (
     push_error,
     push_agent_switch,
     push_approval_required,
+    push_context_trimmed,
+    push_approaching_limit,
 )
 
 # ---------------------------------------------------------------------------
@@ -226,6 +228,23 @@ class TestConvenienceHelpers:
         assert evs[0]["type"] == "approval_required"
         assert evs[0]["thread_id"] == "task-1"
         assert evs[0]["action"] == "plan_review"
+
+    def test_push_context_trimmed(self):
+        """Gap-closure Stage 1.5 (answers.md)."""
+        push_context_trimmed("h1", 10, 6)
+        evs = self._drain("h1")
+        assert evs[0]["type"] == "context_trimmed"
+        assert evs[0]["messages_before"] == 10
+        assert evs[0]["messages_after"] == 6
+
+    def test_push_approaching_limit(self):
+        """Gap-closure Stage 1.5 (answers.md)."""
+        push_approaching_limit("h1", 48_000, 60_000, 0.8)
+        evs = self._drain("h1")
+        assert evs[0]["type"] == "approaching_limit"
+        assert evs[0]["tokens_in"] == 48_000
+        assert evs[0]["token_budget"] == 60_000
+        assert evs[0]["pct"] == 0.8
 
 
 # ---------------------------------------------------------------------------

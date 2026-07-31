@@ -80,7 +80,11 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from app.agents.base import get_effective_api_key
-from app.agents.base_graph import VerificationConfig
+from app.agents.base_graph import (
+    VerificationConfig,
+    _select_messages_to_condense,
+    _stringify_messages_for_summary,
+)
 from app.agents.tools import CHAT_TOOLS, _is_dangerous_command, _is_protected_path
 from app.config import get_settings
 from app.models.chat import ChatSession
@@ -350,6 +354,113 @@ def _run_subprocess(
         return f"[ERROR] {e}"
 
 
+# ---------------------------------------------------------------------------
+# Context condense — Gap-closure Stage 1.5 (answers.md). Async counterpart
+# to base_graph.py::_condense_messages/_summarize_dropped_messages: this
+# file's own client is anthropic.AsyncAnthropic (base_graph.py's is sync
+# anthropic.Anthropic), so the sync, circuit-breaker-wrapped _call_anthropic
+# helper can't be reused directly for the summarization call itself — but
+# _select_messages_to_condense/_stringify_messages_for_summary are pure
+# (no I/O), so those ARE reused as-is, keeping the actual condense
+# decision and message formatting identical between both graphs.
+# ---------------------------------------------------------------------------
+
+_CHAT_CONDENSE_SUMMARY_PROMPT = (
+    "Summarize the key facts, decisions, file names/paths, and progress "
+    "from this earlier part of a chat conversation, in 3-8 concrete bullet "
+    "points. Preserve specifics (values, file paths, conclusions) — do not "
+    "write vague generalities.\n\nConversation excerpt:\n{excerpt}"
+)
+
+
+async def _summarize_dropped_messages_async(
+    dropped: list[dict[str, Any]], client: anthropic.AsyncAnthropic, model_haiku: str
+) -> str:
+    """Uses the shared Anthropic circuit breaker's allow()/record_success()/
+    record_failure() primitives directly (the same pattern _call_llm_node
+    already uses for its own main streaming call), since call() only wraps
+    a sync callable."""
+    excerpt = _stringify_messages_for_summary(dropped)[:12000]
+    if not excerpt:
+        return "(no summarizable content in the dropped messages)"
+
+    from app.fleet.circuit_breaker import get_anthropic_breaker
+
+    breaker = get_anthropic_breaker()
+    if not breaker.allow():
+        return (
+            f"({len(dropped)} earlier messages were dropped; "
+            "circuit breaker open — Anthropic API calls temporarily suspended)"
+        )
+    try:
+        r = await client.messages.create(
+            model=model_haiku,
+            max_tokens=512,
+            messages=[
+                {
+                    "role": "user",
+                    "content": _CHAT_CONDENSE_SUMMARY_PROMPT.format(excerpt=excerpt),
+                }
+            ],
+        )
+        breaker.record_success()
+        text = "".join(
+            str(getattr(block, "text", ""))
+            for block in r.content
+            if getattr(block, "type", None) == "text"
+        )
+        return text or "(summarization returned no content)"
+    except Exception as exc:
+        breaker.record_failure()
+        logger.warning("Chat context condense summarization failed: %s", exc)
+        return (
+            f"({len(dropped)} earlier messages were dropped; "
+            f"summarization failed: {exc})"
+        )
+
+
+async def _condense_history_async(
+    messages: list[dict[str, Any]],
+    token_budget: int,
+    tokens_in: int,
+    client: anthropic.AsyncAnthropic,
+    model_haiku: str,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Real LLM-summarization condense step for the interactive chat
+    session's history, mirroring base_graph.py::_condense_messages exactly
+    (same head[0] + tail[-4] boundary, same "summarize, don't silently
+    drop" behavior) — the async counterpart chat_agent.py's own client
+    type requires."""
+    selection = _select_messages_to_condense(messages, token_budget, tokens_in)
+    if selection is None:
+        return messages, False
+    head, dropped, tail = selection
+    summary_text = await _summarize_dropped_messages_async(dropped, client, model_haiku)
+    condensed = (
+        head
+        + [
+            {
+                "role": "user",
+                "content": (
+                    f"[Earlier conversation summary — {len(dropped)} messages "
+                    f"condensed]\n{summary_text}"
+                ),
+            }
+        ]
+        + tail
+    )
+    logger.info(
+        "Chat context condense: %d → %d messages (tokens_in=%d > budget=%d), "
+        "%d messages summarized",
+        len(messages),
+        len(condensed),
+        tokens_in,
+        token_budget,
+        len(dropped),
+    )
+    return condensed, True
+
+
 def _git(args: list[str], cwd: str, timeout: int = 30) -> str:
     """Run a git command and return combined output."""
     try:
@@ -398,9 +509,34 @@ class ChatAgent:
         self._current_tool_use_id: str = ""
         self._checkpointer = MemorySaver()
         self._graph = self._build_chat_graph()
+        # Gap-closure Stage 1.5 (answers.md) — chat_agent.py had ZERO
+        # token-budget tracking before this (confirmed by grep: no
+        # tokens_in/tokens_out/response.usage reference anywhere in this
+        # file), unlike base_graph.py's call_llm. Kept on the instance for
+        # the same reason self._background_processes is: this ChatAgent
+        # instance survives the whole session (get_or_create_chat_agent()),
+        # so cumulative usage naturally persists across turns without
+        # needing to round-trip through checkpointed graph state.
+        self._tokens_in: int = 0
+        self._tokens_out: int = 0
 
     def _client(self) -> anthropic.AsyncAnthropic:
         return anthropic.AsyncAnthropic(api_key=get_effective_api_key())
+
+    def _haiku_model(self) -> str:
+        """Gap-closure Stage 1.5 (answers.md) — cheap model for the context
+        condense summarization call, same ModelRouter-first-then-settings
+        fallback pattern run_agent_graph() already uses for its own
+        model_haiku default (base_graph.py)."""
+        try:
+            from app.fleet.model_router import get_model_router
+
+            haiku_agents = get_model_router().agents_by_tier("haiku")
+            if haiku_agents:
+                return get_model_router().model_for(haiku_agents[0])
+        except Exception:
+            pass
+        return get_settings().model_coder
 
     # ------------------------------------------------------------------
     # Human confirmation — MASTER_AGENT_v2.md Phase 5.2, real interrupt().
@@ -2468,6 +2604,48 @@ class ChatAgent:
         tool_uses: list[dict[str, Any]] = []
         stop_reason = "end_turn"
 
+        # Gap-closure Stage 1.5 (answers.md) — this file had ZERO
+        # token-budget tracking before this (confirmed by grep). Mirrors
+        # base_graph.py::call_llm's own condense/approaching_limit check
+        # exactly: always attempt condense and check was_condensed FIRST
+        # (never a separate pct>=1.0 pre-check — that duplicated boundary
+        # doesn't exactly match _select_messages_to_condense's own `tokens_in
+        # <= token_budget` cutoff at the exact tokens_in==token_budget edge,
+        # caught by this day's own test suite before shipping), falling
+        # through to the approaching_limit check only when nothing was
+        # condensed. Condensing mutates self.session.history in place so it
+        # persists for every later turn, not just this one call.
+        context_token_budget = settings.context_token_budget
+        if self._tokens_in > 0 and context_token_budget > 0:
+            messages_before = len(self.session.history)
+            condensed, was_condensed = await _condense_history_async(
+                list(self.session.history),
+                token_budget=context_token_budget,
+                tokens_in=self._tokens_in,
+                client=client,
+                model_haiku=self._haiku_model(),
+            )
+            if was_condensed:
+                self.session.history[:] = condensed
+                await self.session.push(
+                    {
+                        "type": "context_trimmed",
+                        "messages_before": messages_before,
+                        "messages_after": len(self.session.history),
+                    }
+                )
+            else:
+                pct = self._tokens_in / context_token_budget
+                if 0.8 <= pct < 1.0:
+                    await self.session.push(
+                        {
+                            "type": "approaching_limit",
+                            "tokens_in": self._tokens_in,
+                            "token_budget": context_token_budget,
+                            "pct": round(pct, 3),
+                        }
+                    )
+
         # Cast our dict-based messages/tools to what the SDK expects
         sdk_messages = cast(list[MessageParam], self.session.history)
         sdk_tools = cast(list[ToolParam], CHAT_TOOLS)
@@ -2504,6 +2682,10 @@ class ChatAgent:
 
                 final = await stream.get_final_message()
                 stop_reason = final.stop_reason or "end_turn"
+                # Gap-closure Stage 1.5 — real cumulative usage tracking,
+                # feeding the condense check above on the NEXT turn.
+                self._tokens_in += final.usage.input_tokens
+                self._tokens_out += final.usage.output_tokens
                 for block in final.content:
                     if block.type == "tool_use":
                         tool_uses.append(

@@ -70,7 +70,33 @@ Escalate (submit with status `blocked` or `needs_human`) when:
 - The work requires actions outside your role's permissions or non-responsibilities
 - 3 self-correction attempts have failed
 - You discover a security-critical issue, data-loss risk, or breaking change beyond task scope
+- A stated hard constraint conflicts with the repo's real state (see the Hard-Constraint Conflict
+  Rule below) — this is a DIFFERENT case from plain ambiguity: you know exactly what was asked, and
+  it's technically incompatible with something already true.
 Escalation payload must include: what was attempted, exact blocker with evidence, and a recommended next step. Never guess your way past a blocker.
+
+**Hard-Constraint Conflict Rule (gap-closure Stage 1.6, answers.md)** — a "hard constraint" is any
+requirement the user states as non-negotiable (a specific library, database, framework version,
+architecture pattern, or "must not touch X"). When a hard constraint conflicts with evidence already
+gathered in this run (the repo already uses a different, incompatible choice; the constraint is
+technically impossible given what's actually installed/configured; two stated constraints
+contradict each other), you MUST stop before making any change either way and surface the conflict
+— never silently pick one side and proceed as if the user hadn't stated the other. Use whichever
+real mechanism your role actually has: bounded worker-agent runs with a `request_clarification` tool
+call it; roles with a `submit_*` contract but no `request_clarification` submit
+`status: needs_human` with the conflict as the blocker; interactive roles with neither (e.g. chat —
+you're live with the user, there is no "pause the run" to do) respond with the conflict and a direct
+question in plain text instead of any tool call. State the conflict factually: what was asked, what
+the repo evidence actually shows, and the real options (which one wins, or a third path). Silent
+substitution — implementing what "seems right" instead of what conflicts — is a Failure Condition,
+not a judgment call you get to make alone.
+
+**"Already done?" check (gap-closure Stage 1.6, answers.md)** — before starting implementation work,
+search for whether the requested change already exists (the relevant file/function/config already
+does what's being asked, a previous run already implemented it, or it's already partially done).
+Report what you found instead of re-implementing or silently duplicating existing work. This is
+cheap (one search/read) and prevents two real failure modes: wasted work, and two conflicting
+implementations of the same thing existing side by side.
 
 **Limitation taxonomy (mandatory on every `blocked`/`needs_human` submission)** — classify the
 blocker as exactly one of:

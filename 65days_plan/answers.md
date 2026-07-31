@@ -456,7 +456,7 @@ exists (see Project Memory finding above), so sharing is effectively "everything
 - Intelligent Understanding: **YES** — every capability runs on a real Anthropic `messages.create` call (`_make_client()`, `base_graph.py:48-55`), not a rules engine or regex classifier.
 - Deep Instruction Analysis: **YES (70/72 by default)** — `planner_node`'s gather-facts call (`_gather_facts_and_plan`, `base_graph.py:293-351`) produces structured `{given, to_look_up, to_derive, guesses}` JSON before any tool call, for every `run_agent_graph` caller (default on).
 - Smart Planning: **PARTIAL** — initial plan generation (`planner_node`) is real and on-by-default for 70/72; continuous mid-run replanning (`replan_node`) is real but confirmed **0/72 opted in** (see Q6 Recovery System). So "smart planning" = real initial plan, not real adaptive re-planning in production today.
-- Context Awareness: **YES** — repo-context injection (`memory_hook_node`, `base_graph.py:510-525`, via `context_builder.build_context`) plus context-window trimming (`_trim_messages`, `base_graph.py:249-265`) for every graph agent.
+- Context Awareness: **YES** — repo-context injection (`memory_hook_node`, `base_graph.py:510-525`, via `context_builder.build_context`) plus context-window condensing (`_condense_messages`, `base_graph.py:448` — Stage 1.5, 2026-07-31: real LLM-summarization, not the old drop-oldest `_trim_messages`; see Q65) for every graph agent.
 - Long-Term Memory: **YES** — `memory_embeddings` (Postgres/pgvector) survives restarts and is shared across worker processes; confirmed real call sites now exist for all 4 categories (`embed_task_outcome`, `embed_learning_signal`, `embed_architecture_note`, `embed_failure` — the latter two were "fully dead" per `MASTER_AGENT_v2.md` §A.4 but now have live callers in `app/memory/hooks.py:91,112` and `chat_agent.py:463`, per `IMPLEMENTATION_PROGRESS.md` Phase 1.1). Caveat: the ONE store actually read before every LLM call, `LessonStore`, is still in-process/ephemeral — durable memory is a second, DB-backed layer queried in parallel (Phase 1.3), not the sole path.
 - Learn From Success: **YES** — `_extract_and_store_lesson` runs after every graph-agent submission unconditionally (not just failures).
 - Learn From Failure: **YES** — `embed_failure` has real call sites (`app/memory/hooks.py:91`, `chat_agent.py:463`) wired into the universal post-run hook (`record_agent_run_outcome`, Phase 1.1), which fires for all ~55 non-manager-driven agents dispatched via `app/api/specialized_agents.py`, not just manager-driven ones.
@@ -526,44 +526,65 @@ second badge uses 5s polling — an inconsistent, unfinished-looking pattern, no
 **5. Error handling** — Backend: real, centralized (`main.py` registers `HTTPException`/
 `RequestValidationError` handlers returning a consistent `{"error": {code, message}}` envelope,
 plus `SlowAPIMiddleware`/`CORSMiddleware`). Frontend: `lib/api.ts::handleResponse` converts non-OK
-responses to thrown `Error`s caught into local state. **React error boundaries: NOT FOUND** — no
-`error.tsx` (Next.js App Router convention) exists anywhere under `apps/web/app/**`; an unhandled
-render exception produces Next.js's default crash screen with no app-level recovery UI.
-Plan: add `error.tsx` boundaries at least at the top-level `app/` and per major route group.
+responses to thrown `Error`s caught into local state.
+**React error boundaries — Stage 1.4 (2026-07-31): DONE.** `apps/web/app/error.tsx` (root-level) +
+one `error.tsx` in each of the 16 route-group directories, sharing UI via
+`apps/web/components/RouteError.tsx`. Verified via `tsc --noEmit` and a real `next build` (all 19
+routes generated). Not verified: the rendered error UI in a live browser (no browser-automation
+tool available).
 
-**6. Reconnect/retry logic — PARTIAL, largely absent.** `app/stream/[taskId]/page.tsx`'s
-`es.onerror` just closes the connection — no automatic reconnect/backoff. The fleet-badge stream
-relies only on the browser's native `EventSource` auto-reconnect (not app-level retry logic, and
-doesn't apply to the task-activity stream). No exponential backoff anywhere in the frontend.
-Plan: add explicit reconnect-with-backoff to the task-activity SSE consumer instead of relying on
-inconsistent per-stream behavior.
+**6. Reconnect/retry logic — Stage 1.4 (2026-07-31): DONE for the task-activity stream.**
+`app/stream/[taskId]/page.tsx`'s `es.onerror` used to unconditionally call `es.close()` on ANY
+connection error — which defeats `EventSource`'s own native auto-reconnect — permanently killing
+the feed on any transient drop. Now a shared `connect(attempt)` (also used by `handleResume`, which
+previously duplicated a second non-reconnecting copy) retries with exponential backoff
+(1s→2s→4s→8s→16s, capped 30s, 5 attempts), distinguishing a transient connection error (reconnects)
+from a genuine terminal server event (does not). New `page.test.tsx` (4 tests, a controllable fake
+`EventSource`) proves this. The fleet-badge stream's inconsistent SSE-vs-poll pattern noted in §4
+was NOT touched (out of the plan's named scope — only the task-activity stream was named).
 
 **7. Frontend/backend sync** — verified, no orphaned frontend calls found; the one real
 inconsistency is the dual sync-strategy badge counters noted in §4.
 
-**8. Authentication — real JWT, but disabled by default and under-wired.** `backend/app/auth/jwt.py`
-(python-jose + bcrypt, real), `backend/app/api/auth.py` (login/setup/change-password/me, all real).
+**8. Authentication — real JWT, but disabled by default; the wiring gap is now closed.**
+`backend/app/auth/jwt.py` (python-jose + bcrypt, real), `backend/app/api/auth.py` (real).
 `jwt_auth_enabled` defaults to `False` (`config.py:539`); when off, falls back to an opt-in legacy
-`X-User-Role` header or anonymous-viewer. **Real gap**: `authHeaders()` (bearer token attach) is
-wired into only 1 of ~57 frontend fetch call sites (`app/repo/page.tsx`) — if a deployment turns
-JWT auth on, most mutating UI actions would get 401s because the token is never attached elsewhere.
-Plan: thread `authHeaders()` through every mutating call in `lib/api.ts`, not just one page.
+`X-User-Role` header or anonymous-viewer.
+**Stage 1.4 (2026-07-31): DONE.** New `apiFetch()` wrapper in `lib/api.ts` merges `authHeaders()`
+into all 44 fetch call sites in that file (not just mutating ones — a GET fails identically to a
+write under `RBAC_ENABLED=true`, so the real fix had to cover reads too, broader than the plan's
+literal "mutating calls" wording). Grep-swept the rest of the app and found 5 more files with raw
+`fetch()` calls bypassing `lib/api.ts` entirely, all with the same gap — fixed the same way:
+`app/chat/page.tsx`, `app/review/page.tsx`, `app/settings/page.tsx`, `app/fleet/page.tsx`,
+`app/approvals/page.tsx`, `components/NavBar.tsx`. New `lib/api.test.ts` (6 tests) proves the header
+is actually attached across GET/POST/PATCH/DELETE and calls with their own pre-existing headers.
 
-**9. Authorization (RBAC) — real server-side enforcement, zero frontend UI gating.**
-`backend/app/middleware/rbac.py`'s `require_approver`/`require_authenticated` are real, broadly
-applied dependencies (task creation/mutation gated by `require_authenticated`, approve/reject/push
-gated by `require_approver`). **Frontend has no role-based UI gating at all** — every nav link and
-every Approve/Reject button renders regardless of role (confirmed by grep — only test files
-reference role/isAdmin checks). Also: `GET /api/tasks/{id}/stream` has no auth dependency at all,
-unlike its sibling stop/resume endpoints — an unauthenticated data-exposure gap when JWT auth is on.
-Plan: add UI-level role gating (courtesy hiding, not a security boundary — the server already
-enforces it) and add `Depends(require_authenticated)` to the stream endpoint.
+**9. Authorization (RBAC) — real server-side enforcement; UI gating is now wired, stream-endpoint
+auth gap remains open.** `backend/app/middleware/rbac.py`'s `require_approver`/`require_authenticated`
+are real, broadly applied dependencies.
+**UI role gating — Stage 1.4 (2026-07-31): DONE.** New `getRole()`/`isApprover()` in `lib/auth.ts`
+(decodes the JWT's own `role` claim client-side, no signature check — meaningless here, the server's
+signature-verified check is the real boundary; this only affects what renders). Wired into every
+Approve/Reject/Approve-Cost button found: `app/approvals/page.tsx`, `app/review/page.tsx` (epic
+rows, task rows, batch "Approve All"), `app/epics/[id]/page.tsx`, `app/fleet/page.tsx`. 6 new tests
+in `lib/auth.test.ts` (real JWTs with `role` claims).
+**Still open, explicitly flagged, not silently fixed**: `GET /api/tasks/{id}/stream` still has no
+`Depends(require_authenticated)`, unlike its sibling stop/resume endpoints (re-confirmed directly
+against the endpoint's current signature) — an unauthenticated data-exposure gap when JWT auth is
+on. Not fixed this pass because `EventSource` cannot send a custom `Authorization` header at all (a
+browser API limitation, not a fetch-headers problem) — adding server-side auth here without also
+redesigning how the frontend authenticates the stream (e.g. a signed short-lived query-param token)
+would break the whole activity-feed feature the moment `jwt_auth_enabled=true` (currently `False` by
+default, so dormant today, but a real regression risk for any deployment that turns it on). This
+item was in the original Q9 audit's own "Plan:" note but not in the day-by-day Stage 1.4 plan's
+literal 4-item list — left for a dedicated future day rather than rushed in unassessed.
 
-**10. Broken/missing integrations found (summary):** (1) auth-header wiring gap, (2) unauthenticated
-task-stream endpoint, (3) no React error boundaries, (4) middleware checks token presence not
-validity/expiry, (5) inconsistent SSE-vs-poll badge pattern, (6) no SSE auto-reconnect on the task
-activity feed. No stubbed/mock-wired frontend UI was found — a genuine positive (all `mock`/`TODO`
-hits are confined to `e2e/`/test files, not production code).
+**10. Broken/missing integrations found (summary):** (1) auth-header wiring gap — **FIXED**, (2)
+unauthenticated task-stream endpoint — **still open, flagged above**, (3) no React error boundaries
+— **FIXED**, (4) middleware checks token presence not validity/expiry — unchanged, out of Stage
+1.4's scope, (5) inconsistent SSE-vs-poll badge pattern — unchanged, out of scope, (6) no SSE
+auto-reconnect on the task activity feed — **FIXED**. No stubbed/mock-wired frontend UI was found —
+a genuine positive (all `mock`/`TODO` hits are confined to `e2e/`/test files, not production code).
 
 ---
 
@@ -1017,16 +1038,21 @@ today even as a stub.
   real, structural, fleet-wide (~74-76 agent modules) refactor of the shared node builder, not a
   quick wrapper.
   **Gap-closure Day 19 (2026-07-31): DONE.** `_make_execute_tools_node`
-  (`backend/app/agents/base_graph.py:1132-1432` — line numbers re-verified during the Day 24 audit
-  after Days 21-22's edits shifted them from their original 1039-1339; re-verify against
-  `_make_execute_tools_node`'s own `def`/`return execute_tools` if this drifts again) now processes
+  (`backend/app/agents/base_graph.py:1268` — `def` line, re-verified during the Day 34 Gap Audit;
+  drifted from Day 24's own citation of `1132-1432` because Stage 1.5's same-day insertions above
+  it in the file shifted everything below; drifted before that from the original `1039-1339` after
+  Days 21-22's edits. This citation has now drifted twice — re-verify against
+  `_make_execute_tools_node`'s own `def`/`return execute_tools` if it drifts again rather than
+  trusting the line number) now processes
   exactly one pending tool call per invocation instead of looping over the whole batch inline. New
   `AgentRunState` fields (`pending_tool_uses`, `tool_results_buffer`, `batch_requires_human_approval`,
   lines 198-200) carry a batch across invocations; when a batch isn't drained yet, the node returns a
   partial state update instead of appending to `messages`/incrementing `turns`.
-  `_post_execute_tools_router` (line 1676) self-loops back to `execute_tools` (via
-  `build_agent_graph`'s `{"execute_tools": "execute_tools", ...}` conditional-edge keys, lines
-  1834 and 1855 — the critique-enabled and non-critique branches respectively) while
+  `_post_execute_tools_router` (line 1812, re-verified during the Day 34 Gap Audit — drifted from
+  Day 24's `1676` for the same reason as above) self-loops back to `execute_tools` (via
+  `build_agent_graph`'s `{"execute_tools": "execute_tools", ...}` conditional-edge keys, now at
+  lines 1938, 1948, 1970, and 1991 — 4 occurrences, not the 2 Day 24 recorded; re-verified via
+  live grep during the Day 34 audit) while
   `pending_tool_uses` is non-empty, mirroring `chat_agent.py`'s already-proven Phase 5.2 pattern
   exactly. Proven against the REAL production node (not a toy analog this time):
   `tests/test_gap19_execute_tools_replay_safety.py` builds a real `StateGraph` from the real
@@ -1058,11 +1084,13 @@ today even as a stub.
   in. Full regression: 20/20 baseline unchanged, 3,437 passed.
   **Day 21 (2026-07-31): DONE — `build_agent_graph()` now durably checkpoints via a real
   `AsyncPostgresSaver`.** `backend/app/agents/base_graph.py:66-117` (`init_agent_checkpointer`/
-  `close_agent_checkpointer` — re-verified during the Day 24 audit; original citation was 48-104
-  before Day 22's circuit-breaker import shifted it, mirroring `pipeline/graph.py`'s own established
-  pattern exactly); `base_graph.py:1865` (`g.compile(checkpointer=_agent_checkpointer)`);
-  `base_graph.py:2140`
-  (`graph.stream(..., config={"configurable": {"thread_id": tid}})` — `tid` is the run's own
+  `close_agent_checkpointer` — re-verified again during the Day 34 Gap Audit, still accurate at
+  66-117; original citation was 48-104 before Day 22's circuit-breaker import shifted it, mirroring
+  `pipeline/graph.py`'s own established pattern exactly); `base_graph.py:2001`
+  (`g.compile(checkpointer=_agent_checkpointer)` — drifted from Day 24's `1865` after Stage 1.5's
+  same-day insertions above it; re-verified live during the Day 34 audit); `base_graph.py:2277`
+  (`graph.stream(..., config={"configurable": {"thread_id": tid}})` — drifted from Day 24's `2140`
+  for the same reason — `tid` is the run's own
   pre-existing stable identity, already used as `trace_id`). Wired into `app/main.py`'s lifespan.
   Investigated (not assumed) whether `AsyncPostgresSaver` — built for async `ainvoke`/`astream` —
   actually works with `run_agent_graph()`'s sync `graph.stream()`: read `AsyncPostgresSaver`'s real
@@ -1098,7 +1126,9 @@ today even as a stub.
   `Settings` fields for threshold/cooldown — no hardcoded magic numbers). Wired into all three real
   call-site surfaces: `base_graph.py:130`'s new `_call_anthropic()` wrapper (all ~6
   `client.messages.create` sites in the shared node builder ~74-76 agents route through);
-  `chat_agent.py:2439-2488`'s streaming `_call_llm_node` (via the breaker's `allow()`/
+  `chat_agent.py:2592`'s streaming `_call_llm_node` (drifted from `2439-2488` after Stage 1.5's
+  `_condense_history_async`/`_summarize_dropped_messages_async` insertions above it; re-verified
+  live during the Day 34 Gap Audit) (via the breaker's `allow()`/
   `record_success()`/`record_failure()` primitives directly, since an `async with ... stream()`
   block doesn't fit a single wrapped callable); `groq_adapter.py:317-367`'s `run_groq` retry loop
   (same primitives, since a caught `BadRequestError` with `tool_use_failed` is a real Groq response,
@@ -1165,6 +1195,19 @@ today even as a stub.
   actually works. Zero net regressions across the whole 6-day block — the known 20-item baseline is
   unchanged from before Day 18 to now.
   Order: Stage 1.3 (Days 18-24) complete. Next: Stage 1.4 (frontend/backend robustness).
+  **Day 34 (2026-07-31): Stage 1 Gap Audit Protocol checkpoint — 6 of 7 Stage 1 sub-buckets
+  (1.1, 1.2, 1.4, 1.5, 1.6, 1.7) independently re-confirmed live** (real code re-read at cited
+  `file:line`s, cited tests actually re-run and passing, full regression re-run to completion:
+  3,489 passed / 20 failed [unchanged known Windows-dev-only environment baseline] / 55 skipped /
+  17 deselected; frontend 32/32). **Bucket 1.3 (this stage) found DRIFTED, not broken**: all
+  underlying code and tests genuinely still work — the 6 citations corrected above (`1132-1432`→
+  `1268`, `1676`→`1812`, `1834`/`1855`→`1938`/`1948`/`1970`/`1991`, `1865`→`2001`, `2140`→`2277`,
+  `chat_agent.py:2439-2488`→`2592`) had gone stale again since Day 24's own correction pass,
+  because Stage 1.5's same-day insertions into `base_graph.py`/`chat_agent.py` shifted everything
+  below them and no later stage re-verified Stage 1.3's citations specifically. This is the same
+  failure mode Day 24 already named and fixed once, recurring — confirms the risk is real and
+  ongoing, not a one-off, and that any stage inserting code above an earlier stage's cited lines in
+  a shared file should re-grep that earlier stage's citations, not just its own.
 - **Per-project RBAC / real user table.** Why it matters: `UserRole` is a flat `viewer`/`approver`
   table (plus `admin` from JWT claims), and the actual user list is a JSON blob under one
   `system_settings` key (`auth_users`), not a proper table — no per-project or per-workspace
@@ -1222,11 +1265,25 @@ today even as a stub.
 
 ## Q26. Difficult User Handling
 
-- Frustrated / angry / abusive language / poor English / mixed languages / one-word / extremely long prompts: **NOT VERIFIED** — grepped `backend/roles/*.md` and `backend/app/**` for `frustrat|abusive|angry|poor english|mixed language|de-escalat|emotion` (case-insensitive): zero real hits (`release_notes_agent.md`'s one match is unrelated, about changelog tone for end-users, not chat behavior). No role prompt or code addresses any of these named user states explicitly.
-  Plan: add an explicit "difficult user" section to `chat.md` (or `_GLOBAL_STANDARDS.md` §9) naming these states and the required response pattern.
-- Repeating the same issue / contradictory instructions / changing requirements repeatedly: **PARTIAL** — `chat.md` Edge Cases: "Conflicting instructions across a session — confirm which stands" is the only related text found; nothing about repetition detection.
-- Remains professional / continues helping / avoids arguments: **PARTIAL** — inferred only from generic `_GLOBAL_STANDARDS.md` §9 Communication Rules ("Structured, concise, evidence-cited. No filler, no apologies-as-content") and `chat.md` "Be concise and direct" — these are general professionalism norms, not written as a response to user hostility/emotion specifically. No code enforces tone.
-  Plan: same as above — this is a real, documented gap, not a design choice; the audit's "largely duplicate of Q26" hint about Q63 is confirmed (see Q63).
+**Stage 1.6 (2026-07-31): DONE.** New "Handling Difficult Users / De-escalation" section in
+`backend/roles/chat.md` (right after the Memory section) — a real, named section, not inferred from
+generic professionalism norms: stay factual not defensive, don't perform repeated contrition,
+restate conflicting constraints neutrally (cross-referenced to the new Hard-Constraint Conflict Rule
+— Q53), don't re-run the same investigation to produce a differently-worded identical answer,
+escalate instead of guessing to appease pressure to skip verification, and hold a verified fact
+against user pressure/tone rather than conceding to match their certainty.
+- Frustrated / angry / abusive language / poor English / mixed languages / one-word / extremely long
+  prompts: **PARTIAL, improved** — the new section names the response PATTERN (stay factual, don't
+  argue, don't over-apologize) generally rather than per-named-state; still no dedicated handling
+  for poor-English/mixed-language input specifically (a language-detection feature, out of Stage
+  1.6's scope) or extremely-long-prompt truncation beyond the existing Stage 1.5 context condense.
+- Repeating the same issue / contradictory instructions / changing requirements repeatedly: **YES**
+  — the new section explicitly covers both: contradictory constraints route to the Hard-Constraint
+  Conflict Rule; a repeated request gets "check whether new evidence actually changes the answer
+  before repeating yourself" instead of blind re-investigation.
+- Remains professional / continues helping / avoids arguments: **YES** — "you cannot be argued out
+  of a verified fact... don't concede to match their certainty" is now an explicit, named
+  instruction, not just inferred from general communication-style rules.
 
 ---
 
@@ -1849,29 +1906,73 @@ under real outage), it is explicitly marked NOT VERIFIED rather than estimated.
 - Identify the correct project: **NO** — explicitly documented as an unimplemented gap: `IMPLEMENTATION_PROGRESS.md` Day 3/1.6 states the `MemoryEmbedding` schema "has no `repo_id`/`project_id` column at all, so every existing query is already unscoped across whatever tasks exist in the table," and a planned `cross_project=True` flag was deliberately not built because there is nothing to filter on. "Project" and "fleet" memory tiers are literally the same implementation today.
   Plan: add a `project_id`/`repo_id` column to `MemoryEmbedding` + a real migration before per-project historical scoping can exist; tracked as a known, honestly-documented gap in the repo's own progress file, not silently missing.
 - Reuse previous plans: **PARTIAL** — `architect.md` "Memory Context" section explicitly instructs using `<memory_context>` to "Avoid implementation approaches that failed before" and "Reuse patterns that worked well" — prompt-level, backed by the real `query_memory_context` data feed.
-- Avoid repeating completed work / resume unfinished work: **PARTIAL** — `app.fleet.approval_gate`'s recorded clarification/decision rows and `manager.py`'s checkpointing (Q34) support resuming a specific halted task; there is no general "is this already done" pre-check before starting new work beyond the prompt-level duplicate-checking noted in Q29.
-- Detect task is already complete and explain why no changes are needed: **NOT VERIFIED** — no code or prompt text found instructing an agent to conclude "no changes needed" and explain why; the closest is the generic escalation/conflict-reporting language in `architect.md`/`decomposer.md` Failure Conditions, which is about conflicts, not already-satisfied requirements.
-  Plan: add an explicit "check-if-already-done" step to `architect.md`/`chat.md` that queries memory + reads current code and can terminate with an explicit "no changes needed, here's why" response.
+- Avoid repeating completed work / resume unfinished work: **YES, Stage 1.6 (2026-07-31)** — new
+  "Already done?" check in `backend/roles/_GLOBAL_STANDARDS.md` §8 (a real, named step, not just the
+  prior halted-task-resume mechanism): before starting implementation work, search whether the
+  requested change already exists and report what's found instead of re-implementing/duplicating.
+  `chat.md`'s own "For IMPLEMENTATION tasks" process now has this as an explicit numbered step (step
+  2, before any file is touched), not just the global rule.
+- Detect task is already complete and explain why no changes are needed: **YES, Stage 1.6
+  (2026-07-31)** — the new check's own instruction is exactly this: "if it already exists (fully or
+  partially), say so and report what's there instead of re-implementing." Scoped to `chat.md` (the
+  interactive, per-request-driven role this matters most for) rather than `architect.md` — a planner
+  role that decomposes NEW work by design, where "already done" is less applicable to its own
+  planning step; `architect.md` was left unchanged, an intentional scope boundary, not an oversight.
 
 ---
 
 ## Q52. Large Context Understanding
 
-- Extremely large prompts / thousands of LOC: **PARTIAL** — real token-budget trimming exists: `backend/app/agents/base_graph.py:249-265` (`_trim_messages`, pattern credited to "LangGraph RemainingSteps + roo-code src/core/condense/") drops oldest messages once `tokens_in > token_budget` (default `context_token_budget=60_000`, `base_graph.py:1499,1629`). This is real, wired code (used in `_make_call_llm_node`, line ~536-589) — but it is a pure drop (keeps `messages[:1] + messages[-4:]`), not a summarization/condense-into-fewer-tokens strategy; dropped middle content is genuinely lost, not preserved via summary.
+- Extremely large prompts / thousands of LOC: **YES, Stage 1.5 (2026-07-31)** — real token-budget
+  condensing exists: `backend/app/agents/base_graph.py:362,448` (`_select_messages_to_condense`/
+  `_condense_messages`, replacing the old drop-oldest `_trim_messages`) fires once
+  `tokens_in > token_budget`. Now a real LLM-summarization strategy (not a pure drop, see Q65 for
+  full detail) — the dropped middle messages are summarized via a real haiku-tier call and spliced
+  back in, not lost.
 - Multiple documents / multiple code blocks: **NOT VERIFIED** — no dedicated multi-document ingestion/parsing code found; relies on the model's native handling of whatever text is in a single turn.
 - Multiple repositories: **NO** — same gap as Q51: `MemoryEmbedding` has no per-repo scoping column (`IMPLEMENTATION_PROGRESS.md` Day 3/1.6), and `chat_agent.py`'s `ChatSession` is bound to a single `repo_path` (`chat_agent.py:310`, `self.root = Path(session.repo_path)`) — one chat session operates on exactly one repo.
-- Long conversations: **PARTIAL** — `ChatSession.history` persists to `chat_messages` table (`backend/app/models/chat.py:5,91-109`) so history survives restarts, and `_trim_messages` bounds what's sent to the LLM — but see the "genuine loss, no summarization" caveat above.
+- Long conversations: **YES, Stage 1.5 (2026-07-31)** — `ChatSession.history` persists to
+  `chat_messages` table (`backend/app/models/chat.py:5,91-109`) so history survives restarts, and
+  `chat_agent.py` now has its own real condense check (`_condense_history_async`,
+  `chat_agent.py:422`) — previously this graph had NO budget check at all (see Q65).
 - Mixed instructions: **NOT VERIFIED** — no dedicated handling found beyond the general conflict-resolution prompt language already cited in Q25/Q26.
-- Context management / chunking / prioritization / context-loss prevention / summarization strategy (explained): chunking = drop-oldest-messages (`base_graph.py:249-265`), NOT summarization-based; prioritization = keep first message (system/task framing) + last 4 (recent exchange) — a real but simplistic heuristic; context-loss prevention is explicitly NOT achieved (dropped messages are gone, not condensed) — this is a genuine, findable gap versus the audit's expectation of a "summarization strategy."
-  Plan: replace the drop-oldest trim in `_trim_messages` with an LLM-summarization condense step (the roo-code pattern this code cites but only partially implements) so dropped context degrades gracefully instead of disappearing.
+- Context management / chunking / prioritization / context-loss prevention / summarization strategy
+  (explained): **Stage 1.5 (2026-07-31) — now genuinely summarization-based, not drop-oldest.**
+  Chunking = condense (`base_graph.py:362,448`); prioritization = keep first message (system/task
+  framing) + last 4 (recent exchange), same heuristic as before, but the dropped middle is now
+  summarized via a real LLM call (haiku-tier, circuit-breaker-protected) instead of discarded —
+  context-loss prevention is now real (see Q65 for full evidence and test citations).
 
 ---
 
 ## Q53. Strict Requirement Compliance
 
-- Always obeys explicit user tech requirements (LangGraph only / Python only / no JS / Postgres / FastAPI / a specific model / "don't modify existing files" / "create new files only"): **NO (no dedicated runtime enforcement)** — the project's OWN stack is hardcoded via `CLAUDE.md` (governs the coding assistant that built this repo, not the shipped product) and reflected descriptively in `chat.md`'s "Tech Stack You Work On" section — but there is no code or prompt mechanism that parses a specific *end-user's* ad hoc constraint in a chat message (e.g. "use PostgreSQL only for this feature") and enforces or checks it. `chat.md`'s stack description is fixed/static, not a per-request constraint tracker.
-- Warns/explains/asks for clarification on conflict instead of silently switching tech: **PARTIAL** — the only related mechanism is the generic `request_clarification` tool (Q25/Q27) and `chat.md` Edge Cases ("Conflicting instructions across a session — confirm which stands") — both generic, not specific to a tech-constraint conflict scenario.
-  Plan: add an explicit rule to `chat.md`/`_GLOBAL_STANDARDS.md`: "if a user names a specific technology/constraint, treat it as a hard constraint; if it conflicts with the existing stack, stop and use `request_clarification` rather than silently substituting" — currently absent.
+**Stage 1.6 (2026-07-31): DONE.** New "Hard-Constraint Conflict Rule"
+(`backend/roles/_GLOBAL_STANDARDS.md` §8, right after the limitation taxonomy) — a real, named rule
+(not the generic ambiguity/request_clarification guidance this section previously pointed to): any
+requirement the user states as non-negotiable is a hard constraint; when one conflicts with evidence
+already gathered in the run (repo already uses something incompatible, two stated constraints
+contradict each other), the agent must stop before making any change and surface the conflict
+factually — using whichever real mechanism its role actually has (`request_clarification` for
+bounded worker runs, `status: needs_human` for `submit_*`-only roles, or a plain-text question for
+interactive roles like chat that have neither tool and are live with the user anyway). `chat.md`'s
+own Escalation section now references this rule explicitly and correctly documents that chat has no
+`request_clarification` tool (it's scoped to bounded worker-agent runs — `app/agents/tools.py`'s own
+docstring) so the right chat-specific mechanism is a direct question, not a tool call.
+- Always obeys explicit user tech requirements: **PARTIAL, improved** — still no runtime parser that
+  extracts a specific ad hoc constraint from a chat message and mechanically enforces it (that would
+  be a much larger NLU feature, out of Stage 1.6's scope) — what's now real is the STOP-AND-SURFACE
+  behavior once a conflict is noticed via normal investigation, replacing what was previously silent
+  substitution with no rule against it at all.
+- Warns/explains/asks for clarification on conflict instead of silently switching tech: **YES,
+  Stage 1.6 (2026-07-31)** — no longer generic ambiguity guidance; a named, specific rule for this
+  exact scenario. Proven end to end via `tests/test_gap_stage16_hard_constraint_clarification.py`:
+  a scripted worker-agent run given two conflicting hard constraints (PostgreSQL vs. SQLite-only)
+  calls `request_clarification` naming both constraints and why they conflict, records a real
+  `PendingApproval` row, and ends cleanly with `needs_clarification` — never a submitted result that
+  silently picked a side. (Prompt-level adherence by a real model can't be unit-tested — this proves
+  the MECHANISM correctly carries the rule through when followed, the same standard already applied
+  to the pre-existing `tests/test_phase53_request_clarification.py`.)
 
 ---
 
@@ -2041,11 +2142,17 @@ Plan: if MCP-based tool access becomes a real requirement (vs. today's deliberat
 
 ## Q63. User Emotion & Conversation Handling
 
-Duplicate of Q26 as the audit brief itself anticipated — same findings apply verbatim:
-- Frustrated / impatient / confused / blaming the system / disappointed / repeatedly reporting failures / emotional / poor grammar / fragmented instructions: **NOT VERIFIED** — no role prompt or code addresses any of these named states (same grep result as Q26: zero real hits for `frustrat|abusive|angry|poor english|mixed language|de-escalat|emotion` across `backend/roles/*.md` and `backend/app/**`).
-- Remains respectful / stays focused on solving the problem / avoids escalating conflict: **PARTIAL** — generic professionalism norms only (`_GLOBAL_STANDARDS.md` §9, `chat.md` "Communication Style"), not written as a response to user distress.
-- Provides actionable next steps: **YES, generically** — `_GLOBAL_STANDARDS.md` §9: "Recommendations must be actionable and verifiable... never vague" and `chat.md`'s Output Contract requires a `response` field on every run — this is a real, structural requirement for the *output shape*, independent of whether the user is upset.
-  Plan: same as Q26 — add an explicit emotional-de-escalation section to `chat.md`/`_GLOBAL_STANDARDS.md`; currently a genuine, documented gap, not a design choice found elsewhere.
+Duplicate of Q26 as the audit brief itself anticipated — **Stage 1.6 (2026-07-31): DONE, same fix
+applies verbatim** — see Q26 for the full evidence (`chat.md`'s new "Handling Difficult Users /
+De-escalation" section).
+- Frustrated / impatient / confused / blaming the system / disappointed / repeatedly reporting
+  failures / emotional / poor grammar / fragmented instructions: **PARTIAL, improved** — same as
+  Q26's updated verdict: the response pattern is now named explicitly; no per-named-state dedicated
+  handling (language detection, etc.) was added — out of scope.
+- Remains respectful / stays focused on solving the problem / avoids escalating conflict: **YES** —
+  no longer generic professionalism norms only; a specific instruction now exists ("you cannot be
+  argued out of a verified fact... don't concede to match their certainty").
+- Provides actionable next steps: **YES**, unchanged real structural requirement (Output Contract).
 
 ---
 
@@ -2182,53 +2289,62 @@ today's implicit grouping-by-comment.
 
 ## Q65. Token & Context Budget Management
 
-- Aware of model context limits: **NO** — `_trim_messages` (`base_graph.py` line 249)
-  uses one fixed `token_budget` parameter (default `60_000`, `run_agent_graph`'s own
-  default, `base_graph.py` line 1499/1629) applied identically to every model tier
-  (Haiku/Sonnet/Opus), never looked up per-model. `config.py`'s own
-  `context_token_budget` setting (default `8000`, line 71-73) is dead — grep confirms
-  it is read nowhere in `base_graph.py`; the graph uses its own hardcoded `60_000`
-  default instead. No mapping of model name → real context window (e.g. 200K) exists anywhere.
-  Plan: add a model→context-window table (or read it from `agent_models.json`) and make
-  `_trim_messages`'s budget derive from it per-call; wire the orphaned `context_token_budget`
-  setting in or remove it.
-- Aware of token budgets: **PARTIAL** — `tokens_in`/`tokens_out` are tracked per run
-  (`AgentRunState`) and accumulated fleet-wide for `$` cost (`app/fleet/budget_manager.py`,
-  `manager.py::compute_actual_cost_usd`), but that's a cost budget, not a context-size budget.
-- Aware of conversation size / prompt growth: **PARTIAL** — `_trim_messages` compares
-  `state["tokens_in"]` against the fixed budget before each `call_llm`, so worker agents
-  (`run_agent_graph`) are size-aware. `chat_agent.py` has **no equivalent** — grep for
-  `summar|condense|trim|compact` in `chat_agent.py` returns no hits; its LangGraph message
-  state can grow unbounded across a long conversation.
-  Plan: give `chat_agent.py`'s graph the same `_trim_messages`-style budget check `base_graph.py`
-  already has, since it's the one agent proven not to inherit it structurally.
-- Aware of memory growth: **PARTIAL** — `memory_embeddings_retention_days` (config.py,
-  default 180) plus `app/services/retention.py::start_retention_loop` archives old rows,
-  but nothing measures or reports current table size/growth rate anywhere (see Q120
-  Memory Analytics — confirmed NO).
-- Can summarize context: **NO** — `_trim_messages` is drop-oldest-keep-head-and-tail
-  (`messages[:1] + messages[-4:]`, `base_graph.py` line 257), not an LLM summarization
-  step. No summarization call exists in this trim path (confirmed by reading the function
-  body — it truncates, it never calls a model to condense).
-  Plan: replace or supplement the truncation with a real LLM-summarization pass (a small,
-  cheap model call condensing the dropped middle messages into one summary message) before
-  discarding them, so information is compressed rather than deleted.
-- Can compact history: **PARTIAL** — same `_trim_messages` mechanism; "compact" in the
-  sense of "shrink message count," not in the sense of preserving content.
-- Preserve critical information: **NO** — the trim keeps only the first and last 4
-  messages; anything in the middle (e.g. an early critical finding) is unconditionally
-  dropped, not selectively retained by importance.
-- Avoid context overflow: **YES** (mechanically) — the trim does fire before the token
-  count would exceed the configured budget, so the graph itself won't blow past its own
-  fixed ceiling, though that ceiling isn't model-aware (see above).
-- Warn users when limits are approaching: **NO** — `_trim_messages` only `logger.info`s
-  server-side (line 258-264); no user-facing warning/event is emitted to the chat UI or
-  any API response when a trim occurs or a budget is nearly exhausted. Confirmed by
-  grep across `chat_agent.py`/`base_graph.py` for any SSE/event push tied to trimming —
-  none found.
-  Plan: push a `context_trimmed`/`approaching_limit` SSE event to the chat UI (same
-  `session.push()` mechanism already used for other events) when `_trim_messages` actually
-  fires or `tokens_in` crosses e.g. 80% of budget.
+**Stage 1.5 (2026-07-31): DONE — all items below fixed in one pass.** `_trim_messages` (the old
+pure drop-oldest function this whole section originally described) no longer exists; replaced by
+`_select_messages_to_condense`/`_condense_messages` (`backend/app/agents/base_graph.py:362,448`)
+and, for the graph that previously had nothing at all, `chat_agent.py`'s own
+`_condense_history_async` (`backend/app/agents/chat_agent.py:422`).
+
+- Aware of model context limits: **YES.** New `TIER_CONTEXT_WINDOWS`
+  (`backend/app/fleet/model_router.py:76`) — a real model→context-window table, sourced via live
+  web search on 2026-07-31 (not guessed): 1M tokens is GA for current-gen Opus/Sonnet as of
+  2026-03-13 (Anthropic API release notes), Haiku 4.5 confirmed at 200K, the Groq/"gpt" tier's real
+  models confirmed at 128K (also surfacing a separate, flagged gap: those exact Groq models were
+  deprecated 2026-06-17). Exposed via `RouteConfig.context_window` and
+  `ModelRouter.context_window_for()`. The day-to-day condense trigger still uses
+  `context_token_budget` (a much smaller practical operating budget, by design — this ceiling table
+  is for validation/percentage-of-real-limit purposes, not the primary threshold).
+- Aware of token budgets: **YES** — unchanged real mechanism (`tokens_in`/`tokens_out` on
+  `AgentRunState`, `app/fleet/budget_manager.py` for `$` cost), plus the new condense check now
+  actually consumes it for context-size purposes too (previously it only fed cost tracking).
+- Aware of conversation size / prompt growth: **YES for both graphs now.** `base_graph.py::call_llm`
+  already had this; `chat_agent.py` previously had **none at all** (confirmed by grep before this
+  day's work: zero `tokens_in`/`tokens_out`/`response.usage` references anywhere in the file). New
+  `self._tokens_in`/`self._tokens_out` instance attributes (persist for the life of the session,
+  same pattern as the existing `self._background_processes`), accumulated from
+  `final.usage.input_tokens`/`.output_tokens` after every real streaming call.
+- Aware of memory growth: **PARTIAL, unchanged** — out of Stage 1.5's scope (memory-embedding table
+  growth, not conversation context growth); still tracked as a separate gap (Q120).
+- Can summarize context: **YES.** `_summarize_dropped_messages`/`_summarize_dropped_messages_async`
+  make a real haiku-tier LLM call (routed through the existing circuit breaker) to condense the
+  dropped middle messages into 3-8 concrete bullet points, spliced back in as one synthetic message
+  in place of the originals — proven via `tests/test_base_graph_scaffold.py::TestCondenseMessages`
+  and the end-to-end `tests/test_gap_stage15_context_condense.py`/
+  `test_gap_stage15_chat_context_condense.py` (real content from the summary confirmed reaching a
+  later real LLM call, not silently dropped). On summarization failure: an honest placeholder
+  ("summarization failed: ...") is spliced in instead — never a fabricated summary.
+- Can compact history: **YES** — same mechanism; now genuinely content-preserving, not just
+  message-count-shrinking (and can leave the count unchanged when the dropped section is small,
+  since 1 real message replaced by 1 summary message nets zero count change while still shrinking
+  actual token volume).
+- Preserve critical information: **YES** — condensed via LLM summarization instead of unconditional
+  drop; the summary explicitly asks for concrete specifics (file paths, values, conclusions), not
+  vague generalities.
+- Avoid context overflow: **YES**, unchanged mechanical guarantee, now model-aware via the new table.
+- Warn users when limits are approaching: **YES.** New `push_context_trimmed()`/
+  `push_approaching_limit()` (`backend/app/services/activity_stream.py`) — the latter fires once
+  `tokens_in` crosses 80% of budget, before an actual condense happens, wired into both graphs via
+  the same SSE/`session.push()` mechanism already used for every other event type.
+  **A real boundary-condition bug caught by the new test suite before shipping**: chat_agent.py's
+  first version had a separate outer `pct >= 1.0` pre-check that didn't exactly match
+  `_select_messages_to_condense`'s own `tokens_in <= token_budget` cutoff at the precise
+  `tokens_in == token_budget` boundary — at that exact edge, NEITHER event fired at all. Fixed by
+  removing the redundant outer check and always attempting condense first, branching on the real
+  `was_condensed` result (matching `base_graph.py::call_llm`'s own pattern, which never had this bug).
+  Tests: `tests/test_base_graph_scaffold.py` (7 new/replaced tests), `tests/test_activity_stream.py`
+  (2 new), `tests/test_gap_stage15_context_condense.py` (2), `tests/test_gap_stage15_chat_context_condense.py`
+  (2), `tests/test_model_router.py` (4 new, 20 total). Full regression: 20/20 known baseline
+  unchanged, 3,470 passed.
 
 ---
 
@@ -3091,11 +3207,10 @@ in the codebase.
 - Security checks: **YES** — `ci.yml`, dedicated `security` job running `pip-audit -r requirements.txt` with one explicitly-justified `--ignore-vuln GHSA-jfh8-c2jp-5` exception (documented inline) — a real, non-bypassed gate (the file's own comments note a prior `|| true` bypass was removed as a gap-closure fix). Gap-closure Day 7 (2026-07-30): the second exception this job used to carry, `--ignore-vuln PYSEC-2026-1325` (ecdsa), is removed — `backend/app/auth/jwt.py` no longer depends on `python-jose`/`ecdsa` at all (migrated to PyJWT), so there is nothing left to ignore.
 - Dependency checks: **YES** — same `pip-audit` job; also `eslint`'s frontend equivalent gate at `ci.yml:112-119` (also had its `|| true` bypass explicitly removed per an in-file gap-closure note).
 - Architecture checks: **NO** — no CI step or automated gate validates architecture rules (module boundaries, dependency direction, layering). The closest capability, `architecture_mapper.py`, is a one-shot descriptive LLM summarizer (not a pass/fail checker) invoked on demand, not wired into CI.
-- Performance checks: **PARTIAL** — `app/fleet/regression_detector.py`'s `DeploymentBlocked` exception can block a deploy on a measured agent-benchmark regression (tested in `test_regression_detector.py`), but this is not wired as a CI step in `ci.yml` — it's an in-process fleet-level gate, not a repo-wide deployment gate.
-  Plan: add a CI step invoking `regression_detector`'s check against stored baselines before allowing a merge/deploy.
+- Performance checks: **YES** — Gap-closure Stage 1.7 (2026-07-31): `.github/workflows/ci.yml`'s `backend` job now runs a dedicated, labeled "Regression gate (regression_detector baseline check)" step (`ci.yml:78-99`) invoking `python -m pytest tests/test_regression_detector.py -v --tb=short` as its own visible CI check, separate from the general `pytest tests/` run — so a deliberately-regressed benchmark now demonstrably fails its own named CI step (`test_gate_deploy_raises_deployment_blocked_on_regression`, already-existing, now CI-visible by name). Honest limitation documented inline in `ci.yml`: this CI Postgres is a fresh ephemeral container per run with no baseline history from prior runs, so it proves the gate mechanism works, not "did this specific PR regress the real fleet's persisted baseline" — that needs a persistent CI database or a downloaded baseline artifact, out of scope for this pass.
 - Documentation checks: **NO** — no CI step checks documentation coverage or requires doc updates alongside code changes.
 
-**Overall: PARTIAL.** Lint/format/tests/dependency-security are real, automatically-enforced CI gates (verified in `ci.yml`, and the fact that two prior silent-pass bypasses were found and explicitly removed — per the file's own gap-closure comments — is evidence these gates are taken seriously as real blockers, not decorative). Architecture and documentation checks are not automated at all; performance regression checking exists as working code but is not wired into the CI pipeline itself.
+**Overall: PARTIAL → mostly YES.** Lint/format/tests/dependency-security/performance-gate-visibility are real, automatically-enforced CI gates (verified in `ci.yml`, and the fact that two prior silent-pass bypasses were found and explicitly removed — per the file's own gap-closure comments — is evidence these gates are taken seriously as real blockers, not decorative). Architecture and documentation checks remain not automated.
 
 ---
 
@@ -3104,12 +3219,11 @@ in the codebase.
 ## Q91. Architecture Drift Detection
 
 - Broken design patterns: **NO** — no automated check evaluates whether a change breaks an established design pattern. `architecture_mapper.py` (`backend/app/repo_tools/architecture_mapper.py:1-27`) is explicitly a one-shot LLM summarization tool, not a diagnostic/enforcing one; its own docstring states it deliberately mirrors `continue`'s "LLM prompt asking the model to freehand a prose summary" precedent because "a real, novel static-analysis architecture-detection algorithm has no prior art to build from" — i.e., this was a conscious decision not to build automated drift detection.
-- New technical debt: **PARTIAL** — `backend/app/agents/tech_debt_agent.py` is a real agent whose `_VERIFICATION_CFG` (lines 61-70) forces `run_linter`/`coverage_report` execution before it can submit findings about "lint violations, test coverage gaps, oversized functions, TODO density" — genuine capability, but it must be explicitly dispatched as a task; it is not triggered automatically on every commit/PR (not present in `ci.yml`).
+- New technical debt: **YES** — Gap-closure Stage 1.7 (2026-07-31, user-scoped as "real LLM call, non-blocking"): `backend/app/fleet/structural_diff.py`'s `is_structural_file_change()` (pure, deterministic, 6 tests in `tests/test_structural_diff.py`) detects whether a PR's diff touches a structural file (shared DB schema, the two graph builders, central settings/bootstrap, migrations, RBAC/policy, model routing). `backend/scripts/ci_tech_debt_scan.py` (12 tests in `tests/test_ci_tech_debt_scan.py`, `run_tech_debt_agent` mocked so no real API cost in the test suite itself) wires this into `.github/workflows/ci.yml`'s `backend` job as a new "Tech debt scan" step (`ci.yml:101-114`, `if: github.event_name == 'pull_request'`): on a structural-file diff with `ANTHROPIC_API_KEY` set, it makes a real `run_tech_debt_agent()` call and posts findings to `$GITHUB_STEP_SUMMARY` as an informational annotation. It never blocks the merge — no base ref, no structural change, no API key, or any internal error all fall through to a clean exit 0, by design (this is advisory, not a gate; `regression_detector`'s step above is the real gate). `backend`'s `actions/checkout` step gained `fetch-depth: 0` so `git diff` against the PR base branch actually resolves.
 - Inconsistent modules: **NO** — no automated cross-module consistency checker found; `quality_auditor.py` and `code_quality_agent.py` exist as on-demand LLM agents (`backend/app/agents/quality_auditor.py`, `code_quality_agent.py`) but again require explicit task dispatch, not continuous/automatic triggering on architecture change.
 - Duplicated architectures: **NO** — no automated duplication-detection tooling (no jscpd/similar code-clone detector, no structural-similarity check) found anywhere in `backend/app` or CI config.
 
-**Overall: PARTIAL, trending NO for "automatic."** Real capability exists for tech-debt/quality auditing (`tech_debt_agent.py`, `quality_auditor.py`, `code_quality_agent.py`, all genuine LangGraph agents with verification contracts, not just prompts with no teeth), and `architecture_mapper.py` gives a real, novel structural summary using PageRank over a real cross-file call graph (`cross_file_graph.py`). But none of this is wired to run automatically "if someone changes the architecture" — every one of these is a task a human or orchestrator must explicitly dispatch, and there is no CI step or git hook that triggers them on a diff.
-  Plan: add a CI step (or a manager-graph auto-dispatch rule) that runs `tech_debt_agent` against files changed in a PR when the diff touches structural files (new top-level modules, changed imports across package boundaries).
+**Overall: PARTIAL.** Real capability exists for tech-debt/quality auditing (`tech_debt_agent.py`, `quality_auditor.py`, `code_quality_agent.py`, all genuine LangGraph agents with verification contracts, not just prompts with no teeth), and `architecture_mapper.py` gives a real, novel structural summary using PageRank over a real cross-file call graph (`cross_file_graph.py`). Gap-closure Stage 1.7 (2026-07-31) closed the "new technical debt" sub-item specifically: `tech_debt_agent` now runs automatically in CI on structural-file PR diffs (`backend/scripts/ci_tech_debt_scan.py`, wired into `ci.yml`). `quality_auditor`/`code_quality_agent`/`architecture_mapper` remain explicit-dispatch-only — broadening the same trigger to them was not part of the user's Stage 1.7 scope decision and is not claimed here.
 
 ---
 
@@ -3711,19 +3825,21 @@ Plan: same fix as Q5's Project Memory gap — add `repo_id`, migrate, filter eve
 - Automatically removes temporary data after task completion: **YES** — the state dict
   is never persisted; it's discarded when the function returns (ordinary Python GC),
   confirmed by absence of any table backing `AgentRunState` itself.
-- Prevents memory overflow: **PARTIAL** — `_trim_messages` bounds the messages list
-  within one run, but see Q65 for its truncation-not-summarization weakness.
+- Prevents memory overflow: **YES, Stage 1.5 (2026-07-31)** — `_condense_messages` bounds the
+  messages list within one run, now via real summarization rather than truncation (see Q65).
 
 ### Session Memory
 - Retains important decisions: **PARTIAL** — `LessonStore.add()` (`base_graph.py`)
   retains lessons extracted post-submit, keyword-retrievable, but keeps everything up to
   `capacity=1000` with FIFO eviction (`.pop(0)`), not an "important decisions only" filter.
-- Removes unnecessary conversation: **NO** for `chat_agent.py` (no trim mechanism found,
-  see Q65); **PARTIAL** for worker agents via `_trim_messages`.
-- Summarizes completed work: **NO** — no summarization call found anywhere in the
-  session layer (`LessonStore`/`ChatSession`); lessons are stored as short structured
-  fields (`Lesson` dataclass: category/pattern/lesson), not generated summaries of a
-  whole session.
+- Removes unnecessary conversation: **YES, Stage 1.5 (2026-07-31)** for both — `chat_agent.py` now
+  has its own real condense mechanism (`_condense_history_async`, previously had none at all) and
+  worker agents' `_condense_messages` (see Q65).
+- Summarizes completed work: **PARTIAL, improved Stage 1.5 (2026-07-31)** — the condense step now
+  makes a real LLM summarization call for dropped conversation history (see Q65), but this is
+  scoped to context-budget management, not a dedicated "summarize this whole completed session"
+  feature; `LessonStore`/`Lesson` still stores short structured fields, not generated session
+  summaries, unchanged from before.
 - Compresses repeated information: **NO** — `LessonStore.add()` is pure append, no
   dedup check against existing lessons (contrast with `VersionedLesson.publish()`'s
   real dedup, which `LessonStore` does not share).
@@ -3735,8 +3851,10 @@ Plan: same fix as Q5's Project Memory gap — add `repo_id`, migrate, filter eve
   `request_human_input()`/`arecord_decision()` entry point per `chat_agent.py`'s own
   docstring (line 51-54).
   Plan: add a dedup/similarity check to `LessonStore.add()` (mirroring
-  `VersionedLesson.publish()`'s pattern) and an LLM summarization pass for `chat_agent.py`
-  sessions once they exceed a turn-count threshold.
+  `VersionedLesson.publish()`'s pattern) — still open, out of Stage 1.5's scope (that was
+  specifically context-budget condensing, not lesson dedup). The "LLM summarization pass for
+  `chat_agent.py` sessions" half of this plan note is now DONE (Stage 1.5, 2026-07-31 — see Q65),
+  though scoped to context-budget condensing rather than a turn-count threshold specifically.
 
 ### Long-Term Memory
 - Stores only valuable knowledge (coding preferences, architecture decisions, reusable

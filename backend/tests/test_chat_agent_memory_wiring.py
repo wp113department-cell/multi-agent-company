@@ -165,6 +165,7 @@ class _FakeStream:
         final = MagicMock()
         final.stop_reason = "end_turn"
         final.content = [block]
+        final.usage = MagicMock(input_tokens=10, output_tokens=5)
         return final
 
 

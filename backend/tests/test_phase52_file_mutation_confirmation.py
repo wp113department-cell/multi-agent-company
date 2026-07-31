@@ -53,6 +53,7 @@ class _FakeToolUseStream:
         final = MagicMock()
         final.stop_reason = "tool_use"
         final.content = [block]
+        final.usage = MagicMock(input_tokens=10, output_tokens=5)
         return final
 
 
@@ -78,6 +79,7 @@ class _FakeTextStream:
         final = MagicMock()
         final.stop_reason = "end_turn"
         final.content = [block]
+        final.usage = MagicMock(input_tokens=10, output_tokens=5)
         return final
 
 

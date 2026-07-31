@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { authHeaders, isApprover } from "../../lib/auth";
 
 interface PendingApproval {
   id: number;
@@ -32,7 +33,10 @@ const ACTION_LABELS: Record<string, string> = {
 };
 
 async function apiFetch<T>(path: string, method = "GET"): Promise<T> {
-  const res = await fetch(path, { method, headers: { "Content-Type": "application/json" } });
+  const res = await fetch(path, {
+    method,
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+  });
   const json = (await res.json()) as T;
   if (!res.ok) {
     const detail = (json as { detail?: string })?.detail ?? `HTTP ${res.status}`;
@@ -89,22 +93,33 @@ function ApprovalCard({
       </div>
 
       {approval.status === "pending" ? (
-        <div className="mt-4 flex gap-2">
-          <button
-            disabled={busy}
-            onClick={() => onApprove(approval.threadId)}
-            className="rounded-md bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
-          >
-            Approve
-          </button>
-          <button
-            disabled={busy}
-            onClick={() => onReject(approval.threadId)}
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
-          >
-            Reject
-          </button>
-        </div>
+        // Gap-closure Stage 1.4 (answers.md) — UI-level role gating. The
+        // server (require_approver) is the real enforcement point; this
+        // just stops a viewer-role user from seeing a button that would
+        // only 403 (app/middleware/rbac.py's own docstring: "UI hiding
+        // buttons is a courtesy only").
+        isApprover() ? (
+          <div className="mt-4 flex gap-2">
+            <button
+              disabled={busy}
+              onClick={() => onApprove(approval.threadId)}
+              className="rounded-md bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+            >
+              Approve
+            </button>
+            <button
+              disabled={busy}
+              onClick={() => onReject(approval.threadId)}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              Reject
+            </button>
+          </div>
+        ) : (
+          <p className="mt-4 text-xs text-slate-400 dark:text-slate-500">
+            Approver role required to decide on this request.
+          </p>
+        )
       ) : (
         <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
           <span

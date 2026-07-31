@@ -20,6 +20,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { authHeaders } from "@/lib/auth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -286,7 +287,7 @@ export default function ActivityFeedPage() {
   const handleStop = useCallback(async () => {
     setStopping(true);
     try {
-      await fetch(`/api/tasks/${taskId}/stop`, { method: "POST" });
+      await fetch(`/api/tasks/${taskId}/stop`, { method: "POST", headers: authHeaders() });
     } finally {
       setStopping(false);
     }
@@ -297,7 +298,7 @@ export default function ActivityFeedPage() {
     try {
       await fetch(`/api/tasks/${taskId}/resume`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ message: resumeMsg, files: [] }),
       });
       setResumeMsg("");

@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
-import { authHeaders } from "@/lib/auth";
+import { authHeaders, isApprover } from "@/lib/auth";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -149,20 +149,27 @@ function EpicRow({
             </p>
           )}
         </div>
-        <div className="flex gap-2 shrink-0">
-          <button
-            onClick={() => onApprove(epic.epicId)}
-            className="rounded bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1.5 font-medium transition-colors"
-          >
-            Approve
-          </button>
-          <button
-            onClick={() => onReject(epic.epicId)}
-            className="rounded bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1.5 font-medium transition-colors"
-          >
-            Reject
-          </button>
-        </div>
+        {/* Gap-closure Stage 1.4 (answers.md) — UI-level role gating, a
+            courtesy only; the server (require_approver) is the real
+            enforcement point. */}
+        {isApprover() ? (
+          <div className="flex gap-2 shrink-0">
+            <button
+              onClick={() => onApprove(epic.epicId)}
+              className="rounded bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1.5 font-medium transition-colors"
+            >
+              Approve
+            </button>
+            <button
+              onClick={() => onReject(epic.epicId)}
+              className="rounded bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1.5 font-medium transition-colors"
+            >
+              Reject
+            </button>
+          </div>
+        ) : (
+          <span className="shrink-0 text-xs text-gray-400">Approver role required</span>
+        )}
       </div>
     </div>
   );
@@ -207,20 +214,24 @@ function TaskRow({
             </p>
           )}
         </div>
-        <div className="flex gap-2 shrink-0">
-          <button
-            onClick={() => onApprove(task.taskId)}
-            className="rounded bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1.5 font-medium transition-colors"
-          >
-            Approve
-          </button>
-          <button
-            onClick={() => onReject(task.taskId)}
-            className="rounded bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1.5 font-medium transition-colors"
-          >
-            Reject
-          </button>
-        </div>
+        {isApprover() ? (
+          <div className="flex gap-2 shrink-0">
+            <button
+              onClick={() => onApprove(task.taskId)}
+              className="rounded bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1.5 font-medium transition-colors"
+            >
+              Approve
+            </button>
+            <button
+              onClick={() => onReject(task.taskId)}
+              className="rounded bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1.5 font-medium transition-colors"
+            >
+              Reject
+            </button>
+          </div>
+        ) : (
+          <span className="shrink-0 text-xs text-gray-400">Approver role required</span>
+        )}
       </div>
     </div>
   );
@@ -347,7 +358,7 @@ export default function BatchReviewPage() {
       )}
 
       {/* Approve all */}
-      {data && total > 0 && (
+      {data && total > 0 && isApprover() && (
         <div className="flex justify-end">
           <button
             onClick={handleApproveAll}

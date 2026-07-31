@@ -11,6 +11,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { authHeaders, isApprover } from "../../lib/auth";
 
 interface EnhancementRequest {
   id: number;
@@ -57,7 +58,10 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 async function apiFetch<T>(path: string, method = "GET", body?: unknown): Promise<T> {
-  const opts: RequestInit = { method, headers: { "Content-Type": "application/json" } };
+  const opts: RequestInit = {
+    method,
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+  };
   if (body !== undefined) opts.body = JSON.stringify(body);
   const res = await fetch(path, opts);
   const json = (await res.json()) as T;
@@ -106,22 +110,31 @@ function RequestCard({
       </div>
 
       {req.status === "pending" ? (
-        <div className="mt-4 flex gap-2">
-          <button
-            disabled={busy}
-            onClick={() => onApprove(req.id)}
-            className="rounded-md bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
-          >
-            Approve
-          </button>
-          <button
-            disabled={busy}
-            onClick={() => onReject(req.id)}
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
-          >
-            Reject
-          </button>
-        </div>
+        // Gap-closure Stage 1.4 (answers.md) — UI-level role gating, a
+        // courtesy only; the server (require_approver) is the real
+        // enforcement point.
+        isApprover() ? (
+          <div className="mt-4 flex gap-2">
+            <button
+              disabled={busy}
+              onClick={() => onApprove(req.id)}
+              className="rounded-md bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+            >
+              Approve
+            </button>
+            <button
+              disabled={busy}
+              onClick={() => onReject(req.id)}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              Reject
+            </button>
+          </div>
+        ) : (
+          <p className="mt-4 text-xs text-slate-400 dark:text-slate-500">
+            Approver role required to decide on this request.
+          </p>
+        )
       ) : (
         <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
           <span className={`font-medium ${STATUS_STYLES[req.status] ?? ""}`}>

@@ -37,6 +37,7 @@ class RouteConfig:
     max_tokens: int
     thinking_budget: int | None
     temperature: float
+    context_window: int  # real model input-token ceiling — see TIER_CONTEXT_WINDOWS
 
     def token_kwargs(self) -> dict[str, Any]:
         """Return kwargs suitable for an Anthropic messages.create() call."""
@@ -57,6 +58,26 @@ _DEFAULT_TIERS: dict[str, dict[str, Any]] = {
     "sonnet": {"max_tokens": 4096, "thinking_budget": None, "temperature": 1.0},
     "haiku": {"max_tokens": 1024, "thinking_budget": None, "temperature": 0.5},
     "gpt": {"max_tokens": 4096, "thinking_budget": None, "temperature": 0.7},
+}
+
+# Gap-closure Stage 1.5 (answers.md) — model→context-window table, sourced
+# (not guessed) via live web search on 2026-07-31, not training-data
+# recall: the 1M-token context window is General Availability (default, no
+# beta header) for current-generation Opus/Sonnet as of 2026-03-13
+# (Anthropic API release notes); Haiku 4.5 is confirmed at 200K (matches
+# this fleet's pinned "claude-haiku-4-5-20251001"). The "gpt" tier's real
+# models (Groq's qwen/qwen3-32b, llama-3.1-8b-instant — see
+# Settings.groq_model_*) are confirmed at 128K via Groq's own model docs;
+# note both were deprecated by Groq on 2026-06-17 — a real, separate,
+# out-of-scope-for-this-item gap flagged in answers.md, not fixed here.
+# This is a ceiling for validation/percentage-of-real-limit purposes; the
+# actual day-to-day trim/condense threshold remains context_token_budget
+# (Settings), which is deliberately far below any of these numbers already.
+TIER_CONTEXT_WINDOWS: dict[str, int] = {
+    "opus": 1_000_000,
+    "sonnet": 1_000_000,
+    "haiku": 200_000,
+    "gpt": 128_000,
 }
 
 
@@ -141,7 +162,12 @@ class ModelRouter:
             max_tokens=tier_cfg.get("max_tokens", 4096),
             thinking_budget=tier_cfg.get("thinking_budget"),
             temperature=tier_cfg.get("temperature", 1.0),
+            context_window=TIER_CONTEXT_WINDOWS.get(tier, 200_000),
         )
+
+    def context_window_for(self, agent_name: str) -> int:
+        """Convenience shortcut — returns just the real model context window."""
+        return self.route(agent_name).context_window
 
     def model_for(self, agent_name: str) -> str:
         """Convenience shortcut — returns just the model string."""

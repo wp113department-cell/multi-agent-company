@@ -47,6 +47,7 @@ class TestRouteConfig:
             max_tokens=4096,
             thinking_budget=None,
             temperature=1.0,
+            context_window=1_000_000,
         )
         kw = rc.token_kwargs()
         assert kw["max_tokens"] == 4096
@@ -61,6 +62,7 @@ class TestRouteConfig:
             max_tokens=8192,
             thinking_budget=2048,
             temperature=1.0,
+            context_window=1_000_000,
         )
         kw = rc.token_kwargs()
         assert kw["max_tokens"] == 8192
@@ -98,6 +100,45 @@ class TestModelRouter:
         assert cfg.tier == "haiku"
         assert cfg.max_tokens == 1024
         assert cfg.thinking_budget is None
+
+    # Gap-closure Stage 1.5 (answers.md) — model→context-window table.
+    def test_route_context_window_by_tier(self):
+        router = ModelRouter()
+        assert router.route("architect").context_window == 1_000_000  # opus
+        assert router.route("coder").context_window == 1_000_000  # sonnet
+        assert router.route("env_checker_agent").context_window == 200_000  # haiku
+
+    def test_context_window_for_shortcut(self):
+        router = ModelRouter()
+        assert (
+            router.context_window_for("architect")
+            == router.route("architect").context_window
+        )
+
+    def test_unknown_tier_falls_back_to_200k(self, tmp_path: Path):
+        data = {
+            "_tiers": {
+                "weird_tier": {
+                    "max_tokens": 4096,
+                    "thinking_budget": None,
+                    "temperature": 1.0,
+                }
+            },
+            "DEFAULT": {
+                "provider": "anthropic",
+                "model": "claude-sonnet-5",
+                "tier": "weird_tier",
+            },
+            "some_agent": {
+                "provider": "anthropic",
+                "model": "claude-sonnet-5",
+                "tier": "weird_tier",
+            },
+        }
+        path = tmp_path / "agent_models.json"
+        _make_json(path, data)
+        router = ModelRouter(json_path=path)
+        assert router.route("some_agent").context_window == 200_000
 
     def test_route_sonnet_tier(self):
         router = ModelRouter()

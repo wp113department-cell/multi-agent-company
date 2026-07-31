@@ -46,6 +46,41 @@ export function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// Gap-closure Stage 1.4 (answers.md) — UI-level role gating. The server is
+// the real enforcement point (app/middleware/rbac.py's own docstring:
+// "UI hiding buttons is a courtesy only") — this exists purely so a
+// viewer-role user doesn't see an Approve/Reject button that would just
+// 403, not as a security boundary. Decodes the JWT's own `role` claim
+// (already embedded by the backend's create_access_token({"sub", "role"})
+// at login) client-side — no signature verification, since that would be
+// meaningless here: a forged role claim still hits the real, signature-
+// verified check server-side and gets a real 403, this only ever affects
+// what's rendered.
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const payloadB64 = token.split(".")[1];
+    if (!payloadB64) return null;
+    const base64 = payloadB64.replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(base64)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+export function getRole(): string | null {
+  const token = getToken();
+  if (!token) return null;
+  const payload = decodeJwtPayload(token);
+  const role = payload?.role;
+  return typeof role === "string" ? role : null;
+}
+
+/** Matches the backend's own require_approver check (role in ("approver", "admin")). */
+export function isApprover(): boolean {
+  const role = getRole();
+  return role === "approver" || role === "admin";
+}
+
 export async function login(
   username: string,
   password: string
