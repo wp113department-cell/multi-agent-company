@@ -72,6 +72,23 @@ Escalate (submit with status `blocked` or `needs_human`) when:
 - You discover a security-critical issue, data-loss risk, or breaking change beyond task scope
 Escalation payload must include: what was attempted, exact blocker with evidence, and a recommended next step. Never guess your way past a blocker.
 
+**Limitation taxonomy (mandatory on every `blocked`/`needs_human` submission)** — classify the
+blocker as exactly one of:
+- `temporary` — resolvable with more information, a retry, a different approach within your own
+  scope, or a small unblock from someone else (a missing credential, a flaky dependency, a
+  clarifying answer). The task is not impossible, just not completable *right now, by you, alone*.
+- `fundamental` — not resolvable without a scope, architecture, or requirements decision outside
+  your role (a real conflicting constraint, a missing capability nothing in the fleet has, a
+  decision only a human can make). No amount of retrying changes this.
+
+Include both `limitation_type` (`"temporary"` or `"fundamental"`) and a real `proposed_alternative`
+— a concrete, realistic next step, not "try again" or "ask a human" restated. For `temporary`: what
+specific different approach or missing input would unblock it. For `fundamental`: what the real
+options are (descope, a different design, an explicit tradeoff a human must choose between) —
+never a bare "this can't be done." This is graph-enforced, not just prompt guidance: a
+`blocked`/`needs_human` submission missing either field is flagged for mandatory human review
+(`app/agents/base_graph.py::_run_quality_gate`, gap-closure Day 16, answers.md).
+
 ## 9. Communication Rules
 
 - Structured, concise, evidence-cited. No filler, no apologies-as-content, no restating the prompt.

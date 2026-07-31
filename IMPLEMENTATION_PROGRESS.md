@@ -1773,3 +1773,490 @@ be silently dropped — every item below traces to a real `MASTER_AGENT_v2.md` �
   **Day 15 done. Per explicit owner instruction, stopping here for today — Day 16 (the
   "propose realistic alternative" + limitation taxonomy sub-item, plus the chat_agent.py
   verification-tracking follow-up named above) resumes next session.**
+- **2026-07-31**: **Day 16 (Stage 1.2, both remaining sub-items) complete.** Docker Desktop had
+  stopped since the last session (new day, machine state) — relaunched from its non-standard
+  install path, waited for the daemon, confirmed `gridiron-postgres`/`gridiron-redis` still running,
+  ran `tests/test_sandbox.py` as a live health check before starting any real work.
+  1. **`chat_agent.py`'s dead `_VERIFICATION_CFG` — wired for real, not just flagged.** Day 15 had
+     already investigated and found this: the config object existed since the class was written
+     (`set_by`, `reset_by`/`reset_keys`, `expected_verification={"read": "read_file or search_code
+     must run before write/bash tools"}`) but was consulted nowhere — `ChatGraphState` had no
+     `verification` key at all, confirmed by grep before writing a line of code. New
+     `ChatGraphState.verification: dict[str, Any]` field, deliberately left OUT of `run()`'s per-turn
+     `initial_state` dict — LangGraph's checkpointer merges partial state updates onto what's already
+     checkpointed for a `thread_id`, so omitting it means it accumulates across the whole session (a
+     file read in turn 1 still counts in turn 5) rather than resetting every user message, which is
+     the actually-correct semantics for a real due-diligence check. `_execute_tool_node` now computes
+     `verification` at the top of each tool call, checks a new `blocking_until={"write_file": "read",
+     "edit_file": "read", "apply_patch": "read", "bash": "read"}` (added to `_VERIFICATION_CFG`)
+     before invoking the real handler — refusing with a real `[POLICY DENIED]` result, the handler
+     never runs — then applies `set_by`/`reset_by`/`reset_keys` afterward exactly like
+     `base_graph.py`'s shared node already does. `delete_file` deliberately excluded from
+     `blocking_until` — Day 5 already gates every delete behind mandatory human confirmation, a
+     stronger protection than a prior-read requirement would add on top.
+     A real implementation bug was caught and fixed while writing tests, not shipped: first draft
+     referenced `self.AGENT_CONTRACT` inside `_execute_tool_node`, but `AGENT_CONTRACT` is a
+     module-level dict (matching every other agent file's convention), not a class attribute —
+     would have raised `AttributeError` on the very first blocked call. Caught by actually running
+     the test, not just reading the code back.
+     Tests: `tests/test_gap16_chat_agent_verification_gate.py` (4 new) — driving the real compiled
+     graph through real scripted LLM turns (the same fake-streaming-client pattern
+     `test_phase52_chat_graph_interrupt.py` established), not internal bookkeeping assertions: bash
+     refused before any read; bash succeeds after a real read_file call; the flag persists across two
+     separate `agent.run()` calls on the same session (proving the accumulate-not-reset design
+     actually works, not just compiles); write_file blocked unconditionally even for brand-new file
+     creation. 3 pre-existing tests in `tests/test_phase52_file_mutation_confirmation.py`
+     (write_file-overwrite confirmed/denied, new-file-creation-skips-confirmation) needed a preceding
+     `read_file` turn added to their setup to keep reaching the confirmation-gate code path they
+     actually test — an intentionally strengthened contract correctly breaking old test setups, not
+     a regression, same principle applied consistently since Days 5-6.
+  2. **Limitation taxonomy + "propose a realistic alternative," graph-enforced, not new prompt text
+     nobody checks.** `_GLOBAL_STANDARDS.md` §8 already told every agent to escalate with "a
+     recommended next step" but had zero code behind it — confirmed by reading `_run_quality_gate`
+     (Phase 3.7's existing real, shared, graph-enforced chokepoint every `submit_*` call already
+     routes through) before designing anything: only critique and confidence could flip a submission
+     to `requires_human_approval`. Updated `_GLOBAL_STANDARDS.md` §8 to define the taxonomy
+     explicitly (`temporary` — resolvable with more info/a retry/a different approach within scope;
+     `fundamental` — needs a scope/architecture/requirements decision outside the role) and require
+     both `limitation_type` and a real `proposed_alternative` on every `blocked`/`needs_human`
+     escalation. Added the actual enforcement to `_run_quality_gate` itself: when
+     `raw_result["status"]` is `blocked`/`needs_human`, `limitation_type` must be exactly
+     `"temporary"`/`"fundamental"` and `proposed_alternative` must be a real, non-empty string: 2 new
+     `checks` entries, both feeding into `passed`. Deliberately NOT a new per-agent JSON-schema
+     property retrofitted across 72 hand-written `input_schema` files (real, but disproportionate
+     scope for one day) — a model can include extra tool-call keys beyond what a schema declares,
+     and none of the 72 submit schemas set `additionalProperties: false`, so the `_GLOBAL_STANDARDS.md`
+     §8 prompt instruction is sufficient for every agent to actually supply them. Matches the
+     existing critique/confidence gate's own informational-only precedent exactly: a missing/invalid
+     field never blocks the submission outright, it sets `requires_human_approval=True` — so a
+     blocked result with no real next step is always routed to a human instead of disappearing
+     silently, the same real distinction this whole engagement has drawn before (Day 5's
+     post-hoc-vs-pre-action gate) between "stops it" and "makes sure a human sees it."
+     Tests: `tests/test_gap16_limitation_taxonomy.py` (9 new) — 7 direct `_run_quality_gate` unit
+     tests (non-blocked status unaffected, missing both fields fails, invalid `limitation_type`
+     value fails, whitespace-only `proposed_alternative` fails, real temporary/fundamental values
+     with real alternatives pass, `needs_human` gated identically to `blocked`) plus 2
+     `execute_tools` integration tests confirming the real escalation and non-escalation paths reuse
+     `test_phase37_quality_gate.py`'s own established `_cfg`/`_state`/integration-test pattern for
+     this exact shared function.
+  `black`/`ruff` clean on every touched file. `mypy --strict`: source files
+  (`app/agents/chat_agent.py`, `app/agents/base_graph.py`) clean except the same pre-existing,
+  unrelated `budget_manager.py` error every prior day has noted. `tests/test_gap16_limitation_taxonomy.py`
+  carries the same `_state()`-returns-loosely-typed-dict mypy pattern `test_phase37_quality_gate.py`
+  itself already has (confirmed identical, 11 errors in each) — deliberately left consistent with
+  that established convention rather than diverging in the new file alone.
+  Full regression: **3434 passed / 20 failed / 55 skipped / 17 deselected** (424s) — the exact known
+  baseline, zero new regressions; pass count rose by exactly 13, the new tests. `answers.md` updated:
+  Q29 ("Only then implement" ordering — now YES for both real architectures, chat_agent.py's
+  specific case explicitly closed, not left as a dangling citation), Q67 ("Only then make changes"
+  ordering — YES for chat_agent.py), Q68 (distinguish temporary vs fundamental — YES; propose
+  realistic alternatives — YES, both with full evidence), and the related Q69-area item repeating
+  the same two sub-points.
+  **Stage 1.2 (Days 15-16, verification & trust) is fully closed — real blocking checks live in
+  both graph architectures this codebase has, real test-runner exit codes, real limitation taxonomy
+  graph-enforced fleet-wide. Next: Days 18-23 (Stage 1.3, reliability & durability) — the plan's own
+  biggest single bucket, starting with Day 18's standalone replay-safety repro for
+  `base_graph.py`'s node shape before any real wiring, with the plan's own hard stop condition: if
+  that repro finds a real problem, Days 19-23 extend rather than compress.**
+- **2026-07-31 (same day)**: **Day 18 (⚠, hard-stop-condition day) complete — real problem found,
+  schedule now extends per the plan's own explicit rule, not compressed under pressure.**
+  Standalone repro (`day18_replay_safety_repro.py`, scratchpad, not committed — same "prototype
+  only, real production code lands after the mechanism is proven" precedent Day 8 already
+  established): real LangGraph 1.2.7 (this project's own pinned version), real `MemorySaver`
+  checkpointer (the same class `chat_agent.py`/`pipeline/graph.py` already use in production, not a
+  mock), a single `StateGraph` node built to match `execute_tools`'s real structure exactly — one
+  synchronous `for tu in tool_uses:` loop, each iteration performing a real, externally-observable
+  side effect (an append to a real log file on disk, standing in for a real git commit/file
+  write/bash command — something that happens outside the graph's own state and can't be undone by
+  the state rolling back).
+  Method: run the graph until an unhandled exception fires partway through the loop (simulating a
+  real process crash — an OOM kill, a deploy restart — NOT a deliberate `interrupt()`, since
+  `execute_tools` has no `interrupt()` call anywhere today, confirmed by grep before writing the
+  repro). Then invoke the same graph/thread_id again with `None` as input — LangGraph's own
+  documented resume convention, exactly what a fresh process reconnecting to the same durable
+  checkpoint store after a crash would do.
+  **Result: CONFIRMED REPLAY-SAFETY HAZARD.** The side-effect log showed each of the 2 tool calls
+  that completed before the simulated crash (`git_commit_change`, `write_file`) appearing TWICE
+  after resume — the entire node replayed from its start, including tool calls whose real side
+  effects had already happened. This is the exact "whole node replays" hazard `chat_agent.py`'s own
+  Phase 5.2 docstring already named and solved for the interactive chat graph (that graph's
+  `_execute_tool_node` processes exactly ONE tool call per node invocation, via a `pending_tool_uses`
+  list popped one item at a time, specifically so a crash mid-batch only ever risks re-running the
+  ONE tool call that was in-flight, never ones already completed) — now empirically confirmed, not
+  assumed by analogy, to also apply to `base_graph.py`'s differently-shaped `execute_tools` node,
+  which processes its ENTIRE batch of tool calls within one synchronous node invocation.
+  Because this graph currently has NO checkpointer at all in production, this hazard is dormant
+  today (a crash mid-run just loses the whole task, caught by the existing 900s orphan-recovery
+  sweep — no silent duplication happens because there's no checkpoint to resume from). It becomes
+  live and dangerous the moment a checkpointer is added naively, which was the plan's original
+  Days 19-20 goal — confirming exactly why the plan required proving this safe FIRST, before any
+  real wiring, rather than assuming LangGraph's replay semantics would just work.
+  **Per the plan's own explicit hard-stop condition for this exact scenario ("if that repro finds a
+  real problem, Days 19-23 extend to however many days a safe per-node decomposition actually
+  takes — do not compress back into the original 5-day window under schedule pressure"): the
+  schedule now extends.** Revised plan for the remainder of Stage 1.3, communicated here rather than
+  silently absorbed: Day 19 — design and implement a safe one-tool-call-per-node-invocation
+  decomposition of `_make_execute_tools_node` (the shared builder ~74-76 agent modules route
+  through), matching `chat_agent.py`'s already-proven pattern. Day 20 — prove the decomposed version
+  is actually safe (an adapted version of today's same repro, run against the real refactored code,
+  not just unit tests) plus full regression, since this touches the shared graph builder every
+  worker agent uses. Day 21 — wire the actual `AsyncPostgresSaver` checkpointer into
+  `build_agent_graph()`, now safe to do. Day 22 — circuit breaker around Anthropic/Groq client calls
+  (unchanged from the original plan, shifted by one day). Day 23 — persist background-process PIDs +
+  session-close hook to terminate orphans (unchanged, shifted by one day). Day 24 — final fleet-wide
+  regression for the whole Stage 1.3 block (unchanged, shifted by one day).
+  `answers.md` updated: Q24's "Durable resumability for the ~70 worker agents" backlog item — its
+  own original text already predicted this exact risk ("Complexity: High — 5.2's own writeup shows
+  this is genuinely hard to get side-effect-safe") — updated from a predicted risk to a confirmed,
+  empirically-reproduced finding, with the revised, extended plan.
+  **Next: Day 19 — the actual `execute_tools` decomposition. This is the single highest-blast-radius
+  change in the entire 65-day plan (every worker agent in the fleet routes through this one shared
+  function) — full regression before AND after, smallest correct change, no drive-by refactors,
+  exactly as the Definition of Done has required every day so far, held to even more strictly here
+  given the stakes.**
+- **2026-07-31 (same day)**: **Day 19 (⚠, highest-blast-radius day in the whole 65-day plan)
+  complete — `execute_tools` decomposed to one-tool-call-per-invocation, replay-safety hazard
+  closed, proven against the real production node, zero regressions.**
+  Applied `chat_agent.py`'s already-proven Phase 5.2 pattern to `base_graph.py`'s
+  `_make_execute_tools_node` (`backend/app/agents/base_graph.py:1039-1339`): three new optional
+  `AgentRunState` fields (`pending_tool_uses`, `tool_results_buffer`,
+  `batch_requires_human_approval`, lines 110-112) let the node process exactly one pending tool
+  call per invocation instead of looping over the whole batch inline. When a batch isn't drained
+  yet, the node returns a partial state update (verification/result/submitted plus the remaining
+  batch) instead of appending to `messages` or incrementing `turns` — those stay batch-level
+  concepts, updated only once the last tool call in the batch completes, exactly matching the
+  pre-Day-19 single-message-per-turn shape from the caller's point of view. `pending_tool_uses` is
+  deliberately re-derived from `messages[-1]` whenever it's empty/unset (not just at the very start
+  of a run), which also preserves an existing, unrelated `reflection_node` interaction rather than
+  silently changing it (see bug note below).
+  `_post_execute_tools_router` (`base_graph.py:1582`) now checks `pending_tool_uses` FIRST and
+  self-loops back to `"execute_tools"` while a batch is still draining, before falling through to
+  its existing `critique_node`/`call_llm` routing. `build_agent_graph`'s edge-wiring
+  (`base_graph.py:1725-1767`) was updated in BOTH the `enable_critique` and non-critique branches
+  to include the `{"execute_tools": "execute_tools", ...}` self-loop key — a genuine bug was caught
+  here mid-implementation: the non-critique branch previously used a plain unconditional
+  `g.add_edge`, never calling `_post_execute_tools_router` at all, so routing it through the shared
+  router for the self-loop meant its "critique_node" abstract-route key (returned whenever
+  `submitted` is True) had nowhere to go in a graph with no `critique_node`. Fixed by mapping that
+  key to `loop_back_target` in the non-critique path map too, exactly restoring the original
+  unconditional-edge behavior for that case (a real test — `test_graph_low_planner_confidence_...`
+  — caught this with a `KeyError` before it could ship).
+  A second real bug surfaced during full regression, not anticipated in the design: `reflection_node`
+  can replace `messages[-1]` with a plain-string `"[Self-review]\n{...}"` message when it judges a
+  turn unsatisfied. The pre-Day-19 code silently no-opped on this (iterating a string yields
+  characters, none of which are `tool_use` dicts, so the old loop just did nothing and returned an
+  empty-tool_results state); the naive Day-19 rewrite crashed instead (`IndexError` on `pending[0]`
+  against an empty list). `tests/test_phase36_continuous_replanning.py` (3 tests) caught this
+  immediately on the first full regression run. Fixed with an explicit empty-`pending` guard that
+  returns the exact same no-op final state the old code produced — preserving a pre-existing (and
+  out of Day 19's scope to actually fix) quirk rather than silently changing behavior beyond the
+  replay-safety fix itself.
+  **Proof, against real production code this time (not Day 18's toy analog):**
+  `tests/test_gap19_execute_tools_replay_safety.py` (new, 2 tests) builds a real `StateGraph` from
+  the real `_make_execute_tools_node`/`_post_execute_tools_router`, compiled with a real
+  `MemorySaver` checkpointer. `test_execute_tools_does_not_replay_completed_side_effects_after_resume`
+  streams 3 tool calls that each append to a real external log file, stops consuming the stream the
+  moment the log shows 2 real completed side effects (simulating an actual process crash — no
+  exception thrown, the process just stops, matching how an OOM-kill or deploy restart actually
+  behaves), then resumes with LangGraph's own documented `graph.stream(None, config)` convention on
+  the same `thread_id`. The real log after resume reads `["a", "b", "c"]` — never
+  `["a", "b", "a", "b", "c"]`. `test_execute_tools_completes_normally_with_no_crash` is the control
+  case, confirming the decomposition doesn't change normal-path (no-crash) behavior.
+  Also updated: `tests/test_gap15_blocking_verification.py`'s
+  `test_within_the_same_turn_a_prior_setter_call_satisfies_a_later_gate` — this test directly
+  exercised the OLD "one node call drains a whole multi-tool_use batch" contract by calling `node(state)`
+  once and asserting on both tool calls' results. Updated (not reverted) to a `_drain_batch` helper
+  that invokes the node repeatedly until `pending_tool_uses` empties, mirroring what
+  `build_agent_graph`'s real self-loop edge now does — the test's actual intent (a same-turn setter
+  call satisfies a same-turn gated call, no artificial extra `call_llm` round-trip needed) is fully
+  preserved, only the mechanism by which the batch drains changed.
+  Full regression: before this day's fix-cycle, first full run showed 23 failed (the known 20-item
+  environment-specific baseline + the 3 new `test_phase36_continuous_replanning.py` regressions from
+  the `reflection_node` interaction bug above) — after both bug fixes, full regression is back to
+  exactly the known 20-item baseline, 3,436 passed (3,434 + the 2 new Day 19 replay-safety tests),
+  zero unexplained regressions. `black`/`ruff`/`mypy --strict` clean on every touched file (the one
+  pre-existing `budget_manager.py` "resource" name-defined error is unrelated, a known Windows/Unix
+  `resource`-module environment quirk, not touched by this change).
+  `answers.md` Q24 updated: the durable-resumability item now records Day 19 as DONE with exact
+  `file:line` evidence and test names, and the revised Day 20-24 plan for the remainder of Stage 1.3.
+  Day 18's scratch repro script/log cleaned up from the scratchpad (superseded by the real
+  production-code proof committed in `tests/`).
+  **Next: Day 20 — a more comprehensive fleet-wide durability regression pass for Stage 1.3's
+  reliability work before Day 21 adds the actual `AsyncPostgresSaver` checkpointer (now safe to add,
+  since the replay-safety hazard that made it dangerous is closed).**
+- **2026-07-31 (same day)**: **Day 20 complete — honest scope note plus one genuinely new
+  end-to-end proof, not a re-run of Day 19's already-done work.**
+  The plan's revised Day 20 description ("prove the decomposed version is actually safe — an
+  adapted repro against the real refactored code, not just unit tests — plus full regression") was
+  written before Day 19 itself turned out to already deliver exactly that: Day 19's own
+  `tests/test_gap19_execute_tools_replay_safety.py` already runs a real crash+resume repro against
+  the real production node with a real `MemorySaver` checkpointer, and Day 19 already ran full
+  regression three times to green. Re-doing that identical proof today would be padding, not new
+  verification — so Day 20 does not repeat it: when a planned day's literal scope has already been
+  satisfied by the prior day's real work, the honest move is to say so and redirect the day's effort
+  to a genuinely uncovered gap, not manufacture busywork to match the plan document.
+  Two real gaps Day 19's own tests did NOT cover, both closed today:
+  1. Grep-confirmed (`grep -rn "_make_execute_tools_node\|_post_execute_tools_router" app/`) that no
+  file outside `base_graph.py` itself references either function directly — the shared node/router
+  is exclusively reached through `build_agent_graph()`, so no other call site in the ~74-76 agent
+  modules could be relying on the pre-Day-19 whole-batch-in-one-call contract. Confirms the Day 19
+  refactor's blast radius really is fully contained to the one shared builder, as designed.
+  2. New: `tests/test_gap20_execute_tools_batch_with_critique.py` (1 test) — the one real scenario
+  neither Day 19's isolated-node tests nor the pre-existing `test_phase35_self_critique.py` covered:
+  a FULLY COMPILED graph (`run_agent_graph`, `enable_critique=True`) where a single LLM turn returns
+  TWO tool_use blocks (a setter tool plus `submit_result` together) — the exact combination where a
+  self-loop routing mistake could send the batch to `critique_node` before it's actually drained, or
+  never reach `critique_node` at all once it is. Both existing critique integration tests only ever
+  scripted one tool_use per turn, so neither failure mode was reachable by them. The new test proves:
+  both tool calls run in order exactly once, `critique_node` fires exactly once (after the batch
+  drains, not once per tool call), and the batch's tool results are bundled into one message —
+  matching the pre-Day-19 shape from the caller's point of view.
+  Full regression: 20/20 known baseline unchanged, 3,437 passed (3,436 + the 1 new test), zero
+  regressions. `black`/`ruff`/`mypy --strict` clean.
+  **Next: Day 21 — wire the actual `AsyncPostgresSaver` checkpointer into `build_agent_graph()`, now
+  safe to do since the replay-safety hazard that made it dangerous is closed.**
+- **2026-07-31 (same day)**: **Day 21 complete — `build_agent_graph()` now durably checkpoints every
+  worker-agent run via a real `AsyncPostgresSaver`, mirroring `pipeline/graph.py`'s own established
+  pattern exactly; a real cross-thread-loop compatibility question was investigated (not assumed)
+  and confirmed safe; a real global-state test-pollution bug was found and fixed before it could
+  ship as a regression.**
+  `app/agents/base_graph.py:48-104`: new module-level `_agent_checkpointer`/`_agent_pg_cm` +
+  `init_agent_checkpointer()`/`close_agent_checkpointer()`, matching `pipeline/graph.py`'s
+  `init_checkpointer()`/`close_checkpointer()` line for line (same driver, same DSN conversion, same
+  fallback-to-`MemorySaver`-on-failure `except Exception` contract) — kept as `base_graph.py`'s own
+  independent instance/connection rather than importing `pipeline/graph.py`'s, so the ~74-76 worker
+  agent modules don't gain a dependency on the higher-level pipeline orchestrator module.
+  `build_agent_graph()`'s `return g.compile()` (`base_graph.py:1842`) now passes
+  `checkpointer=_agent_checkpointer`. `run_agent_graph()`'s `graph.stream(...)` call
+  (`base_graph.py:2117`) now passes `config={"configurable": {"thread_id": tid}}` — `tid` is the
+  run's own already-existing stable identity (already used as `state["trace_id"]` and
+  `build_agent_graph`'s `trace_id=` parameter), so a resumed run genuinely addresses the same
+  checkpoint rather than starting fresh under a random ID. Wired into `app/main.py`'s FastAPI
+  `lifespan()` alongside the existing pipeline checkpointer calls (`init_agent_checkpointer`/
+  `close_agent_checkpointer`, called right after `init_checkpointer`/before `close_checkpointer`).
+  **Investigated, not assumed, before writing any of this**: does `AsyncPostgresSaver` — designed for
+  async `graph.ainvoke()`/`astream()` — actually work with `run_agent_graph()`'s SYNC `graph.stream()`
+  call (unlike `pipeline/graph.py`, which uses the async API directly)? Read
+  `AsyncPostgresSaver.get_tuple`'s real source before assuming either way: its sync methods bridge
+  onto their owning event loop via `asyncio.run_coroutine_threadsafe` and explicitly refuse to run
+  synchronously from the SAME thread that owns that loop ("use the async interface instead"). Grepped
+  every dispatch path that calls `run_agent_graph()` (`app/api/specialized_agents.py`'s two endpoints,
+  `app/agents/manager.py`'s dev/qa/reviewer dispatch) and confirmed all of them already wrap the sync
+  call in `asyncio.to_thread()` — meaning `graph.stream()` (and therefore the checkpointer's sync
+  methods) always runs on a worker thread, never the main loop thread that owns
+  `AsyncPostgresSaver`'s connection. This is exactly the bridging contract `AsyncPostgresSaver`
+  requires, confirming `AsyncPostgresSaver` (not a sync `PostgresSaver`) is the correct choice here,
+  matching the plan's own text and `pipeline/graph.py`'s existing precedent class.
+  **A real, environment-specific finding, not unique to this day's new code**: on this dev machine
+  (native Windows, not Docker), `init_agent_checkpointer()` falls back to `MemorySaver` — confirmed
+  the root cause is psycopg3's async mode being incompatible with Windows' default
+  `ProactorEventLoop` (`asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())`
+  fixes it, confirmed empirically both via a standalone script and inside
+  `tests/test_gap21_agent_checkpointer_postgres.py`'s second test). Confirmed this is a **pre-existing**
+  limitation of `pipeline/graph.py`'s own `init_checkpointer()` too (reproduced identically against
+  it), not introduced today — and confirmed it does NOT affect real production, which runs in
+  Docker/Linux (`backend/Dockerfile`) where the default event loop has no such incompatibility.
+  Documented in the test file rather than silently worked around, and NOT expanded into a
+  global-event-loop-policy change (out of scope for "wire the checkpointer," would affect the whole
+  app's asyncio behavior, not just this).
+  **A real bug found and fixed before it could ship**: the first version of `close_agent_checkpointer()`
+  closed the Postgres connection but never reset `_agent_checkpointer` back to a working default,
+  leaving it pointing at a checkpointer bound to an already-closed event loop. Harmless in
+  production (close only ever happens once, at process shutdown, nothing runs afterward) but this
+  day's own new test — the first thing to ever call init+close within a single long-lived process —
+  caught it immediately: first full regression run showed 51 failures (`RuntimeWarning: coroutine
+  'AsyncPostgresSaver.aget_tuple' was never awaited`) cascading into every subsequent test in the
+  suite that called `build_agent_graph()`. Fixed by resetting `_agent_checkpointer = MemorySaver()`
+  inside `close_agent_checkpointer()`'s cleanup — full regression back to the known 20-item baseline
+  immediately after.
+  **Tests**: `tests/test_gap21_agent_checkpointer_postgres.py` (2 tests) — against this dev
+  environment's real running Postgres (`gridiron-postgres` docker container), not a mock.
+  `test_agent_checkpointer_resumes_without_replaying_completed_calls` re-runs Day 19's own
+  crash+resume replay-safety proof, this time compiled against whichever checkpointer backend
+  actually activated (reports which one), proving the property holds end to end through the real
+  `init_agent_checkpointer()`/`build_agent_graph()` wiring, not just the bare node.
+  `test_real_postgres_backend_activates_given_a_compatible_event_loop` isolates the Windows/
+  ProactorEventLoop variable by running as a plain sync test with its own explicit
+  `WindowsSelectorEventLoopPolicy()`, proving the real driver/connection/`setup()` table-creation
+  logic genuinely works end to end — not just that the Python wiring compiles.
+  Full regression: one transient failure on the first post-fix run
+  (`test_fleet_metrics.py::TestRunSpan::test_run_span_times_execution`, a pre-existing
+  `time.sleep(0.01)` / `>=5ms` timing assertion unrelated to this day's work — passed in isolation,
+  passed on the very next full-suite rerun, confirmed as system-load flakiness, not a regression);
+  final run: 20/20 known baseline unchanged, 3,439 passed, zero unexplained regressions.
+  `black`/`ruff`/`mypy --strict` clean on every touched file.
+  `answers.md` Q24 updated with Day 21's completion, evidence, and the investigation findings above.
+  **Next: Day 22 — circuit breaker around Anthropic/Groq client calls.**
+- **2026-07-31 (same day)**: **Day 22 complete — a real, tested circuit breaker now sits in front of
+  every Anthropic/Groq LLM call in the three real call-site surfaces this codebase has; a
+  fleet-wide test-compatibility bug was found and fixed before it could ship.**
+  New `app/fleet/circuit_breaker.py`: a standard closed → open → half-open state machine
+  (`CircuitBreaker`), thread-safe (`threading.Lock`, matching this codebase's own `LessonStore`
+  pattern in `base_graph.py`). `allow()`/`record_success()`/`record_failure()` are the real
+  primitives; `call(fn)` is a thin convenience built on top of them for call sites that fit a single
+  wrapped callable. Two new `Settings` fields
+  (`llm_circuit_breaker_failure_threshold=5`, `llm_circuit_breaker_cooldown_seconds=30.0`,
+  `app/config.py`) — no hardcoded magic numbers. Two module-level singleton accessors
+  (`get_anthropic_breaker()`, `get_groq_breaker()`) — one shared breaker per provider, not per call
+  site, since the point is protecting the shared upstream dependency: if one call site starts
+  failing, every other call site hitting the same API sees the same open breaker.
+  Wired into the three real surfaces:
+  1. `app/agents/base_graph.py:130` — new `_call_anthropic(client, **kwargs)` wraps
+  `client.messages.create(**kwargs)` through `get_anthropic_breaker().call(...)`; all ~6
+  `client.messages.create` call sites in this file (the shared node builder ~74-76 agents route
+  through) now call `_call_anthropic(client, ...)` instead. **Not** a monkey-patch of
+  `client.messages.create` itself — see the bug note below for why.
+  2. `app/agents/chat_agent.py:2439-2488` — `_call_llm_node`'s streaming block
+  (`async with client.messages.stream(...) as stream: ...`) doesn't fit a single wrapped callable,
+  so it uses `allow()`/`record_success()`/`record_failure()` directly: checked before entering the
+  `try`, `record_failure()` in both the `anthropic.APIStatusError` and generic `Exception` except
+  branches, `record_success()` in a new `else:` clause after the try succeeds.
+  3. `app/agents/groq_adapter.py:317-367` — `run_groq`'s existing retry loop (already handling
+  `RateLimitError` with backoff and `BadRequestError`'s `tool_use_failed` recovery path) now checks
+  `breaker.allow()` before each attempt. Also uses the primitives directly rather than `call()`,
+  because a caught `BadRequestError` with `tool_use_failed` isn't a real API-health failure — Groq
+  DID respond, just in a legacy format this adapter already parses — so it correctly records
+  success, not failure; a new catch-all `except Exception` records failure for anything not already
+  handled by the two specific branches.
+  **A real, fleet-wide bug found and fixed before it shipped**: the first version wired the breaker
+  by monkey-patching `client.messages.create` itself inside `_make_client()` (returning a client
+  whose `.messages.create` was already breaker-wrapped, so all 6 base_graph.py call sites got
+  protection with zero per-call-site changes — elegant, but wrong). First full regression run
+  surfaced 3 new failures beyond the known 20-item baseline
+  (`test_day0_capabilities.py::test_planner_node_makes_two_llm_calls`,
+  `test_hierarchy_chain.py::test_steps_4_5_6_...`,
+  `test_phase53_request_clarification.py::test_graph_never_calls_llm_again_after_clarification_request`)
+  — all three, and (grep-confirmed) 9 total assertion sites across the suite, inspect
+  `mock_client.messages.create.call_count`/`.call_args_list` after `run_agent_graph()` runs, the
+  established mocking convention this whole 3400+-test suite already relies on. Monkey-patching
+  `client.messages.create` replaced that attribute with a plain function on the SAME mock object the
+  test holds a reference to, so `mock_client.messages.create.call_count` broke with
+  `AttributeError: 'function' object has no attribute 'call_count'`. Fixed by wrapping the CALL in a
+  separate `_call_anthropic()` function instead of mutating the client object at all — the mock's own
+  `.create` method stays completely untouched and real assertions against it keep working, while the
+  breaker still sees and gates every real invocation.
+  **Tests**: `tests/test_gap22_circuit_breaker.py` (8 tests) — the state machine in isolation:
+  closed calls pass through; failures below threshold stay closed; reaching threshold opens it and
+  refuses without calling `fn`; cooldown elapsing transitions to half-open and probes; a successful
+  probe closes it; a failed probe reopens immediately (not waiting for `threshold` more failures);
+  concurrent callers during a half-open probe only let one through (a real `threading.Thread` race,
+  not simulated); `reset()` works. `tests/test_gap22_circuit_breaker_wiring.py` (3 tests) — proves
+  each of the three real call sites actually routes through the shared breaker and refuses without
+  ever reaching the mocked client when forced open. New `tests/conftest.py::reset_circuit_breakers`
+  autouse fixture (mirroring the existing `reset_db_engine` Day-10 pattern) resets both breaker
+  singletons to `None` after every test — without it, tests that deliberately simulate LLM failures
+  would accumulate failures in the SAME shared breaker across unrelated test files and eventually
+  trip it, turning a later, unrelated test's mocked call into a spurious `CircuitBreakerOpenError`.
+  Full regression: first run (before the monkey-patch fix) showed 23 failures (20 known baseline + 3
+  real regressions); after the fix, back to 20/20 known baseline, 3,450 passed (3,439 + 11 new
+  tests), zero unexplained regressions. `black`/`ruff`/`mypy --strict` clean on every touched file.
+  `LLMProvider`/`app/fleet/providers/base.py` noted in passing (grep-confirmed zero implementations,
+  zero usages anywhere) — dead scaffolding, same "built but never wired" pattern as
+  `tool_manifest.py`'s previously-noted gap; out of scope for today, not silently resurrected.
+  **Next: Day 23 — persist background-process PIDs + a session-close hook to terminate orphans.**
+- **2026-07-31 (same day)**: **Day 23 complete — background processes started via `run_background`
+  now survive being tracked only in a dict that vanishes on crash/restart, and a real,
+  previously-nonexistent session-close hook actually terminates them, not just makes them
+  unreachable.**
+  Investigated first (not assumed): `app/agents/tools.py`'s `_session_bg_procs` (the plan's own
+  named file) turned out to be one of TWO separate, parallel background-process trackers, not the
+  only one — `app/agents/chat_agent.py::ChatAgent` has its own independent
+  `self._background_processes` (line 362), used by the interactive chat session's own separate
+  `run_background`/`kill_process` tool-call handlers (~line 1362-1402), not by
+  `make_chat_handlers()`'s closure at all. Both had the same real gap: a `subprocess.Popen` object
+  becoming Python-unreachable (dict garbage collected, closure scope exited, or the whole process
+  crashing) does NOT terminate the real OS process it wraps — it just becomes impossible for this
+  codebase to ever find or stop again. Also found: `_chat_agents`' own existing `delete_chat_agent()`
+  (`chat_agent.py:141`) — already called whenever a chat session closes, already described in its
+  own docstring as the session-close counterpart to `app.models.chat.delete_session()` — did nothing
+  with `self._background_processes` at all; it was already the right hook, just never wired to the
+  thing it needed to clean up.
+  New `app/fleet/bg_process_registry.py`: `register(pid, command, cwd)`/`unregister(pid)` persist to
+  a durable JSON file (atomic write via a temp-file-then-`replace()`, works identically on POSIX and
+  Windows); `sweep_orphaned_processes()` (line 102) — called once at FastAPI startup, before any
+  agent can start a new background process — terminates everything still in the registry (a fresh
+  process could not have legitimately started any of it, so being in the file at startup IS the
+  orphan signal) via the same `os.kill(pid, SIGTERM)` pattern already proven cross-platform-correct
+  in this codebase's existing `kill_process` handlers (SIGKILL doesn't exist on Windows; SIGTERM
+  already maps to `TerminateProcess` there). New `Settings.bg_process_registry_path` field
+  (`/tmp/gridiron-bg-processes.json` default, matching the existing `worktrees_dir`/`repos_dir`
+  `/tmp/gridiron-*` convention) — no hardcoded path.
+  Wired into all three places that needed it: `tools.py::run_background`/`kill_process` (register on
+  start, unregister on kill); `chat_agent.py`'s own separate `run_background`/`kill_process` tool
+  handlers (same); and — the real fix — `delete_chat_agent()` (`chat_agent.py:141-171`) now iterates
+  `self._background_processes`, calls `proc.terminate()` on anything still running
+  (`proc.poll() is None`), and unregisters each from the durable registry, before popping the agent
+  out of `_chat_agents`. This is the immediate, graceful counterpart; `sweep_orphaned_processes()` at
+  startup is the safety net for crashes that never reach a graceful session close at all. A small,
+  in-scope fix along the way: `chat_agent.py`'s own `kill_process` handler never popped the killed
+  PID out of `self._background_processes` (unbounded growth of dead entries) — fixed in the same
+  edit, matching how `tools.py`'s own `kill_process` already did this.
+  **Tests, using real `subprocess.Popen` processes, not mocks** — the whole point being proving an
+  actual OS process gets actually terminated: `tests/test_gap23_bg_process_registry.py` (6 tests) —
+  register/unregister persist and remove correctly; `sweep_orphaned_processes()` genuinely terminates
+  a real long-lived process (`python -c "time.sleep(60)"`) and clears the registry file, confirmed by
+  polling `proc.poll()` until it actually exits (not just trusting the return value); skips PIDs
+  already gone; safe no-op on an empty/missing registry.
+  `tests/test_gap23_session_close_kills_bg_processes.py` (2 tests) — `delete_chat_agent()` terminates
+  a real live process registered to that session and removes its registry entry; safe no-op on an
+  unknown session_id.
+  Full regression: 20/20 known baseline unchanged, 3,458 passed (3,450 + 8 new tests), zero
+  regressions. `black`/`ruff`/`mypy --strict` clean on every touched file.
+  `answers.md` Q24 updated with Day 23's completion and the two-tracker finding.
+  **Next: Day 24 — final fleet-wide regression for the whole Stage 1.3 (Days 18-23) block.**
+- **2026-07-31 (same day)**: **Day 24 complete — Stage 1.3 (Days 18-23, reliability & durability)
+  signed off. Full Gap Audit Protocol re-verification, not a status re-report: fresh full regression
+  run, the 52 tests across every Stage 1.3 day re-run together, and every `file:line` citation for
+  Days 19 and 21 spot-checked against current code — real drift found and corrected.**
+  Fresh full regression: 20/20 known baseline unchanged, 3,458 passed, 55 skipped, 17 deselected —
+  identical to Day 23's own closing count, confirming no silent regression crept in between Day 23's
+  close and this audit. All 52 tests across `test_gap19_execute_tools_replay_safety.py` (2),
+  `test_gap20_execute_tools_batch_with_critique.py` (1), `test_gap21_agent_checkpointer_postgres.py`
+  (2), `test_gap22_circuit_breaker.py` (8), `test_gap22_circuit_breaker_wiring.py` (3),
+  `test_gap23_bg_process_registry.py` (6), `test_gap23_session_close_kills_bg_processes.py` (2),
+  plus the pre-existing `test_gap15_blocking_verification.py` (6), `test_phase36_continuous_replanning.py`
+  (11), and `test_phase37_quality_gate.py` (11) that Day 19's refactor directly touched — re-run
+  together as one batch, all pass.
+  **Citation drift found and fixed** (exactly what the Gap Audit Protocol exists to catch — code
+  drifts, citations go stale): Day 19's original `answers.md` citations for
+  `_make_execute_tools_node` (`1039-1339`), the `AgentRunState` batch fields (`lines 110-112`), and
+  `_post_execute_tools_router`'s self-loop conditional-edge keys had all shifted because Day 21's
+  checkpointer block and Day 22's circuit-breaker import were inserted above them in the same file.
+  Re-verified against live `grep`/`sed` output (not assumed) and corrected in `answers.md` to their
+  current accurate line numbers: `_make_execute_tools_node` is now `1132-1432`, the batch fields are
+  now `198-200`, `_post_execute_tools_router` is now `1676`, and its self-loop keys are at `1834`
+  (critique-enabled branch) and `1855` (non-critique branch) — also correcting a citation error
+  along the way (the original cited lines 1708/1740/1761 actually pointed at the pre-existing
+  `call_llm` router's conditional edges, an unrelated block, not the post-`execute_tools` router).
+  Day 21's citations for `init_agent_checkpointer`/`close_agent_checkpointer` (`48-104` → `66-117`)
+  and the `g.compile()`/`graph.stream()` call sites (`1842`/`2117` → `1865`/`2140`) were re-verified
+  and corrected the same way. `IMPLEMENTATION_PROGRESS.md`'s own historical entries for Days 19 and
+  21 are left as originally written — they're dated, point-in-time change-log entries (accurate as
+  of the day they were written), not living pointers the way `answers.md`'s Q24 entry is meant to be;
+  only `answers.md` was corrected, consistent with which of these two documents is the one the Gap
+  Audit Protocol actually re-verifies.
+  **Stage 1.3 sign-off summary** (Days 18-23, the plan's own single biggest bucket): Day 18 proved a
+  real replay-safety hazard existed in `execute_tools`'s pre-refactor shape (a genuine finding, not a
+  hypothetical the plan merely predicted). Day 19 closed it with a one-tool-call-per-invocation
+  decomposition, catching two real bugs before shipping (a router `KeyError` in the non-critique
+  branch, and a `reflection_node`-interaction `IndexError`) via full regression, not assumption. Day
+  20 added the one real end-to-end gap Day 19's own tests didn't cover (multi-tool batch + critique
+  through a fully compiled graph) rather than padding with a repeat of Day 19's already-complete
+  proof. Day 21 wired real durable Postgres checkpointing, investigating (not assuming) a genuine
+  sync/async compatibility question and catching a real state-leak bug in its own new cleanup path
+  before it could ship. Day 22 wired a real circuit breaker into all three actual LLM-call surfaces,
+  catching a real fleet-wide test-compatibility break (9 assertion sites across 3 files) from its
+  first design attempt via full regression, not assumption, and correcting course before it shipped.
+  Day 23 found TWO separate, previously-undocumented background-process trackers (not the one the
+  plan's own text named) and wired a real durable registry plus an actual working session-close hook
+  where one had existed in name only. Every day's fix is proven against real production code with
+  real tests (subprocess.Popen, real Postgres, real threading.Thread races, real crash+resume
+  cycles) — never mocked away where a mock would have hidden the actual risk. Zero net regressions
+  across the whole block: the known 20-item environment-specific baseline is unchanged from before
+  Day 18 started to now, and every new test added across all six days still passes.
+  `answers.md` Q24 updated with Day 24's sign-off and the corrected citations. TodoWrite Stage 1.3
+  items marked complete; no scratch files remain (Day 18's standalone repro script was cleaned up at
+  Day 19's close, superseded by committed production-code tests).
+  **Next: Stage 1.4 (Days 24-26 per the original plan numbering, now shifted by the Stage 1.3
+  extension — frontend/backend robustness: error boundaries, SSE reconnect-with-backoff, auth-header
+  threading, UI role gating).**

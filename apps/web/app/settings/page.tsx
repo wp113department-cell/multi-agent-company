@@ -11,6 +11,7 @@ import {
   saveGithubToken,
   type AppSettings,
 } from "../../lib/api";
+import { authHeaders } from "../../lib/auth";
 
 // ---------------------------------------------------------------------------
 // API helpers
@@ -19,7 +20,7 @@ import {
 async function saveOpenAiKey(key: string) {
   const res = await fetch("/api/settings/openai-key", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ api_key: key }),
   });
   if (!res.ok) {
@@ -32,7 +33,7 @@ async function saveOpenAiKey(key: string) {
 async function verifyKey(provider: "anthropic" | "openai", key: string): Promise<{ ok: boolean; error?: string }> {
   const res = await fetch("/api/settings/verify-key", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ provider, api_key: key }),
   });
   if (!res.ok) {

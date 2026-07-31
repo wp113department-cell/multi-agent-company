@@ -165,7 +165,10 @@ export default function ActivityFeedPage() {
   const taskId = typeof params.taskId === "string" ? params.taskId : String(params.taskId ?? "");
 
   const [events, setEvents] = useState<ActivityEvent[]>([]);
-  const [status, setStatus] = useState<"connecting" | "running" | "stopped" | "done" | "error">("connecting");
+  const [status, setStatus] = useState<
+    "connecting" | "running" | "reconnecting" | "stopped" | "done" | "error"
+  >("connecting");
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const [tokenUsage, setTokenUsage] = useState<{ in: number; out: number; cost: number }>({ in: 0, out: 0, cost: 0 });
   const [stoppedCheckpoint, setStoppedCheckpoint] = useState("");
   const [resumeMsg, setResumeMsg] = useState("");
@@ -173,61 +176,112 @@ export default function ActivityFeedPage() {
   const [stopping, setStopping] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const esRef = useRef<EventSource | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reachedTerminalRef = useRef(false);
+
+  // Gap-closure Stage 1.4 (answers.md) — MAX_RECONNECT_ATTEMPTS/BASE_DELAY_MS
+  // bound reconnect-with-backoff: before this, es.onerror unconditionally
+  // called es.close() on ANY connection error (a transient network blip,
+  // a load balancer timeout, a server restart) — that close() call is what
+  // actually defeated EventSource's own native auto-reconnect (the browser
+  // reconnects on its own after onerror UNLESS close() was called first),
+  // so a real user watching a live task lost the feed permanently and had
+  // to manually reload, with no distinction from a genuine terminal error
+  // the agent itself reported.
+  const MAX_RECONNECT_ATTEMPTS = 5;
+  const BASE_RECONNECT_DELAY_MS = 1000;
 
   // Auto-scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [events]);
 
-  // SSE subscription
+  // Gap-closure Stage 1.4 (answers.md) — the single connect() used both by
+  // the initial subscription effect below AND by handleResume (which
+  // previously duplicated a second, non-reconnecting copy of this same
+  // logic — a resumed task that then dropped its connection had no
+  // recovery at all, unlike this shared version).
+  const connect = useCallback(
+    (attempt: number) => {
+      if (!taskId) return;
+      setStatus(attempt === 0 ? "connecting" : "reconnecting");
+      setReconnectAttempt(attempt);
+
+      const es = new EventSource(`/api/tasks/${taskId}/stream`);
+      esRef.current = es;
+
+      es.onopen = () => {
+        setStatus("running");
+        setReconnectAttempt(0);
+      };
+
+      es.onmessage = (e: MessageEvent) => {
+        try {
+          const event = JSON.parse(e.data) as ActivityEvent;
+          if (event.type === "ping") return;
+
+          setEvents(prev => [...prev, event]);
+
+          if (event.type === "token_usage") {
+            setTokenUsage({ in: event.tokens_in, out: event.tokens_out, cost: event.cost_usd });
+          }
+          if (event.type === "done") {
+            reachedTerminalRef.current = true;
+            setStatus("done");
+            setTokenUsage({ in: event.tokens_in, out: event.tokens_out, cost: event.cost_usd });
+            es.close();
+          }
+          if (event.type === "stopped") {
+            reachedTerminalRef.current = true;
+            setStatus("stopped");
+            setStoppedCheckpoint(event.checkpoint_id);
+            es.close();
+          }
+          if (event.type === "error") {
+            // A real, terminal error the agent itself reported — not a
+            // transient connection drop, so this must NOT reconnect.
+            reachedTerminalRef.current = true;
+            setStatus("error");
+            es.close();
+          }
+        } catch {
+          // ignore parse errors
+        }
+      };
+
+      es.onerror = () => {
+        es.close();
+        if (reachedTerminalRef.current) return;
+
+        if (attempt >= MAX_RECONNECT_ATTEMPTS) {
+          setStatus("error");
+          return;
+        }
+        // Show "reconnecting" immediately — not only once the retry itself
+        // fires after the backoff delay — so the UI never silently shows a
+        // stale "running" pill while the connection is actually down.
+        const nextAttempt = attempt + 1;
+        setStatus("reconnecting");
+        setReconnectAttempt(nextAttempt);
+        const delay = Math.min(BASE_RECONNECT_DELAY_MS * 2 ** attempt, 30000);
+        reconnectTimeoutRef.current = setTimeout(() => connect(nextAttempt), delay);
+      };
+    },
+    [taskId], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  // SSE subscription with reconnect-with-backoff
   useEffect(() => {
     if (!taskId) return;
-    setStatus("connecting");
-    const es = new EventSource(`/api/tasks/${taskId}/stream`);
-    esRef.current = es;
-
-    es.onopen = () => setStatus("running");
-
-    es.onmessage = (e: MessageEvent) => {
-      try {
-        const event = JSON.parse(e.data) as ActivityEvent;
-        if (event.type === "ping") return;
-
-        setEvents(prev => [...prev, event]);
-
-        if (event.type === "token_usage") {
-          setTokenUsage({ in: event.tokens_in, out: event.tokens_out, cost: event.cost_usd });
-        }
-        if (event.type === "done") {
-          setStatus("done");
-          setTokenUsage({ in: event.tokens_in, out: event.tokens_out, cost: event.cost_usd });
-          es.close();
-        }
-        if (event.type === "stopped") {
-          setStatus("stopped");
-          setStoppedCheckpoint(event.checkpoint_id);
-          es.close();
-        }
-        if (event.type === "error") {
-          setStatus("error");
-          es.close();
-        }
-      } catch {
-        // ignore parse errors
-      }
-    };
-
-    es.onerror = () => {
-      if (status !== "done" && status !== "stopped") {
-        setStatus("error");
-      }
-      es.close();
-    };
+    reachedTerminalRef.current = false;
+    connect(0);
 
     return () => {
-      es.close();
+      reachedTerminalRef.current = true; // stop any pending reconnect from firing post-unmount
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      esRef.current?.close();
     };
-  }, [taskId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [taskId, connect]);
 
   const handleStop = useCallback(async () => {
     setStopping(true);
@@ -247,24 +301,13 @@ export default function ActivityFeedPage() {
         body: JSON.stringify({ message: resumeMsg, files: [] }),
       });
       setResumeMsg("");
-      setStatus("connecting");
-      // Re-connect SSE
-      const es = new EventSource(`/api/tasks/${taskId}/stream`);
-      esRef.current = es;
-      es.onopen = () => setStatus("running");
-      es.onmessage = (e: MessageEvent) => {
-        try {
-          const event = JSON.parse(e.data) as ActivityEvent;
-          if (event.type !== "ping") setEvents(prev => [...prev, event]);
-          if (event.type === "done" || event.type === "stopped" || event.type === "error") {
-            es.close();
-          }
-        } catch { /* ignore */ }
-      };
+      reachedTerminalRef.current = false;
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      connect(0);
     } finally {
       setResumeLoading(false);
     }
-  }, [taskId, resumeMsg]);
+  }, [taskId, resumeMsg, connect]);
 
   const renderEvent = (ev: ActivityEvent, idx: number) => {
     switch (ev.type) {
@@ -289,7 +332,8 @@ export default function ActivityFeedPage() {
         .feed-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
         .feed-title { font-size: 18px; font-weight: 700; }
         .status-pill { padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
-        .status-pill.connecting { background: #fef9c3; color: #92400e; }
+        .status-pill.connecting   { background: #fef9c3; color: #92400e; }
+        .status-pill.reconnecting { background: #fef9c3; color: #92400e; }
         .status-pill.running    { background: #dcfce7; color: #166534; }
         .status-pill.stopped    { background: #fef3c7; color: #92400e; }
         .status-pill.done       { background: #d1fae5; color: #065f46; }
@@ -374,7 +418,11 @@ export default function ActivityFeedPage() {
         <div className="feed-header">
           <button onClick={() => router.back()} style={{ fontSize: 13, cursor: "pointer" }}>← Back</button>
           <h1 className="feed-title">Task {taskId} — Activity Feed</h1>
-          <span className={`status-pill ${status}`}>{status}</span>
+          <span className={`status-pill ${status}`}>
+            {status === "reconnecting"
+              ? `reconnecting (attempt ${reconnectAttempt}/${MAX_RECONNECT_ATTEMPTS})…`
+              : status}
+          </span>
           {status === "running" && (
             <button className="stop-btn" onClick={handleStop} disabled={stopping}>
               {stopping ? "Stopping…" : "⏹ Stop"}
@@ -385,6 +433,11 @@ export default function ActivityFeedPage() {
         <div className="events-list">
           {events.length === 0 && status === "connecting" && (
             <p style={{ color: "#9ca3af", fontSize: 13 }}>Connecting to event stream…</p>
+          )}
+          {status === "reconnecting" && (
+            <p style={{ color: "#92400e", fontSize: 13 }}>
+              Connection lost — reconnecting (attempt {reconnectAttempt}/{MAX_RECONNECT_ATTEMPTS})…
+            </p>
           )}
           {events.map(renderEvent)}
           <div ref={bottomRef} />

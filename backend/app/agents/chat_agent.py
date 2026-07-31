@@ -107,6 +107,15 @@ class ChatGraphState(TypedDict, total=False):
     final_text: str
     last_error: str | None
     stop: bool
+    # Gap-closure Day 16 (Stage 1.2, answers.md): _VERIFICATION_CFG below has
+    # existed since this class was written but was never consulted anywhere
+    # — no key on this TypedDict could even hold it, and _execute_tool_node
+    # never read or wrote one. Deliberately NOT included in run()'s per-turn
+    # initial_state dict — LangGraph's checkpointer merges partial state
+    # updates onto what's already checkpointed for this thread_id, so
+    # omitting it here means it accumulates across the whole session (a file
+    # read in turn 1 still counts in turn 5), not reset every user message.
+    verification: dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
@@ -132,8 +141,38 @@ def get_or_create_chat_agent(session: ChatSession) -> "ChatAgent":
 def delete_chat_agent(session_id: str) -> None:
     """Mirrors app.models.chat.delete_session() — called when a session is
     closed, so its ChatAgent (and the checkpointer/graph it holds) doesn't
-    leak for the life of the process."""
-    _chat_agents.pop(session_id, None)
+    leak for the life of the process.
+
+    Gap-closure Day 23 (Stage 1.3, answers.md) — before this, popping the
+    agent out of _chat_agents just made its self._background_processes
+    dict (and the subprocess.Popen objects in it) unreachable; garbage
+    collecting a Popen object does NOT terminate the real OS process it
+    wraps, so any run_background call a session made outlived the session
+    itself with nothing left able to stop it. This is the session-close
+    hook that actually terminates them, the immediate-and-graceful
+    counterpart to bg_process_registry.sweep_orphaned_processes()'s
+    startup-time safety net for crashes that never reach here at all."""
+    agent = _chat_agents.pop(session_id, None)
+    if agent is None:
+        return
+    from app.fleet.bg_process_registry import unregister as _bg_unregister
+
+    for pid, proc in agent._background_processes.items():
+        if proc.poll() is None:  # still running
+            try:
+                proc.terminate()
+                logger.info(
+                    "Session %s closed — terminated its background PID %d",
+                    session_id,
+                    pid,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to terminate background PID %d on session close: %s",
+                    pid,
+                    exc,
+                )
+        _bg_unregister(pid)
 
 
 def _read_stream_nonblocking(stream: Any, max_bytes: int = 8192) -> str | None:
@@ -220,6 +259,23 @@ _VERIFICATION_CFG = VerificationConfig(
         "tests_passed": False,
         "lint_ran": False,
         "diff_checked": False,
+    },
+    # Gap-closure Day 16 (Stage 1.2, answers.md): this config object existed
+    # since this class was written but nothing ever consulted it — no
+    # `state["verification"]` slot existed, and _execute_tool_node never
+    # read or wrote one. Now genuinely enforced by _execute_tool_node below.
+    # blocking_until makes AGENT_CONTRACT["expected_verification"]'s own
+    # stated rule ("read_file or search_code must run before write/bash
+    # tools") a real refusal — scoped to the literal "write"-shaped tools
+    # (write_file/edit_file/apply_patch) plus bash; delete_file is
+    # deliberately excluded here since gap-closure Day 5 already gates it
+    # behind a mandatory human confirmation for every call, a stronger
+    # protection than a prior-read requirement would add.
+    blocking_until={
+        "write_file": "read",
+        "edit_file": "read",
+        "apply_patch": "read",
+        "bash": "read",
     },
 )
 
@@ -1346,6 +1402,13 @@ class ChatAgent:
                     text=True,
                 )
                 self._background_processes[proc.pid] = proc
+                # Gap-closure Day 23 (Stage 1.3, answers.md) — durably
+                # persisted so a crash (or a session that never gets a
+                # graceful delete_chat_agent() call) still leaves a trail
+                # sweep_orphaned_processes() can find at the next startup.
+                from app.fleet.bg_process_registry import register as _bg_register
+
+                _bg_register(proc.pid, rb_command, rb_cwd)
                 return f"Started background process PID {proc.pid}: {rb_command[:80]}"
             except Exception as e:
                 return f"[ERROR] {e}"
@@ -1367,6 +1430,10 @@ class ChatAgent:
                 "INT": _signal.SIGINT,
             }
             kp_sig = sig_map.get(kp_sig_name, _signal.SIGTERM)
+            self._background_processes.pop(kp_pid, None)
+            from app.fleet.bg_process_registry import unregister as _bg_unregister
+
+            _bg_unregister(kp_pid)
             try:
                 _os.kill(kp_pid, kp_sig)
                 return f"Sent {kp_sig_name} to PID {kp_pid}"
@@ -2405,6 +2472,19 @@ class ChatAgent:
         sdk_messages = cast(list[MessageParam], self.session.history)
         sdk_tools = cast(list[ToolParam], CHAT_TOOLS)
 
+        # Gap-closure Day 22 (Stage 1.3, answers.md) — circuit breaker around
+        # the Anthropic streaming call. Uses allow()/record_success()/
+        # record_failure() directly (not the simpler call() wrapper) since
+        # this whole block is `async with ... stream: async for ...` — not
+        # a single callable a sync breaker.call() could wrap.
+        from app.fleet.circuit_breaker import get_anthropic_breaker
+
+        breaker = get_anthropic_breaker()
+        if not breaker.allow():
+            msg = breaker.open_error_message()
+            await self.session.push({"type": "error", "message": msg})
+            return {"stop": True, "last_error": msg}
+
         try:
             async with client.messages.stream(
                 model=settings.model_coder,
@@ -2435,14 +2515,18 @@ class ChatAgent:
                         )
 
         except anthropic.APIStatusError as e:
+            breaker.record_failure()
             await self.session.push(
                 {"type": "error", "message": f"API error: {e.message}"}
             )
             return {"stop": True, "last_error": f"API error: {e.message}"}
         except Exception as e:
+            breaker.record_failure()
             await self.session.push({"type": "error", "message": str(e)})
             logger.exception("Chat agent error on iteration %d", iteration)
             return {"stop": True, "last_error": str(e)}
+        else:
+            breaker.record_success()
 
         # Append assistant turn to history
         turn_content: list[dict[str, Any]] = []
@@ -2488,21 +2572,46 @@ class ChatAgent:
                 "tool_use_id": tu["id"],
             }
         )
-        try:
-            result = await self._execute_tool(tu["name"], tu["input"])
-        except GraphBubbleUp:
-            # Real bug caught by testing: interrupt() (called deep inside
-            # _execute_tool, from _confirm()) signals a pause by raising
-            # GraphInterrupt, a genuine subclass of Exception — a blanket
-            # `except Exception` here would silently swallow it, turning
-            # every confirmation pause into a fake "[ERROR] Tool ... failed"
-            # result and permanently breaking the graph's ability to pause
-            # at all. Must propagate uncaught for LangGraph's own execution
-            # engine to catch and handle.
-            raise
-        except Exception as e:
-            result = f"[ERROR] Tool {tu['name']} failed: {e}"
-            logger.exception("Tool %s failed", tu["name"])
+
+        # Gap-closure Day 16 (Stage 1.2, answers.md) — real enforcement of
+        # _VERIFICATION_CFG, previously dead config (see module-level
+        # comments on ChatGraphState.verification / _VERIFICATION_CFG for
+        # the full "why"). Accumulates across the whole session, not reset
+        # per turn.
+        verification: dict[str, Any] = dict(
+            state.get("verification") or _VERIFICATION_CFG.initial
+        )
+        blocking_key = _VERIFICATION_CFG.blocking_until.get(tu["name"])
+        if blocking_key is not None and not verification.get(blocking_key, False):
+            result = (
+                f"[POLICY DENIED] {tu['name']} is refused until "
+                f"'{blocking_key}' is satisfied first — "
+                f"{AGENT_CONTRACT['expected_verification'].get(blocking_key, '')}"
+            )
+        else:
+            try:
+                result = await self._execute_tool(tu["name"], tu["input"])
+            except GraphBubbleUp:
+                # Real bug caught by testing: interrupt() (called deep inside
+                # _execute_tool, from _confirm()) signals a pause by raising
+                # GraphInterrupt, a genuine subclass of Exception — a blanket
+                # `except Exception` here would silently swallow it, turning
+                # every confirmation pause into a fake "[ERROR] Tool ... failed"
+                # result and permanently breaking the graph's ability to pause
+                # at all. Must propagate uncaught for LangGraph's own execution
+                # engine to catch and handle.
+                raise
+            except Exception as e:
+                result = f"[ERROR] Tool {tu['name']} failed: {e}"
+                logger.exception("Tool %s failed", tu["name"])
+
+            if not result.startswith("[ERROR]") and not result.startswith("[POLICY"):
+                set_key = _VERIFICATION_CFG.set_by.get(tu["name"])
+                if set_key is not None:
+                    verification[set_key] = True
+                if tu["name"] in _VERIFICATION_CFG.reset_by:
+                    for reset_key in _VERIFICATION_CFG.reset_keys:
+                        verification[reset_key] = False
 
         await self.session.push(
             {
@@ -2518,12 +2627,20 @@ class ChatAgent:
         ]
 
         if pending:
-            return {"pending_tool_uses": pending, "tool_results": tool_results}
+            return {
+                "pending_tool_uses": pending,
+                "tool_results": tool_results,
+                "verification": verification,
+            }
 
         # Last tool in this LLM turn's batch — flush to history, matching
         # the original loop's post-for-loop history.append() exactly.
         self.session.history.append({"role": "user", "content": tool_results})
-        return {"pending_tool_uses": [], "tool_results": []}
+        return {
+            "pending_tool_uses": [],
+            "tool_results": [],
+            "verification": verification,
+        }
 
     async def _finalize_node(self, state: ChatGraphState) -> dict[str, Any]:
         await self._memory_write_outcome(

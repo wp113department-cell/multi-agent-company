@@ -314,13 +314,27 @@ def run_groq(
         kwargs["tool_choice"] = "auto"
 
     from app.config import get_settings
+    from app.fleet.circuit_breaker import CircuitBreakerOpenError, get_groq_breaker
 
     max_retries = get_settings().groq_max_retries
+    # Gap-closure Day 22 (Stage 1.3, answers.md) — circuit breaker around
+    # every retry attempt, so a sustained outage stops hammering Groq
+    # instead of burning through all max_retries with backoff sleeps each
+    # time. Uses allow()/record_success()/record_failure() directly
+    # (rather than the simpler call() wrapper) because a caught
+    # BadRequestError with tool_use_failed isn't a real API-health
+    # failure — Groq DID respond, just in a legacy format this adapter
+    # already knows how to parse — so it must record success, not failure.
+    breaker = get_groq_breaker()
     for attempt in range(max_retries):
+        if not breaker.allow():
+            raise CircuitBreakerOpenError(breaker.open_error_message())
         try:
             response = client.chat.completions.create(**kwargs)
+            breaker.record_success()
             break
         except groq_module.RateLimitError as exc:
+            breaker.record_failure()
             if attempt < max_retries - 1:
                 wait = 30 * (attempt + 1)
                 logger.warning(
@@ -334,6 +348,7 @@ def run_groq(
             else:
                 raise
         except groq_module.BadRequestError as exc:
+            breaker.record_success()
             body = getattr(exc, "body", {}) or {}
             err = body.get("error", {}) if isinstance(body, dict) else {}
             if err.get("code") == "tool_use_failed":
@@ -347,6 +362,9 @@ def run_groq(
                     f"Groq tool_use_failed (model={groq_model}): "
                     f"{err.get('message', str(exc))}"
                 ) from exc
+            raise
+        except Exception:
+            breaker.record_failure()
             raise
 
     choice = response.choices[0]
