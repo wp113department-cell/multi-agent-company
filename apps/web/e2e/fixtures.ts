@@ -5,26 +5,73 @@ import type { BrowserContext, Page } from "@playwright/test";
  * live Postgres/agent fleet, matching this batch's deterministic-CI design.
  */
 
-const FAKE_TOKEN = "e2e-fake-token";
+/**
+ * Builds a JWT-*shaped* fake token (header.payload.signature, unsigned) —
+ * not a real signed JWT, but enough for lib/auth.ts's client-side
+ * decodeJwtPayload() (which never verifies a signature; the server's real
+ * signature-checked auth is the actual boundary) to read a `role` claim
+ * out of it. Gap-closure Stage 1.4 added UI-level role gating
+ * (isApprover()) on Approve/Reject buttons in review/approvals/epics/fleet
+ * pages; the previous plain-string fake token had no payload segment at
+ * all, so decodeJwtPayload() silently returned null and every
+ * isApprover()-gated button rendered as if the user were a viewer —
+ * breaking e2e/review.spec.ts, which predates the role-gating feature and
+ * expects the buttons to be visible.
+ */
+function buildFakeToken(role: string): string {
+  const payload = Buffer.from(
+    JSON.stringify({ sub: "e2e-test-user", role })
+  ).toString("base64");
+  return `e2e-fake-header.${payload}.e2e-fake-signature`;
+}
 
 /**
  * Sets the auth cookie (read by middleware.ts to gate page navigation) and
  * localStorage token (read by lib/auth.ts's getToken()/isAuthenticated(),
  * which drives NavBar's UI state) — mirrors exactly what a real login()
  * call does via setToken(), without driving the login form for every spec
- * that isn't specifically testing login itself.
+ * that isn't specifically testing login itself. Defaults to "approver" so
+ * existing specs (written before role gating existed) keep seeing the same
+ * full-access UI; pass "viewer" to test the restricted-UI path instead.
  */
-export async function authenticate(context: BrowserContext): Promise<void> {
+export async function authenticate(
+  context: BrowserContext,
+  role: string = "approver"
+): Promise<void> {
+  const token = buildFakeToken(role);
   await context.addCookies([
     {
       name: "gridiron_token",
-      value: encodeURIComponent(FAKE_TOKEN),
+      value: encodeURIComponent(token),
       url: "http://localhost:3100",
     },
   ]);
-  await context.addInitScript((token) => {
-    window.localStorage.setItem("gridiron_token", token);
-  }, FAKE_TOKEN);
+  await context.addInitScript((t) => {
+    window.localStorage.setItem("gridiron_token", t);
+  }, token);
+
+  // NavBar renders on every page and polls these three endpoints in the
+  // background (fleet pending count, approvals pending count, and an SSE
+  // stream) regardless of which page a spec is actually testing. No spec
+  // mocks them individually, so previously they fell through page.route()
+  // entirely, hit the real network, and got proxied server-side by
+  // next.config.mjs's rewrites() to NEXT_PUBLIC_API_URL (localhost:8000) —
+  // which doesn't exist in the e2e job, producing ECONNREFUSED spam in the
+  // webServer log on every run. Harmless to test correctness (NavBar's own
+  // fetches are wrapped in try/catch and fail silently), but noisy and
+  // unnecessary real-network activity in a suite designed to need zero live
+  // backend. Registered on the context (not a single page) so it applies
+  // fleet-wide across every spec automatically via this same authenticate()
+  // call every spec's beforeEach already makes. Individual specs' own
+  // page.route() calls for these same paths (if any) still take precedence
+  // since they're registered later, per Playwright's route-matching order.
+  await context.route("**/api/fleet/requests?*", (route) => route.fulfill(json([])));
+  await context.route("**/api/approvals/pending", (route) =>
+    route.fulfill(json({ approvals: [] }))
+  );
+  await context.route("**/api/fleet/requests/stream", (route) =>
+    route.fulfill({ status: 200, contentType: "text/event-stream", body: "" })
+  );
 }
 
 /** JSON mock for a page.route() handler. */

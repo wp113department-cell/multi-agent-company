@@ -2537,3 +2537,92 @@ be silently dropped — every item below traces to a real `MASTER_AGENT_v2.md` �
   scheduled day"), the drifted citations were fixed in this same pass, not deferred.**
   **Next: Stage 2 (Days 35-57) — the 80 "should fix soon" items across 7 categories, starting with
   35-39's resource/cost/size pre-flight work extending `app/pipeline/cost_controller.py`.**
+
+- **2026-07-31 (same day)**: **Post-Day-34 CI hygiene pass — first real GitHub Actions run after
+  pushing surfaced 3 genuine issues (none related to Stage 2, which has not started), all found and
+  fixed with root-cause analysis, not just silenced.**
+  **1. `black --check .` failure**: `backend/migrations/versions/024_memory_project_scoping.py`
+  (Stage 0 Day 2) had 2 lines exceeding black's line-length preference that were never re-run
+  through `black` after being hand-edited. Reformatted; `black --check .` now clean (390 files).
+  This single failing step was also why the "Test suite (pytest)" step never ran and
+  `pytest-results.xml` was reported missing by the upload step — a cascading symptom of this one
+  root cause, not a second bug.
+  **2. `eslint` failure**: `apps/web/lib/api.test.ts` (Stage 1.4) imported `beforeEach` from vitest
+  but never used it (only `afterEach` is used). Removed the unused import.
+  **3. Real E2E regression, root-caused (not just patched around)**: `e2e/review.spec.ts` — both
+  tests asserting the Approve/Reject buttons are visible started failing. Traced to Stage 1.4's own
+  UI role-gating (`isApprover()`, `apps/web/lib/auth.ts:79`): `e2e/fixtures.ts`'s `authenticate()`
+  set a plain string `"e2e-fake-token"` as the fake auth token — not JWT-shaped at all. Stage 1.4
+  postdates when this fixture was written; `decodeJwtPayload()` (`lib/auth.ts:59`) silently returned
+  `null` for a token with no `.`-delimited payload segment, `getRole()` returned `null`,
+  `isApprover()` returned `false`, and every `isApprover()`-gated Approve/Reject button rendered as
+  hidden — exactly the same failure mode a real viewer-role user would hit, just unintentional.
+  Fixed `authenticate()` (`apps/web/e2e/fixtures.ts`) to build a real JWT-*shaped* (unsigned —
+  `decodeJwtPayload` never checks a signature, matching the server's own "UI hiding buttons is a
+  courtesy only" design) token carrying a `role` claim, defaulting to `"approver"` so the 4
+  pre-existing specs written before role-gating existed keep seeing the same full-access UI; added
+  an optional `role` parameter so a future spec can pass `"viewer"` to test the restricted-UI path
+  (not exercised yet — no such spec exists, not claimed as done).
+  **Bonus fix, same root cause class**: `NavBar.tsx` (rendered globally) polls
+  `/api/fleet/requests`, `/api/approvals/pending`, and an SSE stream in the background on every
+  page; no spec mocked these, so they fell through `page.route()` to the real network and got
+  proxied server-side by `next.config.mjs`'s `rewrites()` to a backend that doesn't exist in the e2e
+  job — harmless (wrapped in `try/catch`, never asserted on) but noisy `ECONNREFUSED` spam in every
+  e2e run's webServer log. Added global mocks for these three endpoints inside `authenticate()`
+  (via `context.route()`, applying fleet-wide since every spec's `beforeEach` already calls it).
+  One remaining instance of this same noise, left as-is and explicitly flagged rather than silently
+  scope-crept: `login.spec.ts`'s unauthenticated-state test doesn't call `authenticate()` (correctly
+  — it's testing pre-login behavior), so NavBar's background polling still hits the proxy there.
+  Cosmetic only, does not fail the test, pre-existing before today's fix, not introduced by it.
+  **Verification, real not assumed**: installed Playwright's Chromium locally
+  (`npx playwright install chromium`) specifically to run the previously-failing suite for real
+  rather than trust the fix by inspection — `e2e/review.spec.ts` 3/3 passed (was 2 failed + 1
+  incidentally passing), full `apps/web` e2e suite 11/11 passed, zero `ECONNREFUSED` noise in the
+  authenticated specs' logs. Frontend: `tsc --noEmit` clean, `eslint .` clean, `vitest run` 32/32
+  passed (unchanged). Backend: `black --check .` clean, full `pytest tests/` re-run in full to
+  confirm no incidental regression from the migration-file reformat.
+  Reviewed the CI pipeline holistically per the request to check for gaps given how much landed
+  since it was last touched: `backend/app/policy/sandbox.py`'s Docker-based tests
+  (`tests/test_sandbox.py`, Stage 0 Days 8-9) need no CI config changes — GitHub Actions'
+  `ubuntu-latest` runners have Docker preinstalled and running by default, and the sandbox's default
+  image (`alpine:latest`, `Settings.bash_sandbox_image`) is pulled on-demand by `docker run` itself,
+  well within the per-test timeout. No other gaps found: `backend/scripts/ci_tech_debt_scan.py`
+  (Stage 1.7) needs no CI change beyond what was already wired; `frontend-e2e`'s
+  `npx playwright install --with-deps chromium` step already covers what local verification needed
+  `--with-deps` for on Linux (not needed standalone on this Windows dev box, hence the extra local
+  install step this pass, not a pipeline gap).
+
+- **2026-07-31 (same day)**: **Correction to the "no other gaps found" claim two entries above — a
+  second, more careful holistic pass (prompted by the user explicitly asking "did you check
+  anything need to add" a second time, which warranted not just repeating the prior answer) found
+  one real, previously-missed CI gap.** `ci.yml`'s `security` job audits backend Python dependencies
+  (`pip-audit`) but the frontend's own npm dependencies had **no** CVE-audit step at all. Ran
+  `pnpm audit` for real (not assumed) before adding anything: **36 known vulnerabilities — 1
+  critical, 18 high, 15 moderate, 2 low** — all traced to one root cause, `next` pinned to `14.2.15`
+  (`apps/web/package.json:19`) against patched versions requiring `>=15.5.21`. Confirmed via
+  `npm view next versions` that this is a major-version gap (14→15), not a patch — Next 15 carries
+  real breaking changes (React 19 requirement, `cookies()`/`headers()`/route `params` becoming
+  async, caching-behavior changes), so silently bumping it was rejected as too risky to do
+  unilaterally while the user's stated goal for today was "get CI green," not a framework migration.
+  Presented the finding and three real options via `AskUserQuestion` rather than picking one
+  silently; user chose **"Add pnpm audit as non-blocking for now."**
+  Implemented in `ci.yml`'s `frontend` job: new "Dependency audit (pnpm audit, informational)" step,
+  `continue-on-error: true` (the step shows flagged/non-green in the Actions UI when findings exist
+  — real signal, not hidden) capturing the real exit code explicitly (`set +e` / capture / `set -e`
+  / `exit $ec` at the end) rather than the bare `|| true` pattern this same file's own earlier
+  gap-closure passes explicitly identified and removed as an anti-pattern elsewhere
+  (SEC-05-019, INFRA-06-004) — deliberately not repeating that mistake even though this step is
+  intentionally non-blocking. Writes the full finding list to `$GITHUB_STEP_SUMMARY`.
+  Verified the exact script logic standalone (`set +e; output=$(pnpm audit 2>&1); ec=$?; set -e; ...
+  exit $ec`) before trusting it in CI: captured exit code 1 correctly, summary file populated
+  correctly head and tail, matching real `pnpm audit` output. YAML re-validated via
+  `yaml.safe_load` — confirmed step present in the `frontend` job's step list with
+  `continue-on-error: True`.
+  `answers.md` updated: Q90's "Dependency checks" sub-item corrected (it previously miscited
+  `eslint` as the frontend's dependency-check equivalent — a lint gate, not a CVE-audit gate — and
+  is now accurate: backend YES/real gate, frontend PARTIAL/informational-only with the specific
+  36-vulnerability finding and the deferred-upgrade decision recorded); Q90's Overall line updated
+  to match.
+  **Standing gap, explicitly tracked, not closed**: the real fix (Next.js 14→15 upgrade + full
+  frontend regression/e2e/manual smoke test, then flip this step to a real blocking gate) remains
+  open, by the user's own explicit choice today — not silently deferred.

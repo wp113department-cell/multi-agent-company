@@ -38,9 +38,7 @@ def upgrade() -> None:
         ["id"],
         ondelete="SET NULL",
     )
-    op.create_index(
-        "ix_memory_embeddings_repo_id", "memory_embeddings", ["repo_id"]
-    )
+    op.create_index("ix_memory_embeddings_repo_id", "memory_embeddings", ["repo_id"])
 
     op.add_column(
         "versioned_lessons",
@@ -54,9 +52,7 @@ def upgrade() -> None:
         ["id"],
         ondelete="SET NULL",
     )
-    op.create_index(
-        "ix_versioned_lessons_repo_id", "versioned_lessons", ["repo_id"]
-    )
+    op.create_index("ix_versioned_lessons_repo_id", "versioned_lessons", ["repo_id"])
 
 
 def downgrade() -> None:

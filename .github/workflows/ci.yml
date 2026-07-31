@@ -151,6 +151,42 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Dependency audit (pnpm audit, informational)
+        # Gap-closure post-Day-34 CI hygiene pass (2026-07-31): CI's existing
+        # `security` job only audits backend Python deps (pip-audit) — the
+        # frontend's own npm dependencies had no equivalent check at all.
+        # `pnpm audit` currently reports 36 known vulnerabilities (1
+        # critical, 18 high), all traced to one root cause: `next` is
+        # pinned to 14.2.15 while the patched versions require >=15.5.21 —
+        # a major-version upgrade with real breaking changes (React 19,
+        # async cookies()/headers()/params, caching behavior changes), not
+        # a quick patch bump. Making this step a real blocking gate today
+        # would fail every build until that upgrade lands as its own
+        # dedicated, tested piece of work (see answers.md for the tracked
+        # gap) — so this is deliberately `continue-on-error: true`, which
+        # marks the step as flagged/non-green in the Actions UI so findings
+        # stay visible, without hiding the real exit code behind a bare
+        # `|| true` the way this file's own prior gap-closure passes
+        # explicitly removed elsewhere as an anti-pattern (SEC-05-019,
+        # INFRA-06-004) — the exit code captured below is the real one.
+        # Revisit and flip this to a real blocking gate once the Next.js
+        # upgrade lands.
+        continue-on-error: true
+        run: |
+          set +e
+          output=$(pnpm audit 2>&1)
+          ec=$?
+          set -e
+          {
+            echo "## Frontend dependency audit (pnpm audit) — informational, non-blocking"
+            echo "Tracked gap: next@14.2.15 needs a major upgrade to >=15.5.21 to clear this. See answers.md."
+            echo ""
+            echo '```'
+            echo "$output" | tail -60
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $ec
+
       - name: Type check
         run: pnpm --filter @gridiron/web run typecheck
 
