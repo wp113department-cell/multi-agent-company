@@ -2260,3 +2260,280 @@ be silently dropped — every item below traces to a real `MASTER_AGENT_v2.md` �
   **Next: Stage 1.4 (Days 24-26 per the original plan numbering, now shifted by the Stage 1.3
   extension — frontend/backend robustness: error boundaries, SSE reconnect-with-backoff, auth-header
   threading, UI role gating).**
+- **2026-07-31 (same day)**: **Stage 1.4 complete — all four items (error boundaries, SSE
+  reconnect-with-backoff, `authHeaders()` threading, UI role gating), plus real gaps discovered
+  along the way that the plan's own literal 4-item list didn't name, fixed in the same pass rather
+  than left half-done.**
+  **1. Error boundaries**: new `apps/web/components/RouteError.tsx` (shared UI, since Next.js
+  requires a real per-segment `error.tsx` file — no way to share one file across routes) plus
+  `apps/web/app/error.tsx` (root-level; must render its own `<html>`/`<body>`, a Next.js App Router
+  requirement since a root error.tsx can be triggered by the root layout itself throwing) and one
+  `error.tsx` in each of the 16 route-group directories (`agents/`, `approvals/`, `chat/`,
+  `console/`, `cost/`, `epics/`, `fleet/`, `goals/`, `login/`, `metrics/`, `onboarding/`, `repo/`,
+  `review/`, `settings/`, `stream/`, `tasks/`). Verified via `tsc --noEmit` (clean) and a real
+  `next build` (all 19 routes generated successfully — Next.js's own build validates every
+  error.tsx's required export signature). Not verified: the actual rendered error UI in a live
+  browser (no browser-automation tool available this session) — flagged rather than claimed.
+  **2. SSE reconnect-with-backoff**: `apps/web/app/stream/[taskId]/page.tsx`'s `es.onerror` used to
+  unconditionally call `es.close()` on ANY connection error — which defeats `EventSource`'s own
+  native auto-reconnect (the browser reconnects on its own after `onerror` UNLESS `close()` was
+  called first), so a real transient drop (network blip, load-balancer timeout, server restart)
+  permanently killed the live activity feed with no recovery. Rewrote as a shared `connect(attempt)`
+  callback (also reused by `handleResume`, which previously duplicated a second, non-reconnecting
+  copy of the same logic) with exponential backoff (1s/2s/4s/8s/16s, capped at 30s,
+  `MAX_RECONNECT_ATTEMPTS=5`), a new `"reconnecting"` status distinct from a genuine terminal
+  `"error"` event the agent itself reported (which correctly does NOT trigger a reconnect), and a
+  real bug caught by the test suite before shipping: the first version only flipped the status to
+  "reconnecting" once the retry itself fired, leaving a stale "running" label during the whole
+  backoff wait — fixed to update immediately in `onerror`. New
+  `apps/web/app/stream/[taskId]/page.test.tsx` (4 tests) — a controllable fake `EventSource` (jsdom
+  doesn't implement the real one) proves reconnection actually happens after the backoff delay,
+  does NOT happen after a genuine terminal server event, and correctly gives up after
+  `MAX_RECONNECT_ATTEMPTS` with a real error state.
+  **3. `authHeaders()` threading**: root cause was that NONE of `lib/api.ts`'s 44 exported functions
+  sent the `Authorization: Bearer <token>` header the backend's RBAC middleware actually reads (only
+  one unrelated page, `app/repo/page.tsx`, ever did it manually) — and since GET reads fail
+  identically to mutating writes under `RBAC_ENABLED=true`, the real fix covers every fetch call in
+  the file, not just mutating ones as the plan's literal wording said. New `apiFetch()` wrapper
+  (`lib/api.ts`) merges `authHeaders()` into every call's headers; all 44 `fetch(` call sites now go
+  through it. Grep-swept the rest of the app for the same class of bug and found 5 more files with
+  raw `fetch()` calls to `/api/*` bypassing `lib/api.ts` entirely, all missing the header: `app/chat/page.tsx`,
+  `app/review/page.tsx`, `app/settings/page.tsx`, `app/fleet/page.tsx`, `app/approvals/page.tsx`,
+  `components/NavBar.tsx` — fixed all of them the same way. New `lib/api.test.ts` (6 tests) proves
+  the header is actually attached (GET, POST, PATCH, DELETE, a call with its own pre-existing custom
+  header, and the no-token case still sending no header at all — unchanged prior behavior).
+  **Known, explicitly NOT fixed, out-of-scope-for-today limitation found along the way**: the SSE
+  `EventSource` connection itself cannot carry a custom `Authorization` header at all (a browser API
+  limitation, not fixable by adding fetch headers) — and `backend/app/api/activity.py::stream_task_events`
+  has no `Depends(require_authenticated)` at all, unlike its sibling stop/resume endpoints (confirmed
+  by reading the endpoint's signature directly). This is a real, previously-identified gap (from the
+  original Q9 audit's "Plan:" note, not the day-by-day Stage 1.4 plan's own literal 4-item list) —
+  adding auth to that endpoint without ALSO redesigning how the frontend's `EventSource` authenticates
+  (e.g. a signed short-lived query-param token) would break the whole activity-feed feature the
+  moment `jwt_auth_enabled=true` (currently `False` by default, so dormant today) — flagged here for
+  a future day rather than rushed in with unassessed regression risk.
+  **4. UI-level role gating**: the backend already embeds `role` in the JWT payload at login
+  (`create_access_token({"sub": ..., "role": role})`) but the frontend never decoded it. New
+  `getRole()`/`isApprover()` in `lib/auth.ts` (decodes the JWT payload client-side, no signature
+  verification — meaningless here since a forged claim still hits the real, signature-verified
+  server-side check and gets a real 403; this only ever affects what's rendered, matching
+  `app/middleware/rbac.py`'s own docstring: "UI hiding buttons is a courtesy only"). Wired into every
+  Approve/Reject/Approve-Cost button found across the app: `app/approvals/page.tsx`,
+  `app/review/page.tsx` (epic rows, task rows, and the batch "Approve All" button),
+  `app/epics/[id]/page.tsx`, `app/fleet/page.tsx` — a viewer-role user now sees a "Approver role
+  required" message instead of a button that would just 403. 6 new tests in `lib/auth.test.ts`
+  (real JWTs with `role` claims, not mocked) — now 16 total in that file.
+  Full frontend regression: `tsc --noEmit` clean, `next build` clean (all 19 routes), `vitest run`
+  32/32 passed (16 auth + 6 api + 4 stream-reconnect + 6 pre-existing agents-page tests) — up from
+  the pre-Stage-1.4 baseline of 20 passed.
+  `answers.md`'s Q9 (Frontend Architecture Audit) findings updated to reflect what's now fixed vs.
+  the one explicitly-flagged remaining gap (the SSE-auth/stream-endpoint item).
+  **Next: continue through the remaining plan days (Stage 1.5 onward) per the standing instruction
+  to complete all days one by one without stopping.**
+- **2026-07-31 (same day)**: **Stage 1.5 (Context & token management) complete — all four items,
+  with a real boundary-condition bug caught and fixed by the new test suite before shipping.**
+  **1. Model→context-window table**: `app/fleet/model_router.py:76` (`TIER_CONTEXT_WINDOWS`), new
+  `RouteConfig.context_window` field + `ModelRouter.context_window_for()`. Sourced via live web
+  search on 2026-07-31, not training-data recall: 1M tokens is GA (default, no beta header) for
+  current-gen Opus/Sonnet as of 2026-03-13 (Anthropic API release notes); Haiku 4.5 confirmed at
+  200K; the unused "gpt"/Groq tier's real models (qwen/qwen3-32b, llama-3.1-8b-instant) confirmed
+  at 128K via Groq's own docs — also surfaced, and explicitly flagged as a separate out-of-scope
+  gap: both Groq models were deprecated 2026-06-17, so `Settings.groq_model_planner`/
+  `groq_model_coder`/`groq_model_router` currently point at models Groq may already be phasing out.
+  2 existing `RouteConfig(...)` direct-construction call sites in `tests/test_model_router.py`
+  fixed (new required field); 4 new tests added (20 total in that file, all passing).
+  **2 & 3. Real LLM-summarization condense, both graphs** (replacing base_graph.py's old pure
+  drop-oldest `_trim_messages`, and giving chat_agent.py a budget check it never had at all —
+  confirmed by grep before starting: zero tokens_in/tokens_out/response.usage references anywhere
+  in that file). `base_graph.py:362` (`_select_messages_to_condense`, pure — same head[0]+tail[-4]
+  boundary the old code used), `:448` (`_condense_messages`, sync, used by `call_llm` via the
+  existing circuit-breaker-wrapped `_call_anthropic`). `chat_agent.py:422`
+  (`_condense_history_async` — an async counterpart chat_agent.py's own `AsyncAnthropic` client
+  requires; reuses `_select_messages_to_condense`/`_stringify_messages_for_summary` as-is since
+  they're pure, only the LLM-calling summarization step needed its own async version, wired through
+  the shared Anthropic circuit breaker's `allow()`/`record_success()`/`record_failure()` primitives
+  matching how `_call_llm_node`'s own main call already uses them). Both: on summarization failure,
+  an honest placeholder ("summarization failed: ...") is spliced in — never a fabricated summary or
+  a silent revert to drop-oldest.
+  **4. `context_trimmed`/`approaching_limit` SSE events**: new `push_context_trimmed()`/
+  `push_approaching_limit()` in `app/services/activity_stream.py`, wired into both `call_llm`
+  (base_graph.py) and `_call_llm_node` (chat_agent.py, via `session.push()`).
+  **Real bug found and fixed by the test suite, not shipped**: chat_agent.py's first version had a
+  separate outer `if pct >= 1.0:` pre-check before attempting condense, but
+  `_select_messages_to_condense`'s own internal cutoff is `tokens_in <= token_budget` (i.e. only
+  *strictly greater than* budget triggers condensing) — at the exact boundary
+  (`tokens_in == token_budget`), the outer check said "condense" while the inner one said "not yet,"
+  so `was_condensed` came back `False` and NEITHER `context_trimmed` NOR the `approaching_limit`
+  fallback fired at all. Caught by `tests/test_gap_stage15_chat_context_condense.py`'s own boundary
+  math landing exactly on this edge. Fixed by removing the redundant outer pre-check entirely and
+  always attempting condense first, branching on the real `was_condensed` result — exactly matching
+  `base_graph.py::call_llm`'s own (already-correct) pattern, which never had this bug because it was
+  written that way from the start.
+  A second, unrelated pre-existing test-fixture gap surfaced by full regression: `ChatAgent`'s own
+  fake-streaming-client test helpers (`_FakeToolUseStream`/`_FakeTextStream`, independently defined
+  in 4 different test files) never set `final.usage`, so `self._tokens_in += final.usage.input_tokens`
+  crashed with `TypeError: '>' not supported between instances of 'MagicMock' and 'int'` on the
+  very next turn. Fixed by adding a real `final.usage = MagicMock(input_tokens=10, output_tokens=5)`
+  to every occurrence across `test_gap16_chat_agent_verification_gate.py`,
+  `test_chat_agent_memory_wiring.py`, `test_phase52_chat_graph_interrupt.py`, and
+  `test_phase52_file_mutation_confirmation.py` (7 occurrences, 4 files) — plus one `ChatAgent.__new__`
+  test-double construction in `test_gap22_circuit_breaker_wiring.py` that bypasses `__init__`
+  entirely, needing the new `_tokens_in`/`_tokens_out` attributes set explicitly.
+  **Tests**: `tests/test_base_graph_scaffold.py` — `TestTrimMessages` replaced with
+  `TestSelectMessagesToCondense` (4 tests, pure boundary logic) and `TestCondenseMessages` (3 tests,
+  including the honest-placeholder-on-failure case), matching the renamed/redesigned function.
+  `tests/test_activity_stream.py` — 2 new tests for the new push functions.
+  `tests/test_gap_stage15_context_condense.py` (2 tests) — real `run_agent_graph()` end-to-end proof
+  that a long conversation triggers summarization with content preserved and the SSE event fires,
+  plus a control case proving a short conversation never fires either event.
+  `tests/test_gap_stage15_chat_context_condense.py` (2 tests) — the same end-to-end proof through
+  the real compiled chat graph.
+  Full regression: 20/20 known baseline unchanged, 3,470 passed. `black`/`ruff`/`mypy --strict`
+  clean on every touched file.
+  `answers.md` updated with Stage 1.5's completion and evidence.
+  **Next: Stage 1.6 (Requirement compliance & clarification) — explicit hard-constraint rule,
+  difficult-user/de-escalation section in chat.md, "check if already done" step before new work.**
+- **2026-07-31 (same day)**: **Stage 1.6 (Requirement compliance & clarification) complete —
+  all three items, plus a real gap in the initial draft caught and fixed before it shipped:
+  `chat_agent.py` doesn't actually have a `request_clarification` tool.**
+  **1. Hard-Constraint Conflict Rule**: new subsection in `backend/roles/_GLOBAL_STANDARDS.md` §8
+  (right after the existing limitation taxonomy). Defines a "hard constraint" (anything the user
+  states as non-negotiable) and requires stopping before making any change when one conflicts with
+  evidence already gathered in the run — using whichever real escalation mechanism the calling
+  role actually has.
+  **A real gap found investigating this, not assumed**: the first draft of `chat.md`'s Escalation
+  section said to "call `request_clarification`" on a conflict — but `app/agents/tools.py`'s own
+  `REQUEST_CLARIFICATION_TOOL` docstring explicitly scopes that tool to bounded worker-agent runs
+  with no interrupt()/resume machinery of their own (`base_graph.py`'s shape); `chat_agent.py` is a
+  continuously interactive graph with the user live in the same turn-taking loop, and grep confirmed
+  it never registers that tool at all. Fixed by rewriting the global rule to name THREE real
+  mechanisms depending on what the calling role actually has (`request_clarification` for bounded
+  worker runs; `status: needs_human` for `submit_*`-only roles without that tool; a direct plain-text
+  question for interactive roles with neither, since there's no "pause the run" to do when the user
+  is already right there) — and correcting `chat.md`'s own Escalation section to say so explicitly,
+  rather than shipping a rule referencing a tool that doesn't exist for the role reading it.
+  **2. Difficult-user/de-escalation section**: new "Handling Difficult Users / De-escalation"
+  section in `backend/roles/chat.md` (after Memory) — stay factual not defensive; don't perform
+  repeated contrition; restate conflicting constraints neutrally (cross-referenced to item 1); check
+  whether new evidence changes an answer before repeating an investigation verbatim; escalate rather
+  than guess to appease pressure to skip verification; hold a verified fact against user
+  tone/pressure rather than conceding to match their certainty.
+  **3. "Already done?" check**: new step in `_GLOBAL_STANDARDS.md` §8 (search for whether the
+  requested change already exists before implementing) plus an explicit numbered step 2 in
+  `chat.md`'s own "For IMPLEMENTATION tasks" process (before any file is read/touched).
+  **Tests**: `tests/test_gap_stage16_hard_constraint_clarification.py` (1 test) — proves the plan's
+  own acceptance criterion end to end through the real compiled graph: a scripted worker-agent run
+  given two conflicting hard constraints (PostgreSQL vs. SQLite-only) calls `request_clarification`
+  naming BOTH constraints and why they conflict (not a vague "is this ok?"), records a real
+  `PendingApproval` row, and ends cleanly with `needs_clarification` — never a submitted result that
+  silently picked a side. Mirrors the established `tests/test_phase53_request_clarification.py`
+  scripted-LLM pattern, adding the specific conflicting-constraint scenario that file's own generic
+  "ambiguous task" LLM doesn't cover. Prompt-level rule adherence by a real model can't be
+  unit-tested (this codebase's own established convention) — this proves the underlying mechanism
+  correctly carries the rule through when followed, the same standard already applied to the
+  pre-existing test file.
+  Sanity-verified both edited role files still load cleanly via `load_role()` (no markdown/encoding
+  issues introduced).
+  Full regression: 20/20 known baseline unchanged, 3,471 passed. `black`/`ruff`/`mypy --strict`
+  clean on the one new test file (role `.md` files have no lint/type-check surface).
+  `answers.md` updated across Q53 (source of this plan item), Q26/Q63 (difficult-user handling,
+  duplicate sections), and Q51 (already-done check) with completion evidence.
+  **Next: continue through the remaining plan days per the standing instruction to complete all
+  days one by one without stopping.**
+
+- **2026-07-31 (same day)**: **Stage 1.7 (Wire quality tools into CI) complete — both halves.**
+  **1. `regression_detector` CI gate**: `app/fleet/regression_detector.py`'s `gate_deploy()`
+  (Day 11) and its full test coverage (`tests/test_regression_detector.py`, incl.
+  `test_gate_deploy_raises_deployment_blocked_on_regression`) already existed and were already
+  correct — the gap was purely CI *visibility*: it only ran buried inside the general
+  `pytest tests/` step, so a regression there didn't fail its own named check. Added a new,
+  separately-labeled "Regression gate (regression_detector baseline check)" step to `ci.yml`'s
+  `backend` job (`.github/workflows/ci.yml:78-99`) running
+  `pytest tests/test_regression_detector.py -v --tb=short` on its own. Documented inline (and in
+  `answers.md` Q90) an honest limitation left open, not solved: CI's Postgres is a fresh ephemeral
+  container per run with no baseline history from prior runs, so this proves the gate mechanism
+  itself works, not "did this PR regress the persisted fleet baseline" — that needs a persistent
+  CI DB or a downloaded baseline artifact, out of scope here.
+  **2. `tech_debt_agent` CI wiring** — user given an explicit `AskUserQuestion` on scope (this
+  makes a real, cost-bearing Anthropic API call) and chose **"Real LLM call, non-blocking"**:
+  detect structural-file PR diffs, actually invoke `tech_debt_agent`, post findings as an
+  informational annotation, never block the merge. Built as two layers:
+    - `backend/app/fleet/structural_diff.py` (new) — `is_structural_file_change(changed_files)`,
+      a pure/deterministic/no-I/O function checking changed files against
+      `STRUCTURAL_FILE_PATTERNS` (shared DB schema, `base_graph.py`/`chat_agent.py`, central
+      config/bootstrap, migrations, RBAC/policy engine, model router) — kept out of the CI YAML's
+      own shell logic specifically so the trigger decision is unit-testable.
+      `tests/test_structural_diff.py` (6 tests), including a regression-catch on the module's own
+      first draft: an unconditional `.startswith()` would have imprecisely prefix-matched
+      similarly-named non-structural files (e.g. `models.py` vs. `models.py.bak`); fixed with a
+      `_matches()` helper that only prefix-matches patterns explicitly ending in `/`
+      (`test_does_not_over_match_a_similarly_named_non_structural_file` proves it).
+    - `backend/scripts/ci_tech_debt_scan.py` (new) — `get_changed_files()` (`git diff --name-only`
+      against `origin/$GITHUB_BASE_REF`), `format_summary()`, and `main()`: skips cleanly (exit 0)
+      on a push event (no `GITHUB_BASE_REF`), a non-structural diff, a missing `ANTHROPIC_API_KEY`,
+      or any internal/API error from `run_tech_debt_agent()` itself — this step can never fail the
+      build by design. On a genuine structural PR diff with a real key configured, it calls
+      `run_tech_debt_agent()` for real and appends the findings to `$GITHUB_STEP_SUMMARY`.
+      Confirmed safe to call with a synthetic `task_id=0` from a standalone CI context: traced
+      `run_tech_debt_agent` → `run_agent_graph` → `_maybe_store_procedure` →
+      `app/memory/store.py::embed_procedure` → `MemoryEmbedding.task_id`
+      (`backend/app/db/models.py:508`, `Mapped[str] = mapped_column(String(100), index=True)`) —
+      a plain indexed string column, no FK constraint, so no crash risk and no bad
+      production-relevant write (CI's Postgres is ephemeral/throwaway per run regardless).
+      `tests/test_ci_tech_debt_scan.py` (12 tests) — `run_tech_debt_agent` mocked at every call
+      site, so the suite itself incurs zero real API cost; covers all four skip paths, the
+      triggered-and-writes-summary path (real temp-file round-trip via `GITHUB_STEP_SUMMARY`), and
+      the never-fails-the-build-on-agent-error path.
+    - `.github/workflows/ci.yml`: new "Tech debt scan (tech_debt_agent on structural PR diffs)"
+      step (`ci.yml:101-114`), `if: github.event_name == 'pull_request'`, running
+      `python scripts/ci_tech_debt_scan.py`. The `backend` job's `actions/checkout` step gained
+      `fetch-depth: 0` (`ci.yml:51-58`) — the default shallow/depth-1 checkout only fetches the PR
+      merge commit, so `origin/$GITHUB_BASE_REF` wasn't resolvable for `git diff` without it.
+  **Validation**: `.github/workflows/ci.yml` parsed with `yaml.safe_load` — confirmed correct job
+  list, correct step order (`Test suite` → `Regression gate` → `Tech debt scan` →
+  `Upload test results`), `checkout.with.fetch-depth == 0`, tech-debt step's `if`/`run` as written.
+  `black`/`ruff` clean on both new backend files; `mypy --strict` clean on
+  `scripts/ci_tech_debt_scan.py` itself (the one pre-existing `app/fleet/budget_manager.py:94`
+  `resource`-undefined error surfaced by the same `mypy app/ --strict` invocation is unrelated —
+  confirmed pre-existing, not touched this session, not in any file this stage modified).
+  Full regression: 3,489 passed, 20 failed (the pre-existing Windows-dev-only environment
+  baseline — Python launcher alias unavailable, `git_service`'s hardcoded `/home`-only
+  `ALLOWED_WORKSPACE_PARENT` assumption, missing `node`/`make` on PATH — none in any file this
+  stage touched, none new), 55 skipped, matching the already-documented baseline pattern from
+  Day 21's regression note. All 18 new tests (6 structural-diff + 12 CI-scan) pass.
+  `answers.md` updated: Q90 (performance-check CI gate, PARTIAL → YES for the gate-mechanism
+  half, limitation on persisted-baseline history left honest) and Q91 (new-technical-debt
+  sub-item, PARTIAL → YES; `quality_auditor`/`code_quality_agent`/`architecture_mapper` explicitly
+  left as still-explicit-dispatch-only — broadening the same CI trigger to them was not part of
+  the user's Stage 1.7 scope decision).
+
+- **2026-07-31 (same day)**: **Day 34 (Stage 1 regression + Gap Audit Protocol checkpoint)
+  complete.** Ran as a genuine independent re-verification (delegated to a sub-agent instructed to
+  re-read every cited `file:line`, actually re-run every cited test, and run the full suite to
+  completion — not summarize prior reports). One real hiccup along the way, not a finding: the
+  first full-regression attempt died silently around 73% when its background process didn't
+  survive between tool-call boundaries; caught and restarted with `nohup ... & disown` so it ran to
+  genuine completion the second time (428.51s).
+  **Result: 6 of 7 Stage 1 sub-buckets (1.1, 1.2, 1.4, 1.5, 1.6, 1.7) independently RE-CONFIRMED**
+  — real code at the cited lines, real cited tests re-run and passing, no discrepancies.
+  **1 bucket (1.3, reliability & durability) found DRIFTED**: all underlying code and tests
+  genuinely still work (nothing broken, nothing regressed) — but 6 `answers.md` `file:line`
+  citations for Days 19/21/22 had gone stale again since Day 24's own correction pass, because
+  Stage 1.5's same-day insertions into `base_graph.py`/`chat_agent.py` shifted line numbers below
+  them and no later stage re-checked Stage 1.3's citations specifically. Corrected in place in
+  `answers.md`: `_make_execute_tools_node` `1132-1432`→`1268`; `_post_execute_tools_router`
+  `1676`→`1812`; the self-loop conditional-edge keys `1834`/`1855`→`1938`/`1948`/`1970`/`1991`
+  (4 occurrences now, not 2 — also re-verified live via grep, not assumed); `g.compile()`
+  `1865`→`2001`; `graph.stream()` `2140`→`2277`; `chat_agent.py`'s `_call_llm_node`
+  circuit-breaker citation `2439-2488`→`2592`. This is the same citation-drift failure mode Day 24
+  already named and fixed once, recurring — real evidence the risk is ongoing, not hypothetical,
+  and that a stage touching a shared file should re-grep earlier stages' citations into that same
+  file, not just verify its own.
+  **Full regression** (actually run to completion, not estimated): backend
+  3,489 passed / 20 failed / 55 skipped / 17 deselected — exact match to the last recorded
+  baseline, the 20 failures confirmed by name to be the same known Windows-dev-only environment
+  set (no new or different failing tests). Frontend: 32/32 passed, matching the claimed count.
+  **Per the Gap Audit Protocol's own rule ("close any real gaps found before resuming the next
+  scheduled day"), the drifted citations were fixed in this same pass, not deferred.**
+  **Next: Stage 2 (Days 35-57) — the 80 "should fix soon" items across 7 categories, starting with
+  35-39's resource/cost/size pre-flight work extending `app/pipeline/cost_controller.py`.**

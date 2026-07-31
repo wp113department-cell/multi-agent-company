@@ -2,11 +2,21 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   authHeaders,
   clearToken,
+  getRole,
   getToken,
+  isApprover,
   isAuthenticated,
   setToken,
   syncAuthCookie,
 } from "./auth";
+
+// Real JWTs (header.payload.signature, base64url) with role claims —
+// the signature segment is a dummy since getRole()/isApprover() never
+// verify it (that's the server's job; see lib/auth.ts's own docstring).
+const JWT_ROLE_APPROVER =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsInJvbGUiOiJhcHByb3ZlciJ9.sig";
+const JWT_ROLE_VIEWER =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJib2IiLCJyb2xlIjoidmlld2VyIn0.sig";
 
 function readCookie(): string {
   return document.cookie;
@@ -59,6 +69,38 @@ describe("authHeaders", () => {
   it("returns a Bearer Authorization header with a token", () => {
     setToken("abc123");
     expect(authHeaders()).toEqual({ Authorization: "Bearer abc123" });
+  });
+});
+
+describe("getRole", () => {
+  it("returns null with no token", () => {
+    expect(getRole()).toBeNull();
+  });
+
+  it("decodes the role claim from a real JWT payload", () => {
+    setToken(JWT_ROLE_APPROVER);
+    expect(getRole()).toBe("approver");
+  });
+
+  it("returns null for a malformed token instead of throwing", () => {
+    setToken("not-a-real-jwt");
+    expect(getRole()).toBeNull();
+  });
+});
+
+describe("isApprover", () => {
+  it("is false with no token", () => {
+    expect(isApprover()).toBe(false);
+  });
+
+  it("is true for role=approver", () => {
+    setToken(JWT_ROLE_APPROVER);
+    expect(isApprover()).toBe(true);
+  });
+
+  it("is false for role=viewer", () => {
+    setToken(JWT_ROLE_VIEWER);
+    expect(isApprover()).toBe(false);
   });
 });
 

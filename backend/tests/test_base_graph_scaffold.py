@@ -4,7 +4,9 @@ Tests prove:
 - All 9 new state fields exist with correct types in initial_state
 - LessonStore add / retrieve / format_for_injection works correctly
 - Keyword scoring returns correct top-k results
-- _trim_messages enforces token budget
+- _select_messages_to_condense / _condense_messages enforce the token budget
+  and preserve dropped content via summarization (Stage 1.5, answers.md —
+  replaces the old pure drop-oldest _trim_messages)
 - _policy_check still blocks protected paths and commands
 - VerificationConfig dataclass unchanged (backward compat)
 - build_agent_graph compiles with all flags False (existing behavior preserved)
@@ -16,6 +18,7 @@ Tests prove:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -25,10 +28,11 @@ from app.agents.base_graph import (
     Lesson,
     LessonStore,
     VerificationConfig,
+    _condense_messages,
     _policy_check,
+    _select_messages_to_condense,
     _serialize_content,
     _text_from_content,
-    _trim_messages,
     build_agent_graph,
     get_lesson_store,
 )
@@ -250,37 +254,106 @@ class TestLessonStoreSingleton:
 
 
 # ---------------------------------------------------------------------------
-# _trim_messages
+# _select_messages_to_condense / _condense_messages
+# (Stage 1.5, answers.md — replaces the old pure drop-oldest _trim_messages)
 # ---------------------------------------------------------------------------
 
 
-class TestTrimMessages:
+class TestSelectMessagesToCondense:
     def _msgs(self, n: int) -> list[dict[str, Any]]:
         return [
             {"role": "user" if i % 2 == 0 else "assistant", "content": f"msg {i}"}
             for i in range(n)
         ]
 
-    def test_no_trim_when_under_budget(self) -> None:
+    def test_none_when_under_budget(self) -> None:
         msgs = self._msgs(6)
-        result = _trim_messages(msgs, token_budget=100_000, tokens_in=50_000)
-        assert result == msgs
+        assert (
+            _select_messages_to_condense(msgs, token_budget=100_000, tokens_in=50_000)
+            is None
+        )
 
-    def test_trims_when_over_budget(self) -> None:
+    def test_returns_head_dropped_tail_when_over_budget(self) -> None:
         msgs = self._msgs(10)
-        result = _trim_messages(msgs, token_budget=100, tokens_in=90_000)
-        assert len(result) < len(msgs)
+        result = _select_messages_to_condense(msgs, token_budget=100, tokens_in=90_000)
+        assert result is not None
+        head, dropped, tail = result
+        assert head == msgs[:1]
+        assert dropped == msgs[1:-4]
+        assert tail == msgs[-4:]
 
-    def test_trim_keeps_head_and_tail(self) -> None:
-        msgs = self._msgs(10)
-        result = _trim_messages(msgs, token_budget=100, tokens_in=90_000)
-        assert result[0] == msgs[0]  # head preserved
-        assert result[-1] == msgs[-1]  # tail preserved
-
-    def test_no_trim_when_few_messages(self) -> None:
+    def test_none_when_few_messages(self) -> None:
         msgs = self._msgs(3)
-        result = _trim_messages(msgs, token_budget=100, tokens_in=90_000)
+        assert (
+            _select_messages_to_condense(msgs, token_budget=100, tokens_in=90_000)
+            is None
+        )
+
+    def test_none_when_nothing_would_be_dropped(self) -> None:
+        msgs = self._msgs(5)  # head[0] + dropped[1:-4]==[] + tail[-4:]
+        assert (
+            _select_messages_to_condense(msgs, token_budget=100, tokens_in=90_000)
+            is None
+        )
+
+
+class TestCondenseMessages:
+    def _msgs(self, n: int) -> list[dict[str, Any]]:
+        return [
+            {"role": "user" if i % 2 == 0 else "assistant", "content": f"msg {i}"}
+            for i in range(n)
+        ]
+
+    def test_no_condense_when_under_budget(self) -> None:
+        msgs = self._msgs(6)
+        client = MagicMock()
+        result, was_condensed = _condense_messages(
+            msgs,
+            token_budget=100_000,
+            tokens_in=50_000,
+            client=client,
+            model_haiku="claude-haiku-4-5-20251001",
+        )
         assert result == msgs
+        assert was_condensed is False
+        client.messages.create.assert_not_called()
+
+    def test_condenses_and_preserves_head_and_tail(self) -> None:
+        msgs = self._msgs(10)
+        client = MagicMock()
+        client.messages.create.return_value = SimpleNamespace(
+            content=[SimpleNamespace(type="text", text="- did X\n- decided Y")]
+        )
+        result, was_condensed = _condense_messages(
+            msgs,
+            token_budget=100,
+            tokens_in=90_000,
+            client=client,
+            model_haiku="claude-haiku-4-5-20251001",
+        )
+        assert was_condensed is True
+        assert result[0] == msgs[0]
+        assert result[-4:] == msgs[-4:]
+        assert len(result) == 6  # head + 1 synthetic summary message + tail(4)
+        # The dropped content is preserved in the summary, not silently lost.
+        assert "did X" in str(result[1]["content"])
+        assert "decided Y" in str(result[1]["content"])
+
+    def test_condense_survives_summarization_failure_with_honest_placeholder(
+        self,
+    ) -> None:
+        msgs = self._msgs(10)
+        client = MagicMock()
+        client.messages.create.side_effect = RuntimeError("API down")
+        result, was_condensed = _condense_messages(
+            msgs,
+            token_budget=100,
+            tokens_in=90_000,
+            client=client,
+            model_haiku="claude-haiku-4-5-20251001",
+        )
+        assert was_condensed is True
+        assert "summarization failed" in str(result[1]["content"])
 
 
 # ---------------------------------------------------------------------------

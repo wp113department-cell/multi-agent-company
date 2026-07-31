@@ -71,6 +71,10 @@ async def test_chat_agent_call_llm_node_checks_the_shared_breaker_first() -> Non
     agent.session.history = []
     agent._system = "system prompt"
     agent.MAX_ITERATIONS = 10
+    # Gap-closure Stage 1.5 (answers.md) added self._tokens_in/_tokens_out,
+    # normally set in __init__ — set explicitly since this test bypasses it.
+    agent._tokens_in = 0
+    agent._tokens_out = 0
 
     stream_client = MagicMock()
     agent._client = MagicMock(return_value=stream_client)  # type: ignore[method-assign]

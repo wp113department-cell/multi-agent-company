@@ -359,23 +359,135 @@ def _text_from_content(content: list[dict[str, Any]]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _trim_messages(
+def _select_messages_to_condense(
+    messages: list[dict[str, Any]], token_budget: int, tokens_in: int
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]] | None:
+    """Returns (head, dropped, tail) if condensing is needed, else None.
+    head=messages[:1], dropped=messages[1:-4], tail=messages[-4:] — the same
+    boundary this file's trim logic has always used."""
+    if tokens_in <= token_budget or len(messages) <= 4:
+        return None
+    head = messages[:1]
+    dropped = messages[1:-4]
+    tail = messages[-4:]
+    if not dropped:
+        return None
+    return head, dropped, tail
+
+
+def _stringify_messages_for_summary(messages: list[dict[str, Any]]) -> str:
+    """Flattens a message list (text/tool_use/tool_result blocks) into a
+    plain-text transcript excerpt suitable for an LLM summarization prompt."""
+    lines: list[str] = []
+    for m in messages:
+        role = str(m.get("role", "?"))
+        content = m.get("content", "")
+        if isinstance(content, str):
+            if content:
+                lines.append(f"{role}: {content}")
+        elif isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                btype = block.get("type")
+                if btype == "text":
+                    text = str(block.get("text", ""))
+                    if text:
+                        lines.append(f"{role}: {text}")
+                elif btype == "tool_use":
+                    lines.append(
+                        f"{role} called {block.get('name')}: "
+                        f"{json.dumps(block.get('input', {}), default=str)[:200]}"
+                    )
+                elif btype == "tool_result":
+                    lines.append(f"tool_result: {str(block.get('content', ''))[:300]}")
+    return "\n".join(lines)
+
+
+_CONDENSE_SUMMARY_PROMPT = (
+    "Summarize the key facts, decisions, file names/paths, and progress from "
+    "this earlier part of an agent conversation, in 3-8 concrete bullet "
+    "points. Preserve specifics (values, file paths, conclusions) — do not "
+    "write vague generalities.\n\nConversation excerpt:\n{excerpt}"
+)
+
+
+def _summarize_dropped_messages(
+    dropped: list[dict[str, Any]], client: anthropic.Anthropic, model_haiku: str
+) -> str:
+    """Real LLM-summarization condense step (roo-code src/core/condense/
+    pattern) — replaces silently discarding the dropped messages with a
+    cheap (haiku-tier) call that preserves their content in compact form.
+    On failure, returns an honest placeholder rather than fabricating a
+    summary or silently reverting to drop-oldest without saying so."""
+    excerpt = _stringify_messages_for_summary(dropped)[:12000]
+    if not excerpt:
+        return "(no summarizable content in the dropped messages)"
+    try:
+        r = _call_anthropic(
+            client,
+            model=model_haiku,
+            max_tokens=512,
+            messages=[
+                {
+                    "role": "user",
+                    "content": _CONDENSE_SUMMARY_PROMPT.format(excerpt=excerpt),
+                }
+            ],
+        )
+        summary = _text_from_content(_serialize_content(r.content))
+        return summary or "(summarization returned no content)"
+    except Exception as exc:
+        logger.warning("Context condense summarization failed: %s", exc)
+        return (
+            f"({len(dropped)} earlier messages were dropped; "
+            f"summarization failed: {exc})"
+        )
+
+
+def _condense_messages(
     messages: list[dict[str, Any]],
     token_budget: int,
     tokens_in: int,
-) -> list[dict[str, Any]]:
-    """Drop oldest messages when over budget. Keeps head[0] + tail[-4]."""
-    if tokens_in <= token_budget or len(messages) <= 4:
-        return messages
-    trimmed = messages[:1] + messages[-4:]
+    client: anthropic.Anthropic,
+    model_haiku: str,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Real LLM-summarization condense step (gap-closure Stage 1.5,
+    answers.md), replacing the old pure drop-oldest _trim_messages — the
+    dropped messages' content was silently lost before this. Keeps the
+    same head[0] + tail[-4] boundary the old code used; the messages in
+    between are summarized (not discarded) into one synthetic message
+    spliced in their place. Returns (possibly-condensed messages,
+    was_condensed) — the caller uses was_condensed to push the
+    context_trimmed SSE event."""
+    selection = _select_messages_to_condense(messages, token_budget, tokens_in)
+    if selection is None:
+        return messages, False
+    head, dropped, tail = selection
+    summary_text = _summarize_dropped_messages(dropped, client, model_haiku)
+    condensed = (
+        head
+        + [
+            {
+                "role": "user",
+                "content": (
+                    f"[Earlier conversation summary — {len(dropped)} messages "
+                    f"condensed]\n{summary_text}"
+                ),
+            }
+        ]
+        + tail
+    )
     logger.info(
-        "Context trim: %d → %d messages (tokens_in=%d > budget=%d)",
+        "Context condense: %d → %d messages (tokens_in=%d > budget=%d), "
+        "%d messages summarized",
         len(messages),
-        len(trimmed),
+        len(condensed),
         tokens_in,
         token_budget,
+        len(dropped),
     )
-    return trimmed
+    return condensed, True
 
 
 # ---------------------------------------------------------------------------
@@ -650,12 +762,16 @@ def _make_call_llm_node(
     tools: list[dict[str, Any]],
     context_token_budget: int,
     task_id: str = "",
+    model_haiku: str = "",
 ) -> Callable[[AgentRunState], dict[str, Any]]:
     """Calls Anthropic. Injects plan + memory_context into system prompt.
-    Applies context trim when tokens_in exceeds budget.
-    Pushes thinking/token_usage events to ActivityStream when task_id is set.
+    Applies context condense (real LLM summarization, not silent drop) when
+    tokens_in exceeds budget.
+    Pushes thinking/token_usage/context_trimmed/approaching_limit events to
+    ActivityStream when task_id is set.
     """
     system_prompt = load_role(role_name)
+    _condense_model = model_haiku or model
 
     # MASTER_AGENT_v2.md Phase 5.4 (2026-07-29) — thinking_budget_opus was a
     # dead config field (existed, never passed into any real API call).
@@ -698,12 +814,32 @@ def _make_call_llm_node(
 
         client = _make_client()
 
-        # Context trim
-        messages = _trim_messages(
+        # Context condense (real LLM summarization, not silent drop-oldest)
+        tokens_in_so_far = state.get("tokens_in", 0)
+        messages, was_condensed = _condense_messages(
             list(state["messages"]),
             token_budget=context_token_budget,
-            tokens_in=state.get("tokens_in", 0),
+            tokens_in=tokens_in_so_far,
+            client=client,
+            model_haiku=_condense_model,
         )
+        if task_id:
+            try:
+                from app.services.activity_stream import (
+                    push_approaching_limit,
+                    push_context_trimmed,
+                )
+
+                if was_condensed:
+                    push_context_trimmed(task_id, len(state["messages"]), len(messages))
+                elif context_token_budget > 0:
+                    pct = tokens_in_so_far / context_token_budget
+                    if 0.8 <= pct < 1.0:
+                        push_approaching_limit(
+                            task_id, tokens_in_so_far, context_token_budget, pct
+                        )
+            except Exception:
+                pass
 
         # Enrich system prompt with plan + memory context
         full_system = system_prompt
@@ -1742,7 +1878,7 @@ def build_agent_graph(
     """
     haiku = model_haiku or model
     call_llm = _make_call_llm_node(
-        role_name, model, tools, context_token_budget, task_id
+        role_name, model, tools, context_token_budget, task_id, model_haiku=haiku
     )
     execute_tools_node = _make_execute_tools_node(
         tool_handlers,

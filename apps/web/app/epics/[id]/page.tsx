@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { fetchEpic, approveEpic, rejectEpic, approveCost } from "../../../lib/api";
+import { isApprover } from "../../../lib/auth";
 
 const STATUS_COLORS: Record<string, string> = {
   pending: "bg-gray-100 text-gray-700",
@@ -140,7 +141,10 @@ export default function EpicDetailPage({ params }: { params: { id: string } }) {
           />
         </div>
 
-        {needsCostApproval && (
+        {/* Gap-closure Stage 1.4 (answers.md) — UI-level role gating, a
+            courtesy only; the server (require_approver) is the real
+            enforcement point. */}
+        {needsCostApproval && isApprover() && (
           <button
             onClick={() => approveCostMutation.mutate()}
             disabled={approveCostMutation.isPending}
@@ -150,8 +154,12 @@ export default function EpicDetailPage({ params }: { params: { id: string } }) {
           </button>
         )}
 
+        {(canApprove || canReject) && !isApprover() && (
+          <p className="text-xs text-gray-400">Approver role required to decide on this epic.</p>
+        )}
+
         <div className="flex gap-3">
-          {canApprove && (
+          {canApprove && isApprover() && (
             <button
               onClick={() => approveMutation.mutate()}
               disabled={approveMutation.isPending}
@@ -160,7 +168,7 @@ export default function EpicDetailPage({ params }: { params: { id: string } }) {
               {approveMutation.isPending ? "Approving…" : "Approve Epic"}
             </button>
           )}
-          {canReject && (
+          {canReject && isApprover() && (
             <button
               onClick={() => rejectMutation.mutate()}
               disabled={rejectMutation.isPending}

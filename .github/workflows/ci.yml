@@ -49,6 +49,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Gap-closure Stage 1.7 (answers.md): scripts/ci_tech_debt_scan.py
+          # needs `git diff` against the PR base branch to detect structural
+          # file changes. The default shallow (depth-1) checkout only fetches
+          # the PR merge commit, so origin/<base> isn't available locally.
+          # fetch-depth: 0 fetches full history for all branches/tags.
+          fetch-depth: 0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v7
@@ -74,6 +81,44 @@ jobs:
 
       - name: Test suite (pytest)
         run: python -m pytest tests/ -v --tb=short --timeout=120 --junitxml=pytest-results.xml
+
+      - name: Regression gate (regression_detector baseline check)
+        # Gap-closure Stage 1.7 (answers.md) — app/fleet/regression_detector.py's
+        # RegressionDetector.gate_deploy() already existed (Day 11) and was
+        # already fully tested (tests/test_regression_detector.py), but was
+        # never invoked as its own explicit, visible CI gate — only buried
+        # inside the general `pytest tests/` run above. This step runs it
+        # by name so a deliberately-regressed benchmark demonstrably fails
+        # CI as its own labeled check, not merged into the general suite's
+        # pass/fail. Real, deterministic, no LLM call: it constructs its own
+        # baseline + regressed run and asserts DeploymentBlocked is raised
+        # (tests/test_regression_detector.py::test_gate_deploy_raises_deployment_blocked_on_regression).
+        #
+        # Known, honest limitation (not solved here): this CI Postgres is a
+        # fresh, ephemeral container per run with no baseline history from
+        # prior runs, so this step cannot yet catch "did THIS PR regress
+        # against the real fleet's stored baseline" the way a real deploy
+        # gate against the persistent production DB eventually should —
+        # that needs either a persistent CI database or a downloaded
+        # baseline artifact from the last successful main-branch run, which
+        # is a separate, larger CI-infrastructure change, not implemented
+        # as part of this pass.
+        run: python -m pytest tests/test_regression_detector.py -v --tb=short
+
+      - name: Tech debt scan (tech_debt_agent on structural PR diffs)
+        # Gap-closure Stage 1.7 (answers.md) — second half. User's explicit
+        # scoping choice: real LLM call, non-blocking. scripts/ci_tech_debt_scan.py
+        # (backend/scripts/ci_tech_debt_scan.py) checks whether this PR's diff
+        # touches a structural file (app/fleet/structural_diff.py's
+        # STRUCTURAL_FILE_PATTERNS — shared DB schema, the two graph builders,
+        # central settings, RBAC/policy, model routing, migrations); if so,
+        # and only if ANTHROPIC_API_KEY is configured, it runs tech_debt_agent
+        # for real against the repo and posts findings to the job summary as
+        # an informational annotation. It always exits 0 — this step can never
+        # fail the build, on a push event (no GITHUB_BASE_REF), on a routine
+        # non-structural diff, or on an LLM/API error.
+        if: github.event_name == 'pull_request'
+        run: python scripts/ci_tech_debt_scan.py
 
       - name: Upload test results
         if: always()

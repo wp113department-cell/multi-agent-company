@@ -14,6 +14,8 @@ Event types:
   stopped     — user clicked Stop; includes checkpoint_id
   done        — agent graph completed; includes AgentResult summary
   error       — unrecoverable failure
+  context_trimmed   — conversation was condensed via LLM summarization (Stage 1.5)
+  approaching_limit — tokens_in crossed 80% of context_token_budget (Stage 1.5)
 """
 
 from __future__ import annotations
@@ -301,5 +303,41 @@ def push_approval_required(task_id: str | int, thread_id: str, action: str) -> N
             "type": "approval_required",
             "thread_id": thread_id,
             "action": action,
+        },
+    )
+
+
+def push_context_trimmed(
+    task_id: str | int, messages_before: int, messages_after: int
+) -> None:
+    """Gap-closure Stage 1.5 (answers.md) — fired whenever
+    base_graph.py::_condense_messages (or chat_agent.py's async
+    equivalent) actually condenses the conversation, so the UI can show
+    "earlier messages summarized" instead of the transcript silently
+    getting shorter with no explanation."""
+    get_activity_registry().push_event(
+        task_id,
+        {
+            "type": "context_trimmed",
+            "messages_before": messages_before,
+            "messages_after": messages_after,
+        },
+    )
+
+
+def push_approaching_limit(
+    task_id: str | int, tokens_in: int, token_budget: int, pct: float
+) -> None:
+    """Gap-closure Stage 1.5 (answers.md) — fired once tokens_in crosses
+    80% of the configured context_token_budget but before condensing
+    actually triggers, so the UI can warn ahead of the cut rather than
+    only after it happens."""
+    get_activity_registry().push_event(
+        task_id,
+        {
+            "type": "approaching_limit",
+            "tokens_in": tokens_in,
+            "token_budget": token_budget,
+            "pct": round(pct, 3),
         },
     )
