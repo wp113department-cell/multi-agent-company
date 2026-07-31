@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { logout, isAuthenticated } from "../lib/auth";
+import { logout, isAuthenticated, authHeaders } from "../lib/auth";
 
 function ThemeToggle() {
   const [dark, setDark] = useState(false);
@@ -62,7 +62,7 @@ function useFleetPendingCount(): number {
 
     async function refresh() {
       try {
-        const res = await fetch("/api/fleet/requests?status=pending");
+        const res = await fetch("/api/fleet/requests?status=pending", { headers: authHeaders() });
         if (!res.ok) return;
         const data = (await res.json()) as unknown[];
         if (!cancelled) setCount(data.length);
@@ -99,7 +99,7 @@ function useApprovalsPendingCount(): number {
 
     async function refresh() {
       try {
-        const res = await fetch("/api/approvals/pending");
+        const res = await fetch("/api/approvals/pending", { headers: authHeaders() });
         if (!res.ok) return;
         const data = (await res.json()) as { approvals: unknown[] };
         if (!cancelled) setCount(data.approvals.length);

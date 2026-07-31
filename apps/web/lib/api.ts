@@ -1,6 +1,29 @@
 // All fetches go to /api/* which Next.js proxies to http://localhost:8000/api/*
 // via the rewrites() in next.config.mjs.
 
+import { authHeaders } from "./auth";
+
+// Gap-closure Stage 1.4 (answers.md) — before this, authHeaders() (the
+// Authorization: Bearer <token> header the backend's RBAC middleware
+// actually reads — app/middleware/rbac.py has no cookie fallback, only
+// this header) was threaded through exactly one page (app/repo/page.tsx)
+// out of every fetch call in this file. Every other call — GET reads
+// included, not just mutating writes, since a GET fails the identical way
+// under RBAC_ENABLED=true — silently omitted it. apiFetch() is the one
+// chokepoint every function below now calls instead of the global fetch,
+// so the header can't be forgotten at a new call site the way it was
+// omitted at all 43 existing ones. Safe when RBAC is disabled or no user
+// is logged in yet: authHeaders() returns {} in both cases.
+async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  return fetch(input, {
+    ...init,
+    headers: {
+      ...authHeaders(),
+      ...(init.headers as Record<string, string> | undefined),
+    },
+  });
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as Record<string, unknown>;
@@ -87,18 +110,18 @@ export async function fetchTasks(status?: string, repoId?: number | null): Promi
   if (status && status !== "all") params.set("status", status);
   if (repoId != null) params.set("repo_id", String(repoId));
   const qs = params.toString() ? `?${params.toString()}` : "";
-  const res = await fetch(`/api/tasks${qs}`, { cache: "no-store" });
+  const res = await apiFetch(`/api/tasks${qs}`, { cache: "no-store" });
   const data = await handleResponse<{ tasks: DevTask[] }>(res);
   return data.tasks;
 }
 
 export async function fetchTask(taskId: string): Promise<DevTask> {
-  const res = await fetch(`/api/tasks/${taskId}`, { cache: "no-store" });
+  const res = await apiFetch(`/api/tasks/${taskId}`, { cache: "no-store" });
   return handleResponse<DevTask>(res);
 }
 
 export async function createTask(input: { title: string; description: string; repoId?: number | null }): Promise<DevTask> {
-  const res = await fetch(`/api/tasks`, {
+  const res = await apiFetch(`/api/tasks`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title: input.title, description: input.description, repo_id: input.repoId ?? null }),
@@ -115,7 +138,7 @@ export interface PdfFileResult {
 export async function extractPdfs(files: File[]): Promise<PdfFileResult[]> {
   const form = new FormData();
   for (const f of files) form.append("files", f);
-  const res = await fetch("/api/tasks/extract-pdfs", { method: "POST", body: form });
+  const res = await apiFetch("/api/tasks/extract-pdfs", { method: "POST", body: form });
   const data = await handleResponse<{ ok: boolean; files: PdfFileResult[] }>(res);
   return data.files;
 }
@@ -131,29 +154,29 @@ export interface TaskImageMeta {
 export async function uploadTaskImages(taskId: number, files: File[]): Promise<TaskImageMeta[]> {
   const form = new FormData();
   for (const f of files) form.append("files", f);
-  const res = await fetch(`/api/tasks/${taskId}/images`, { method: "POST", body: form });
+  const res = await apiFetch(`/api/tasks/${taskId}/images`, { method: "POST", body: form });
   const data = await handleResponse<{ created: TaskImageMeta[] }>(res);
   return data.created;
 }
 
 export async function fetchTaskImages(taskId: string): Promise<TaskImageMeta[]> {
-  const res = await fetch(`/api/tasks/${taskId}/images`, { cache: "no-store" });
+  const res = await apiFetch(`/api/tasks/${taskId}/images`, { cache: "no-store" });
   const data = await handleResponse<{ images: TaskImageMeta[] }>(res);
   return data.images;
 }
 
 export async function deleteTaskImage(taskId: string, imageId: number): Promise<{ deleted: boolean }> {
-  const res = await fetch(`/api/tasks/${taskId}/images/${imageId}`, { method: "DELETE" });
+  const res = await apiFetch(`/api/tasks/${taskId}/images/${imageId}`, { method: "DELETE" });
   return handleResponse(res);
 }
 
 export async function restartTask(taskId: string): Promise<{ restarted: boolean; taskId: number }> {
-  const res = await fetch(`/api/tasks/${taskId}/restart`, { method: "POST" });
+  const res = await apiFetch(`/api/tasks/${taskId}/restart`, { method: "POST" });
   return handleResponse(res);
 }
 
 export async function updateTaskStatus(taskId: string, status: string): Promise<DevTask> {
-  const res = await fetch(`/api/tasks/${taskId}`, {
+  const res = await apiFetch(`/api/tasks/${taskId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status }),
@@ -166,7 +189,7 @@ export async function updateTaskStatus(taskId: string, status: string): Promise<
 // ---------------------------------------------------------------------------
 
 export async function triggerAgentRun(taskId: string): Promise<{ triggered: boolean }> {
-  const res = await fetch(`/api/tasks/${taskId}/run`, {
+  const res = await apiFetch(`/api/tasks/${taskId}/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mode: "simple" }),
@@ -179,7 +202,7 @@ export async function triggerAgentRun(taskId: string): Promise<{ triggered: bool
 // ---------------------------------------------------------------------------
 
 export async function triggerPipeline(taskId: string): Promise<{ triggered: boolean }> {
-  const res = await fetch(`/api/tasks/${taskId}/run`, {
+  const res = await apiFetch(`/api/tasks/${taskId}/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mode: "full" }),
@@ -188,32 +211,32 @@ export async function triggerPipeline(taskId: string): Promise<{ triggered: bool
 }
 
 export async function fetchPipelineState(taskId: string): Promise<PipelineStateClient | null> {
-  const res = await fetch(`/api/tasks/${taskId}/pipeline`, { cache: "no-store" });
+  const res = await apiFetch(`/api/tasks/${taskId}/pipeline`, { cache: "no-store" });
   if (res.status === 404) return null;
   return handleResponse<PipelineStateClient>(res);
 }
 
 // Approve the PM→Architect→Decomposer plan — resumes LangGraph + starts coder
 export async function approvePipeline(taskId: string): Promise<{ approved: boolean }> {
-  const res = await fetch(`/api/tasks/${taskId}/pipeline/approve`, { method: "POST" });
+  const res = await apiFetch(`/api/tasks/${taskId}/pipeline/approve`, { method: "POST" });
   return handleResponse(res);
 }
 
 // Reject the plan — resumes LangGraph with approved=false
 export async function rejectPipeline(taskId: string): Promise<{ rejected: boolean }> {
-  const res = await fetch(`/api/tasks/${taskId}/pipeline/reject`, { method: "POST" });
+  const res = await apiFetch(`/api/tasks/${taskId}/pipeline/reject`, { method: "POST" });
   return handleResponse(res);
 }
 
 // Day 14 — Git Push Workflow
 export async function fetchTaskPr(taskId: string): Promise<TaskPr> {
-  const res = await fetch(`/api/tasks/${taskId}/pr`, { cache: "no-store" });
+  const res = await apiFetch(`/api/tasks/${taskId}/pr`, { cache: "no-store" });
   return handleResponse<TaskPr>(res);
 }
 
 // Manual retry — re-runs push+PR creation for a previously-approved push that failed
 export async function retryTaskPush(taskId: string): Promise<{ triggered: boolean }> {
-  const res = await fetch(`/api/tasks/${taskId}/push`, { method: "POST" });
+  const res = await apiFetch(`/api/tasks/${taskId}/push`, { method: "POST" });
   return handleResponse(res);
 }
 
@@ -222,7 +245,7 @@ export async function retryTaskPush(taskId: string): Promise<{ triggered: boolea
 // ---------------------------------------------------------------------------
 
 export async function fetchArtifacts(taskId: string): Promise<ArtifactRecord[]> {
-  const res = await fetch(`/api/tasks/${taskId}/artifacts`, { cache: "no-store" });
+  const res = await apiFetch(`/api/tasks/${taskId}/artifacts`, { cache: "no-store" });
   if (!res.ok) return [];
   return handleResponse<ArtifactRecord[]>(res);
 }
@@ -252,13 +275,13 @@ export interface Epic {
 }
 
 export async function fetchEpics(): Promise<Epic[]> {
-  const res = await fetch("/api/epics", { cache: "no-store" });
+  const res = await apiFetch("/api/epics", { cache: "no-store" });
   if (!res.ok) return [];
   return handleResponse<Epic[]>(res);
 }
 
 export async function fetchEpic(epicId: string): Promise<Epic> {
-  const res = await fetch(`/api/epics/${epicId}`, { cache: "no-store" });
+  const res = await apiFetch(`/api/epics/${epicId}`, { cache: "no-store" });
   return handleResponse<Epic>(res);
 }
 
@@ -267,7 +290,7 @@ export async function createEpic(input: {
   description: string;
   complexityMultiplier?: number;
 }): Promise<{ epicId: string; status: string; costEstimate: number; requiresCostApproval: boolean }> {
-  const res = await fetch("/api/epics", {
+  const res = await apiFetch("/api/epics", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -283,7 +306,7 @@ export async function approveEpic(
   epicId: string,
   userId: string,
 ): Promise<{ epicId: string; status: string }> {
-  const res = await fetch(`/api/epics/${epicId}/approve`, {
+  const res = await apiFetch(`/api/epics/${epicId}/approve`, {
     method: "POST",
     headers: { "X-User-Id": userId },
   });
@@ -294,7 +317,7 @@ export async function rejectEpic(
   epicId: string,
   userId: string,
 ): Promise<{ epicId: string; status: string }> {
-  const res = await fetch(`/api/epics/${epicId}/reject`, {
+  const res = await apiFetch(`/api/epics/${epicId}/reject`, {
     method: "POST",
     headers: { "X-User-Id": userId },
   });
@@ -305,7 +328,7 @@ export async function approveCost(
   epicId: string,
   userId: string,
 ): Promise<{ epicId: string; status: string }> {
-  const res = await fetch(`/api/epics/${epicId}/approve-cost`, {
+  const res = await apiFetch(`/api/epics/${epicId}/approve-cost`, {
     method: "POST",
     headers: { "X-User-Id": userId },
   });
@@ -325,18 +348,18 @@ export interface Goal {
 }
 
 export async function fetchGoals(): Promise<Goal[]> {
-  const res = await fetch("/api/goals", { cache: "no-store" });
+  const res = await apiFetch("/api/goals", { cache: "no-store" });
   if (!res.ok) return [];
   return handleResponse<Goal[]>(res);
 }
 
 export async function fetchGoal(goalId: string): Promise<Goal> {
-  const res = await fetch(`/api/goals/${goalId}`, { cache: "no-store" });
+  const res = await apiFetch(`/api/goals/${goalId}`, { cache: "no-store" });
   return handleResponse<Goal>(res);
 }
 
 export async function createGoal(text: string): Promise<Goal> {
-  const res = await fetch("/api/goals", {
+  const res = await apiFetch("/api/goals", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
@@ -361,7 +384,7 @@ export interface RepoRecord {
 }
 
 export async function listRepos(): Promise<{ repos: RepoRecord[]; activeRepoPath: string }> {
-  const res = await fetch("/api/repo", { cache: "no-store" });
+  const res = await apiFetch("/api/repo", { cache: "no-store" });
   return handleResponse(res);
 }
 
@@ -371,7 +394,7 @@ export async function cloneRepo(input: {
   branch?: string;
   token?: string;
 }): Promise<RepoRecord> {
-  const res = await fetch("/api/repo/clone", {
+  const res = await apiFetch("/api/repo/clone", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -385,12 +408,12 @@ export async function cloneRepo(input: {
 }
 
 export async function deleteRepo(repoId: number): Promise<{ deleted: boolean; id: number }> {
-  const res = await fetch(`/api/repo/${repoId}`, { method: "DELETE" });
+  const res = await apiFetch(`/api/repo/${repoId}`, { method: "DELETE" });
   return handleResponse(res);
 }
 
 export async function activateRepo(repoId: number): Promise<RepoRecord> {
-  const res = await fetch(`/api/repo/${repoId}/activate`, { method: "POST" });
+  const res = await apiFetch(`/api/repo/${repoId}/activate`, { method: "POST" });
   return handleResponse<RepoRecord>(res);
 }
 
@@ -434,12 +457,12 @@ export interface EpicCostSummary {
 }
 
 export async function fetchSystemMetrics(): Promise<SystemMetrics> {
-  const res = await fetch("/api/metrics", { cache: "no-store" });
+  const res = await apiFetch("/api/metrics", { cache: "no-store" });
   return handleResponse<SystemMetrics>(res);
 }
 
 export async function fetchEpicCosts(): Promise<EpicCostSummary[]> {
-  const res = await fetch("/api/metrics/epics", { cache: "no-store" });
+  const res = await apiFetch("/api/metrics/epics", { cache: "no-store" });
   if (!res.ok) return [];
   return handleResponse<EpicCostSummary[]>(res);
 }
@@ -463,7 +486,7 @@ export interface AgentRegistryEntry {
 
 export async function fetchAgents(tag?: string): Promise<AgentRegistryEntry[]> {
   const qs = tag ? `?tag=${encodeURIComponent(tag)}` : "";
-  const res = await fetch(`/api/agents${qs}`, { cache: "no-store" });
+  const res = await apiFetch(`/api/agents${qs}`, { cache: "no-store" });
   return handleResponse<AgentRegistryEntry[]>(res);
 }
 
@@ -487,12 +510,12 @@ export interface AppSettings {
 }
 
 export async function fetchAppSettings(): Promise<AppSettings> {
-  const res = await fetch("/api/settings", { cache: "no-store" });
+  const res = await apiFetch("/api/settings", { cache: "no-store" });
   return handleResponse<AppSettings>(res);
 }
 
 export async function saveApiKey(apiKey: string): Promise<{ saved: boolean }> {
-  const res = await fetch("/api/settings/api-key", {
+  const res = await apiFetch("/api/settings/api-key", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ api_key: apiKey }),
@@ -501,13 +524,13 @@ export async function saveApiKey(apiKey: string): Promise<{ saved: boolean }> {
 }
 
 export async function deleteApiKey(): Promise<{ deleted: boolean }> {
-  const res = await fetch("/api/settings/api-key", { method: "DELETE" });
+  const res = await apiFetch("/api/settings/api-key", { method: "DELETE" });
   return handleResponse(res);
 }
 
 // Day 14 — GitHub token (no verify-key support server-side, unlike Anthropic/OpenAI)
 export async function saveGithubToken(token: string): Promise<{ saved: boolean }> {
-  const res = await fetch("/api/settings/github-token", {
+  const res = await apiFetch("/api/settings/github-token", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ api_key: token }),
@@ -516,19 +539,19 @@ export async function saveGithubToken(token: string): Promise<{ saved: boolean }
 }
 
 export async function deleteGithubToken(): Promise<{ deleted: boolean }> {
-  const res = await fetch("/api/settings/github-token", { method: "DELETE" });
+  const res = await apiFetch("/api/settings/github-token", { method: "DELETE" });
   return handleResponse(res);
 }
 
 // Day 17 — Credential Vault custom secrets
 export async function fetchCustomSecrets(): Promise<string[]> {
-  const res = await fetch("/api/settings/custom-secrets", { cache: "no-store" });
+  const res = await apiFetch("/api/settings/custom-secrets", { cache: "no-store" });
   const data = await handleResponse<{ names: string[] }>(res);
   return data.names;
 }
 
 export async function saveCustomSecret(name: string, value: string): Promise<{ saved: boolean; name: string }> {
-  const res = await fetch("/api/settings/custom-secrets", {
+  const res = await apiFetch("/api/settings/custom-secrets", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, value }),
@@ -537,7 +560,7 @@ export async function saveCustomSecret(name: string, value: string): Promise<{ s
 }
 
 export async function deleteCustomSecret(name: string): Promise<{ deleted: boolean; name: string }> {
-  const res = await fetch(`/api/settings/custom-secrets/${encodeURIComponent(name)}`, {
+  const res = await apiFetch(`/api/settings/custom-secrets/${encodeURIComponent(name)}`, {
     method: "DELETE",
   });
   return handleResponse(res);
@@ -548,7 +571,7 @@ export async function deleteCustomSecret(name: string): Promise<{ deleted: boole
 // ---------------------------------------------------------------------------
 
 export async function createChatSession(repoPath: string): Promise<{ session_id: string }> {
-  const res = await fetch("/api/chat/sessions", {
+  const res = await apiFetch("/api/chat/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ repo_path: repoPath }),
@@ -561,7 +584,7 @@ export async function confirmChatAction(
   actionId: string,
   approved: boolean,
 ): Promise<{ status: string }> {
-  const res = await fetch(`/api/chat/sessions/${sessionId}/confirm`, {
+  const res = await apiFetch(`/api/chat/sessions/${sessionId}/confirm`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action_id: actionId, approved }),
@@ -570,5 +593,5 @@ export async function confirmChatAction(
 }
 
 export async function deleteChatSession(sessionId: string): Promise<void> {
-  await fetch(`/api/chat/sessions/${sessionId}`, { method: "DELETE" });
+  await apiFetch(`/api/chat/sessions/${sessionId}`, { method: "DELETE" });
 }

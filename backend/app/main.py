@@ -250,6 +250,10 @@ async def _benchmark_baseline_loop() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.pipeline.graph import init_checkpointer, close_checkpointer
+    from app.agents.base_graph import (
+        init_agent_checkpointer,
+        close_agent_checkpointer,
+    )
     from app.db.session import get_session_factory
     from app.db.repository import get_setting
     from app.agents.base import set_api_key_override
@@ -291,8 +295,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning("Fleet agent registry bootstrap failed (non-fatal): %s", exc)
 
+    # Gap-closure Day 23 (Stage 1.3, answers.md) — before any agent can
+    # start a new background process this run, terminate anything left
+    # over in the durable registry from a previous crash/restart: nothing
+    # in a fresh process could have legitimately started it, so being in
+    # the registry at this point IS the orphan signal.
+    try:
+        from app.fleet.bg_process_registry import sweep_orphaned_processes
+
+        killed = sweep_orphaned_processes()
+        if killed:
+            logger.warning(
+                "Startup orphan sweep terminated %d leftover background process(es): %s",
+                len(killed),
+                killed,
+            )
+    except Exception as exc:
+        logger.warning("Startup orphan-process sweep failed (non-fatal): %s", exc)
+
     await init_active_repo()
     await init_checkpointer(settings.database_url)
+    await init_agent_checkpointer(settings.database_url)
 
     # Load DB-stored API key override (if user saved one via UI)
     try:
@@ -383,6 +406,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except asyncio.CancelledError:
             pass
     await close_checkpointer()
+    await close_agent_checkpointer()
 
 
 app = FastAPI(

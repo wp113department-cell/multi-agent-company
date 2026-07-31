@@ -22,6 +22,22 @@ from app.agents.base_graph import (
 )
 from app.agents.dependency_security_agent import _CFG as DEP_SEC_CFG
 
+
+def _drain_batch(node: Any, state: Any) -> dict[str, Any]:
+    """Gap-closure Day 19 (Stage 1.3, answers.md) — execute_tools now
+    processes exactly one tool call per invocation and self-loops (via
+    graph state's pending_tool_uses) until its batch drains, instead of
+    draining a whole multi-tool_use batch in one call. This mirrors what
+    build_agent_graph's real self-loop edge does, for tests that exercise
+    the node function directly without compiling a graph."""
+    merged: dict[str, Any] = dict(state)
+    result: dict[str, Any] = node(merged)
+    while result.get("pending_tool_uses"):
+        merged.update(result)
+        result = node(merged)
+    return result
+
+
 _BASH_TOOL = {
     "name": "bash",
     "description": "Run a command",
@@ -152,7 +168,9 @@ def test_a_tool_with_no_blocking_entry_is_never_gated() -> None:
 def test_within_the_same_turn_a_prior_setter_call_satisfies_a_later_gate() -> None:
     """If the model calls read_file AND bash in the same LLM turn (one
     tool_use batch), read_file running first must satisfy bash's gate
-    within that same batch — no artificial extra round-trip required."""
+    within that same batch — no artificial extra call_llm round-trip
+    required, even though (Day 19) each tool call is now its own
+    execute_tools invocation rather than one shared loop iteration."""
     calls: list[str] = []
 
     def read_file_handler(inp: dict[str, Any]) -> str:
@@ -205,7 +223,7 @@ def test_within_the_same_turn_a_prior_setter_call_satisfies_a_later_gate() -> No
         "critique_result": {},
     }
 
-    result = node(state)
+    result = _drain_batch(node, state)
 
     assert calls == ["read_file", "bash"]
     bash_result_content = result["messages"][-1]["content"][1]["content"]

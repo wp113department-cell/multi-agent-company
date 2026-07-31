@@ -83,3 +83,24 @@ def reset_db_engine():  # type: ignore[no-untyped-def]
 
     _sess._engine = None
     _sess._session_factory = None
+
+
+@pytest.fixture(autouse=True)
+def reset_circuit_breakers():  # type: ignore[no-untyped-def]
+    """Gap-closure Day 22 (Stage 1.3, answers.md) — get_anthropic_breaker()/
+    get_groq_breaker() are module-level singletons shared across the whole
+    process, by design (production wants one real breaker per provider,
+    not one per call site). Several tests deliberately simulate LLM call
+    failures to exercise error-handling paths; without this reset, those
+    failures accumulate in the SAME shared breaker across unrelated test
+    files, and once consecutive failures reach
+    llm_circuit_breaker_failure_threshold (default 5) the breaker opens —
+    silently turning a later, unrelated test's mocked LLM call into a
+    CircuitBreakerOpenError instead of whatever it actually meant to test.
+    Same reset-to-None-after-every-test convention as reset_db_engine
+    above, applied to the same class of process-wide-singleton hazard."""
+    yield
+    import app.fleet.circuit_breaker as _cb
+
+    _cb._anthropic_breaker = None
+    _cb._groq_breaker = None

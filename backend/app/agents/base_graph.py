@@ -40,9 +40,81 @@ import jsonschema
 from app.agents.base import get_effective_api_key, load_role
 from app.agents.guardrails import check_command, check_path
 from app.config import get_settings
+from app.fleet.circuit_breaker import get_anthropic_breaker
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Gap-closure Day 21 (Stage 1.3, answers.md) — durable checkpointing for
+# every worker agent's graph. Only safe as of Day 19 (which closed the
+# replay-safety hazard: before that, adding a checkpointer here would have
+# made a crash mid-batch silently duplicate already-completed real side
+# effects on resume, instead of just losing the run — see Day 18/19's
+# writeup). Mirrors app/pipeline/graph.py's own init_checkpointer()/
+# close_checkpointer() pattern exactly (same driver, same
+# fallback-to-MemorySaver-on-failure behavior, same "called once from
+# FastAPI lifespan startup" contract) — kept as its own independent
+# module-level checkpointer/connection rather than importing pipeline/
+# graph.py's, so base_graph.py (used by ~74-76 agent modules) doesn't
+# depend on the higher-level pipeline orchestrator module.
+_agent_checkpointer: Any = MemorySaver()
+_agent_pg_cm: Any = None  # holds the AsyncPostgresSaver context manager open
+
+
+async def init_agent_checkpointer(database_url: str) -> None:
+    """Initialize the LangGraph PostgreSQL checkpointer so worker-agent runs
+    survive server restarts. Called once from FastAPI lifespan startup.
+
+    database_url: the asyncpg DSN from config (postgresql+asyncpg://...),
+    converted to psycopg3 format (postgresql://...), same as
+    pipeline/graph.py's init_checkpointer().
+    """
+    global _agent_checkpointer, _agent_pg_cm
+    try:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+        psycopg_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
+        cm = AsyncPostgresSaver.from_conn_string(psycopg_url)
+        saver = await cm.__aenter__()
+        await saver.setup()  # creates langgraph checkpoint tables if missing
+        _agent_pg_cm = cm
+        _agent_checkpointer = saver
+        logger.info(
+            "Agent graph PostgreSQL checkpointer initialized — worker agent "
+            "runs are now durably checkpointed"
+        )
+    except Exception as exc:
+        logger.warning(
+            "Agent graph PostgreSQL checkpointer init failed, falling back "
+            "to MemorySaver: %s",
+            exc,
+        )
+
+
+async def close_agent_checkpointer() -> None:
+    """Close the PostgreSQL checkpointer connection. Called at FastAPI shutdown.
+
+    Also resets _agent_checkpointer back to a fresh MemorySaver — found
+    while writing this day's test coverage: without this reset,
+    _agent_checkpointer keeps referencing the just-closed AsyncPostgresSaver
+    (now bound to a dead event loop), which is harmless in production
+    (close only ever happens once, at process shutdown, nothing runs
+    afterward) but silently breaks every subsequent build_agent_graph()
+    call in any process that inits+closes+keeps running — exactly what a
+    test doing init/close in the same pytest session does. Reset makes the
+    module's post-close state genuinely safe to keep using, not just
+    safe-in-practice-because-nothing-does-that-yet.
+    """
+    global _agent_pg_cm, _agent_checkpointer
+    if _agent_pg_cm is not None:
+        try:
+            await _agent_pg_cm.__aexit__(None, None, None)
+        except Exception as exc:
+            logger.warning("Error closing agent graph checkpointer: %s", exc)
+        _agent_pg_cm = None
+        _agent_checkpointer = MemorySaver()
 
 
 def _make_client() -> anthropic.Anthropic:
@@ -53,6 +125,22 @@ def _make_client() -> anthropic.Anthropic:
         api_key=get_effective_api_key(),
         timeout=get_settings().llm_call_timeout_seconds,
     )
+
+
+def _call_anthropic(client: anthropic.Anthropic, **kwargs: Any) -> Any:
+    """Gap-closure Day 22 (Stage 1.3, answers.md) — every client.messages.create
+    call in this file goes through here so the shared Anthropic circuit
+    breaker can't be forgotten at a new call site, without mutating
+    client.messages.create itself (mutating it broke ~9 existing tests
+    across the suite that assert on mock_client.messages.create.call_count/
+    call_args_list/assert_called_with after run_agent_graph() — the
+    established test convention throughout this suite; discovered via a
+    full regression run, not assumed, and fixed by wrapping the CALL
+    instead of the callee attribute, matching this file's own established
+    "shared node builder wraps behavior, doesn't mutate the client SDK
+    object" style)."""
+    breaker = get_anthropic_breaker()
+    return breaker.call(lambda: client.messages.create(**kwargs))
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +183,21 @@ class AgentRunState(_AgentRunStateBase, total=False):
     critique_result: dict[str, Any]  # last critique_node score: {criteria, all_met}
     critique_retries: int  # times critique_node sent work back for improvement
     replan_count: int  # times replan_node actually revised the plan mid-execution
+
+    # Gap-closure Day 19 (Stage 1.3, answers.md) — execute_tools batch
+    # bookkeeping. Day 18's standalone repro proved the old shape (one node
+    # invocation runs every pending tool call in a synchronous loop) replays
+    # already-completed real side effects if the process crashes mid-batch
+    # and a checkpointer resumes the run. These fields let execute_tools
+    # process exactly one tool call per invocation and self-loop back to
+    # itself (via _post_execute_tools_router) while a batch is still
+    # draining, mirroring chat_agent.py's already-proven-safe Phase 5.2
+    # pattern. pending_tool_uses is deliberately re-derivable from
+    # messages[-1] when empty/unset (see execute_tools), so an older
+    # checkpoint resuming without these fields still behaves correctly.
+    pending_tool_uses: list[dict[str, Any]]
+    tool_results_buffer: list[dict[str, Any]]
+    batch_requires_human_approval: bool
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +428,8 @@ def _gather_facts_and_plan(
     )
     facts_text = "{}"
     try:
-        r = client.messages.create(
+        r = _call_anthropic(
+            client,
             model=model_haiku,
             max_tokens=512,
             messages=[{"role": "user", "content": facts_prompt}],
@@ -348,7 +452,8 @@ def _gather_facts_and_plan(
     plan_text = "{}"
     confidence = 0.8
     try:
-        r2 = client.messages.create(
+        r2 = _call_anthropic(
+            client,
             model=model_haiku,
             max_tokens=512,
             messages=[{"role": "user", "content": plan_prompt}],
@@ -618,7 +723,8 @@ def _make_call_llm_node(
         extra_kwargs: dict[str, Any] = (
             {"thinking": _thinking_budget} if _thinking_budget else {}
         )
-        response = client.messages.create(
+        response = _call_anthropic(
+            client,
             model=model,
             max_tokens=8096,
             system=[
@@ -628,7 +734,7 @@ def _make_call_llm_node(
                     "cache_control": {"type": "ephemeral"},
                 }
             ],
-            messages=messages,  # type: ignore[arg-type]
+            messages=messages,
             tools=anthropic_tools,
             **extra_kwargs,
         )
@@ -678,10 +784,11 @@ def _make_reflection_node(model: str) -> Callable[[AgentRunState], dict[str, Any
     def reflection_node(state: AgentRunState) -> dict[str, Any]:
         client = _make_client()
         try:
-            r = client.messages.create(
+            r = _call_anthropic(
+                client,
                 model=model,
                 max_tokens=384,
-                messages=list(state["messages"])  # type: ignore[arg-type]
+                messages=list(state["messages"])
                 + [{"role": "user", "content": REFLECTION_PROMPT}],
                 # No tools param → tool_choice=none equivalent
             )
@@ -789,10 +896,11 @@ def _make_critique_node(
 
         client = _make_client()
         try:
-            r = client.messages.create(
+            r = _call_anthropic(
+                client,
                 model=model,
                 max_tokens=512,
-                messages=list(state["messages"])  # type: ignore[arg-type]
+                messages=list(state["messages"])
                 + [{"role": "user", "content": prompt}],
                 # No tools param → tool_choice=none equivalent
             )
@@ -924,7 +1032,44 @@ def _run_quality_gate(
             f"planner confidence {confidence:.2f} below required {min_confidence:.2f}"
         )
 
-    passed = checks.get("critique:all_met", True) and checks["confidence:threshold"]
+    # Gap-closure Day 16 (Stage 1.2, answers.md) — _GLOBAL_STANDARDS.md §7/§8
+    # has always told every agent to escalate with status blocked/needs_human
+    # "including... a recommended next step," but that was prompt text with
+    # no code-level check behind it: nothing stopped a submission from
+    # saying "blocked" with no usable next step at all. Real, fleet-wide
+    # (every agent routing through this shared function) — not a new
+    # per-agent schema field, since a model can include extra tool-call keys
+    # beyond what input_schema declares and none of the 72 submit_* schemas
+    # set additionalProperties: false. Informational-only failure, matching
+    # the existing critique/confidence pattern above — never blocks the
+    # submission, only flags it for human review (requires_human_approval)
+    # instead of a blocked-with-no-plan result disappearing silently.
+    if raw_result.get("status") in ("blocked", "needs_human"):
+        limitation_type = raw_result.get("limitation_type")
+        proposed_alternative = raw_result.get("proposed_alternative")
+        has_taxonomy = limitation_type in ("temporary", "fundamental")
+        has_alternative = bool(
+            isinstance(proposed_alternative, str) and proposed_alternative.strip()
+        )
+        checks["escalation:limitation_taxonomy"] = has_taxonomy
+        checks["escalation:alternative_proposed"] = has_alternative
+        if not has_taxonomy:
+            warnings.append(
+                "blocked/needs_human submission missing limitation_type "
+                "('temporary' or 'fundamental')"
+            )
+        if not has_alternative:
+            warnings.append(
+                "blocked/needs_human submission missing a real "
+                "proposed_alternative next step"
+            )
+
+    passed = (
+        checks.get("critique:all_met", True)
+        and checks["confidence:threshold"]
+        and checks.get("escalation:limitation_taxonomy", True)
+        and checks.get("escalation:alternative_proposed", True)
+    )
     return QualityGateResult(
         passed=passed, checks=checks, warnings=warnings, confidence=confidence
     )
@@ -995,6 +1140,20 @@ def _make_execute_tools_node(
 ) -> Callable[[AgentRunState], dict[str, Any]]:
     """Runs tool calls, enforces verification contract, resets stall counter.
     Pushes tool_call / tool_result / file_edit / terminal events to ActivityStream.
+
+    Gap-closure Day 19 (Stage 1.3, answers.md) — processes exactly ONE
+    pending tool call per invocation and self-loops (via
+    _post_execute_tools_router's "execute_tools" key) while
+    state["pending_tool_uses"] is still non-empty, instead of looping over
+    the whole batch synchronously inside one node call. Day 18's standalone
+    repro proved the old whole-batch-in-one-node shape replays every
+    already-completed real side effect (git commits, file writes, bash
+    commands) if the process crashes mid-batch and a checkpointer resumes
+    the run — LangGraph only checkpoints between node invocations, never
+    inside one. Bounding each invocation to one tool call bounds the replay
+    blast radius to at most the one call that was interrupted, mirroring
+    the pattern already proven safe in chat_agent.py's _execute_tool_node
+    (Phase 5.2).
     """
     # Audit 02 gap-closure (2026-07-24) — every submit_* handler across the
     # agent fleet used to do a raw dict.update(inp) with zero validation
@@ -1011,197 +1170,250 @@ def _make_execute_tools_node(
     }
 
     def execute_tools(state: AgentRunState) -> dict[str, Any]:
-        last_msg = state["messages"][-1]
-        content = last_msg.get("content", []) if isinstance(last_msg, dict) else []
-        tool_uses = [
-            b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"
-        ]
+        # pending_tool_uses carries the batch across self-loop invocations.
+        # Falsy (unset or drained-to-[]) means this is a fresh batch: derive
+        # it the same way the pre-Day-19 code always did, from the LLM's own
+        # last message — this also preserves the exact pre-existing
+        # interaction with reflection_node (which may replace messages[-1]
+        # with a "[Self-review]" string before execute_tools ever runs).
+        pending = list(state.get("pending_tool_uses") or [])
+        if not pending:
+            last_msg = state["messages"][-1]
+            content = last_msg.get("content", []) if isinstance(last_msg, dict) else []
+            pending = [
+                b
+                for b in content
+                if isinstance(b, dict) and b.get("type") == "tool_use"
+            ]
 
         new_verification = dict(state["verification"])
         new_result = dict(state["result"])
         submitted = state["submitted"]
         quality_gate_failed = False
         clarification_requested = False
-        tool_results: list[dict[str, Any]] = []
+        tool_results: list[dict[str, Any]] = list(
+            state.get("tool_results_buffer") or []
+        )
+        batch_requires_human_approval = state.get(
+            "batch_requires_human_approval", False
+        )
 
-        for tu in tool_uses:
-            tu_id = str(tu.get("id", ""))
-            tu_name = str(tu.get("name", ""))
-            tu_input = dict(tu.get("input", {}))
+        if not pending:
+            # Pre-existing edge case, unchanged from before Day 19:
+            # reflection_node can replace messages[-1] with a plain-string
+            # "[Self-review]" message when unsatisfied, so the fresh-batch
+            # derivation above finds zero tool_use blocks. The pre-Day-19
+            # code silently no-opped its loop in this case rather than
+            # crashing; this preserves that exact behavior instead of
+            # indexing into an empty pending list.
+            return {
+                "messages": list(state["messages"])
+                + [{"role": "user", "content": tool_results}],
+                "verification": new_verification,
+                "result": new_result,
+                "submitted": submitted,
+                "turns": state["turns"] + 1,
+                "requires_human_approval": batch_requires_human_approval,
+                "n_stalls": 0,
+                "pending_tool_uses": [],
+                "tool_results_buffer": [],
+                "batch_requires_human_approval": False,
+            }
 
-            # Push tool_call event
-            if task_id:
-                try:
-                    from app.services.activity_stream import push_tool_call
+        tu = pending[0]
+        remaining = pending[1:]
+        tu_id = str(tu.get("id", ""))
+        tu_name = str(tu.get("name", ""))
+        tu_input = dict(tu.get("input", {}))
 
-                    push_tool_call(task_id, tu_name, tu_input, tu_id)
-                except Exception:
-                    pass
+        # Push tool_call event
+        if task_id:
+            try:
+                from app.services.activity_stream import push_tool_call
 
-            denial = _policy_check(tu_name, tu_input)
-            if not denial and tu_name in verification_cfg.blocking_until:
-                required_key = verification_cfg.blocking_until[tu_name]
-                if not new_verification.get(required_key, False):
-                    denial = (
-                        f"{tu_name} is refused until '{required_key}' is "
-                        "satisfied first (see this agent's expected_verification)."
-                    )
-            if denial:
-                result_content = f"[POLICY DENIED] {denial}"
-                logger.warning("Policy denied %s: %s", tu_name, denial)
+                push_tool_call(task_id, tu_name, tu_input, tu_id)
+            except Exception:
+                pass
+
+        denial = _policy_check(tu_name, tu_input)
+        if not denial and tu_name in verification_cfg.blocking_until:
+            required_key = verification_cfg.blocking_until[tu_name]
+            if not new_verification.get(required_key, False):
+                denial = (
+                    f"{tu_name} is refused until '{required_key}' is "
+                    "satisfied first (see this agent's expected_verification)."
+                )
+        if denial:
+            result_content = f"[POLICY DENIED] {denial}"
+            logger.warning("Policy denied %s: %s", tu_name, denial)
+        else:
+            handler = tool_handlers.get(tu_name)
+            if handler is None:
+                result_content = f"[ERROR] Unknown tool: {tu_name}"
             else:
-                handler = tool_handlers.get(tu_name)
-                if handler is None:
-                    result_content = f"[ERROR] Unknown tool: {tu_name}"
-                else:
-                    _t0 = time.monotonic()
-                    try:
-                        result_content = str(handler(tu_input))
-                        if not result_content.startswith(
-                            "[ERROR]"
-                        ) and not result_content.startswith("[POLICY"):
-                            # Phase 6.3 — flag first (checks the real handler
-                            # output), then wrap: the delimiter must enclose
-                            # the warning too, so both stay inside the
-                            # "this is data" boundary.
-                            result_content = _flag_suspicious_tool_output(
-                                tu_name, result_content
-                            )
-                            result_content = _wrap_untrusted_tool_content(
-                                tu_name, result_content
-                            )
-                    except Exception as exc:
-                        result_content = f"[ERROR] {tu_name} raised: {exc}"
-                        logger.exception("Tool %s raised", tu_name)
-                    _duration_ms = (time.monotonic() - _t0) * 1000
-                    _ok = not result_content.startswith(
-                        "[ERROR]"
-                    ) and not result_content.startswith("[POLICY")
-
-                    # Day 10 — wire real tool-call data into RunMetrics (non-fatal).
-                    # avg_tool_accuracy() depends on this; before this fix it was
-                    # always computed from an empty tool_calls list.
-                    if trace_id:
-                        try:
-                            from app.fleet.metrics import get_metrics_collector
-
-                            _m = get_metrics_collector().get(trace_id)
-                            if _m is not None:
-                                _err = None if _ok else result_content[:200]
-                                _m.record_tool(tu_name, _ok, _duration_ms, _err)
-                        except Exception:
-                            pass
-
+                _t0 = time.monotonic()
+                try:
+                    result_content = str(handler(tu_input))
                     if not result_content.startswith(
                         "[ERROR]"
                     ) and not result_content.startswith("[POLICY"):
-                        if tu_name in verification_cfg.set_by:
-                            key = verification_cfg.set_by[tu_name]
-                            new_verification[key] = True
-                            logger.debug(
-                                "Verification: %s=True (from %s)", key, tu_name
-                            )
-
-                    if tu_name in verification_cfg.reset_by:
-                        for key in verification_cfg.reset_keys:
-                            new_verification[key] = False
-
-                    if tu_name.startswith("submit_"):
-                        submitted = True
-                        raw_result = dict(tu_input)
-                        schema = _schema_by_name.get(tu_name)
-                        if schema is not None:
-                            try:
-                                jsonschema.validate(instance=raw_result, schema=schema)
-                            except jsonschema.ValidationError as exc:
-                                logger.warning(
-                                    "submit tool %s did not match its declared "
-                                    "input_schema: %s",
-                                    tu_name,
-                                    exc.message,
-                                )
-                                raw_result["_validation_warning"] = exc.message[:300]
-                        for (
-                            result_field,
-                            verif_key,
-                        ) in verification_cfg.enforce_in_result.items():
-                            actual = new_verification.get(verif_key, False)
-                            if raw_result.get(result_field) != actual:
-                                logger.info(
-                                    "Verification override: result[%s]=%s → %s",
-                                    result_field,
-                                    raw_result.get(result_field),
-                                    actual,
-                                )
-                            raw_result[result_field] = actual
-
-                        gate = _run_quality_gate(
-                            state,
-                            verification_cfg,
-                            raw_result,
-                            quality_gate_min_confidence,
+                        # Phase 6.3 — flag first (checks the real handler
+                        # output), then wrap: the delimiter must enclose
+                        # the warning too, so both stay inside the
+                        # "this is data" boundary.
+                        result_content = _flag_suspicious_tool_output(
+                            tu_name, result_content
                         )
-                        raw_result["_quality_gate"] = {
-                            "passed": gate.passed,
-                            "checks": gate.checks,
-                            "warnings": gate.warnings,
-                        }
-                        if not gate.passed:
-                            quality_gate_failed = True
+                        result_content = _wrap_untrusted_tool_content(
+                            tu_name, result_content
+                        )
+                except Exception as exc:
+                    result_content = f"[ERROR] {tu_name} raised: {exc}"
+                    logger.exception("Tool %s raised", tu_name)
+                _duration_ms = (time.monotonic() - _t0) * 1000
+                _ok = not result_content.startswith(
+                    "[ERROR]"
+                ) and not result_content.startswith("[POLICY")
+
+                # Day 10 — wire real tool-call data into RunMetrics (non-fatal).
+                # avg_tool_accuracy() depends on this; before this fix it was
+                # always computed from an empty tool_calls list.
+                if trace_id:
+                    try:
+                        from app.fleet.metrics import get_metrics_collector
+
+                        _m = get_metrics_collector().get(trace_id)
+                        if _m is not None:
+                            _err = None if _ok else result_content[:200]
+                            _m.record_tool(tu_name, _ok, _duration_ms, _err)
+                    except Exception:
+                        pass
+
+                if not result_content.startswith(
+                    "[ERROR]"
+                ) and not result_content.startswith("[POLICY"):
+                    if tu_name in verification_cfg.set_by:
+                        key = verification_cfg.set_by[tu_name]
+                        new_verification[key] = True
+                        logger.debug("Verification: %s=True (from %s)", key, tu_name)
+
+                if tu_name in verification_cfg.reset_by:
+                    for key in verification_cfg.reset_keys:
+                        new_verification[key] = False
+
+                if tu_name.startswith("submit_"):
+                    submitted = True
+                    raw_result = dict(tu_input)
+                    schema = _schema_by_name.get(tu_name)
+                    if schema is not None:
+                        try:
+                            jsonschema.validate(instance=raw_result, schema=schema)
+                        except jsonschema.ValidationError as exc:
                             logger.warning(
-                                "quality gate failed for %s: %s",
+                                "submit tool %s did not match its declared "
+                                "input_schema: %s",
                                 tu_name,
-                                gate.warnings,
+                                exc.message,
                             )
+                            raw_result["_validation_warning"] = exc.message[:300]
+                    for (
+                        result_field,
+                        verif_key,
+                    ) in verification_cfg.enforce_in_result.items():
+                        actual = new_verification.get(verif_key, False)
+                        if raw_result.get(result_field) != actual:
+                            logger.info(
+                                "Verification override: result[%s]=%s → %s",
+                                result_field,
+                                raw_result.get(result_field),
+                                actual,
+                            )
+                        raw_result[result_field] = actual
 
-                        raw_result["_requires_human_approval"] = (
-                            human_approval_required or not gate.passed
-                        )
-                        new_result.update(raw_result)
-                    elif tu_name == "request_clarification":
-                        # MASTER_AGENT_v2.md Phase 5.3 — ends the run cleanly
-                        # with a distinct status, same as a real submit_*
-                        # would, but never treated as a completed/blocked
-                        # result: a caller checking state["result"]["status"]
-                        # for "needs_clarification" is what makes this a real
-                        # signal, not just a string in the transcript.
-                        submitted = True
-                        clarification_requested = True
-                        new_result.update(dict(tu_input))
-                        new_result["status"] = "needs_clarification"
-                        new_result["_requires_human_approval"] = True
-
-            # Push tool_result + specialized events
-            if task_id:
-                try:
-                    from app.services.activity_stream import (
-                        push_tool_result,
-                        push_file_edit,
-                        push_terminal,
+                    gate = _run_quality_gate(
+                        state,
+                        verification_cfg,
+                        raw_result,
+                        quality_gate_min_confidence,
                     )
-
-                    ok = not result_content.startswith(
-                        "[ERROR]"
-                    ) and not result_content.startswith("[POLICY")
-                    push_tool_result(task_id, tu_name, result_content, ok, tu_id)
-                    if tu_name in (
-                        "write_file",
-                        "edit_file",
-                        "apply_patch",
-                        "delete_file",
-                    ):
-                        path = str(tu_input.get("path", ""))
-                        push_file_edit(task_id, path, tu_name)
-                    if tu_name == "bash":
-                        push_terminal(
-                            task_id, str(tu_input.get("command", "")), result_content
+                    raw_result["_quality_gate"] = {
+                        "passed": gate.passed,
+                        "checks": gate.checks,
+                        "warnings": gate.warnings,
+                    }
+                    if not gate.passed:
+                        quality_gate_failed = True
+                        logger.warning(
+                            "quality gate failed for %s: %s",
+                            tu_name,
+                            gate.warnings,
                         )
-                except Exception:
-                    pass
 
-            tool_results.append(
-                {"type": "tool_result", "tool_use_id": tu_id, "content": result_content}
-            )
+                    raw_result["_requires_human_approval"] = (
+                        human_approval_required or not gate.passed
+                    )
+                    new_result.update(raw_result)
+                elif tu_name == "request_clarification":
+                    # MASTER_AGENT_v2.md Phase 5.3 — ends the run cleanly
+                    # with a distinct status, same as a real submit_*
+                    # would, but never treated as a completed/blocked
+                    # result: a caller checking state["result"]["status"]
+                    # for "needs_clarification" is what makes this a real
+                    # signal, not just a string in the transcript.
+                    submitted = True
+                    clarification_requested = True
+                    new_result.update(dict(tu_input))
+                    new_result["status"] = "needs_clarification"
+                    new_result["_requires_human_approval"] = True
+
+        # Push tool_result + specialized events
+        if task_id:
+            try:
+                from app.services.activity_stream import (
+                    push_tool_result,
+                    push_file_edit,
+                    push_terminal,
+                )
+
+                ok = not result_content.startswith(
+                    "[ERROR]"
+                ) and not result_content.startswith("[POLICY")
+                push_tool_result(task_id, tu_name, result_content, ok, tu_id)
+                if tu_name in (
+                    "write_file",
+                    "edit_file",
+                    "apply_patch",
+                    "delete_file",
+                ):
+                    path = str(tu_input.get("path", ""))
+                    push_file_edit(task_id, path, tu_name)
+                if tu_name == "bash":
+                    push_terminal(
+                        task_id, str(tu_input.get("command", "")), result_content
+                    )
+            except Exception:
+                pass
+
+        tool_results.append(
+            {"type": "tool_result", "tool_use_id": tu_id, "content": result_content}
+        )
+        batch_requires_human_approval = batch_requires_human_approval or (
+            (human_approval_required or quality_gate_failed or clarification_requested)
+            and submitted
+        )
+
+        if remaining:
+            # Batch not drained yet — partial update only. turns/n_stalls/
+            # messages are batch-level concepts (one LLM turn = one batch),
+            # so they're deliberately untouched until the final tool call.
+            return {
+                "verification": new_verification,
+                "result": new_result,
+                "submitted": submitted,
+                "pending_tool_uses": remaining,
+                "tool_results_buffer": tool_results,
+                "batch_requires_human_approval": batch_requires_human_approval,
+            }
 
         return {
             "messages": list(state["messages"])
@@ -1210,13 +1422,11 @@ def _make_execute_tools_node(
             "result": new_result,
             "submitted": submitted,
             "turns": state["turns"] + 1,
-            "requires_human_approval": (
-                human_approval_required
-                or quality_gate_failed
-                or clarification_requested
-            )
-            and submitted,
+            "requires_human_approval": batch_requires_human_approval,
             "n_stalls": 0,  # reset stall counter — tools were used this turn
+            "pending_tool_uses": [],
+            "tool_results_buffer": [],
+            "batch_requires_human_approval": False,
         }
 
     return execute_tools
@@ -1257,7 +1467,8 @@ def _extract_and_store_lesson(
     )
     try:
         client = _make_client()
-        r = client.messages.create(
+        r = _call_anthropic(
+            client,
             model=model_haiku,
             max_tokens=256,
             messages=[{"role": "user", "content": prompt}],
@@ -1463,9 +1674,15 @@ def _make_router(
 
 
 def _post_execute_tools_router(state: AgentRunState) -> str:
-    """Route after execute_tools when critique is enabled: a fresh submission
-    goes to critique_node for scoring; anything else loops back to call_llm
-    exactly as it always has."""
+    """Route after execute_tools. Gap-closure Day 19 (Stage 1.3, answers.md)
+    — self-loops back to execute_tools while pending_tool_uses still has
+    unprocessed tool calls from this batch (checked first, since a batch
+    must fully drain before submitted/critique routing is meaningful).
+    Once the batch is drained: a fresh submission goes to critique_node for
+    scoring (when critique is enabled); anything else loops back to
+    call_llm exactly as it always has."""
+    if state.get("pending_tool_uses"):
+        return "execute_tools"
     return "critique_node" if state.get("submitted") else "call_llm"
 
 
@@ -1603,11 +1820,21 @@ def build_agent_graph(
     if enable_replanning:
         g.add_edge("replan_node", "call_llm")
 
+    # Gap-closure Day 19 (Stage 1.3, answers.md) — execute_tools now
+    # processes one tool call per invocation and reports back via
+    # _post_execute_tools_router's "execute_tools" key while its batch
+    # hasn't drained yet, regardless of whether critique is enabled — so
+    # both branches below need the self-loop target, not just the routing
+    # that happens once a batch is actually done.
     if enable_critique:
         g.add_conditional_edges(
             "execute_tools",
             _post_execute_tools_router,
-            {"critique_node": "critique_node", "call_llm": loop_back_target},
+            {
+                "execute_tools": "execute_tools",
+                "critique_node": "critique_node",
+                "call_llm": loop_back_target,
+            },
         )
         g.add_conditional_edges(
             "critique_node",
@@ -1615,9 +1842,27 @@ def build_agent_graph(
             {"call_llm": loop_back_target, END: END},
         )
     else:
-        g.add_edge("execute_tools", loop_back_target)
+        # No critique_node exists in this graph — _post_execute_tools_router
+        # may still return "critique_node" as its abstract "just submitted"
+        # signal, so that key is mapped to loop_back_target here (not
+        # dropped), exactly matching the pre-Day-19 unconditional edge that
+        # always went straight to loop_back_target regardless of submitted;
+        # call_llm's own router already handles ending the run on submitted.
+        g.add_conditional_edges(
+            "execute_tools",
+            _post_execute_tools_router,
+            {
+                "execute_tools": "execute_tools",
+                "critique_node": loop_back_target,
+                "call_llm": loop_back_target,
+            },
+        )
 
-    return g.compile()
+    # Gap-closure Day 21 (Stage 1.3, answers.md) — durable, resumable
+    # checkpointing (see the module-level init_agent_checkpointer() docstring
+    # above). run_agent_graph() supplies a real, stable thread_id (its own
+    # trace_id) so a resumed run actually addresses the same checkpoint.
+    return g.compile(checkpointer=_agent_checkpointer)
 
 
 def run_agent_graph(
@@ -1882,9 +2127,20 @@ def run_agent_graph(
             "critique_result": {},
             "critique_retries": 0,
             "replan_count": 0,
+            # Day 19 batch-processing fields
+            "pending_tool_uses": [],
+            "tool_results_buffer": [],
+            "batch_requires_human_approval": False,
         }
 
-        for _step_state in graph.stream(initial_state, stream_mode="values"):
+        # Day 21 — tid is this run's stable identity end to end (already used
+        # as state["trace_id"] and build_agent_graph's trace_id= above); using
+        # it as the checkpointer's thread_id is what makes a resumed run
+        # actually address the SAME checkpoint rather than starting fresh.
+        run_config = {"configurable": {"thread_id": tid}}
+        for _step_state in graph.stream(
+            initial_state, config=run_config, stream_mode="values"
+        ):
             _last_known_state = _step_state
         final_state: AgentRunState = (
             _last_known_state if _last_known_state is not None else initial_state

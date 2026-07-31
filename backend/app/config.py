@@ -60,6 +60,13 @@ class Settings(BaseSettings):
         default="/tmp/gridiron-repos",
         description="Where cloned GitHub repos are stored",
     )
+    bg_process_registry_path: str = Field(
+        default="/tmp/gridiron-bg-processes.json",
+        description="Gap-closure Day 23 (Stage 1.3, answers.md) — durable "
+        "registry of PIDs started by the run_background tool, so a crashed "
+        "or restarted server can find and terminate orphans left running "
+        "with nothing else able to stop them (app/fleet/bg_process_registry.py).",
+    )
 
     # Pipeline behaviour
     pipeline_mode: str = Field(
@@ -76,6 +83,20 @@ class Settings(BaseSettings):
         description="Timeout (seconds) applied to every Anthropic SDK client "
         "construction. Without this, LLM calls rely entirely on the SDK's own "
         "undocumented default, which could hang a worker thread indefinitely.",
+    )
+    llm_circuit_breaker_failure_threshold: int = Field(
+        default=5,
+        description="Gap-closure Day 22 (Stage 1.3, answers.md) — consecutive "
+        "LLM call failures (per provider: Anthropic, Groq) before the shared "
+        "circuit breaker opens and refuses further calls without hitting the "
+        "API, so a real outage doesn't get hammered by every one of the "
+        "~74-76 agents retrying independently.",
+    )
+    llm_circuit_breaker_cooldown_seconds: float = Field(
+        default=30.0,
+        description="Gap-closure Day 22 — how long the circuit breaker stays "
+        "open before allowing one trial call through (half-open) to test "
+        "whether the provider has recovered.",
     )
 
     # Phase 5 — Cost Controller

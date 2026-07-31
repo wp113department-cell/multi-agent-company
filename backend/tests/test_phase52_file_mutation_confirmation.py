@@ -177,6 +177,13 @@ async def test_confirmed_write_file_overwrite_runs_exactly_once(tmp_path: Path) 
     )
     agent = ChatAgent(session)
     responses = [
+        # Gap-closure Day 16 (Stage 1.2, answers.md): write_file is now
+        # blocking_until-gated on a prior read this session (previously
+        # dead config on _VERIFICATION_CFG, now enforced) — a real,
+        # separate concern from this test's own confirmation-gate subject.
+        _FakeToolUseStream(
+            "read_file", {"path": "existing.py"}, tool_id="toolu_read_pre1"
+        ),
         _FakeToolUseStream(
             "write_file",
             {"path": "existing.py", "content": "new content"},
@@ -208,6 +215,13 @@ async def test_denied_write_file_overwrite_leaves_old_content_untouched(
     session = ChatSession(session_id="td_write_overwrite_deny", repo_path=str(tmp_path))
     agent = ChatAgent(session)
     responses = [
+        # Gap-closure Day 16: write_file is now blocking_until-gated on a
+        # prior read this session — see the comment on the previous test.
+        _FakeToolUseStream(
+            "read_file",
+            {"path": "protected_by_choice.py"},
+            tool_id="toolu_read_pre2",
+        ),
         _FakeToolUseStream(
             "write_file",
             {"path": "protected_by_choice.py", "content": "attempted overwrite"},
@@ -234,10 +248,17 @@ async def test_write_file_creating_a_new_file_needs_no_confirmation(
     needed' turn shape — proves normal coding work isn't disrupted."""
     target = tmp_path / "brand_new_file.py"
     assert not target.exists()
+    # Gap-closure Day 16: write_file is now blocking_until-gated on a prior
+    # read this session — a real, existing file to read first (the target
+    # itself doesn't exist yet, so it can't be what's read).
+    (tmp_path / "existing_sibling.py").write_text("# an existing file\n")
 
     session = ChatSession(session_id="td_write_new_no_confirm", repo_path=str(tmp_path))
     agent = ChatAgent(session)
     responses = [
+        _FakeToolUseStream(
+            "read_file", {"path": "existing_sibling.py"}, tool_id="toolu_read_pre3"
+        ),
         _FakeToolUseStream(
             "write_file",
             {"path": "brand_new_file.py", "content": "print('hello')"},

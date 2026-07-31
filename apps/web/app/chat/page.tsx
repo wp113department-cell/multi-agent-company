@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { confirmChatAction, createChatSession, deleteChatSession, listRepos } from "@/lib/api";
 import type { RepoRecord } from "@/lib/api";
+import { authHeaders } from "@/lib/auth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -302,7 +303,7 @@ export default function ChatPage() {
     try {
       const res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ message: userText }),
         signal: abortCtrl.signal,
       });

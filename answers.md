@@ -993,15 +993,178 @@ today even as a stub.
   Order: 2nd.
 
 ### High Priority
-- **Durable resumability for the ~70 worker agents.** Why it matters: only `pipeline/graph.py`
-  (pm/architect/decomposer) uses `AsyncPostgresSaver` (durable); `base_graph.py` (every other agent) has
-  no checkpointer, so a Python/Docker crash mid-run loses that run's progress entirely (caught only by
-  orphan-recovery marking it "failed" after 900s, not resumed). Claude Code: a session's tool-call
-  history is itself the resumable unit via its own conversation/transcript persistence. Should be
-  implemented: extend `base_graph.py` with a `AsyncPostgresSaver`-backed checkpointer analogous to
-  `chat_agent.py`'s Phase 5.2 per-tool-call-node design. Complexity: High (5.2's own writeup shows this
-  is genuinely hard to get side-effect-safe). Dependencies: none new — the pattern already exists in
-  this codebase (5.2). Order: 3rd.
+- **Durable resumability for the ~70 worker agents — gap-closure Day 18 (2026-07-31): the
+  "genuinely hard to get side-effect-safe" risk this item already predicted is now CONFIRMED, not
+  hypothetical.** Only `pipeline/graph.py` (pm/architect/decomposer) uses `AsyncPostgresSaver`
+  (durable); `base_graph.py` (every other agent) still has no checkpointer, so a Python/Docker crash
+  mid-run still loses that run's progress entirely today (caught only by orphan-recovery marking it
+  "failed" after 900s, not resumed) — that half of the finding is unchanged.
+  What's new: before wiring a checkpointer (which the plan's own Day 18 required proving safe
+  first, not assuming it), built a standalone repro (not production code) — real LangGraph 1.2.7,
+  real `MemorySaver` checkpointer, a node shaped exactly like `execute_tools`'s real structure (one
+  synchronous `for tu in tool_uses:` loop, each iteration performing a real, external side effect).
+  Result: **a process crash partway through that loop, followed by a resume from the last
+  checkpoint, re-runs the ENTIRE node from the start — including tool calls that already completed
+  with real side effects before the crash.** In the repro, two "tool calls" that had already run
+  (and would map to a real git commit / file write in production) ran a second time after resume.
+  This is exactly the "whole node replays" hazard `chat_agent.py`'s Phase 5.2 docstring already
+  named and solved for the interactive chat graph (one-tool-call-per-node-invocation, not
+  batch-per-node) — now empirically confirmed to also apply to `base_graph.py`'s differently-shaped
+  `execute_tools` node, not assumed by analogy.
+  Per the plan's own explicit hard-stop condition for this exact scenario, the schedule extended
+  rather than compressed: `execute_tools` needed the same one-tool-call-per-node-invocation
+  decomposition `chat_agent.py` already proved safe, BEFORE a checkpointer could be safely added — a
+  real, structural, fleet-wide (~74-76 agent modules) refactor of the shared node builder, not a
+  quick wrapper.
+  **Gap-closure Day 19 (2026-07-31): DONE.** `_make_execute_tools_node`
+  (`backend/app/agents/base_graph.py:1132-1432` — line numbers re-verified during the Day 24 audit
+  after Days 21-22's edits shifted them from their original 1039-1339; re-verify against
+  `_make_execute_tools_node`'s own `def`/`return execute_tools` if this drifts again) now processes
+  exactly one pending tool call per invocation instead of looping over the whole batch inline. New
+  `AgentRunState` fields (`pending_tool_uses`, `tool_results_buffer`, `batch_requires_human_approval`,
+  lines 198-200) carry a batch across invocations; when a batch isn't drained yet, the node returns a
+  partial state update instead of appending to `messages`/incrementing `turns`.
+  `_post_execute_tools_router` (line 1676) self-loops back to `execute_tools` (via
+  `build_agent_graph`'s `{"execute_tools": "execute_tools", ...}` conditional-edge keys, lines
+  1834 and 1855 — the critique-enabled and non-critique branches respectively) while
+  `pending_tool_uses` is non-empty, mirroring `chat_agent.py`'s already-proven Phase 5.2 pattern
+  exactly. Proven against the REAL production node (not a toy analog this time):
+  `tests/test_gap19_execute_tools_replay_safety.py` builds a real `StateGraph` from the real
+  `_make_execute_tools_node`/`_post_execute_tools_router` with a real `MemorySaver` checkpointer,
+  stops consuming the stream after 2 of 3 real side effects have happened (simulating a real
+  process crash — no exception, the process just stops), resumes with the documented
+  `graph.stream(None, config)` convention, and confirms the real external side-effect log shows
+  `["a", "b", "c"]` — never `["a", "b", "a", "b", "c"]`. A real bug was also found and fixed while
+  wiring this: `reflection_node` can replace `messages[-1]` with a plain-string `"[Self-review]"`
+  message when unsatisfied, which the pre-Day-19 code silently no-opped on (zero tool_uses parsed
+  from a string) but the naive Day-19 rewrite crashed on (`IndexError` on an empty `pending` list)
+  — full regression (`tests/test_phase36_continuous_replanning.py`) caught this immediately; fixed
+  by an explicit empty-batch guard that returns the same no-op final state the old code produced.
+  Full regression: 20/20 pre-existing (environment-specific, unrelated) failures unchanged,
+  3,436 passed (3,434 pre-existing + 2 new replay-safety tests), zero new regressions. Complexity: High,
+  confirmed, not estimated. Dependencies: the pattern already existed and was proven in this
+  codebase (`chat_agent.py`'s own `_execute_tool_node`) — this applied a working design to a
+  second, structurally different graph, not inventing one from scratch.
+  **Day 20 (2026-07-31): DONE.** Day 20's originally-planned scope ("prove the decomposition safe
+  against real code, plus full regression") turned out to already be satisfied by Day 19's own
+  work, so Day 20 redirected to two gaps Day 19's tests didn't cover instead of repeating them: (1)
+  grep-confirmed no file outside `base_graph.py` references `_make_execute_tools_node`/
+  `_post_execute_tools_router` directly, so the refactor's blast radius is fully contained to the
+  shared builder as designed; (2) new `tests/test_gap20_execute_tools_batch_with_critique.py` proves
+  a fully compiled graph (`enable_critique=True`) with a real multi-tool_use batch (a setter tool +
+  `submit_result` in one LLM turn) drains completely before `critique_node` fires exactly once —
+  the one scenario neither Day 19's isolated-node tests nor the pre-existing
+  `test_phase35_self_critique.py` (single-tool-use turns only) could have caught a routing mistake
+  in. Full regression: 20/20 baseline unchanged, 3,437 passed.
+  **Day 21 (2026-07-31): DONE — `build_agent_graph()` now durably checkpoints via a real
+  `AsyncPostgresSaver`.** `backend/app/agents/base_graph.py:66-117` (`init_agent_checkpointer`/
+  `close_agent_checkpointer` — re-verified during the Day 24 audit; original citation was 48-104
+  before Day 22's circuit-breaker import shifted it, mirroring `pipeline/graph.py`'s own established
+  pattern exactly); `base_graph.py:1865` (`g.compile(checkpointer=_agent_checkpointer)`);
+  `base_graph.py:2140`
+  (`graph.stream(..., config={"configurable": {"thread_id": tid}})` — `tid` is the run's own
+  pre-existing stable identity, already used as `trace_id`). Wired into `app/main.py`'s lifespan.
+  Investigated (not assumed) whether `AsyncPostgresSaver` — built for async `ainvoke`/`astream` —
+  actually works with `run_agent_graph()`'s sync `graph.stream()`: read `AsyncPostgresSaver`'s real
+  source, confirmed its sync methods bridge cross-thread via `run_coroutine_threadsafe` and require
+  being called from a different thread than whichever owns the checkpointer's loop; grep-confirmed
+  every real dispatch path (`app/api/specialized_agents.py`'s two endpoints,
+  `app/agents/manager.py`'s dev/qa/reviewer dispatch) already wraps `run_agent_graph()` in
+  `asyncio.to_thread()` — exactly satisfying that contract, confirming `AsyncPostgresSaver` (not a
+  sync `PostgresSaver`) is correct here.
+  Two real findings, both evidenced rather than assumed: (1) on native Windows (this dev machine,
+  not Docker), `init_agent_checkpointer()` falls back to `MemorySaver` — root-caused to psycopg3's
+  async mode being incompatible with Windows' default `ProactorEventLoop`; confirmed this is a
+  **pre-existing** limitation already present in `pipeline/graph.py`'s own `init_checkpointer()`
+  (reproduced identically against it, not introduced today) and confirmed it does NOT affect real
+  production (Docker/Linux, `backend/Dockerfile`, whose default loop has no such incompatibility) —
+  documented rather than silently worked around or expanded into an out-of-scope global
+  event-loop-policy change. (2) A real bug: `close_agent_checkpointer()`'s first version never reset
+  `_agent_checkpointer` back to a working default after closing, leaving it bound to a dead event
+  loop — harmless in production (close only happens once, at shutdown) but caught by this day's own
+  new test doing init+close within one long-lived process, which caused 51 cascading failures on the
+  first full regression run; fixed by resetting to a fresh `MemorySaver()` in the cleanup path, back
+  to the 20-item baseline immediately after.
+  Tests: `tests/test_gap21_agent_checkpointer_postgres.py` (2 tests) against the real running
+  Postgres (`gridiron-postgres` docker container) — one proves Day 19's crash+resume replay-safety
+  property holds through the real `init_agent_checkpointer()`/`build_agent_graph()` wiring
+  (reporting whichever backend actually activated); the other isolates the Windows event-loop
+  variable with an explicit `WindowsSelectorEventLoopPolicy()` override, proving the real
+  driver/connection/table-setup logic genuinely works end to end. Full regression: 20/20 baseline
+  unchanged, 3,439 passed (one transient unrelated timing-flake on the first post-fix run, confirmed
+  non-reproducing).
+  **Day 22 (2026-07-31): DONE — a real circuit breaker now gates every Anthropic/Groq call.** New
+  `app/fleet/circuit_breaker.py` (`CircuitBreaker`: closed → open → half-open, thread-safe, two new
+  `Settings` fields for threshold/cooldown — no hardcoded magic numbers). Wired into all three real
+  call-site surfaces: `base_graph.py:130`'s new `_call_anthropic()` wrapper (all ~6
+  `client.messages.create` sites in the shared node builder ~74-76 agents route through);
+  `chat_agent.py:2439-2488`'s streaming `_call_llm_node` (via the breaker's `allow()`/
+  `record_success()`/`record_failure()` primitives directly, since an `async with ... stream()`
+  block doesn't fit a single wrapped callable); `groq_adapter.py:317-367`'s `run_groq` retry loop
+  (same primitives, since a caught `BadRequestError` with `tool_use_failed` is a real Groq response,
+  not an outage signal, and must record success not failure).
+  A real, fleet-wide bug found and fixed before shipping: the first version monkey-patched
+  `client.messages.create` itself inside `_make_client()`, which broke 9 assertion sites across 3
+  test files that inspect `mock_client.messages.create.call_count`/`.call_args_list` after
+  `run_agent_graph()` — the suite's own established mocking convention. First full regression
+  surfaced this (23 failures, 20 baseline + 3 real). Fixed by wrapping the CALL in a separate
+  `_call_anthropic()` function instead of mutating the client object — `client.messages.create`
+  itself stays untouched, so existing test assertions keep working while the breaker still gates
+  every real invocation.
+  Tests: `tests/test_gap22_circuit_breaker.py` (8, the state machine in isolation, including a real
+  `threading.Thread` race proving concurrent half-open probes are correctly serialized) and
+  `tests/test_gap22_circuit_breaker_wiring.py` (3, proving each real call site actually routes
+  through the shared breaker). New `tests/conftest.py::reset_circuit_breakers` autouse fixture
+  (mirroring the Day-10 `reset_db_engine` pattern) resets both breaker singletons between tests, so
+  unrelated tests simulating LLM failures can't accumulate toward tripping the shared breaker.
+  Full regression: 20/20 known baseline unchanged, 3,450 passed (3,439 + 11 new tests).
+  `LLMProvider`/`app/fleet/providers/base.py` noted (zero implementations, zero usages anywhere) —
+  dead scaffolding, same "built but never wired" pattern as `tool_manifest.py`; flagged, not
+  silently resurrected — out of scope for today.
+  **Day 23 (2026-07-31): DONE — background processes now durably tracked, with a real session-close
+  hook that actually terminates them.** Found TWO separate, parallel background-process trackers, not
+  one: `app/agents/tools.py`'s `_session_bg_procs` (the plan's own named file) and
+  `app/agents/chat_agent.py::ChatAgent`'s own independent `self._background_processes` — both had
+  the same gap (a GC'd `Popen` object doesn't terminate the real OS process). New
+  `app/fleet/bg_process_registry.py`: `register`/`unregister` persist PIDs to a durable JSON file
+  (new `Settings.bg_process_registry_path`, matching the existing `/tmp/gridiron-*` convention);
+  `sweep_orphaned_processes()` terminates anything left over at FastAPI startup. Wired into both
+  trackers' `run_background`/`kill_process` handlers, and — the real fix — into `delete_chat_agent()`
+  (`chat_agent.py:141`), which already existed as the session-close hook but previously did nothing
+  with `self._background_processes` at all; it now terminates every still-running process on
+  graceful session close, with the startup sweep as the safety net for crashes that never reach it.
+  Tests use real `subprocess.Popen` processes (not mocks): `tests/test_gap23_bg_process_registry.py`
+  (6) and `tests/test_gap23_session_close_kills_bg_processes.py` (2), both confirming actual process
+  termination via `proc.poll()` polling, not just trusting a return value. Full regression: 20/20
+  baseline unchanged, 3,458 passed (3,450 + 8 new tests).
+  **Day 24 (2026-07-31): DONE — Stage 1.3 (Days 18-23) signed off via a real Gap Audit Protocol
+  re-verification, not a status re-report.** Fresh full regression: 20/20 known baseline unchanged,
+  3,458 passed — identical to Day 23's own closing count, confirming nothing regressed silently
+  between Day 23's close and this audit. All 52 tests across every Stage 1.3 test file (Days 19-23's
+  own new files plus the pre-existing files Day 19's refactor directly touched) re-run together as
+  one batch — all pass.
+  Citation drift found and fixed (exactly what this protocol exists to catch): Day 19's and Day 21's
+  `file:line` citations above had drifted because Day 21's checkpointer block and Day 22's
+  circuit-breaker import were inserted above them in the same file, shifting everything below.
+  Re-verified against live `grep`/`sed` output, not assumed, and corrected in place above:
+  `_make_execute_tools_node` `1039-1339` → `1132-1432`; the `AgentRunState` batch fields
+  `lines 110-112` → `198-200`; `_post_execute_tools_router` `1582` → `1676`; its self-loop
+  conditional-edge keys `1708/1740/1761` → `1834`/`1855` (also fixing a citation error — the
+  original lines actually pointed at the pre-existing, unrelated `call_llm` router); `init_agent_checkpointer`/
+  `close_agent_checkpointer` `48-104` → `66-117`; `g.compile()`/`graph.stream()` `1842`/`2117` →
+  `1865`/`2140`. `IMPLEMENTATION_PROGRESS.md`'s own dated, point-in-time entries for Days 19/21 were
+  left as originally written (accurate as of when they were written) — only this living document was
+  corrected.
+  Stage 1.3 sign-off: Day 18 proved a real replay-safety hazard (not hypothetical). Day 19 closed it,
+  catching 2 real bugs via full regression before shipping. Day 20 added one real end-to-end gap
+  instead of repeating Day 19's already-complete proof. Day 21 wired real durable checkpointing,
+  investigating a genuine sync/async compatibility question and catching a real state-leak bug before
+  shipping. Day 22 wired a real circuit breaker into all three actual LLM-call surfaces, catching a
+  real 9-site test-compatibility break before shipping. Day 23 found two undocumented
+  background-process trackers and wired a real durable registry plus a session-close hook that
+  actually works. Zero net regressions across the whole 6-day block — the known 20-item baseline is
+  unchanged from before Day 18 to now.
+  Order: Stage 1.3 (Days 18-24) complete. Next: Stage 1.4 (frontend/backend robustness).
 - **Per-project RBAC / real user table.** Why it matters: `UserRole` is a flat `viewer`/`approver`
   table (plus `admin` from JWT claims), and the actual user list is a JSON blob under one
   `system_settings` key (`auth_users`), not a proper table — no per-project or per-workspace
@@ -1100,32 +1263,44 @@ today even as a stub.
 - Whether it conflicts with architecture: **PARTIAL** — `architect.md`/`decomposer.md` Quality Gates language ("Contradicting existing routes, schemas, or configs found in the repo" is listed as a Failure Condition in both files) — prompt-enforced via the Output Contract, not code-checked.
 - Whether it violates project rules: **YES (for the fixed safety subset)** — `backend/app/policy/engine.py` (via `backend/app/agents/guardrails.py:1-71`, confirmed a real delegation, not a duplicate/weaker copy per its own gap-closure note) code-enforces protected-path and dangerous-command denylists on every tool call in `base_graph.py`'s `execute_tools` gate. This covers hardcoded safety rules only (secrets, `.github/workflows/**`, destructive commands) — not general "project rules" like architectural conventions, which remain prompt-level.
 - Whether another module already solves it: **PARTIAL** — same as "similar implementation exists" above; `search_code`/`search_symbols` tools make this checkable, but nothing forces the check.
-- "Only then implement" ordering actually followed: **PARTIAL, mechanism now real — gap-closure Day 15
-  (2026-07-30), one specific case still open.** `coder.md`/`architect.md` prescribe a fixed
-  read-then-write sequence. New `VerificationConfig.blocking_until` ({tool_name: verification_key})
-  in `base_graph.py` — used by every worker agent routed through the shared, reusable
-  `_make_execute_tools_node` (~74 of 76 agent modules, per Day 9's own citation count) — makes a
-  declared `expected_verification` prerequisite an actual, enforced refusal: a tool named in
+- "Only then implement" ordering actually followed: **YES for the two real architectures this
+  audit item covers — gap-closure Days 15-16 (2026-07-30 / 31).** `coder.md`/`architect.md` prescribe
+  a fixed read-then-write sequence. New `VerificationConfig.blocking_until` ({tool_name:
+  verification_key}) in `base_graph.py` — used by every worker agent routed through the shared,
+  reusable `_make_execute_tools_node` (~74 of 76 agent modules, per Day 9's own citation count) —
+  makes a declared `expected_verification` prerequisite an actual, enforced refusal: a tool named in
   `blocking_until` gets a real `[POLICY DENIED]` result and its handler never runs while the required
   flag is still `False`. Wired live to `dependency_security_agent` (`bash` refused until `read` is
   True) as the concrete proof, not just the primitive. Proven by
   `backend/tests/test_gap15_blocking_verification.py` (6 tests) — including same-turn ordering (a
   prior setter call in the same LLM turn satisfies a later gate in that same batch) and a negative
   control confirming tools absent from `blocking_until` are never gated.
-  **`chat_agent.py`'s own specific case — the one this exact audit item names — is NOT yet wired,
-  found and flagged honestly rather than silently left stale**: `chat_agent.py` has its own separate
-  `_execute_tool_node`/graph implementation (interrupt-based pause-resume, its own `ChatGraphState`),
-  architecturally distinct from `base_graph.py`'s shared node my new mechanism hooks into. Investigated
-  before claiming anything: `chat_agent.py`'s `_VERIFICATION_CFG` (`chat_agent.py:207-223`,
-  `expected_verification` at `chat_agent.py:201-203`) is grepped-confirmed **entirely dead code** —
-  referenced nowhere else in the file, no `state["verification"]` key exists in `ChatGraphState` at
-  all. Closing this specific case needs building the flag-tracking mechanism from scratch for
-  `chat_agent`'s distinct architecture (not just adding a blocking check to an existing live one, as
-  was true for every other agent), a real, separate, correctly-scoped follow-up.
-  Plan: build `state["verification"]` tracking for `ChatGraphState` (set by `read_file`/`search_code`,
-  matching `_VERIFICATION_CFG.set_by`'s already-declared intent), then apply the same
-  `blocking_until`-style refusal to `chat_agent`'s own `_execute_tool_node` for `write_file`/
-  `edit_file`/`bash` — tracked as a named next step, not silently dropped.
+  **`chat_agent.py`'s own specific case — the one this exact audit item originally named — closed
+  Day 16, not left stale.** `chat_agent.py` has its own separate `_execute_tool_node`/graph
+  implementation (interrupt-based pause-resume, its own `ChatGraphState`), architecturally distinct
+  from `base_graph.py`'s shared node the Day 15 mechanism hooks into — Day 15 correctly identified
+  its `_VERIFICATION_CFG` as entirely dead code (no `state["verification"]` key existed in
+  `ChatGraphState` at all) and scoped it as a named follow-up rather than silently claiming it done.
+  Day 16 built that tracking from scratch: `ChatGraphState.verification` (new field, deliberately
+  omitted from `run()`'s per-turn `initial_state` so it accumulates across the whole session via
+  LangGraph's own checkpointer, not reset every user message) plus a real `blocking_until={
+  "write_file": "read", "edit_file": "read", "apply_patch": "read", "bash": "read"}` enforced
+  directly in `_execute_tool_node` (`delete_file` deliberately excluded — already gated behind a
+  mandatory human confirmation since Day 5, a stronger protection than a prior-read requirement
+  would add). Proven live, driving the real compiled graph through real scripted LLM turns (not
+  internal bookkeeping): `backend/tests/test_gap16_chat_agent_verification_gate.py` (4 tests) —
+  bash refused before any read, succeeds after a real read, the flag persists across two separate
+  `agent.run()` calls on the same session (not reset per-turn), and write_file is blocked
+  unconditionally even for brand-new file creation (a deliberately orthogonal concern from Day 5's
+  "new file creation skips confirmation" — that gate is about human approval, this one is about
+  due-diligence verification). 3 pre-existing tests in
+  `backend/tests/test_phase52_file_mutation_confirmation.py` needed a preceding `read_file` turn
+  added to their setup to keep reaching the confirmation-gate code path they actually test — an
+  intentionally strengthened contract, not a regression (same "update the test to match the new
+  contract" principle this engagement has applied consistently since Days 5-6).
+  Plan: extend `blocking_until` from the one proof-of-concept agent (`dependency_security_agent`) to
+  the rest of the ~74 base_graph.py-routed agents whose role files already state a read-before-write
+  expectation, now that both architectures (shared graph, chat_agent's own) have a real mechanism.
 
 ---
 
@@ -2086,8 +2261,24 @@ today's implicit grouping-by-comment.
 - Inspect CI/CD: **NO (for general coding agents)** — grepped `backend/roles/*.md` for CI/CD-related terms: only `cicd_agent.md` (a dedicated, narrow-scope agent) and safety-only mentions (`coder.md` line 20: "Never write to... `.github/workflows/**`") exist; `coder.md`/`backend_dev.md`/`architect.md` have no step instructing inspection of `.github/workflows/` before a general code change.
 - Inspect deployment implications: **NOT VERIFIED** — no role prompt for general coding agents (`coder.md`, `backend_dev.md`, `frontend_dev.md`) mentions considering deployment impact; this concern is implicitly delegated to human deploy-gating (`CLAUDE.md`'s "Deploy is a human action forever," reflected in the real absence of any deploy tool — see Q55) rather than being inspected pre-change.
 - Inspect documentation: **NOT VERIFIED** — no explicit "read existing docs before changing code" step found in the general coding role prompts (docs are the `docs_agent`'s own domain, not a prerequisite step for `coder`/`backend_dev`).
-- "Only then make changes" ordering: **PARTIAL** — the read-before-write ordering is real and repeated across every relevant role prompt (`coder.md`, `architect.md`, `chat.md`), but as established in Q29/Q30, it is prompt-enforced, not code-blocked — `_execute_tool`/`execute_tools` will run a `write_file`/`edit_file` call even if no prior `read_file`/`search_code` happened in that turn.
-  Plan: same as Q29 — turn the declared `expected_verification` contracts (already present as metadata, e.g. `chat_agent.py:200-202`) into an actual blocking check in `execute_tools`/`_execute_tool_node` for architecture/patterns/tests inspection, and add explicit CI/CD- and deployment-implication-inspection steps to the general coding role prompts, which currently have none.
+- "Only then make changes" ordering: **YES for `chat_agent.py` — gap-closure Days 15-16 (2026-07-30
+  / 31).** The read-before-write ordering was real and prompt-repeated but not code-blocked; it now
+  genuinely is, for the highest-risk agent. Day 15 added `VerificationConfig.blocking_until`
+  (`app/agents/base_graph.py`) — a tool named there is refused with a real `[POLICY DENIED]` result,
+  the handler never runs, until the required flag is set. Day 16 wired `chat_agent.py`'s own
+  `_VERIFICATION_CFG` to it for the first time — that config object existed since the class was
+  written but was never consulted anywhere (`ChatGraphState` had no `verification` key at all).
+  `write_file`/`edit_file`/`apply_patch`/`bash` are now genuinely refused until at least one
+  `read_file`/`search_code` call has happened in the session — accumulating across turns via
+  LangGraph's own checkpointer, not reset every message. Proven live by
+  `backend/tests/test_gap16_chat_agent_verification_gate.py` (4 tests) driving the real compiled
+  graph through real scripted LLM turns, not internal bookkeeping assertions. `coder`/`architect`/
+  other worker agents (base_graph.py-routed, not chat_agent.py's own separate graph) still rely on
+  prompt-level ordering only — this fix is scoped to chat_agent.py specifically, the one agent whose
+  `expected_verification` this item's original citation actually pointed at.
+  Plan: extend `blocking_until` to the worker-agent tier (`base_graph.py::run_agent_graph()`-routed
+  agents) the same way, and add explicit CI/CD- and deployment-implication-inspection steps to the
+  general coding role prompts, which still have none.
 
 ---
 
@@ -2095,10 +2286,28 @@ today's implicit grouping-by-comment.
 
 - explain why: **PARTIAL** — `status: "blocked"` (`AgentResult.status`, set when `final_state["submitted"]` is false) is the structural signal that a request could not be completed; blocking reasons are surfaced via whatever the agent's own last message/critique says (e.g. `critique_node`'s `[Critique]` messages, `replan_node`'s `[Replan]` messages with a real cited reason), not a single dedicated "why impossible" field on `AgentResult`.
 - identify the blocking constraint: **PARTIAL** — same mechanism; `_run_quality_gate`'s `checks`/`warnings` (`base_graph.py:850-919`) do cite specific failed checks (e.g. "planner confidence 0.40 below required 0.70") when escalating to human review, which is a real, evidence-citing blocking-constraint identification for that one path (quality-gate escalation) — but this doesn't cover every kind of "impossible" (e.g. a request needing an unsupported tool/capability that was never attempted).
-- distinguish temporary vs fundamental limitations: **NOT VERIFIED** — no explicit temporary/fundamental taxonomy found in `AgentResult`, `AgentCapability`, or the quality-gate/critique code.
-- propose realistic alternatives: **NO** — no code path found that generates a fallback/alternative suggestion when blocking; `rollback_agent` and similar Analyzer-tier agents produce recommendations for their own domain, but there's no general "this failed, here's an alternative" synthesis step in `base_graph.py`.
+- distinguish temporary vs fundamental limitations: **YES — gap-closure Day 16 (2026-07-31).**
+  `roles/_GLOBAL_STANDARDS.md` §8 now defines the taxonomy explicitly (`temporary` — resolvable with
+  more info/a retry/a different approach; `fundamental` — needs a scope/architecture/requirements
+  decision outside the agent's role) and every one of the 72 agents inherits it. Real, not just
+  prompt text: `_run_quality_gate` (`app/agents/base_graph.py`, the same shared, graph-enforced
+  chokepoint every `submit_*` call already routes through — Phase 3.7) now checks that any
+  `status="blocked"`/`"needs_human"` submission includes `limitation_type` set to exactly one of
+  `"temporary"`/`"fundamental"`.
+- propose realistic alternatives: **YES — gap-closure Day 16 (2026-07-31).** The same
+  `_run_quality_gate` check also requires a real, non-empty `proposed_alternative` string alongside
+  `limitation_type`. Neither field is a new per-agent JSON-schema property (retrofitting 72
+  hand-written `input_schema` declarations was out of scope for one day) — the model can include
+  extra tool-call keys beyond what a schema declares, and none of the 72 submit schemas set
+  `additionalProperties: false`, so the prompt-level instruction in `_GLOBAL_STANDARDS.md` §8 is
+  sufficient for every agent to supply them. Missing either field doesn't block the submission
+  outright (matching the existing critique/confidence gate's own informational-only precedent) — it
+  sets `requires_human_approval=True`, so a blocked result with no real next step is always routed
+  to a human instead of silently disappearing. Proven by `backend/tests/test_gap16_limitation_taxonomy.py`
+  (9 tests: direct `_run_quality_gate` unit tests for both fields, invalid values, empty strings,
+  `needs_human` gated identically to `blocked`, non-blocked statuses unaffected, plus 2
+  `execute_tools` integration tests confirming the real escalation and non-escalation paths).
 - avoid pretending success: **YES** — this is a real, tested, structural guarantee, not aspirational: `AgentResult.verified` and `.raw` are graph-enforced from `state["verification"]`/`final_state["result"]`, never the model's raw unverified claim (Phase 3.4 gap-closure explicitly fixed a bug where a false claim like `tests_run=True` with no real tool call behind it could leak through — closed across all 25 affected agent files, tested in `tests/test_phase34_real_output_verification.py`). A model cannot fabricate "tests passed" and have it register as `verified=True`.
-  Plan: the "propose realistic alternatives" and "temporary vs fundamental" pieces are genuine gaps — would need a new synthesis step (likely alongside `_run_quality_gate` or `critique_node`) that classifies the blocking cause and drafts an alternative, not just halts.
 
 ---
 
@@ -2662,7 +2871,14 @@ ecosystem_maturity, deployment_env, LTS}, score, citation}`), reusing `research.
 - tasks requiring external services: **PARTIAL** — individual tools fail gracefully with `[ERROR] ...` string returns when an external dependency is unavailable (e.g. `mermaid_from_schema_h` wraps its `subprocess` call in try/except), but there's no upfront "this task needs GitHub/Docker/an external API, and it's unavailable" boundary check before starting (consistent with Q31's finding — no pre-flight external-dependency check exists).
 - tasks requiring human review: **YES** — `requires_human_approval` is a real, graph-enforced boolean on `AgentResult`/quality-gate results, escalated by confidence threshold or critique-retry exhaustion (`base_graph.py`'s `_run_quality_gate`, confirmed only confidence/critique are allowed to flip it — documented as a deliberate scope boundary in the function's own docstring).
 - unsupported tasks: **PARTIAL** — a request naming a tool/capability outside an agent's `AGENT_CONTRACT["allowed_tools"]` simply has no handler for it (the model can't call a tool that isn't in its `tools=` schema) — a structural boundary, but not a friendly "this is unsupported" message; it manifests as the model working around the gap or stalling, not an explicit boundary response.
-- "explains the limitation honestly / does not fabricate an implementation / proposes realistic alternatives / identifies what would be needed": **PARTIAL for the first two, NO for the latter two** — the "does not fabricate" guarantee is real and tested (see Q68's `verified`/`.raw` evidence — this is the same enforcement mechanism). "Explains honestly" happens informally via critique/replan messages citing real evidence, not a dedicated boundary-explanation feature. "Proposes realistic alternatives" and "identifies what would be needed" were not found anywhere in code.
+- "explains the limitation honestly / does not fabricate an implementation / proposes realistic alternatives / identifies what would be needed": **PARTIAL for the first, YES for the rest — gap-closure
+  Day 16 updates the latter two (2026-07-31).** "Does not fabricate" is real and tested (Q68's
+  `verified`/`.raw` evidence — the same enforcement mechanism). "Explains honestly" still happens
+  informally via critique/replan messages citing real evidence, not a dedicated boundary-explanation
+  field — genuinely still PARTIAL. "Proposes realistic alternatives" and "identifies what would be
+  needed" are now real: see Q68's `limitation_type`/`proposed_alternative` fields, graph-enforced via
+  `_run_quality_gate`, not just documented — a `proposed_alternative` with no real content (empty,
+  whitespace-only) fails the same check a fabricated `limitation_type` value would.
   Plan: the honesty/no-fabrication guarantees are real, load-bearing, and tested — the strongest-verified part of this question. The taxonomy-labeling and alternative-proposing pieces are genuine gaps, same underlying work as Q68's plan.
 
 ---

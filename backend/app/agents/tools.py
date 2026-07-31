@@ -7929,6 +7929,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 text=True,
             )
             _session_bg_procs[proc.pid] = proc
+            # Gap-closure Day 23 (Stage 1.3, answers.md) — durably persisted
+            # so a crash/restart before kill_process ever runs still leaves
+            # a trail sweep_orphaned_processes() can find and clean up at
+            # the next startup, instead of leaking the OS process forever.
+            from app.fleet.bg_process_registry import register as _bg_register
+
+            _bg_register(proc.pid, rb_command, rb_cwd)
             return f"Started background process PID {proc.pid}: {rb_command[:80]}"
         except Exception as e:
             return f"[ERROR] {e}"
@@ -7936,6 +7943,8 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def kill_process(inp: dict[str, Any]) -> str:
         import os as _os
         import signal as _signal
+
+        from app.fleet.bg_process_registry import unregister as _bg_unregister
 
         kp_pid = int(inp["pid"])
         kp_sig_name = str(inp.get("signal", "TERM"))
@@ -7951,6 +7960,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         }
         kp_sig = sig_map.get(kp_sig_name, _signal.SIGTERM)
         _session_bg_procs.pop(kp_pid, None)
+        _bg_unregister(kp_pid)
         try:
             _os.kill(kp_pid, kp_sig)
             return f"Sent {kp_sig_name} to PID {kp_pid}"

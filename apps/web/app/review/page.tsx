@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
+import { authHeaders } from "@/lib/auth";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -39,24 +40,25 @@ interface BatchReviewData {
 // ──────────────────────────────────────────────────────────────────────────────
 
 async function fetchBatchReview(): Promise<BatchReviewData> {
-  const res = await fetch("/api/epics/batch-review", { cache: "no-store" });
+  const res = await fetch("/api/epics/batch-review", { cache: "no-store", headers: authHeaders() });
   if (!res.ok) throw new Error(`Failed to load batch review: ${res.status}`);
   return res.json();
 }
 
 async function approveEpic(epicId: string): Promise<void> {
-  const res = await fetch(`/api/epics/${epicId}/approve`, { method: "POST" });
+  const res = await fetch(`/api/epics/${epicId}/approve`, { method: "POST", headers: authHeaders() });
   if (!res.ok) throw new Error(`Approve failed: ${res.status}`);
 }
 
 async function rejectEpic(epicId: string): Promise<void> {
-  const res = await fetch(`/api/epics/${epicId}/reject`, { method: "POST" });
+  const res = await fetch(`/api/epics/${epicId}/reject`, { method: "POST", headers: authHeaders() });
   if (!res.ok) throw new Error(`Reject failed: ${res.status}`);
 }
 
 async function approveTask(taskId: number): Promise<void> {
   const res = await fetch(`/api/tasks/${taskId}/pipeline/approve`, {
     method: "POST",
+    headers: authHeaders(),
   });
   if (!res.ok) throw new Error(`Task approve failed: ${res.status}`);
 }
@@ -64,6 +66,7 @@ async function approveTask(taskId: number): Promise<void> {
 async function rejectTask(taskId: number): Promise<void> {
   const res = await fetch(`/api/tasks/${taskId}/pipeline/reject`, {
     method: "POST",
+    headers: authHeaders(),
   });
   if (!res.ok) throw new Error(`Task reject failed: ${res.status}`);
 }
