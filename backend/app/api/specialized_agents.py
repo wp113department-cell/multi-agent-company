@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import inspect
 import logging
 from typing import Any, Callable
 
@@ -143,6 +144,23 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         "run_version_manager_agent",
     ),
     "devex_agent": ("app.agents.devex_agent", "run_devex_agent"),
+    # Gap-closure Day 53 (Stage 2, answers.md Q41) — 4 new doc generators
+    "architecture_doc_agent": (
+        "app.agents.architecture_doc_agent",
+        "run_architecture_doc_agent",
+    ),
+    "agent_roster_doc_agent": (
+        "app.agents.agent_roster_doc_agent",
+        "run_agent_roster_doc_agent",
+    ),
+    "tool_catalog_doc_agent": (
+        "app.agents.tool_catalog_doc_agent",
+        "run_tool_catalog_doc_agent",
+    ),
+    "migration_guide_doc_agent": (
+        "app.agents.migration_guide_doc_agent",
+        "run_migration_guide_doc_agent",
+    ),
 }
 
 SUPPORTED_AGENTS = sorted(_REGISTRY.keys())
@@ -191,6 +209,23 @@ class RunAgentResponse(BaseModel):
 # ──────────────────────────────────────────────────────────────────────────────
 
 
+def _agent_call_kwargs(
+    fn: Callable[..., Any], task_id: int, description: str, repo_path: str
+) -> dict[str, Any]:
+    """Gap-closure Day 53 (Stage 2) — real, pre-existing bug found while
+    wiring 4 new doc-generator agents into this same registry: readme_agent/
+    api_docs_agent's real second parameter is named `doc_request`, not
+    `description` — calling them with description=description raised
+    TypeError, silently caught by _run_specialized_agent_bg's own
+    except-and-log, so dispatching either agent via this endpoint has always
+    failed. Fixed generally (not per-agent-name special-cased) by calling
+    the target function's real second parameter, whatever it's named —
+    task_id is always first by this registry's own convention."""
+    param_names = list(inspect.signature(fn).parameters.keys())
+    second_param = param_names[1] if len(param_names) > 1 else "description"
+    return {"task_id": task_id, second_param: description, "repo_path": repo_path}
+
+
 async def _run_specialized_agent_bg(
     agent_name: str,
     task_id: int,
@@ -214,9 +249,7 @@ async def _run_specialized_agent_bg(
 
             result = await asyncio.to_thread(
                 fn,
-                task_id=task_id,
-                description=description,
-                repo_path=effective_repo,
+                **_agent_call_kwargs(fn, task_id, description, effective_repo),
             )
 
             # Phase 1.1 (MASTER_AGENT_v2.md) — write to shared memory. Before this,

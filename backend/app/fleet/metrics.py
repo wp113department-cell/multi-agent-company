@@ -62,6 +62,23 @@ class ToolCallRecord:
 
 
 @dataclass
+class PhaseTimingRecord:
+    """Gap-closure Day 54 (Stage 2, answers.md Q8 "Planning speed"/"Memory
+    retrieval speed": NO — record_tool() times individual tool calls, but no
+    metric isolates a graph node's own time from the rest of a run). A
+    record_tool()-equivalent for non-tool phases of a run (planner_node,
+    memory retrieval, file scanning) — kept in its own list, not mixed into
+    tool_calls, since tool_accuracy (tool_calls-derived) feeds directly into
+    benchmark_manager.py's real regression-gate scoring; a synthetic
+    always-succeeds phase entry in that list would silently skew it."""
+
+    phase_name: str
+    duration_ms: float
+    success: bool = True
+    error: str | None = None
+
+
+@dataclass
 class RunMetrics:
     """Metrics collected for a single agent run."""
 
@@ -83,6 +100,11 @@ class RunMetrics:
     retries: int = 0
     failures: int = 0
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
+
+    # Gap-closure Day 54 — non-tool phase timings (planner_node, memory
+    # retrieval, file scanning). See PhaseTimingRecord's own docstring for
+    # why this is a separate list from tool_calls.
+    phase_timings: list[PhaseTimingRecord] = field(default_factory=list)
 
     # Verification
     verification_pct: float = 0.0
@@ -126,6 +148,22 @@ class RunMetrics:
             )
         )
         _record_tool_otel_span(self._otel_span, tool_name, success, duration_ms, error)
+
+    def record_phase(
+        self,
+        phase_name: str,
+        duration_ms: float,
+        success: bool = True,
+        error: str | None = None,
+    ) -> None:
+        self.phase_timings.append(
+            PhaseTimingRecord(
+                phase_name=phase_name,
+                duration_ms=duration_ms,
+                success=success,
+                error=error,
+            )
+        )
 
     def record_tokens(self, tokens_in: int, tokens_out: int) -> None:
         self.tokens_in += tokens_in
@@ -174,6 +212,15 @@ class RunMetrics:
                 for t in self.tool_calls
             ],
             "tool_accuracy": self.tool_accuracy,
+            "phase_timings": [
+                {
+                    "phase": p.phase_name,
+                    "success": p.success,
+                    "duration_ms": p.duration_ms,
+                    "error": p.error,
+                }
+                for p in self.phase_timings
+            ],
             "verification_pct": self.verification_pct,
             "memory_retrieved": self.memory_retrieved,
             "memory_written": self.memory_written,
@@ -424,6 +471,31 @@ def _record_tool_otel_span(
         logger.debug(
             "OTEL child span failed for tool_call:%s", tool_name, exc_info=True
         )
+
+
+# ---------------------------------------------------------------------------
+# Gap-closure Day 54 — non-fatal record_phase() lookup by trace_id, mirroring
+# the existing inline pattern at base_graph.py's record_tool() call site
+# (get_metrics_collector().get(trace_id), no-op if that trace_id never had
+# start_run()/run_span() called for it — e.g. no agent-run context at all).
+# ---------------------------------------------------------------------------
+
+
+def record_phase_timing(
+    trace_id: str,
+    phase_name: str,
+    duration_ms: float,
+    success: bool = True,
+    error: str | None = None,
+) -> None:
+    if not trace_id:
+        return
+    try:
+        m = get_metrics_collector().get(trace_id)
+        if m is not None:
+            m.record_phase(phase_name, duration_ms, success, error)
+    except Exception:
+        logger.debug("record_phase_timing failed for %s/%s", trace_id, phase_name)
 
 
 # ---------------------------------------------------------------------------

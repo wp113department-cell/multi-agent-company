@@ -629,6 +629,10 @@ def _make_planner_node(
     """
 
     def planner_node(state: AgentRunState) -> dict[str, Any]:
+        # Gap-closure Day 54 (Stage 2, answers.md Q8 "Planning speed": NO —
+        # no metric isolates the planner node's time from the rest of a
+        # run). record_tool()-equivalent for this node specifically.
+        _t0 = time.monotonic()
         client = _make_client()
         task = task_description or str(
             (state["messages"][0].get("content", "") if state["messages"] else "")
@@ -637,6 +641,13 @@ def _make_planner_node(
             client, model_haiku, task
         )
         logger.info("planner_node done (confidence=%.2f)", confidence)
+        from app.fleet.metrics import record_phase_timing
+
+        record_phase_timing(
+            state.get("trace_id", ""),
+            "planner_node",
+            (time.monotonic() - _t0) * 1000,
+        )
         return {
             "facts": facts_text,
             "plan": plan_text,
@@ -755,13 +766,25 @@ def _make_memory_hook_node(
         # lesson written by a different process (or before this process's
         # last restart) was invisible here even though it was durably stored.
         # Additive, not a replacement — either source can be empty.
+        # Gap-closure Day 54 (Stage 2, answers.md Q8 "Memory retrieval speed"/
+        # "File scanning speed": both NO — no timing at all for either). Both
+        # real operations run here, once per agent run, so this is the one
+        # real place to attribute their latency to the run's own RunMetrics.
+        from app.fleet.metrics import record_phase_timing
+
         try:
             from app.memory.store import (
                 format_full_memory_context,
                 query_memory_context_sync,
             )
 
+            _t0 = time.monotonic()
             mem = query_memory_context_sync(query, top_k=3)
+            record_phase_timing(
+                state.get("trace_id", ""),
+                "memory_retrieval",
+                (time.monotonic() - _t0) * 1000,
+            )
             db_block = format_full_memory_context(
                 mem["tasks"],
                 mem["failures"],
@@ -782,7 +805,13 @@ def _make_memory_hook_node(
                 from app.repo_tools.context_builder import build_context
                 from app.repo_tools.scanner import index_repository
 
+                _t1 = time.monotonic()
                 idx = index_repository(repo_path)
+                record_phase_timing(
+                    state.get("trace_id", ""),
+                    "file_scanning",
+                    (time.monotonic() - _t1) * 1000,
+                )
                 ctx = build_context(
                     task_description=query or "general", index=idx, top_k=10
                 )

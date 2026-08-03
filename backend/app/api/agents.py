@@ -465,6 +465,14 @@ async def launch_manager(
             custom_secrets_env.pop("GITHUB_TOKEN", None)
             custom_secrets_env.pop("ANTHROPIC_API_KEY", None)
 
+            # Gap-closure Day 54 (Stage 2, answers.md Q8 "Orchestration
+            # speed") — same standalone tracker manager.py's own epic-manager
+            # graph call site uses.
+            import time as _time
+
+            from app.fleet.orchestration_analytics import record_orchestration_time
+
+            _t0 = _time.monotonic()
             result = await run_manager(
                 task_id=task_id,
                 subtasks=subtasks,
@@ -476,6 +484,7 @@ async def launch_manager(
                 extra_env=custom_secrets_env or None,
                 db=db,
             )
+            record_orchestration_time("run_manager", (_time.monotonic() - _t0) * 1000)
 
             overall_status = result.get("status", "blocked")
             results = result.get("results", [])

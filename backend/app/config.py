@@ -298,6 +298,10 @@ class Settings(BaseSettings):
         default=200,
         description="Number of most-recent retrieval-duration samples kept per query_* function for the average-retrieval-time analytic",
     )
+    orchestration_timing_window: int = Field(
+        default=200,
+        description="Number of most-recent orchestration-duration samples kept per phase (e.g. run_manager) for the average-orchestration-time analytic. Gap-closure Day 54, answers.md Q8 'Orchestration speed'.",
+    )
 
     # Gap-closure Day 44 (Stage 2, answers.md Q120 "Memory Aging" — "MemoryEmbedding has
     # only a boolean archived/archived_at — active vs. archived, no 'recent'/'historical'/
@@ -613,6 +617,10 @@ class Settings(BaseSettings):
     benchmark_baseline_interval_hours: int = Field(
         default=24,
         description="Hours between automatic baseline-population sweeps for agents with real MetricsCollector runs but no stored baseline yet. 0 disables.",
+    )
+    doc_agent_auto_trigger_interval_hours: float = Field(
+        default=6,
+        description="Hours between checks for whether target_repo_path's local `main` HEAD has moved since changelog_agent/release_notes_agent last ran, auto-dispatching each when it has. 0 disables. Gap-closure Day 52, answers.md Q41.",
     )
 
     # Day 11 — Fleet OS Versioned Memory (merge-on-conflict lesson lifecycle)
