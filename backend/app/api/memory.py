@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.db.models import MemoryEmbedding, VersionedLesson
+from app.memory.analytics import compute_memory_analytics
 from app.memory.store import query_similar_tasks
 from app.middleware.rbac import require_approver
 
@@ -86,6 +87,36 @@ async def get_memory_patterns(
             }
             for r in recent
         ],
+    }
+
+
+@router.get("/analytics")
+async def get_memory_analytics(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Gap-closure Day 43 (Stage 2, answers.md Q120 "Memory Analytics" — total
+    memory size, average retrieval time, memory growth, duplicate memories, and
+    unused memories were all NO/PARTIAL with zero instrumentation before this).
+
+    Real data throughout: total_rows/total_size_bytes are a live COUNT(*) and
+    Postgres's own pg_total_relation_size(); growth_by_day is a real daily
+    trend, not a snapshot; unused_count uses Day 40's real reuse_count column;
+    duplicate_pairs_count is a real pairwise cosine-similarity scan at the same
+    threshold Day 42's dedup guard uses (capped — see
+    duplicate_scan_skipped_reason when skipped); retrieval_time_stats are real
+    wall-clock timings recorded by store.py's own 5 query_* functions.
+    stalenessDistribution (Day 44, answers.md Q120 "Memory Aging") buckets
+    non-archived rows into recent/aging/stale/obsolete by age relative to the
+    same recency half-life Day 41's composite ranking already uses.
+    """
+    analytics = await compute_memory_analytics(db)
+    return {
+        "totalRows": analytics.total_rows,
+        "totalSizeBytes": analytics.total_size_bytes,
+        "growthByDay": analytics.growth_by_day,
+        "unusedCount": analytics.unused_count,
+        "duplicatePairsCount": analytics.duplicate_pairs_count,
+        "duplicateScanSkippedReason": analytics.duplicate_scan_skipped_reason,
+        "retrievalTimeStats": analytics.retrieval_time_stats,
+        "stalenessDistribution": analytics.staleness_distribution,
     }
 
 

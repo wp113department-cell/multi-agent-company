@@ -196,6 +196,22 @@ def _parse_file(
     return symbols, imports
 
 
+def parse_single_file(path: Path) -> tuple[list[SymbolInfo], list[str]] | None:
+    """Gap-closure Days 45-47 (Stage 2) — public entry point for callers
+    (app/repo_tools/file_folding.py) that need one arbitrary file's real
+    symbols without running a full repository scan. Returns None for a
+    tree-sitter-unsupported extension or any parse failure — never raises,
+    matching this module's own index_repository() per-file error handling."""
+    ext = path.suffix.lower()
+    lang = _LANG_MAP.get(ext)
+    if lang is None:
+        return None
+    try:
+        return _parse_file(path, lang, ext)
+    except Exception:
+        return None
+
+
 def index_repository(
     repo_path: str,
     known_hashes: dict[str, str] | None = None,

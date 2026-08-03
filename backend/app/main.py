@@ -135,7 +135,13 @@ async def _weekly_reindex_loop() -> None:
 
 
 async def _fleet_agents_scan_loop() -> None:
-    """Day 9 — periodic SCAN phase for the 5 fleet self-improvement agents.
+    """Day 9 — periodic SCAN phase for the fleet self-improvement agents.
+
+    5 agents from Day 9 (agent_performance_reviewer, agent_debugger, agent_advisor,
+    knowledge_curator, quality_auditor) plus architecture_reviewer (Day 48) and
+    dependency_security_agent (Day 49), both added gap-closure Days 48-50 (Stage 2) —
+    their real analysis tools (dead_code_detect/circular_dep_detect/import_graph;
+    pip-audit/npm audit) existed but were only ever task-triggered, never autonomous.
 
     Runs sequentially (not parallel — real LLM calls, avoid a runaway-cost loop).
     Each agent's own scan function is fully autonomous and read-only; it only ever
@@ -162,6 +168,23 @@ async def _fleet_agents_scan_loop() -> None:
             "run_knowledge_curator_scan",
         ),
         ("quality_auditor", "app.agents.quality_auditor", "run_quality_auditor_scan"),
+        # Gap-closure Days 48-50 (Stage 2, answers.md Q35/Q36) — architecture_reviewer
+        # was previously task-triggered only (app.api.specialized_agents); its own
+        # existing dead_code_detect/circular_dep_detect/import_graph tools are real
+        # and work, just never ran autonomously. 6th fleet self-improvement scan.
+        (
+            "architecture_reviewer",
+            "app.agents.architecture_reviewer",
+            "run_architecture_reviewer_scan",
+        ),
+        # Gap-closure Day 49 (Stage 2, answers.md Q35 "Dependency conflicts") — 7th
+        # fleet self-improvement scan. dependency_security_agent's real CVE-scanning
+        # (pip-audit/npm audit) was also task-triggered only.
+        (
+            "dependency_security_agent",
+            "app.agents.dependency_security_agent",
+            "run_dependency_security_scan",
+        ),
     ]
 
     while True:

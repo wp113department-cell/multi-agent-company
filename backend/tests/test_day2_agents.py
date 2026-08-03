@@ -317,16 +317,22 @@ class TestArchReviewerHandlers:
         assert "✅" in result or "No circular" in result
 
     def test_submit_stores_result(self, tmp_repo: Path) -> None:
+        # Gap-closure Day 48 (Stage 2): field names match the real fixed
+        # _SUBMIT_ARCH_REVIEW_TOOL schema (and roles/architecture_reviewer.md's
+        # own documented contract) — {structure_summary, risks, recommendations,
+        # blast_radius, import_graph_ran}, not the previous, unused
+        # {verdict, issues, summary} shape no consuming code ever read.
         h = make_arch_reviewer_handlers(str(tmp_repo))
         h["submit_arch_review"](
             {
-                "verdict": "approved",
-                "issues": [],
+                "structure_summary": "1 module, no cycles",
+                "risks": [],
                 "recommendations": [],
-                "summary": "ok",
+                "blast_radius": None,
+                "import_graph_ran": True,
             }
         )
-        assert h["_arch_result"]["verdict"] == "approved"
+        assert h["_arch_result"]["structure_summary"] == "1 module, no cycles"
 
 
 class TestMonitoringHandlers:
@@ -465,11 +471,31 @@ class TestDependencyHandlers:
         assert "Edited" in result
 
     def test_submit_stores_result(self, tmp_repo: Path) -> None:
+        # Gap-closure Day 49 (Stage 2): field names match the real fixed
+        # _SUBMIT_DEPENDENCY_REPORT_TOOL schema (and
+        # roles/dependency_agent.md's own documented contract) —
+        # {dependencies, summary, files_changed, manifest_read}, not the
+        # previous, unused {outdated, upgraded} shape no consuming code
+        # ever read.
         h = make_dependency_agent_handlers(str(tmp_repo))
         h["submit_dependency_report"](
-            {"outdated": ["fastapi: 0.111 → 0.112"], "upgraded": []}
+            {
+                "dependencies": [
+                    {
+                        "name": "fastapi",
+                        "current_version": "0.111",
+                        "latest_version": "0.112",
+                        "vulnerability_ids": [],
+                        "upgrade_recommended": True,
+                        "breaking_changes": "",
+                    }
+                ],
+                "summary": "1 dependency checked, 1 upgrade available",
+                "files_changed": [],
+                "manifest_read": True,
+            }
         )
-        assert len(h["_dependency_result"]["outdated"]) == 1
+        assert len(h["_dependency_result"]["dependencies"]) == 1
 
 
 class TestReadmeHandlers:

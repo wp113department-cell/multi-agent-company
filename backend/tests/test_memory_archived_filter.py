@@ -11,6 +11,8 @@ embedding convention for this table.
 
 from __future__ import annotations
 
+import hashlib
+import random
 import uuid
 from unittest.mock import patch
 
@@ -39,7 +41,18 @@ from app.memory.store import (
 )
 from app.services.retention import _archive_table
 
-_FAKE_VECTOR = [0.1] * 1536
+
+def _vector_for(text_to_embed: str) -> list[float]:
+    """Deterministic, content-derived fake embedding — distinct text
+    produces an effectively-orthogonal distinct vector (real embedding
+    behavior), same text always reproduces the same vector. Gap-closure
+    Day 42's dedup guard is cosine-similarity-sensitive; a single shared
+    constant vector (this file's pre-Day-42 convention) would make every
+    embed_*() call in the same category collide as a false "duplicate."
+    """
+    seed = int(hashlib.sha256(text_to_embed.encode()).hexdigest(), 16) % (2**32)
+    rng = random.Random(seed)
+    return [rng.uniform(-1, 1) for _ in range(1536)]
 
 
 def _engine() -> AsyncEngine:
@@ -58,7 +71,7 @@ async def _mark_archived(session: AsyncSession, task_id: str) -> None:
 
 
 @pytest.mark.asyncio
-@patch("app.memory.store._embed", return_value=_FAKE_VECTOR)
+@patch("app.memory.store._embed", side_effect=_vector_for)
 async def test_query_similar_tasks_excludes_archived_rows(_mock_embed: object) -> None:
     engine = _engine()
     suffix = uuid.uuid4().hex[:8]
@@ -68,7 +81,7 @@ async def test_query_similar_tasks_excludes_archived_rows(_mock_embed: object) -
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             await embed_task_outcome(
                 task_id=task_active,
-                description="active row marker",
+                description=f"active row marker {suffix}",
                 summary="stays visible",
                 outcome="completed",
                 files_changed=[],
@@ -76,7 +89,7 @@ async def test_query_similar_tasks_excludes_archived_rows(_mock_embed: object) -
             )
             await embed_task_outcome(
                 task_id=task_archived,
-                description="archived row marker",
+                description=f"archived row marker {suffix}",
                 summary="must disappear once archived",
                 outcome="completed",
                 files_changed=[],
@@ -85,7 +98,7 @@ async def test_query_similar_tasks_excludes_archived_rows(_mock_embed: object) -
             await _mark_archived(session, task_archived)
 
             results = await query_similar_tasks(
-                "irrelevant query text", session, top_k=50
+                "irrelevant query text", session, top_k=1000
             )
             task_ids = {r["task_id"] for r in results}
             assert task_active in task_ids
@@ -102,7 +115,7 @@ async def test_query_similar_tasks_excludes_archived_rows(_mock_embed: object) -
 
 
 @pytest.mark.asyncio
-@patch("app.memory.store._embed", return_value=_FAKE_VECTOR)
+@patch("app.memory.store._embed", side_effect=_vector_for)
 async def test_query_architecture_notes_excludes_archived_rows(
     _mock_embed: object,
 ) -> None:
@@ -112,11 +125,13 @@ async def test_query_architecture_notes_excludes_archived_rows(
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             await embed_architecture_note(
-                task_id=task_archived, content="an architecture note", db=session
+                task_id=task_archived,
+                content=f"an architecture note {suffix}",
+                db=session,
             )
             await _mark_archived(session, task_archived)
 
-            results = await query_architecture_notes("irrelevant", session, top_k=50)
+            results = await query_architecture_notes("irrelevant", session, top_k=1000)
             task_ids = {r["task_id"] for r in results}
             assert task_archived not in task_ids
 
@@ -129,7 +144,7 @@ async def test_query_architecture_notes_excludes_archived_rows(
 
 
 @pytest.mark.asyncio
-@patch("app.memory.store._embed", return_value=_FAKE_VECTOR)
+@patch("app.memory.store._embed", side_effect=_vector_for)
 async def test_query_failures_excludes_archived_rows(_mock_embed: object) -> None:
     engine = _engine()
     suffix = uuid.uuid4().hex[:8]
@@ -138,13 +153,13 @@ async def test_query_failures_excludes_archived_rows(_mock_embed: object) -> Non
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             await embed_failure(
                 task_id=task_archived,
-                error_description="an error",
+                error_description=f"an error {suffix}",
                 root_cause="a root cause",
                 db=session,
             )
             await _mark_archived(session, task_archived)
 
-            results = await query_failures("irrelevant", session, top_k=50)
+            results = await query_failures("irrelevant", session, top_k=1000)
             task_ids = {r["task_id"] for r in results}
             assert task_archived not in task_ids
 
@@ -157,7 +172,7 @@ async def test_query_failures_excludes_archived_rows(_mock_embed: object) -> Non
 
 
 @pytest.mark.asyncio
-@patch("app.memory.store._embed", return_value=_FAKE_VECTOR)
+@patch("app.memory.store._embed", side_effect=_vector_for)
 async def test_query_learning_signals_excludes_archived_rows(
     _mock_embed: object,
 ) -> None:
@@ -169,13 +184,13 @@ async def test_query_learning_signals_excludes_archived_rows(
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             await embed_learning_signal(
                 agent_name=agent_name,
-                description="an action",
+                description=f"an action {suffix}",
                 outcome_summary="an outcome",
                 db=session,
             )
             await _mark_archived(session, task_id)
 
-            results = await query_learning_signals("irrelevant", session, top_k=50)
+            results = await query_learning_signals("irrelevant", session, top_k=1000)
             agent_names = {r["agent_name"] for r in results}
             assert agent_name not in agent_names
 
@@ -188,7 +203,7 @@ async def test_query_learning_signals_excludes_archived_rows(
 
 
 @pytest.mark.asyncio
-@patch("app.memory.store._embed", return_value=_FAKE_VECTOR)
+@patch("app.memory.store._embed", side_effect=_vector_for)
 async def test_query_procedures_excludes_archived_rows(_mock_embed: object) -> None:
     engine = _engine()
     suffix = uuid.uuid4().hex[:8]
@@ -197,7 +212,7 @@ async def test_query_procedures_excludes_archived_rows(_mock_embed: object) -> N
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             await embed_procedure(
                 task_id=task_archived,
-                symptom="a symptom",
+                symptom=f"a symptom {suffix}",
                 steps_taken=["step one", "step two"],
                 resolution="a resolution",
                 agent_name="tester",
@@ -205,7 +220,7 @@ async def test_query_procedures_excludes_archived_rows(_mock_embed: object) -> N
             )
             await _mark_archived(session, task_archived)
 
-            results = await query_procedures("irrelevant", session, top_k=50)
+            results = await query_procedures("irrelevant", session, top_k=1000)
             task_ids = {r["task_id"] for r in results}
             assert task_archived not in task_ids
 
@@ -217,7 +232,7 @@ async def test_query_procedures_excludes_archived_rows(_mock_embed: object) -> N
         await engine.dispose()
 
 
-@patch("app.memory.store._embed", return_value=_FAKE_VECTOR)
+@patch("app.memory.store._embed", side_effect=_vector_for)
 def test_real_retention_job_output_is_actually_excluded_end_to_end(
     _mock_embed: object,
 ) -> None:
@@ -282,7 +297,7 @@ def test_real_retention_job_output_is_actually_excluded_end_to_end(
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
                 results = await query_similar_tasks(
-                    "irrelevant query text", session, top_k=50
+                    "irrelevant query text", session, top_k=1000
                 )
                 task_ids = {r["task_id"] for r in results}
                 await session.execute(

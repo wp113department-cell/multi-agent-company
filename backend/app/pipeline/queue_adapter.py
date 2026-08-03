@@ -20,8 +20,11 @@ policy) have materially different failure semantics — swapping the real
 dispatch call sites to use this adapter is a deliberate architectural
 decision about which failure model the whole task lifecycle wants, not a
 one-line wiring fix, and shouldn't be made as a drive-by change alongside
-unrelated orchestration fixes. Same category as prompt_registry.deploy()'s
-documented-dormant status. See docs/reports/AUDIT_04_ORCHESTRATION.md.
+unrelated orchestration fixes. Same category prompt_registry.deploy() used
+to be in before gap-closure Day 50 gave it a real caller (see
+app/agents/tools.py::_propose_and_deploy_role_prompt) — deliberately
+unintegrated infrastructure, not a bug, until a specific caller is chosen.
+See docs/reports/AUDIT_04_ORCHESTRATION.md.
 """
 
 from __future__ import annotations

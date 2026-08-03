@@ -16,6 +16,7 @@ from app.agents.tools import (
     make_chat_handlers,
     make_dependency_audit_bash_handler,
     make_record_learning_handler,
+    make_submit_enhancement_request_handler,
 )
 from app.config import get_settings
 
@@ -181,6 +182,118 @@ def run_dependency_security_agent(
         tokens_out=final_state["tokens_out"],
         status="completed" if final_state["submitted"] else "blocked",
         raw=raw,
+    )
+
+
+# ---------------------------------------------------------------------------
+# SCAN phase — Gap-closure Days 49-50 (Stage 2, answers.md Q35 "Dependency
+# conflicts: NO — no dependency-conflict-checking tool/agent found (a
+# separate dependency_agent.py/dependency_security_agent.py exist but are
+# ordinary task-triggered agents, not in the autonomous loop). Plan: add
+# dependency-conflict scanning to the periodic scan loop"). Scope note,
+# honestly stated: this wires the real, existing CVE-scanning capability
+# into the autonomous loop (the same "wire an existing on-demand agent into
+# _fleet_agents_scan_loop()" pattern Day 48 established for
+# architecture_reviewer) — it does not add a new version-constraint-graph
+# SAT-solver-style conflict detector, which doesn't exist anywhere in this
+# codebase and would be new-capability work, not a wiring fix. "Dependency
+# conflicts" in the audit's own framing groups with dependency_agent.py's
+# unautonomous outdated-version detection in the same sentence — the real,
+# buildable gap here is autonomy, not a missing conflict-detection algorithm.
+# ---------------------------------------------------------------------------
+
+_SCAN_SUBMIT_ENHANCEMENT_TOOL: dict[str, Any] = {
+    "name": "submit_enhancement_request",
+    "description": "File one scoped dependency security issue (known CVE, vulnerable pinned version) for human review. One issue per request — never bundle multiple findings into one.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "description": {"type": "string"},
+            "category": {"type": "string", "enum": ["security", "quality"]},
+            "priority": {"type": "string", "enum": ["emergency", "medium", "low"]},
+            "evidence": {"type": "object"},
+        },
+        "required": ["title", "description", "category", "priority"],
+    },
+}
+
+_SCAN_CFG = VerificationConfig(
+    set_by={"read_file": "read", "bash": "audited"},
+    reset_by=(),
+    reset_keys=(),
+    enforce_in_result={"read": "read", "audited": "audited"},
+    initial={"read": False, "audited": False},
+    blocking_until={"bash": "read"},
+)
+
+_SCAN_TOOLS = READ_ONLY_TOOLS + [
+    DEPENDENCY_AUDIT_BASH_TOOL,
+    _SCAN_SUBMIT_ENHANCEMENT_TOOL,
+]
+
+
+def make_scan_handlers(repo_path: str, trace_id: str = "") -> dict[str, Any]:
+    handlers = make_chat_handlers(repo_path)
+    handlers["bash"] = make_dependency_audit_bash_handler(repo_path)
+    handlers["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
+    handlers["submit_enhancement_request"] = make_submit_enhancement_request_handler(
+        AGENT_CONTRACT["name"], trace_id=trace_id
+    )
+    return handlers
+
+
+def run_dependency_security_scan(trace_id: str = "") -> AgentResult:
+    """SCAN phase — autonomous CVE audit of the platform's own dependencies.
+    Called periodically from app.main::_fleet_agents_scan_loop(), same as
+    the other fleet self-improvement agents' own scan functions."""
+    settings = get_settings()
+    repo = settings.fleet_self_repo_path
+    handlers = make_scan_handlers(repo, trace_id=trace_id)
+    msg = (
+        "Autonomous dependency security scan of this codebase. Read requirements.txt / "
+        "package.json / lockfiles to identify all real dependencies, then use bash "
+        "(pip-audit / npm audit) to check for known CVEs against the real pinned "
+        "versions. For each distinct real vulnerability found, file a separate "
+        "submit_enhancement_request (category='security') citing the package name, "
+        "current version, CVE identifier, and minimum safe version from this run's "
+        "real tool output — never a fabricated or generic finding. If nothing real "
+        "turns up, that's a normal outcome — don't invent an issue."
+    )
+
+    final_state = run_agent_graph(
+        role_name="dependency_security_agent",
+        model=settings.model_coder,
+        tools=_SCAN_TOOLS + [RECORD_LEARNING_TOOL],
+        tool_handlers=handlers,
+        verification_cfg=_SCAN_CFG,
+        initial_message=msg,
+        task_description="Dependency CVE scan",
+        repo_path=repo,
+        model_haiku=settings.model_router,
+        enable_planning=True,
+        enable_memory=True,
+        enable_reflection=True,
+        enable_lesson=True,
+        max_turns=15,
+        trace_id=trace_id,
+    )
+
+    return AgentResult(
+        summary=(
+            "Dependency security scan complete"
+            if final_state["submitted"]
+            else "Dependency security scan complete — nothing to flag"
+        ),
+        findings=[],
+        files_touched=[],
+        verified=bool(final_state["verification"].get("audited"))
+        or not final_state["submitted"],
+        requires_human_approval=False,
+        tokens_in=final_state["tokens_in"],
+        tokens_out=final_state["tokens_out"],
+        status="completed",
+        raw=final_state.get("result", {}),
     )
 
 

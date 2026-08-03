@@ -790,6 +790,129 @@ class EpicManagerState(TypedDict, total=False):
     package: EpicApprovalPackage
 
 
+async def _resource_check_node(state: EpicManagerState) -> dict[str, Any]:
+    """Gap-closure Day 36 (Stage 2, answers.md Q31): runs first, before any
+    cost estimation or planning — RAM/CPU/disk/Docker/GPU are a real
+    infrastructure constraint no human approval can fix (unlike cost, where
+    approval is a legitimate way to proceed anyway), so an insufficient
+    result halts the epic immediately, mirroring _conflict_check_node's own
+    halt-and-return-early shape rather than _cost_estimate_node's
+    approval-gate shape.
+
+    Gap-closure Day 38 (answers.md Q32) extended this with a second,
+    project-specific check: even when the host's fixed global minimums
+    (Day 36) are satisfied, THIS repo's projected disk/memory footprint
+    (`size_estimate.py`, real measured file/byte count x config
+    coefficients) can still exceed what's actually free right now — a
+    5 GB free-disk minimum doesn't help if this specific repo's projected
+    working-copy footprint is 8 GB. Both checks feed the same halt path so
+    there is exactly one place an epic gets stopped for infrastructure
+    reasons, not two parallel gates."""
+    from sqlalchemy import update as sa_update
+
+    from app.db.models import Epic
+    from app.event_bus.bus import publish_event
+    from app.event_bus.models import GridironEvent
+    from app.fleet.resource_check import run_resource_check
+    from app.fleet.size_estimate import estimate_project_size
+
+    epic_id = state["epic_id"]
+    db = state["db"]
+    settings = get_settings()
+    repo_path = state.get("repo_path") or settings.target_repo_path
+
+    result = run_resource_check(path=repo_path)
+    # Subtask count is unknown this early (planning hasn't run yet) — same
+    # documented placeholder _cost_estimate_node already uses below.
+    size_est = await estimate_project_size(repo_path, db=db, subtask_count=5)
+
+    reasons = list(result.reasons)
+    recommendations = list(result.recommendations)
+
+    real_free_disk_mb = result.disk_free_gb * 1024
+    if size_est.estimated_disk_required_mb > real_free_disk_mb:
+        reasons.append(
+            f"Projected disk requirement for this repo "
+            f"({size_est.estimated_disk_required_mb:.0f} MB) exceeds real free disk "
+            f"space ({real_free_disk_mb:.0f} MB)"
+        )
+        recommendations.append(
+            "Free disk space or reduce the repository's working-copy footprint "
+            "(clear old worktrees/build artifacts) before starting this operation."
+        )
+
+    real_available_ram_mb = result.ram_available_gb * 1024
+    if size_est.estimated_memory_required_mb > real_available_ram_mb:
+        reasons.append(
+            f"Projected memory requirement for this repo "
+            f"({size_est.estimated_memory_required_mb:.0f} MB) exceeds real "
+            f"available RAM ({real_available_ram_mb:.0f} MB)"
+        )
+        recommendations.append(
+            "Reduce agent concurrency or close other processes to free memory "
+            "before starting this operation."
+        )
+
+    sufficient = result.sufficient and not (
+        size_est.estimated_disk_required_mb > real_free_disk_mb
+        or size_est.estimated_memory_required_mb > real_available_ram_mb
+    )
+
+    if not sufficient:
+        reason = "; ".join(reasons)
+        recommendation = " ".join(recommendations)
+        halt_reason = f"Insufficient resources: {reason}. {recommendation}".strip()
+        logger.warning("Epic %s halted on resource check: %s", epic_id, halt_reason)
+        await db.execute(
+            sa_update(Epic)
+            .where(Epic.epic_id == epic_id)
+            .values(status="halted", halt_reason=halt_reason)
+        )
+        await db.commit()
+        await publish_event(
+            GridironEvent(
+                event_type="epic.halted",
+                epic_id=epic_id,
+                payload={
+                    "reason": halt_reason,
+                    "resource_check": {
+                        "ram_available_gb": result.ram_available_gb,
+                        "disk_free_gb": result.disk_free_gb,
+                        "cpu_count": result.cpu_count,
+                        "docker_available": result.docker_available,
+                        "gpu_available": result.gpu_available,
+                        "reasons": reasons,
+                        "recommendations": recommendations,
+                    },
+                    "size_estimate": {
+                        "total_files": size_est.repo.total_files,
+                        "total_size_mb": size_est.repo.total_size_mb,
+                        "estimated_disk_required_mb": size_est.estimated_disk_required_mb,
+                        "estimated_memory_required_mb": size_est.estimated_memory_required_mb,
+                    },
+                },
+                emitted_by="manager",
+            ),
+            db=db,
+        )
+        return {
+            "stage": "halted_resources",
+            "package": EpicApprovalPackage(
+                epic_id=epic_id,
+                status="halted",
+                subtask_results=[],
+                total_files_changed=[],
+                all_diffs="",
+                all_qa_summaries=[],
+                all_review_findings=[],
+                cost_actual_usd=0.0,
+                halt_reason=halt_reason,
+            ),
+        }
+
+    return {"stage": ""}
+
+
 async def _cost_estimate_node(state: EpicManagerState) -> dict[str, Any]:
     """Step 1 of _run_epic_manager_body()'s original flow — rough cost
     estimate (subtask count unknown yet; use 5 as baseline). Sets
@@ -1194,6 +1317,12 @@ async def _finalize_node(state: EpicManagerState) -> dict[str, Any]:
     }
 
 
+def _route_after_resource_check(state: EpicManagerState) -> str:
+    if state.get("stage") == "halted_resources":
+        return "END"
+    return "cost_estimate"
+
+
 def _route_after_cost_estimate(state: EpicManagerState) -> str:
     if state.get("stage") == "pending_cost_approval":
         return "END"
@@ -1211,7 +1340,8 @@ _compiled_epic_manager_graph: Any = None
 
 def build_epic_manager_graph() -> Any:
     """MASTER_AGENT_v2.md Phase 5.1 — the epic-level orchestration flow
-    (cost check → planning → conflict check → coding → finalize) as a real
+    (resource check → cost check → planning → conflict check → coding →
+    finalize) as a real
     LangGraph StateGraph. Deliberately does NOT convert run_manager()'s own
     per-subtask retry loop (dev→QA→review with backoff) into graph nodes:
     that loop is a poor structural fit for LangGraph's node/edge model (deep
@@ -1233,13 +1363,19 @@ def build_epic_manager_graph() -> Any:
     """
     graph: StateGraph[EpicManagerState] = StateGraph(EpicManagerState)
 
+    graph.add_node("resource_check", _resource_check_node)
     graph.add_node("cost_estimate", _cost_estimate_node)
     graph.add_node("planning", _planning_node)
     graph.add_node("conflict_check", _conflict_check_node)
     graph.add_node("coding", _coding_node)
     graph.add_node("finalize", _finalize_node)
 
-    graph.add_edge(START, "cost_estimate")
+    graph.add_edge(START, "resource_check")
+    graph.add_conditional_edges(
+        "resource_check",
+        _route_after_resource_check,
+        {"cost_estimate": "cost_estimate", "END": END},
+    )
     graph.add_conditional_edges(
         "cost_estimate",
         _route_after_cost_estimate,
@@ -1276,7 +1412,10 @@ async def _run_epic_manager_body(
     this returns/raises — unchanged from before this conversion.
 
     Flow (identical to the pre-conversion imperative version, just expressed
-    as graph nodes/edges instead of a single function body):
+    as graph nodes/edges instead of a single function body, plus the Day-36
+    resource-check node prepended ahead of it):
+    0. Resource check (gap-closure Day 36) → if host RAM/CPU/disk/Docker/GPU
+       is insufficient → mark epic 'halted' and return early
     1. Cost estimate → if over threshold → mark epic 'pending_cost_approval' and return early
     2. Mark epic 'planning' → run PM→Arch→Decomp planning pipeline
     3. Mark epic 'coding' → run per-subtask Dev→QA→Review pipeline

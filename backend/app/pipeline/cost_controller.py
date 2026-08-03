@@ -3,6 +3,13 @@
 Uses historical averages from agent_runs when available, then falls back to
 config-driven per-subtask coefficients. The estimate gates epic execution:
 epics over COST_APPROVAL_THRESHOLD require explicit human approval.
+
+Gap-closure Day 39 (Stage 2, answers.md Q42, "expected runtime estimate: NO")
+added estimated_duration_seconds, computed the same way: a real historical
+average of 'coder' agent_runs wall-clock duration when available
+(reusing app.fleet.size_estimate.historical_avg_duration_seconds — the same
+query Days 37-38 already built for the size pre-flight check, not a
+duplicate), config fallback otherwise.
 """
 
 from __future__ import annotations
@@ -23,6 +30,8 @@ class CostEstimate:
     estimated_cost_usd: float
     requires_approval: bool
     historical_avg_tokens_in: int | None  # None when no history available
+    estimated_duration_seconds: float
+    duration_source: str  # "historical" | "config_fallback"
 
 
 async def _historical_avg_tokens(db: AsyncSession) -> tuple[int | None, int | None]:
@@ -56,7 +65,20 @@ async def estimate_epic_cost(
     """
     settings = get_settings()
 
+    from app.fleet.size_estimate import historical_avg_duration_seconds
+
     hist_in, hist_out = await _historical_avg_tokens(db)
+
+    duration_source = "config_fallback"
+    duration_per_subtask = settings.size_processing_seconds_fallback_per_subtask
+    hist_duration = await historical_avg_duration_seconds(db, "coder")
+    if hist_duration is not None:
+        duration_per_subtask = hist_duration
+        duration_source = "historical"
+    # No max()-clamp, unlike size_estimate.py's own use of this shape — a
+    # 0-subtask epic must estimate 0 duration, consistent with this same
+    # function's 0-subtask -> 0 cost/token behavior (test_estimate_zero_subtasks).
+    estimated_duration_seconds = duration_per_subtask * subtask_count
 
     if hist_in is not None:
         tokens_in_per_subtask = int(hist_in * complexity_multiplier)
@@ -87,6 +109,8 @@ async def estimate_epic_cost(
         estimated_cost_usd=cost,
         requires_approval=cost > settings.cost_approval_threshold,
         historical_avg_tokens_in=hist_in,
+        estimated_duration_seconds=estimated_duration_seconds,
+        duration_source=duration_source,
     )
 
 
@@ -128,4 +152,7 @@ def estimate_epic_cost_sync(
         estimated_cost_usd=cost,
         requires_approval=cost > settings.cost_approval_threshold,
         historical_avg_tokens_in=avg_tokens_in,
+        estimated_duration_seconds=settings.size_processing_seconds_fallback_per_subtask
+        * subtask_count,
+        duration_source="config_fallback",
     )

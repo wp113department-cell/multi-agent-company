@@ -205,7 +205,7 @@ def make_scan_handlers(repo_path: str, trace_id: str = "") -> dict[str, Any]:
 
 
 def make_apply_handlers(repo_path: str) -> dict[str, Any]:
-    handlers = make_fleet_apply_handlers(repo_path)
+    handlers = make_fleet_apply_handlers(repo_path, agent_name="knowledge_curator")
     handlers["record_learning"] = make_record_learning_handler("knowledge_curator")
     handlers["memory_curate_write"] = memory_curate_write
     handlers["memory_promote_lesson"] = memory_promote_lesson

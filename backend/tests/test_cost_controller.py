@@ -69,3 +69,28 @@ def test_approval_boundary() -> None:
     high = estimate_epic_cost_sync(subtask_count=10_000)
     assert low.requires_approval is False
     assert high.requires_approval is True
+
+
+def test_estimate_duration_seconds_uses_config_fallback_when_sync() -> None:
+    """Gap-closure Day 39 (Stage 2, answers.md Q42): estimate_epic_cost_sync
+    has no DB, so duration is always config_fallback-sourced."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    result = estimate_epic_cost_sync(subtask_count=3)
+
+    assert result.duration_source == "config_fallback"
+    assert result.estimated_duration_seconds == (
+        settings.size_processing_seconds_fallback_per_subtask * 3
+    )
+
+
+def test_estimate_duration_seconds_zero_subtasks_is_zero_duration() -> None:
+    result = estimate_epic_cost_sync(subtask_count=0)
+    assert result.estimated_duration_seconds == 0.0
+
+
+def test_estimate_duration_seconds_scales_with_subtask_count() -> None:
+    a = estimate_epic_cost_sync(subtask_count=2)
+    b = estimate_epic_cost_sync(subtask_count=4)
+    assert abs(b.estimated_duration_seconds - a.estimated_duration_seconds * 2) < 1e-9

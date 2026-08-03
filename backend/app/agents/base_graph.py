@@ -268,8 +268,46 @@ class LessonStore:
         self._capacity = capacity
         self._lock = Lock()
 
+    @staticmethod
+    def _tokens(lesson: Lesson) -> set[str]:
+        text = f"{lesson.lesson} {lesson.pattern} {lesson.category}".lower()
+        return set(text.split())
+
+    @staticmethod
+    def _jaccard(a: set[str], b: set[str]) -> float:
+        if not a and not b:
+            return 0.0
+        union = a | b
+        if not union:
+            return 0.0
+        return len(a & b) / len(union)
+
     def add(self, lesson: Lesson) -> None:
+        """Gap-closure Day 46 (Stage 2, answers.md Q120 "Session Memory" —
+        "Compresses repeated information: NO — LessonStore.add() is pure
+        append, no dedup check against existing lessons"). Mirrors
+        VersionedLesson.publish()'s dedup-before-insert *pattern* (Day 42
+        did the same for MemoryEmbedding); LessonStore has no embeddings
+        (in-process, keyword-overlap only), so the near-duplicate check
+        reuses retrieve()'s own Jaccard token-overlap metric rather than
+        forcing a cosine-similarity fit where no embedding exists. A
+        near-duplicate (same category, overlap >= threshold) is replaced,
+        not accumulated — the newer occurrence's phrasing wins."""
+        from app.config import get_settings
+
+        settings = get_settings()
         with self._lock:
+            if settings.lesson_dedup_enabled:
+                new_tokens = self._tokens(lesson)
+                for existing in self._lessons:
+                    if existing.category != lesson.category:
+                        continue
+                    if (
+                        self._jaccard(new_tokens, self._tokens(existing))
+                        >= settings.lesson_dedup_similarity_threshold
+                    ):
+                        self._lessons.remove(existing)
+                        break
             if len(self._lessons) >= self._capacity:
                 self._lessons.pop(0)
             self._lessons.append(lesson)
@@ -313,7 +351,11 @@ def get_lesson_store() -> LessonStore:
     if _lesson_store is None:
         with _lesson_store_lock:
             if _lesson_store is None:
-                _lesson_store = LessonStore()
+                from app.config import get_settings
+
+                _lesson_store = LessonStore(
+                    capacity=get_settings().lesson_store_capacity
+                )
     return _lesson_store
 
 
