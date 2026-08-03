@@ -15,6 +15,8 @@ documented in test_versioned_memory.py and test_prompt_registry.py.
 
 from __future__ import annotations
 
+import hashlib
+import random
 import uuid
 from unittest.mock import patch
 
@@ -36,7 +38,16 @@ from app.memory.store import (
     query_similar_tasks,
 )
 
-_FAKE_VECTOR = [0.1] * 1536
+
+def _vector_for(text_to_embed: str) -> list[float]:
+    """Deterministic, content-derived fake embedding — see
+    test_memory_archived_filter.py's identical helper for the full
+    rationale (Day 42's dedup guard is cosine-similarity-sensitive; a
+    single shared constant vector would make distinct rows in the same
+    category falsely collide as "duplicates")."""
+    seed = int(hashlib.sha256(text_to_embed.encode()).hexdigest(), 16) % (2**32)
+    rng = random.Random(seed)
+    return [rng.uniform(-1, 1) for _ in range(1536)]
 
 
 def _engine() -> AsyncEngine:
@@ -57,7 +68,7 @@ async def _make_repo(session: AsyncSession, suffix: str) -> int:
 
 
 @pytest.mark.asyncio
-@patch("app.memory.store._embed", return_value=_FAKE_VECTOR)
+@patch("app.memory.store._embed", side_effect=_vector_for)
 async def test_project_a_scoped_memory_never_returned_by_project_bs_scoped_query(
     _mock_embed: object,
 ) -> None:
@@ -75,7 +86,7 @@ async def test_project_a_scoped_memory_never_returned_by_project_bs_scoped_query
 
             await embed_task_outcome(
                 task_id=task_a,
-                description="unique marker alpha needle",
+                description=f"unique marker alpha needle {suffix}",
                 summary="project A summary",
                 outcome="completed",
                 files_changed=[],
@@ -84,7 +95,7 @@ async def test_project_a_scoped_memory_never_returned_by_project_bs_scoped_query
             )
             await embed_task_outcome(
                 task_id=task_b,
-                description="unique marker bravo needle",
+                description=f"unique marker bravo needle {suffix}",
                 summary="project B summary",
                 outcome="completed",
                 files_changed=[],
@@ -96,14 +107,14 @@ async def test_project_a_scoped_memory_never_returned_by_project_bs_scoped_query
             # vice versa — this is the real isolation guarantee, not just
             # that the column exists.
             results_for_a = await query_similar_tasks(
-                "irrelevant query text", session, top_k=50, repo_id=repo_a
+                "irrelevant query text", session, top_k=1000, repo_id=repo_a
             )
             task_ids_for_a = {r["task_id"] for r in results_for_a}
             assert task_a in task_ids_for_a
             assert task_b not in task_ids_for_a
 
             results_for_b = await query_similar_tasks(
-                "irrelevant query text", session, top_k=50, repo_id=repo_b
+                "irrelevant query text", session, top_k=1000, repo_id=repo_b
             )
             task_ids_for_b = {r["task_id"] for r in results_for_b}
             assert task_b in task_ids_for_b
@@ -112,7 +123,7 @@ async def test_project_a_scoped_memory_never_returned_by_project_bs_scoped_query
             # Unfiltered (repo_id=None, the pre-Day-3 default) must still see
             # both — this capability is additive, not a breaking change.
             results_unfiltered = await query_similar_tasks(
-                "irrelevant query text", session, top_k=50
+                "irrelevant query text", session, top_k=1000
             )
             task_ids_unfiltered = {r["task_id"] for r in results_unfiltered}
             assert task_a in task_ids_unfiltered
@@ -130,7 +141,7 @@ async def test_project_a_scoped_memory_never_returned_by_project_bs_scoped_query
 
 
 @pytest.mark.asyncio
-@patch("app.memory.store._embed", return_value=_FAKE_VECTOR)
+@patch("app.memory.store._embed", side_effect=_vector_for)
 async def test_legacy_unscoped_row_stays_visible_to_every_scoped_query(
     _mock_embed: object,
 ) -> None:
@@ -147,7 +158,7 @@ async def test_legacy_unscoped_row_stays_visible_to_every_scoped_query(
 
             await embed_task_outcome(
                 task_id=task_legacy,
-                description="legacy unscoped marker",
+                description=f"legacy unscoped marker {suffix}",
                 summary="written with no repo_id, like every pre-migration row",
                 outcome="completed",
                 files_changed=[],
@@ -156,7 +167,7 @@ async def test_legacy_unscoped_row_stays_visible_to_every_scoped_query(
             )
 
             results = await query_similar_tasks(
-                "irrelevant query text", session, top_k=50, repo_id=repo_id
+                "irrelevant query text", session, top_k=1000, repo_id=repo_id
             )
             task_ids = {r["task_id"] for r in results}
             assert task_legacy in task_ids, (
@@ -174,7 +185,7 @@ async def test_legacy_unscoped_row_stays_visible_to_every_scoped_query(
 
 
 @pytest.mark.asyncio
-@patch("app.memory.store._embed", return_value=_FAKE_VECTOR)
+@patch("app.memory.store._embed", side_effect=_vector_for)
 async def test_failure_records_are_also_isolated_by_repo_id(
     _mock_embed: object,
 ) -> None:
@@ -192,21 +203,21 @@ async def test_failure_records_are_also_isolated_by_repo_id(
 
             await embed_failure(
                 task_id=task_a,
-                error_description="error in project A",
+                error_description=f"error in project A {suffix}",
                 root_cause="root cause A",
                 db=session,
                 repo_id=repo_a,
             )
             await embed_failure(
                 task_id=task_b,
-                error_description="error in project B",
+                error_description=f"error in project B {suffix}",
                 root_cause="root cause B",
                 db=session,
                 repo_id=repo_b,
             )
 
             results_for_a = await query_failures(
-                "irrelevant", session, top_k=50, repo_id=repo_a
+                "irrelevant", session, top_k=1000, repo_id=repo_a
             )
             task_ids_for_a = {r["task_id"] for r in results_for_a}
             assert task_a in task_ids_for_a

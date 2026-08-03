@@ -527,6 +527,15 @@ class MemoryEmbedding(Base):
     )
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Gap-closure Day 40 (Stage 2, answers.md Q120 "Memory Prioritization") —
+    # see migrations/versions/026_memory_prioritization_columns.py for the
+    # real-signal-not-placeholder rationale on each default.
+    reuse_count: Mapped[int] = mapped_column(Integer, default=0)
+    importance: Mapped[float] = mapped_column(Float, default=0.5)
+    verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_accessed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class EnhancementRequest(Base):
@@ -545,7 +554,7 @@ class EnhancementRequest(Base):
     description: Mapped[str] = mapped_column(Text)
     category: Mapped[str] = mapped_column(
         String(50)
-    )  # performance | bug | orchestration | knowledge | quality | security
+    )  # performance | bug | orchestration | knowledge | quality | security | architecture
     priority: Mapped[str] = mapped_column(
         String(20), index=True
     )  # emergency | medium | low

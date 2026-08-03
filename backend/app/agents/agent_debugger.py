@@ -217,7 +217,7 @@ def run_agent_debugger_apply(
     """APPLY phase — full write toolset, only ever called after a human approves `request_id`."""
     settings = get_settings()
     repo = settings.fleet_self_repo_path
-    handlers = make_fleet_apply_handlers(repo)
+    handlers = make_fleet_apply_handlers(repo, agent_name="agent_debugger")
     handlers["record_learning"] = make_record_learning_handler("agent_debugger")
     handlers["bash"] = make_scoped_bash_handler(repo)
 

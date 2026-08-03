@@ -135,6 +135,16 @@ def test_publish_similar_content_after_promotion_creates_a_merge_draft() -> None
             mock_client.messages.create.assert_called_once()
         finally:
             _cleanup(v1.lesson_id)
+            # promote(agent_name="tester") syncs into memory_embeddings
+            # (task_id="fleet-tester") — real gap found while investigating
+            # a Day-42 (65-day plan) dedup-guard interaction: this cleanup
+            # was missing here (and 4 other tests below using the same
+            # literal agent_name), leaking 64+ rows into the shared dev DB
+            # over repeated runs. Harmless before Day 42; now a real
+            # dedup/composite-ranking false-positive risk given enough
+            # accumulated volume, so fixed at the root (real cleanup) rather
+            # than worked around in production code.
+            _cleanup_memory_embeddings("fleet-tester")
 
 
 def test_promoting_a_merge_draft_flips_the_prior_published_version_to_superseded() -> (
@@ -205,6 +215,7 @@ def test_promoting_a_merge_draft_flips_the_prior_published_version_to_superseded
             assert states == [(1, "superseded"), (2, "published")]
         finally:
             _cleanup(v1.lesson_id)
+            _cleanup_memory_embeddings("fleet-tester")  # see comment above
 
 
 def test_publish_different_topic_does_not_merge() -> None:
@@ -232,6 +243,7 @@ def test_publish_different_topic_does_not_merge() -> None:
             assert v2.state == "draft"
         finally:
             _cleanup(v1.lesson_id, v2.lesson_id)
+            _cleanup_memory_embeddings("fleet-tester")  # see comment above
 
 
 def test_publish_with_zero_vector_never_merges() -> None:
@@ -287,6 +299,7 @@ def test_rollback_restores_previous_published_version_and_state() -> None:
             )  # reflects the post-rollback state, not the stale pre-flip one
         finally:
             _cleanup(v1.lesson_id)
+            _cleanup_memory_embeddings("fleet-tester")  # see comment above
 
 
 def test_rollback_with_no_superseded_version_raises() -> None:
@@ -355,6 +368,7 @@ def test_archive_expired_marks_old_superseded_rows_archived() -> None:
             assert archived_count >= 1  # the superseded v1 row
         finally:
             _cleanup(v1.lesson_id)
+            _cleanup_memory_embeddings("fleet-tester")  # see comment above
 
 
 def test_archive_expired_disabled_when_retention_is_zero(

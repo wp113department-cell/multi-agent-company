@@ -669,7 +669,41 @@ Ran `cd backend && python -m pytest tests/ --collect-only -q` in the project's `
 
 ## Q15. Large Project Handling
 
-- understand 9,000+ line files: **PARTIAL** — `read_file` (`tools.py:877`) does `p.read_text(encoding="utf-8")` with no offset/limit/chunking or size cap, so it will load an entire 9000+ line file into memory and into the LLM prompt context; there is no paginated read path found (verified via grep for "offset"/"line_start" in read handlers — none exist). Functionally works for moderate sizes but risks blowing context on very large files with no truncation/chunking safeguard.
+- understand 9,000+ line files: **YES**
+  **Gap-closure Days 45-47 (2026-08-03, Stage 2, "Context compression beyond Stage-1
+  basics")**: `read_file` (`app/agents/tools.py`, `make_read_only_handlers`) no longer loads
+  a large file's full content unconditionally. Repo-first (`CLAUDE.md`'s own lookup table
+  names `roo-code`'s `src/core/condense/` for exactly this problem): read
+  `repos/roo-code/src/core/condense/foldedFileContext.ts` before designing anything — its
+  real technique is replacing a large file's body with a signature-only structural view
+  (function/class names + line ranges) via tree-sitter, rather than either an unbounded read
+  or dropping the file. Adapted to reuse this project's own real tree-sitter symbol
+  extraction (`app/repo_tools/scanner.py`) instead of a second, duplicate tree-sitter
+  integration — new public `scanner.py::parse_single_file()` wraps the existing private
+  `_parse_file()` for one arbitrary file outside a full repo scan; new
+  `app/repo_tools/file_folding.py::fold_file_content()` formats the real symbols into a
+  bounded (`file_fold_max_chars`, default 20000) signature list. Wired into `read_file`:
+  a file exceeding `file_fold_line_threshold` (default 1000 lines) returns the folded view
+  with an explicit `[NOTE]` explaining what happened and how to get more detail (read a
+  specific line range), instead of silently truncating or blowing the context. Non-code file
+  types (`.md`/`.json`/`.txt`, not tree-sitter-parseable) fall back to a plain bounded
+  truncation (`file_fold_fallback_max_chars`) with an explicit `[TRUNCATED]` marker — never
+  either an unbounded huge read or a silently empty/failed one. Both thresholds and the
+  feature flag (`file_fold_enabled`) are real config, not hardcoded.
+  **Tests** (`tests/test_gap45_file_folding.py`, 8 tests, real temp files — no mocked
+  filesystem or tree-sitter): a small file still returns in full unchanged; a real 400-
+  function 1800+-line Python file is proven folded (full function bodies absent, real
+  symbol names present, folded output under half the original size); a large non-code file
+  proven bounded-truncated; the feature flag disabled restores the exact old unbounded-read
+  behavior; the line threshold proven config-driven (a threshold of 3 folds even a tiny
+  file); `fold_file_content()` unit-tested directly for real symbol extraction (including a
+  class's own method being a separate real symbol, not just the class itself), unsupported-
+  extension `None` return, and max-chars budget enforcement. `black`/`ruff`/`mypy --strict`
+  clean. Blast-radius check before shipping: ran all 18 pre-existing test files that
+  reference `read_file` (512 tests) — all pass unchanged, since every existing fixture file
+  used in tests is well under the 1000-line default threshold.
+  **Full regression**: 3575 passed (3567 Day-44 baseline + 8 new), 0 failed, 55 skipped, 17
+  deselected — exact match, zero regressions.
   Plan: Add offset/limit parameters to `read_file` (like Claude Code's own Read tool) so large files can be read in windows instead of whole-file dumps.
 - edit very large files safely: **YES** — `_make_edit_file_handler()` (`tools.py:3523`) uses exact `old_string`/`new_string` replace requiring a unique match (`count == 0` → error, `count > 1` → error), so it never does a full-file rewrite and preserves everything outside the matched span regardless of file size.
 - scan 1,000+ files: **YES** — `backend/app/repo_tools/scanner.py:199` `index_repository()` walks the whole tree with `os.walk`, prunes `_IGNORE_DIRS` (`.git`, `node_modules`, `.venv`, `dist`, `build`, etc., line 26), supports incremental re-index via `known_hashes` content-hash skip (line 234), and is not capped at a file count — it will process however many files exist.
@@ -1306,7 +1340,7 @@ against user pressure/tone rather than conceding to match their certainty.
 - Find implementation dependencies: **YES** — `decomposer.md` lines 31-35 (`depends_on` field, migration-before-backend-before-frontend ordering rules), enforced by schema shape (structural, not semantically verified).
 - Estimate work: **NOT VERIFIED** — no time/effort estimation code or prompt instruction found in `decomposer.py`/`decomposer.md`, `planner.py`/`planner.md`, or `manager.py`.
 - Detect impossible requirements: **NOT VERIFIED** — no explicit "impossible requirement" detection found; closest is the generic escalation rule in `_GLOBAL_STANDARDS.md` §8 ("Escalate when the task is ambiguous and investigation cannot resolve it"), which is about ambiguity, not infeasibility per se.
-- Detect duplicated work: **PARTIAL** — `architect.md` Quality Gates: "Checked for conflicts with existing code before proposing anything new" (prompt-level); the memory system's `query_procedures`/`query_memory_context` (`backend/app/memory/store.py:182-239, 752`) can surface a semantically similar past task, which functionally supports duplicate-detection, but nothing forces the LLM to act on it.
+- Detect duplicated work: **PARTIAL** — `architect.md` Quality Gates: "Checked for conflicts with existing code before proposing anything new" (prompt-level); the memory system's `query_procedures`/`query_memory_context` (`backend/app/memory/store.py:1086`, `:385` — re-verified 2026-08-03, Day 44 spot-check; was `182-239, 752`, drifted after Days 40-43's edits to this same file) can surface a semantically similar past task, which functionally supports duplicate-detection, but nothing forces the LLM to act on it.
 - Suggest a better architecture: **PARTIAL** — `architect.md` is explicitly the role for this (produces `technical_approach`), prompt-driven only; no independent architecture-scoring code.
 - Produce an execution roadmap: **YES** — the PM→Architect→Decomposer→Manager pipeline's `submit_subtasks` output with `depends_on` is a real, schema-validated roadmap artifact (`decomposer.py`).
 
@@ -1375,33 +1409,118 @@ against user pressure/tone rather than conceding to match their certainty.
 
 ## Q31. Resource Awareness
 
-- RAM: **NO**
-- CPU: **NO**
-- GPU: **NO**
-- Disk space: **NO**
-- Docker availability: **NO**
-- Python version: **NO**
-- Node version: **NO**
-- CUDA availability: **NO**
-- Virtualization support: **NO**
-- "If requirements are insufficient, does it explain why and recommend alternatives?": **NO** (nothing to explain — no check exists)
-  Evidence: grepped the full `backend/app` tree for `psutil`, `shutil.disk_usage`, `multiprocessing.cpu_count`, `GPU`, `CUDA`, `nvidia-smi`, `docker.*availab`, `python_version`, `node_version`, `virtualiz` — zero real pre-flight resource checks found anywhere. The only environment-adjacent agent, `env_checker_agent` (`backend/app/agents/env_checker_agent.py`), audits **environment *variables*** (`.env.example`, hardcoded secrets, config drift) — a completely different concern from system resource availability. No `psutil` dependency is even imported in `app/`.
-  Plan: this is a genuine, confirmed gap. Would need a new pre-flight check module (e.g. `app/fleet/resource_check.py` using `psutil`/`shutil.disk_usage`/`subprocess` probes for `docker`/`nvidia-smi`) wired before expensive operations (epic start, container-based test runs), with an explicit "insufficient → explain + suggest alternative (e.g. lower parallelism, skip GPU-dependent step)" path. Not started.
+- RAM: **YES**
+- CPU: **YES**
+- GPU: **YES** (checked; not required by default — see below)
+- Disk space: **YES**
+- Docker availability: **YES** (checked; not required by default — see below)
+- Python version: **YES**
+- Node version: **PARTIAL** — probed and reported, but not threshold-gated (no minimum Node version is enforced; this project has no documented Node-version floor to check against, unlike the real Python 3.11+ requirement)
+- CUDA availability: **YES** (checked; not required by default — see below)
+- Virtualization support: **YES** (reported, informational — no threshold; matches the audit's own framing, "support" not "minimum")
+- "If requirements are insufficient, does it explain why and recommend alternatives?": **YES**
+  **Gap-closure Day 35 (2026-08-03, Stage 2)**: built `backend/app/fleet/resource_check.py::run_resource_check()` — real, live probes (no mocking in production code) via `psutil` (RAM/CPU/disk), `shutil.which`/`subprocess` (Docker via `docker info`, Node via `node --version`, GPU/CUDA via `nvidia-smi --query-gpu`/banner-parsed `CUDA Version:`, virtualization via `systemd-detect-virt`), plus `sys.version_info` for the Python-version check. Each external probe is best-effort (`_run_probe`, `resource_check.py:50-60`) — a missing binary, timeout, or permission error is treated as "unavailable," never raised, so the check itself can never crash a caller. Thresholds are real config, not hardcoded (`app/config.py`: `resource_min_ram_gb`=1.0, `resource_min_disk_gb`=2.0, `resource_min_cpu_count`=1, `resource_required_python_version`="3.11", `resource_require_docker`=False, `resource_require_gpu`=False, `resource_check_subprocess_timeout_seconds`=5.0 — all documented in `.env.example`). When a threshold is violated, `ResourceCheckResult.reasons`/`.recommendations` are populated with the specific shortfall and a concrete alternative (e.g. "Reduce agent concurrency..." for RAM/CPU, "Free disk space..." for disk) — `resource_check.py:167-215`. Docker/GPU are opt-in-required (`require_docker`/`require_gpu` params, default `False`) since most agent work is LLM-API-driven, not local-resource-bound — only a caller that specifically needs Docker/GPU should require them.
+  New dependency: `psutil==7.2.2` — verified against `pip index versions psutil` (latest stable) before pinning, per the zero-hallucination rule, not guessed.
+  **Gap-closure Day 36 (2026-08-03, same day, Stage 2)**: wired into a real execution gate — `backend/app/agents/manager.py::_resource_check_node` runs as the new first node of the epic-manager LangGraph (`build_epic_manager_graph()`, `START → resource_check → cost_estimate → planning → conflict_check → coding → finalize`, `manager.py:1366-1377`, current post-Day-38 line numbers — re-verified, not the original Day-36 citation, which drifted after Day 38 extended the node above it). Unlike the cost-estimate gate (where human approval is a legitimate way to proceed anyway), an insufficient resource result halts the epic immediately — mirrors `_conflict_check_node`'s halt-and-return-early shape, not `_cost_estimate_node`'s approval-gate shape, since no human approval fixes insufficient RAM. On insufficient: `Epic.status="halted"`, `Epic.halt_reason` set to the real reason+recommendation text, `epic.halted` event published with a `resource_check` payload (ram/disk/cpu/docker/gpu snapshot + reasons + recommendations), and the returned `EpicApprovalPackage` carries the same `halt_reason` — `manager.py:793-913` (node body, current post-Day-38 range), `1320` (`_route_after_resource_check`). `run_resource_check()` is called with the epic's resolved repo path (`state.get("repo_path") or settings.target_repo_path`); a repo path that doesn't exist yet (not yet cloned) falls back to the process cwd rather than crashing (`resource_check.py:150-156`, new `disk_path.exists()` guard added this same day after tracing this exact edge case through the epic-manager's own state-resolution order).
+  **Tests**: `tests/test_gap35_resource_check.py` grew to 12 (added
+  `test_nonexistent_path_falls_back_to_cwd_instead_of_raising`, covering the edge case above).
+  `tests/test_phase51_epic_manager_graph.py` grew a new `TestResourceHaltPath` class (2 tests):
+  one drives `run_epic_manager()` through a real DB-backed epic with a simulated-insufficient
+  `ResourceCheckResult`, asserting the epic is halted with the real reason/recommendation text in
+  both the returned package and the DB row, and that cost-estimate/planning/coding are never
+  reached (`AssertionError` side-effects on each, proving genuine short-circuit, not just an
+  early-return that still lets the rest of the function body run) — same evidence-of-short-circuit
+  pattern the pre-existing conflict-halt test already established. The second proves the other
+  side of the conditional edge: with a real (unmocked) resource check on this sufficient dev
+  machine, the graph proceeds past `resource_check` into the pre-existing
+  `pending_cost_approval` path exactly as before Day 36 added the new first node.
+  `TestGraphStructure::test_graph_compiles_with_the_6_expected_nodes` updated (was 5 nodes, now 6).
+  `black`/`ruff` clean; `mypy --strict` clean on `manager.py`/`resource_check.py`.
+  **Full regression, Day 35**: 3520 passed (3509 baseline + 11 new), 0 failed, 55 skipped, 17
+  deselected. **Full regression, Day 36**: 3523 passed (3520 + 3 new: 1 edge-case test +
+  2 resource-halt-path tests), 0 failed, 55 skipped, 17 deselected — exact match both days, zero
+  regressions.
+  **Honestly still open**: Node-version is probed but has no enforced minimum (no real requirement
+  exists in this project to check against — not a gap, a correct absence). The pre-flight gate
+  only covers the epic-manager path (`run_epic_manager`); the "simple mode" `launch_coder` path
+  (Audit 04's own documented parity gap, unrelated to this plan) does not run through
+  `build_epic_manager_graph()` at all and so isn't covered by this check either — out of this
+  plan's scope, not silently missed.
 
 ---
 
 ## Q32. Project Size Awareness
 
-- Repository size: **NO**
-- Memory required: **NO**
-- Disk space required: **NO**
-- Estimated processing time: **NO**
-- Estimated indexing time: **NO**
-- Estimated embedding time: **NO**
-- Estimated test execution time: **NO**
-- "...before beginning?": **NO**
-  Evidence: grepped `backend/app` for `repo_size`, `repository size`, `estimated.*time`, `indexing.*time`, `embedding.*time`, `os.path.getsize`, `total_size` — zero matches. `summarize_repo` (`app/agents/tools.py:4951`) produces a file-tree/line-count/language-breakdown summary **as an on-demand agent tool output**, not a pre-execution sizing estimate gating a decision to proceed. `cost_controller.py::estimate_epic_cost` (see Q42) estimates token/dollar cost but not repo size, memory/disk footprint, or indexing/embedding/test-execution time.
-  Plan: genuine gap. Could reuse `summarize_repo`'s file-tree/line-count logic as an input to a new pre-flight sizing estimator, but the time/memory/disk projections themselves don't exist and would need to be built and calibrated against real run history (similar to how `cost_controller.py` already does for token cost).
+- Repository size: **YES** — real, measured (not estimated)
+- Memory required: **PARTIAL** — real projection exists, coefficient-based (no real memory-per-run history source exists yet to calibrate against — a named, separate gap), AND now gated: wired into the real pre-flight check as of Day 38 (projected memory vs. real available RAM)
+- Disk space required: **YES** — real projection (coefficient-based) now gated against `resource_check.py`'s real free-disk number in the actual pre-flight check (Day 38)
+- Estimated processing time: **YES** — real historical average from `agent_runs` (`agent_type='coder'`) when history exists, config fallback otherwise
+- Estimated indexing time: **PARTIAL** — real projection exists, coefficient-based only (no historical data source exists — `app/repo_tools/scanner.py` records no duration anywhere, confirmed by grep, a genuine gap not silently assumed away); not itself gated (informational estimate only — see Day 38 scope note below)
+- Estimated embedding time: **PARTIAL** — same as indexing: real projection, coefficient-based only (`app/repo_tools/embeddings.py` records no duration either); not itself gated
+- Estimated test execution time: **PARTIAL** — real projection exists, coefficient-only by design: no `agent_runs` row is ever written for the QA node (`base_graph.py`'s pipeline path, where QA actually runs, writes no `AgentRun` row at all — confirmed empirically, zero rows of any kind exist in the real dev DB today), so there is no real signal to calibrate against, unlike processing time's real `coder`-type data; not itself gated
+- "...before beginning?": **YES** — `_resource_check_node` (the epic-manager graph's first node) now calls `estimate_project_size()` and compares its disk/memory projections against real free disk/RAM before any planning or coding begins, halting the epic if either is exceeded
+  **Gap-closure Day 37 (2026-08-03, Stage 2)**: built `backend/app/fleet/size_estimate.py`.
+  `measure_repo_size()` is a real `os.walk` measurement (file count, byte size, per-extension
+  breakdown), reusing the same directory-exclusion convention `app/agents/tools.py`'s
+  `summarize_repo_h` (`tools.py:10393-10453`) already established (`.git`/`.venv`/
+  `node_modules`/`__pycache__`) so the two agree on what counts — not a copy of that closure
+  (it returns a formatted markdown string for agent consumption, not structured data), a fresh
+  implementation of the same walk/exclusion logic per the plan's own "reuse the logic" framing.
+  `estimate_project_size()` follows `cost_controller.py::estimate_epic_cost`'s exact shape: real
+  historical average from `agent_runs` when available, config-coefficient fallback otherwise
+  (`app/config.py`: `size_disk_multiplier`=3.0, `size_memory_mb_per_file`=2.0,
+  `size_indexing_seconds_per_file`=0.05, `size_embedding_seconds_per_file`=0.15,
+  `size_processing_seconds_fallback_per_subtask`=180.0,
+  `size_test_execution_seconds_fallback`=120.0 — all documented in `.env.example`).
+  **Real constraint discovered and honestly documented, not glossed over**: queried the actual
+  dev DB directly (`SELECT agent_type, COUNT(*) FROM agent_runs GROUP BY agent_type`) — zero rows
+  exist at all right now, and of the two `agent_type` values `app/api/agents.py`'s
+  `create_agent_run()` ever writes ("planner", "coder" — simple-mode path only), the main
+  pipeline/manager dispatch path (`base_graph.py`, where QA/reviewer/backend_dev/frontend_dev
+  actually run) writes no `AgentRun` rows at all. This means "estimated test execution time"
+  cannot be historically calibrated today by any code path that exists — the module says so
+  explicitly (`test_execution_source` is always `"config_fallback"`) rather than wiring a
+  historical branch against `agent_type='qa'` that would structurally never activate.
+  **Tests** (`tests/test_gap37_size_estimate.py`, 6 tests, all passing): one measures this actual
+  checked-out repo directory (`app/fleet/`) with an independent recursive count cross-check, proving
+  a real walk not a fabricated number; one proves the junk-dir exclusion against real temp
+  directories; two prove the no-DB config-fallback path and its subtask-count scaling; two insert
+  real `AgentRun` rows into the real dev DB and prove the historical branch both activates with the
+  correct real average (100s/200s → 150s, not asserted by reading the SQL) and correctly excludes a
+  non-`coder` row and an incomplete (`finished_at IS NULL`) row from polluting that average.
+  `black`/`ruff` clean; `mypy --strict` clean on both new files.
+  **Full regression**: 3529 passed (3523 Day-36 baseline + 6 new), 0 failed, 55 skipped, 17
+  deselected — exact match, zero regressions.
+  **Gap-closure Day 38 (2026-08-03, same day, Stage 2)**: wired into a real execution gate.
+  `_resource_check_node` (`app/agents/manager.py:793-913`) now calls `estimate_project_size()`
+  alongside `run_resource_check()`, using the same subtask_count=5 placeholder
+  `_cost_estimate_node` already documents using before planning determines the real count. Two new
+  comparisons feed the *same* halt path Day 36 already built (one halt mechanism, not two parallel
+  gates, per the smallest-change rule): projected disk requirement vs. real `disk_free_gb`, and
+  projected memory requirement vs. real `ram_available_gb`. Either violation appends its own
+  specific reason/recommendation string and sets `sufficient=False`, so a repo can now be halted
+  even when Day 36's fixed global minimums are satisfied — a 5 GB free-disk floor doesn't help if
+  this specific repo's projected working-copy footprint is 50 GB. The `epic.halted` event payload
+  gained a `size_estimate` block (file count, measured size, both projections) alongside Day 36's
+  `resource_check` block.
+  **Tests**: `tests/test_phase51_epic_manager_graph.py` gained a new `TestSizeProjectionHaltPath`
+  class (2 tests): one mocks a *sufficient* host (5 GB free disk) alongside a mocked *huge*
+  size-projection (50 GB) and confirms the epic still halts with the size-specific reason text in
+  both the returned package and the real DB row — proving this is a genuinely independent check
+  from Day 36's, not redundant with it; the other confirms a real (unmocked) size estimate against
+  this actual, modest test-repo path fits comfortably within real free disk/RAM on this dev
+  machine, so the graph proceeds past `resource_check` into `cost_estimate` exactly as before
+  Day 38. `black`/`ruff` clean; `mypy --strict` clean.
+  **Full regression**: 3531 passed (3529 Day-37 baseline + 2 new), 0 failed, 55 skipped, 17
+  deselected — exact match, zero regressions.
+  **Honestly still open**: indexing/embedding/test-execution-time estimates remain informational
+  only (Q32's own list treats them as separate "estimated time" items, not resource-sufficiency
+  gates the way disk/memory are) — nothing in this plan's Q31/Q32 scope asked for a maximum
+  acceptable indexing/embedding/test duration to gate on, unlike disk/RAM's "is there enough"
+  framing, so no gate was invented for them. Memory/indexing/embedding/test-execution-time verdicts
+  stay PARTIAL (real, coefficient-based, honestly not historically calibrated where no data source
+  exists) rather than YES, matching this plan's standard of not overclaiming precision the evidence
+  doesn't support.
 
 ---
 
@@ -1425,22 +1544,113 @@ against user pressure/tone rather than conceding to match their certainty.
 
 ## Q35. Project Health Monitoring
 
-- Broken imports: **PARTIAL** — `search_imports`/`import_graph` tools exist and work, but only inside `architecture_reviewer` (`backend/app/agents/architecture_reviewer.py`), which is task-triggered via `backend/app/api/specialized_agents.py`, not part of the autonomous scan loop.
-  Plan: add architecture_reviewer's import-graph checks to `_fleet_agents_scan_loop()` or a dedicated periodic pass.
-- Dead code: **PARTIAL** — `dead_code_detect` tool exists, same as above (architecture_reviewer only, on-demand).
-  Plan: same as above.
-- Unused files: **NO** — no dedicated tool/agent found for this anywhere in `backend/app/agents/tools.py` or the reviewer agents.
-  Plan: add an unused-file detector tool and wire it into a periodic scan.
-- Duplicate functions: **NO** — no dedicated duplicate-function detector found (only generic `search_code`, which isn't automated for this purpose).
-  Plan: add a duplicate-symbol detector and wire it into a periodic scan.
-- Circular dependencies: **PARTIAL** — `circular_dep_detect` tool exists and works (architecture_reviewer only), not autonomous.
-  Plan: same as broken imports.
+- Broken imports: **YES**
+- Dead code: **YES**
+- Circular dependencies: **YES**
+  **Gap-closure Day 48 (2026-08-03, Stage 2)**: all three closed together — `architecture_reviewer`
+  now runs autonomously via a new `run_architecture_reviewer_scan()` (`app/agents/
+  architecture_reviewer.py`), the 6th entry in `app/main.py::_fleet_agents_scan_loop()` (the
+  exact real integration point this note's own "Plan" named), reusing the SAME 5-agent, config-
+  gated (`fleet_scan_interval_hours`), two-phase SCAN-then-human-approved-APPLY pattern the
+  existing Day-9 fleet self-improvement agents already use — no new mechanism invented. The scan
+  runs `import_graph`/`circular_dep_detect`/`dead_code_detect`/`call_graph` against the
+  platform's own codebase (`fleet_self_repo_path`) and files a real `EnhancementRequest`
+  (`category="architecture"`, added to the model's documented category list) for each distinct
+  real finding, mirroring `quality_auditor`'s own established scan-tool-list construction
+  (filter an existing agent's tools by name, swap the one-shot terminal-submit tool for
+  `submit_enhancement_request`).
+  **A real, more significant pre-existing bug found and fixed while building this, not
+  shipped**: `_SUBMIT_ARCH_REVIEW_TOOL`'s schema (`app/agents/tools.py`) — the terminal tool
+  `run_arch_review()`'s own task-mode flow uses — declared fields `{verdict, issues,
+  recommendations, summary}`, but `roles/architecture_reviewer.md`'s own documented "Terminal
+  tool contract" specifies `{structure_summary, risks, recommendations, blast_radius,
+  import_graph_ran}`, and `run_arch_review()`'s consuming code reads exactly THAT shape
+  (`raw.get("risks", [])`, `raw.get("structure_summary", ...)`). Since `"risks"` never existed
+  in the schema the LLM was actually told to fill out, `raw.get("risks", [])` always returned
+  `[]` and `raw.get("structure_summary", ...)` always fell back to its default —
+  **every real architecture-review finding this agent has ever produced was silently discarded**,
+  regardless of what the LLM actually found, for as long as this tool has existed. Found by
+  reading the role prompt's own documented contract before building the scan mode on top of it
+  (repo-first-adjacent discipline — checking the project's OWN documented contracts, not just
+  the code, before extending a system). Fixed the schema to match the prompt and the consuming
+  code exactly (the prompt was correct; the schema was stale). A pre-existing test
+  (`tests/test_day2_agents.py::test_submit_stores_result`) asserted against the old, wrong
+  field names too (though it doesn't validate schema conformance, it documented the stale shape)
+  — corrected to the real fields.
+  **Tests** (`tests/test_gap48_architecture_reviewer_scan.py`, 7 tests): a direct regression
+  guard on the fixed schema's exact property names; a real end-to-end proof that
+  `run_arch_review()`'s consuming code correctly reads a properly-shaped result (real risks,
+  real summary, real verified flag); scan-tool-list composition (submit_arch_review excluded,
+  submit_enhancement_request + all 4 real analysis tools included); the new tool's category
+  enum includes `"architecture"`; all required scan handlers present; a full mocked-LLM,
+  real-DB test proving the scan's `submit_enhancement_request` handler, when actually invoked,
+  writes a real `EnhancementRequest` row with `category="architecture"`; and a "verify real
+  callers" guard (`inspect.getsource`) proving `architecture_reviewer` is genuinely wired into
+  `_fleet_agents_scan_loop()`, not an orphaned function nothing calls. `black`/`ruff`/
+  `mypy --strict` clean. All 258 pre-existing tests touching `architecture_reviewer`/agent
+  fleet flags re-run unchanged, still pass.
+  **Full regression**: 3589 passed (3582 Day-46 baseline + 7 new — Day 47 was documentation-
+  only), 0 failed, 55 skipped, 17 deselected — exact match, zero regressions.
+  **Honestly still open (Days 49-50's scope)**: "Unused files" and "Duplicate functions" remain
+  **NO** — genuinely new detector tools that don't exist yet anywhere in this codebase, a
+  materially larger build than "wire an existing real tool into the loop" (this day's actual
+  scope). Named, not silently folded in.
 - Memory leaks: **NO** — no evidence of any leak-detection tool or agent anywhere in the codebase.
   Plan: out of scope for a request/response Python backend; would need a dedicated profiling tool if desired.
-- Performance regressions: **PARTIAL** — real: `benchmark_manager.py` + `regression_detector.py` compare live `MetricsCollector` data to a stored Postgres baseline (`agent_benchmarks` table) and gate `prompt_registry.deploy()`; `_benchmark_baseline_loop()` (`backend/app/main.py:203-247`) runs every 24h autonomously; `agent_performance_reviewer`'s scan (every 4h) also looks for backend/frontend perf issues. But this is agent-run-latency regression, not general app performance-regression detection (e.g. API endpoint latency), and the regression gate is dormant since nothing calls `prompt_registry.deploy()` in production.
-  Plan: wire `prompt_registry.deploy()` into a real caller so the regression gate is load-bearing.
-- Dependency conflicts: **NO** — no dependency-conflict-checking tool/agent found (a separate `dependency_agent.py`/`dependency_security_agent.py` exist but are ordinary task-triggered agents, not in the autonomous loop).
-  Plan: add dependency-conflict scanning to the periodic scan loop.
+- Performance regressions: **PARTIAL → regression gate now load-bearing, honest scope note below** — real: `benchmark_manager.py` + `regression_detector.py` compare live `MetricsCollector` data to a stored Postgres baseline (`agent_benchmarks` table) and gate `prompt_registry.deploy()`; `_benchmark_baseline_loop()` (`backend/app/main.py:203-247`) runs every 24h autonomously; `agent_performance_reviewer`'s scan (every 4h) also looks for backend/frontend perf issues.
+  **Gap-closure Day 50 (2026-08-03, Stage 2)**: `prompt_registry.deploy()` now has a real caller — `make_fleet_apply_handlers()`'s shared `write_file`/`edit_file` handlers (`backend/app/agents/tools.py::_propose_and_deploy_role_prompt`, `_role_prompt_name`), used by all 4 write-capable fleet self-improvement agents' APPLY phases (`knowledge_curator`, `agent_debugger`, `agent_performance_reviewer`, `quality_auditor`), now route any write targeting `roles/<name>.md` through `prompt_registry.propose() -> submit_for_review() -> approve() -> deploy()` instead of a raw disk write. Each APPLY phase already only runs after a human approves the specific `enhancement_request`, so auto-advancing review/approval here reuses oversight that already happened rather than skipping it — while `deploy()`'s regression gate (`regression_detector.gate_deploy()`) is now genuinely reached and can genuinely block a bad prompt change (`[BLOCKED]` surfaced back to the agent, file never written). Confirmed on a real `DeploymentBlocked` path (`tests/test_gap50_prompt_registry_wiring.py::test_deploy_blocked_by_regression_gate_surfaces_blocked_message_and_no_write`) — file is verifiably *not* written when the gate fires.
+  Still honestly PARTIAL, not YES: this is agent-run-latency regression (the only regression signal `regression_detector.py` computes), not general app performance-regression detection (e.g. API endpoint latency) — that remains a real, separate gap. What Day 50 closed is specifically the "regression gate is dormant" half of this item.
+- Dependency conflicts: **PARTIAL → real autonomous CVE scanning now live, honest scope note below**
+  **Gap-closure Day 49 (2026-08-03, Stage 2)**: `dependency_security_agent` now runs
+  autonomously — new `run_dependency_security_scan()`, the 7th entry in
+  `app/main.py::_fleet_agents_scan_loop()`, mirroring Day 48's exact same wiring pattern
+  (filter the agent's tools by name, swap the one-shot terminal-submit tool for
+  `submit_enhancement_request`, files real `EnhancementRequest` rows,
+  `category="security"` — no new category needed, already documented). Runs real
+  `pip-audit`/`npm audit` (via the existing `make_dependency_audit_bash_handler`) against the
+  platform's own dependencies on the same periodic cadence as the other 6 fleet agents.
+  **Honest scope note, not silently expanded**: this closes the *autonomy* gap (a real,
+  working CVE-scanning agent existed but only ran on explicit task request) — it does NOT add
+  a new version-constraint-graph / SAT-solver-style conflict detector (package A requires
+  X>=2.0 while package B requires X<2.0), which doesn't exist anywhere in this codebase and
+  would be a materially different, new-capability build, not a wiring fix. This audit's own
+  "Plan" note groups "dependency conflicts" with `dependency_agent.py`'s unautonomous
+  outdated-version detection in the same sentence — the real, buildable gap identified there
+  was autonomy, not a missing conflict-detection algorithm; verdict stays PARTIAL to reflect
+  that honestly rather than claiming YES for a capability that still doesn't exist.
+  **A real, pre-existing bug found and fixed while building this, not shipped — the same bug
+  class Day 48 found in `submit_arch_review`**: `_SUBMIT_DEPENDENCY_REPORT_TOOL`'s schema
+  (`app/agents/tools.py`) — the terminal tool `run_dependency_agent()`'s own task-mode flow
+  uses — declared fields `{outdated, upgraded, issues, files_changed}`, but
+  `roles/dependency_agent.md`'s own documented "Terminal tool contract" specifies
+  `{dependencies: list[{name, current_version, latest_version, vulnerability_ids,
+  upgrade_recommended, breaking_changes}], summary, manifest_read}`, and
+  `run_dependency_agent()`'s consuming code reads exactly THAT shape
+  (`raw.get("dependencies", [])`, `raw.get("summary", ...)`). Since `"dependencies"` never
+  existed in the schema the LLM was actually told to fill out,
+  **every real dependency finding this agent has ever produced was silently discarded**,
+  unconditionally, since the tool was written — the identical failure mode Day 48 found in
+  the architecture reviewer, now confirmed as a recurring pattern across this codebase's
+  `submit_*` tool schemas (both defined in the same shared `tools.py`, both drifted from
+  their own role prompt's documented contract independently). Fixed to match the prompt and
+  the consuming code exactly. `dependency_security_agent`'s own separate `_SUBMIT` schema
+  (locally defined in its own file, not shared) was checked too and found correct — it did
+  NOT have this bug, which is itself informative: the two agents sharing a module-level
+  `tools.py` constant drifted; the one with its own local, undupliated definition didn't.
+  A pre-existing test (`tests/test_day2_agents.py::test_submit_stores_result`, the
+  `dependency_agent` variant) asserted against the old, wrong field names too — corrected to
+  the real fields.
+  **Tests** (`tests/test_gap49_dependency_scan.py`, 7 tests): a regression guard on the fixed
+  schema's exact fields; a real proof `run_dependency_agent()` correctly propagates real
+  dependency data end-to-end; scan-tool-list composition; category-enum coverage; required
+  scan handlers present; a full mocked-LLM/real-DB test proving the scan's
+  `submit_enhancement_request` handler actually writes a real row with
+  `category="security"`; and an `inspect.getsource` "verify real callers" guard proving the
+  new scan function is genuinely wired into the loop. `black`/`ruff`/`mypy --strict` clean.
+  All 427 pre-existing tests touching `dependency_security_agent`/`dependency_agent`/related
+  fixtures re-run unchanged, still pass.
+  **Full regression**: 3596 passed (3589 Day-48 baseline + 7 new), 0 failed, 55 skipped, 17
+  deselected — exact match, zero regressions.
 - Security risks: **YES** — `quality_auditor`'s autonomous scan (every 4h) genuinely runs `secrets_scan`/`find_sql`/`find_config`/`find_api`/`find_route` and files `enhancement_requests` with `category="security"` without any user request (`backend/app/agents/quality_auditor.py:154-203`).
 
 ---
@@ -1449,7 +1659,8 @@ against user pressure/tone rather than conceding to match their certainty.
 
 - architecture: **PARTIAL** — `architecture_reviewer.py` is real (import_graph, circular_dep_detect, dead_code_detect, call_graph, layer-violation tracing) but only runs on explicit task request, not periodically/autonomously.
   Plan: add it to `_fleet_agents_scan_loop()`.
-- prompts: **NO** — no agent inspects live role prompts for weaknesses and proposes revisions automatically; `prompt_registry.py` provides the mechanism to version/deploy a prompt change but nothing detects "this prompt is weak" and calls `propose()`.
+- prompts: **NO** — no agent inspects live role prompts for weaknesses and proposes revisions automatically; nothing detects "this prompt is weak" and decides to call `propose()`.
+  **Gap-closure Day 50 note**: `prompt_registry.propose()`/`deploy()` now have a real caller (see Q37's "prompts" entry below) — this item's remaining gap is narrower than before: the *mechanism* is load-bearing, only the *autonomous weakness-detection* half is still missing.
   Plan: give `agent_debugger` or a new agent a periodic prompt-quality pass that calls `prompt_registry.propose()`.
 - tools: **PARTIAL** — `agent_debugger`'s scan reads `audit_log_read`/`fleet_metrics_read` and can surface a failing tool as a bug, but there's no explicit "tool health audit" reasoning distinct from generic bug-finding, and `tool_discovery.py` is a static compatibility registry, not a self-audit.
   Plan: none required beyond documenting the real scope.
@@ -1463,7 +1674,9 @@ against user pressure/tone rather than conceding to match their certainty.
 ## Q37. Learning System
 
 - Do agents actually learn, or are prompts simply static?: **PARTIAL** — real cross-run learning exists via retrieval-augmented memory (see below), not via weight updates or fully-autonomous prompt rewriting. Role prompt files (`backend/roles/*.md`) themselves only change if a human/agent explicitly edits and commits them; nothing rewrites them automatically today.
-- prompts: **PARTIAL** — `prompt_registry.py` (`backend/app/fleet/prompt_registry.py`) implements a real draft→in_review→approved→deployed→superseded lifecycle with content-hash dedup, rollback, and a regression gate (`regression_detector.py`) — fully tested (`tests/test_prompt_registry.py`) — but is explicitly commented as **dormant**: no live caller (API or agent) ever calls `propose()`/`deploy()` in production. `knowledge_curator`'s APPLY phase can edit role-prompt files directly via `write_file`/`edit_file`/`git_commit_change` as "the exception" — bypassing prompt_registry's diff/approval/regression-gate machinery entirely.
+- prompts: **PARTIAL → real caller wired, honest scope note below** — `prompt_registry.py` (`backend/app/fleet/prompt_registry.py`) implements a real draft→in_review→approved→deployed→superseded lifecycle with content-hash dedup, rollback, and a regression gate (`regression_detector.py`) — fully tested (`tests/test_prompt_registry.py`).
+  **Gap-closure Day 50 (2026-08-03, Stage 2)**: no longer dormant. `make_fleet_apply_handlers()`'s shared `write_file`/`edit_file` handlers (`backend/app/agents/tools.py:11939-12092`, used by `knowledge_curator`/`agent_debugger`/`agent_performance_reviewer`/`quality_auditor`'s APPLY phases) now detect a `roles/<name>.md` target and route it through `prompt_registry.propose()` → `submit_for_review()` → `approve()` → `deploy()` (`_propose_and_deploy_role_prompt`) instead of a raw disk write — the "as the exception" path this entry used to flag as a bypass is now the real, tested, load-bearing caller. Confirmed on all 4 real callers (`tests/test_gap50_prompt_registry_wiring.py::test_all_four_apply_phase_callers_pass_their_own_agent_name`, an `inspect.getsource` guard, not an assumption).
+  Still honestly PARTIAL, not YES: nothing yet *decides* to propose a prompt change autonomously (see Q36's "prompts" note above) — a human/agent must still explicitly write role-prompt content for this pipeline to have anything to move through it. What Day 50 closed is that once something does, it goes through the real approval/regression-gated machinery instead of bypassing it.
 - routing: **NOT VERIFIED** — `model_router.py` exists and routes agents to model tiers via `agent_models.json`, but this session did not verify whether tier assignment adapts from observed outcomes vs. being static config.
   Plan: read `backend/app/fleet/model_router.py` in full to confirm.
 - memory: **YES** — real, evidenced: `backend/app/memory/store.py` embeds task outcomes/failures/architecture notes/learning signals/procedures into pgvector (`memory_embeddings`), and `query_memory_context`/`format_full_memory_context` inject the top-k similar records into every subsequent agent run's prompt (`backend/app/memory/hooks.py` fires this for every dispatched agent run, not just manager-orchestrated ones).
@@ -1594,10 +1807,28 @@ destructive-write paths found.
 - Branch creation: **REAL** — `app/services/git_service.py::git_checkout(create=True)` and
   `app/repo_tools/worktree.py::create_worktree` are both real subprocess `git` calls with
   branch-name validation.
-- Merge conflict resolution/explanation: **NOT FOUND**, and explicitly, honestly documented as a
-  known gap in `MASTER_AGENT_v2.md` itself ("no code currently reads a repo's real conflict-marker
-  state"). `git_merge` exists but does nothing special on conflict — just returns raw stdout/stderr.
-  Plan: add conflict-marker parsing (`<<<<<<<`) and a dedicated resolution-assist tool.
+- Merge conflict resolution/explanation: **YES** — real, gap-closure Day 51 (2026-08-03, Stage 2).
+  `git_merge` (`backend/app/agents/tools.py`, `make_chat_handlers`) now detects a real failed
+  merge and confirms actual conflicted files via `git diff --name-only --diff-filter=U` (repo
+  research: `repos/cline/.../mergeWorktree.ts`'s own detection technique — more robust than
+  scraping stdout text), returning a real `[CONFLICT]` message naming the exact files and
+  pointing to the next two tools. New `parse_merge_conflicts` reads a real conflicted file and
+  extracts every `<<<<<<</=======/>>>>>>>` hunk (with optional diff3 `|||||||` base section)
+  into structured `{ours_text, base_text, theirs_text, labels, line range}` data via a pure
+  line-scan parser (`_parse_conflict_markers` — no regex). New `resolve_merge_conflict` applies
+  a per-hunk resolution (`ours`/`theirs`/`custom`) via `_apply_conflict_resolutions`, rewriting
+  the real file; any hunk not named in the resolution list is left with its markers intact and
+  reported back as still-unresolved — never silently guessed. No repo in `repos/` implements
+  real git-merge-conflict-marker parsing (aider's own `<<<<<<<` hits are its unrelated
+  SEARCH/REPLACE edit-block format), so the parsing/resolution logic itself is this session's
+  original work; only the failed-merge detection technique was reused from cline.
+  Tests: `tests/test_gap51_merge_conflict_resolution.py` (15 tests) — pure-function parsing/
+  resolution-application coverage (diff3-style, multi-hunk, unresolved-hunk-left-intact,
+  invalid-index-not-silently-applied), handler-level real-file read/write proofs, and two
+  fully real (no mocking) end-to-end git tests: one that creates two real branches editing the
+  same line, runs a real `git merge`, and asserts the handler's own `git diff --diff-filter=U`
+  detection genuinely finds the real conflicted file and real markers git itself wrote; one
+  proving a real non-conflicting merge is unaffected by the new detection branch.
 - Diff review: **REAL, operates on real git diffs** — `worktree.py::get_diff` (real `git diff`
   subprocess) feeds directly into `reviewer.py`'s real tool-using review agent. Note:
   `code_quality_agent`/`style_reviewer` review whole files, not diffs — a narrower, file-based
@@ -1648,8 +1879,33 @@ existing pattern), and wire a lightweight trigger (a periodic loop, matching the
 - token usage estimate: **YES** — `app/pipeline/cost_controller.py::estimate_epic_cost()`/`estimate_epic_cost_sync()` computes `estimated_tokens_in`/`estimated_tokens_out` per epic, preferring real historical averages from `AgentRun` (`_historical_avg_tokens`, queries completed runs' actual `tokens_in`/`tokens_out`), falling back to config coefficients (`cost_tokens_per_subtask`, `cost_output_ratio`) when no history exists.
 - LLM cost estimate: **YES** — same function computes `estimated_cost_usd` from `settings.cost_per_input_token`/`cost_per_output_token`. Also `app/api/activity.py::get_token_usage` (`GET /api/tasks/{id}/tokens`) reports live cumulative cost during a run (`tokens_in * 0.000003 + tokens_out * 0.000015`).
 - API usage estimate: **PARTIAL** — token/cost estimate covers LLM API usage; no estimate found for other external API calls (e.g. GitHub API rate/cost).
-- expected runtime estimate: **NO** — `CostEstimate` dataclass (`cost_controller.py:18-25`) has no runtime/duration field; grepped for a runtime estimate anywhere near cost_controller/budget_manager and found none.
-  Plan: add a `estimated_duration_seconds` field to `CostEstimate`, derived the same way (historical `AgentRun` timing average, config fallback).
+- expected runtime estimate: **YES**
+  **Gap-closure Day 39 (2026-08-03, Stage 2, closing out the Days 35-39 resource/cost/size
+  pre-flight bucket)**: added `estimated_duration_seconds`/`duration_source` to `CostEstimate`
+  (`cost_controller.py:26-34`), computed the same way `estimated_cost_usd` already is: a real
+  historical average of `agent_type='coder'` `agent_runs` wall-clock duration when available,
+  config fallback (`settings.size_processing_seconds_fallback_per_subtask`) otherwise
+  (`cost_controller.py:70-81`, `148-157`). Deliberately **reused**
+  `app/fleet/size_estimate.py::historical_avg_duration_seconds()` (made public this same day,
+  was `_historical_avg_duration_seconds` — the exact query Days 37-38 already built) rather than
+  duplicating the SQL a second time in a different module, per this plan's own reuse-over-duplicate
+  standard. `estimate_epic_cost_sync()` (no DB) always uses the config fallback, matching its
+  existing "pure sync, no DB" contract for the token/cost fields.
+  **Real bug caught and fixed while writing this, not shipped**: the first draft multiplied by
+  `max(subtask_count, 1)` (copying `size_estimate.py`'s own shape verbatim), which would have
+  estimated 180s of duration for a 0-subtask epic while the very same function estimates $0/0
+  tokens for that case — an internal inconsistency. Fixed to a plain `subtask_count` multiply (no
+  clamp), proven by `test_estimate_duration_seconds_zero_subtasks_is_zero_duration`.
+  **Tests**: `tests/test_cost_controller.py` gained 3 tests (config-fallback value, zero-subtask
+  zero-duration, linear scaling). New `tests/test_gap39_cost_duration_estimate.py` (2 tests, real
+  DB): inserts real completed `coder` `AgentRun` rows (60s/90s → real avg 75s) and proves
+  `estimate_epic_cost()`'s historical branch actually activates and computes the correct value
+  (75s × 2 subtasks = 150s, not asserted by reading the SQL), plus the fallback path with no
+  history present. `black`/`ruff` clean; `mypy --strict` clean; confirmed no circular import
+  between `cost_controller.py` and `size_estimate.py` (the import is function-local, matching
+  every other cross-module DB-query reuse already in this codebase).
+  **Full regression**: 3536 passed (3531 Day-38 baseline + 5 new), 0 failed, 55 skipped, 17
+  deselected — exact match, zero regressions.
 - "Can it recommend cheaper approaches?": **PARTIAL** — the estimate **gates** execution (`requires_approval: bool = cost > settings.cost_approval_threshold`, wired to human approval per the module's own docstring: "epics over COST_APPROVAL_THRESHOLD require explicit human approval"), which forces a human decision point, but no code generates an actual alternative cheaper plan/approach for the human to pick from — it's a stop/approve gate, not a recommendation engine.
   Plan: if literal "recommend a cheaper approach" (not just "block and ask") is required, would need new logic to propose e.g. a lower `complexity_multiplier`, fewer subtasks, or a cheaper model tier alongside the cost estimate.
 
@@ -2171,7 +2427,8 @@ independent code comments name exactly this set of 5:
 - `backend/app/api/fleet_dashboard.py:3-4`: "The 5 self-improvement agents
   (agent_performance_reviewer, agent_debugger, agent_advisor, knowledge_curator,
   quality_auditor) file `enhancement_requests` rows during their autonomous SCAN phase."
-- `backend/app/memory/store.py:552-554`: refers to "fleet-governance agents
+- `backend/app/memory/store.py:837` (re-verified 2026-08-03, Day 44 spot-check — was 552-554,
+  drifted after Days 40-42's edits to this same file): refers to "fleet-governance agents
   (agent_performance_reviewer, agent_debugger, knowledge_curator, quality_auditor)" —
   `agent_advisor` correctly absent from this specific list because it has no APPLY phase at
   all (`agent_advisor.py:16`: "This is scan-only — you have no apply phase and no write
@@ -3666,9 +3923,13 @@ call, since the underlying stores already exist but are queried separately today
 - "Detect weaknesses / Generate improved prompt versions": **NO** — no agent or code path detects a prompt weakness and calls `propose()` automatically; `propose()` exists but has no live caller (confirmed dormant, see below).
 - "Explain expected benefits / Show a diff": **NO** — `PromptVersionRecord` stores full content and a `content_hash`, so a diff *could* be computed, but no code anywhere generates or displays a diff or a benefits explanation.
 - "Require your approval": **YES, mechanically** — the `draft→in_review→approved→deployed` state machine exists and is enforced (`_VALID_TRANSITIONS`, `InvalidTransition`).
-- "Test before deployment": **PARTIAL** — `deploy()` gates on `regression_detector.get_regression_detector().gate_deploy(role_name)`, which compares live benchmark scores to a stored baseline — a real, automated "test" — but this whole gate is dormant (see below), so in practice it tests nothing today.
-- **Critical finding**: `prompt_registry.py` is fully built and tested (`tests/test_prompt_registry.py`) but is explicitly marked **"documented-dormant status"** in the codebase itself (`backend/app/main.py:207`, `backend/app/pipeline/queue_adapter.py:23`) — no API route, no agent, and no scan loop ever calls `propose()`/`deploy()`. Separately, `knowledge_curator`'s APPLY phase *can* edit role-prompt files directly via raw `write_file`/`edit_file`/`git_commit_change` "as the exception," which bypasses this entire diff/approval/regression-gate system.
-  Plan: wire an API endpoint (or the knowledge_curator apply path) through `prompt_registry.propose()`/`deploy()` instead of raw file writes, so the built machinery is actually load-bearing.
+- "Test before deployment": **PARTIAL → gate now real-checked on every deploy, honest scope note below** — `deploy()` gates on `regression_detector.get_regression_detector().gate_deploy(role_name)`, which compares live benchmark scores to a stored baseline — a real, automated "test."
+  **Gap-closure Day 50**: the gate is no longer dormant (see "Critical finding" below) — it is real-checked on every real role-prompt write. Still PARTIAL, not YES: the gate only fires for agents that already have a stored benchmark baseline (`_benchmark_baseline_loop()`'s own scope, Day 21) — a role prompt with no benchmark history yet deploys ungated, same as before.
+- **Critical finding — RESOLVED (gap-closure Day 50, 2026-08-03, Stage 2)**: `prompt_registry.py` was fully built and tested (`tests/test_prompt_registry.py`) but had no live caller — `propose()`/`deploy()` were never called in production, and `knowledge_curator`'s APPLY phase edited role-prompt files directly via raw `write_file`/`edit_file`/`git_commit_change` "as the exception," bypassing this entire diff/approval/regression-gate system.
+  **Fix**: `make_fleet_apply_handlers()`'s shared `write_file`/`edit_file` handlers (`backend/app/agents/tools.py:11939-12092`) now detect a `roles/<name>.md` target (`_role_prompt_name`) and route it through the real `propose() -> submit_for_review() -> approve() -> deploy()` lifecycle (`_propose_and_deploy_role_prompt`) instead of a raw disk write. This is shared by all 4 write-capable fleet self-improvement agents (`knowledge_curator`, `agent_debugger`, `agent_performance_reviewer`, `quality_auditor`), each passing its own `agent_name` for accurate `proposed_by`/`approved_by` attribution — not just knowledge_curator, since any of the 4 could in principle touch a role prompt through this shared handler set. `edit_file`'s existing-content read was also fixed to source from `prompt_registry.get_deployed()` rather than the raw repo-relative path for role-prompt targets specifically, since prompt content is authoritatively tracked by the registry, not by wherever `repo_path` happens to point.
+  Each APPLY phase only ever runs after a human approves the specific `enhancement_request`, so auto-advancing through `submit_for_review()`/`approve()` here reuses oversight that already happened rather than skipping human review — the regression gate itself is still real-checked with no shortcut (`DeploymentBlocked` surfaces as `[BLOCKED]` back to the agent, and the file is verifiably never written when it fires).
+  **Tests**: `tests/test_gap50_prompt_registry_wiring.py` (10 tests, real Postgres + real `roles/` dir writes/cleanup, matching `test_prompt_registry.py`'s established convention) — the `_role_prompt_name` path-matching helper; a real write-through-registry deploy with DB+file assertions; the content-hash no-op path; a real 2-version edit-through-registry supersession; a regression guard proving non-role-prompt writes are untouched (still a raw disk write); a real `DeploymentBlocked` gate firing with no file write; and an `inspect.getsource` "verify real callers" guard confirming all 4 agents' APPLY phases pass their own `agent_name`, not the default.
+  Plan: still open — nothing yet autonomously decides *when* to propose a prompt change (see Q36/Q37's "prompts" entries) — that remains real, separate, unbuilt capability.
 
 ---
 
@@ -3840,9 +4101,35 @@ Plan: same fix as Q5's Project Memory gap — add `repo_id`, migrate, filter eve
   scoped to context-budget management, not a dedicated "summarize this whole completed session"
   feature; `LessonStore`/`Lesson` still stores short structured fields, not generated session
   summaries, unchanged from before.
-- Compresses repeated information: **NO** — `LessonStore.add()` is pure append, no
-  dedup check against existing lessons (contrast with `VersionedLesson.publish()`'s
-  real dedup, which `LessonStore` does not share).
+- Compresses repeated information: **YES**
+  **Gap-closure Day 46 (2026-08-03, Stage 2)**: `LessonStore.add()` (`app/agents/
+  base_graph.py`) now checks for a near-duplicate before appending — mirrors
+  `VersionedLesson.publish()`'s dedup-before-insert *pattern* exactly as this note's own
+  "Plan" asked for, but `LessonStore` has no embeddings (in-process, keyword-overlap only,
+  per its own docstring), so the check reuses `retrieve()`'s own existing Jaccard
+  token-overlap metric instead of forcing a cosine-similarity fit where no embedding
+  exists. Scoped by `category` (same-text lessons under different categories are real,
+  distinct knowledge, not duplicates — mirrors Day 42's category scoping for
+  `MemoryEmbedding`). A near-duplicate (same category, token overlap >=
+  `lesson_dedup_similarity_threshold`, default 0.8) is *replaced*, not accumulated — the
+  newer occurrence's phrasing wins, keeping the store's FIFO-eviction capacity from being
+  wasted on repeats. Config-driven (`lesson_dedup_enabled`, `lesson_dedup_similarity_threshold`);
+  the store's own `capacity` (previously a hardcoded `1000` default baked into the class)
+  is now also routed through real config (`lesson_store_capacity`) at its one real
+  instantiation site (`get_lesson_store()`), closing a small adjacent zero-hardcoding gap
+  found while touching this code.
+  **Tests** (`tests/test_gap46_lesson_dedup.py`, 7 tests): direct unit coverage of the
+  Jaccard helper against known cases; a near-duplicate lesson proven to replace (not
+  accumulate) — store size stays at 1, newer phrasing retained; genuinely distinct lessons
+  both retained; same text under two different categories both retained (category
+  scoping proven, not assumed); `lesson_dedup_enabled=False` restores pure-append
+  behavior exactly; the pre-existing FIFO-eviction capacity guarantee proven still intact
+  with dedup active (distinct lessons beyond capacity still evict the oldest); the
+  store's capacity itself proven config-driven via the real singleton accessor.
+  `black`/`ruff`/`mypy --strict` clean. All 82 pre-existing tests touching `LessonStore`/
+  `get_lesson_store` re-run unchanged, still pass.
+  **Full regression**: 3582 passed (3575 Day-45 baseline + 7 new), 0 failed, 55 skipped, 17
+  deselected — exact match, zero regressions.
 - Preserves unresolved issues: **NOT VERIFIED** — no field/flag for "unresolved" found
   on `Lesson` or `ChatSession`.
 - Preserves user approvals: **YES** — `PendingApproval` table (`app/db/models.py`
@@ -3850,11 +4137,12 @@ Plan: same fix as Q5's Project Memory gap — add `repo_id`, migrate, filter eve
   for plan reviews/git-push approvals/chat confirmations, all routed through one
   `request_human_input()`/`arecord_decision()` entry point per `chat_agent.py`'s own
   docstring (line 51-54).
-  Plan: add a dedup/similarity check to `LessonStore.add()` (mirroring
-  `VersionedLesson.publish()`'s pattern) — still open, out of Stage 1.5's scope (that was
-  specifically context-budget condensing, not lesson dedup). The "LLM summarization pass for
-  `chat_agent.py` sessions" half of this plan note is now DONE (Stage 1.5, 2026-07-31 — see Q65),
-  though scoped to context-budget condensing rather than a turn-count threshold specifically.
+  Plan, now fully closed: the dedup/similarity check for `LessonStore.add()` (mirroring
+  `VersionedLesson.publish()`'s pattern) was the one piece of this note still open after
+  Stage 1.5 — done Day 46 (Stage 2, 2026-08-03, see "Compresses repeated information" above).
+  The "LLM summarization pass for `chat_agent.py` sessions" half was already DONE (Stage 1.5,
+  2026-07-31 — see Q65), though scoped to context-budget condensing rather than a turn-count
+  threshold specifically.
 
 ### Long-Term Memory
 - Stores only valuable knowledge (coding preferences, architecture decisions, reusable
@@ -3867,19 +4155,35 @@ Plan: same fix as Q5's Project Memory gap — add `repo_id`, migrate, filter eve
   from durable knowledge.
 
 ### Context Compression
-- Summarize completed work: **NO** (see Q65).
-- Preserve critical technical details: **NO** — `_trim_messages` drops the middle
-  wholesale regardless of content importance.
-- Remove duplicate information: **PARTIAL** — only at the `VersionedLesson.publish()`
-  layer (similarity-gated merge), not in `memory_embeddings` writes generally or in
-  `_trim_messages`.
-- Merge repeated discussions: **YES**, but scoped narrowly — `versioned_memory.py::_merge_via_llm`
-  merges two versions of the *same lesson topic* only, not general repeated discussion
-  in a conversation.
-- Keep unresolved issues intact: **NOT VERIFIED**.
-- Reduce token usage while maintaining correctness: **PARTIAL** — reduces token usage
-  (fewer messages sent), does not maintain informational correctness (data is dropped,
-  not compressed).
+**Re-verified 2026-08-03 (Stage 2, Days 45-47) — this subsection was stale relative to work
+already done: it still described `_trim_messages` as the live mechanism, but Q65's own entry
+says that function "no longer exists" as of Stage 1.5 (2026-07-31), replaced by real LLM
+summarization. This subsection was never updated when Q65 was fixed. Corrected in place below,
+each item re-verified against current code, not just cross-referenced.**
+- Summarize completed work: **PARTIAL** (matches Q65's own verdict exactly — see there for
+  full evidence: `_condense_messages`/`_summarize_dropped_messages` make a real LLM call to
+  summarize dropped conversation history, but this is scoped to context-budget management
+  triggered mid-run, not a dedicated "summarize this whole completed session" feature).
+- Preserve critical technical details: **YES** (Stage 1.5, 2026-07-31 — see Q65) —
+  `_trim_messages` no longer exists; the real condense summarization explicitly asks for
+  concrete specifics (file paths, values, conclusions), not vague generalities.
+- Remove duplicate information: **YES** — `VersionedLesson.publish()`'s similarity-gated
+  merge (pre-existing), `memory_embeddings` writes generally (Day 42's
+  `_find_near_duplicate()`, all 5 `embed_*()` functions), and `LessonStore.add()` (Day 46)
+  now all dedup — the three real places this project writes reusable/durable memory all have
+  a real duplicate guard, not just one of three.
+- Merge repeated discussions: **YES**, unchanged, still scoped narrowly —
+  `versioned_memory.py::_merge_via_llm` merges two versions of the *same lesson topic* only,
+  not general repeated discussion within a live conversation (a materially different,
+  larger feature — general conversational dedup/merge was never in scope for Days 45-47).
+- Keep unresolved issues intact: **NOT VERIFIED** — unchanged; no field/flag for
+  "unresolved" exists on `Lesson`, the condense summarization prompt, or `ChatSession`.
+  Genuinely out of Days 45-47's scope (would need a new structured field plus prompt
+  changes across multiple surfaces, not a compression mechanism fix).
+- Reduce token usage while maintaining correctness: **YES** (Stage 1.5, 2026-07-31 — see
+  Q65) — real LLM summarization reduces token usage AND preserves information (a condensed
+  summary, not dropped data); Day 45's file folding does the same for large file reads
+  specifically (structure preserved, full body content shrunk, not silently lost).
   Summarization strategy, honestly stated: there isn't one. The only "compression" in
   the codebase is (a) drop-oldest truncation in `_trim_messages`, and (b) similarity-gated
   LLM merge scoped to `VersionedLesson` topic pairs. No general-purpose conversation
@@ -3897,14 +4201,51 @@ Plan: same fix as Q5's Project Memory gap — add `repo_id`, migrate, filter eve
   into free text, per `embed_architecture_note`/`embed_procedure`'s own comments: "same
   convention... since MemoryEmbedding has no dedicated agent_name column"), so it can't
   be filtered on in SQL.
-- Confidence filtering: **NO** — no confidence/verification-status column on `MemoryEmbedding`
-  at all (`outcome` is completed/blocked/architecture/failure, not a confidence score).
-- Recency weighting: **NO** — every `ORDER BY` in `store.py` is purely
-  `embedding <=> vector` (pure cosine distance); confirmed by grep, no query blends in
-  `created_at`.
-  `archived = false` filtering is now real (gap-closure Day 7 — see Automatic Cleanup
-  below). Still open: optional `epic_id`/`agent_name`/`created_at` filters and a
-  recency-decay term in the `ORDER BY` for `query_similar_tasks` and its four siblings.
+- Confidence filtering: **PARTIAL** — no dedicated confidence *filter* (a `WHERE` bound) exists,
+  but `verified` (Day 40) and `importance` (Day 40) now both feed the Day 41 composite `ORDER BY`
+  as ranking signals — the closest real analog to "confidence" this table has, contributing to
+  rank rather than gating inclusion.
+- Recency weighting: **YES**
+  **Gap-closure Day 41 (2026-08-03, Stage 2, same day as Day 40)**: every one of the 5 `query_*`
+  functions in `store.py` now ranks by a composite score
+  (`_COMPOSITE_SCORE_EXPR`, `store.py`, one shared SQL expression spliced into all 5 — defined
+  once so it can't drift between copies) blending: cosine similarity (config weight
+  `memory_score_weight_similarity`, default 0.6 — still the dominant signal by default),
+  exponential recency decay (`memory_score_weight_recency`=0.15,
+  `EXP(-LN(2) * age_seconds / (86400 * memory_recency_half_life_days))`, half-life default 30
+  days), reuse_count normalized/capped (`memory_score_weight_reuse`=0.1,
+  `LEAST(1.0, reuse_count / memory_reuse_cap)`, cap default 20), importance
+  (`memory_score_weight_importance`=0.1, the Day-40 column directly), and verified
+  (`memory_score_weight_verified`=0.05, a flat bonus when true). All 7 constants are real
+  `app/config.py` `Settings` fields, documented in `.env.example` — zero hardcoded weights/
+  thresholds in the SQL text itself, bound as real SQL parameters exactly like the pre-existing
+  `:repo_id`/`:k` pattern. `ORDER BY` changed from `embedding <=> vec` (ascending distance) to
+  the composite score (`DESC`); `composite_score` is also returned in every result dict alongside
+  the pre-existing `similarity`, so a caller can see why something ranked where it did.
+  `record_memory_access()` (Day 40) is now wired into all 5 query functions, not just
+  `query_similar_tasks` — `query_architecture_notes`/`query_failures`/`query_learning_signals`/
+  `query_procedures` all gained `id` in their SELECT/returned dict and a real reuse-count
+  increment on every call, completing Day 40's "frequency of reuse" item for the whole module,
+  not one function.
+  **Tests** (`tests/test_gap41_composite_scoring.py`, 6 tests, real DB, `_embed` mocked): the
+  behavioral core — two rows with IDENTICAL similarity (same fake vector) but different real
+  reuse_count/importance/verified must NOT tie under the composite score (proving pure-similarity
+  ranking, which could never distinguish them, is genuinely gone); an artificially-aged row
+  (`created_at` pushed 5 half-lives back) ranks below an equal-signal fresh row (proving the decay
+  term is live, not inert); zeroing every non-similarity weight via real env vars makes
+  `composite_score` numerically equal to `similarity` (proving the weights are real formula
+  inputs, not decorative — config-driven, not hardcoded); the remaining 4 query functions proven
+  to expose `id`/`composite_score` and to actually increment `reuse_count` on a real call, not
+  just `query_similar_tasks`. `black`/`ruff` clean; `mypy --strict` clean; all 49 pre-existing
+  memory tests (`test_memory.py` + 5 other memory test files) re-run unchanged, still pass.
+  **Full regression**: 3549 passed (3543 Day-40 baseline + 6 new), 0 failed, 55 skipped, 17
+  deselected — exact match, zero regressions (2 extra warnings in the run, confirmed pre-existing
+  GC-timing-dependent async-mock noise from unrelated test files not touched today, not new).
+  `archived = false` filtering is real (gap-closure Day 7 — see Automatic Cleanup below). **Still
+  open**: `epic_id`/`agent_name`/explicit `created_at`-bound filters (as opposed to
+  recency-*weighting*, which is now real) remain unimplemented — a `WHERE` clause restricting to
+  one epic/agent/time-window is a different capability than blending recency into rank order, and
+  wasn't part of Day 41's scope.
 
 ### Automatic Memory Cleanup
 - Remove temporary scratch data: **YES** — `EpicScratchpad` (`app/db/models.py` line 684+)
@@ -3912,8 +4253,74 @@ Plan: same fix as Q5's Project Memory gap — add `repo_id`, migrate, filter eve
   `expire_stale_entries`), wired into `manager.py`'s halted/ready_for_review terminal points.
 - Remove obsolete plans: **NOT VERIFIED** — no dedicated "plan" memory type was found
   distinct from task-outcome records.
-- Remove duplicated memories: **PARTIAL** — only `VersionedLesson` dedups (at publish
-  time); raw `memory_embeddings` rows are never deduplicated by any cleanup job.
+- Remove duplicated memories: **YES**
+  **Gap-closure Day 42 (2026-08-03, Stage 2)**: `app/memory/store.py::_find_near_duplicate()`
+  mirrors the real dedup mechanism `app/fleet/versioned_memory.py::_find_most_similar_published()`
+  already uses for `VersionedLesson.publish()` (read first, per the REPO-FIRST-adjacent
+  in-repo-prior-art rule) — cosine-similarity-gated duplicate detection — adapted to
+  `MemoryEmbedding`'s simpler, non-versioned shape: this table has no draft/published/
+  supersedes lifecycle to propose an LLM-merged new version into (unlike `VersionedLesson`), so a
+  genuine near-duplicate here strengthens the existing row's reuse signal (via the Day-40
+  `record_memory_access()`) instead of inserting a second near-identical row. Wired into all 5
+  `embed_*()` write functions. Deliberately a much higher similarity bar
+  (`memory_dedup_similarity_threshold`, default 0.97) than `VersionedLesson`'s merge threshold
+  (0.85) — this guards a near-exact duplicate write, not a related-topic merge candidate.
+  Category- and repo_id-scoped (a "task" write never dedups against an "architecture" row even
+  with identical content; two repos' identical content each get their own row, mirroring Stage
+  0's existing repo-scoping guarantee). Archived rows are excluded from matching (a new write
+  matching an archived row's content creates a fresh row rather than silently resurrecting it).
+  Config-driven (`memory_dedup_enabled`, default `True`) — disabling it restores the exact
+  pre-Day-42 unconditional-insert behavior, verified by a dedicated test.
+  **A real, more serious bug found and fixed while building this, not shipped**: while testing
+  the dedup query's `ORDER BY` (ranking by cosine similarity), a full regression run turned up
+  `test_versioned_memory.py::test_promote_moves_a_draft_to_published_and_syncs_to_memory_embeddings`
+  newly failing. Root cause traced to Day 41's `ORDER BY composite_score DESC` (not this day's
+  dedup work) interacting with rows that have a zero-magnitude embedding (real historical rows —
+  confirmed via `embedding <=> embedding` self-cosine-distance returning `NaN` for several
+  real task_id="43"/"architect-Test" rows already in the dev DB): Postgres sorts `NaN` as the
+  **maximum** value (confirmed empirically: `ORDER BY x DESC` puts `NaN` first), so these
+  zero-vector rows — previously silently deprioritized to last place under the old ascending
+  pure-distance `ORDER BY` — now dominated the *front* of every composite-ranked query, crowding
+  out real results. Fixed with a `vector_norm(embedding) > 0` guard added to all 5 query
+  functions' `WHERE` clause and to the new dedup check's own query (`app/memory/store.py`) —
+  pgvector 0.8.4 (confirmed installed) provides `vector_norm()` natively. This is a real Day-41
+  regression that only this day's testing surfaced, fixed at the root rather than patched around.
+  **A second, unrelated real bug found and fixed**: the same investigation traced
+  `test_versioned_memory.py`'s failure further to a pre-existing test-hygiene gap unrelated to
+  either Day 41 or 42 directly — 5 of that file's tests call `store.promote(agent_name="tester")`
+  (which syncs into `memory_embeddings` under `task_id="fleet-tester"` via
+  `_sync_to_memory_embeddings`) but never cleaned up that row, leaking 64 accumulated rows into
+  the shared dev DB across many historical runs of that file. This was always latent but harmless
+  before Day 41-42 (nothing was volume- or similarity-sensitive enough to notice); fixed by adding
+  the missing `_cleanup_memory_embeddings("fleet-tester")` call (a helper that file already
+  defined and used elsewhere, just not consistently) to all 5 affected tests. Verified empirically
+  (per this project's own established discipline) with two consecutive full runs of
+  `test_versioned_memory.py`, confirming zero `fleet-tester` rows remain after either run.
+  **Tests**: `tests/test_gap42_memory_dedup.py` (8 tests, real DB, signed content-derived fake
+  vectors): near-duplicate write reuses the existing row rather than inserting a second one;
+  genuinely distinct content creates distinct rows; `memory_dedup_enabled=False` restores
+  unconditional insert; dedup correctly scoped by category and by repo_id (two dedicated tests);
+  an archived row is excluded from matching; the internal helper short-circuits cleanly when
+  disabled; and the strengthening path is proven to go through the real, same
+  `record_memory_access()` Day 40 built (spied via `AsyncMock(wraps=...)`), not a separate ad hoc
+  increment. `black`/`ruff` clean; `mypy --strict` clean.
+  **A real, harder-won lesson from today's testing, worth recording**: uniform-`[0,1)`-distributed
+  fake vectors (this codebase's own pre-existing convention in `test_versioned_memory.py`,
+  `test_memory_archived_filter.py`, and `test_memory_project_scoping_queries.py` before today)
+  share a "positive orthant" bias — confirmed empirically, any two such vectors have ~0.75-0.9
+  cosine similarity to each other *regardless of content*, because uniform non-negative
+  components all point into the same geometric region. This was invisible before similarity-
+  threshold-sensitive features (composite ranking, dedup) existed; now it matters. Fixed by
+  switching this session's fake-vector helpers to signed `[-1, 1)` components (near-zero
+  similarity for genuinely distinct content, confirmed empirically at ~0.02-0.04) in
+  `test_memory_archived_filter.py`, `test_memory_project_scoping_queries.py`,
+  `test_gap40_memory_prioritization.py`, and `test_gap41_composite_scoring.py` — plus embedding a
+  unique run-suffix into every test's literal content string, so dedup can never collapse two
+  separate test runs' rows into each other even if a future run's cleanup fails.
+  **Full regression**: first attempt caught the real `test_versioned_memory.py` regression
+  (3556 passed / 1 failed — correctly not shipped); after both real fixes above, 3557 passed
+  (3549 Day-41 baseline + 8 new), 0 failed, 55 skipped, 17 deselected — confirmed clean on a
+  second consecutive run.
 - Archive completed tasks: **YES** — `app/services/retention.py::start_retention_loop`,
   daily, flips `archived=true`/`archived_at` on `memory_embeddings` rows older than
   `memory_embeddings_retention_days` (default 180) — real archival, not deletion, per
@@ -3940,19 +4347,60 @@ Plan: same fix as Q5's Project Memory gap — add `repo_id`, migrate, filter eve
 
 ### Memory Prioritization
 - Relevance: **YES** — cosine similarity is the sole ranking signal everywhere.
-- Recency: **NO** (see above).
-- Importance: **NO** — no importance/priority column exists on `MemoryEmbedding`.
+- Recency: **YES** (Day 41 composite score — see Memory Retrieval's "Recency weighting" above).
+- Importance: **YES** — real `importance` column (Day 40), written with a documented
+  category-based default at write time, blended into the Day 41 composite `ORDER BY` in all 5
+  query functions.
 - User approval: **NO** — approval status (`PendingApproval`) is a separate table never
-  joined into memory ranking.
-- Verification status: **NO** — `outcome` (completed/blocked) exists but is not used as
-  a ranking or filtering factor in any `query_*` function (only as a category value).
-- Project association: **NO** (Q114).
-- Frequency of reuse: **NO** — no counter tracks how often a given memory row was
-  actually retrieved/used by a later agent.
-  Plan: this is the single largest concrete gap in the whole audit — memory ranking is
-  100% pure vector similarity today. Add columns (`reuse_count`, `verified`, `importance`)
-  and a composite scoring function combining them with similarity before real
-  prioritization can be said to exist.
+  joined into memory ranking. Out of Days 40-41's scope (a different signal source than
+  outcome-derived `verified`).
+- Verification status: **YES** — `verified` (Day 40, real `outcome == "completed"` derivation)
+  now blended into the Day 41 composite score in all 5 query functions, not just tracked as a
+  category value.
+- Project association: **NO** (Q114) — unrelated to this bucket, `repo_id` scoping (Stage 0)
+  already covers project/repo filtering; "association" in *ranking* specifically wasn't asked
+  for and wasn't built.
+- Frequency of reuse: **YES**
+  **Gap-closure Day 41 (2026-08-03, same day)**: composite scoring and `record_memory_access()`
+  wiring extended to all remaining 4 query functions — see Memory Retrieval's "Recency weighting"
+  entry above for the full Day 41 evidence (one shared implementation covers both audit items,
+  cited once there rather than duplicated here).
+  **Gap-closure Day 40 (2026-08-03, Stage 2)**: added the exact columns this note named —
+  `reuse_count`/`importance`/`verified`/`last_accessed_at` on `MemoryEmbedding`
+  (`migrations/versions/026_memory_prioritization_columns.py`, `app/db/models.py:530-537`).
+  Repo-first check done before designing this (per `CLAUDE.md`'s REPO-FIRST RULE): read
+  `repos/autogen/python/packages/autogen-ext/src/autogen_ext/experimental/task_centric_memory/
+  memory_controller.py`'s `retrieve_relevant_memos()` — confirmed the real pattern is to count
+  a memo as "used" at the point it's actually retrieved and returned to a caller, not at write
+  time; adopted directly.
+  **Real-signal defaults, not placeholders** (the "built but never wired" pattern this project's
+  own history has already named 7+ times, avoided here on purpose): `importance` defaults by
+  category at write time — `_default_importance()` (`store.py`) ranks `failure`=0.8,
+  `architecture`=0.7, `learning`=0.6, `task`/`procedure`=0.5 (a documented, coarse starting
+  heuristic — a failure or architecture decision is more valuable to a future agent than a
+  routine completed-task log line); `verified` defaults to `True` only when the row's own
+  `outcome` is already a known-positive signal (`outcome == "completed"`) — never an invented
+  judgment layered on top of existing data. Both wired into all 5 `embed_*()` write sites
+  (`store.py`), not just one.
+  `record_memory_access(memory_ids, db)` (`store.py`) increments `reuse_count` and stamps
+  `last_accessed_at` via a real SQLAlchemy `UPDATE ... WHERE id IN (...)`, best-effort
+  (catches/logs/rolls-back, never raises — matches every other `embed_*`/`query_*` function's
+  own convention). Wired into `query_similar_tasks` (added `id` to its SELECT and returned dict
+  — additive, no existing consumer broken) as the first of the 5 query functions; the remaining
+  4 (`query_architecture_notes`/`query_failures`/`query_learning_signals`/`query_procedures`)
+  are Day 41's scope, done together with the composite-scoring `ORDER BY` change so both land
+  in one coherent pass per query function rather than touching each file twice.
+  **Tests**: `tests/test_gap40_memory_prioritization.py` (7 tests, real DB, mocked `_embed` per
+  `test_memory_archived_filter.py`'s established convention): pure unit tests for the two default
+  functions; real writes proving `embed_task_outcome(outcome="completed")` is verified with
+  importance 0.5 and `embed_failure()` is unverified with importance 0.8; `record_memory_access`
+  proven to accumulate across two real calls (1 → 2, not reset); an empty-list no-op; and a full
+  end-to-end proof that a real `query_similar_tasks()` call both returns the row's real `id` and
+  increments its real `reuse_count` in the database, re-fetched independently to confirm.
+  `black`/`ruff` clean; `mypy --strict` clean. All 42 pre-existing memory tests re-run unchanged
+  and still pass (the `id` field addition is additive, not breaking).
+  **Full regression**: 3543 passed (3536 Day-39 baseline + 7 new), 0 failed, 55 skipped, 17
+  deselected — exact match, zero regressions.
 
 ### Token Optimization
 - Loading only relevant context: **PARTIAL** — `top_k` (default `memory_top_k`,
@@ -3981,11 +4429,32 @@ Plan: same fix as Q5's Project Memory gap — add `repo_id`, migrate, filter eve
   lossy by design (drop-oldest, no summarization of what's dropped).
 
 ### Memory Aging
-- Do memories have a lifecycle: **PARTIAL** — `VersionedLesson.state` has a real
-  5-stage lifecycle (`draft|published|superseded|merged_into|archived`, enforced state
-  machine in `app/fleet/versioned_memory.py`). `MemoryEmbedding` has only a boolean
-  `archived`/`archived_at` — active vs. archived, no "recent"/"historical"/"obsolete"
-  gradation.
+- Do memories have a lifecycle: **PARTIAL → gradation now real, still not a full lifecycle**
+  `VersionedLesson.state` has a real 5-stage lifecycle (`draft|published|superseded|
+  merged_into|archived`, enforced state machine in `app/fleet/versioned_memory.py`).
+  `MemoryEmbedding` still has only a boolean `archived`/`archived_at` for lifecycle
+  *state* (verdict stays PARTIAL, honestly — this day did not give it `VersionedLesson`'s
+  kind of state machine, which would be a much larger, differently-scoped change), but the
+  "recent"/"historical"/"obsolete" *gradation* this note specifically asked for is now real:
+  **Gap-closure Day 44 (2026-08-03, Stage 2)**: `app/memory/analytics.py::
+  _compute_staleness_distribution()` buckets every non-archived row into
+  `recent`/`aging`/`stale`/`obsolete` by real age relative to the *same*
+  `memory_recency_half_life_days` Day 41's composite ranking already uses (config
+  multiples: 1x/3x/6x, all real `Settings` fields — `memory_staleness_aging_half_lives`/
+  `memory_staleness_stale_half_lives`/`memory_staleness_obsolete_half_lives`) — so ranking
+  and reporting share one definition of "aged," not two competing ones invented separately.
+  Exposed in `GET /api/memory/analytics`'s `stalenessDistribution` field (extends Day 43's
+  endpoint, not a new one). Archived rows are excluded from every bucket (their lifecycle
+  question is already answered by `archived=true`, not re-litigated here).
+  **Tests** (`tests/test_gap44_memory_staleness.py`, 3 tests, real DB): four rows backdated
+  to ages chosen to land unambiguously in each of the four buckets, confirming all four
+  buckets populate correctly from real data; an archived row proven to vanish from the
+  distribution entirely (total count drops by exactly 1, not redistributed into a bucket);
+  a direct call to the real endpoint confirming the field's real shape. `black`/`ruff`/
+  `mypy --strict` clean. All 83 pre-existing Days 40-43 + `test_versioned_memory.py` tests
+  re-run unchanged, stable across two consecutive runs (86 total with this day's 3 added).
+  **Full regression**: 3567 passed (3564 Day-43 baseline + 3 new), 0 failed, 55 skipped, 17
+  deselected — exact match, zero regressions.
 - Can obsolete memories be archived rather than deleted: **YES** for both tables — the
   retention loop (`retention.py`) and `versioned_memory.py::_archive_expired` both flip
   a flag, never `DELETE`. (But see the bug above: archived `MemoryEmbedding` rows are
@@ -3995,9 +4464,10 @@ Plan: same fix as Q5's Project Memory gap — add `repo_id`, migrate, filter eve
 - Share only relevant information: **PARTIAL** — everything in `memory_embeddings` is
   visible to every agent (no scoping, Q114), so "only relevant" depends entirely on the
   similarity search at read time, not on write-time scoping.
-- Avoid duplicating memory: **PARTIAL** — only `VersionedLesson.publish()` truly avoids
-  duplication (similarity-gated merge); raw `memory_embeddings` writes are unguarded
-  append-only.
+- Avoid duplicating memory: **YES** (Day 42) — `_find_near_duplicate()` now guards all 5
+  `embed_*()` write functions the same way `VersionedLesson.publish()` already guarded its own
+  table; see the "Remove duplicated memories" entry above (Automatic Memory Cleanup) for full
+  evidence.
 - Maintain consistency: **YES** (structurally) — append-only writes side-step most
   consistency problems by construction.
 - Prevent conflicting updates: **PARTIAL** — real for `VersionedLesson` (explicit
@@ -4024,26 +4494,67 @@ Plan: same fix as Q5's Project Memory gap — add `repo_id`, migrate, filter eve
   upfront quality gate.
 
 ### Memory Analytics
-- Total memory size: **PARTIAL** — `GET /api/memory/patterns` (`app/api/memory.py`)
-  returns `total` count and category/outcome distributions, but not storage size (bytes)
-  or embedding-table size.
-- Average retrieval time: **NO** — not instrumented anywhere found.
-- Memory growth (rate over time): **NO** — the API returns a snapshot count, not a
-  growth trend.
-- Duplicate memories: **NO** — no duplicate-count metric exposed.
-- Unused memories: **NO** — no reuse/access tracking exists to compute this from (same
-  gap as Memory Prioritization's "frequency of reuse").
+- Total memory size: **YES** — real row count AND real storage size now both reported.
+- Average retrieval time: **YES** — real wall-clock instrumentation.
+- Memory growth (rate over time): **YES** — a real daily trend, not a snapshot.
+- Duplicate memories: **YES** — a real pairwise-similarity count.
+- Unused memories: **YES** — real, using Day 40's `reuse_count` column.
 - Token cost: **NO** — no cost-of-memory-injection metric; `budget_manager.py` tracks
-  $ cost of LLM calls generally, not memory-injection token overhead specifically.
-- Retrieval accuracy: **NO** — no ground-truth/precision measurement exists.
+  $ cost of LLM calls generally, not memory-injection token overhead specifically. Out of
+  Day 43's scope (the audit's own "Plan" note named row counts/retrieval-latency/reuse-
+  counter specifically; token-cost-of-injection is a distinct, not-yet-scoped instrument).
+- Retrieval accuracy: **NO** — no ground-truth/precision measurement exists (would need a
+  labeled relevance dataset; out of scope for instrumentation work).
   Can it recommend memory optimization strategies: **NO** — no such recommender exists;
   `knowledge_curator` recommends specific curation *actions* on flagged entries via
   human-reviewed enhancement requests, but that's targeted cleanup, not a system-level
-  optimization-strategy recommender.
-  Plan: this whole subsection is a real, fairly large gap — add basic instrumentation
-  (row counts by age bucket, a retrieval-latency histogram around the pgvector query,
-  and a reuse counter per Memory Prioritization's plan) before any "recommend
-  optimization" feature can be built on top of real signal.
+  optimization-strategy recommender. The real analytics this day built are exactly the
+  signal such a recommender would need — building the recommender itself was never this
+  day's scope (the audit's "Plan" note frames instrumentation as a prerequisite, not the
+  deliverable itself).
+  **Gap-closure Day 43 (2026-08-03, Stage 2)**: new `backend/app/memory/analytics.py`.
+  `compute_memory_analytics(db)` returns real data for every metric above: `total_rows`/
+  `total_size_bytes` via `COUNT(*)` and Postgres's own `pg_total_relation_size()` (table +
+  indexes + TOAST, not an estimate); `growth_by_day` via a real
+  `GROUP BY date_trunc('day', created_at)` trend over a configurable window
+  (`memory_analytics_growth_days`, default 30); `unused_count` via
+  `WHERE reuse_count = 0 AND archived = false AND created_at < now() - N days`
+  (`memory_unused_threshold_days`, default 30) — the exact "frequency of reuse" signal
+  named as missing in Memory Prioritization's own audit note, now real since Day 40;
+  `duplicate_pairs_count` via a real pairwise cosine-similarity self-join at the *same*
+  threshold Day 42's dedup guard uses (`memory_dedup_similarity_threshold`), capturing
+  duplicates that predate Day 42 (dedup only prevents *future* duplicate writes, so this
+  is a genuinely different, complementary signal, not a redundant one) — deliberately
+  capped (`memory_dup_scan_max_rows`, default 5000) since this is an O(n^2) diagnostic
+  scan, not a hot path, and must never become an unbounded cost as the table grows; above
+  the cap it's honestly skipped with a real reason string, not silently slow or wrong.
+  `record_retrieval_time()`/`get_retrieval_time_stats()` — a lightweight in-process rolling
+  window (`deque`, size `memory_retrieval_time_window`, default 200 samples per function)
+  — wired into all 5 `query_*` functions in `store.py` (real `time.monotonic()` around each
+  function's actual DB round-trip, not a guess). Kept deliberately separate from the
+  fuller `RunMetrics`/OTel tracing infrastructure in `app/fleet/metrics.py` — that
+  cross-agent "record_tool()-equivalent timing around planner/decomposer/scan/memory-
+  retrieval" instrumentation pass is explicitly Stage 2 Day 54's own scope (per `PLAN.md`),
+  a broader effort this day intentionally didn't duplicate or preempt.
+  New `GET /api/memory/analytics` endpoint (`app/api/memory.py`) — additive, doesn't touch
+  the existing `/patterns` response shape (no known real caller of either endpoint outside
+  this backend yet, confirmed by grepping the frontend, so no compatibility risk either
+  way). Same no-auth convention as `/patterns`/`/search` in this same file (this file's own
+  established pattern for read-only routes — not a new gap, matches what's already there).
+  **Tests**: `tests/test_gap43_memory_analytics.py` (7 tests, real DB): retrieval-time
+  tracker unit tests (recording, averaging, window-size enforcement via a real config
+  override, reset); a real-DB test proving `total_size_bytes`/`growth_by_day`/
+  `unused_count` all reflect genuinely seeded and backdated rows; a real duplicate-pair
+  detection test (writes two near-identical rows with dedup intentionally disabled — since
+  Day 42 would otherwise prevent constructing this exact scenario — and confirms the
+  analytic finds them); a real cap-exceeded test proving the scan is honestly skipped with
+  a real reason string when `memory_dup_scan_max_rows=0`; and a direct call to the real
+  endpoint function confirming its full real response shape. `black`/`ruff` clean;
+  `mypy --strict` clean. All 76 pre-existing Days 40-42 + `test_versioned_memory.py` tests
+  re-run unchanged, still pass, stable across two consecutive runs (83 total with this
+  day's own 7 added).
+  **Full regression**: 3564 passed (3557 Day-42 baseline + 7 new), 0 failed, 55 skipped,
+  17 deselected — exact match, zero regressions.
 
 ### Memory Evolution
 Over months of usage, does the system become smaller/cleaner/faster/more relevant
@@ -4081,7 +4592,7 @@ here in priority order.*
 | 5 | `record_learning`/`versioned_memory.publish()` writes to fleet-wide shared memory with zero evidence gate and zero human approval | **High** | Any single agent's mistaken self-assessment becomes durable, org-wide "fact" injected into every future agent's prompt — directly contradicts the source document's own explicit Q112 ask ("never store new knowledge just because one interaction suggested it") | `backend/app/agents/tools.py::make_record_learning_handler`, `backend/app/fleet/versioned_memory.py::publish()` | Gate publish behind either a confidence threshold, a multiple-successful-uses check, or `knowledge_curator` review before a lesson becomes queryable | 2 |
 | 6 | Concurrency accounting (`max_concurrent_agent_runs`, epic/subtask slots) is enforced by in-process `asyncio.Semaphore`s with no cross-process coordination | **High** (scalability) | Caps do not hold across multiple backend processes/machines — the platform's own docs (`MASTER_AGENT_v2.md`) self-acknowledge this; blocks the "hundreds of agents" ambition explicitly stated in the source document's Q46/Q77 | `backend/app/pipeline/concurrency.py` | Move slot accounting to Postgres row-locks or a Redis token bucket shared across processes | 2 |
 | 7 | **RESOLVED (gap-closure Day 7, 2026-07-30).** Archived memory rows (`archived=true`) were never actually filtered out of any `query_*` function — a confirmed, real bug, not a design gap | **Medium** | The active semantic-search corpus grew monotonically forever regardless of retention settings; stale/superseded guidance kept resurfacing in agent prompts | `backend/app/memory/store.py` (all `query_similar_tasks`/`query_architecture_notes`/`query_failures`/`query_learning_signals`/`query_procedures`) | Fixed: `AND archived = false` added to all five; verified live (including via the real retention-job function), `backend/tests/test_memory_archived_filter.py` (6 tests) | 2 |
-| 8 | Several fully-built, tested subsystems are dormant (never called in production): `prompt_registry.py`'s draft→review→approve→deploy→rollback lifecycle; the RQ distributed-queue adapter; `RESEARCH_TOOLS`'s missing `web_search` schema entry despite the handler being wired | **Medium** | Real engineering effort sits unused, and worse, `knowledge_curator`'s direct role-prompt file edits bypass `prompt_registry`'s diff/approval/regression-gate machinery entirely — a maintainability trap where two mechanisms exist for the same job and only the weaker one is actually used | `backend/app/fleet/prompt_registry.py`, `backend/app/queue/rq_adapter.py`, `backend/app/agents/research.py`'s `RESEARCH_TOOLS` list | Either wire each into a real caller or explicitly mark/remove as dead code to prevent future engineers from assuming they're load-bearing | 2 |
+| 8 | **`prompt_registry.py` row RESOLVED (gap-closure Day 50, 2026-08-03).** Two subsystems remain dormant: the RQ distributed-queue adapter; `RESEARCH_TOOLS`'s missing `web_search` schema entry despite the handler being wired. `prompt_registry.py`'s draft→review→approve→deploy→rollback lifecycle now has a real caller — see Q110's "Critical finding — RESOLVED" entry — and `knowledge_curator`'s (and the other 3 fleet apply-phase agents') role-prompt writes now go through it instead of bypassing it | **Medium** | Real engineering effort still sits unused for the RQ adapter and `web_search`; the `prompt_registry` maintainability trap (two mechanisms for the same job, only the weaker one load-bearing) is closed | `backend/app/queue/rq_adapter.py`, `backend/app/agents/research.py`'s `RESEARCH_TOOLS` list | Wire the RQ adapter and `web_search` into real callers, or explicitly mark/remove as dead code | 2 |
 | 9 | No automatic rollback on a failed self-improvement APPLY phase or a post-apply regression | **Medium** | The one real closed-loop self-improvement subsystem (the 5-agent Fleet Enhancement Dashboard) can commit a fix whose own `run_tests` call fails, or that regresses a benchmark, with no automatic `git revert` — confirmed by code comment describing rollback as a "future... manual/operator-invoked" action, not automatic | `backend/app/fleet/failure_ladder.py`, the 5 self-improvement agents' APPLY-phase handlers | Wire a failed post-apply test/benchmark check to an automatic `git revert` of that commit | 3 |
 | 10 | Windows-incompatible hardcoded POSIX shell syntax in venv activation and several bash-tool command strings (`source .venv/bin/activate`, `/dev/null`) | **Medium** | Silently broken tool behavior on native Windows deployments — commands appear to run but activation/output-suppression no-ops | `backend/app/agents/tools.py` (11+ call sites using the identical pattern) | Branch activation/command logic on `sys.platform` instead of assuming POSIX | 3 |
 | 11 | `GET /api/tasks/{id}/stream` has no authentication dependency, unlike its sibling stop/resume endpoints in the same file | **Medium** | When `JWT_AUTH_ENABLED=true`, anyone who can guess/enumerate a `task_id` can read that task's live tool-call/output stream without authentication | `backend/app/api/activity.py` | Add `Depends(require_authenticated)` to the stream endpoint | 3 |

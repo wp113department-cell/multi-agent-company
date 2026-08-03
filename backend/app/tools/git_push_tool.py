@@ -93,6 +93,48 @@ async def generate_commit_message(task_title: str, diff: str, model: str) -> str
         return f"feat: {task_title[:60]}"
 
 
+async def generate_pr_body(
+    task_title: str, task_description: str, diff: str, model: str
+) -> str:
+    """Gap-closure Day 52 (Stage 2, answers.md Q40 "Change summarization/PR
+    descriptions": PARTIAL — PR body was task_description[:2000], a
+    truncation of the original description, not an LLM summary of the real
+    diff/changes). Mirrors generate_commit_message's exact pattern (one
+    Haiku call, diff-aware, deterministic non-raising fallback) rather than
+    inventing a new mechanism. Falls back to task_description[:2000] — the
+    prior behavior — on any failure or an empty diff, never raises."""
+    import anthropic
+
+    from app.agents.base import get_effective_api_key
+
+    fallback = task_description[:2000]
+    if not diff.strip():
+        return fallback
+
+    prompt = (
+        "Write a concise pull request description in Markdown summarizing this "
+        "real diff. Structure: a '## Summary' section with 2-5 bullet points of "
+        "what actually changed (from the diff itself, not the task description), "
+        "and a '## Files Changed' section listing the changed file paths. Do not "
+        "invent changes not present in the diff. Respond with ONLY the markdown "
+        "body, no preamble, no code fences.\n\n"
+        f"Task: {task_title[:200]}\n\nOriginal task description (context only — "
+        f"the diff below is the source of truth for what to summarize):\n"
+        f"{task_description[:500]}\n\nDiff (truncated):\n{diff[:6000]}"
+    )
+    try:
+        client = anthropic.Anthropic(api_key=get_effective_api_key())
+        r = client.messages.create(
+            model=model, max_tokens=600, messages=[{"role": "user", "content": prompt}]
+        )
+        text_blocks = [b.text for b in r.content if b.type == "text"]
+        body = "\n".join(text_blocks).strip()
+        return body or fallback
+    except Exception as exc:
+        logger.warning("generate_pr_body failed (non-fatal), using fallback: %s", exc)
+        return fallback
+
+
 async def create_github_pr(
     repo_full_name: str,
     source_branch: str,

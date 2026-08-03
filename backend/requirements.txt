@@ -37,3 +37,4 @@ cryptography==49.0.0
 networkx==3.6.1
 scipy==1.17.1
 jsonschema==4.26.0
+psutil==7.2.2

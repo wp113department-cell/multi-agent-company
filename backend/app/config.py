@@ -119,6 +119,69 @@ class Settings(BaseSettings):
         description="Estimated output/input token ratio for cost pre-estimation",
     )
 
+    # Gap-closure Day 35 (Stage 2, answers.md Q31) — Resource Awareness pre-flight.
+    # Mirrors cost_controller.py's own shape: compute a real number, compare to a
+    # config threshold, explain + recommend when insufficient instead of a silent
+    # hard stop.
+    resource_min_ram_gb: float = Field(
+        default=1.0,
+        description="Minimum available RAM (GB) required before an epic/expensive operation may start",
+    )
+    resource_min_disk_gb: float = Field(
+        default=2.0,
+        description="Minimum free disk space (GB) on the working directory's filesystem required before an epic/expensive operation may start",
+    )
+    resource_min_cpu_count: int = Field(
+        default=1,
+        description="Minimum logical CPU count required before an epic/expensive operation may start",
+    )
+    resource_required_python_version: str = Field(
+        default="3.11",
+        description="Minimum Python version ('major.minor') this backend requires — matches the project's documented Python 3.11+ requirement",
+    )
+    resource_require_docker: bool = Field(
+        default=False,
+        description="If true, the resource pre-flight check fails when Docker is unavailable. Only operations that actually need Docker (sandboxed bash execution) should opt into this — most tasks don't need it.",
+    )
+    resource_require_gpu: bool = Field(
+        default=False,
+        description="If true, the resource pre-flight check fails when no GPU is detected. Off by default — the fleet's agents are LLM-API-driven, not local-GPU-bound.",
+    )
+    resource_check_subprocess_timeout_seconds: float = Field(
+        default=5.0,
+        description="Timeout for each external probe subprocess (docker info, node --version, nvidia-smi, systemd-detect-virt) the resource pre-flight check shells out to",
+    )
+
+    # Gap-closure Days 37-38 (Stage 2, answers.md Q32) — Project/Repo Size Awareness.
+    # Coefficients below are documented fallback defaults (no measured baseline exists
+    # yet for indexing/embedding/test-execution duration) — used only when no real
+    # historical `agent_runs` data is available, same fallback shape
+    # cost_controller.py already uses for token estimation.
+    size_disk_multiplier: float = Field(
+        default=3.0,
+        description="Projected working-copy disk footprint = raw repo size x this multiplier (clone + worktree + build artifacts)",
+    )
+    size_memory_mb_per_file: float = Field(
+        default=2.0,
+        description="Projected in-memory footprint (MB) per file during a full-repo scan/parse pass",
+    )
+    size_indexing_seconds_per_file: float = Field(
+        default=0.05,
+        description="Fallback estimated AST-indexing time (seconds) per file — no real indexing-duration history exists yet to calibrate against",
+    )
+    size_embedding_seconds_per_file: float = Field(
+        default=0.15,
+        description="Fallback estimated embedding time (seconds) per file (Voyage AI API round-trip) — no real embedding-duration history exists yet to calibrate against",
+    )
+    size_processing_seconds_fallback_per_subtask: float = Field(
+        default=180.0,
+        description="Fallback estimated coding time (seconds) per subtask, used only when no real 'coder' agent_runs history exists yet",
+    )
+    size_test_execution_seconds_fallback: float = Field(
+        default=120.0,
+        description="Fallback estimated test-execution time (seconds) — no QA-run timing data exists in agent_runs yet (the pipeline's QA node writes no AgentRun row; a separate, already-tracked gap), so this is coefficient-only, not historically calibrated",
+    )
+
     # Phase 5 — Manager Agent
     manager_max_subtask_retries: int = Field(
         default=2, description="Max per-subtask retries before epic is halted"
@@ -166,6 +229,135 @@ class Settings(BaseSettings):
     memory_top_k: int = Field(
         default=3,
         description="Number of similar past tasks to inject into Architect context",
+    )
+
+    # Gap-closure Day 41 (Stage 2, answers.md Q120 "Memory Prioritization") — composite
+    # ranking weights blending similarity with recency/reuse/importance/verified, replacing
+    # pure-cosine-distance ORDER BY. Weights need not sum to 1.0 (not enforced) — similarity
+    # stays the dominant signal by default (0.6 of the total), the rest mildly re-rank
+    # otherwise-close matches rather than overriding relevance outright.
+    memory_score_weight_similarity: float = Field(
+        default=0.6, description="Composite memory ranking: weight on cosine similarity"
+    )
+    memory_score_weight_recency: float = Field(
+        default=0.15,
+        description="Composite memory ranking: weight on exponential recency decay",
+    )
+    memory_score_weight_reuse: float = Field(
+        default=0.1,
+        description="Composite memory ranking: weight on reuse_count (capped, normalized)",
+    )
+    memory_score_weight_importance: float = Field(
+        default=0.1,
+        description="Composite memory ranking: weight on the importance column",
+    )
+    memory_score_weight_verified: float = Field(
+        default=0.05,
+        description="Composite memory ranking: weight on the verified boolean flag",
+    )
+    memory_recency_half_life_days: float = Field(
+        default=30.0,
+        description="Days for a memory's recency contribution to decay to half its initial value",
+    )
+    memory_reuse_cap: int = Field(
+        default=20,
+        description="reuse_count value at which the reuse contribution to composite ranking saturates at 1.0",
+    )
+
+    # Gap-closure Day 42 (Stage 2, answers.md Q120 "Automatic Memory Cleanup" / "Shared
+    # Memory Synchronization" — "remove duplicated memories: PARTIAL, only VersionedLesson
+    # dedups; raw memory_embeddings rows are never deduplicated"). Deliberately a much
+    # stricter threshold than memory_merge_similarity_threshold (0.85) above: this guards
+    # against a near-exact duplicate write, not a related-topic merge candidate — a lower
+    # threshold here would incorrectly collapse genuinely distinct memories.
+    memory_dedup_enabled: bool = Field(
+        default=True,
+        description="If true, embed_*() write functions check for a near-duplicate before inserting a new memory_embeddings row and strengthen the existing row instead",
+    )
+    memory_dedup_similarity_threshold: float = Field(
+        default=0.97,
+        description="Cosine similarity above which a new memory write is treated as a near-duplicate of an existing row (same category/repo scope) rather than a genuinely new memory",
+    )
+
+    # Gap-closure Day 43 (Stage 2, answers.md Q120 "Memory Analytics" — "a real, fairly
+    # large gap": average retrieval time, memory growth, duplicate count, and unused
+    # memories were all NO/PARTIAL with zero instrumentation).
+    memory_analytics_growth_days: int = Field(
+        default=30,
+        description="Number of days of daily row-count history the memory growth-rate analytic reports",
+    )
+    memory_unused_threshold_days: int = Field(
+        default=30,
+        description="A memory row with reuse_count=0 older than this many days counts as 'unused' in memory analytics",
+    )
+    memory_dup_scan_max_rows: int = Field(
+        default=5000,
+        description="Skip the O(n^2) duplicate-pair analytics scan above this many total memory rows (it is a diagnostic, not a hot path, and must not become an unbounded cost as the table grows)",
+    )
+    memory_retrieval_time_window: int = Field(
+        default=200,
+        description="Number of most-recent retrieval-duration samples kept per query_* function for the average-retrieval-time analytic",
+    )
+
+    # Gap-closure Day 44 (Stage 2, answers.md Q120 "Memory Aging" — "MemoryEmbedding has
+    # only a boolean archived/archived_at — active vs. archived, no 'recent'/'historical'/
+    # 'obsolete' gradation"). Buckets are multiples of the same
+    # memory_recency_half_life_days Day 41's composite ranking already uses, so "what
+    # counts as aged" is defined once, not two conflicting notions of age.
+    memory_staleness_aging_half_lives: float = Field(
+        default=1.0,
+        description="A memory row older than this many recency half-lives is 'aging' (was 'recent')",
+    )
+    memory_staleness_stale_half_lives: float = Field(
+        default=3.0,
+        description="A memory row older than this many recency half-lives is 'stale' (was 'aging')",
+    )
+    memory_staleness_obsolete_half_lives: float = Field(
+        default=6.0,
+        description="A memory row older than this many recency half-lives is 'obsolete' (was 'stale')",
+    )
+
+    # Gap-closure Days 45-47 (Stage 2, "Context compression beyond Stage-1 basics" —
+    # answers.md's flagged "understand 9,000+ line files: PARTIAL... no truncation/
+    # chunking safeguard"). File folding (repo-first pattern, roo-code's
+    # foldedFileContext.ts): a large file's read_file result is replaced with a
+    # signature-only structural view instead of either an unbounded full read or a
+    # dropped/empty result.
+    file_fold_enabled: bool = Field(
+        default=True,
+        description="If true, read_file returns a folded (signature-only) view for files exceeding file_fold_line_threshold instead of their full content",
+    )
+    file_fold_line_threshold: int = Field(
+        default=1000,
+        description="A file with more lines than this is folded (or, if not tree-sitter-parseable, bounded-truncated) by read_file instead of returned in full",
+    )
+    file_fold_max_chars: int = Field(
+        default=20000,
+        description="Maximum character budget for a folded (signature-only) file view",
+    )
+    file_fold_fallback_max_chars: int = Field(
+        default=20000,
+        description="Maximum characters returned for a large, non-tree-sitter-parseable file (e.g. .md/.json/.txt) — a plain bounded truncation, since folding isn't possible for these",
+    )
+
+    # Gap-closure Day 46 (Stage 2, "Context compression beyond Stage-1 basics" —
+    # answers.md Q120 "Session Memory": "Compresses repeated information: NO —
+    # LessonStore.add() is pure append, no dedup check against existing lessons").
+    # LessonStore has no embeddings (in-process, keyword-overlap only, per its own
+    # docstring) so its dedup uses the same Jaccard token-overlap metric
+    # retrieve() already established for relevance scoring, not a forced cosine-
+    # similarity fit where no embedding exists.
+    lesson_store_capacity: int = Field(
+        default=1000,
+        description="Max lessons LessonStore holds before the oldest is evicted (FIFO)",
+    )
+    lesson_dedup_enabled: bool = Field(
+        default=True,
+        description="If true, LessonStore.add() checks for a near-duplicate (same category, high token overlap) before appending and replaces it instead of accumulating repeats",
+    )
+    lesson_dedup_similarity_threshold: float = Field(
+        default=0.8,
+        description="Jaccard token-overlap ratio (same-category lessons only) above which a new lesson is treated as a near-duplicate of an existing one",
     )
 
     # Phase 7 — Concurrency

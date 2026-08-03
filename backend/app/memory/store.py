@@ -46,13 +46,15 @@ real schema rather than assumed:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db.models import MemoryEmbedding
+from app.memory.analytics import record_retrieval_time
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,146 @@ def _build_outcome_text(
 ) -> str:
     files_str = ", ".join(files_changed[:20]) if files_changed else "none"
     return f"Outcome: {outcome}\nDescription: {description}\nSummary: {summary}\nFiles: {files_str}"
+
+
+def _default_importance(category: str, outcome: str) -> float:
+    """Gap-closure Day 40 (Stage 2, answers.md Q120): a real, documented
+    starting heuristic set at write time — not a fabricated score, not a
+    dead always-0.5 default. A failure record or an architecture decision
+    is more valuable to a future agent than a routine completed-task log
+    line, so it starts ranked higher. This is intentionally coarse (4
+    buckets, category-only) — Day 41's composite scoring blends this with
+    real usage (reuse_count) and recency rather than trying to make this
+    single number carry all the signal."""
+    if category == "failure":
+        return 0.8
+    if category == "architecture":
+        return 0.7
+    if category == "learning":
+        return 0.6
+    return 0.5  # "task"/"procedure" and any future category
+
+
+def _default_verified(outcome: str) -> bool:
+    """A row is 'verified' only when its own outcome is already a real,
+    known-positive signal at write time (outcome='completed') — never a
+    separate, invented judgment layered on top of existing data."""
+    return outcome == "completed"
+
+
+async def record_memory_access(memory_ids: list[int], db: AsyncSession) -> None:
+    """Gap-closure Day 40 (Stage 2, answers.md Q120 "frequency of reuse" —
+    "no counter tracks how often a given memory row was actually retrieved
+    /used by a later agent"). Increments reuse_count and stamps
+    last_accessed_at for rows actually retrieved and returned to a caller —
+    the same point autogen's task_centric_memory `memory_controller.py`
+    counts a memo as used (retrieval time, not write time; see
+    `retrieve_relevant_memos()` in that reference repo). Best-effort: a
+    failure here must never break the caller's actual query result, so it's
+    caught and logged, never raised — mirrors every embed_*()/query_*()
+    function's own try/except-and-log convention in this module."""
+    if not memory_ids:
+        return
+    from datetime import datetime, timezone
+
+    from sqlalchemy import update as sa_update
+
+    try:
+        await db.execute(
+            sa_update(MemoryEmbedding)
+            .where(MemoryEmbedding.id.in_(memory_ids))
+            .values(
+                reuse_count=MemoryEmbedding.reuse_count + 1,
+                last_accessed_at=datetime.now(timezone.utc),
+            )
+        )
+        await db.commit()
+    except Exception as exc:
+        logger.warning("Memory: failed to record access for %s: %s", memory_ids, exc)
+        await db.rollback()
+
+
+# Gap-closure Day 41 (Stage 2, answers.md Q120 "Memory Prioritization" — "memory
+# ranking is 100% pure vector similarity today"). A single shared SQL expression
+# spliced into all 5 query_* functions' SELECT/ORDER BY, so the formula is
+# defined once and can't drift between copies. All weights/constants are real
+# config values bound as SQL parameters (app/config.py) — zero hardcoded
+# thresholds in the SQL text itself.
+_COMPOSITE_SCORE_EXPR = """(
+    :w_similarity * (1 - (embedding <=> CAST(:vec AS vector)))
+    + :w_recency * EXP(-LN(2) * EXTRACT(EPOCH FROM (now() - created_at)) / (86400.0 * :recency_half_life_days))
+    + :w_reuse * LEAST(1.0, reuse_count::float / GREATEST(CAST(:reuse_cap AS float), 1))
+    + :w_importance * importance
+    + :w_verified * (CASE WHEN verified THEN 1.0 ELSE 0.0 END)
+)"""
+
+
+def _composite_score_params(settings: Any) -> dict[str, Any]:
+    return {
+        "w_similarity": settings.memory_score_weight_similarity,
+        "w_recency": settings.memory_score_weight_recency,
+        "w_reuse": settings.memory_score_weight_reuse,
+        "w_importance": settings.memory_score_weight_importance,
+        "w_verified": settings.memory_score_weight_verified,
+        "recency_half_life_days": settings.memory_recency_half_life_days,
+        "reuse_cap": settings.memory_reuse_cap,
+    }
+
+
+async def _find_near_duplicate(
+    vector: list[float],
+    category: str,
+    repo_id: int | None,
+    db: AsyncSession,
+) -> MemoryEmbedding | None:
+    """Gap-closure Day 42 (Stage 2, answers.md Q120 "remove duplicated
+    memories" — "raw memory_embeddings rows are never deduplicated by any
+    cleanup job"). Mirrors the real dedup mechanism
+    `app/fleet/versioned_memory.py::_find_most_similar_published` already
+    uses for `VersionedLesson.publish()` — cosine-similarity-gated duplicate
+    detection — adapted to `MemoryEmbedding`'s simpler, non-versioned shape:
+    this table has no draft/published/supersedes lifecycle to propose an
+    LLM-merged new version into, so a genuine near-duplicate here just
+    strengthens the existing row's reuse signal instead of inserting a
+    second near-identical one. Deliberately a much higher similarity bar
+    (`memory_dedup_similarity_threshold`, default 0.97) than the lesson
+    merge threshold (0.85) — this guards against a near-exact duplicate
+    write, not a related-topic merge candidate; a lower bar here would
+    incorrectly collapse genuinely distinct memories."""
+    settings = get_settings()
+    if not settings.memory_dedup_enabled or vector == _ZERO_VECTOR_1536:
+        return None
+
+    try:
+        vec_str = "[" + ",".join(str(v) for v in vector) + "]"
+        sql = text("""
+            SELECT id, 1 - (embedding <=> CAST(:vec AS vector)) AS similarity
+            FROM memory_embeddings
+            WHERE category = :category
+              AND embedding IS NOT NULL
+              AND vector_norm(embedding) > 0
+              AND archived = false
+              AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+            ORDER BY embedding <=> CAST(:vec AS vector)
+            LIMIT 1
+        """)
+        row = (
+            await db.execute(
+                sql, {"vec": vec_str, "category": category, "repo_id": repo_id}
+            )
+        ).fetchone()
+        if (
+            row is None
+            or float(row.similarity) < settings.memory_dedup_similarity_threshold
+        ):
+            return None
+        result = await db.execute(
+            select(MemoryEmbedding).where(MemoryEmbedding.id == row.id)
+        )
+        return result.scalar_one_or_none()
+    except Exception as exc:
+        logger.warning("Memory: dedup check failed for category=%s: %s", category, exc)
+        return None
 
 
 async def _embed(text_to_embed: str) -> list[float]:
@@ -119,6 +261,16 @@ async def embed_task_outcome(
     text_to_embed = _build_outcome_text(description, summary, outcome, files_changed)
     vector = await _embed(text_to_embed)
 
+    duplicate = await _find_near_duplicate(vector, "task", repo_id, db)
+    if duplicate is not None:
+        await record_memory_access([duplicate.id], db)
+        logger.info(
+            "Memory: task outcome for %s is a near-duplicate of existing row %s — reused, not re-inserted",
+            task_id,
+            duplicate.id,
+        )
+        return duplicate
+
     try:
         row = MemoryEmbedding(
             task_id=task_id,
@@ -129,6 +281,8 @@ async def embed_task_outcome(
             summary=summary,
             files_changed=files_changed,
             embedding=vector,
+            importance=_default_importance("task", outcome),
+            verified=_default_verified(outcome),
         )
         db.add(row)
         await db.commit()
@@ -175,28 +329,43 @@ async def query_similar_tasks(
         return []
 
     try:
-        # Use pgvector cosine distance operator (<=>)
-        sql = text("""
+        # Use pgvector cosine distance operator (<=>). Ranked by the Day-41
+        # composite score (similarity + recency + reuse + importance +
+        # verified), not pure cosine distance — see _COMPOSITE_SCORE_EXPR.
+        sql = text(f"""
             SELECT
+                id,
                 task_id,
                 epic_id,
                 outcome,
                 description,
                 summary,
                 files_changed,
-                1 - (embedding <=> CAST(:vec AS vector)) AS similarity
+                1 - (embedding <=> CAST(:vec AS vector)) AS similarity,
+                {_COMPOSITE_SCORE_EXPR} AS composite_score
             FROM memory_embeddings
             WHERE embedding IS NOT NULL
+              AND vector_norm(embedding) > 0
               AND archived = false
               AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
-            ORDER BY embedding <=> CAST(:vec AS vector)
+            ORDER BY {_COMPOSITE_SCORE_EXPR} DESC
             LIMIT :k
         """)
         vec_str = "[" + ",".join(str(v) for v in vector) + "]"
-        result = await db.execute(sql, {"vec": vec_str, "k": k, "repo_id": repo_id})
+        params = {
+            "vec": vec_str,
+            "k": k,
+            "repo_id": repo_id,
+            **_composite_score_params(settings),
+        }
+        _t0 = time.monotonic()
+        result = await db.execute(sql, params)
         rows = result.fetchall()
+        record_retrieval_time("query_similar_tasks", (time.monotonic() - _t0) * 1000)
+        await record_memory_access([row.id for row in rows], db)
         return [
             {
+                "id": row.id,
                 "task_id": row.task_id,
                 "epic_id": row.epic_id,
                 "outcome": row.outcome,
@@ -204,6 +373,7 @@ async def query_similar_tasks(
                 "summary": row.summary,
                 "files_changed": list(row.files_changed or []),
                 "similarity": float(row.similarity),
+                "composite_score": float(row.composite_score),
             }
             for row in rows
         ]
@@ -375,6 +545,16 @@ async def embed_architecture_note(
     full_content = f"Agent: {agent_name}\n{content}" if agent_name else content
     vector = await _embed(full_content)
 
+    duplicate = await _find_near_duplicate(vector, "architecture", repo_id, db)
+    if duplicate is not None:
+        await record_memory_access([duplicate.id], db)
+        logger.info(
+            "Memory: architecture note for %s is a near-duplicate of existing row %s — reused, not re-inserted",
+            task_id,
+            duplicate.id,
+        )
+        return duplicate
+
     try:
         row = MemoryEmbedding(
             task_id=task_id,
@@ -386,6 +566,8 @@ async def embed_architecture_note(
             summary=full_content[:300],
             files_changed=[],
             embedding=vector,
+            importance=_default_importance("architecture", "architecture"),
+            verified=_default_verified("architecture"),
         )
         db.add(row)
         await db.commit()
@@ -466,32 +648,48 @@ async def query_architecture_notes(
         return []
 
     try:
-        sql = text("""
+        sql = text(f"""
             SELECT
+                id,
                 task_id,
                 epic_id,
                 outcome,
                 description,
                 summary,
                 files_changed,
-                1 - (embedding <=> CAST(:vec AS vector)) AS similarity
+                1 - (embedding <=> CAST(:vec AS vector)) AS similarity,
+                {_COMPOSITE_SCORE_EXPR} AS composite_score
             FROM memory_embeddings
             WHERE outcome = 'architecture'
               AND embedding IS NOT NULL
+              AND vector_norm(embedding) > 0
               AND archived = false
               AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
-            ORDER BY embedding <=> CAST(:vec AS vector)
+            ORDER BY {_COMPOSITE_SCORE_EXPR} DESC
             LIMIT :k
         """)
         vec_str = "[" + ",".join(str(v) for v in vector) + "]"
-        result = await db.execute(sql, {"vec": vec_str, "k": top_k, "repo_id": repo_id})
+        params = {
+            "vec": vec_str,
+            "k": top_k,
+            "repo_id": repo_id,
+            **_composite_score_params(settings),
+        }
+        _t0 = time.monotonic()
+        result = await db.execute(sql, params)
         rows = result.fetchall()
+        record_retrieval_time(
+            "query_architecture_notes", (time.monotonic() - _t0) * 1000
+        )
+        await record_memory_access([row.id for row in rows], db)
         return [
             {
+                "id": row.id,
                 "task_id": row.task_id,
                 "epic_id": row.epic_id,
                 "content": row.description,
                 "similarity": float(row.similarity),
+                "composite_score": float(row.composite_score),
             }
             for row in rows
         ]
@@ -524,6 +722,16 @@ async def embed_failure(
     content = f"Error: {error_description}\nRoot cause: {root_cause}"
     vector = await _embed(content)
 
+    duplicate = await _find_near_duplicate(vector, "failure", repo_id, db)
+    if duplicate is not None:
+        await record_memory_access([duplicate.id], db)
+        logger.info(
+            "Memory: failure for %s is a near-duplicate of existing row %s — reused, not re-inserted",
+            task_id,
+            duplicate.id,
+        )
+        return duplicate
+
     try:
         row = MemoryEmbedding(
             task_id=task_id,
@@ -535,6 +743,8 @@ async def embed_failure(
             summary=root_cause[:300],
             files_changed=[],
             embedding=vector,
+            importance=_default_importance("failure", "failure"),
+            verified=_default_verified("failure"),
         )
         db.add(row)
         await db.commit()
@@ -566,31 +776,45 @@ async def query_failures(
         return []
 
     try:
-        sql = text("""
+        sql = text(f"""
             SELECT
+                id,
                 task_id,
                 epic_id,
                 description,
                 summary,
-                1 - (embedding <=> CAST(:vec AS vector)) AS similarity
+                1 - (embedding <=> CAST(:vec AS vector)) AS similarity,
+                {_COMPOSITE_SCORE_EXPR} AS composite_score
             FROM memory_embeddings
             WHERE outcome = 'failure'
               AND embedding IS NOT NULL
+              AND vector_norm(embedding) > 0
               AND archived = false
               AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
-            ORDER BY embedding <=> CAST(:vec AS vector)
+            ORDER BY {_COMPOSITE_SCORE_EXPR} DESC
             LIMIT :k
         """)
         vec_str = "[" + ",".join(str(v) for v in vector) + "]"
-        result = await db.execute(sql, {"vec": vec_str, "k": top_k, "repo_id": repo_id})
+        params = {
+            "vec": vec_str,
+            "k": top_k,
+            "repo_id": repo_id,
+            **_composite_score_params(settings),
+        }
+        _t0 = time.monotonic()
+        result = await db.execute(sql, params)
         rows = result.fetchall()
+        record_retrieval_time("query_failures", (time.monotonic() - _t0) * 1000)
+        await record_memory_access([row.id for row in rows], db)
         return [
             {
+                "id": row.id,
                 "task_id": row.task_id,
                 "epic_id": row.epic_id,
                 "error": row.description,
                 "root_cause": row.summary,
                 "similarity": float(row.similarity),
+                "composite_score": float(row.composite_score),
             }
             for row in rows
         ]
@@ -624,6 +848,16 @@ async def embed_learning_signal(
     content = f"Agent: {agent_name}\nAction: {description}\nOutcome: {outcome_summary}"
     vector = await _embed(content)
 
+    duplicate = await _find_near_duplicate(vector, "learning", repo_id, db)
+    if duplicate is not None:
+        await record_memory_access([duplicate.id], db)
+        logger.info(
+            "Memory: learning signal for %s is a near-duplicate of existing row %s — reused, not re-inserted",
+            agent_name,
+            duplicate.id,
+        )
+        return duplicate
+
     try:
         row = MemoryEmbedding(
             task_id=f"fleet-{agent_name}",
@@ -634,6 +868,8 @@ async def embed_learning_signal(
             summary=outcome_summary[:300],
             files_changed=[],
             embedding=vector,
+            importance=_default_importance("learning", "learning"),
+            verified=_default_verified("learning"),
         )
         db.add(row)
         await db.commit()
@@ -708,29 +944,43 @@ async def query_learning_signals(
         return []
 
     try:
-        sql = text("""
+        sql = text(f"""
             SELECT
+                id,
                 task_id,
                 description,
                 summary,
-                1 - (embedding <=> CAST(:vec AS vector)) AS similarity
+                1 - (embedding <=> CAST(:vec AS vector)) AS similarity,
+                {_COMPOSITE_SCORE_EXPR} AS composite_score
             FROM memory_embeddings
             WHERE category = 'learning'
               AND embedding IS NOT NULL
+              AND vector_norm(embedding) > 0
               AND archived = false
               AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
-            ORDER BY embedding <=> CAST(:vec AS vector)
+            ORDER BY {_COMPOSITE_SCORE_EXPR} DESC
             LIMIT :k
         """)
         vec_str = "[" + ",".join(str(v) for v in vector) + "]"
-        result = await db.execute(sql, {"vec": vec_str, "k": top_k, "repo_id": repo_id})
+        params = {
+            "vec": vec_str,
+            "k": top_k,
+            "repo_id": repo_id,
+            **_composite_score_params(settings),
+        }
+        _t0 = time.monotonic()
+        result = await db.execute(sql, params)
         rows = result.fetchall()
+        record_retrieval_time("query_learning_signals", (time.monotonic() - _t0) * 1000)
+        await record_memory_access([row.id for row in rows], db)
         return [
             {
+                "id": row.id,
                 "agent_name": str(row.task_id).removeprefix("fleet-"),
                 "action": row.description,
                 "outcome": row.summary,
                 "similarity": float(row.similarity),
+                "composite_score": float(row.composite_score),
             }
             for row in rows
         ]
@@ -791,6 +1041,16 @@ async def embed_procedure(
         f"Agent: {agent_name}\nResolution: {resolution}\nSteps:\n{steps_text}"
     )
 
+    duplicate = await _find_near_duplicate(vector, "procedure", repo_id, db)
+    if duplicate is not None:
+        await record_memory_access([duplicate.id], db)
+        logger.info(
+            "Memory: procedure for %s is a near-duplicate of existing row %s — reused, not re-inserted",
+            task_id,
+            duplicate.id,
+        )
+        return duplicate
+
     try:
         row = MemoryEmbedding(
             task_id=task_id,
@@ -802,6 +1062,8 @@ async def embed_procedure(
             summary=summary_text[:2000],
             files_changed=[],
             embedding=vector,
+            importance=_default_importance("procedure", "procedure"),
+            verified=_default_verified("procedure"),
         )
         db.add(row)
         await db.commit()
@@ -841,31 +1103,45 @@ async def query_procedures(
         return []
 
     try:
-        sql = text("""
+        sql = text(f"""
             SELECT
+                id,
                 task_id,
                 epic_id,
                 description,
                 summary,
-                1 - (embedding <=> CAST(:vec AS vector)) AS similarity
+                1 - (embedding <=> CAST(:vec AS vector)) AS similarity,
+                {_COMPOSITE_SCORE_EXPR} AS composite_score
             FROM memory_embeddings
             WHERE category = 'procedure'
               AND embedding IS NOT NULL
+              AND vector_norm(embedding) > 0
               AND archived = false
               AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
-            ORDER BY embedding <=> CAST(:vec AS vector)
+            ORDER BY {_COMPOSITE_SCORE_EXPR} DESC
             LIMIT :k
         """)
         vec_str = "[" + ",".join(str(v) for v in vector) + "]"
-        result = await db.execute(sql, {"vec": vec_str, "k": top_k, "repo_id": repo_id})
+        params = {
+            "vec": vec_str,
+            "k": top_k,
+            "repo_id": repo_id,
+            **_composite_score_params(settings),
+        }
+        _t0 = time.monotonic()
+        result = await db.execute(sql, params)
         rows = result.fetchall()
+        record_retrieval_time("query_procedures", (time.monotonic() - _t0) * 1000)
+        await record_memory_access([row.id for row in rows], db)
         return [
             {
+                "id": row.id,
                 "task_id": row.task_id,
                 "epic_id": row.epic_id,
                 "symptom": row.description,
                 "steps_and_resolution": row.summary,
                 "similarity": float(row.similarity),
+                "composite_score": float(row.composite_score),
             }
             for row in rows
         ]

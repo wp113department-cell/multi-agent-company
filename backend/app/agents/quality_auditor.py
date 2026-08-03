@@ -209,7 +209,7 @@ def run_quality_auditor_apply(
     """APPLY phase — only ever called after a human approves `request_id`. One scoped fix."""
     settings = get_settings()
     repo = settings.fleet_self_repo_path
-    handlers = make_fleet_apply_handlers(repo)
+    handlers = make_fleet_apply_handlers(repo, agent_name="quality_auditor")
 
     handlers["record_learning"] = make_record_learning_handler("quality_auditor")
 

@@ -1003,9 +1003,41 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
         if not p.exists():
             return f"[ERROR] File not found: {rel}"
         try:
-            return str(p.read_text(encoding="utf-8"))
+            content = str(p.read_text(encoding="utf-8"))
         except Exception as e:
             return f"[ERROR] Cannot read {rel}: {e}"
+
+        # Gap-closure Days 45-47 (Stage 2) — this file has "no truncation/
+        # chunking safeguard" for 9,000+ line files (answers.md); a large
+        # file is folded to its structural signature instead of loaded in
+        # full, or bounded-truncated when folding isn't possible (non-code
+        # file types).
+        settings = get_settings()
+        line_count = content.count("\n") + 1
+        if (
+            settings.file_fold_enabled
+            and line_count > settings.file_fold_line_threshold
+        ):
+            from app.repo_tools.file_folding import fold_file_content
+
+            folded = fold_file_content(p, settings.file_fold_max_chars)
+            if folded is not None:
+                return (
+                    f"[NOTE] {rel} is {line_count} lines — showing structure "
+                    "only (functions/classes + line ranges) instead of full "
+                    "content to avoid an oversized context. Read a specific "
+                    "line range if you need implementation detail.\n\n"
+                    f"{folded}"
+                )
+            if len(content) > settings.file_fold_fallback_max_chars:
+                cap = settings.file_fold_fallback_max_chars
+                return (
+                    content[:cap]
+                    + f"\n... [TRUNCATED: {rel} is {line_count} lines; showing "
+                    f"the first {cap} characters]"
+                )
+
+        return content
 
     def list_files(inp: dict[str, Any]) -> str:
         directory = str(inp.get("directory", ""))
@@ -2388,6 +2420,203 @@ _GIT_MERGE_TOOL = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# Gap-closure Day 51 (Stage 2, answers.md Q40 "Merge conflict resolution/
+# explanation": NOT FOUND — "git_merge exists but does nothing special on
+# conflict — just returns raw stdout/stderr"). Repo research
+# (repos/cline/apps/vscode/src/core/controller/worktree/mergeWorktree.ts):
+# cline detects a failed merge and lists conflicted files via
+# `git diff --name-only --diff-filter=U` rather than scraping stdout text —
+# that detection technique is reused in git_merge below. cline stops there
+# (aborts the merge and reports file names); actual conflict-marker parsing
+# and a resolution-assist tool are this session's own original addition —
+# no repo in repos/ implements real git-merge-conflict-marker parsing
+# (aider's own `<<<<<<<`/`=======`/`>>>>>>>` hits are its unrelated
+# SEARCH/REPLACE edit-block format, not git conflicts).
+# ---------------------------------------------------------------------------
+
+
+def _parse_conflict_markers(text: str) -> list[dict[str, Any]]:
+    """Pure line-scan (no regex) over a file's real content, extracting every
+    git conflict region delimited by <<<<<<</=======/>>>>>>> markers (with
+    optional diff3-style ||||||| base section). Returns one dict per hunk:
+    index, ours_label, base_label, theirs_label, ours_text, base_text,
+    theirs_text, start_line, end_line (1-indexed, inclusive)."""
+    lines = text.split("\n")
+    hunks: list[dict[str, Any]] = []
+    state = "context"
+    ours_label = base_label = theirs_label = ""
+    ours_lines: list[str] = []
+    base_lines: list[str] = []
+    theirs_lines: list[str] = []
+    start_line = 0
+
+    for lineno, line in enumerate(lines, start=1):
+        if state == "context":
+            if line.startswith("<<<<<<<"):
+                state = "ours"
+                start_line = lineno
+                ours_label = line[len("<<<<<<<") :].strip()
+                ours_lines, base_lines, theirs_lines = [], [], []
+                base_label = ""
+            continue
+        if state == "ours":
+            if line.startswith("|||||||"):
+                state = "base"
+                base_label = line[len("|||||||") :].strip()
+            elif line.startswith("======="):
+                state = "theirs"
+            else:
+                ours_lines.append(line)
+            continue
+        if state == "base":
+            if line.startswith("======="):
+                state = "theirs"
+            else:
+                base_lines.append(line)
+            continue
+        if state == "theirs":
+            if line.startswith(">>>>>>>"):
+                theirs_label = line[len(">>>>>>>") :].strip()
+                hunks.append(
+                    {
+                        "index": len(hunks),
+                        "ours_label": ours_label,
+                        "base_label": base_label,
+                        "theirs_label": theirs_label,
+                        "ours_text": "\n".join(ours_lines),
+                        "base_text": "\n".join(base_lines) if base_lines else "",
+                        "theirs_text": "\n".join(theirs_lines),
+                        "start_line": start_line,
+                        "end_line": lineno,
+                    }
+                )
+                state = "context"
+            else:
+                theirs_lines.append(line)
+            continue
+    return hunks
+
+
+def _apply_conflict_resolutions(
+    text: str, resolutions: dict[int, dict[str, Any]]
+) -> tuple[str, list[int], list[int]]:
+    """Rewrites text, replacing each conflict hunk with the resolved content
+    per `resolutions` (index -> {"choice": "ours"|"theirs"|"custom",
+    "custom_content": str}). Hunks with no matching (or invalid) resolution
+    are left untouched (markers intact). Returns (new_text, applied_indices,
+    unresolved_indices) — every real hunk is accounted for in exactly one of
+    the two lists, so a resolutions entry for a non-existent index is never
+    silently counted as applied."""
+    lines = text.split("\n")
+    out: list[str] = []
+    applied: list[int] = []
+    unresolved: list[int] = []
+    state = "context"
+    ours_lines: list[str] = []
+    theirs_lines: list[str] = []
+    marker_block: list[str] = []
+    hunk_index = -1
+
+    for line in lines:
+        if state == "context":
+            if line.startswith("<<<<<<<"):
+                state = "ours"
+                hunk_index += 1
+                ours_lines, theirs_lines = [], []
+                marker_block = [line]
+            else:
+                out.append(line)
+            continue
+        if state == "ours":
+            marker_block.append(line)
+            if line.startswith("|||||||"):
+                state = "base"
+            elif line.startswith("======="):
+                state = "theirs"
+            else:
+                ours_lines.append(line)
+            continue
+        if state == "base":
+            marker_block.append(line)
+            if line.startswith("======="):
+                state = "theirs"
+            continue
+        if state == "theirs":
+            marker_block.append(line)
+            if line.startswith(">>>>>>>"):
+                resolution = resolutions.get(hunk_index)
+                choice = resolution.get("choice") if resolution else None
+                if choice == "ours":
+                    out.extend(ours_lines)
+                    applied.append(hunk_index)
+                elif choice == "theirs":
+                    out.extend(theirs_lines)
+                    applied.append(hunk_index)
+                elif choice == "custom" and resolution is not None:
+                    out.extend(str(resolution.get("custom_content", "")).split("\n"))
+                    applied.append(hunk_index)
+                else:
+                    out.extend(marker_block)
+                    unresolved.append(hunk_index)
+                state = "context"
+            else:
+                theirs_lines.append(line)
+            continue
+    return "\n".join(out), applied, unresolved
+
+
+_PARSE_MERGE_CONFLICTS_TOOL = {
+    "name": "parse_merge_conflicts",
+    "description": "Parse a file's real <<<<<<</=======/>>>>>>> conflict markers into structured hunks (ours/theirs text, labels, line ranges) — read this before deciding how to resolve a conflicted file, never guess resolution from raw marker text.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Conflicted file, relative to repo root",
+            },
+        },
+        "required": ["path"],
+    },
+}
+
+_RESOLVE_MERGE_CONFLICT_TOOL = {
+    "name": "resolve_merge_conflict",
+    "description": "Resolve specific conflict hunks in a file (by index, from parse_merge_conflicts) by keeping 'ours', 'theirs', or 'custom' merged content. Hunks not named in resolutions are left untouched and reported back as still unresolved.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Conflicted file, relative to repo root",
+            },
+            "resolutions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "index": {
+                            "type": "integer",
+                            "description": "Hunk index from parse_merge_conflicts",
+                        },
+                        "choice": {
+                            "type": "string",
+                            "enum": ["ours", "theirs", "custom"],
+                        },
+                        "custom_content": {
+                            "type": "string",
+                            "description": "Required when choice='custom' — the exact merged content for this hunk",
+                        },
+                    },
+                    "required": ["index", "choice"],
+                },
+            },
+        },
+        "required": ["path", "resolutions"],
+    },
+}
+
 _GIT_RESET_TOOL = {
     "name": "git_reset",
     "description": "Reset HEAD. --soft keeps staged, --mixed keeps working tree, --hard discards all (requires confirmation).",
@@ -3386,20 +3615,58 @@ _SUBMIT_SECURITY_REPORT_TOOL = {
 }
 
 _SUBMIT_ARCH_REVIEW_TOOL = {
+    # Gap-closure Day 48 (Stage 2) — real bug fix, not a new feature: this
+    # schema previously used {verdict, issues, summary}, a field set that
+    # matched NEITHER roles/architecture_reviewer.md's own documented
+    # "Terminal tool contract" ({structure_summary, risks, recommendations,
+    # blast_radius, import_graph_ran}) NOR what
+    # app/agents/architecture_reviewer.py::run_arch_review() reads back
+    # (raw.get("risks", []), raw.get("structure_summary", ...)) — meaning
+    # every real architecture-review finding was silently discarded
+    # (raw.get("risks", []) always returned [] since "risks" never existed
+    # in the schema the LLM was told to fill out). Corrected to match the
+    # role prompt and the consuming code exactly.
     "name": "submit_arch_review",
     "description": "Submit architecture review result.",
     "input_schema": {
         "type": "object",
         "properties": {
-            "verdict": {
-                "type": "string",
-                "enum": ["approved", "changes_needed", "rejected"],
+            "structure_summary": {"type": "string"},
+            "risks": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "severity": {
+                            "type": "string",
+                            "enum": ["critical", "high", "medium", "low"],
+                        },
+                        "description": {"type": "string"},
+                        "evidence": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "file:line — description entries from this run's real tool output",
+                        },
+                    },
+                    "required": ["severity", "description", "evidence"],
+                },
             },
-            "issues": {"type": "array", "items": {"type": "string"}},
             "recommendations": {"type": "array", "items": {"type": "string"}},
-            "summary": {"type": "string"},
+            "blast_radius": {
+                "type": ["array", "null"],
+                "items": {"type": "string"},
+            },
+            "import_graph_ran": {
+                "type": "boolean",
+                "description": "Overridden by the real VerificationConfig graph-execution state, never trusted from the model's own claim — see run_arch_review()'s verification handling.",
+            },
         },
-        "required": ["verdict", "issues", "recommendations", "summary"],
+        "required": [
+            "structure_summary",
+            "risks",
+            "recommendations",
+            "import_graph_ran",
+        ],
     },
 }
 
@@ -3460,17 +3727,56 @@ _SUBMIT_REFACTOR_REPORT_TOOL = {
 }
 
 _SUBMIT_DEPENDENCY_REPORT_TOOL = {
+    # Gap-closure Day 49 (Stage 2) — real bug fix, same class as Day 48's
+    # submit_arch_review fix: this schema previously used
+    # {outdated, upgraded, issues, files_changed}, matching NEITHER
+    # roles/dependency_agent.md's own documented "Terminal tool contract"
+    # ({dependencies: list[{name, current_version, latest_version,
+    # vulnerability_ids, upgrade_recommended, breaking_changes}], summary,
+    # manifest_read}) NOR run_dependency_agent()'s own consuming code
+    # (raw.get("dependencies", []), raw.get("summary", ...)) — every real
+    # dependency finding was silently discarded (raw.get("dependencies", [])
+    # always returned [] since "dependencies" never existed in the schema).
+    # Corrected to match the role prompt and the consuming code; kept
+    # files_changed (present in code's own raw.get("files_changed", []) read,
+    # not in the prompt's contract but genuinely needed — this agent has real
+    # edit_file access per its own AGENT_CONTRACT side_effects).
     "name": "submit_dependency_report",
     "description": "Submit dependency upgrade analysis.",
     "input_schema": {
         "type": "object",
         "properties": {
-            "outdated": {"type": "array", "items": {"type": "string"}},
-            "upgraded": {"type": "array", "items": {"type": "string"}},
-            "issues": {"type": "array", "items": {"type": "string"}},
+            "dependencies": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "current_version": {"type": "string"},
+                        "latest_version": {"type": "string"},
+                        "vulnerability_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "upgrade_recommended": {"type": "boolean"},
+                        "breaking_changes": {"type": "string"},
+                    },
+                    "required": [
+                        "name",
+                        "current_version",
+                        "latest_version",
+                        "upgrade_recommended",
+                    ],
+                },
+            },
+            "summary": {"type": "string"},
             "files_changed": {"type": "array", "items": {"type": "string"}},
+            "manifest_read": {
+                "type": "boolean",
+                "description": "Overridden by the real VerificationConfig graph-execution state, never trusted from the model's own claim.",
+            },
         },
-        "required": ["outdated", "upgraded"],
+        "required": ["dependencies", "summary", "manifest_read"],
     },
 }
 
@@ -6775,6 +7081,8 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _FETCH_URL_TOOL,
     # Batch 3 — Git extras
     _GIT_MERGE_TOOL,
+    _PARSE_MERGE_CONFLICTS_TOOL,
+    _RESOLVE_MERGE_CONFLICT_TOOL,
     _GIT_RESET_TOOL,
     _GIT_WORKTREE_TOOL,
     _CREATE_PR_TOOL,
@@ -8085,9 +8393,77 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             r = subprocess.run(
                 gm_cmd, cwd=repo_path, capture_output=True, text=True, timeout=30
             )
-            return (r.stdout + r.stderr).strip() or f"Merged {gm_branch}"
+            output = (r.stdout + r.stderr).strip() or f"Merged {gm_branch}"
+            if r.returncode == 0:
+                return output
+            # Gap-closure Day 51 — repo research
+            # (repos/cline/apps/vscode/.../mergeWorktree.ts): detect real
+            # conflicted files via `git diff --name-only --diff-filter=U`
+            # rather than trusting stdout text alone, so a caller has an
+            # exact file list to run parse_merge_conflicts against.
+            diff_r = subprocess.run(
+                ["git", "diff", "--name-only", "--diff-filter=U"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            conflicted = [f for f in diff_r.stdout.strip().split("\n") if f]
+            if conflicted:
+                files_list = ", ".join(conflicted)
+                return (
+                    f"[CONFLICT] Merge of {gm_branch} has real conflicts in "
+                    f"{len(conflicted)} file(s): {files_list}. Use "
+                    f"parse_merge_conflicts on each, then resolve_merge_conflict "
+                    f"to resolve, then git_commit to finish the merge.\n{output}"
+                )
+            return f"[ERROR] {output}"
         except Exception as e:
             return f"[ERROR] {e}"
+
+    def parse_merge_conflicts(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        result = check_path(rel)
+        if not result.allowed:
+            return f"[POLICY DENIED] {rel}: {result.reason}"
+        target = Path(repo_path) / rel
+        if not target.exists():
+            return f"[ERROR] File not found: {rel}"
+        text = target.read_text(encoding="utf-8")
+        hunks = _parse_conflict_markers(text)
+        if not hunks:
+            return f"No conflict markers found in {rel}."
+        import json as _json
+
+        return _json.dumps({"path": rel, "hunks": hunks}, indent=2)
+
+    def resolve_merge_conflict(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        result = check_path(rel)
+        if not result.allowed:
+            return f"[POLICY DENIED] {rel}: {result.reason}"
+        target = Path(repo_path) / rel
+        if not target.exists():
+            return f"[ERROR] File not found: {rel}"
+        raw_resolutions = inp.get("resolutions") or []
+        if not raw_resolutions:
+            return "[ERROR] resolutions is required — at least one {index, choice}"
+        resolutions: dict[int, dict[str, Any]] = {}
+        for entry in raw_resolutions:
+            idx = int(entry["index"])
+            choice = str(entry.get("choice", ""))
+            if choice == "custom" and "custom_content" not in entry:
+                return f"[ERROR] hunk {idx}: choice='custom' requires custom_content"
+            resolutions[idx] = entry
+        text = target.read_text(encoding="utf-8")
+        new_text, applied, unresolved = _apply_conflict_resolutions(text, resolutions)
+        target.write_text(new_text, encoding="utf-8")
+        if unresolved:
+            return (
+                f"Resolved {len(applied)} hunk(s) in {rel}. "
+                f"Still unresolved (markers left intact): {unresolved}"
+            )
+        return f"Resolved all {len(applied)} conflict hunk(s) in {rel}."
 
     def git_reset(inp: dict[str, Any]) -> str:
         gr_ref = str(inp.get("ref", "HEAD"))
@@ -8792,6 +9168,8 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["fetch_url"] = fetch_url
     # Batch 3
     handlers["git_merge"] = git_merge
+    handlers["parse_merge_conflicts"] = parse_merge_conflicts
+    handlers["resolve_merge_conflict"] = resolve_merge_conflict
     handlers["git_reset"] = git_reset
     handlers["git_worktree"] = git_worktree
     handlers["create_pr"] = create_pr
@@ -11827,12 +12205,65 @@ def make_git_commit_change_handler(repo_path: str) -> Any:
     return git_commit_change
 
 
-def make_fleet_apply_handlers(repo_path: str) -> dict[str, Any]:
+def _role_prompt_name(rel: str) -> str | None:
+    """Returns the role_name if rel is exactly roles/<role_name>.md, else None."""
+    p = Path(rel)
+    if len(p.parts) == 2 and p.parts[0] == "roles" and p.suffix == ".md":
+        return p.stem
+    return None
+
+
+def _propose_and_deploy_role_prompt(
+    role_name: str, content: str, agent_name: str
+) -> str:
+    """Route a role-prompt change through prompt_registry's real
+    propose -> submit_for_review -> approve -> deploy lifecycle instead of a
+    raw disk write — gap-closure Day 50 (answers.md Q35/Q36/Phase-6 finding
+    #8): this shared handler was the one real production path that touched
+    roles/*.md files, and it bypassed the built regression-gated approval
+    machinery entirely, leaving prompt_registry.deploy() with no real
+    caller. The enclosing enhancement_request is already human-approved
+    before this APPLY-phase handler ever runs, so auto-advancing through
+    review/approval here reuses oversight that already happened rather than
+    skipping it — while still real-checking the regression gate before any
+    write reaches disk."""
+    from app.fleet.prompt_registry import get_prompt_registry
+    from app.fleet.regression_detector import DeploymentBlocked
+
+    registry = get_prompt_registry()
+    version = registry.propose(role_name, content, proposed_by=agent_name)
+    if version.status == "deployed":
+        return (
+            f"No change: {role_name}.md content already matches the deployed "
+            f"version (v{version.version_number})."
+        )
+    try:
+        registry.submit_for_review(version.id)
+        registry.approve(version.id, approved_by=f"{agent_name}-post-human-approval")
+        deployed = registry.deploy(version.id)
+    except DeploymentBlocked as exc:
+        return (
+            f"[BLOCKED] Regression gate blocked deploying {role_name}.md "
+            f"v{version.version_number}: {exc}"
+        )
+    return (
+        f"Deployed {role_name}.md as v{deployed.version_number} via "
+        f"prompt_registry (id={deployed.id})."
+    )
+
+
+def make_fleet_apply_handlers(
+    repo_path: str, agent_name: str = "fleet_apply"
+) -> dict[str, Any]:
     """Shared APPLY-phase handler set for the 4 write-capable fleet-enhancement
     agents (agent_performance_reviewer, agent_debugger, knowledge_curator,
     quality_auditor) — only ever invoked after a human approves a specific
     enhancement request. read_file + write_file + edit_file + run_tests +
-    git_commit_change, all scoped to repo_path (settings.fleet_self_repo_path)."""
+    git_commit_change, all scoped to repo_path (settings.fleet_self_repo_path).
+
+    write_file/edit_file targeting roles/<name>.md are routed through
+    prompt_registry (see _propose_and_deploy_role_prompt) instead of a raw
+    disk write — gap-closure Day 50."""
     base = Path(repo_path)
 
     def write_file_h(inp: dict[str, Any]) -> str:
@@ -11840,6 +12271,11 @@ def make_fleet_apply_handlers(repo_path: str) -> dict[str, Any]:
         result = check_path(rel)
         if not result.allowed:
             return f"[POLICY DENIED] {rel}: {result.reason}"
+        role_name = _role_prompt_name(rel)
+        if role_name is not None:
+            return _propose_and_deploy_role_prompt(
+                role_name, str(inp["content"]), agent_name
+            )
         target = base / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(str(inp["content"]), encoding="utf-8")
@@ -11850,17 +12286,32 @@ def make_fleet_apply_handlers(repo_path: str) -> dict[str, Any]:
         result = check_path(rel)
         if not result.allowed:
             return f"[POLICY DENIED] {rel}: {result.reason}"
-        target = base / rel
-        if not target.exists():
-            return f"[ERROR] File not found: {rel}"
-        text = target.read_text(encoding="utf-8")
+        role_name = _role_prompt_name(rel)
+        if role_name is not None:
+            # Role-prompt content is authoritatively tracked by
+            # prompt_registry (its deployed row), which may live outside
+            # repo_path — read the current text from there, not `base / rel`.
+            from app.fleet.prompt_registry import get_prompt_registry
+
+            deployed = get_prompt_registry().get_deployed(role_name)
+            if deployed is None:
+                return f"[ERROR] File not found: {rel}"
+            text = deployed.content
+        else:
+            target = base / rel
+            if not target.exists():
+                return f"[ERROR] File not found: {rel}"
+            text = target.read_text(encoding="utf-8")
         old_s, new_s = str(inp["old_string"]), str(inp["new_string"])
         count = text.count(old_s)
         if count == 0:
             return f"[ERROR] old_string not found in {rel}"
         if count > 1:
             return f"[ERROR] old_string appears {count} times in {rel} — must be unique"
-        target.write_text(text.replace(old_s, new_s, 1), encoding="utf-8")
+        new_text = text.replace(old_s, new_s, 1)
+        if role_name is not None:
+            return _propose_and_deploy_role_prompt(role_name, new_text, agent_name)
+        target.write_text(new_text, encoding="utf-8")
         return f"Edited {rel}"
 
     def run_tests_h(inp: dict[str, Any]) -> str:
