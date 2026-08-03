@@ -270,6 +270,135 @@ async def _benchmark_baseline_loop() -> None:
             logger.warning("Benchmark baseline loop iteration failed: %s", exc)
 
 
+async def _doc_agent_auto_trigger_loop() -> None:
+    """Gap-closure Day 52 (Stage 2, answers.md Q41 "Auto-trigger 'when code
+    changes': NO for all of the above. All four real doc agents are
+    dispatch-only via POST /api/specialized-agents/{name}/run; no CI step,
+    pre-commit hook, or post-merge trigger regenerates any of them
+    automatically." Plan: "wire a lightweight trigger (a periodic loop,
+    matching the existing _fleet_agents_scan_loop() pattern, or a CI
+    post-merge step) to invoke changelog_agent/release_notes_agent
+    automatically on merge to main").
+
+    No real CI/webhook receiver exists anywhere in this codebase (confirmed
+    by grep before building this), so this follows the plan's other named
+    option: a periodic loop matching _fleet_agents_scan_loop()'s own
+    pattern. Polls the target repo's real local `main` HEAD SHA (the same
+    local repo every other real git operation here already operates on —
+    not a remote fetch, which would add a network dependency this loop
+    doesn't otherwise have) and, when it has moved since the last recorded
+    run for that agent (SystemSetting-backed, keyed per agent so
+    changelog_agent and release_notes_agent track independently), creates a
+    real DevTask and dispatches the agent against it — the exact same
+    task-based execution path POST /api/specialized-agents/{name}/run
+    already uses (create_task + run_changelog_agent/run_release_notes_agent
+    + record_agent_run_outcome), not a new bypass mechanism. Set
+    DOC_AGENT_AUTO_TRIGGER_INTERVAL_HOURS=0 to disable.
+    """
+    interval_hours = get_settings().doc_agent_auto_trigger_interval_hours
+    if interval_hours <= 0:
+        logger.info(
+            "Doc-agent auto-trigger loop disabled "
+            "(DOC_AGENT_AUTO_TRIGGER_INTERVAL_HOURS=0)"
+        )
+        return
+
+    while True:
+        await asyncio.sleep(interval_hours * 60 * 60)
+        try:
+            await _run_doc_agent_auto_trigger_once()
+        except Exception as exc:
+            logger.warning("Doc-agent auto-trigger loop iteration failed: %s", exc)
+
+
+_DOC_AUTO_TRIGGER_AGENTS: tuple[tuple[str, str, str, str], ...] = (
+    (
+        "changelog_agent",
+        "app.agents.changelog_agent",
+        "run_changelog_agent",
+        "Auto-update CHANGELOG.md",
+    ),
+    (
+        "release_notes_agent",
+        "app.agents.release_notes_agent",
+        "run_release_notes_agent",
+        "Auto-generate release notes",
+    ),
+)
+
+
+async def _run_doc_agent_auto_trigger_once() -> None:
+    import importlib
+    import subprocess
+
+    from app.db.repository import create_task, get_setting, set_setting
+    from app.db.session import get_session_factory
+    from app.memory.hooks import record_agent_run_outcome
+
+    settings = get_settings()
+    repo_path = str(settings.target_repo_path)
+
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "main"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception as exc:
+        logger.warning("Doc-agent auto-trigger: could not read main HEAD: %s", exc)
+        return
+    if head.returncode != 0:
+        return  # no local `main` branch yet (e.g. repo not cloned) — nothing to do
+    current_sha = head.stdout.strip()
+    if not current_sha:
+        return
+
+    factory = get_session_factory()
+    for agent_name, module_path, fn_name, title in _DOC_AUTO_TRIGGER_AGENTS:
+        setting_key = f"doc_agent_last_sha:{agent_name}"
+        try:
+            async with factory() as db:
+                last_sha = await get_setting(db, setting_key)
+                if last_sha == current_sha:
+                    continue  # main hasn't moved since this agent's last run
+
+                task = await create_task(
+                    db,
+                    title=title,
+                    description=(
+                        f"Autonomous trigger: main moved to {current_sha[:12]} — "
+                        f"regenerate from the real git history up to this commit."
+                    ),
+                )
+                module = importlib.import_module(module_path)
+                run_fn = getattr(module, fn_name)
+                result = await asyncio.to_thread(
+                    run_fn,
+                    task_id=task.id,
+                    description=task.description,
+                    repo_path=repo_path,
+                )
+                await record_agent_run_outcome(
+                    agent_name=agent_name,
+                    task_id=str(task.id),
+                    description=task.description,
+                    result=result,
+                    db=db,
+                )
+                await set_setting(db, setting_key, current_sha)
+                logger.info(
+                    "Doc-agent auto-trigger: %s ran for main@%s (task #%d, status=%s)",
+                    agent_name,
+                    current_sha[:12],
+                    task.id,
+                    result.status,
+                )
+        except Exception as exc:
+            logger.warning("Doc-agent auto-trigger failed for %s: %s", agent_name, exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.pipeline.graph import init_checkpointer, close_checkpointer
@@ -407,6 +536,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     lesson_archive_task = asyncio.create_task(_versioned_lesson_archive_loop())
     benchmark_baseline_task = asyncio.create_task(_benchmark_baseline_loop())
     orphan_recovery_task = asyncio.create_task(start_orphan_recovery_loop())
+    doc_agent_auto_trigger_task = asyncio.create_task(_doc_agent_auto_trigger_loop())
 
     yield
 
@@ -416,6 +546,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     lesson_archive_task.cancel()
     benchmark_baseline_task.cancel()
     orphan_recovery_task.cancel()
+    doc_agent_auto_trigger_task.cancel()
     for task in (
         reindex_task,
         retention_task,
@@ -423,6 +554,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         lesson_archive_task,
         benchmark_baseline_task,
         orphan_recovery_task,
+        doc_agent_auto_trigger_task,
     ):
         try:
             await task

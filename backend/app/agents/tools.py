@@ -1700,6 +1700,166 @@ _SUBMIT_DOCS_TOOL = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Gap-closure Day 53 (Stage 2, answers.md Q41: "Architecture docs"/"Agent
+# docs"/"Tool docs"/"Migration guides" all NOT FOUND — no generator at all).
+# Repo research (repos/aider/aider/repomap.py): aider builds its repo map
+# from real tree-sitter-parsed symbols, never from guessing — the same
+# "introspect the real thing, don't ask the LLM to guess" principle applies
+# here: each of these 3 tools returns real, directly-introspected data
+# (the actual capability_registry, the actual tool specs in this very
+# module, the actual Alembic migration files' real revision/down_revision
+# via AST parsing) for the LLM to write UP, not to invent from scratch.
+# ---------------------------------------------------------------------------
+
+_LIST_REGISTERED_AGENTS_TOOL = {
+    "name": "list_registered_agents",
+    "description": "Real introspection of every registered agent's capability contract (name, description, tools, capabilities, risk_level, dependencies) from the actual fleet capability_registry — not a guess from file names.",
+    "input_schema": {"type": "object", "properties": {}, "required": []},
+}
+
+_LIST_TOOL_SPECS_TOOL = {
+    "name": "list_all_tool_specs",
+    "description": "Real introspection of every distinct tool schema defined in this codebase (name + description), deduplicated by name — not a guess from grepping.",
+    "input_schema": {"type": "object", "properties": {}, "required": []},
+}
+
+_LIST_MIGRATIONS_TOOL = {
+    "name": "list_migrations",
+    "description": "Real introspection of every Alembic migration file under backend/migrations/versions/ — file name, revision id, down_revision, and the file's own module docstring, extracted via AST parsing (the file is never executed) — not a guess from file names alone.",
+    "input_schema": {"type": "object", "properties": {}, "required": []},
+}
+
+
+def list_registered_agents(inp: dict[str, Any]) -> str:
+    import json as _json
+
+    from app.fleet.capability_registry import (
+        ensure_all_agents_registered,
+        get_capability_registry,
+    )
+
+    ensure_all_agents_registered()
+    entries = get_capability_registry().all()
+    data = [
+        {
+            "name": e.name,
+            "description": e.description,
+            "tools": e.tools,
+            "input_types": e.input_types,
+            "output_types": e.output_types,
+            "capabilities": e.capabilities,
+            "risk_level": e.risk_level,
+            "dependencies": e.dependencies,
+        }
+        for e in sorted(entries, key=lambda e: e.name)
+    ]
+    return _json.dumps(data, indent=2)
+
+
+def list_all_tool_specs(inp: dict[str, Any]) -> str:
+    import json as _json
+    import sys
+
+    module = sys.modules[__name__]
+    seen: dict[str, str] = {}
+    for attr_name in dir(module):
+        val = getattr(module, attr_name)
+        if isinstance(val, dict) and "name" in val and "input_schema" in val:
+            seen[str(val["name"])] = str(val.get("description", ""))
+        elif isinstance(val, list):
+            for item in val:
+                if isinstance(item, dict) and "name" in item and "input_schema" in item:
+                    seen[str(item["name"])] = str(item.get("description", ""))
+    data = [{"name": n, "description": d} for n, d in sorted(seen.items())]
+    return _json.dumps(data, indent=2)
+
+
+def list_migrations(inp: dict[str, Any]) -> str:
+    import ast as _ast_mod
+    import json as _json
+
+    versions_dir = (
+        Path(__file__).resolve().parent.parent.parent / "migrations" / "versions"
+    )
+    if not versions_dir.exists():
+        return "[]"
+    results: list[dict[str, Any]] = []
+    for path in sorted(versions_dir.glob("*.py")):
+        try:
+            tree = _ast_mod.parse(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        docstring = _ast_mod.get_docstring(tree) or ""
+        revision: Any = None
+        down_revision: Any = None
+        for node in tree.body:
+            # Alembic's generated files use annotated assignments
+            # (`revision: str = "001"`), not plain `Assign` — handle both.
+            targets: list[_ast_mod.expr] = []
+            value: _ast_mod.expr | None = None
+            if isinstance(node, _ast_mod.Assign):
+                targets = list(node.targets)
+                value = node.value
+            elif isinstance(node, _ast_mod.AnnAssign) and node.value is not None:
+                targets = [node.target]
+                value = node.value
+            for target in targets:
+                if not isinstance(target, _ast_mod.Name) or not isinstance(
+                    value, _ast_mod.Constant
+                ):
+                    continue
+                if target.id == "revision":
+                    revision = value.value
+                if target.id == "down_revision":
+                    down_revision = value.value
+        results.append(
+            {
+                "file": path.name,
+                "revision": revision,
+                "down_revision": down_revision,
+                "docstring": docstring.strip()[:300],
+            }
+        )
+    return _json.dumps(results, indent=2)
+
+
+def make_doc_generator_handlers(repo_path: str) -> dict[str, Any]:
+    """Shared base for the 4 gap-closure Day 53 doc-generator agents
+    (architecture_doc_agent, agent_roster_doc_agent, tool_catalog_doc_agent,
+    migration_guide_doc_agent) — read-only + write_file (*.md / docs/** only,
+    mirroring readme_agent's own established write scoping) + submit_docs.
+    Each agent adds its own specific real-introspection tool on top of this
+    shared base."""
+    handlers = make_read_only_handlers(repo_path)
+    root = Path(repo_path)
+    docs_result: dict[str, Any] = {}
+
+    def dg_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        if not (rel.endswith(".md") or rel.startswith("docs/")):
+            return (
+                f"[POLICY DENIED] Doc generator agents may only write .md files "
+                f"or paths under docs/. Got: {rel!r}"
+            )
+        result = check_path(rel)
+        if not result.allowed:
+            return f"[POLICY DENIED] {rel}: {result.reason}"
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(str(inp["content"]), encoding="utf-8")
+        return f"Written {rel}"
+
+    def dg_submit(inp: dict[str, Any]) -> str:
+        docs_result.update(inp)
+        return "Docs submitted"
+
+    handlers["write_file"] = dg_write_file
+    handlers["submit_docs"] = dg_submit
+    handlers["_docs_result"] = docs_result
+    return handlers
+
+
 def make_docs_handlers(worktree_path: str, repo_path: str) -> dict[str, Any]:
     """Docs agent: read-only + write_file (scoped to *.md and docs/**) + submit_docs."""
     from app.policy.engine import check_path_in_worktree

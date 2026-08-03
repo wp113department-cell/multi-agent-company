@@ -484,14 +484,35 @@ exists (see Project Memory finding above), so sharing is effectively "everything
 
 - Compare runtime behavior with Claude Code and Cursor: **NOT VERIFIED** — no live benchmarking harness in this repo runs Claude Code or Cursor side-by-side against this system. There is no code path, script, or fixture anywhere in `backend/` that invokes either external tool. Any numeric comparison would be fabricated. Doing this for real would require running identical tasks through both systems and diffing wall-clock/token traces, which is outside what can be verified by reading the repo.
 - Response latency: **PARTIAL** — `backend/app/fleet/metrics.py`'s `MetricsCollector.p50_latency_ms()`/`p95_latency_ms()` (lines 230–251) compute real percentile latency per agent from `RunMetrics.execution_time_ms`, which `run_span()` (lines 434–461) sets via `time.monotonic()` around every agent run. This is real instrumentation capable of measuring response latency, but it has never been used to produce a comparison number against another tool.
-- Planning speed: **NO** — `RunMetrics` and `record_tool()` (metrics.py:113–128) time individual *tool calls* (`ToolCallRecord.duration_ms`), but there is no separate metric isolating the planner node's time from the rest of a run. `base_graph.py` has exactly one `record_tool()` call site (line 1074); planning/orchestration nodes aren't separately timed.
-  Plan: add a `record_tool()`-equivalent call around the planner/decomposer LangGraph nodes to isolate planning latency.
-- Orchestration speed: **NO** — same gap as above; `manager.py`'s epic-manager graph and `pipeline/graph.py` have no dedicated orchestration-latency metric, only the whole-run `execution_time_ms`.
-- File scanning speed: **NO** — `backend/app/repo_tools/scanner.py` and `cross_file_graph.py` contain no `time.monotonic()`/`perf_counter()` instrumentation (grep for timing calls in `app/repo_tools` returned zero hits). Scan duration is only indirectly visible if a scan happens to run inside a `list_files`/`get_file_tree` tool call, in which case `record_tool()`'s `duration_ms` captures it as a generic tool-call time, not a labeled scan metric.
+- Planning speed: **YES** — gap-closure Day 54 (2026-08-03, Stage 2). `base_graph.py`'s
+  `planner_node` (inside `_make_planner_node`) now wraps its real `_gather_facts_and_plan` call
+  with `time.monotonic()` and calls the new `record_phase_timing(trace_id, "planner_node",
+  duration_ms)` (`app/fleet/metrics.py`) — a `record_tool()`-equivalent for non-tool phases,
+  kept in a new, separate `RunMetrics.phase_timings` list (not mixed into `tool_calls`, since
+  `tool_accuracy` — derived from `tool_calls` — feeds directly into
+  `benchmark_manager.py`'s real regression-gate scoring; a synthetic always-succeeds phase entry
+  there would have silently skewed it).
+- Orchestration speed: **YES** — gap-closure Day 54. `run_manager()` spans multiple sub-agent
+  trace_ids (dev/QA/reviewer), so there's no single per-run `RunMetrics` owner for the
+  orchestration span itself — new `app/fleet/orchestration_analytics.py` (mirrors
+  `app/memory/analytics.py`'s own Day 43 in-process-rolling-window pattern exactly) records real
+  wall-clock timings from both of `run_manager()`'s real call sites: `manager.py::_coding_node`
+  (the epic-manager graph's own dispatch) and `app/api/agents.py`'s direct-dispatch path.
+- File scanning speed: **YES** — gap-closure Day 54. `base_graph.py`'s `memory_hook_node` (the
+  one real place `index_repository()` runs once per agent run — confirmed via grep across every
+  real call site: `api/repo.py`/`mcp/server.py` have no agent-run trace_id context at all, only
+  this one does) now times the real `index_repository(repo_path)` call and records it via
+  `record_phase_timing(trace_id, "file_scanning", duration_ms)`.
 - Editing speed: **PARTIAL** — `edit_file`/`write_file` tool calls are timed the same generic way via `record_tool()`'s `duration_ms` (metrics.py:113–128), so edit latency is recoverable per-run from `tool_calls[]`, but there's no dedicated "editing speed" aggregate metric or dashboard rollup.
 - Tool execution speed: **YES** — this is the one sub-item with dedicated, first-class instrumentation: every tool call records `duration_ms` and success/failure (`ToolCallRecord`, metrics.py:57–61), aggregated into `tool_accuracy` (metrics.py:147–152) and exposed per-agent via `by_agent()`.
-- Memory retrieval speed: **NO** — `RunMetrics.memory_retrieved`/`memory_written` (metrics.py:91–92) are *counts*, not timings. Grep across `backend/app/memory` found no `time.monotonic()`/`perf_counter()`/duration instrumentation at all.
-  Plan: add explicit timing around `app/memory/store.py`'s retrieval calls and record it on `RunMetrics`.
+- Memory retrieval speed: **YES** — gap-closure Day 54 (this closes the narrower, RunMetrics-specific gap Day 43's own `memory/analytics.py::record_retrieval_time()` did not — that's a separate, global in-process tracker, never attached to a specific run's `RunMetrics`). Same `memory_hook_node` call site as file scanning: the real `query_memory_context_sync(...)` call (which itself internally calls Day 43's 5 already-individually-timed `query_*` functions) is now also timed as a whole and recorded via `record_phase_timing(trace_id, "memory_retrieval", duration_ms)` — giving this run's own `RunMetrics` a real memory-retrieval-phase total, on top of Day 43's separate per-function breakdown.
+  **Real bug avoided, not fixed (verified before assuming), while designing this**: an earlier
+  design considered threading `trace_id` into `store.py`'s 5 `query_*` functions and
+  `manager.py`'s own `manager_trace_id`; investigated and rejected both — `query_*`'s only real
+  caller with agent-run context already routes through `memory_hook_node` (confirmed by grep, no
+  other real caller has a trace_id to thread), and `manager_trace_id` never has a `start_run()`
+  call anywhere (confirmed by grep) so attaching to it would have silently no-op'd every time,
+  looking like real instrumentation while recording nothing.
 
 **Estimated production performance level: NOT VERIFIED (no numeric estimate given) — reasoning:** the repo has real per-agent p50/p95 latency and per-tool duration/success instrumentation (`app/fleet/metrics.py`), an OTEL bridge for external tracing (metrics.py:262–427), and a regression detector that blocks deploys on measured benchmark regressions (`app/fleet/regression_detector.py`, exercised by `tests/test_regression_detector.py`). That is genuine capability to *measure* production performance. But no benchmark run comparing this system's numbers to Claude Code or Cursor exists in the repo, so any percentage figure here would be an unfounded guess, not a fact. Reporting a percentage would violate the "no hallucination" standard — this is explicitly **NOT VERIFIED** rather than estimated.
 
@@ -621,9 +642,10 @@ Ran `cd backend && python -m pytest tests/ --collect-only -q` in the project's `
 - Orchestrator Tests: **YES** — `test_audit04_orchestration_fixes.py`, `test_phase51_epic_manager_graph.py`, `test_bootstrap.py`/`test_bootstrap_wiring.py` cover manager/epic-graph orchestration.
 - Regression Tests: **YES** — `test_regression_detector.py` (real Postgres round-trip test of `app/fleet/regression_detector.py`'s `DeploymentBlocked` gate wrapping `benchmark_manager.compare_to_baseline()`), plus the documented 3318-passed whole-suite regression gate itself in `IMPLEMENTATION_PROGRESS.md:1008-1039`.
 - Performance Tests: **PARTIAL** — `test_benchmark_manager.py` and `test_benchmark_baseline_loop.py` test agent-behavior benchmarking/regression comparison (accuracy/cost/latency baselines per agent), which is real performance-adjacent testing, but there is no dedicated throughput/latency load-generation test.
-- Load Tests: **NO** — no locust/k6/or equivalent load-generation tooling found anywhere in the repo (`find . -iname "*locust*"` / `"*k6*"` both empty). `test_concurrency.py` tests semaphore-slot acquisition and timeout behavior (`TestSemaphoreSlots`, `TestSlotAcquisitionTimeout`), which is concurrency-*correctness* testing, not load testing under real traffic volume.
-  Plan: add a locust/k6 script exercising the FastAPI endpoints under concurrent load if production-scale validation is required.
-- Stress Tests: **NO** — no dedicated stress-test suite found; same gap as Load Tests above.
+- Load Tests: **YES** — gap-closure Days 55-56 (2026-08-03, Stage 2). `backend/tests/load/gridiron_load_test.js` — a real, committed k6 script (not the existing `load_test_agent.py`'s on-request script generation for arbitrary target repos; this is checked in for the platform's own infrastructure) exercising 4 real, currently-registered read-only endpoints (`GET /health`, `/api/agents`, `/api/metrics`, `/api/tasks`, each confirmed against their actual route handlers, not guessed) under a realistic ramping-VU load profile with explicit pass/fail thresholds (`http_req_duration: p(95)<500ms`, `http_req_failed: rate<1%`). Actually run against a real live instance of this app during implementation (not just written and assumed correct) — 100% checks passed, 0% error rate, exit code 0.
+  Zero hardcoding: `BASE_URL`/`API_TOKEN`/`SCENARIO` are all `k6` `__ENV`-driven; no baked-in deployment URL or credential.
+- Stress Tests: **YES** — gap-closure Days 55-56. Same script, a genuinely distinct traffic shape (`SCENARIO=stress`, ramping to 150 VUs vs. load's 10 — a real different peak, not "load run longer"), with its own looser sanity-ceiling thresholds (`p(95)<3000ms`, error rate<10%) appropriate for finding a breaking point rather than asserting normal-traffic performance. Also actually run against the real live app — 100% checks passed, exit code 0.
+  Tests: `tests/test_gap55_56_load_test_and_cicd_inspection.py` — structural regression guards (real-endpoint cross-check against the actual route files, both scenarios present, thresholds present, env-driven config, stress genuinely exceeds load's peak) that always run, plus a real k6-execution test (spawns a real `uvicorn` instance, runs a shortened real `k6 run`, asserts exit 0 and 100% checks) gated by `shutil.which("k6")` — mirrors this codebase's own established CLI-tool-dependent-test pattern (`test_gap35_resource_check.py`'s `docker_available`, `test_day0_groq_integration.py`'s `ANTHROPIC_AVAILABLE`).
 - Failure Recovery Tests: **YES** — `test_failure_ladder.py` tests `app/fleet/failure_ladder.py`'s 7-state failure recovery ladder (Checkpoint/Rollback/Resume/Retry/Escalate/Abort/Human Review — see Q66 below for detail), plus `test_orphan_recovery.py`.
 
 ---
@@ -1833,10 +1855,20 @@ destructive-write paths found.
   subprocess) feeds directly into `reviewer.py`'s real tool-using review agent. Note:
   `code_quality_agent`/`style_reviewer` review whole files, not diffs — a narrower, file-based
   pattern, not a bug.
-- Change summarization/PR descriptions: **PARTIAL** — PR title is the real LLM-generated commit
-  message (diff-aware); PR body is `task_description[:2000]` — a truncation of the original
-  description, **not** an LLM summary of the actual diff/changes.
-  Plan: generate the PR body from the diff the same way the commit message already is.
+- Change summarization/PR descriptions: **YES** — gap-closure Day 52 (2026-08-03, Stage 2).
+  `backend/app/tools/git_push_tool.py::generate_pr_body(task_title, task_description, diff,
+  model)` mirrors `generate_commit_message`'s exact established pattern (one Haiku call,
+  diff-aware, deterministic non-raising fallback) rather than inventing a new mechanism: a real
+  LLM call over the real diff produces a Markdown `## Summary` + `## Files Changed` body: falls
+  back to `task_description[:2000]` (the prior behavior) on an empty diff or any LLM failure,
+  never raises. `push_and_create_pr()` now calls it and passes the result as the PR body instead
+  of the raw truncated description.
+  Tests: `tests/test_git_push_tool.py::TestGeneratePrBody` (5 new tests — LLM-generated
+  diff-aware body, empty-diff fallback without an LLM call, LLM-failure fallback, empty-response
+  fallback, 2000-char fallback truncation), plus the 3 pre-existing `TestPushAndCreatePr` tests
+  updated to mock `generate_pr_body` (avoiding a real, unmocked network call now that
+  `push_and_create_pr` calls it) and one of them (`test_full_success_path`) extended to assert
+  the real generated body reaches `create_github_pr`'s `body` kwarg, not the task description.
 - Enumerated git tools: all confirmed real, subprocess-backed, none stubbed —
   `app/services/git_service.py` (clone/status/log/diff/add/commit/push/branch_list/checkout/pull)
   and ~20 more chat-tool-layer git operations (`git_stash`, `git_rebase` non-interactive-only,
@@ -1849,28 +1881,82 @@ destructive-write paths found.
 ## Q41. Documentation Intelligence
 
 - README: **YES** — `readme_agent.py`, real repo-grounded generation.
-- Architecture docs: **NOT FOUND as a dedicated doc-writer** — `architecture_reviewer` produces
-  findings, not a maintained `ARCHITECTURE.md`.
+- Architecture docs: **YES** — gap-closure Day 53 (2026-08-03, Stage 2). New
+  `architecture_doc_agent.py` writes a maintained `ARCHITECTURE.md`, reusing
+  `architecture_reviewer`'s own real, already-tested `import_graph`/`circular_dep_detect`/
+  `dead_code_detect`/`call_graph` tools (`make_arch_reviewer_handlers`) as the grounding data
+  (never asks the LLM to guess module relationships), swapping in the doc-generator's
+  `write_file`(*.md-scoped)/`submit_docs` instead of `submit_arch_review`. Distinct from
+  `architecture_reviewer`, whose own output is findings, not a maintained doc.
 - API docs: **YES** — `api_docs_agent.py`, documents this repo's own real FastAPI routes/Pydantic
   schemas from direct introspection.
-- Agent docs: **NOT FOUND** — no agent generates documentation about the other 72 agents; the
-  existing agent-creation guide is a static, human-written doc.
-- Tool docs: **NOT FOUND.**
+- Agent docs: **YES** — gap-closure Day 53. New `agent_roster_doc_agent.py` writes a real
+  agent-roster document, grounded in a new `list_registered_agents` tool
+  (`backend/app/agents/tools.py`) that calls `ensure_all_agents_registered()` (real, pre-existing
+  Day 19 infra — imports every agent module first, so the list is genuinely complete, not
+  whatever happened to be dispatched already) then reads the actual `capability_registry` — name,
+  description, real tools, real risk_level per agent. Never a guess from file names.
+- Tool docs: **YES** — gap-closure Day 53. New `tool_catalog_doc_agent.py` writes a real
+  tool-catalog document, grounded in a new `list_all_tool_specs` tool that reflects over
+  `app.agents.tools`'s own module globals for every dict/list-of-dicts shaped like a real tool
+  schema (`name` + `input_schema`), deduplicated by name — 206 real distinct tools found live.
 - Changelogs: **YES** — `changelog_agent.py`, real `git log`-based, Keep-a-Changelog format.
-- Migration guides: **NOT FOUND** — `migration_agent.py` performs DB migrations, it does not write
-  human-facing migration guides; no agent is scoped for that.
+- Migration guides: **YES** — gap-closure Day 53. New `migration_guide_doc_agent.py` writes a
+  human-facing migration guide, distinct from `migration_agent.py` (which performs real DB
+  migrations, never documents them). Grounded in a new `list_migrations` tool that AST-parses
+  (never executes) every real file under `backend/migrations/versions/` for its `revision`/
+  `down_revision`/docstring — real bug found and fixed while building this: Alembic's generated
+  files use annotated assignments (`revision: str = "001"`, an `ast.AnnAssign`), which an early
+  draft of the parser (handling only plain `ast.Assign`) silently missed, returning `revision:
+  None` for all 26 real migration files; caught by testing against the real files, not assumed
+  correct from the AST-parsing approach alone.
 - Release notes: **YES** — `release_notes_agent.py`, real tag-range `git log` based.
-- **Auto-trigger "when code changes": NO for all of the above.** All four real doc agents are
-  dispatch-only via `POST /api/specialized-agents/{name}/run`; no CI step, pre-commit hook, or
-  post-merge trigger regenerates any of them automatically.
+- **Auto-trigger "when code changes": PARTIAL for changelog/release notes, still NO for the
+  rest.** Gap-closure Day 52 (2026-08-03, Stage 2): new `_doc_agent_auto_trigger_loop()`
+  (`backend/app/main.py`, wired into `lifespan()` alongside the other periodic loops, config
+  `DOC_AGENT_AUTO_TRIGGER_INTERVAL_HOURS`, default 6h, 0 disables) polls `target_repo_path`'s
+  real local `main` HEAD SHA via `git rev-parse main` and, when it has moved since the last
+  recorded run for `changelog_agent`/`release_notes_agent` (tracked per-agent in the real
+  `system_settings` key-value table via the existing `get_setting`/`set_setting` helpers — no
+  new table needed), creates a real `DevTask` and dispatches the agent against it through the
+  exact same `create_task` → `run_changelog_agent`/`run_release_notes_agent` →
+  `record_agent_run_outcome` path `POST /api/specialized-agents/{name}/run` already uses, not a
+  new bypass mechanism. No real CI/webhook receiver exists anywhere in this codebase (confirmed
+  by grep before building — the plan's other named option), so this is the periodic-loop half
+  of the plan, not a CI post-merge step. Still PARTIAL, not YES: only these two of the four real
+  doc agents are wired; `readme_agent`/`api_docs_agent` remain dispatch-only, and the
+  local-`main`-only check (no `git fetch`) means a remote-only merge that never lands on this
+  backend's local checkout won't be seen — an honest, named scope limit, not a bug.
+  Tests: `tests/test_gap52_doc_agent_auto_trigger.py` (5 tests) — a real git repo + real
+  `system_settings` DB rows proving first-run dispatch of both agents and correct
+  per-agent-marker persistence; a real proof that an agent whose marker already matches current
+  `main` is skipped while the other (never run) still fires; a real no-`main`-branch repo
+  returning silently without dispatching; the disabled-when-0 case (mirroring
+  `test_benchmark_baseline_loop.py`'s established pattern); and an `inspect.getsource`
+  "verify real callers" guard confirming the loop is genuinely started and cancelled in the
+  real `lifespan()`, not orphaned.
 
-Verdict: **PARTIAL** — 4 of 7 named doc types have real, repo-grounded, on-demand generators;
-architecture docs, agent docs, tool docs, and migration guides have no generator at all; and none of
-the working generators fire automatically on code change.
-Plan: add architecture-doc/agent-roster/tool-catalog generators (straightforward variants of the
-existing pattern), and wire a lightweight trigger (a periodic loop, matching the existing
-`_fleet_agents_scan_loop()` pattern, or a CI post-merge step) to invoke `changelog_agent`/
-`release_notes_agent` automatically on merge to main.
+Verdict: **YES** — gap-closure Day 53 (2026-08-03, Stage 2). All 7 named doc types now have
+real, repo-grounded generators (4 pre-existing: README/API docs/changelogs/release notes; 3 new
+this session: architecture docs, agent docs, tool docs — plus migration guides, a Day 53 addition
+not in the original 7-type list but named in this same audit item's own "Migration guides" line).
+2 of 7 (changelog, release notes) auto-trigger on real `main` movement (Day 52); the other 5
+remain on-demand-dispatch only via `POST /api/specialized-agents/{name}/run` — an honest,
+named scope limit, not silently claimed as automatic.
+**Real, pre-existing bug found and fixed while wiring the 4 new generators into the dispatch
+registry** (`backend/app/api/specialized_agents.py`): `readme_agent`/`api_docs_agent`'s real
+second parameter is named `doc_request`, not `description` — `_run_specialized_agent_bg` always
+called every registered agent with `description=description` (assuming a uniform param name
+across all 60+ registered agents), which raised `TypeError` for these two, silently caught by
+the function's own broad `except Exception` and logged as an `agent_error` — meaning dispatching
+either agent via this real production endpoint has failed, unnoticed, since the endpoint was
+built. Fixed generally, not per-agent-name special-cased: new `_agent_call_kwargs(fn, task_id,
+description, repo_path)` inspects the target function's real second parameter name and binds the
+description value to it, whatever it's called — verified against the real, previously-broken
+`run_readme_agent` (confirmed no longer raises) and the real, already-correct
+`run_changelog_agent` (confirmed unaffected by the fix).
+Plan: none remaining for generator coverage. Optional follow-up, not committed: extend the Day 52
+auto-trigger loop to the other 5 doc agents if warranted.
 
 ---
 
@@ -2631,8 +2717,9 @@ and, for the graph that previously had nothing at all, `chat_agent.py`'s own
 - Inspect coding standards: **PARTIAL** — `_GLOBAL_STANDARDS.md` §4 (SOLID/KISS/DRY/YAGNI, existing architecture respect) is itself the standards document every agent inherits, but there's no step instructing an agent to look for a project-specific style/lint config before writing code beyond running the linter after.
 - Inspect dependencies: **YES** — `decomposer.md`'s `depends_on` graph, `architect.md` Step 5 (DB models/migrations).
 - Inspect tests: **PARTIAL** — no explicit "read existing tests before changing code" step found in `coder.md`/`architect.md` (only "run tests" post-change, `chat.md` step 5/6); reading existing test files for conventions before writing new ones isn't a named mandatory step.
-- Inspect CI/CD: **NO (for general coding agents)** — grepped `backend/roles/*.md` for CI/CD-related terms: only `cicd_agent.md` (a dedicated, narrow-scope agent) and safety-only mentions (`coder.md` line 20: "Never write to... `.github/workflows/**`") exist; `coder.md`/`backend_dev.md`/`architect.md` have no step instructing inspection of `.github/workflows/` before a general code change.
-- Inspect deployment implications: **NOT VERIFIED** — no role prompt for general coding agents (`coder.md`, `backend_dev.md`, `frontend_dev.md`) mentions considering deployment impact; this concern is implicitly delegated to human deploy-gating (`CLAUDE.md`'s "Deploy is a human action forever," reflected in the real absence of any deploy tool — see Q55) rather than being inspected pre-change.
+- Inspect CI/CD: **YES (for general coding agents)** — gap-closure Days 55-56 (2026-08-03, Stage 2). `coder.md` (Step 8), `backend_dev.md` (Step 9), `frontend_dev.md` (Step 8), and `architect.md` (Step 8) each now have a real, explicit instruction to check whether the diff/plan touches `.github/workflows/**`, `Dockerfile*`, `docker-compose*.yml`, `Procfile`, or dependency manifests before submitting — not just the pre-existing safety-only "never write to `.github/workflows/**`" denial. `backend_dev.md`'s own existing Non-Responsibility boundary ("CI/CD (cicd_agent)") is deliberately preserved — this is CI/CD *awareness/flagging*, not a scope change into cicd_agent's actual engineering work.
+- Inspect deployment implications: **YES** — same gap-closure Days 55-56 change. Each of the 4 role prompts' new step explicitly names the real deployment implications a touched path can have (a new dependency needs a real image rebuild before it's usable in production; a new migration must run before code depending on it is safe to deploy; a workflow change affects what CI actually gates) and requires noting them in the submission summary (`architect.md`: as an explicit `risks` entry). Deploy execution itself remains correctly delegated to a human (`CLAUDE.md`'s "Deploy is a human action forever," unchanged) — this closes the *inspection/awareness* gap, not deploy authority.
+  Tests: `tests/test_gap55_56_load_test_and_cicd_inspection.py::TestCicdInspectionStepInRolePrompts` (5 tests) — each of the 4 files' real content asserted to contain the new step text and checklist bullet, plus a regression guard proving `backend_dev.md`'s pre-existing "CI/CD (cicd_agent)" Non-Responsibility line is still present (the addition is additive, not a boundary change).
 - Inspect documentation: **NOT VERIFIED** — no explicit "read existing docs before changing code" step found in the general coding role prompts (docs are the `docs_agent`'s own domain, not a prerequisite step for `coder`/`backend_dev`).
 - "Only then make changes" ordering: **YES for `chat_agent.py` — gap-closure Days 15-16 (2026-07-30
   / 31).** The read-before-write ordering was real and prompt-repeated but not code-blocked; it now

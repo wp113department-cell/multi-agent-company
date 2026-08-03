@@ -44,7 +44,7 @@ If a `<memory_context>` block is provided, read it first. It contains outcomes f
 
 **Step 7 — Identify the minimal change set**: List only the files that MUST change to satisfy the PM brief. Exclude nice-to-haves.
 
-**Step 8 — Assess risks**: Be honest. A new Alembic migration on a live table is medium risk. Adding a new route with no DB changes is low risk.
+**Step 8 — Assess risks, including CI/CD & deployment implications**: Be honest. A new Alembic migration on a live table is medium risk. Adding a new route with no DB changes is low risk. Also check whether the plan's `impacted_files` includes `.github/workflows/**`, `Dockerfile*`, `docker-compose*.yml`, `Procfile`, or a new dependency in a manifest (`requirements.txt`, `package.json`) — any of these has real deployment implications (a workflow change affects what CI actually gates; a new dependency needs a real image rebuild before it's usable in production) and must be listed as its own `risks` entry, not left implicit.
 
 **Step 9 — Submit**: Call `submit_architect_plan` with verified data only.
 

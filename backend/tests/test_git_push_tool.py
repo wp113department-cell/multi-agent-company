@@ -18,6 +18,7 @@ from app.tools.git_push_tool import (
     PushResult,
     create_github_pr,
     generate_commit_message,
+    generate_pr_body,
     parse_repo_full_name,
     push_and_create_pr,
 )
@@ -166,6 +167,92 @@ class TestGenerateCommitMessage:
         assert message == "feat: Add hello endpoint"
 
 
+class TestGeneratePrBody:
+    """Gap-closure Day 52 (answers.md Q40 "Change summarization/PR
+    descriptions": PARTIAL — PR body was a truncation of task_description,
+    not an LLM summary of the real diff). Mirrors TestGenerateCommitMessage's
+    exact mocking pattern."""
+
+    @pytest.mark.asyncio
+    @patch("app.agents.base.get_effective_api_key", return_value="test-key")
+    @patch("anthropic.Anthropic")
+    async def test_returns_llm_generated_diff_aware_body(
+        self, mock_anthropic_cls: Any, _key: Any
+    ) -> None:
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = SimpleNamespace(
+            content=[
+                SimpleNamespace(
+                    type="text",
+                    text="## Summary\n- Added /hello endpoint\n\n## Files Changed\n- app/api/hello.py",
+                )
+            ]
+        )
+        mock_anthropic_cls.return_value = mock_client
+
+        body = await generate_pr_body(
+            "Add hello endpoint",
+            "original truncated task description",
+            "diff --git a/app/api/hello.py b/app/api/hello.py",
+            "claude-haiku-4-5-20251001",
+        )
+        assert "## Summary" in body
+        assert "Added /hello endpoint" in body
+        # real diff-derived content, not the raw task description
+        assert "original truncated task description" not in body
+
+    @pytest.mark.asyncio
+    async def test_empty_diff_falls_back_to_task_description_without_llm_call(
+        self,
+    ) -> None:
+        with patch("anthropic.Anthropic") as mock_anthropic_cls:
+            body = await generate_pr_body(
+                "Add hello endpoint", "the real task description", "", "haiku"
+            )
+        assert body == "the real task description"
+        mock_anthropic_cls.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("app.agents.base.get_effective_api_key", return_value="test-key")
+    @patch("anthropic.Anthropic")
+    async def test_falls_back_on_llm_failure(
+        self, mock_anthropic_cls: Any, _key: Any
+    ) -> None:
+        mock_anthropic_cls.side_effect = RuntimeError("API down")
+
+        body = await generate_pr_body(
+            "Add x", "fallback description", "diff --git a/x b/x", "haiku"
+        )
+        assert body == "fallback description"
+
+    @pytest.mark.asyncio
+    @patch("app.agents.base.get_effective_api_key", return_value="test-key")
+    @patch("anthropic.Anthropic")
+    async def test_falls_back_on_empty_llm_response(
+        self, mock_anthropic_cls: Any, _key: Any
+    ) -> None:
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = SimpleNamespace(content=[])
+        mock_anthropic_cls.return_value = mock_client
+
+        body = await generate_pr_body(
+            "Add x", "fallback description", "diff --git a/x b/x", "haiku"
+        )
+        assert body == "fallback description"
+
+    @pytest.mark.asyncio
+    @patch("app.agents.base.get_effective_api_key", return_value="test-key")
+    @patch("anthropic.Anthropic")
+    async def test_truncates_overlong_fallback_to_2000_chars(
+        self, mock_anthropic_cls: Any, _key: Any
+    ) -> None:
+        mock_anthropic_cls.side_effect = RuntimeError("API down")
+        long_description = "x" * 5000
+
+        body = await generate_pr_body("Add x", long_description, "diff", "haiku")
+        assert len(body) == 2000
+
+
 class TestPushAndCreatePr:
     @pytest.mark.asyncio
     async def test_full_success_path(self) -> None:
@@ -175,6 +262,9 @@ class TestPushAndCreatePr:
             "app.tools.git_push_tool.generate_commit_message",
             return_value="feat: add x",
         ) as mock_msg, patch(
+            "app.tools.git_push_tool.generate_pr_body",
+            return_value="## Summary\n- did x",
+        ) as mock_body, patch(
             "app.tools.git_push_tool.create_github_pr"
         ) as mock_create_pr:
             mock_push.return_value = {"ok": True, "stdout": "", "stderr": ""}
@@ -203,9 +293,11 @@ class TestPushAndCreatePr:
             "/repo", remote="origin", branch="agent/task-42"
         )
         mock_msg.assert_called_once()
+        mock_body.assert_called_once()
         mock_create_pr.assert_called_once()
         assert mock_create_pr.call_args.kwargs["repo_full_name"] == "owner/repo"
         assert mock_create_pr.call_args.kwargs["source_branch"] == "agent/task-42"
+        assert mock_create_pr.call_args.kwargs["body"] == "## Summary\n- did x"
 
     @pytest.mark.asyncio
     async def test_push_failure_returns_error_without_attempting_pr(self) -> None:
@@ -242,6 +334,8 @@ class TestPushAndCreatePr:
         ), patch(
             "app.tools.git_push_tool.generate_commit_message", return_value="feat: x"
         ), patch(
+            "app.tools.git_push_tool.generate_pr_body", return_value="body"
+        ), patch(
             "app.tools.git_push_tool.create_github_pr"
         ) as mock_create_pr:
             mock_push.return_value = {"ok": True, "stdout": "", "stderr": ""}
@@ -266,6 +360,8 @@ class TestPushAndCreatePr:
             "app.repo_tools.worktree.get_diff", return_value=""
         ), patch(
             "app.tools.git_push_tool.generate_commit_message", return_value="feat: x"
+        ), patch(
+            "app.tools.git_push_tool.generate_pr_body", return_value="body"
         ):
             mock_push.return_value = {"ok": True, "stdout": "", "stderr": ""}
 

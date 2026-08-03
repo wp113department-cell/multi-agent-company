@@ -3380,3 +3380,302 @@ be silently dropped — every item below traces to a real `MASTER_AGENT_v2.md` �
   Q41's "wire a lightweight trigger... to invoke `changelog_agent`/`release_notes_agent`
   automatically on merge to main" — then Day 53's four new doc generators (architecture/agent/
   tool/migration).**
+
+- **2026-08-03 (same day)**: **Stage 2 Day 52 — real diff-driven PR bodies (answers.md Q40
+  "Change summarization/PR descriptions": PARTIAL — PR body was `task_description[:2000]`, a
+  truncation, not an LLM summary of the real diff) + a doc-agent auto-trigger loop (answers.md
+  Q41 "Auto-trigger 'when code changes': NO for all... Plan: wire a lightweight trigger... to
+  invoke changelog_agent/release_notes_agent automatically on merge to main").**
+  **Part 1 — PR body**: `backend/app/tools/git_push_tool.py::generate_pr_body(task_title,
+  task_description, diff, model)` mirrors the file's own existing `generate_commit_message`
+  pattern exactly (one Haiku call, diff-aware, deterministic non-raising fallback to
+  `task_description[:2000]` — the prior behavior — on an empty diff or any failure).
+  `push_and_create_pr()` now calls it and passes the real generated body to `create_github_pr`
+  instead of the raw truncated description. No new mechanism invented — same file, same author
+  intent as the sibling function it sits next to.
+  **Part 2 — auto-trigger loop**: repo research first (REPO-FIRST rule) found no real
+  CI/webhook receiver anywhere in this codebase (grepped `app/api/` for `webhook`/`post_merge`
+  — zero hits), so this follows the plan's other named option: a periodic loop matching
+  `_fleet_agents_scan_loop()`'s own established pattern. New `_doc_agent_auto_trigger_loop()` +
+  `_run_doc_agent_auto_trigger_once()` (`backend/app/main.py`) poll `target_repo_path`'s real
+  local `main` HEAD SHA via a real `git rev-parse main` subprocess and compare against a
+  per-agent marker persisted in the real, pre-existing `system_settings` key-value table
+  (`app.db.repository.get_setting`/`set_setting` — reused as-is, no new migration/table for
+  what's a small feature). When `main` has moved since an agent's last recorded run, creates a
+  real `DevTask` (`create_task`) and dispatches `run_changelog_agent`/`run_release_notes_agent`
+  against it via `asyncio.to_thread`, then calls `record_agent_run_outcome` — the exact same
+  task-based execution path `POST /api/specialized-agents/{name}/run` already uses, not a new
+  bypass mechanism. Wired into `lifespan()` alongside the other periodic loops (started,
+  cancelled on shutdown, same as `_benchmark_baseline_loop`/`_fleet_agents_scan_loop`). New
+  config `doc_agent_auto_trigger_interval_hours` (default 6, 0 disables), documented in
+  `.env.example`.
+  **Honest scope note**: only 2 of the 4 real doc agents are wired (`readme_agent`/
+  `api_docs_agent` remain dispatch-only); the local-`main`-only check (deliberately no `git
+  fetch`, to avoid a network dependency this loop otherwise doesn't have) means a remote-only
+  merge that never lands on this backend's own local checkout won't be seen. Both named in
+  `answers.md`, not hidden.
+  **Tests**: `tests/test_git_push_tool.py::TestGeneratePrBody` (5 new tests) + 3 pre-existing
+  `TestPushAndCreatePr` tests updated to mock `generate_pr_body` (the real, previously-missing
+  mock — without it these 3 would now make a real unmocked network call to the Anthropic API
+  on every run, since `push_and_create_pr` calls the real diff-aware function; caught by running
+  the file, not assumed) — one of them extended to assert the real generated body reaches
+  `create_github_pr`'s `body` kwarg. `tests/test_gap52_doc_agent_auto_trigger.py` (5 new tests)
+  — a real git repo + real `system_settings` rows proving first-run dispatch of both agents and
+  correct per-agent-marker persistence; a real proof that an agent whose marker already matches
+  current `main` is skipped while the other (never run) still fires; a real no-`main`-branch
+  repo returning silently; the disabled-when-0 case (mirroring
+  `test_benchmark_baseline_loop.py`'s own established pattern); and an `inspect.getsource`
+  "verify real callers" guard confirming the loop is genuinely wired into `lifespan()`.
+  `black`/`ruff`/`mypy --strict` clean on every touched file. Focused re-run of 10 directly
+  related pre-existing test files (`test_approvals_api.py`, `test_benchmark_baseline_loop.py`,
+  `test_bootstrap_wiring.py`, `test_day12_smoke_test.py`, `test_gap48_architecture_reviewer_scan.py`,
+  `test_gap49_dependency_scan.py`, `test_git_push_approval_dispatch.py`, `test_git_push_tool.py`,
+  `test_lesson_archive_loop.py`, `test_sentry_init.py`) plus this day's two new files: 88
+  passed, 0 failed.
+  **Full regression**: 3631 passed (3621 Day-51 baseline + 10 new), 0 failed, 55 skipped, 17
+  deselected — exact match, zero regressions.
+  **`answers.md` updated**: Q40 "Change summarization/PR descriptions" flipped PARTIAL → **YES**.
+  Q41's "Auto-trigger" line flipped NO → PARTIAL (2 of 4 doc agents now real-auto-triggered,
+  honest scope note on the other 2 and the local-only check); Q41's overall verdict stays
+  PARTIAL with an updated Plan line.
+  **Next: Day 53 — the four new doc generators (architecture/agent-roster/tool-catalog/
+  migration-guide), reusing `readme_agent.py`/`api_docs_agent.py` as the template per PLAN.md's
+  own "Reuse" column — then the Days 51-53 bucket close-out.**
+
+- **2026-08-03 (same day)**: **Stage 2 Day 53 — 4 new doc generators, closing out Q41's last
+  real gaps (architecture docs, agent docs, tool docs, migration guides — all "NOT FOUND").**
+  Reused `readme_agent.py`/`api_docs_agent.py`'s established shape exactly (real repo-grounded
+  read-only tools + `write_file` scoped to `*.md`/`docs/**` + `submit_docs`), per PLAN.md's own
+  "Reuse" column — factored the shared write_file/submit_docs pair into a new
+  `make_doc_generator_handlers()` (`backend/app/agents/tools.py`) so 4 new agent files don't
+  each duplicate that closure.
+  **The core design choice**: each generator's grounding data comes from real introspection, not
+  the LLM's memory of what "should" exist — matching aider's `repomap.py` principle (build from
+  real parsed structure, never guess) cited during repo research. 3 new introspection tools in
+  `tools.py`: `list_registered_agents` (calls the real, pre-existing Day 19
+  `ensure_all_agents_registered()` first, so the list is genuinely complete regardless of what's
+  been dispatched yet, then reads the real `capability_registry` — 72 real agents confirmed
+  live); `list_all_tool_specs` (reflects over `tools.py`'s own module globals for every
+  dict/list-of-dicts shaped like a real tool schema, deduplicated by name — 206 real tools
+  confirmed live); `list_migrations` (AST-parses, never executes, every real file under
+  `backend/migrations/versions/` for `revision`/`down_revision`/docstring).
+  `architecture_doc_agent.py` reuses `architecture_reviewer`'s own real tools directly
+  (`make_arch_reviewer_handlers`) rather than a 4th new introspection tool, swapping in
+  `write_file`/`submit_docs` for `submit_arch_review`.
+  **Real bug found and fixed while building `list_migrations`**: an early version only handled
+  `ast.Assign` nodes, but Alembic's real generated files use annotated assignments
+  (`revision: str = "001"`, an `ast.AnnAssign`) — silently returned `revision: None` for every
+  one of the 26 real migration files until caught by testing against the real files (not assumed
+  correct from the parsing approach alone) and fixed to handle both node types.
+  **Second, separate real bug found and fixed while wiring the 4 new agents into
+  `app/api/specialized_agents.py`'s dispatch registry**: `readme_agent`/`api_docs_agent`'s real
+  second parameter is named `doc_request`, not `description` — `_run_specialized_agent_bg` has
+  always called every registered agent with `description=description` (a uniform-name
+  assumption across 60+ agents that was never actually true), raising `TypeError` for these two,
+  silently caught by the function's own broad exception handler and logged as a routine
+  `agent_error` — meaning real dispatch of either agent via this real production endpoint has
+  failed, unnoticed, since the endpoint was built (predates this session; found only because the
+  4 new agents I was wiring in used the same `doc_request` convention, which would have hit the
+  identical bug). Fixed generally, not per-agent-special-cased: new `_agent_call_kwargs(fn,
+  task_id, description, repo_path)` inspects the target function's real second parameter name at
+  call time and binds the description value to it, whatever it's called.
+  **Capability tags**: all 4 new agents given unique tags, verified against the full live
+  76-agent fleet (72 pre-existing + 4 new) with zero duplicates — per CLAUDE.md's own rule.
+  **Tests**: `tests/test_gap53_doc_generators.py` (32 tests) — real-data assertions for all 3
+  new introspection tools (including the AnnAssign regression guard and a real down_revision
+  chain-link check); per-agent handler creation + `*.md`-scoping proofs (mirroring
+  `test_day2_agents.py::TestReadmeHandlers` exactly) for all 4 new agents; mocked-`run_agent_graph`
+  proofs that each `run_*_doc_agent` correctly propagates a real result (mirroring
+  `test_gap49_dependency_scan.py`'s established pattern); a fleet-wide no-duplicate-capability-tag
+  regression guard; registry-wiring proofs all 4 are loadable via `_load_agent_fn`; and dedicated
+  coverage of the `_agent_call_kwargs` bug fix — both in the abstract (fake functions shaped like
+  each real convention) and against the real, previously-broken `run_readme_agent` (confirmed no
+  longer raises `TypeError`) and the real, already-correct `run_changelog_agent` (confirmed
+  unaffected).
+  `black`/`ruff`/`mypy --strict` clean on every touched/new file.
+  **Full regression**: 3663 passed (3631 Day-52 baseline + 32 new), 0 failed, 55 skipped, 17
+  deselected — exact match, zero regressions.
+  **`answers.md` updated**: Q41's Architecture docs/Agent docs/Tool docs/Migration guides lines
+  all flipped NOT FOUND → **YES**; overall Q41 verdict flipped PARTIAL → **YES** (all 7 named doc
+  types now have real generators; auto-trigger coverage honestly stays partial — 2 of 7, named
+  not overclaimed); the real `_agent_call_kwargs` bug documented in the verdict block itself,
+  not buried.
+  **Next: the Days 51-53 bucket close-out (citation spot-check across all three days' new
+  evidence + combined regression summary), then Day 54 (performance/latency instrumentation).**
+
+- **2026-08-03 (same day)**: **Days 51-53 bucket close-out.** Re-derived (not re-summarized)
+  each day's real evidence: `list_registered_agents`/`list_all_tool_specs`/`list_migrations`
+  re-run live (76 agents, 206 tools, 26 migrations — all still real and correct);
+  `app/api/specialized_agents.py`'s `_REGISTRY` re-grepped for all 4 Day 53 entries (present) and
+  `_agent_call_kwargs` re-confirmed as the real call site (not reverted); Day 51's
+  `parse_merge_conflicts`/`resolve_merge_conflict` re-grepped as still registered in
+  `make_chat_handlers`; Day 52's `_doc_agent_auto_trigger_loop` re-grepped as still wired into
+  `lifespan()`'s create/cancel pairs. No drift found — bucket verdict: clean. Combined regression
+  across the three days: Day 51 3621, Day 52 3631, Day 53 3663 — each an exact, zero-regression
+  increment already independently confirmed at its own close.
+  **Next: Day 54 — performance/latency instrumentation (PLAN.md Stage 2: `record_tool()`-
+  equivalent timing around planner/decomposer/scan/memory-retrieval, reusing
+  `backend/app/fleet/metrics.py`'s existing pattern).**
+
+- **2026-08-03 (same day)**: **Stage 2 Day 54 — performance/latency instrumentation (answers.md
+  Q8: "Planning speed"/"Orchestration speed"/"File scanning speed"/"Memory retrieval speed" all
+  NO — record_tool() times individual tool calls, but nothing isolates a graph node's own time,
+  and repo_tools/app.memory had zero timing instrumentation at all).**
+  **Design investigation before writing code** (both a real finding, not assumed): considered
+  attaching orchestration timing directly to `RunMetrics` via `manager.py`'s own
+  `manager_trace_id`, and threading `trace_id` into `store.py`'s 5 `query_*` functions directly
+  — rejected both after grepping real call sites. `manager_trace_id` never has `start_run()`
+  called for it anywhere (confirmed by grep), so attaching to it would have silently recorded
+  nothing, looking like real instrumentation while being dead code. `store.py`'s `query_*`
+  functions' only real caller with agent-run trace_id context already routes through
+  `base_graph.py`'s `memory_hook_node` (confirmed by grep — `api/repo.py`/`mcp/server.py` call
+  `index_repository()` with no agent-run context at all), so instrumenting that one real call
+  site covers both "memory retrieval speed" and "file scanning speed" (which also only has real
+  agent-run context there) without an invasive signature change across 5+ call sites.
+  **Built**: `PhaseTimingRecord` + `RunMetrics.record_phase()`/`.phase_timings` +
+  module-level `record_phase_timing(trace_id, phase_name, duration_ms)` (all
+  `backend/app/fleet/metrics.py`) — a `record_tool()`-equivalent for non-tool phases, kept in a
+  **separate** list from `tool_calls` specifically because `tool_accuracy` (derived from
+  `tool_calls`) feeds directly into `benchmark_manager.py`'s real regression-gate scoring; a
+  synthetic always-succeeds phase entry mixed into `tool_calls` would have silently skewed every
+  agent's real benchmark score — caught during design, not after.
+  Wired into 2 real call sites in `base_graph.py`: `planner_node` (Planning speed) times its
+  real `_gather_facts_and_plan` call; `memory_hook_node` times its real
+  `query_memory_context_sync(...)` call (Memory retrieval speed — additive to Day 43's separate,
+  global `memory/analytics.py::record_retrieval_time()`, not a replacement: Day 43 tracks
+  per-function DB-query time process-wide, this attaches a whole-phase total to the specific
+  run's own `RunMetrics`) and its real `index_repository(repo_path)` call (File scanning speed).
+  For Orchestration speed — `run_manager()` spans multiple sub-agent trace_ids (dev/QA/reviewer),
+  so there's no single per-run `RunMetrics` owner for the orchestration span itself — new
+  `backend/app/fleet/orchestration_analytics.py` mirrors `app/memory/analytics.py`'s own Day 43
+  in-process-rolling-window pattern exactly (`record_orchestration_time`/
+  `get_orchestration_time_stats`/`reset_orchestration_time_stats`, new config
+  `orchestration_timing_window`), wired into both of `run_manager()`'s real call sites:
+  `manager.py::_coding_node` (the epic-manager graph's own dispatch) and `app/api/agents.py`'s
+  direct-dispatch path.
+  **Tests**: `tests/test_gap54_phase_timing.py` (13 tests) — `PhaseTimingRecord`/`record_phase()`
+  correctness including the tool_accuracy-isolation regression guard (a real failing tool call
+  plus 2 phase entries — `tool_accuracy` must be unaffected); `record_phase_timing()`'s non-fatal
+  trace_id lookup (both a live and a nonexistent/empty trace_id, mirroring `record_tool()`'s own
+  established non-fatal call-site pattern); `orchestration_analytics.py`'s record/window/reset
+  behavior (mirroring `test_gap43_memory_analytics.py`'s own test pattern exactly); real
+  `planner_node`/`memory_hook_node` calls (mocked LLM/DB, real `MetricsCollector`) proving each
+  actually records the expected phase timing under the run's real trace_id; and `inspect.getsource`
+  "verify real callers" guards proving both `run_manager()` call sites actually call
+  `record_orchestration_time`, not just that the function exists somewhere.
+  `black`/`ruff`/`mypy --strict` clean on every touched/new file.
+  **Full regression**: 3676 passed (3663 Day-53 baseline + 13 new), 0 failed, 55 skipped, 17
+  deselected — exact match, zero regressions.
+  **`answers.md` updated**: Q8's Planning speed/Orchestration speed/File scanning speed/Memory
+  retrieval speed lines all flipped NO → **YES**, each with the real design-investigation
+  reasoning (not just the final code) documented so a future reader can judge whether the
+  chosen instrumentation point is still the right one. "Estimated production performance level"
+  unchanged (still honestly NOT VERIFIED — this day adds real measurement capability, not a
+  Claude-Code/Cursor comparison number, which remains a separate, unbuilt gap).
+  **Next: Days 55-56 — load/stress tests + a CI/CD-config inspection step for general coding
+  role prompts (PLAN.md Stage 2's last 2-item bucket before Day 57's Stage 2 regression + Gap
+  Audit Protocol checkpoint).**
+
+- **2026-08-03 (same day)**: **Stage 2 Days 55-56 — a real committed k6 load/stress test suite
+  (answers.md Q11: "Load Tests"/"Stress Tests" both NO — no locust/k6 tooling found anywhere)
+  + a CI/CD-config inspection step added to the 4 general coding role prompts (answers.md Q67:
+  "Inspect CI/CD"/"Inspect deployment implications" NO/NOT VERIFIED).**
+  **Part 1 — load/stress**: new `backend/tests/load/gridiron_load_test.js`, a real k6 script
+  (not the existing `load_test_agent.py`'s on-request script generation for arbitrary target
+  repos — this is checked in for the platform's own infrastructure specifically). Targets 4
+  real, currently-registered read-only endpoints, each confirmed against their actual route
+  handlers before use, not guessed: `GET /health` (`app/main.py`, no auth), `GET /api/agents`
+  (`app/api/registry.py`, no auth), `GET /api/metrics` (`app/api/metrics.py`, no auth),
+  `GET /api/tasks` (`app/api/tasks.py`, requires auth when `JWT_AUTH_ENABLED=true` — handled via
+  an optional `API_TOKEN` env var, `401` accepted as a valid response when no token is given).
+  Two genuinely distinct traffic profiles selected via `SCENARIO` env var: `load` (ramp to 10
+  VUs, explicit pass/fail thresholds `p(95)<500ms`/error rate `<1%` for normal-traffic
+  validation) and `stress` (ramp to 150 VUs — a real different peak, not "load run longer" —
+  looser sanity-ceiling thresholds `p(95)<3000ms`/error rate `<10%` appropriate for finding a
+  breaking point). `BASE_URL`/`API_TOKEN`/`SCENARIO` all `__ENV`-driven — zero hardcoding.
+  **Actually run, not just written** (CLAUDE.md's "it ran and passed" rule, not "should work"):
+  downloaded the real k6 v0.54.0 binary (no root needed — a plain static-binary tarball),
+  started a real `uvicorn` instance of this app, and ran both scenarios against it for real —
+  100% checks passed, 0% error rate, exit code 0 for both `load` and `stress`.
+  **Part 2 — CI/CD inspection**: `coder.md` (Step 8), `backend_dev.md` (Step 9),
+  `frontend_dev.md` (Step 8), `architect.md` (Step 8) each gained a real, explicit instruction
+  to check whether the diff/plan touches `.github/workflows/**`, `Dockerfile*`,
+  `docker-compose*.yml`, `Procfile`, or dependency manifests before submitting, naming the real
+  deployment implication each has (new dependency → real image rebuild needed; new migration →
+  must run before dependent code is safe to deploy; workflow change → affects what CI actually
+  gates) — going beyond the pre-existing safety-only "never write to `.github/workflows/**`"
+  denial into genuine pre-submit awareness. `backend_dev.md`'s existing Non-Responsibility
+  boundary ("CI/CD (cicd_agent)") deliberately left untouched — this is awareness/flagging, not
+  a scope change into cicd_agent's actual engineering work.
+  **Tests**: `tests/test_gap55_56_load_test_and_cicd_inspection.py` (16 tests) — structural
+  regression guards for the k6 script (real-endpoint cross-check against the actual route files,
+  both scenarios present, thresholds present, env-driven config, stress genuinely exceeds load's
+  peak) that always run regardless of environment; a real k6-execution test (spawns a real
+  `uvicorn` instance, runs a shortened real `k6 run`, asserts exit 0 and 100% checks) gated by
+  `shutil.which("k6")`, mirroring this codebase's own established CLI-tool-dependent-test
+  pattern (`test_gap35_resource_check.py`'s `docker_available`, `test_day0_groq_integration.py`'s
+  `ANTHROPIC_AVAILABLE`) — confirmed genuinely passing when k6 is on `PATH` (15/15 incl. the
+  execution test) and cleanly skipping (not failing) when it isn't (15 passed, 1 skipped), both
+  verified directly; and 5 tests on the 4 role prompts' real content (new step text present,
+  checklist bullet present, `backend_dev.md`'s Non-Responsibility line still intact).
+  `black`/`ruff`/`mypy --strict` clean on every touched/new file.
+  **Full regression**: 3691 passed (3676 Day-54 baseline + 15 new — 1 of the 16 new tests is the
+  k6-gated execution test, skipped in this run since k6 isn't on the standard suite's `PATH`),
+  0 failed, 56 skipped (55 + 1 new), 17 deselected — exact match, zero regressions.
+  **`answers.md` updated**: Q11's Load Tests/Stress Tests flipped NO → **YES**; Q67's Inspect
+  CI/CD/Inspect deployment implications flipped NO/NOT VERIFIED → **YES**.
+  **Next: Day 57 — Stage 2 regression + Gap Audit Protocol checkpoint (PLAN.md's own scheduled
+  re-verification cadence at every Stage boundary — re-derive open items across all of Stage 2's
+  80 items, not just re-summarize prior claims, before Stage 3 can begin).**
+
+- **2026-08-03 (same day)**: **Day 57 — Stage 2 close-out: Gap Audit Protocol checkpoint
+  (PLAN.md's own built-in checkpoint day; the protocol's exact 6-step procedure applied, not a
+  status summary).**
+  **Step 1-2 (re-derive, not re-summarize)**: re-grepped/re-read a representative real citation
+  from every one of Stage 2's 7 sub-buckets against current code — not assumed still-true from
+  the day it was written:
+  - Days 35-39: `run_resource_check()`/`measure_repo_size()`/`estimate_project_size()` (real
+    functions, confirmed present) and `_resource_check_node`/`_route_after_resource_check` still
+    wired into `build_epic_manager_graph()`.
+  - Days 40-44: `_COMPOSITE_SCORE_EXPR`/`_find_near_duplicate`/the `vector_norm(embedding) > 0`
+    NaN-sort guard all still present in `store.py`; `get_memory_analytics`'s `stalenessDistribution`
+    field still wired in `api/memory.py`.
+  - Days 45-47: `fold_file_content()` still real in `file_folding.py`; `LessonStore._jaccard`/
+    `lesson_store_capacity` still wired in `base_graph.py`.
+  - Days 48-53: already independently re-confirmed at their own bucket close-outs earlier this
+    session (Days 48-50's and 51-53's own citation spot-checks, both clean).
+  - Day 54: `record_phase_timing` still called from `planner_node`/`memory_hook_node`
+    (`base_graph.py`); `record_orchestration_time` still called from both real `run_manager()`
+    call sites (`manager.py`, `api/agents.py`).
+  - Days 55-56: fresh this session, re-confirmed by their own passing test suite moments earlier.
+  **Zero drift found** — every re-checked citation still matches current code exactly.
+  **Step 3 (full regression, fresh run)**: 3691 passed, 0 failed, 56 skipped, 17 deselected —
+  an exact match to Days 55-56's own close-out count, confirming a completely fresh full-suite
+  run finds no silent regression anywhere in Stage 2's cumulative changes (Day 34 baseline through
+  today: every day's increment individually verified as exact-match-zero-regression at its own
+  close, and this fresh whole-suite run corroborates the cumulative total independently).
+  **Step 4-5 (honest report — nothing reverted, because nothing failed re-verification)**: all
+  spot-checked claims independently re-confirmed; 0 items found regressed or newly incomplete.
+  Stage 2's own honestly-still-open items (never silently dropped, each already named in its own
+  day's entry) restated here for a single consolidated view:
+  - Q35 "Unused files"/"duplicate functions" detectors — genuinely new capability, not built
+    (Days 48-50's own honest note).
+  - Q35/Days 35-39: Node-version is probed but has no enforced minimum; indexing/embedding/
+    test-execution-time estimates remain informational (not gate-blocking).
+  - Q36: nothing yet autonomously decides *when* to propose a prompt-quality fix — Day 50 fixed
+    the delivery pipeline, not the decision-making piece.
+  - Phase 5/6 finding #8 (partially resolved Day 50): the RQ distributed-queue adapter and
+    `RESEARCH_TOOLS`'s `web_search` schema entry remain dormant — named, not silently expanded
+    alongside `prompt_registry`'s real fix.
+  - Q8: "Compare runtime behavior with Claude Code and Cursor" stays NOT VERIFIED — Day 54 added
+    real measurement capability, not an external comparison benchmark, which remains unbuilt.
+  - Q11: no dedicated throughput/latency dashboard rollup for "Editing speed" (Response latency
+    stays PARTIAL for the same never-produced-a-comparison-number reason as before).
+  **Step 6**: no real gaps found to close before resuming — Stage 2 checkpoint is clean.
+  **Verdict: 7 of 7 sub-buckets independently re-confirmed; 0 regressed or incomplete.** Stage 2
+  (Days 35-57, 80-item "should fix soon" bucket) is complete per the Gap Audit Protocol's own
+  standard. Per `PLAN.md`'s "Stage boundaries pause for an explicit owner go-ahead" rule, Stage 3
+  (Days 58-63, NOT VERIFIED items — measure, don't build) does not begin without the owner's
+  explicit go-ahead, even though day-to-day progress within a stage doesn't require per-day
+  permission.
+  **Next: awaiting explicit go-ahead to begin Stage 3.**

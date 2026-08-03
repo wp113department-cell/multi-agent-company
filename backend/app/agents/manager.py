@@ -1145,6 +1145,17 @@ async def _coding_node(state: EpicManagerState) -> dict[str, Any]:
 
     worktree_path = str(create_worktree(task_id, repo))
 
+    # Gap-closure Day 54 (Stage 2, answers.md Q8 "Orchestration speed": NO —
+    # no dedicated orchestration-latency metric). run_manager() spans
+    # multiple sub-agent trace_ids (dev/QA/reviewer), so there's no single
+    # RunMetrics owner for this span — recorded on the standalone
+    # orchestration_analytics tracker instead (mirrors memory/analytics.py's
+    # own Day 43 pattern).
+    import time as _time
+
+    from app.fleet.orchestration_analytics import record_orchestration_time
+
+    _t0 = _time.monotonic()
     manager_result = await run_manager(
         task_id=task_id,
         subtasks=state["subtasks"],
@@ -1154,6 +1165,7 @@ async def _coding_node(state: EpicManagerState) -> dict[str, Any]:
         epic_id=epic_id,
         db=db,
     )
+    record_orchestration_time("run_manager", (_time.monotonic() - _t0) * 1000)
 
     return {"worktree_path": worktree_path, "manager_result": manager_result}
 

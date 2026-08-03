@@ -210,6 +210,9 @@ async def push_and_create_pr(
     commit_message = await generate_commit_message(
         task_title, diff, settings.model_router
     )
+    pr_body = await generate_pr_body(
+        task_title, task_description, diff, settings.model_router
+    )
 
     try:
         repo_full_name = parse_repo_full_name(github_url)
@@ -218,7 +221,7 @@ async def push_and_create_pr(
             source_branch=branch,
             target_branch=base_branch,
             title=commit_message,
-            body=task_description[:2000],
+            body=pr_body,
             token=token,
             draft=True,
         )
