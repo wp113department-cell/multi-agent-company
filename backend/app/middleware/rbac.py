@@ -132,8 +132,23 @@ async def require_authenticated(
 
     if settings.jwt_auth_enabled:
         auth_header = request.headers.get("Authorization", "")
+        token: str | None = None
         if auth_header.startswith("Bearer "):
             token = auth_header[len("Bearer ") :]
+        else:
+            # Gap-closure Stage 3 Day 63 (answers.md Appendix finding #11) —
+            # cookie fallback added specifically so GET /api/tasks/{id}/stream
+            # can require real auth: browser-native EventSource cannot set a
+            # custom Authorization header, but DOES send same-origin cookies
+            # automatically, and lib/auth.ts's setToken() already mirrors the
+            # same JWT into a `gridiron_token` cookie (originally only for
+            # middleware.ts's server-side route gating) — reusing that
+            # existing cookie here is strictly additive: every existing
+            # Bearer-header caller is unaffected (checked first, unchanged),
+            # this only accepts an equally signature-verified credential via
+            # a second real transport, not a weaker one.
+            token = request.cookies.get("gridiron_token")
+        if token:
             try:
                 from app.auth.jwt import decode_access_token
 
@@ -145,7 +160,8 @@ async def require_authenticated(
                 ) from exc
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization: Bearer <token> header required when JWT auth is enabled",
+            detail="Authorization: Bearer <token> header (or gridiron_token cookie) "
+            "required when JWT auth is enabled",
         )
 
     if settings.allow_legacy_role_header:

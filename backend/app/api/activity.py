@@ -29,11 +29,19 @@ class ResumePayload(BaseModel):
 
 
 @router.get("/{task_id}/stream")
-async def stream_task_events(task_id: str) -> StreamingResponse:
+async def stream_task_events(
+    task_id: str, _actor: str = Depends(require_authenticated)
+) -> StreamingResponse:
     """SSE event stream for a running task.
 
     Creates a stream on demand if one doesn't exist (agents that were started
     without a task_id still get a stream so the UI can subscribe).
+
+    Gap-closure Stage 3 Day 63 (answers.md Appendix finding #11) — this was
+    the one endpoint in this file without `require_authenticated`, unlike
+    its stop/resume/tokens siblings below: when `jwt_auth_enabled=true`,
+    anyone who could guess/enumerate a task_id could read that task's live
+    tool-call/output stream with no authentication at all.
     """
     registry = get_activity_registry()
     stream = registry.get_or_create(task_id)

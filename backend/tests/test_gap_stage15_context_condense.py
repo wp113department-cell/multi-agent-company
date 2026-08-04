@@ -98,10 +98,10 @@ class _LongConversationLLM:
 def _drain(reg: ActivityStreamRegistry, task_id: str) -> list[dict[str, Any]]:
     stream = reg.get(task_id)
     assert stream is not None
-    events: list[dict[str, Any]] = []
-    while not stream._queue.empty():
-        events.append(stream._queue.get_nowait())
-    return events
+    # Gap-closure Day 62 — TaskStream no longer holds one shared queue
+    # (fan-out fix); `_history` is the equivalent "everything pushed so
+    # far" view.
+    return list(stream._history)
 
 
 def test_long_conversation_triggers_condense_with_content_preserved_and_sse_event() -> (

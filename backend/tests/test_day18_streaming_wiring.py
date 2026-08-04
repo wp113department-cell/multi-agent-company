@@ -343,9 +343,10 @@ class TestApprovalRequiredWiredAtRealRecordingPoints:
 
             stream = registry.get(str(task_id))
             assert stream is not None
-            events = []
-            while not stream._queue.empty():
-                events.append(stream._queue.get_nowait())
+            # Gap-closure Day 62 — TaskStream no longer holds one shared
+            # queue (fan-out fix); `_history` is the equivalent "everything
+            # pushed so far" view.
+            events = list(stream._history)
             approval_events = [e for e in events if e["type"] == "approval_required"]
             assert (
                 approval_events
