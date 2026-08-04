@@ -68,6 +68,24 @@ _SUBMIT = {
             "summary": {"type": "string"},
             "findings": {"type": "array", "items": {"type": "string"}},
             "recommendations": {"type": "array", "items": {"type": "string"}},
+            # Stage 4 Cluster Q (2026-08-05, STAGE4_BACKLOG.md) — this role's
+            # prompt already requires running real coverage tooling and
+            # forbids estimating, but until this field existed the number it
+            # measured had nowhere to go and was discarded into free-text
+            # findings. Optional/nullable, never required: a genuinely
+            # blocked run (coverage tool unavailable) must report status
+            # blocked, not fabricate a number to satisfy this schema — see
+            # AgentResult.verified below, which is the real, graph-enforced
+            # signal for whether this field can be trusted at all.
+            "coverage_pct": {
+                "type": ["number", "null"],
+                "description": (
+                    "Overall test coverage percentage (0-100) from THIS run's "
+                    "real coverage tool output (pytest --cov / jest --coverage). "
+                    "Never estimate or recall from memory — omit or set null if "
+                    "the coverage tool did not run or its output wasn't parseable."
+                ),
+            },
         },
         "required": ["summary"],
     },
@@ -151,7 +169,9 @@ def run_test_coverage_agent(
         "you didn't actually measure this run. If the tool can't run, report status "
         "blocked with the error instead of estimating.\n"
         "7. Write the coverage gap report with write_file if requested.\n"
-        "8. Call submit_test_coverage_agent with summary, findings, and recommendations."
+        "8. Call submit_test_coverage_agent with summary, findings, recommendations, "
+        "and coverage_pct (the real overall percentage the coverage tool reported — "
+        "omit it if the tool didn't run or its output wasn't parseable; never estimate)."
     )
 
     final_state = run_agent_graph(

@@ -282,6 +282,15 @@ async def _run_specialized_agent_bg(
                 "tokens_in": result.tokens_in,
                 "tokens_out": result.tokens_out,
             }
+            # Stage 4 Cluster Q (2026-08-05) — this whitelist previously
+            # dropped AgentResult.raw entirely, which would have silently
+            # discarded test_coverage_agent's real coverage_pct at this
+            # persistence boundary even after adding it to the submit
+            # schema — the same "measured then discarded" bug one layer
+            # deeper. Scoped to this one agent/field rather than exposing
+            # `raw` for all 78 agents, which is outside this fix's scope.
+            if agent_name == "test_coverage_agent":
+                artifact_payload["coverage_pct"] = result.raw.get("coverage_pct")
             await save_artifact_async(
                 task_id, agent_name, artifact_payload, agent_name, db=db
             )
@@ -447,17 +456,24 @@ async def run_specialized_agent_sync(
         repo_id=repo_id,
     )
 
+    sync_artifact_payload: dict[str, Any] = {
+        "agent": agent_name,
+        "summary": result.summary,
+        "findings": result.findings,
+        "files_touched": result.files_touched,
+        "verified": result.verified,
+        "status": result.status,
+    }
+    # Stage 4 Cluster Q (2026-08-05) — same fix as the /run background
+    # dispatch path above: without this, coverage_pct would be captured by
+    # the submit schema and then silently discarded again right here.
+    if agent_name == "test_coverage_agent":
+        sync_artifact_payload["coverage_pct"] = result.raw.get("coverage_pct")
+
     await save_artifact_async(
         body.task_id,
         agent_name,
-        {
-            "agent": agent_name,
-            "summary": result.summary,
-            "findings": result.findings,
-            "files_touched": result.files_touched,
-            "verified": result.verified,
-            "status": result.status,
-        },
+        sync_artifact_payload,
         agent_name,
         db=db,
     )

@@ -123,11 +123,40 @@ def run_arch_review(
 
     raw = final_state["result"]
     risks = list(raw.get("risks", []))
+    verified = bool(final_state["verification"].get("import_graph_ran", False))
+
+    # Stage 4 Cluster Q — Architecture slice (2026-08-05). Only persist a
+    # score when this run's risks[] claim is graph-verified grounded
+    # (import_graph_ran, the same flag AgentResult.verified below uses) —
+    # never build a score on an unverified claim. repo_id resolved via
+    # DevTask.repo_id, Cluster O's single source of truth for repo scoping
+    # (ADR 006); a None (unresolvable) repo_id is never an error — the row
+    # is simply not attributable to a specific repo (INV-8).
+    if verified:
+        try:
+            from app.db.repository import get_task_repo_id_sync
+            from app.fleet.architecture_score import (
+                compute_architecture_score,
+                store_architecture_score,
+            )
+
+            score_result = compute_architecture_score(risks)
+            store_architecture_score(
+                str(task_id), get_task_repo_id_sync(task_id), score_result
+            )
+        except Exception as exc:
+            logger.warning(
+                "Stage 4 Cluster Q: failed to compute/persist architecture_score "
+                "for task %s: %s",
+                task_id,
+                exc,
+            )
+
     return AgentResult(
         summary=str(raw.get("structure_summary", f"{len(risks)} architectural risks")),
         findings=risks,
         files_touched=[],
-        verified=bool(final_state["verification"].get("import_graph_ran", False)),
+        verified=verified,
         requires_human_approval=False,
         tokens_in=final_state["tokens_in"],
         tokens_out=final_state["tokens_out"],

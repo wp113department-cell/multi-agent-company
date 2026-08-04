@@ -408,6 +408,159 @@ not a correctness or safety one.
 Size: **M-L** (mostly gated on deciding real per-category metrics, not raw effort). Not fixed in
 this pass — documented and Q117 marked blocked-on-this rather than fabricating a placeholder score.
 
+### Architecture review (2026-08-05) — per-category producer audit before any aggregation work
+
+Q117's real category list (`Bhaskar's_questions.md` #117, verbatim): **Architecture, Prompts,
+Agents, Tools, Memory, Documentation, Tests, Performance, Security** — 9 categories. The original
+finding above checked 4 of these with a name-pattern grep; this pass verified all 9 directly against
+real code (submit-tool schemas, DB migrations, agent implementations), not the category's name
+alone — because a category name matching a real signal's name does not mean the signal is the right
+*kind* of data for that category (the same trap the original finding already caught once, with
+`benchmark_score` measuring agent execution quality, not "Tools"). Two more instances of that exact
+trap turned up in this pass:
+
+| Category | Real producer today | Verified shape | Honest path to a real score |
+|---|---|---|---|
+| **Agents** | `benchmark_manager.py` → `agent_benchmarks` table (migration 012) | **Real, working, historical.** `objectives` JSONB per run: `latency_p50`, `tool_accuracy`, `verification_coverage`, `retry_success`, `compile_success`, `hallucination_rate`, weighted into `benchmark_score` (`config.py`'s `benchmark_weight_*`); `is_baseline` flag drives `compare_to_baseline()`. | Already done — this is the one category with a full, working "track improvements over time" precedent. Any new per-category table should mirror this shape. |
+| **Architecture** | `architecture_reviewer.py` → `submit_arch_review` | No numeric score, but `risks[]` is already structured: `{severity: enum[critical\|high\|medium\|low], description, evidence[]}` (`app/agents/tools.py:3885-3925`). | **Cheap, honest, non-fabricated path exists**: severity-weighted count over `risks[]`. Needs an aggregator + a new historical table (mirroring `agent_benchmarks`) — no new agent instrumentation required. |
+| **Security** | `dependency_security_agent.py` → `submit_dependency_security_agent` | **Wrong shape, not missing**: `findings` is `array[string]` — free text, no severity field (unlike architecture_reviewer's `risks[]`). The underlying `pip-audit`/`npm audit` run via `DEPENDENCY_AUDIT_BASH_TOOL` *does* emit structured JSON with real CVE severities as its raw stdout, but that structured output is discarded — only the LLM's narrative summary of it survives into the result. | The original finding's suggested path ("parse dependency_security_agent's findings into a severity-weighted count") is **not actually available as-is** — `findings` has nothing to parse. The real honest path is different: capture and parse the audit tool's own raw JSON output directly (deterministic, zero LLM-interpretation risk), not the agent's narrative findings. Needs a schema/capture change in the agent, not just an aggregator. |
+| **Tests** | `test_coverage_agent.py` → `submit_test_coverage_agent` | Agent's role prompt explicitly requires running real `pytest --cov`/`jest --coverage` via bash and forbids reporting a percentage "you didn't actually measure this run" — but the submit schema (`summary`, `findings: array[string]`, `recommendations: array[string]`) has **no numeric field to put that percentage in**. The real number is measured every run and then discarded into prose. | **Cheapest real fix of all 9**: no new instrumentation needed, no new tool call — just add a structured field (e.g. `coverage_pct: number`) to the existing submit schema so the number the agent already computes gets captured instead of thrown away. |
+| **Memory** | `app/memory/store.py`'s `_COMPOSITE_SCORE_EXPR` (`memory_score_weight_*` in `config.py`) | **Real, but the wrong kind of signal** — this is a per-row *retrieval-ranking* formula (similarity + recency + reuse + importance + verified, SQL-computed per query to rank candidate memories), not a subsystem-wide health/quality score tracked over time. Reusing it as "Memory category score" would misrepresent a ranking heuristic as a quality metric. | Needs a genuinely new signal — e.g. dedupe rate, verified-vs-unverified ratio, staleness distribution across `memory_embeddings` — none of which exist today. |
+| **Tools** | `RunMetrics.tool_accuracy` (`app/fleet/metrics.py`) / `benchmark_weight_tool_accuracy` | **Real, but scoped to one agent run**, not a fleet-wide "Tools" subsystem signal (tool schema health, per-tool reliability across all agents, deprecated/unused tool detection). Already folded into `benchmark_score` as one of six weighted signals for the **Agents** category. | No dedicated producer exists. Would need new instrumentation aggregating tool-call outcomes *across* agents/runs, not reuse of the existing per-run number. |
+| **Performance** | `benchmark_score`'s `latency_p50` component | Same shape mismatch as Tools: measures *this orchestrator's own agent-run wall-clock time*, not the shipped application's real runtime performance. `load_test_agent.py`'s submit schema (`summary`, `findings: array[string]`, `recommendations: array[string]`) is purely narrative — no numeric throughput/latency field despite the agent's whole job being load testing. | Needs new structured capture in `load_test_agent`'s submit schema (same shape of fix as Tests) plus a decision on what "Performance" means for a codebase with no deployed running instance to measure. |
+| **Prompts** | none | **Zero real signal anywhere** — `app/fleet/prompt_registry.py` has no quality/score fields at all; no agent evaluates prompt quality. | Needs net-new instrumentation from scratch — no existing data to build on, honestly or otherwise. |
+| **Documentation** | none | **Zero real signal anywhere.** Multiple real agents *write* documentation (`api_docs_agent`, `docker_agent`, `migration_guide_doc_agent`, `tool_catalog_doc_agent`, `architecture_doc_agent`, `agent_roster_doc_agent`) — none *measure* coverage, staleness, or quality of what exists. | Needs net-new instrumentation from scratch (e.g. docstring/README coverage via AST, staleness via git blame vs. code-change recency) — no existing data to build on. |
+
+**Net picture**: 1 of 9 categories (Agents) is fully real and historical today. 3 of 9 (Architecture,
+Security, Tests) have a genuinely honest, non-fabricated path available from data that's already
+either structured or already computed-and-discarded — none of these three require new agent
+capability, only capture/aggregation work, though Security's real path differs from what this
+section originally assumed. 2 of 9 (Memory, Tools — plus Performance, arguably a 3rd) have a
+real *existing* signal that is the **wrong kind** for this purpose and must not be reused as-is,
+on pain of exactly the "aggregation on inferred data" the user asked this review to guard against.
+2 of 9 (Prompts, Documentation) have nothing at all and need net-new instrumentation from scratch.
+
+This means Cluster Q is not one M-L-sized piece of work — it's at minimum 3 substantially
+independent efforts (a cheap schema-capture fix for Tests; an aggregator over already-structured
+`risks[]` for Architecture; a capture-and-parse fix for Security) plus a decision on whether/how to
+tackle the harder net-new categories (Prompts, Documentation, and a correctly-scoped Memory/Tools/
+Performance) before any single "unified cross-category score" can exist without a placeholder or
+fabricated component. Recommended staging, cheapest-and-most-honest first: **Tests → Architecture →
+Security**, each independently shippable and each adding one real category to the eventual
+aggregate; the composite/weighting/aggregation layer and its historical table should not be built
+until at least these 3 are real, so the aggregation code is never written against placeholder data
+for categories it already claims to cover.
+
+### Tests slice — implemented + verified 2026-08-05
+
+User-approved first slice (of the 3-effort staging above): add `coverage_pct` to
+`test_coverage_agent`'s existing submit schema — no new agent capability, no aggregator/historical
+table yet.
+
+**Implemented**:
+- `app/agents/test_coverage_agent.py`: `_SUBMIT` schema gained `coverage_pct: [number, null]`
+  (optional — `required` stays `["summary"]` only, so a genuinely blocked run, e.g. coverage tool
+  unavailable, is never pressured into fabricating a number to pass schema validation). Role-prompt
+  message (`run_test_coverage_agent`'s `msg`) and `roles/test_coverage_agent.md`'s Process step 6
+  both updated to tell the model to include it.
+- **Second real gap found and fixed in the same change**: even with the schema field added,
+  `app/api/specialized_agents.py`'s two real persistence call sites (`_run_specialized_agent_bg`,
+  `run_specialized_agent_sync`) build a hand-rolled `artifact_payload` dict that never included
+  `AgentResult.raw` at all — so `coverage_pct` would have been captured by the schema and then
+  silently discarded a second time at the artifact-write boundary, the exact "measured then
+  discarded" pattern this whole item is about, one layer deeper. Fixed narrowly: both call sites now
+  add `artifact_payload["coverage_pct"] = result.raw.get("coverage_pct")`, **gated on
+  `agent_name == "test_coverage_agent"`** — deliberately not exposing `raw` fleet-wide for all 78
+  agents, which is outside this slice's approved scope.
+- **Pre-existing, unrelated gap found and documented, not fixed**: `roles/test_coverage_agent.md`'s
+  own "Output Contract" section (lines 51-58) describes a *different* contract than the real code
+  implements — `coverage`/`critical_gaps`/`status` fields that don't exist in `_SUBMIT` at all,
+  same bug class as the Day 48/49 `submit_arch_review`/`submit_dependency_report` schema-vs-role-file
+  mismatches referenced in `app/agents/tools.py`'s own comments. Left unfixed here — reconciling it
+  is a larger, separate change than adding one field, and doing it silently inside this slice would
+  be exactly the unrelated-change scope creep this project's standards warn against. Flagged for a
+  future pass.
+
+**Verified**: `tests/test_stage4_cluster_q_test_coverage_pct.py` (7 new tests) — schema shape
+(optional/nullable, `summary` still the only required field); end-to-end proof via a mocked
+`run_agent_graph` that a real `coverage_pct` survives into `AgentResult.raw`, and that a blocked run
+carries none (never fabricated); both persistence call sites (`_run_specialized_agent_bg`,
+`run_specialized_agent_sync`) persist `coverage_pct` for `test_coverage_agent` and — regression guard
+— do *not* add the key for any other agent (`debugger_agent`), proving the fix stayed scoped.
+`mypy --strict` clean on both touched modules. `tests/test_day6b_agents.py`,
+`tests/test_phase3_verification_audit.py`, `tests/test_memory_hooks.py`,
+`tests/test_phase34_real_output_verification.py` (229 tests covering this agent's contract shape and
+the same 2 persistence call sites from other angles) all still green. **Full backend suite confirmed:
+3807 passed, 0 failed, 56 skipped** — exact match to the 3800 prior baseline + 7 new tests, zero
+regressions.
+
+### Architecture slice — implemented + verified 2026-08-05
+
+Re-verified before writing any code (per user instruction) that `architecture_reviewer` genuinely
+produces sufficient structured data: `run_arch_review()`'s `submit_arch_review` schema
+(`app/agents/tools.py`) declares `risks[]` as `{severity: enum[critical|high|medium|low],
+description, evidence[]}` — `severity` is a real JSON-schema enum, not free text. Also confirmed a
+**second, separate real producer exists but is out of scope**: `run_architecture_reviewer_scan()`
+(the periodic autonomous SCAN phase, called from `app.main::_fleet_agents_scan_loop()`) files
+`EnhancementRequest` rows via `submit_enhancement_request` (`priority` enum, human-approval workflow)
+— a different real subsystem (an escalation backlog, not a point-in-time review snapshot). Scoring
+against `risks[]` only, not conflating the two, is what "narrowly scoped to Architecture category
+only" required here. Also confirmed `run_arch_review()` is dispatched only on-demand via
+`specialized_agents.py`'s `"arch_reviewer"` registry key (not `"architecture_reviewer"`, the
+`AGENT_CONTRACT` name — a real naming mismatch, noted for anyone wiring a future caller) — there is
+no existing scheduled/automatic trigger, so "track improvements over time" is honestly a capability
+that exists and works, not a claim that data is already accumulating today without a human or future
+scheduler calling it.
+
+**Implemented**:
+- `app/config.py`: `architecture_score_weight_{critical,high,medium,low}` (policy defaults 1.0/0.5/
+  0.2/0.05 — same category of config as `benchmark_weight_*`, not measured constants) and
+  `architecture_score_risk_cap` (default 3.0 — the weighted-point sum at which the score bottoms at
+  0.0).
+- `app/fleet/architecture_score.py` (new module, mirrors `benchmark_manager.py`'s shape exactly — the
+  one other real per-category historical-tracking precedent in this codebase): `compute_architecture_score()`
+  is a pure function reading **only** the `severity` field (never `description`/`evidence`, proven by
+  a dedicated test); a clean review (`risks=[]`) scores `1.0` vacuously, mirroring
+  `benchmark_manager.py`'s own "no negative signal → full marks" convention; an unrecognized/missing
+  severity value is excluded from both counts and the weighted sum, never guessed. `store_architecture_score()`/
+  `get_latest_architecture_score()`/`get_architecture_score_trend()` are sync entry points (no
+  AsyncSession param — matches `BenchmarkManager`'s real shape; no async caller exists yet, so one
+  wasn't built) using `new_isolated_async_engine()` per call.
+- New `architecture_scores` table (migration 028, applied and verified against real Postgres):
+  `task_id`, `repo_id` (resolved via `DevTask.repo_id` — Cluster O's established single source of
+  truth, ADR 006 — nullable per INV-8), `risk_counts` JSONB, `weighted_risk_score`,
+  `architecture_score`, `created_at`.
+- `app/agents/architecture_reviewer.py::run_arch_review()`: computes and persists a score only when
+  `import_graph_ran` is real graph-verified True (the same flag `AgentResult.verified` already uses)
+  — an unverified run's `risks[]` claim isn't independently grounded, so no row is written for it,
+  never a score built on an unverified claim. Non-fatal: a persistence failure logs and returns,
+  never breaks the real review.
+
+**Verified**: `tests/test_stage4_cluster_q_architecture_score.py` (9 new tests) — pure-function
+formula correctness (weighting, clamping at 0, vacuous 1.0, unrecognized-severity exclusion, and a
+dedicated test proving identical scores regardless of narrative text content); real-Postgres
+persist/read-back (`store_architecture_score` → `get_latest_architecture_score`/
+`get_architecture_score_trend`, newest-first); and a full end-to-end test (`run_arch_review()` with
+`run_agent_graph` mocked at the LLM seam only — not the scoring logic — proving a real Postgres row
+is written and reads back with the exact value `compute_architecture_score()` itself would produce,
+so the test can't drift from the real formula) plus the unverified-run-persists-nothing gate.
+**`git stash` confirmed the real discriminating test fails without the wiring**: with
+`architecture_reviewer.py`'s implementation reverted (module/config/migration left in place), the
+end-to-end persistence test failed with a clear message (`latest is not None` → `assert None is not
+None`) while the 8 other tests (pure function + persistence-layer-in-isolation) correctly still
+passed — proving the E2E test specifically exercises the real wiring, not just the standalone module.
+`mypy app/ --strict` clean across all 193 source files. 492 tests across every file referencing
+`architecture_reviewer`/`run_arch_review` (day2/day6b contract tests, gap48 scan tests, phase3/phase4
+verification-audit tests) still green. **Full backend suite confirmed: 3816 passed, 0 failed, 56
+skipped** — exact match to the 3807 prior baseline + 9 new tests, zero regressions.
+
+**Architecture slice is production verified.** Per user instruction, the Security slice does not
+begin until this is fully documented — this entry is that record.
+
+**Next**: Security (capture-and-parse the `pip-audit`/`npm audit` tool's own raw JSON output, per the
+architecture review's corrected finding — not the originally-assumed `dependency_security_agent`
+`findings` parse) is the last of the 3 staged efforts — not yet started, awaiting user direction.
+
 ---
 
 ## Cluster R — Epics have no repository assignment mechanism (found 2026-08-05, discovered implementing Cluster O Phase 1b)

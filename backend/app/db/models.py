@@ -733,3 +733,46 @@ class EpicScratchpad(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ArchitectureScore(Base):
+    """Stage 4 Cluster Q — Architecture slice (2026-08-05,
+    app/fleet/architecture_score.py).
+
+    Each row is one run_arch_review() call's severity-weighted score,
+    computed only from submit_arch_review's structured `risks[]` array
+    (severity is a real JSON-schema enum — critical/high/medium/low —
+    never free-text narrative). Only ever written when that run's
+    import_graph_ran verification flag is real True (the same graph-
+    enforced signal AgentResult.verified already uses) — an unverified
+    run's risks[] claim is not independently grounded, so no score is
+    persisted for it rather than persisting one built on an unverified
+    claim. Mirrors AgentBenchmark's shape (the one other real per-category
+    historical-tracking table in this codebase) for the same
+    "track improvements over time" purpose, scoped to one review's repo.
+
+    repo_id resolved via DevTask.repo_id — Cluster O's single source of
+    truth for repo scoping (ADR 006, INV-1) — nullable for the same reason
+    memory_embeddings.repo_id is nullable: not every task resolves to a
+    real repo (INV-8, unresolvable defaults to global/unscoped, never an
+    exception).
+    """
+
+    __tablename__ = "architecture_scores"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(100), index=True)
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("repos.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    risk_counts: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    weighted_risk_score: Mapped[float] = mapped_column(Float, nullable=False)
+    architecture_score: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
