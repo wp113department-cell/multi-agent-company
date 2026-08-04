@@ -24,22 +24,44 @@ import asyncio
 import logging
 import threading
 import time
+from collections import deque
 from collections.abc import AsyncGenerator
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Per-task stream state
-# ---------------------------------------------------------------------------
+# Gap-closure Stage 3 Day 62 (PLAN.md, "frontend behavior under real
+# concurrent load/multiple sessions") — real measurement (not assumed)
+# found that two concurrent subscribe() calls on the same TaskStream were
+# competing consumers on one asyncio.Queue: pushing 6 events to a stream
+# with two active subscribers delivered events 0-2 to subscriber A and 3-5
+# to subscriber B, never all 6 to both. Any real "multiple sessions" case —
+# two browser tabs on the same task's activity feed, or two dashboard
+# viewers sharing app/api/fleet_dashboard.py's single `_DASHBOARD_STREAM_KEY`
+# stream — silently saw an incomplete, randomly-split feed. Fixed by giving
+# each subscribe() call its own queue (real fan-out) while preserving the
+# single-subscriber tests' existing "push before subscribe is still seen"
+# expectation via a bounded history replay every new subscriber gets before
+# joining the live broadcast — same effective behavior for the pre-existing
+# one-subscriber-arrives-late case this module was already tested for,
+# correct behavior added for the untested concurrent-subscriber case.
+_HISTORY_MAXLEN = 500
+_SUBSCRIBER_QUEUE_MAXSIZE = 500
 
 
 class TaskStream:
-    """Holds the asyncio.Queue and abort/resume state for one task run."""
+    """Holds per-subscriber queues (fan-out) and abort/resume state for one
+    task run. `push()` broadcasts to every currently-subscribed queue and
+    records the event in a bounded history so a subscriber that joins after
+    some events were already pushed still sees them (matches this module's
+    pre-existing single-subscriber semantics — see the Day 62 note above for
+    why this is no longer a single shared queue)."""
 
     def __init__(self, task_id: str | int) -> None:
         self.task_id = str(task_id)
-        self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=500)
+        self._history: deque[dict[str, Any]] = deque(maxlen=_HISTORY_MAXLEN)
+        self._subscriber_queues: list[asyncio.Queue[dict[str, Any]]] = []
+        self._state_lock = threading.Lock()
         self._abort_event = threading.Event()
         self._resume_payload: dict[str, Any] | None = None
         self._started_at = time.time()
@@ -47,17 +69,26 @@ class TaskStream:
         self.tokens_out: int = 0
 
     def push(self, event: dict[str, Any]) -> None:
-        """Thread-safe push. Called from sync agent code (base_graph.py)."""
+        """Thread-safe push. Called from sync agent code (base_graph.py).
+        Broadcasts to every live subscriber queue; a queue that's full
+        (a slow/stalled subscriber) drops this event for that subscriber
+        only, same as the prior single-queue behavior's own drop-on-full
+        handling, now scoped per-subscriber instead of fleet-wide."""
         event.setdefault("task_id", self.task_id)
         event.setdefault("ts", time.time())
-        try:
-            self._queue.put_nowait(event)
-        except asyncio.QueueFull:
-            logger.warning(
-                "ActivityStream queue full for task %s — dropping event %s",
-                self.task_id,
-                event.get("type"),
-            )
+        with self._state_lock:
+            self._history.append(event)
+            queues = list(self._subscriber_queues)
+        for queue in queues:
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                logger.warning(
+                    "ActivityStream queue full for task %s — dropping event %s "
+                    "for one subscriber",
+                    self.task_id,
+                    event.get("type"),
+                )
 
     def set_abort(self) -> None:
         self._abort_event.set()
@@ -77,16 +108,35 @@ class TaskStream:
     async def subscribe(
         self, timeout: float = 60.0
     ) -> AsyncGenerator[dict[str, Any], None]:
-        """Async generator — yields events until 'done', 'error', or 'stopped'."""
-        while True:
-            try:
-                event = await asyncio.wait_for(self._queue.get(), timeout=timeout)
-            except asyncio.TimeoutError:
-                yield {"type": "ping", "ts": time.time()}
-                continue
-            yield event
-            if event.get("type") in ("done", "error", "stopped"):
-                break
+        """Async generator — yields events until 'done', 'error', or
+        'stopped'. Each call gets its own queue (real fan-out): concurrent
+        subscribers on the same TaskStream each see every event, not a
+        competing-consumer split. Replays the bounded history first so an
+        event pushed before this subscriber joined is still seen."""
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(
+            maxsize=_SUBSCRIBER_QUEUE_MAXSIZE
+        )
+        with self._state_lock:
+            history_snapshot = list(self._history)
+            self._subscriber_queues.append(queue)
+        try:
+            for event in history_snapshot:
+                yield event
+                if event.get("type") in ("done", "error", "stopped"):
+                    return
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    yield {"type": "ping", "ts": time.time()}
+                    continue
+                yield event
+                if event.get("type") in ("done", "error", "stopped"):
+                    break
+        finally:
+            with self._state_lock:
+                if queue in self._subscriber_queues:
+                    self._subscriber_queues.remove(queue)
 
 
 # ---------------------------------------------------------------------------

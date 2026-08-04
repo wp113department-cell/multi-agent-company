@@ -150,10 +150,11 @@ class TestConvenienceHelpers:
     def _drain(self, task_id: str) -> list[dict]:
         stream = self.reg.get(task_id)
         assert stream is not None
-        events = []
-        while not stream._queue.empty():
-            events.append(stream._queue.get_nowait())
-        return events
+        # Gap-closure Day 62 — TaskStream no longer holds one shared queue
+        # (fan-out fix); `_history` is the equivalent "everything pushed so
+        # far" view these tests need (they push synchronously with no real
+        # subscriber draining a live queue).
+        return list(stream._history)
 
     def test_push_thinking(self):
         push_thinking("h1", "I am thinking", "planner")

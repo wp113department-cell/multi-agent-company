@@ -3678,4 +3678,236 @@ be silently dropped — every item below traces to a real `MASTER_AGENT_v2.md` �
   (Days 58-63, NOT VERIFIED items — measure, don't build) does not begin without the owner's
   explicit go-ahead, even though day-to-day progress within a stage doesn't require per-day
   permission.
-  **Next: awaiting explicit go-ahead to begin Stage 3.**
+
+- **2026-08-04: Owner go-ahead given for Stage 3** (per `65days_plan/STAGE4_BACKLOG.md`'s own
+  compilation — the owner also requested a Stage 4 backlog scoped against `answer2.md`'s
+  120-question strict-AND independent re-audit, to be worked *after* PLAN.md's own Days 58-65 are
+  closed first, in that order).
+
+- **2026-08-04: Days 58-59 — LLM-API outage/retry behavior + circuit-breaker interaction
+  (PLAN.md Stage 3, "measure, don't build").** `answer2.md`'s Q66 flagged exponential backoff
+  as **NOT VERIFIED this pass** ("prior session history claims it exists on the Anthropic client
+  wrapper; not re-derived fresh here"). Investigated fresh: `groq_adapter.py`'s own explicit
+  5-retry backoff loop was already real and cited in `answers.md`, but the *Anthropic* path had
+  never been independently proven — it relies entirely on the installed `anthropic` SDK's
+  (0.115.1) own built-in retry, confirmed by reading the installed package source directly (per
+  `CLAUDE.md`'s own zero-hallucination rule 2): `anthropic.Anthropic.__init__`'s
+  `max_retries: int = DEFAULT_MAX_RETRIES` (`anthropic._constants.DEFAULT_MAX_RETRIES == 2`),
+  `anthropic._base_client.BaseClient._calculate_retry_timeout`'s real exponential formula
+  (`min(0.5 * 2**nb_retries, 8.0)`, +/-25% jitter), `_should_retry` retrying on 408/409/429/5xx,
+  `_sleep_for_retry` calling `time.sleep` from that module's own `time` import.
+  **Built**: `tests/test_gap58_59_llm_outage_retry_and_breaker.py` (3 tests) — proves this against
+  a real `httpx.MockTransport`-simulated outage, not mocked at the `anthropic.Anthropic` class
+  level (the existing `test_gap22_circuit_breaker*.py` files both use a `MagicMock` client whose
+  `messages.create` raises a plain `Exception`, proving the `CircuitBreaker` class and its wiring
+  but never the SDK's real retry mechanics interacting with it):
+  1. A 2-failure-then-recovers outage: the SDK retries with real, captured exponential backoff
+     (0.375-0.625s then 0.75-1.25s, strictly increasing, matching the real jitter-adjusted
+     formula) and returns the successful response — 3 real HTTP attempts total.
+  2. A persistent outage: the SDK exhausts exactly `max_retries+1` = 3 attempts and raises
+     `anthropic.APIStatusError`, never retrying forever or silently succeeding.
+  3. **The circuit-breaker interaction PLAN.md specifically asked for**: `app/agents/base_graph.py
+     ::_call_anthropic()` wraps `breaker.call()` around one `messages.create()` invocation, so the
+     SDK's internal 3-attempt retry sequence happens transparently *inside* a single breaker-
+     tracked call — proven by running `_call_anthropic()` `failure_threshold` (5) times against a
+     persistent-outage mock and asserting the breaker only opens after 5 *calls* (== exactly
+     5 x 3 = 15 real HTTP attempts, not 5 raw HTTP failures), then asserting the next call is
+     refused with **zero** additional HTTP attempts — the actual outage-mitigation property Day 22
+     built the breaker for, now proven against real SDK retry behavior instead of a plain mock
+     exception.
+  `black`/`ruff`/`mypy --strict` clean.
+  **Full regression**: 3694 passed (3691 Day-57 baseline + 3 new), 0 failed, 56 skipped, 17
+  deselected — exact match, zero regressions.
+  **`answers.md` updated**: Q66's Exponential backoff and Circuit breakers lines (the latter was
+  stale — still said "NO" from before Day 22 built it, never updated at the time) both rewritten
+  with real Day 58-59 evidence.
+  **Next: Days 60-61 — repo-scan/search performance on the largest real repo available; large-file
+  (9000+ line) handling.**
+
+- **2026-08-04: Days 60-61 — repo-scan/search performance on the largest real repo available;
+  large-file (9000+ line) handling (PLAN.md Stage 3, "measure, don't build").** Both mechanisms
+  already existed (Q15/Q32's `scanner.py::index_repository()`; Days 45-47's `file_folding.py::
+  fold_file_content()`) but had only ever been exercised against small/synthetic fixtures
+  (`test_gap45_file_folding.py`'s own largest fixture: a generated ~1,800-line file) — never a
+  genuinely large real-world target. Measured directly against `repos/*` (CLAUDE.md's own 10
+  reference repos, gitignored/local-only — new tests skip gracefully via `pytest.mark.skipif` if
+  the directory isn't present, matching this suite's established `shutil.which("k6")`/
+  `docker_available` external-dependency-gating convention):
+  - `repos/opencode/` (2,870 real source files, measured via `find` — the largest of the 10
+    reference repos) — `index_repository()` completed a cold scan in **19.28s**, 2,844 real
+    symbols extracted, confirmed via direct calibration run before the test was written (not
+    guessed): no hardcoded file-count cap, a real order of magnitude past the "1,000+ files" the
+    original question named.
+  - `repos/langgraph/libs/langgraph/tests/test_pregel_async.py` (9,729 real lines) — folds
+    structurally in 0.099s (calibrated).
+  - `repos/cline/sdk/packages/llms/src/catalog/catalog.generated.ts` (23,612 real lines) — a real
+    finding from the calibration run, not assumed: this file has a tree-sitter-supported extension
+    (`.ts`) but contains **zero** function/class-shaped symbols (a generated const-data catalog,
+    not code), so `fold_file_content()` correctly returns `None` per its own contract, and
+    `read_file`'s bounded-fallback-truncation branch (`file_fold_fallback_max_chars`) handles it
+    instead of the structural-fold branch — both real, bounded outcomes; this documents which real
+    files hit which branch instead of assuming every large file folds structurally.
+  **Built**: `tests/test_gap60_61_scan_and_large_file_performance.py` (3 tests), timing thresholds
+  seeded from the real calibration numbers above with 3x+ headroom (90s ceiling for the repo scan,
+  5s for each single-file fold) so the assertions catch a genuine regression without being flaky on
+  a slower runner, not pinned to the exact calibrated number.
+  `black`/`ruff`/`mypy --strict` clean.
+  **Full regression**: 3697 passed (3694 Day-59 baseline + 3 new), 0 failed, 56 skipped, 17
+  deselected — exact match, zero regressions.
+  **`answers.md` updated**: Q15's "understand 9,000+ line files" and "scan 1,000+ files" lines both
+  extended with the real large-scale evidence above (previous entries proven correct on the small/
+  synthetic scale they were tested at; now also proven at real scale).
+  **Next: Day 62 — frontend behavior under real concurrent load/multiple sessions.**
+
+- **2026-08-04: Day 62 — frontend behavior under real concurrent load/multiple sessions (PLAN.md
+  Stage 3, "measure, don't build" — except this day's own measurement surfaced a real, active
+  correctness bug, not just an unverified claim, so it was fixed rather than only ticketed; see
+  reasoning below).** Read `apps/web/app/stream/[taskId]/page.tsx`'s real SSE reconnect-with-backoff
+  logic (Stage 1.4) end to end first — already fully unit-tested for the single-session case
+  (`page.test.tsx`, 4 tests: one connection on mount, reconnect-with-backoff on transient error,
+  no-reconnect on a genuine terminal event, gives-up-after-MAX_RECONNECT_ATTEMPTS). What had never
+  been tested anywhere: **multiple concurrent sessions on the same stream** — the actual scope of
+  this day's name. Traced the real backend path (`app/api/activity.py::stream_task_events` /
+  `app/services/activity_stream.py::TaskStream`) and found it used one shared `asyncio.Queue` per
+  stream. Reproduced directly with a small script before writing anything: two concurrent
+  `subscribe()` calls on the same `TaskStream`, 6 events pushed — subscriber A received events 0-2,
+  subscriber B received 3-5, **never all 6 to both**. This is a real, active bug: two browser tabs
+  on the same task's activity feed, or two people viewing the fleet dashboard's live feed
+  (`app/api/fleet_dashboard.py`'s single hardcoded `_DASHBOARD_STREAM_KEY` stream — inherently
+  shared across every viewer, the clearest real "multiple sessions" case in the codebase), each see
+  a silently incomplete, randomly-split feed.
+  **Why fixed instead of only ticketed** (Stage 3's own "measure, don't build" framing): this isn't
+  one of the plan's 43 pre-existing NOT VERIFIED claims being confirmed or refuted — it's a newly
+  discovered defect in a core, already-shipped feature, found as the direct, intended output of
+  "test frontend behavior under multiple sessions." The fix is small and well-scoped (no schema/API
+  contract change), so leaving a known, reproduced, broken invariant unfixed for its own dedicated
+  day would contradict `CLAUDE.md`'s own "identify root causes and fix underlying issues" standing
+  rule and the zero-skip rule ("no gap carries forward to the next day... no matter how small").
+  **Fix** (`app/services/activity_stream.py`): `TaskStream` now gives every `subscribe()` call its
+  own `asyncio.Queue` (real fan-out); `push()` broadcasts to every live subscriber queue instead of
+  one shared queue; a bounded `deque(maxlen=500)` history (replacing the old single queue's dual
+  role as both backlog and live delivery) is replayed to each new subscriber before it joins the
+  live broadcast, preserving the pre-existing "push before subscribe is still seen" behavior every
+  other test in the suite already depended on. Per-subscriber `QueueFull` is caught and logged per
+  subscriber (a stalled viewer only ever loses events for itself), not fleet-wide. Thread-safety
+  posture unchanged from before (a `threading.Lock` guards the plain Python history/subscriber-list
+  mutations, same cross-thread call pattern `push()` already had from sync agent code — no new
+  hazard introduced, none of the pre-existing ones addressed either, out of this day's scope).
+  **Blast-radius check before shipping** (per the standing "verify real callers" rule): grepped
+  every real caller of `TaskStream`/`ActivityStreamRegistry` — `app/api/activity.py` (per-task
+  stream), `app/api/fleet_dashboard.py` (both the dashboard's own shared-key stream and a
+  per-trace-id stream), `app/agents/tools.py` (fleet-dashboard event push), `app/agents/base_graph.py`
+  (abort-flag check only, doesn't touch subscribe/push shape) — all go through the same public
+  `push()`/`subscribe()`/`get_or_create()` surface, unchanged. 3 existing test files
+  (`test_activity_stream.py`, `test_day18_streaming_wiring.py`, `test_gap_stage15_context_condense.py`)
+  reached into the now-removed private `_queue` attribute directly to drain accumulated events
+  without a real subscriber; updated all 3 to use the new `_history` (the equivalent "everything
+  pushed so far" view) — confirmed via `git stash` that the pre-existing, unrelated mypy debt in 2
+  of these files (missing return-type annotations, an unrelated SQLAlchemy overload mismatch) was
+  present before this change too, not introduced by it.
+  **Built**: `tests/test_gap62_concurrent_sessions_activity_stream.py` (5 tests) — the exact
+  2-subscriber race reproduced and now proven fixed; a late-joining subscriber still sees
+  already-pushed history; 20 concurrent subscribers (real "concurrent load", not just 2) each
+  receive all 25 pushed events with zero cross-session leakage; a stalled subscriber's full queue
+  doesn't affect any other subscriber; the real `fleet_dashboard.py` shared-key path specifically
+  (not a synthetic key).
+  `black`/`ruff`/`mypy --strict` clean.
+  **Full regression**: 3702 passed (3697 Day-61 baseline + 5 new), 0 failed, 56 skipped, 17
+  deselected — exact match, zero regressions.
+  **`answers.md` updated**: Q9's Streaming (SSE) section gets a new paragraph documenting the real
+  bug found and fixed, with the same evidence as here.
+  **Next: Day 63 — remaining smaller NOT VERIFIED items batched; final Stage 3 write-up in
+  `answers.md`.**
+
+- **2026-08-04: Day 63 — remaining smaller NOT VERIFIED items batched; final Stage 3 write-up in
+  `answers.md` (PLAN.md Stage 3's closing day).** Real grep/read verification against live code for
+  each item, no re-derivation from memory — see `answers.md`'s new "Stage 3 Final Write-Up" section
+  for the full per-item disposition. Highlights:
+  - Cross-referencing the Appendix "Hidden Architectural Risk Audit" table (written earlier this
+    project, separate from the Q1-120 answers) while compiling this write-up surfaced finding #11
+    was still live: `GET /api/tasks/{id}/stream` (`app/api/activity.py`) had no auth dependency,
+    unlike its `stop`/`resume`/`tokens` siblings in the same file — confirmed by direct read, not
+    assumed stale like item #12 turned out to be.
+  - **Fixed, not just ticketed** (same zero-skip reasoning as Day 62): added
+    `Depends(require_authenticated)` to the stream endpoint. A naive version of this fix would have
+    been a regression in disguise — `apps/web/app/stream/[taskId]/page.tsx` connects via a
+    browser-native `EventSource`, which cannot set a custom `Authorization` header, so with
+    `jwt_auth_enabled=true` the real activity feed would have started 401ing for every real user
+    the moment this endpoint required auth. Caught before shipping by actually checking how the
+    frontend connects, not just adding the dependency and moving on. Fix:
+    `app/middleware/rbac.py::require_authenticated` gained a cookie fallback — `lib/auth.ts::
+    setToken()` already mirrors the JWT into a `gridiron_token` cookie on every login (originally
+    only for `middleware.ts`'s server-side route gating), and `EventSource` sends same-origin
+    cookies automatically, so this closes the gap with zero frontend changes needed (verified via
+    code-level reasoning about cookie flow + Next.js `rewrites()`'s standard cookie-forwarding
+    behavior — not verified via a live full-stack browser test, honestly noted as such). Strictly
+    additive: the existing `Authorization: Bearer` header path is checked first and unchanged, so
+    every existing `fetch()`-based caller using `authHeaders()` is unaffected.
+    `tests/test_gap63_stream_auth_and_notverified_batch.py` (6 tests): cookie-fallback priority
+    ordering, the real fix scenario (no header, cookie present, succeeds), still-401s with neither
+    credential, invalid-cookie-token still 401s, and 2 introspection tests proving the real route
+    functions' dependency wiring (not re-implementations).
+  - **Confirmed NO** (re-grepped live, genuinely absent): project-scaffold tool, multi-target
+    file-sync/watch tool, this project's own k8s/helm manifests, adaptive (vs. static)
+    `model_router.py` model-tier routing, a dedicated "inspect logs" tool, a `/cancel` task
+    endpoint, `eslint-plugin-jsx-a11y` (checked `node_modules` directly — not even transitively
+    present via `eslint-config-next`), and `MemoryEmbedding.category` being a real enum (it's a
+    plain `String(100)` column).
+  - **One assumption caught and corrected before it became a false claim**: initially suspected
+    Day 22's `start_orphan_recovery_loop()` might have resolved the "terminal recovery after
+    restart" gap (it's real and wired) — checked its actual implementation instead of assuming, and
+    found it reconciles orphaned DB-tracked `agent_runs`, not the in-memory `_session_bg_procs` bash
+    child-process PID dict, which still has no recovery mechanism at all. Two real but different
+    "orphan" concepts — recorded precisely rather than conflating them.
+  - **Left honestly NOT VERIFIED**, each with a concrete reason (external access this environment
+    lacks, or a review large enough to deserve its own day): Claude Code/Cursor runtime comparison;
+    a full transaction-boundary/rollback-on-exception review across every `app/db/repository.py`
+    write function; "detect abandoned libraries" (needs a live PyPI/npm registry query); whether a
+    git branch change invalidates stale checkpoint/context state (needs a real reproduction to
+    build, which is out of Stage 3's "measure, don't build" scope — carried into
+    `65days_plan/STAGE4_BACKLOG.md` Cluster M instead of left silently dropped).
+  `black`/`ruff`/`mypy --strict` clean.
+  **Full regression**: 3708 passed (3702 Day-62 baseline + 6 new), 0 failed, 56 skipped, 17
+  deselected — exact match, zero regressions. **Stage 3 (Days 58-63) is complete.**
+  **`answers.md` updated**: new "Stage 3 Final Write-Up (Days 58-63)" section (consolidates all of
+  Days 58-63); Appendix item #12 corrected (was stale); Appendix item #11 marked resolved.
+  **Next: Days 64-65 — Final Full-System Gap Audit, the same 12-cluster methodology that produced
+  the original `answers.md`, against the final code.**
+
+- **2026-08-04: Days 64-65 — Final Full-System Gap Audit (PLAN.md's own closing checkpoint for the
+  entire 65-day plan).** Documented the methodology honestly in `answers.md`'s new "Final
+  Full-System Gap Audit" section rather than silently reinterpreting scope: a literal from-scratch
+  re-derivation of all 811 sub-answers would exactly reproduce `answer2.md`'s own 2026-08-03
+  independent findings for every area this stage didn't touch (nothing in this repo changed outside
+  Stage 3's own Day 58-63 work in the intervening day), so the real, information-producing version
+  of "diff every claimed-YES against live re-verification" is: deep re-verification of everything
+  Stage 3 touched (already done, day by day, above) + live spot-checks across untouched areas to
+  catch drift + one final fresh full-suite regression.
+  **6 spot-checks run live**: capability-registry self-registration (`_register()` in 77 agent
+  modules, still universal), credential vault (`Fernet` encrypt/decrypt, still present), policy
+  engine (`check_command`/`check_path`, still present), memory composite scoring
+  (`_COMPOSITE_SCORE_EXPR`, still wired), fleet dashboard's real route table (still present), and
+  test-file count (186, up from `answer2.md`'s 182 — the +4 fully accounted for by this stage's own
+  4 new gap-closure test files, not unexplained drift). **Zero drift found** — the same clean result
+  Day 57's own Stage 2 checkpoint reached.
+  **Mapped this stage's real changes back to their original questions**: Q66 (backoff/circuit-
+  breaker interaction now proven, not just claimed), Q9 (2 real bugs found and fixed — multi-session
+  fan-out, stream auth — neither previously known), Q15 (large-file/scan claims now backed by real
+  measured numbers against real large files/repos), Q11 (test count current), Q21/Q96 (one more real
+  hardening item closed). Every other one of the 120 questions carried forward from `answer2.md`'s
+  Aug-3 findings as still-current, explicitly not silently assumed.
+  **Full regression, fresh and final**: 3708 passed, 0 failed, 56 skipped, 17 deselected — an exact
+  match to Day 63's own close-out count, confirming a completely independent fresh full-suite run
+  finds zero regression anywhere across the cumulative 65-day plan. Also run as part of this
+  closing checkpoint (not run daily throughout, done here as the final full-stack sweep):
+  `mypy --strict app/` — 191 source files, 0 issues; `ruff check app/ tests/` — clean; `black
+  --check app/ tests/` — 394 files, all formatted; frontend `npx tsc --noEmit` — 0 errors; frontend
+  `npx vitest run` — 32/32 passed (4 files, including the pre-existing SSE reconnect tests,
+  confirming Day 62's backend-only fix didn't disturb frontend behavior).
+  **Final confidence statement** (written into `answers.md`): Stages 0-2 re-confirmed clean at their
+  own prior checkpoints; Stage 3 delivered 4 capabilities with new end-to-end evidence, ~15 smaller
+  items each given a real non-hedged disposition, and 2 real bugs found and fixed — 0 items left
+  silently unresolved. What remains open and why: the 97-item SKIP list (untouched by design), a
+  handful of items left genuinely NOT VERIFIED for stated concrete reasons, and
+  `65days_plan/STAGE4_BACKLOG.md` as the explicitly-scoped next body of work.
+  **`PLAN.md`'s 65-day plan, as originally scoped, is complete as of this entry.**
