@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -41,7 +41,12 @@ class CreateTaskRequest(BaseModel):
     title: str
     description: str
     repo_id: int | None = None
-    priority: str = "medium"
+    # Stage 4 Tier 3 (2026-08-05, answer2.md Q2) — was a bare `str`, meaning
+    # any value (typos, empty string, arbitrary garbage) reached the DB
+    # unchecked. Rejected here at the real API boundary (a real 422, not a
+    # silently-stored bad value) — migration 027 adds a matching DB CHECK
+    # constraint for any write path that bypasses this endpoint.
+    priority: Literal["low", "medium", "high"] = "medium"
     project: str | None = None
 
 

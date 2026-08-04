@@ -139,6 +139,14 @@ async def test_background_dispatch_calls_record_agent_run_outcome() -> None:
             "app.api.specialized_agents._load_agent_fn",
             return_value=lambda **kwargs: fake_result,
         ),
+        # Stage 4 Cluster O (2026-08-05) — a bare AsyncMock()'s child
+        # attributes recursively default to AsyncMock too, so
+        # mock_db.execute(...).scalar_one_or_none() silently returns an
+        # unawaited coroutine instead of a real value/None. Patched
+        # directly rather than trying to hand-configure that chain, and
+        # given a real int so the wiring assertion below actually means
+        # something (not just "didn't crash").
+        patch("app.db.repository.get_task_repo_id", new=AsyncMock(return_value=42)),
         patch(
             "app.memory.hooks.record_agent_run_outcome", new=AsyncMock()
         ) as mock_hook,
@@ -157,6 +165,7 @@ async def test_background_dispatch_calls_record_agent_run_outcome() -> None:
     assert kwargs["task_id"] == "99"
     assert kwargs["description"] == "debug it"
     assert kwargs["result"] is fake_result
+    assert kwargs["repo_id"] == 42
 
 
 @pytest.mark.asyncio
@@ -174,6 +183,13 @@ async def test_run_sync_dispatch_calls_record_agent_run_outcome() -> None:
         ),
         patch("app.artifacts.store.save_artifact_async", new=AsyncMock()),
         patch("app.api.specialized_agents.append_log", new=AsyncMock()),
+        # Stage 4 Cluster O (2026-08-05) — same AsyncMock recursive-
+        # coroutine pitfall as the background-dispatch test above; this
+        # endpoint's new task lookup (get_task) hits it directly (no
+        # intervening mocked function to absorb the garbage value), so it
+        # must be patched here rather than left to the bare mock_db.
+        # None simulates the legitimate "task not found" case.
+        patch("app.db.repository.get_task", new=AsyncMock(return_value=None)),
         patch(
             "app.memory.hooks.record_agent_run_outcome", new=AsyncMock()
         ) as mock_hook,
@@ -189,3 +205,4 @@ async def test_run_sync_dispatch_calls_record_agent_run_outcome() -> None:
     assert kwargs["agent_name"] == "debugger_agent"
     assert kwargs["task_id"] == "7"
     assert kwargs["result"] is fake_result
+    assert kwargs["repo_id"] is None

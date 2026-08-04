@@ -4075,5 +4075,697 @@ be silently dropped — every item below traces to a real `MASTER_AGENT_v2.md` �
   complete evidence above. `STAGE4_BACKLOG.md`'s Cluster N marked **PRODUCTION VERIFIED**; new Tier 3
   item added for the `retention.py` finding.
   **Cluster N: PRODUCTION VERIFIED.**
-  **Next: resume Stage 4 Tier 3 (cheap/verification items), now with the backlog's own critical
-  finding closed and production-verified rather than carried forward.**
+
+- **2026-08-04 (same day): Stage 4 Tier 3 resumes. Owner approved Cluster N as Production Verified
+  and gave a standing instruction for the rest of Stage 4: verify real execution paths (not
+  isolated functions), prefer E2E validation over assumptions, document architectural discoveries,
+  avoid bundling unrelated fixes unless critical.** First housekeeping: corrected a stale Tier 3
+  entry (Q66 exponential backoff was already resolved in Stage 3 Days 58-59; the backlog line
+  hadn't been updated to reflect that).
+  **Q95 (repo_id threading) — verification task, applying the new standard exactly.** The backlog's
+  own framing was "may resolve to already fine on inspection" — verified for real rather than
+  assumed either way: read every one of the ~20 real call sites of the 14 `repo_id`-aware
+  `query_*`/`embed_*` functions in `app/memory/store.py`, across ~10 files
+  (`app/memory/hooks.py`, `app/agents/chat_agent.py`, `app/agents/base_graph.py::memory_hook_node`,
+  `app/pipeline/graph.py`, `app/api/memory.py`, `app/api/fleet_dashboard.py`, `app/fleet/
+  versioned_memory.py`, `app/agents/tools.py` x2, `app/agents/architect.py`, `app/agents/manager.py`
+  x2). **Result: 0 of 20 thread a real `repo_id`** — not "already fine." Traced the root cause
+  precisely rather than stopping at "confirmed broken": no `repo_path -> repo_id` resolver function
+  exists anywhere in this codebase (confirmed by grep, zero hits), and even where a real `repo_id`
+  is already sitting on a row the caller has in hand (`DevTask.repo_id`, confirmed correctly
+  populated by the real `POST /api/tasks` endpoint), it's simply never fetched before the memory
+  call. Identified the single highest-impact site: `base_graph.py::memory_hook_node` runs on every
+  one of the ~76 agents' every run, so its unscoped read is the most consequential single instance
+  of this gap.
+  **Same judgment call as Cluster N's own discovery, applied consistently**: this is a real,
+  substantial finding (comparable in size to Cluster N — a resolver to build plus ~20 call sites to
+  thread through), but it's a data-isolation correctness gap, not a safety-blocking one the way
+  orphan recovery was — so per the owner's own "avoid bundling unrelated fixes unless critical"
+  instruction, **not fixed in this pass**. Documented precisely and promoted out of Tier 3 into its
+  own properly-sized backlog entry, **Cluster O**, in `STAGE4_BACKLOG.md` — same treatment
+  Q102/Cluster N got, applied consistently rather than as a one-off.
+  No code changed this entry — investigation and documentation only, following the exact
+  "verification, not build" scope Q95 was tagged with. Regression suite untouched (still 3716
+  passed / 0 failed from Cluster N's production-verification close-out).
+  **`answers.md` updated**: Q95's "Project A never leaks into Project B" line gets the full,
+  precise, current accounting (previously a general "no real call site passes repo_id yet"
+  statement, now an exact 0-of-20 count with root cause and citations).
+  `STAGE4_BACKLOG.md` updated: Q95 marked verified (not "already fine"), moved to new Cluster O;
+  stale Q66 entry corrected.
+  **Owner directive received**: hold Cluster O's implementation — do a complete architectural design
+  review first (single source of truth for `repo_id`, explicit-param vs. auto-injected-from-context,
+  which of the ~20 call sites can be eliminated by centralizing rather than edited individually,
+  cache safety, backward compatibility, real E2E cross-repo-isolation tests, a genuine no-leakage
+  guarantee) — after Tier 3 finishes, not before. Also received a standing instruction for the rest
+  of Stage 4: verify real execution paths, prefer E2E over assumptions, document architectural
+  discoveries, avoid bundling unrelated fixes unless critical. Applying it to every remaining item.
+
+- **2026-08-05: Q1 (Windows venv-activation POSIX patterns) — genuinely bounded, as originally
+  estimated.** Confirmed via grep before touching anything: 11 real call sites in
+  `app/agents/tools.py`, all following one of two nearly-identical hardcoded-POSIX patterns
+  (`f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true && <cmd>"` at 5 sites where
+  `subprocess.run` doesn't pass `cwd=`; `activate = f"source {repo_path}/.venv/bin/activate ..."`
+  at 6 sites where it does). Verified `subprocess.run(cmd, shell=True)` invokes `cmd.exe` on
+  Windows (confirmed no `executable=` override anywhere), so `source`/`.venv/bin/activate`/
+  `2>/dev/null` are genuinely meaningless there — not a hypothetical gap.
+  **Fixed**: one shared `_venv_activate_snippet()` helper (`sys.platform`-branched), applied at all
+  11 sites — 5 kept their existing `cd {repo_path} &&` prefix (no `cwd=` passed to their own
+  `subprocess.run`), 6 dropped the redundant absolute-path form since `cwd=repo_path` already sets
+  the working directory. POSIX branch is byte-for-byte identical to the old hardcoded string (no
+  behavior change intended there); Windows branch uses real `cmd.exe` syntax
+  (`.venv\Scripts\activate.bat`, `2>nul`, `ver` as the always-succeeds fallback since cmd.exe has no
+  `true` builtin).
+  **Verified, not assumed**: POSIX side confirmed by real execution — the 8 pre-existing
+  `tests/test_gap15_test_runner_exit_code.py` tests (real subprocess pytest runs against a real
+  repo, 2 of the 11 fixed call sites) pass unchanged. Windows side verified by construction only
+  (string content/structure) — no Windows host available in this environment to actually run
+  `cmd.exe` against, stated honestly rather than assumed correct.
+  **Related, still-open finding, deliberately not bundled in**: 5 of the 11 sites also pipe through
+  `| head -N`/`| tail -N` (`head`/`tail` aren't cmd.exe builtins either — the same bug class, a
+  different named gap than what Q1 specifically asked about).
+  **Built**: `tests/test_stage4_tier3_venv_activate_cross_platform.py` (3 tests) — POSIX branch
+  matches the old literal string exactly; Windows branch has the real cmd.exe properties (no
+  `source`, real `.venv\Scripts\activate.bat` path, real `2>nul`, real `ver` fallback, no POSIX
+  strings leaking into it); a source-inspection regression guard confirming exactly one remaining
+  occurrence of each old literal pattern (the explanatory comment, not a live call site) and that
+  all 11 real call sites now reuse the shared helper.
+  `black`/`ruff`/`mypy --strict` clean.
+  **Full regression**: 3719 passed (3716 Cluster-N-close-out baseline + 3 new), 0 failed, 56
+  skipped, 17 deselected — exact match, zero regressions.
+  **`answers.md` updated**: Q1's "How does Windows terminal support work?" line updated with the
+  real fix and the still-open `head`/`tail` finding.
+
+- **2026-08-05: Q2 (`DevTask.priority` not DB-enforced) — genuinely bounded, as originally
+  estimated.** Confirmed the real gap before fixing: `priority: str` was unconstrained at every
+  layer — `CreateTaskRequest.priority: str = "medium"` (Pydantic, any string accepted) and
+  `DevTask.priority: Mapped[str] = mapped_column(String(20), ...)` (no CHECK constraint). Queried
+  the real DB first (not assumed safe): every existing row was already `'medium'` (38/38), so a
+  CHECK constraint needed no data cleanup.
+  **Fixed**: migration `027_dev_tasks_priority_check_constraint.py` adds a real
+  `CHECK (priority IN ('low','medium','high'))`. **Actually run against this environment's live
+  Postgres**, not just authored — `alembic upgrade head` (027 applied), `alembic downgrade 026`
+  (constraint dropped, verified), `alembic upgrade head` again (re-applied, left at head) — both
+  directions of the migration exercised for real. Verified the constraint itself rejects a raw SQL
+  insert with an invalid value (`IntegrityError`, real). `CreateTaskRequest.priority` tightened to
+  `Literal["low", "medium", "high"]` so bad input gets a real Pydantic 422 at the API boundary
+  instead of a raw DB `IntegrityError` reaching the client — verified directly (`ValidationError`
+  raised for `"banana"`, accepted for all 3 real values). `status`'s own existing validation
+  approach (`VALID_TRANSITIONS`/`can_transition()`, a Python state machine) was deliberately not
+  copied here — priority has no transition logic (any value is valid at any time), so a plain DB
+  CHECK constraint is the right-sized fix, not a parallel state-machine validator for a problem that
+  isn't one.
+  **Built**: `tests/test_stage4_tier3_dev_tasks_priority_enforcement.py` (5 tests) — Pydantic
+  rejection/acceptance/default; a raw-SQL insert against the real DB proving the CHECK constraint
+  itself (not just the Pydantic layer); a real `create_task()` call for all 3 valid values,
+  end-to-end through the real repository function.
+  `black`/`ruff`/`mypy --strict` clean (mypy's own strict check caught the test file's intentionally-
+  invalid literal statically too — confirms the `Literal` type is real, not just documentation;
+  silenced with an explicit, commented `# type: ignore[arg-type]` on that one deliberate line).
+  **Full regression**: 3724 passed (3719 Q1 baseline + 5 new), 0 failed, 56 skipped, 17 deselected —
+  exact match, zero regressions.
+  **`answers.md` updated**: new "Are priorities managed" bullet under Q2, noting DB-enforcement is
+  now real while scheduling-order consumption (Cluster K's job) correctly remains out of scope.
+  `STAGE4_BACKLOG.md` updated: Q2 marked done.
+
+- **2026-08-05: Q92 ("detect abandoned libraries") — the backlog's own assumption ("blocked on no
+  network access") was re-checked live rather than trusted, and found wrong, which changed the
+  scope from "can't verify" to "can build."** `curl https://pypi.org` confirmed reachable in this
+  environment before doing anything else. Confirmed the real, distinct gap next: `dependency_agent`'s
+  existing tools (`pip index versions`, `npm outdated`, real allowlisted `bash` commands) only ever
+  compare the installed version against the latest *available* one — they never expose *when* that
+  latest version was published, so a 4-year-stale "latest" looks identical to an actively-maintained
+  one under pure version comparison.
+  **Verified both real registry API shapes live, against real packages, before writing any code
+  against them** (per this project's own zero-hallucination rule) — PyPI's `https://pypi.org/pypi/
+  {name}/json` (`urls[0].upload_time_iso_8601`) and npm's `https://registry.npmjs.org/{name}`
+  (`time[dist-tags.latest]`).
+  **Built**: new `check_last_release` tool (`app/agents/tools.py`), following the codebase's
+  existing `fetch_url`-style `curl`-via-subprocess convention (no new HTTP-library dependency).
+  2 new config thresholds (`dependency_abandoned_threshold_days`=730,
+  `dependency_possibly_abandoned_threshold_days`=365 — not hardcoded) classify staleness. Wired into
+  `dependency_agent`'s real `AGENT_CONTRACT["allowed_tools"]` and `DEPENDENCY_AGENT_TOOLS` tool-spec
+  list, not just defined and left unreachable (the exact recurring "built but never wired" pattern
+  this project's own history has flagged repeatedly — checked for it explicitly here with a
+  dedicated regression-guard test).
+  **Smoke-tested against real, well-known packages before writing formal tests**: `requests`
+  (actively maintained, 81 real days since last release) and `left-pad` — npm's own famous abandoned
+  package (last published 2018, the subject of the 2016 npm-ecosystem "leftpad incident") — correctly
+  classified `ABANDONED` at 3039 real days, a genuine, deterministic, real-world proof point rather
+  than a synthetic fixture.
+  **Built**: `tests/test_stage4_tier3_check_last_release.py` (7 tests) — 3 hit real live registries
+  (gated on real network reachability, `socket.create_connection` to `pypi.org`, skip cleanly if
+  unavailable, mirroring this suite's own `shutil.which("k6")`-style external-dependency gating);
+  error paths (empty package, unknown ecosystem, nonexistent package) that don't need network; a
+  config test proving the 2 new thresholds are real, live settings the handler actually reads, not
+  just documented; and the wiring regression guard (tool spec list + `AGENT_CONTRACT` allowlist both
+  include it).
+  `black`/`ruff`/`mypy --strict` clean.
+  **Full regression**: 3731 passed (3724 Q2 baseline + 7 new), 0 failed, 56 skipped, 17 deselected —
+  exact match, zero regressions.
+  **`answers.md` updated**: Q92's "Identify abandoned libraries" line flipped NO → YES with full
+  evidence — this is exactly the fix that line's own "Plan" note had predicted.
+  `STAGE4_BACKLOG.md` updated: Q92 marked done.
+
+- **2026-08-05: Owner directive — do not pause after each remaining Tier 3 item unless another
+  architectural discovery comparable to Cluster N/O surfaces; report consolidated at the end.**
+  Continuing through Q4/Q6/Q7/Q17/Q20/Q42/Q43/Q117/Q119 with the same standards (verify real
+  execution paths, challenge the backlog's own assumptions, promote to a new cluster and keep moving
+  if something expands beyond "genuinely small").
+
+- **Cluster P found while scoping Q42 ("no recommend a cheaper approach step") — a real,
+  undocumented cost-tracking correctness gap, not what was being looked for.** Every cost
+  computation in this codebase — pre-run estimates (`cost_controller.py::estimate_epic_cost`) and
+  real post-run actual-cost tracking (`manager.py:130`, `metrics.py:179`) — uses one flat
+  `cost_per_input_token`/`cost_per_output_token` pair whose own field description says
+  `"Haiku pricing"`, applied uniformly regardless of which model tier actually ran. But
+  `model_router.py::route()` already computes a real per-agent tier, and most real coding/QA/review
+  work runs on Sonnet per this project's own permanent tiering rule — so `requires_approval` cost
+  gating and any cost report have likely been computed at the wrong (cheaper) rate for most real
+  runs. This is *why* Q42 was never built: there's no per-tier cost difference to recommend
+  switching away from yet. Documented as **Cluster P** (Medium-High severity — cost-governance
+  correctness, not safety) in `STAGE4_BACKLOG.md`; Q42 marked blocked-on-Cluster-P rather than
+  independently attempted. Not fixed this pass — investigation and documentation only, no code
+  changed, regression suite untouched.
+
+- **2026-08-05: Q4 (no automatic tool-level retry wrapper) — genuinely bounded once properly
+  scoped, but the naive version would have been unsafe.** Confirmed the real gap first:
+  `app/fleet/tool_manifest.py`'s `retry_policy` field is declared on all 193 tools (3 `"backoff"`,
+  16 `"once"`) but has zero real readers anywhere in the codebase (grepped, confirmed) — the same
+  "built but never wired" pattern Cluster N and Cluster O both were.
+  **Checked what's actually tagged before writing any retry logic** (per the standing "verify real
+  execution paths" instruction) and found two real hazard classes hiding inside the 16 `"once"`
+  tools: 6 carry `write_remote` permission (`create_pr`, `github_create_pr`, `github_comment`,
+  `github_create_issue`, `linear_create_issue`, `slack_send_message`) — a network call that appears
+  to fail may have already succeeded remotely, so blindly retrying risks a real, visible duplicate
+  side effect. A further 6 carry `execute`/`write_repo` permission (`run_tests`, `run_single_test`,
+  `pip_install`, `npm_install`, `deps_outdated`, `git_pull`) — these return `[ERROR]` for genuinely
+  *deterministic* failures (a real failing test) far more often than transient ones, so
+  auto-retrying would double real wall-clock cost for one of the most routine outcomes in a coding
+  agent's own loop, for a result a retry mathematically cannot change.
+  **Fixed with both exclusions applied by permission, not a hand-maintained tool-name list** (stays
+  correct as the manifest grows): new `_run_tool_with_retry()` in `app/agents/base_graph.py`,
+  wired into the shared `execute_tools` node (the same foundational, ~76-agent-shared function
+  Cluster N's fix already touched). Of the 19 manifest-tagged-non-"none" tools, exactly 7 end up
+  eligible for real automatic retry — all pure `permissions=["network"]` reads (`git_fetch`,
+  `http_request`, `fetch_url`, `web_search`, `check_url_status`, `health_check`,
+  `github_list_prs`) — precisely the class retry-with-backoff logic is classically built for.
+  **Built**: `tests/test_stage4_tier3_tool_level_retry.py` (7 tests, real `_make_execute_tools_node`
+  probe graphs, same established pattern as Cluster N's own heartbeat-throttle tests) — a real
+  network-only tool retries once then succeeds; `run_tests` and `slack_send_message` each proven to
+  NOT auto-retry despite their own manifest entries saying `"once"` (the two safety exclusions,
+  proven directly, not just asserted in a comment); backoff policy retries up to 3 times then gives
+  up with the real error still reaching the LLM; an unknown tool name defaults safely to no retry;
+  a real raised exception (not just an `[ERROR]`-string return) is caught and can still retry.
+  `black`/`ruff`/`mypy --strict` clean.
+  **Full regression**: 3738 passed (3731 Q92 baseline + 7 new), 0 failed, 56 skipped, 17 deselected —
+  exact match, zero regressions.
+  **`STAGE4_BACKLOG.md` updated**: Q4 marked done; new Cluster P added and cross-referenced from Q42.
+
+- **2026-08-05: Q6 scoped, deliberately not flipped.** Verified the real current state first rather
+  than trusting the backlog's own framing: still exactly 5/76 agents (`coder`/`backend_dev`/
+  `frontend_dev`/`qa`/`reviewer`) have `enable_critique=True`; confirmed 0/76 for
+  `enable_replanning=True` (not just "not universal"). This is a deliberate, staged rollout per
+  `build_agent_graph()`'s own code comments (the same "Session-0-style rollout" pattern already used
+  for `enable_planning`/`enable_memory`/`enable_reflection`, each launched `False` fleet-wide then
+  "flipped True fleet-wide after dedicated testing"). `enable_critique` adds a real extra LLM call
+  per turn — flipping it for all 76 agents is a real fleet-wide cost/latency decision, the same
+  category this project's own precedent handles with dedicated validation, not a Tier-3 flip.
+  Documented in `STAGE4_BACKLOG.md`, left as-is — no code changed, regression suite untouched.
+
+- **2026-08-05: Q43 ("confidence self-reported, never independently verified") — scoped honestly
+  rather than fabricating a capability.** No ground-truth outcome labels exist anywhere in this
+  codebase to check confidence *accuracy* against — building that would require labeled data this
+  project doesn't have, so it wasn't attempted. What's real and bounded: new
+  `check_confidence_calibration()` (`app/fleet/metrics.py`) flags a real mismatch between the
+  model's self-reported confidence and this same run's *other* independently-computed signals
+  (`verification_pct`, `reflection_unsatisfied`) — high confidence + poor real verification is
+  flagged; low confidence is never flagged regardless of other signals (that's honest self-report,
+  not miscalibration). New `RunMetrics.confidence_miscalibrated` field (safe `False` default), wired
+  into `run_agent_graph()`'s existing metrics-recording block (the same block that already sets
+  `_metrics.confidence`/`verification_pct`/`reflection_unsatisfied`). 3 new config thresholds (not
+  hardcoded). `tests/test_stage4_tier3_confidence_calibration.py` (6 tests): high-confidence+poor-
+  verification flagged, high-confidence+repeated-dissatisfaction flagged, high-confidence+good-
+  signals not flagged, low-confidence never flagged (the "honest, not miscalibrated" case
+  specifically), thresholds proven to read live config, and the new field's safe default.
+  `black`/`ruff`/`mypy --strict` clean. Full regression: 3744 passed (3738 Q4 baseline + 6 new), 0
+  failed, 56 skipped, 17 deselected — exact match, zero regressions.
+  `STAGE4_BACKLOG.md` updated: Q43 marked done.
+
+- **2026-08-05: Q7 ("no sentiment/satisfaction-detection code found anywhere in the agent graph")
+  — genuinely bounded, built as an honest v1, not a fabricated NLP capability.** New
+  `app/agents/user_sentiment.py::detect_user_frustration()` — a real, bounded pattern/heuristic
+  detector mirroring this codebase's own established `_INJECTION_LOOKING_PATTERNS` precedent
+  (`base_graph.py`, same "compiled regex list, flag don't silently act" shape), not a claim of real
+  sentiment-analysis accuracy. 3 independent real signals: known frustration phrases (regex),
+  message-repetition against recent history (real Jaccard word-overlap, config threshold), and
+  excessive capitalization (config thresholds, both ratio and minimum length so short replies like
+  "OK"/"NO" don't false-positive). Wired into `ChatAgent.run()` — the real entry point for every new
+  user message — with a real consumer: a `user_sentiment` SSE event pushed via the existing
+  `session.push()` mechanism, giving it an actual downstream path rather than the "built but never
+  wired" pattern this whole audit keeps finding. Separate from `roles/chat.md`'s own pre-existing
+  Stage-1.6 prompt-level frustration guidance (the LLM's own behavior once it happens to notice) —
+  this is the independent, code-level signal the question specifically asked for.
+  **Built**: `tests/test_stage4_tier3_user_frustration_detection.py` (10 tests) — neutral messages
+  not flagged, each of the 3 signal types individually proven (including a caught regex bug: "this
+  still isn't working" initially didn't match because the pattern only allowed one modifier word
+  between "this" and "working," not two — caught by the test, not shipped), a short all-caps message
+  correctly NOT flagged, thresholds proven to read live config, and 2 tests through the real
+  `ChatAgent.run()` integration point (not just the standalone detector) proving the SSE event fires
+  when frustrated and stays silent when not.
+  `black`/`ruff`/`mypy --strict` clean.
+  **Full regression**: 3754 passed (3744 Q43 baseline + 10 new), 0 failed, 56 skipped, 17
+  deselected — exact match, zero regressions.
+  **`answers.md` updated**: Q7's "Detect User Satisfaction" line flipped NO → PARTIAL with full
+  evidence, honestly noting what's still not built (a feedback API, any consumer beyond the SSE push).
+
+- **2026-08-05: Q17 ("docker_logs returns raw output only — no structured parsing/pattern-detection
+  layer") — done, and a second hidden duplicate handler caught in the process.** New
+  `_summarize_docker_log_patterns()` (`app/agents/tools.py`) mirrors this codebase's own established
+  `analyze_error()` convention exactly (real pattern list, "=== X Analysis ===" summary prepended to
+  the real raw content, never replacing it) — detects error/exception lines, warning lines, and
+  crash/OOM signatures (`OOMKilled`, `exit code 137`, "container killed"), capped at 5 shown lines
+  per category so a noisy container doesn't flood the LLM's context. While wiring the fix, grepped
+  for every real `docker_logs` call site instead of assuming there was one — found **two** separate,
+  near-duplicate implementations (`make_docker_agent_handlers`'s `dk_docker_logs` and the distinct
+  `docker_logs` inside `make_chat_handlers`) that would otherwise have left one silently unfixed.
+  Both wired. `tests/test_stage4_tier3_docker_logs_structured_parsing.py` (7 tests): error/warning
+  detection, crash-signature detection, clean logs produce no summary (empty string, not a header
+  with nothing under it), the 5-line cap, both real handlers proven wired (2 tests against the real
+  running `gridiron-postgres` container, not mocked), and the pre-existing "(no logs)" empty-output
+  message proven unaffected by the new summarizer.
+  `black`/`ruff`/`mypy --strict` clean.
+  **Full regression**: 3761 passed (3754 Q7 baseline + 7 new), 0 failed, 56 skipped, 17 deselected —
+  exact match, zero regressions.
+  `STAGE4_BACKLOG.md` updated: Q17 marked done.
+
+- **2026-08-05: Q20 ("web_search/fetch_url scoped to research_agent only") — done; the real bug was
+  narrower than the backlog's own framing and was already diagnosed once before.** First pattern-
+  matched this to Q6 (a fleet-wide "should we widen web access" scope decision) and nearly left it
+  alone — but re-reading `answers.md`'s own existing Q20 section surfaced a more specific,
+  already-verified finding from an earlier audit pass: `RESEARCH_TOOLS` (`tools.py:1729`, the actual
+  tool **schema** array sent to the model) never included `_WEB_SEARCH_TOOL`, even though
+  `make_research_handlers()` (`tools.py:1772`) DOES wire a real `web_search` **handler** — so the one
+  agent whose entire job is web research could never actually call it (Anthropic's tool-use API only
+  allows tools present in the request's own `tools` array). Confirmed live before touching anything,
+  including that `research.py::AGENT_CONTRACT["allowed_tools"]` had the same omission while its own
+  `_register()` capability-registry entry already claimed `"web_search"` as a capability — a real
+  contract/reality mismatch. Fixed both: `_WEB_SEARCH_TOOL` added to `RESEARCH_TOOLS`, `"web_search"`
+  added to `AGENT_CONTRACT["allowed_tools"]`. `fetch_url` was correctly left `research_agent`-only —
+  no equivalent handler-vs-schema mismatch found for it, so widening it further would have been the
+  same kind of unilateral fleet-wide call Q6 correctly avoided.
+  **Built**: `tests/test_stage4_tier3_research_web_search_wiring.py` (5 tests) — schema list now
+  includes `web_search`, `AGENT_CONTRACT["allowed_tools"]` now includes it, the live capability
+  registry entry's claimed capability is now backed by a real reachable tool (queried via
+  `get_capability_registry().get("research")`, not just re-read from the source dict), the
+  handler-dict side (already correct before this fix) still wires the real function, and a
+  regression guard proving this didn't widen the agent's write/bash surface.
+  `black`/`ruff`/`mypy --strict` clean.
+  **Full regression**: 3766 passed (3761 Q17 baseline + 5 new), 0 failed, 56 skipped, 17 deselected —
+  exact match, zero regressions.
+  `STAGE4_BACKLOG.md`/`answers.md` updated: Q20 marked done, with the corrected finding replacing
+  the imprecise one-liner. **Lesson applied**: check whether a more specific answer already exists
+  in `answers.md` before pattern-matching a terse backlog one-liner to a prior precedent (Q6) — the
+  precedent matched the backlog's own wording, not the actual underlying bug.
+
+- **2026-08-05: Q117 ("no unified cross-category quality score") — verified the backlog's own
+  assumption and found it wrong; promoted to new Cluster Q rather than fabricating a score.** The
+  original backlog note assumed this was "an aggregation layer over data that mostly already
+  exists" — checked directly instead of trusting it: `grep` for `security_score`/
+  `vulnerability_count`, `docs_coverage`/`documentation_score`, and `architecture_score`/
+  `complexity_score` across `app/` found **zero** matches. `benchmark_manager.py`'s real
+  `benchmark_score` only covers agent-execution quality (latency/tool-accuracy/verification/retry/
+  compile/hallucination), not the architecture/prompts/tools/docs/tests/security categories the
+  question names. `dependency_security_agent`/`test_coverage_agent` both return narrative
+  `AgentResult` output (LLM findings), not a structured numeric score — there is nothing to average
+  today. Building a real fix means deciding what these missing category scores even mean and where
+  their inputs come from first, then a genuine aggregation layer — the same shape as Cluster N/O,
+  not a Tier-3 query. New **Cluster Q** added to `STAGE4_BACKLOG.md` with the full evidence; Q117
+  marked moved, not independently attempted. No code changed.
+
+- **2026-08-05: Q119 ("CEO Dashboard doesn't surface active-agent status/tech-debt/security-warnings
+  together") — partially done for real; the remaining gap scoped into Cluster Q, not fabricated.**
+  Verified per sub-claim instead of trusting "data exists scattered": found
+  `/api/fleet/reports/health` (`app/api/fleet_dashboard.py`) was already real, correct, and fully
+  server-side-aggregated (per-agent-type active-run count, failure rate, avg heartbeat staleness) —
+  but `apps/web/app/fleet/page.tsx` never fetched it; the frontend only ever called
+  `/api/fleet/requests`. Wired it: new `refreshHealth()` + a real "Agent Health" table section,
+  non-fatal on fetch failure (won't clobber the primary pending-review error banner). Tech-debt and
+  security-warning surfacing were deliberately **not** added — per Cluster Q's finding moments
+  earlier, `tech_debt_agent`/`dependency_security_agent` have no structured numeric/countable output
+  to surface yet; wiring a UI field to nothing would be fabrication, not a fix.
+  **Built**: `apps/web/app/fleet/page.test.tsx` (new file, this page had zero test coverage before)
+  — 2 tests: the health table renders real fetched rows (including the null-staleness "—" case),
+  and a failed health fetch doesn't render the section or clobber the main error banner.
+  `tsc --noEmit` clean, `eslint` clean (one `react-hooks/exhaustive-deps` warning fixed by adding
+  `refreshHealth` to the effect's dependency array, matching the existing `refresh` convention).
+  **Full frontend regression**: 34/34 Vitest tests passed (32 pre-existing + 2 new), 0 failed.
+  `STAGE4_BACKLOG.md` updated: Q119 marked partially done, remainder cross-referenced to Cluster Q.
+
+  **Stage 4 Tier 3 is now complete** (Q1, Q2, Q4, Q7, Q17, Q20, Q43, Q92 done; Q6 scoped and
+  deliberately left as a fleet-wide policy decision; Q42 blocked on Cluster P; Q95, Q117 promoted to
+  Cluster O and Cluster Q respectively; Q119 partially done, remainder blocked on Cluster Q).
+  **Next: consolidated Tier 3 report, per the user's explicit request, before returning to the
+  Cluster O architecture design review.**
+
+- **2026-08-05: Cluster O design proposal written — no code yet, per explicit instruction.** User
+  approved the Tier 3 consolidated report and asked for a full architecture proposal answering 8
+  questions (source of truth, explicit-vs-injected, minimizing call-site changes, cache safety,
+  backward compatibility, E2E isolation testing, zero-leakage guarantee, migration strategy) before
+  any implementation. Researched the real current state directly rather than trusting the backlog's
+  own prior framing: `app/memory/store.py`'s 8 `query_*`/`embed_*` functions already accept and
+  correctly filter on `repo_id` (Day 3, 2026-07-30); the schema (migration 024) already has FKs and
+  indexes on both `memory_embeddings.repo_id` and `versioned_lessons.repo_id`; a proven, tested
+  precedent (`resolve_task_repo_path()`, Day 4) already resolves repo context correctly from
+  `DevTask.repo_id`, not the racy `_active_repo_path` global. The real gap is narrower than "~20
+  call sites": grep + read found **17 real invocations across 10 files**, collapsing into **8 real
+  change points** once 2 existing fleet-wide chokepoints (`record_agent_run_outcome`,
+  `run_agent_graph`) are used — smaller than the original "comparable to Cluster N" size estimate,
+  though the *risk profile* (cross-repo data exposure) still earns it Cluster-N-adjacent priority.
+  **New finding while researching**: `specialized_agents.py:416` (`/run-sync`) independently
+  reproduces the same Day-4 "racy `_active_repo_path` fallback" bug in a spot Day 4 never reached —
+  documented, not fixed (design phase only).
+  **Real design decision made**: fleet-wide agent-learning signals (`record_learning` tool,
+  `fleet_dashboard.py`'s enhancement learning, `versioned_memory.py`'s lessons) are deliberately
+  recommended to stay **unscoped** — they capture knowledge about agent/tool/prompt behavior, not
+  about one repo's code, and force-scoping them would break the cross-repo learning transfer that's
+  the entire point of that category. `versioned_memory.py` itself is a deeper gap than the rest
+  (its own internal functions don't even accept a `repo_id` parameter despite the column existing
+  since migration 024) and is recommended as its own smaller Phase 2 design pass, not bundled here.
+  **Written**: `65days_plan/CLUSTER_O_DESIGN.md` — all 8 questions answered, 2 Mermaid sequence
+  diagrams (write path via `record_agent_run_outcome`, read path via `run_agent_graph`'s
+  `memory_hook_node`), 1 Mermaid data-flow diagram, an API-changes table, a risk table, a phased
+  rollout strategy (1a foundation → 1b remaining call sites → 1c human-facing API → 1d judgment-call
+  tool input), a rollback strategy (trivial — every change is additive/`None`-defaulted, no schema
+  or data mutation required), an implementation-size estimate (M overall, smaller than originally
+  framed), and 3 open questions explicitly carried forward rather than silently assumed (does any
+  real epic span multiple repos; pre/post-publish scoping for versioned lessons; the
+  `memory_search` tool's default scope when `repo_id` is omitted).
+  `STAGE4_BACKLOG.md`'s Cluster O section updated with a pointer to the design doc and its headline
+  findings. No code changed — per the user's explicit "do not implement yet" instruction.
+
+- **2026-08-05: Cluster O Phase 1a implemented and PRODUCTION VERIFIED, same day as approval.**
+  User approved the design, asked for one addition (a "Repository Isolation Invariants" section,
+  INV-1 through INV-8, defining the non-negotiable rules future contributors must preserve — added
+  to `CLUSTER_O_DESIGN.md` §11 before any code), approved moving into Phase 1a, and asked
+  implementation to prioritize the existing chokepoints over manual per-caller propagation, then
+  validate with real 2-repo E2E isolation tests before calling it production verified.
+  **Built, prioritizing chokepoints exactly as instructed**: `run_agent_graph()` (change point C,
+  the ~76-agent shared entry point) — resolved `repo_id` once at entry via a new
+  `get_task_repo_id_sync()` call (cached, `app/db/repository.py`), stored into a new
+  `AgentRunState["repo_id"]` field. `memory_hook_node` and `_maybe_store_procedure` both read
+  `state["repo_id"]` directly — confirmed both already received `state`/`final_state` as their own
+  first param, so **zero new parameters were added to either function's signature** — the cleanest
+  possible instance of "reuse the chokepoint, don't propagate a new parameter by hand."
+  `record_agent_run_outcome()` (change points A/B, `app/memory/hooks.py`) — new `repo_id` param
+  threaded into all 3 embed_* calls; its 3 real callers (`main.py`, `specialized_agents.py` ×2)
+  updated to pass `task.repo_id` or the new async `get_task_repo_id()` helper.
+  **Found and fixed a second, previously-undocumented instance of the Day-4 racy-repo-resolution
+  bug** while implementing change point B: `specialized_agents.py`'s `/run-sync` endpoint fell
+  straight to the mutable `get_active_repo_path()` global whenever `repo_path` was omitted, instead
+  of resolving the task's own stored repo first (the exact bug Day 4 already fixed for the sibling
+  `/run` background-dispatch endpoint, just never applied here) — fixed by mirroring that endpoint's
+  own already-correct pattern.
+  **Verification** (`tests/test_cluster_o_repo_scoped_memory_isolation.py`, 9 new tests, 2 real
+  `Repo` rows against real Postgres, no mocked DB): proves through the real chokepoint functions —
+  not just `app/memory/store.py`'s already-Day-3-proven SQL filter — that (1) `run_agent_graph()`
+  resolves the correct distinct `repo_id` per real task and degrades to `None` for a synthetic
+  task_id; (2) the leak-proof test: two repos each seeded with a uniquely-markered memory row, and a
+  real agent run against task A's `memory_context` never contains repo B's marker (asserted on
+  *absence*, deterministic, immune to the composite-score ranking algorithm's own non-determinism
+  against a shared test DB — a WHERE-clause fact, not a ranking fact); (3)
+  `record_agent_run_outcome()` writes correctly-isolated rows for 2 real repos; (4) a learning
+  signal written with no `repo_id` is visible from *both* real repos' scoped queries, proving the
+  "intentionally global" design decision holds in practice; (5) a mixed workload (scoped-A +
+  scoped-B + global together) returns exactly the correct set in one combined assertion; (6)
+  `get_task_repo_id`/`get_task_repo_id_sync` resolve correct, non-cross-contaminated values for 2
+  real repos, including a reverse-order re-resolution check to rule out order-dependent cache bugs,
+  and degrade to `None` (not an exception) for a nonexistent task_id.
+  **Not a coincidental pass**: `git stash` on all 6 implementation files, confirmed all 9 new tests
+  genuinely fail (`ImportError` — the new resolvers don't exist on pre-Phase-1a code), then restored
+  and re-confirmed green.
+  **Found and fixed 1 real regression in a pre-existing test** (`tests/test_memory_hooks.py::
+  test_run_sync_dispatch_calls_record_agent_run_outcome`) — not a production bug: a bare
+  `AsyncMock()`'s child attributes recursively default to `AsyncMock` too, so
+  `mock_db.execute(...).scalar_one_or_none()` silently returned an unawaited coroutine instead of a
+  real value, which the new `get_task()` call in `/run-sync` was the first code in that test path to
+  actually touch (previously nothing there reached the mock's DB layer before an
+  already-fully-mocked `record_agent_run_outcome`). Fixed by patching `get_task`/`get_task_repo_id`
+  directly in both affected tests rather than fighting the mock's plumbing, and strengthened both
+  with a real `repo_id` assertion neither had before.
+  `black`/`ruff`/`mypy --strict` clean on every touched file; `mypy app/ --strict` clean across all
+  192 source files (whole-tree cross-file consistency check).
+  **Full regression**: 3775 passed (3766 baseline + 9 new), 0 failed, 56 skipped, 17 deselected.
+  **`CLUSTER_O_DESIGN.md` updated**: §11 Repository Isolation Invariants added; new §12 Phase 1a
+  Production Verification documenting exactly what shipped and how it was proven; header flipped to
+  "Phase 1a PRODUCTION VERIFIED." `STAGE4_BACKLOG.md`'s Cluster O section updated to match.
+  **Next: Phase 1b (manager.py/ChatSession/architect.py/pipeline/graph.py), 1c
+  (`/api/memory/search`), 1d (`memory_search` tool) remain open, per the design's §7 sequencing —
+  not scheduled yet, no instruction received to proceed to them.**
+
+- **2026-08-05: Cluster O Phase 1b implemented and PRODUCTION VERIFIED, same day as Phase 1a.**
+  User: "proceed with Phase 1b, following the same discipline." Same standard as Phase 1a
+  throughout: prioritize chokepoints, real 2-repo E2E verification, confirm tests fail without the
+  fix, full regression, update docs.
+  **Change point G** (`run_planning_pipeline()`, `app/pipeline/graph.py`): already had `task_id`/
+  `db` as params, so resolving `repo_id` via the existing Phase 1a `get_task_repo_id()` needed
+  **zero new function parameters** — threaded into `query_similar_tasks()`.
+  **Change point F** (`architect_node()`, `app/agents/architect.py`): resolves `repo_id` via Phase
+  1a's `get_task_repo_id_sync()` from `stream_task_id` (already computed for the existing
+  activity-stream push), threads into `embed_architecture_note_sync()` — again, zero new params.
+  **Change point D** (`manager.py`'s epic-manager LangGraph): new `EpicManagerState["repo_id"]`
+  field, same one-field-on-an-already-threaded-state-object shape as Phase 1a's
+  `AgentRunState["repo_id"]`, not a new mechanism. `_finalize_node`'s 2 `embed_task_outcome` calls
+  read `state.get("repo_id")` directly.
+  **Real finding, not assumed**: while implementing D, read the actual `/api/epics` POST endpoint
+  (`app/api/epics.py`) and confirmed `CreateEpicRequest`/`Epic` have **no `repo_id` field anywhere**
+  in the real epic-creation path — so `_planning_node`'s internally-created `DevTask` never gets one
+  set, meaning `state["repo_id"]` resolves to `None` for every real epic in production today. This
+  is materially more precise than the design doc's original speculative framing ("an epic could
+  span multiple repos' tasks") — the real finding is stronger: epics have **zero** repo-assignment
+  mechanism, period. Deliberately **not fixed** here (scope discipline: adding repo assignment to
+  epic creation is a separate, real gap — "wire repo_id into memory calls" ≠ "give epics a repo").
+  The wiring itself is correct and forward-compatible: whenever epics do gain real repo assignment,
+  scoping activates automatically with no further code change. Documented precisely, not swept
+  under the rug — matches this session's standing practice (same as Q20's correction, Cluster Q's
+  and Q117's honest scoping).
+  **Change point E** (`ChatSession`/`chat_agent.py`): new `ChatSession.repo_id` field, resolved once
+  at session creation. New `app/db/repository.py::resolve_repo_id_from_path()` — the one documented,
+  deliberate exception to CLUSTER_O_DESIGN.md's own INV-1 ("never reverse-resolve `repo_id` from a
+  path"): chat sessions have no `DevTask` in the picture at all, so there is no better source of
+  truth available. Mitigated (not eliminated) by filtering `status == 'ready'` and taking the
+  most-recently-created match — the same `status == 'ready'` filter `resolve_task_repo_path()`
+  already uses, for consistency, and an honest, documented caveat rather than a false claim of
+  safety. Wired into both real `ChatSession`-construction sites: `app/api/chat.py::
+  create_chat_session` (the live one) and `app/models/chat.py::get_or_restore_session` (currently
+  has zero real callers anywhere in the codebase — fixed anyway, so a second construction path
+  doesn't silently diverge if it's ever wired up later, matching this whole audit's "don't leave a
+  second copy inconsistent" discipline). `_memory_read_context`/`_memory_write_outcome` thread
+  `self.session.repo_id` into their real memory calls.
+  **Built**: `tests/test_cluster_o_phase1b_repo_scoped_memory_isolation.py` (7 new tests, real
+  Postgres, 2 real `Repo` rows, no mocked DB). Each change point's graph/LLM layer short-circuited
+  using patterns **already established elsewhere in this test suite**, not invented for this phase:
+  `get_graph()` patched to a state-capturing fake `ainvoke` (matches `test_task_images.py::
+  test_run_planning_pipeline_populates_images_from_db` exactly, for G and `_planning_node`);
+  `app.agents.architect.run_agent_graph` patched to return a submitted state (matches
+  `test_day18_streaming_wiring.py::test_architect_node_passes_task_id` exactly, for F);
+  `_finalize_node` and the chat/`resolve_repo_id_from_path` call sites needed no mocking beyond
+  `_embed` (pure DB operations). Tests: G's leak-proof test (2 repos, uniquely-markered rows,
+  absence-based assertion, same deterministic reasoning as Phase 1a's leak test — immune to ranking
+  flakiness); F's distinct-repo_id-per-task proof; D's honest-current-state assertion for
+  `_planning_node` (`repo_id is None`, with a real `Epic` parent row created first — the real FK
+  constraint on `dev_tasks.epic_id` was discovered while writing this test, not assumed) plus
+  `_finalize_node`'s forward-compatible-wiring proof (given a real `repo_id`, writes correctly to 2
+  real repos); E's `resolve_repo_id_from_path` correctness test, chat leak-proof test, and chat
+  write-distinct-repo_id test.
+  **Bugs caught while writing tests, fixed before shipping** (real SQLAlchemy/Postgres constraints,
+  not production bugs): `epics.epic_id` is a real `UUID`-typed column — a plain string test fixture
+  failed at the DB driver level; `dev_tasks.epic_id` has a real FK to `epics.epic_id` — needed a
+  real parent row; `architect_node` is sync and its new `get_task_repo_id_sync()` call does its own
+  `asyncio.run()` — calling it from `@pytest.mark.asyncio async def` raised the same "cannot be
+  called from a running event loop" class of bug this session hit once before (Cluster N's own
+  concurrency-stress script) — fixed by making that one test plain sync, matching Phase 1a's own
+  established convention for sync-bridge-touching tests.
+  **Not a coincidental pass**: `git stash` on all 7 implementation files confirmed genuine
+  `ImportError` for all 7 tests without the fix, then restored and re-confirmed green.
+  `black`/`ruff`/`mypy --strict` clean on every touched file; `mypy app/ --strict` clean across all
+  192 source files.
+  **Full regression**: 3782 passed (3775 Phase 1a baseline + 7 new), 0 failed, 56 skipped, 17
+  deselected — exact match, zero regressions.
+  **`CLUSTER_O_DESIGN.md` updated**: new §13 Phase 1b Production Verification; header flipped to
+  "Phase 1a + Phase 1b PRODUCTION VERIFIED." `STAGE4_BACKLOG.md`'s Cluster O section updated to
+  match, including the new epic-repo-assignment finding.
+  **Next: Phase 1c (`/api/memory/search`) and 1d (`memory_search` tool) remain open per the
+  design's §7 sequencing — not scheduled, no instruction received to proceed to them. The
+  epic-repo-assignment gap found during Phase 1b is a new, separate candidate finding, not yet
+  formally added as its own backlog item.**
+
+- **2026-08-05: Epic repo-assignment finding promoted to its own cluster — Cluster R.** User
+  approved Phase 1b and gave 3 instructions: (1) promote the Phase-1b-discovered epic-repo-
+  assignment gap into its own architectural backlog item ("Cluster R: Epic Repository Assignment")
+  since it's a missing domain capability, not an implementation bug; (2) proceed with Phase 1c
+  (`/api/memory/search`), same standards, implement only the planned scope, validate against 2 real
+  repos plus global memory, verify tests fail without the fix, avoid unrelated changes; (3) only
+  continue to Phase 1d if the API layer is fully verified end-to-end.
+  **Cluster R written** (`STAGE4_BACKLOG.md`, matching Cluster N/O/P/Q's own format exactly): real
+  finding (`CreateEpicRequest`/`Epic` have no `repo_id` field anywhere in the real `/api/epics`
+  creation path — re-confirmed from Phase 1b's own research, not re-derived), why it's not a
+  Cluster O gap (the memory-scoping wiring is correct; there's simply nothing upstream to thread),
+  what a real fix requires (migration + `CreateEpicRequest` field + threading through
+  `create_epic()` → `_launch_epic_manager()` → `run_epic_manager()` → `EpicManagerState`, at which
+  point Cluster O's own Phase 1b wiring already picks it up automatically), severity (real but not
+  urgent — no leakage results, today's safe default is the same global-visibility every other
+  unscoped category gets), and size (S-M, since Phase 1b's own research already mapped the exact
+  call path). Cross-referenced from Cluster O's own section and `CLUSTER_O_DESIGN.md`'s §13 verdict
+  (both updated to point at Cluster R instead of an informal note).
+
+- **2026-08-05: Cluster O Phase 1c implemented and PRODUCTION VERIFIED, same day as Phase 1b.**
+  Smallest phase yet, deliberately — "implement only the planned scope" instruction taken literally.
+  **Built**: `GET /api/memory/search` (`app/api/memory.py::search_memory`) gained exactly one new
+  parameter, `repo_id: int | None = Query(default=None, ...)`, threaded into the existing
+  `query_similar_tasks()` call. Confirmed via `git diff` before shipping that the change is a pure
+  11-line addition — nothing else in the file touched, matching the "avoid unrelated changes"
+  instruction literally, not just in spirit. Deliberately explicit, not auto-injected, per
+  CLUSTER_O_DESIGN.md §2 Q2 — a human debugging memory should choose what they're searching.
+  **Verified two ways, not one — the second layer forced by a real finding during the first**:
+  `tests/test_cluster_o_phase1c_memory_search_api.py`'s first 2 tests call `search_memory()`
+  directly (2 real repos + global memory, real Postgres, no mocked DB), matching this suite's own
+  established convention for testing FastAPI endpoint functions. While writing those, discovered
+  that a *direct* call bypasses FastAPI's own `Query()` resolution entirely — an omitted `repo_id`
+  argument is the literal, unresolved `Query(None)` sentinel object, not a plain `None`, since that
+  resolution only happens inside real FastAPI request handling. This meant direct-call tests alone
+  could prove the function body's logic but not that a real HTTP request actually reaches it
+  correctly — exactly the "fully verified end-to-end" bar the user's own Phase-1d gate named. Closed
+  it with a genuine `TestClient` HTTP test, reusing `test_phase62_reporting_endpoints.py`'s own
+  `app.dependency_overrides[get_db]` pattern (a real minimal FastAPI app mounting just this router,
+  a real GET request with a real `?repo_id=<int>` query string, against 2 real repos).
+  **A materially useful finding from this second layer, found via `git stash`**: without the fix,
+  the HTTP-level test's failure mode isn't a clean error — it's **HTTP 200 with silently leaked
+  cross-repo results**, because FastAPI ignores an unrecognized query parameter by default rather
+  than rejecting the request. A caller sending `?repo_id=X` against the old endpoint would have had
+  no way to know their filter was silently a no-op. Only a real HTTP-level test could have caught
+  this failure mode; the direct-call tests' `TypeError` (unexpected keyword argument) would not have
+  existed pre-fix in the same way, since the old function signature simply didn't have the param to
+  reject.
+  `black`/`ruff`/`mypy --strict` clean; `mypy app/ --strict` clean across all 192 source files.
+  **Full regression**: 3785 passed (3782 Phase 1b baseline + 3 new), 0 failed, 56 skipped, 17
+  deselected — exact match, zero regressions.
+  **`CLUSTER_O_DESIGN.md` updated**: new §14 Phase 1c Production Verification; header flipped to
+  include "Phase 1c PRODUCTION VERIFIED, API layer verified end-to-end." `STAGE4_BACKLOG.md`'s
+  Cluster O section updated to match.
+  **Verdict on the Phase 1d gate**: the API layer (the one surface Phase 1c touches) is now proven
+  end-to-end via a real HTTP request through FastAPI's actual routing/query-parsing machinery, not
+  just a direct Python call — the explicit condition the user set for continuing to Phase 1d is
+  satisfied. Phase 1d (the `memory_search` chat tool's optional `repo_id` input) is next, not yet
+  started.
+
+- **2026-08-05: Cluster O Phase 1d implemented and PRODUCTION VERIFIED — all 4 phases of the
+  original rollout plan complete, same day as approval.** Phase 1c's end-to-end gate was satisfied
+  (real `TestClient` HTTP test added, closing the direct-call gap found earlier that day), so per
+  the user's own conditional pre-authorization ("continue to Phase 1d only if the API layer is
+  fully verified end-to-end"), proceeded directly.
+  **A real finding that corrected the design before writing code**: `CLUSTER_O_DESIGN.md`'s §10 had
+  speculated the `memory_search` tool's omitted-`repo_id` default should be "current run's repo."
+  Before implementing, grepped for `memory_search`'s real callers and found exactly one:
+  `knowledge_curator` (`app/agents/knowledge_curator.py`), whose own module docstring states its job
+  as curating the fleet's shared memory "so future `memory_hook_node` injections stay accurate" —
+  fleet-wide, not per-repo. The speculated default would have actively broken this agent's real job
+  (it needs to see memory across every repo to dedupe/curate the shared store), not made anything
+  safer. Corrected before any code was written: omitted `repo_id` stays fleet-wide (`None`), the
+  same "intentionally global by default" category §1.4 already established for
+  `record_learning`/`fleet_dashboard.py`'s own learning signals. `CLUSTER_O_DESIGN.md`'s §10 item 3
+  updated with strikethrough + the real answer, not silently changed.
+  **Built** (change point I): `_MEMORY_SEARCH_TOOL`'s `input_schema` (`app/agents/tools.py`) gained
+  one new optional integer property, `repo_id` — `query` remains the only required field.
+  `memory_search()`'s body reads `inp.get("repo_id")`, casts to `int | None`, threads it into the
+  existing `query_similar_tasks()` call. Nothing else touched.
+  **Verified**: `tests/test_cluster_o_phase1d_memory_search_tool.py` (4 new tests) — schema
+  correctness (optional, not required); the leak-proof test (2 real repos, uniquely-markered rows,
+  explicit `repo_id`, absence-based assertion — deterministic, same reasoning as every other
+  leak-proof test this whole Cluster O effort has used); the corrected-default proof (omitting
+  `repo_id` still surfaces a real fleet-wide row, using a freshly-created repo so the assertion
+  doesn't depend on ranking against this shared test DB's other accumulated rows); a regression
+  guard for the pre-existing required-`query` validation. `memory_search` does its own
+  `asyncio.run()` (a sync tool handler), so all 4 tests are plain sync functions, matching every
+  other sync-bridge-touching test in this whole Cluster O effort.
+  **`git stash` confirmed exactly the right tests fail**: 2 of 4 (schema, leak-proof) genuinely fail
+  without the fix — the leak test's pre-fix failure message showed real cross-repo leakage
+  (`repo B's row leaked into repo A's scoped search`), since `repo_id` was silently ignored before
+  this phase. The other 2 (fleet-wide default, query-required guard) correctly still pass without
+  the fix, since they test pre-existing behavior this phase didn't change — a clean, honest signal
+  the suite distinguishes new behavior from preserved behavior, not a blanket "everything fails"
+  check.
+  `black`/`ruff`/`mypy --strict` clean; `mypy app/ --strict` clean across all 192 source files.
+  **Full regression**: 3789 passed (3785 Phase 1c baseline + 4 new), 0 failed, 56 skipped, 17
+  deselected — exact match, zero regressions.
+  **`CLUSTER_O_DESIGN.md` updated**: new §15 Phase 1d Production Verification; §10's open question 3
+  resolved with the real answer; header flipped to "Phases 1a, 1b, 1c, and 1d all PRODUCTION
+  VERIFIED — every phase from §7's original rollout plan is now implemented and verified."
+  `STAGE4_BACKLOG.md`'s Cluster O section updated to match, header now reads "ALL 4 PHASES
+  PRODUCTION VERIFIED."
+
+  **Cluster O is now fully closed out.** Across all 4 phases: 23 new tests
+  (9 + 7 + 3 + 4), all real-Postgres/no-mocked-DB where DB behavior was under test, every phase
+  confirmed via `git stash` to genuinely fail without its own fix, zero regressions across the whole
+  effort (3766 → 3789 backend tests passed, plus 2 new frontend tests from the earlier Tier 3 work),
+  `mypy app/ --strict` clean throughout. Two real, previously-undocumented bugs found and fixed along
+  the way (the second Day-4 racy-repo-resolution instance in Phase 1a; the `AsyncMock` test-fixture
+  gap in Phase 1a's regression). One real architectural gap found and promoted to its own cluster
+  (Cluster R, epic repository assignment) rather than silently folded in or left as a footnote. One
+  design-doc speculation corrected by real research before implementation (Phase 1d's default).
+  **Next: no further Cluster O work scheduled.** Remaining related items: Cluster R (not started),
+  `versioned_memory.py`'s own Phase 2 (not started, deferred by design). Awaiting user direction on
+  what to work on next.
+
+## 2026-08-05 (continued) — ADR 006 + Cluster P fixed
+
+**ADR 006 written** (`docs/adr/006-repository-scoped-memory.md`): the canonical reference for
+Cluster O's repository-scoped memory design, per explicit user instruction. Covers the 8 Repository
+Isolation Invariants, the repo-scoped-vs-global distinction table, documented exceptions
+(`resolve_repo_id_from_path()`, epics having no `repo_id`, `versioned_memory.py`'s deferred Phase 2),
+rollout/rollback rationale, and why Knowledge Curator's `memory_search` stays fleet-wide by default.
+Cross-referenced from both `CLUSTER_O_DESIGN.md`'s header and `STAGE4_BACKLOG.md`'s Cluster O
+section, both now stating Cluster O is closed except for defect fixes.
+
+**Cluster P (cost tracking flat-rate bug) — fixed and verified**, next cluster per the backlog's own
+"Suggested staging order" (position 4, immediately after Cluster O). Real scope check before writing
+any code found the picture was narrower than the original finding speculated: the design doc's own
+"consult `model_router.route(agent_name).tier`" framing didn't apply to `estimate_epic_cost()`'s two
+real call sites, since both estimate *before* any subtask is dispatched to a specific agent, and the
+real dev-dispatch decision only ever chooses between `backend_dev`/`frontend_dev` — both sonnet-tier.
+`compute_actual_cost_usd()`'s epic-wide contributor set (`backend_dev`, `frontend_dev`, `qa`,
+`reviewer`) is also verified all-sonnet today. `RunMetrics._recompute_cost()` in `app/fleet/metrics.py`,
+by contrast, genuinely has a real per-run `agent_name` and was the real per-tier fix target.
+
+Implemented: `app/config.py` corrected the mislabeled, stale "Haiku pricing" default
+(`0.0000008`/`0.000004`, actually stale even for real Haiku pricing) to the real Sonnet-tier rate
+(`0.000003`/`0.000015`, sourced from Anthropic's current published pricing via the claude-api skill's
+verified pricing table, standard non-introductory rate); added dedicated `_haiku`/`_opus` tier fields.
+New `cost_rates_for_tier()` helper in `app/pipeline/cost_controller.py` (falls back to sonnet for any
+unrecognized tier, incl. "gpt" — zero registered agents today, Groq deprecated). Wired into
+`RunMetrics._recompute_cost()`. `compute_actual_cost_usd()` left formula-unchanged (verified correct
+as-is) but given an explicit documented invariant + regression test guarding the all-sonnet-contributor
+assumption, with a forward pointer to per-tier accumulation if that ever changes.
+
+**Real finding along the way**: the live `.env` file (not just `.env.example`) independently pinned
+the exact same stale `COST_PER_INPUT_TOKEN=0.0000008`/`COST_PER_OUTPUT_TOKEN=0.000004` values — the
+config.py default fix alone would have been silently overridden at runtime. Same "built but never
+wired" shape as Cluster N/O/Q. Fixed both files.
+
+11 new tests (`tests/test_stage4_cluster_p_per_tier_cost.py`): per-tier rate lookup + unknown-tier
+fallback, sourced-pricing sanity ordering, real end-to-end `RunMetrics` proofs for opus/haiku/sonnet/
+unregistered-agent-name, the all-sonnet-contributor regression guard for `compute_actual_cost_usd`,
+and a direct proof the live settings no longer carry the stale value. Fixed
+`tests/test_cost_controller.py::test_estimate_with_historical_averages`, which had the stale rate
+hardcoded as a literal (would have silently kept passing post-fix if left as-is) — now reads
+`get_settings()` dynamically. `mypy --strict` clean on all 4 touched modules. Full backend suite run
+in background to confirm zero regressions (see next entry once it completes).
+
+`STAGE4_BACKLOG.md`'s Cluster P section updated with the fix summary; header now reads "FIXED +
+VERIFIED 2026-08-05."
+
+**Full regression confirmed**: 3800 passed, 0 failed, 56 skipped, 17 deselected — exact match to
+3789 prior baseline + 11 new Cluster P tests, zero regressions. `mypy app/config.py
+app/pipeline/cost_controller.py app/fleet/metrics.py app/agents/manager.py --strict` clean.
+
+**Cluster P is now closed.** Next: awaiting user direction — Cluster C/D and Cluster Q are next in
+the backlog's "Suggested staging order" after Cluster P.

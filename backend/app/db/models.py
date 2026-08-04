@@ -88,12 +88,16 @@ class DevTask(Base):
     )  # none|pending|pushed|failed
     # Gap-closure (2026-07-23): these 4 were previously faked as hardcoded
     # placeholder values in api/tasks.py's _task_to_dict() — no real columns
-    # existed. priority is free-text (low|medium|high, not DB-enforced,
-    # matching status's own existing convention). assigned_agent is the
-    # current top-level orchestrating identity (pm|planner|coder|manager —
-    # the same strings already passed to create_agent_run/AGENT_CONTRACT
-    # names), not per-subtask granularity. final_summary is set once, at the
-    # real success point (transition to ready_for_review).
+    # existed. priority is low|medium|high — DB-enforced as of migration 027
+    # (Stage 4 Tier 3, 2026-08-05, answer2.md Q2; was free-text, unlike
+    # status's own state-machine validation via VALID_TRANSITIONS/
+    # can_transition() above — priority has no transition logic, just
+    # membership, so a plain CHECK constraint is the right-sized fix rather
+    # than a parallel Python validator). assigned_agent is the current
+    # top-level orchestrating identity (pm|planner|coder|manager — the same
+    # strings already passed to create_agent_run/AGENT_CONTRACT names), not
+    # per-subtask granularity. final_summary is set once, at the real
+    # success point (transition to ready_for_review).
     priority: Mapped[str] = mapped_column(String(20), default="medium")
     assigned_agent: Mapped[str | None] = mapped_column(String(100), nullable=True)
     project: Mapped[str | None] = mapped_column(String(200), nullable=True)

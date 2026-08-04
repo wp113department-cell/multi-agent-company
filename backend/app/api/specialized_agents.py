@@ -257,12 +257,18 @@ async def _run_specialized_agent_bg(
             # every agent dispatched through this endpoint discarded its result.
             from app.memory.hooks import record_agent_run_outcome
 
+            # Stage 4 Cluster O (2026-08-05) — only a bare task_id is in
+            # scope here (not a loaded DevTask), so resolve via the cached
+            # helper rather than an ad hoc query.
+            from app.db.repository import get_task_repo_id
+
             await record_agent_run_outcome(
                 agent_name=agent_name,
                 task_id=str(task_id),
                 description=description,
                 result=result,
                 db=db,
+                repo_id=await get_task_repo_id(db, task_id),
             )
 
             # Persist as artifact
@@ -393,8 +399,27 @@ async def run_specialized_agent_sync(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    # Stage 4 Cluster O (2026-08-05) — this endpoint independently
+    # reproduced the exact race CLUSTER_O_DESIGN.md's B row documents: it
+    # fell straight to the mutable get_active_repo_path() global whenever
+    # body.repo_path was omitted, instead of resolving the task's own
+    # stored repo first (the same bug gap-closure Day 4 already fixed for
+    # the /run background-dispatch endpoint just above this one). Fixed by
+    # mirroring that endpoint's own already-correct pattern, and resolving
+    # repo_id (int) alongside repo_path (str) from the same task lookup —
+    # get_task() already eager-loads .repo (selectinload), so this costs no
+    # extra query beyond the one resolve_task_repo_path() needs anyway.
+    from app.db.repository import get_task, resolve_task_repo_path
+
+    task = await get_task(db, body.task_id)
+    repo_id: int | None = task.repo_id if task is not None else None
+    effective_repo = body.repo_path
+    if effective_repo is None and task is not None:
+        effective_repo = resolve_task_repo_path(task)
+    if effective_repo is None:
+        effective_repo = get_active_repo_path()
+
     try:
-        effective_repo = body.repo_path or get_active_repo_path()
         result = await asyncio.to_thread(
             fn,
             task_id=body.task_id,
@@ -419,6 +444,7 @@ async def run_specialized_agent_sync(
         description=body.description,
         result=result,
         db=db,
+        repo_id=repo_id,
     )
 
     await save_artifact_async(

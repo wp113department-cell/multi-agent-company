@@ -116,6 +116,20 @@ class RunMetrics:
     # Confidence (0.0 – 1.0, estimated by the agent at submit time)
     confidence: float = 1.0
 
+    # Stage 4 Tier 3 (2026-08-05, answer2.md Q43: "confidence is self-
+    # reported by the LLM, never independently verified") — `confidence`
+    # above is purely what the planner's own JSON output claims
+    # (base_graph.py's planner_node, no ground-truth check possible without
+    # real outcome-labeled data this project doesn't have). This is the
+    # bounded, real check that IS possible today: does the model's own
+    # confidence claim match what this run's OTHER independently-computed
+    # signals (verification_pct, reflection_unsatisfied) actually say — a
+    # real self-consistency check, not a claim of "verified accurate."
+    # True means a real mismatch was found (e.g. high self-reported
+    # confidence alongside poor real verification), not that confidence is
+    # simply low.
+    confidence_miscalibrated: bool = False
+
     # Times reflection_node judged its own tool output unsatisfactory this run
     # (a conservative hallucination-rate proxy — see benchmark_manager.py)
     reflection_unsatisfied: int = 0
@@ -171,14 +185,19 @@ class RunMetrics:
         self._recompute_cost()
 
     def _recompute_cost(self) -> None:
+        """Stage 4 Cluster P (2026-08-05) — cost is now computed at this
+        run's own real tier (via model_router.route(self.agent_name).tier),
+        not a single flat Haiku-priced rate applied to every agent
+        regardless of which model it actually calls."""
         try:
             from app.config import get_settings
+            from app.fleet.model_router import get_model_router
+            from app.pipeline.cost_controller import cost_rates_for_tier
 
             s = get_settings()
-            self.cost_estimate_usd = (
-                self.tokens_in * s.cost_per_input_token
-                + self.tokens_out * s.cost_per_output_token
-            )
+            tier = get_model_router().route(self.agent_name).tier
+            rate_in, rate_out = cost_rates_for_tier(tier, s)
+            self.cost_estimate_usd = self.tokens_in * rate_in + self.tokens_out * rate_out
         except Exception:
             pass
 
@@ -225,6 +244,7 @@ class RunMetrics:
             "memory_retrieved": self.memory_retrieved,
             "memory_written": self.memory_written,
             "confidence": self.confidence,
+            "confidence_miscalibrated": self.confidence_miscalibrated,
             "reflection_unsatisfied": self.reflection_unsatisfied,
             "status": self.status,
         }
@@ -546,3 +566,31 @@ def get_metrics_collector() -> MetricsCollector:
 
 def new_trace_id() -> str:
     return _new_trace()
+
+
+def check_confidence_calibration(
+    confidence: float,
+    verification_pct: float,
+    reflection_unsatisfied: int,
+) -> bool:
+    """Stage 4 Tier 3 (2026-08-05, answer2.md Q43) — real, bounded
+    self-consistency check between the model's own self-reported
+    `confidence` and this same run's *other*, independently-computed
+    signals. Returns True on a real mismatch (high self-reported confidence
+    alongside poor real verification/repeated self-dissatisfaction) — never
+    a positive claim that a "true" confidence score is right, since no
+    ground-truth outcome labels exist to check against; a real, honest
+    proxy, not a fabricated calibration.
+    """
+    from app.config import get_settings
+
+    settings = get_settings()
+    high_confidence = confidence >= settings.confidence_miscalibration_min_confidence
+    poor_verification = (
+        verification_pct < settings.confidence_miscalibration_max_verification_pct
+    )
+    repeated_dissatisfaction = (
+        reflection_unsatisfied
+        >= settings.confidence_miscalibration_min_reflection_unsatisfied
+    )
+    return high_confidence and (poor_verification or repeated_dissatisfaction)

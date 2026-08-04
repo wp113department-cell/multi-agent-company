@@ -124,10 +124,20 @@ async def get_memory_analytics(db: AsyncSession = Depends(get_db)) -> dict[str, 
 async def search_memory(
     q: str = Query(..., description="Task description to find similar past tasks"),
     top_k: int = Query(default=3, ge=1, le=20),
+    repo_id: int | None = Query(
+        default=None,
+        description="Stage 4 Cluster O Phase 1c (2026-08-05): restrict results to this "
+        "repo's own rows plus legacy/unscoped rows. Omitted (the default) searches "
+        "unscoped, exactly as before this parameter existed — explicit opt-in only, "
+        "per CLUSTER_O_DESIGN.md §2 Q2: a human debugging memory should choose what "
+        "they're searching, not have it silently narrowed.",
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> list[dict[str, Any]]:
     """Search engineering memory for similar past tasks by description."""
-    results = await query_similar_tasks(description=q, db=db, top_k=top_k)
+    results = await query_similar_tasks(
+        description=q, db=db, top_k=top_k, repo_id=repo_id
+    )
     return results
 
 

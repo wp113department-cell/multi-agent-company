@@ -213,10 +213,28 @@ def architect_node(state: PipelineState) -> PipelineState:
         try:
             from app.memory.store import embed_architecture_note_sync
 
+            # Stage 4 Cluster O Phase 1b (2026-08-05) — repo-scoped write.
+            # Reuses the same cached sync resolver run_agent_graph() uses
+            # (app/db/repository.py::get_task_repo_id_sync) rather than
+            # threading a new param through PipelineState — stream_task_id
+            # is already the same value that resolver expects. Non-numeric
+            # (the synthetic "architect-{title}" fallback) correctly
+            # resolves to unscoped/global, same as every other synthetic-id
+            # case in this codebase.
+            from app.db.repository import get_task_repo_id_sync
+
+            repo_id: int | None = None
+            if stream_task_id:
+                try:
+                    repo_id = get_task_repo_id_sync(int(stream_task_id))
+                except (ValueError, TypeError):
+                    repo_id = None
+
             embed_architecture_note_sync(
                 task_id=stream_task_id or f"architect-{state['task_title'][:40]}",
                 content=technical_approach,
                 agent_name="architect",
+                repo_id=repo_id,
             )
         except Exception:
             logger.debug(

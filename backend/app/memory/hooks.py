@@ -55,6 +55,7 @@ async def record_agent_run_outcome(
     result: AgentResult,
     db: AsyncSession,
     epic_id: str | None = None,
+    repo_id: int | None = None,
 ) -> None:
     """Write the outcome of a completed agent run to shared memory.
 
@@ -64,6 +65,13 @@ async def record_agent_run_outcome(
     the calling dispatch path; `embed_task_outcome`/`embed_failure` already
     catch and log their own DB errors, this wraps the rest of the call for the
     same reason every other post-run hook in this codebase does.
+
+    repo_id (Stage 4 Cluster O, 2026-08-05): repo-scoped category, per
+    CLUSTER_O_DESIGN.md INV-2 — task outcomes, failures, and architecture
+    notes are all task-specific, real-code-changing records, unlike the
+    fleet-wide learning-signal category which stays intentionally unscoped.
+    None (the default) means unscoped/global (INV-8) — correct for callers
+    not yet updated, or genuinely repo-less tasks.
     """
     outcome = "completed" if result.status == "completed" else "blocked"
 
@@ -76,6 +84,7 @@ async def record_agent_run_outcome(
             files_changed=list(result.files_touched),
             db=db,
             epic_id=epic_id,
+            repo_id=repo_id,
         )
     except Exception:
         logger.warning(
@@ -94,6 +103,7 @@ async def record_agent_run_outcome(
                 root_cause=root_cause,
                 db=db,
                 epic_id=epic_id,
+                repo_id=repo_id,
             )
         except Exception:
             logger.warning(
@@ -115,6 +125,7 @@ async def record_agent_run_outcome(
                 db=db,
                 epic_id=epic_id,
                 agent_name=agent_name,
+                repo_id=repo_id,
             )
         except Exception:
             logger.warning(

@@ -13,6 +13,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { authHeaders, isApprover } from "../../lib/auth";
 
+interface AgentHealthRow {
+  agentName: string;
+  totalRuns: number;
+  failedRuns: number;
+  failureRate: number;
+  activeRuns: number;
+  avgHeartbeatStalenessSeconds: number | null;
+}
+
 interface EnhancementRequest {
   id: number;
   agentName: string;
@@ -165,6 +174,7 @@ function RequestCard({
 
 export default function FleetDashboardPage() {
   const [requests, setRequests] = useState<EnhancementRequest[]>([]);
+  const [health, setHealth] = useState<AgentHealthRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyIds, setBusyIds] = useState<Set<number>>(new Set());
@@ -182,8 +192,19 @@ export default function FleetDashboardPage() {
     }
   }, []);
 
+  const refreshHealth = useCallback(async () => {
+    try {
+      const data = await apiFetch<AgentHealthRow[]>("/api/fleet/reports/health");
+      setHealth(data);
+    } catch {
+      // Non-fatal: the pending-review queue above is the primary view — a
+      // failed health-report fetch shouldn't block it or overwrite `error`.
+    }
+  }, []);
+
   useEffect(() => {
     void refresh();
+    void refreshHealth();
 
     const es = new EventSource("/api/fleet/requests/stream");
     esRef.current = es;
@@ -202,7 +223,7 @@ export default function FleetDashboardPage() {
     };
 
     return () => es.close();
-  }, [refresh]);
+  }, [refresh, refreshHealth]);
 
   const decide = useCallback(
     async (id: number, action: "approve" | "reject") => {
@@ -245,6 +266,46 @@ export default function FleetDashboardPage() {
         <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
           {error}
         </div>
+      )}
+
+      {health.length > 0 && (
+        <section className="space-y-4">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Agent Health
+          </h2>
+          <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Agent</th>
+                  <th className="px-4 py-2 font-medium">Active runs</th>
+                  <th className="px-4 py-2 font-medium">Failure rate</th>
+                  <th className="px-4 py-2 font-medium">Heartbeat staleness</th>
+                </tr>
+              </thead>
+              <tbody>
+                {health.map(row => (
+                  <tr key={row.agentName} className="border-t border-slate-100 dark:border-slate-800">
+                    <td className="px-4 py-2 font-medium text-slate-900 dark:text-slate-100">{row.agentName}</td>
+                    <td className="px-4 py-2">{row.activeRuns}</td>
+                    <td
+                      className={
+                        row.failureRate > 0
+                          ? "px-4 py-2 text-red-600 dark:text-red-400"
+                          : "px-4 py-2 text-slate-600 dark:text-slate-400"
+                      }
+                    >
+                      {(row.failureRate * 100).toFixed(1)}%
+                    </td>
+                    <td className="px-4 py-2 text-slate-600 dark:text-slate-400">
+                      {row.avgHeartbeatStalenessSeconds === null ? "—" : `${row.avgHeartbeatStalenessSeconds.toFixed(1)}s`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
 
       {loading ? (

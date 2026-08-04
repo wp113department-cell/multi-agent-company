@@ -11,10 +11,12 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import get_settings
 from app.db.models import (
     AgentRun,
     DevTask,
     PipelineState,
+    Repo,
     Subtask,
     SystemSetting,
     TaskImage,
@@ -85,6 +87,99 @@ def resolve_task_repo_path(task: DevTask) -> str | None:
     if task.repo is not None and task.repo.status == "ready":
         return task.repo.local_path
     return None
+
+
+# ---------------------------------------------------------------------------
+# Cluster O (Stage 4, 2026-08-05) — repo_id resolution for memory scoping.
+# Sibling to resolve_task_repo_path() above: same source of truth
+# (DevTask.repo_id, never the mutable _active_repo_path global), but for
+# call sites that need the int (to pass into app/memory/store.py's repo_id
+# params) rather than the resolved filesystem path. task_id -> repo_id is
+# safe to cache indefinitely (no invalidation logic needed at all): grep
+# confirms no code path ever runs `UPDATE dev_tasks ... repo_id` after
+# create_task() sets it once — see CLUSTER_O_DESIGN.md §2 Q4 and INV-7.
+# ---------------------------------------------------------------------------
+
+_task_repo_id_cache: dict[int, int | None] = {}
+
+
+def _cache_task_repo_id(task_id: int, repo_id: int | None) -> int | None:
+    if task_id not in _task_repo_id_cache:
+        max_size = get_settings().task_repo_id_cache_max_size
+        if len(_task_repo_id_cache) >= max_size:
+            # Simple FIFO eviction (oldest-inserted key) — this cache never
+            # needs correctness-driven invalidation (see module docstring
+            # above), so eviction is purely a memory-bound size cap, not a
+            # staleness concern. No ordering guarantee is promised beyond
+            # "insertion order", matching dict's own real iteration order.
+            _task_repo_id_cache.pop(next(iter(_task_repo_id_cache)))
+    _task_repo_id_cache[task_id] = repo_id
+    return repo_id
+
+
+async def get_task_repo_id(db: AsyncSession, task_id: int) -> int | None:
+    """The int counterpart to resolve_task_repo_path() — for call sites that
+    already hold an AsyncSession but only a bare task_id (not a loaded
+    DevTask object). Returns None when the task doesn't exist or has no
+    repo assigned — both cases correctly fall back to unscoped/global
+    memory visibility (INV-8), never an exception."""
+    if task_id in _task_repo_id_cache:
+        return _task_repo_id_cache[task_id]
+    result = await db.execute(select(DevTask.repo_id).where(DevTask.id == task_id))
+    return _cache_task_repo_id(task_id, result.scalar_one_or_none())
+
+
+def get_task_repo_id_sync(task_id: int) -> int | None:
+    """Sync bridge for get_task_repo_id() — for sync LangGraph-node call
+    sites (e.g. run_agent_graph()) that cannot await, mirroring
+    create_agent_run_sync's own new_isolated_async_engine()/asyncio.run()
+    pattern exactly. Non-fatal: returns None on any failure (invalid
+    task_id, DB unavailable) — never raises, so a memory-scoping lookup can
+    never break the caller's real work (INV-8)."""
+    if task_id in _task_repo_id_cache:
+        return _task_repo_id_cache[task_id]
+
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> int | None:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                return await get_task_repo_id(session, task_id)
+        finally:
+            await engine.dispose()
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        logger.warning("get_task_repo_id_sync failed for task_id=%r: %s", task_id, exc)
+        return None
+
+
+async def resolve_repo_id_from_path(db: AsyncSession, repo_path: str) -> int | None:
+    """Stage 4 Cluster O Phase 1b (2026-08-05) — the one legitimate
+    exception to INV-1's "never reverse-resolve repo_id from a path"
+    guidance: chat sessions (app/models/chat.py::ChatSession) are created
+    directly from a repo_path string with no DevTask in the picture at all,
+    so there is no better source of truth available. INV-1 flags this
+    direction as unsafe as a GENERAL mechanism because Repo.local_path has
+    no uniqueness constraint — mitigated here, not solved, by taking the
+    most recently created 'ready' repo at this path (mirrors
+    resolve_task_repo_path's own status=='ready' filter), which is correct
+    for the overwhelmingly common case (one repo per path) and degrades to
+    "unscoped" rather than a wrong answer if it's ever ambiguous. Returns
+    None (not an exception) when no ready repo matches (INV-8)."""
+    result = await db.execute(
+        select(Repo.id)
+        .where(Repo.local_path == repo_path, Repo.status == "ready")
+        .order_by(Repo.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 async def list_tasks(

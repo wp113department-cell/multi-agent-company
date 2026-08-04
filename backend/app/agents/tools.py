@@ -72,6 +72,104 @@ def _run_bash_command(
         return "", f"Command timed out after {timeout}s", -1, True
 
 
+# ---------------------------------------------------------------------------
+# Cross-platform venv-activation snippet — Stage 4 Tier 3 (2026-08-05,
+# answer2.md Q1: "Windows support is real but incomplete... POSIX-only
+# shell patterns still hardcoded"). 11 real call sites in this file built
+# their own command string as `f"cd {repo_path} && source .venv/bin/
+# activate 2>/dev/null || true && <cmd>"` (or the equivalent `activate =
+# f"source {repo_path}/.venv/bin/activate ..."` form) — every one of the
+# tools that run pytest/ruff/mypy/black. subprocess.run(cmd, shell=True)
+# invokes cmd.exe on Windows, not bash, so `source`/`.venv/bin/activate`/
+# `2>/dev/null` are all syntactically meaningless there. One prior comment
+# in this file (near the run_tests_h handler) already described this as
+# "degrades safely on both shells" — true in the sense that it never
+# crashed on Windows (`|| true` swallowed the unrecognized-command error),
+# but the venv was silently never actually activated there, which is a
+# real, different problem (wrong/missing interpreter, wrong installed
+# packages) from "crashes."
+# ---------------------------------------------------------------------------
+
+
+def _venv_activate_snippet() -> str:
+    """Returns a shell snippet that activates `.venv` in the current
+    directory, for the current platform — chain explicitly:
+    `f"cd {repo_path} && {_venv_activate_snippet()} && <command>"`.
+    Never raises, never blocks: both branches degrade to "activation
+    silently skipped" if `.venv` doesn't exist, matching this codebase's
+    own established `2>/dev/null || true` degrade-safely convention exactly
+    (Windows: `2>nul` is cmd.exe's equivalent null-redirect; `(... || ver
+    >nul)` is cmd.exe's equivalent of `|| true` — `ver` always succeeds and
+    discards its own output, there being no simpler always-succeeding
+    builtin in cmd.exe the way POSIX shells have `true`).
+    """
+    if sys.platform == "win32":
+        return ".venv\\Scripts\\activate.bat 2>nul || ver>nul"
+    return "source .venv/bin/activate 2>/dev/null || true"
+
+
+# Stage 4 Tier 3 (2026-08-05, answer2.md Q17) — real, bounded structured
+# pattern-detection over raw docker_logs output (previously returned
+# completely unparsed, per that finding). Mirrors this same file's own
+# established analyze_error() convention exactly (real pattern list,
+# "=== X Analysis ===" formatted summary prepended to the real content, not
+# replacing it). Docker containers run arbitrary applications with no fixed
+# log schema, so this is deliberately pattern/keyword detection, not a
+# claim of full structured (e.g. JSON) log parsing for every possible
+# container.
+_DOCKER_LOG_ERROR_PATTERNS = (
+    "error",
+    "exception",
+    "fatal",
+    "panic",
+    "traceback",
+    "failed",
+)
+_DOCKER_LOG_WARNING_PATTERNS = ("warn",)
+_DOCKER_LOG_CRASH_PATTERNS = (
+    "oomkilled",
+    "out of memory",
+    "sigkill",
+    "sigsegv",
+    "segmentation fault",
+    "core dumped",
+    "exit code 1",
+    "exit code 137",
+)
+
+
+def _summarize_docker_log_patterns(raw_log: str) -> str:
+    lines = raw_log.splitlines()
+    error_lines = [
+        ln for ln in lines if any(p in ln.lower() for p in _DOCKER_LOG_ERROR_PATTERNS)
+    ]
+    warning_lines = [
+        ln
+        for ln in lines
+        if any(p in ln.lower() for p in _DOCKER_LOG_WARNING_PATTERNS)
+        and ln not in error_lines
+    ]
+    crash_lines = [
+        ln for ln in lines if any(p in ln.lower() for p in _DOCKER_LOG_CRASH_PATTERNS)
+    ]
+
+    if not error_lines and not warning_lines and not crash_lines:
+        return ""
+
+    parts = ["=== Docker Log Analysis ==="]
+    if crash_lines:
+        parts.append(f"Crash/OOM signatures ({len(crash_lines)}):")
+        parts.extend(f"  {ln.strip()}" for ln in crash_lines[:5])
+    if error_lines:
+        parts.append(f"Error/exception lines ({len(error_lines)}):")
+        parts.extend(f"  {ln.strip()}" for ln in error_lines[:5])
+    if warning_lines:
+        parts.append(f"Warning lines ({len(warning_lines)}):")
+        parts.extend(f"  {ln.strip()}" for ln in warning_lines[:5])
+    parts.append("--- raw log below ---\n")
+    return "\n".join(parts)
+
+
 # --- Tool specs (Anthropic input_schema format) ---
 
 READ_ONLY_TOOLS = [
@@ -1634,6 +1732,7 @@ RESEARCH_TOOLS = [
     READ_ONLY_TOOLS[2],
     READ_ONLY_TOOLS[4],  # get_file_tree
     READ_ONLY_TOOLS[9],  # find_references
+    _WEB_SEARCH_TOOL,
     _SUBMIT_RESEARCH_TOOL,
     RECORD_LEARNING_TOOL,
 ]
@@ -3985,6 +4084,32 @@ _DEPENDENCY_BASH_TOOL_SPEC = {
     },
 }
 
+# Stage 4 Tier 3 (2026-08-05, answer2.md Q92) — "abandoned" is a distinct
+# signal from "outdated": `pip index versions`/`npm outdated` (the bash
+# tool above) only compare the installed version against the latest
+# available one, never expose *when* that latest version was actually
+# published — a package whose latest release is 4 years old looks
+# identical to an actively-maintained one if that's the only version ever
+# installed. Real registry API calls (PyPI's/npm's own public JSON APIs,
+# verified live against real packages before writing this), not a
+# heuristic or the LLM's own training-time guess.
+_CHECK_LAST_RELEASE_TOOL = {
+    "name": "check_last_release",
+    "description": "Check when a package's latest version was actually published (real PyPI/npm registry lookup) — distinguishes 'outdated but active' from 'abandoned' (no release in a long time), which pip/npm version-comparison alone cannot tell apart.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "package": {"type": "string", "description": "Package name"},
+            "ecosystem": {
+                "type": "string",
+                "enum": ["pypi", "npm"],
+                "description": "Which registry to check (default: pypi)",
+            },
+        },
+        "required": ["package"],
+    },
+}
+
 # --- Day 2 Tool Lists ---
 
 BUG_FIX_TOOLS = READ_ONLY_TOOLS + [
@@ -4083,6 +4208,7 @@ API_DOCS_AGENT_TOOLS = READ_ONLY_TOOLS + [
 
 DEPENDENCY_AGENT_TOOLS = READ_ONLY_TOOLS + [
     _DEPENDENCY_BASH_TOOL_SPEC,
+    _CHECK_LAST_RELEASE_TOOL,
     _EDIT_FILE_TOOL_SPEC,
     _SUBMIT_DEPENDENCY_REPORT_TOOL,
 ]
@@ -4585,7 +4711,10 @@ def make_docker_agent_handlers(repo_path: str) -> dict[str, Any]:
             text=True,
             timeout=15,
         )
-        return (r.stdout + r.stderr)[:6000] or "(no logs)"
+        raw = (r.stdout + r.stderr)[:6000]
+        if not raw:
+            return "(no logs)"
+        return _summarize_docker_log_patterns(raw) + raw
 
     def dk_docker_exec(inp: dict[str, Any]) -> str:
         de_container = str(inp["container"])
@@ -5057,7 +5186,81 @@ def make_dependency_agent_handlers(repo_path: str) -> dict[str, Any]:
         dep_result.update(inp)
         return "Dependency report submitted"
 
+    def check_last_release(inp: dict[str, Any]) -> str:
+        import json as _json
+
+        package = str(inp.get("package", "")).strip()
+        ecosystem = str(inp.get("ecosystem", "pypi")).strip().lower()
+        if not package:
+            return "[ERROR] package is required"
+        if ecosystem == "pypi":
+            registry_url = f"https://pypi.org/pypi/{package}/json"
+        elif ecosystem == "npm":
+            registry_url = f"https://registry.npmjs.org/{package}"
+        else:
+            return (
+                f"[ERROR] Unknown ecosystem: {ecosystem!r} (expected 'pypi' or 'npm')"
+            )
+
+        try:
+            r = subprocess.run(
+                [
+                    "curl",
+                    "-s",
+                    "-L",
+                    "--max-time",
+                    "15",
+                    "--user-agent",
+                    "Gridiron-Agent/1.0",
+                    registry_url,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        except subprocess.TimeoutExpired:
+            return f"[ERROR] Registry lookup for {package!r} timed out"
+        except FileNotFoundError:
+            return "[ERROR] curl not found"
+        if r.returncode != 0 or not r.stdout:
+            return f"[ERROR] Could not reach {ecosystem} registry for {package!r}"
+        try:
+            data = _json.loads(r.stdout)
+        except _json.JSONDecodeError:
+            return f"[ERROR] {package!r} not found on {ecosystem} (or invalid response)"
+
+        try:
+            if ecosystem == "pypi":
+                latest_version = data["info"]["version"]
+                urls = data.get("urls") or []
+                upload_time = urls[0]["upload_time_iso_8601"] if urls else None
+            else:
+                latest_version = data["dist-tags"]["latest"]
+                upload_time = data.get("time", {}).get(latest_version)
+        except (KeyError, IndexError, TypeError):
+            return f"[ERROR] Unexpected {ecosystem} registry response shape for {package!r}"
+
+        if not upload_time:
+            return f"{package}: latest version {latest_version}, no publish date available from {ecosystem}"
+
+        from datetime import datetime, timezone as _timezone
+
+        published = datetime.fromisoformat(upload_time.replace("Z", "+00:00"))
+        days_since = (datetime.now(_timezone.utc) - published).days
+        settings = get_settings()
+        if days_since >= settings.dependency_abandoned_threshold_days:
+            staleness = f"ABANDONED (no release in {days_since} days)"
+        elif days_since >= settings.dependency_possibly_abandoned_threshold_days:
+            staleness = f"possibly abandoned (no release in {days_since} days)"
+        else:
+            staleness = f"actively maintained ({days_since} days since last release)"
+        return (
+            f"{package} ({ecosystem}): latest release {latest_version}, "
+            f"published {upload_time} — {staleness}"
+        )
+
     handlers["bash"] = dep_bash
+    handlers["check_last_release"] = check_last_release
     handlers["edit_file"] = dep_edit_file
     handlers["submit_dependency_report"] = dep_submit
     handlers["_dependency_result"] = dep_result
@@ -8068,7 +8271,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         # passed — the real bug the exit-code check below was written to
         # fix. Removed; output truncation is Python-side only now.
         if runner == "pytest":
-            cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true && python -m pytest {qpath} {flags} --tb=short -q 2>&1"
+            cmd = f"cd {repo_path} && {_venv_activate_snippet()} && python -m pytest {qpath} {flags} --tb=short -q 2>&1"
         elif runner == "npm_test":
             web_path = str(root.parent / "apps" / "web") if not path else qpath
             cmd = f"cd {web_path} && npm test {flags} 2>&1"
@@ -8115,7 +8318,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         if tool in ("ruff", "all"):
             target = qpath or f"{repo_path}"
             fix_flag = "--fix" if fix else ""
-            cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true && python -m ruff check {target} {fix_flag} 2>&1 | head -50"
+            cmd = f"cd {repo_path} && {_venv_activate_snippet()} && python -m ruff check {target} {fix_flag} 2>&1 | head -50"
             r = subprocess.run(
                 cmd, shell=True, capture_output=True, text=True, timeout=60
             )
@@ -8123,7 +8326,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
         if tool in ("mypy", "all"):
             target = qpath or f"{repo_path}"
-            cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true && python -m mypy {target} --ignore-missing-imports 2>&1 | head -50"
+            cmd = f"cd {repo_path} && {_venv_activate_snippet()} && python -m mypy {target} --ignore-missing-imports 2>&1 | head -50"
             r = subprocess.run(
                 cmd, shell=True, capture_output=True, text=True, timeout=90
             )
@@ -8139,7 +8342,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
         if tool == "black":
             target = qpath or f"{repo_path}"
-            cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true && python -m black {'--check' if not fix else ''} {target} 2>&1 | head -50"
+            cmd = f"cd {repo_path} && {_venv_activate_snippet()} && python -m black {'--check' if not fix else ''} {target} 2>&1 | head -50"
             r = subprocess.run(
                 cmd, shell=True, capture_output=True, text=True, timeout=60
             )
@@ -8204,7 +8407,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] File not found: {rel}"
         if formatter == "auto":
             formatter = "ruff" if fmt_target.suffix == ".py" else "prettier"
-        activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
+        activate = (
+            _venv_activate_snippet()
+        )  # cwd=repo_path is passed to subprocess.run below
         quoted_target = _shlex.quote(str(fmt_target))
         if formatter in ("ruff", "black"):
             cmd = f"{activate} && python -m {formatter} format {quoted_target} 2>&1"
@@ -8224,7 +8429,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         oi_target = root / rel
         if not oi_target.exists():
             return f"[ERROR] File not found: {rel}"
-        activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
+        activate = (
+            _venv_activate_snippet()
+        )  # cwd=repo_path is passed to subprocess.run below
         cmd = (
             f"{activate} && python -m ruff check --select I --fix "
             f"{_shlex.quote(str(oi_target))} 2>&1"
@@ -8442,7 +8649,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
         code = str(inp["code"])
         ps_timeout = int(inp.get("timeout", 30))
-        activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
+        activate = (
+            _venv_activate_snippet()
+        )  # cwd=repo_path is passed to subprocess.run below
         cmd = f"{activate} && python3 -c {_shlex.quote(code)} 2>&1"
         try:
             r = subprocess.run(
@@ -8733,7 +8942,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         rst_file = str(inp.get("file", ""))
         rst_verbose = bool(inp.get("verbose", True))
         rst_vflag = "-v" if rst_verbose else "-q"
-        activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
+        activate = (
+            _venv_activate_snippet()
+        )  # cwd=repo_path is passed to subprocess.run below
         rst_path = rst_file if rst_file else "backend/tests/"
         cmd = f"{activate} && python -m pytest {_shlex.quote(rst_path)} -k {_shlex.quote(rst_kw)} {rst_vflag} --tb=short 2>&1 | head -100"
         try:
@@ -8757,7 +8968,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         cov_path = str(inp.get("path", "backend/tests/"))
         cov_source = str(inp.get("source", "backend/app/"))
         cov_min = inp.get("min_coverage")
-        activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
+        activate = (
+            _venv_activate_snippet()
+        )  # cwd=repo_path is passed to subprocess.run below
         min_flag = ""
         if cov_min:
             try:
@@ -8790,7 +9003,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         tc_path = str(inp.get("path", ""))
         tc_strict = bool(inp.get("strict", False))
         tc_lang = str(inp.get("language", "both"))
-        activate = f"source {repo_path}/.venv/bin/activate 2>/dev/null || true"
+        activate = (
+            _venv_activate_snippet()
+        )  # cwd=repo_path is passed to subprocess.run below
         tc_results: list[str] = []
         if tc_lang in ("python", "both"):
             py_path = _shlex.quote(tc_path) if tc_path else "backend/"
@@ -9132,7 +9347,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 text=True,
                 timeout=15,
             )
-            return (r.stdout + r.stderr)[:5000] or "(no logs)"
+            raw = (r.stdout + r.stderr)[:5000]
+            if not raw:
+                return "(no logs)"
+            return _summarize_docker_log_patterns(raw) + raw
         except FileNotFoundError:
             return "[ERROR] docker not found"
         except Exception as e:
@@ -12020,12 +12238,20 @@ def make_submit_enhancement_request_handler(agent_name: str, trace_id: str = "")
 
 _MEMORY_SEARCH_TOOL: dict[str, Any] = {
     "name": "memory_search",
-    "description": "Semantic search over the fleet's persistent engineering memory (past task outcomes, architecture decisions, failures, lessons) — NOT the same as memory_read/memory_write (those are a different, per-repo scratch store).",
+    "description": "Semantic search over the fleet's persistent engineering memory (past task outcomes, architecture decisions, failures, lessons) — NOT the same as memory_read/memory_write (those are a different, per-repo scratch store). Searches fleet-wide (across every repo) by default — pass repo_id only to narrow to one specific repo's own memories plus fleet-wide/legacy ones.",
     "input_schema": {
         "type": "object",
         "properties": {
             "query": {"type": "string", "description": "What to search for."},
             "top_k": {"type": "integer", "description": "Max results (default 5)."},
+            "repo_id": {
+                "type": "integer",
+                "description": "Stage 4 Cluster O Phase 1d (2026-08-05): optional — restrict "
+                "results to this repo's own memories plus fleet-wide/legacy ones. Omit to "
+                "search fleet-wide (the default, and the right choice for this tool's real "
+                "caller, knowledge_curator, whose job is curating memory across the whole "
+                "fleet, not one repo).",
+            },
         },
         "required": ["query"],
     },
@@ -12039,6 +12265,8 @@ def memory_search(inp: dict[str, Any]) -> str:
     if not query:
         return "[ERROR] query is required"
     top_k = int(inp.get("top_k", 5))
+    repo_id_raw = inp.get("repo_id")
+    repo_id: int | None = int(repo_id_raw) if repo_id_raw is not None else None
 
     async def _search() -> list[dict[str, Any]]:
         from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -12049,7 +12277,7 @@ def memory_search(inp: dict[str, Any]) -> str:
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
                 return await query_similar_tasks(
-                    description=query, db=session, top_k=top_k
+                    description=query, db=session, top_k=top_k, repo_id=repo_id
                 )
         finally:
             await engine.dispose()
@@ -12493,7 +12721,7 @@ def make_fleet_apply_handlers(
         # pytest ever runs. `&& ... || true &&` matches
         # make_chat_handlers.run_tests's already-working pattern, which
         # degrades safely on both shells.
-        cmd = f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true && python -m pytest {_shlex.quote(path)} {flags} -q --tb=short 2>&1"
+        cmd = f"cd {repo_path} && {_venv_activate_snippet()} && python -m pytest {_shlex.quote(path)} {flags} -q --tb=short 2>&1"
         try:
             r = subprocess.run(
                 cmd, shell=True, capture_output=True, text=True, timeout=180

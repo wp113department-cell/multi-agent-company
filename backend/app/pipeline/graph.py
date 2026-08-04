@@ -161,7 +161,14 @@ async def run_planning_pipeline(
     memory_context = ""
     if db is not None:
         try:
-            similar = await query_similar_tasks(description, db=db)
+            # Stage 4 Cluster O Phase 1b (2026-08-05) — repo-scoped read.
+            # task_id is already a required param here, so no new param is
+            # needed on this function; resolved via the same cached
+            # get_task_repo_id() this phase's other change points use.
+            from app.db.repository import get_task_repo_id
+
+            repo_id = await get_task_repo_id(db, task_id)
+            similar = await query_similar_tasks(description, db=db, repo_id=repo_id)
             memory_context = format_memory_context(similar)
         except Exception as exc:
             logger.warning("Memory query failed before planning: %s", exc)
