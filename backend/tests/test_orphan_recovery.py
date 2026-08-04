@@ -51,9 +51,23 @@ def _make_agent_run(status: str, heartbeat_age_seconds: int | None) -> tuple[int
                         .values(status=status)
                     )
                 if heartbeat_age_seconds is not None:
-                    stale_at = datetime.now(timezone.utc).replace(
-                        tzinfo=None
-                    ) - timedelta(seconds=heartbeat_age_seconds)
+                    # Stage 4 Cluster N production validation (2026-08-04) —
+                    # must stay timezone-AWARE, matching the real
+                    # heartbeat_agent_run()'s own datetime.now(timezone.utc)
+                    # convention and reconcile_orphaned_runs()'s now-fixed
+                    # cutoff computation. A naive value here previously
+                    # masked a real bug: this environment's system timezone
+                    # (Asia/Kolkata, UTC+5:30) causes the DB driver to
+                    # silently reinterpret a naive datetime as local time,
+                    # not UTC -- confirmed directly (a naive "UTC-intended"
+                    # write round-tripped back shifted by exactly -5:30).
+                    # Previously that shift happened on both this fixture's
+                    # write AND reconcile_orphaned_runs()'s own (also-naive)
+                    # cutoff, so it canceled out by coincidence; fixing only
+                    # one side breaks the other, so both are now aware.
+                    stale_at = datetime.now(timezone.utc) - timedelta(
+                        seconds=heartbeat_age_seconds
+                    )
                     await session.execute(
                         update(AgentRun)
                         .where(AgentRun.id == run.id)
@@ -204,3 +218,48 @@ def test_orphan_sweep_disabled_when_threshold_is_zero() -> None:
         # Must return immediately (disabled), not enter the infinite loop —
         # if this hangs, the sweep isn't actually honoring the disable flag.
         asyncio.run(asyncio.wait_for(start_orphan_recovery_loop(), timeout=2.0))
+
+
+def test_a_real_heartbeat_write_is_correctly_recognized_as_stale() -> None:
+    """Stage 4 Cluster N production validation (2026-08-04) — regression
+    guard for a real bug a live E2E test caught: reconcile_orphaned_runs()'s
+    cutoff used to be computed as a NAIVE datetime
+    (`.replace(tzinfo=None)`), which this environment's DB driver silently
+    reinterprets as SYSTEM-LOCAL time (this sandbox runs Asia/Kolkata,
+    UTC+5:30), not UTC, when bound as a raw-SQL comparison parameter —
+    confirmed directly: a naive "UTC-intended" write round-tripped back
+    shifted by exactly -5:30. This was invisible in every pre-existing test
+    because _make_agent_run's own fixture ALSO wrote its stale timestamp
+    using the same naive convention, so the erroneous shift canceled out on
+    both sides of the comparison by coincidence — masking the bug until a
+    real, correctly timezone-aware write (from the actual production
+    heartbeat_agent_run_sync(), not a test fixture backdating a fake
+    timestamp) was compared against it for the first time.
+
+    This test uses the REAL public sync bridge (heartbeat_agent_run_sync,
+    the exact function run_agent_graph()'s execute_tools node calls) to
+    write a real "now" heartbeat, waits past a short real threshold, then
+    proves the sweep correctly reconciles it — closing the gap between "the
+    fixture's synthetic stale timestamp is reconciled" (already covered
+    above) and "a REAL heartbeat write, once genuinely stale, is
+    reconciled" (what actually matters in production)."""
+    import time
+
+    from app.db.repository import heartbeat_agent_run_sync
+    from app.fleet.failure_ladder import reconcile_orphaned_runs
+
+    task_id, run_id = _make_agent_run("running", heartbeat_age_seconds=None)
+    try:
+        heartbeat_agent_run_sync(run_id)  # the real production write path
+        run = _get_run(run_id)
+        assert run.last_heartbeat_at is not None  # type: ignore[attr-defined]
+
+        time.sleep(2.2)  # genuinely age past the 2s threshold below
+        _reset_shared_engine()
+        reconciled = asyncio.run(reconcile_orphaned_runs(threshold_seconds=2))
+        assert reconciled >= 1
+
+        run = _get_run(run_id)
+        assert run.status == "failed"  # type: ignore[attr-defined]
+    finally:
+        _cleanup(task_id)

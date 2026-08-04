@@ -3911,3 +3911,169 @@ be silently dropped — every item below traces to a real `MASTER_AGENT_v2.md` �
   handful of items left genuinely NOT VERIFIED for stated concrete reasons, and
   `65days_plan/STAGE4_BACKLOG.md` as the explicitly-scoped next body of work.
   **`PLAN.md`'s 65-day plan, as originally scoped, is complete as of this entry.**
+
+- **2026-08-04: Stage 4 begins — investigating `STAGE4_BACKLOG.md`'s Tier 3 item "Q102 on_heartbeat()
+  wiring," previously estimated as "verification, likely a 1-line fix if actually missing," surfaced
+  a real Critical-severity production gap instead.** Traced the full call chain rather than trusting
+  the estimate: `heartbeat_agent_run()` (the only real writer of `AgentRun.last_heartbeat_at`) is
+  only ever invoked via a closure in `app/api/agents.py`, passed as `on_heartbeat` to
+  `run_planner()`/`run_coder()` — both of which treat it as a **documented no-op** ("kept for
+  backward compat — run_span handles telemetry," a different, in-process-only metrics system,
+  unrelated to the durable DB row the orphan-recovery sweep actually queries). `last_heartbeat_at`
+  therefore stays NULL for the entire life of every real run created via those 2 paths, and
+  `WHERE last_heartbeat_at < :cutoff` never matches NULL by standard SQL semantics — confirmed by
+  this suite's own pre-existing `test_orphan_recovery.py::test_never_heartbeated_run_is_left_alone_
+  real_db`, whose docstring already documented the exclusion without anyone connecting it to the
+  fact that every real run is permanently in that state. **Worse**: `app/agents/manager.py::
+  run_manager()` — the epic-manager dev→QA→review loop that's the *primary* way real coding tasks
+  execute — never calls `create_agent_run()` at all (zero hits), so it has no `AgentRun` row and no
+  orphan-recovery coverage whatsoever. The mechanism this project's own audit history has repeatedly
+  cited as "YES, real" (Stage 1.3 Day 22's original build, re-confirmed at the Day 57 checkpoint,
+  re-confirmed in this session's own Days 64-65 spot-checks) has likely never fired in production —
+  every prior confirmation checked that the sweep's own SQL logic was correct in isolation, never
+  that a real heartbeat ever reaches it.
+  **Likely root cause of the no-op, not just an oversight**: the real `heartbeat()` closure calls
+  `asyncio.create_task()`, which requires a running event loop in the calling thread;
+  `run_agent_graph()` runs synchronously, often inside an `asyncio.to_thread()` worker thread —
+  invoking that closure for real would likely raise `RuntimeError: no running event loop`. This is
+  presumably why it was left a no-op rather than wired.
+  **Decision: documented and escalated rather than rush-fixed.** A real fix touches
+  `run_agent_graph()` — a foundational, heavily-used, heavily-tested function shared by ~76+ agents —
+  and needs a real solution to the cross-thread scheduling hazard plus extending `AgentRun` row
+  creation to `run_manager()`'s own pipeline. Per this project's own established precedent
+  (`PLAN.md`'s intro: "Sandboxing is not cheap... gives it 2 dedicated days instead of bundling it
+  with the 1-day cheap-fix batch, so it doesn't get rushed"), this is not something to patch inside a
+  Tier-3-cheap-items pass. Written up as `STAGE4_BACKLOG.md`'s new **Cluster N (Critical, L-sized)**,
+  moved to position #1 in the staging order — ahead of the cheap items — since severity outranks
+  convenience-ordering. `answers.md`'s Q38 "Docker crashes"/"Python crashes" lines corrected (they
+  previously asserted the orphan-recovery mechanism works; it doesn't, precisely documented why).
+  No code changed this entry — investigation and documentation only; regression suite untouched
+  (still 3708 passed / 0 failed from the Days 64-65 close-out).
+
+- **2026-08-04 (same day): Cluster N implemented — real AgentRun DB tracking, closing the
+  orphan-recovery gap found earlier today.** Owner direction: "Implement this first... reduces
+  future rework and gives a solid production foundation" — fixed before continuing Stage 4's Tier 3.
+  **Design**: traced the real call graph before writing anything (per the standing "verify real
+  callers" rule) — `run_agent_graph()` (`app/agents/base_graph.py`) is the one shared chokepoint all
+  ~76 agents go through (confirmed: `grep -l "run_agent_graph(" app/agents/*.py` → 76 files,
+  including every role wrapper `run_manager()`'s dev/QA/review dispatch calls internally —
+  `run_frontend_dev`/`run_backend_dev`/`run_qa`/`run_reviewer`, each independently confirmed to call
+  `run_agent_graph()`). Fixing it there once gives every real agent run coverage for free, with zero
+  changes needed to `manager.py` or any of the 76 individual agent files — the same "shared
+  chokepoint" reasoning Day 22's original circuit breaker used for `_call_anthropic()`.
+  **The cross-thread hazard, solved rather than reintroduced**: the old design's `heartbeat()`
+  closure called `asyncio.create_task()`, unsafe from a worker thread with no running loop — this
+  codebase already has an established, tested solution for exactly this "sync LangGraph node needs
+  an async DB write" problem (`app/memory/store.py::query_memory_context_sync`, real precedent:
+  `new_isolated_async_engine()` + `asyncio.run()`, never the shared engine singleton — asyncpg
+  connections are bound to the loop that created them). Reused, not reinvented.
+  **Built**: 3 new sync bridge functions in `app/db/repository.py`
+  (`create_agent_run_sync`/`heartbeat_agent_run_sync`/`finish_agent_run_sync`), each non-fatal by
+  construction (logs a warning, returns `None`/no-ops on any failure — invalid `task_id`, FK
+  violation, DB unavailable — never raises into the graph); new config
+  `agent_run_heartbeat_min_interval_seconds` (default 30s, well under the 900s orphan threshold) so
+  a chatty agent doesn't open a fresh throwaway DB connection on every single tool call.
+  `run_agent_graph()` creates the `AgentRun` row on start (skipped non-fatally if `task_id` isn't a
+  real int, e.g. a guardian agent's synthetic scan id), threads the resulting `run_id` down through
+  `build_agent_graph()` into `_make_execute_tools_node()`, which heartbeats (throttled) once per
+  real tool call about to execute; both the success and exception exit paths finish the row
+  (`completed`/`failed`) so it never sits in `status='running'` forever either way.
+  **A second, more subtle bug caught by this fix's own test suite before shipping, not left in**:
+  the heartbeat throttle's original "never heartbeated yet" sentinel was `0.0`, which silently
+  relies on `time.monotonic()`'s absolute value (an undefined reference point, often just
+  process/system uptime) exceeding the configured interval — this environment's own
+  `time.monotonic()` was only ~5100s, so a 9999s-interval test found 0 heartbeats instead of the
+  expected 1, catching a real latent bug (a large configured interval could silently suppress the
+  *first* heartbeat forever on a freshly-started process) before it ever shipped. Fixed with a
+  `None` sentinel — first call always heartbeats regardless of interval size or absolute clock
+  value.
+  **Blast-radius check before shipping** (touching a foundational function used by 76 agents is
+  exactly the kind of change that warrants this): ran all 31 test files that reference
+  `build_agent_graph`/`_make_execute_tools_node`/`run_agent_graph` directly (524 tests) — all pass
+  unchanged. Confirmed via existing tests' own real task_id values (e.g.
+  `test_gap_stage15_context_condense.py` uses non-numeric string task_ids like
+  `"stage15-condense-test"`) that the non-fatal `int(task_id)` failure path is already exercised by
+  dozens of pre-existing tests, not just the new ones — none of them needed any change.
+  **Built** (new test file): `tests/test_stage4_clustern_real_agent_run_heartbeat.py` (7 tests, real
+  Postgres, no DB mocking — matching this suite's own established real-DB convention for anything
+  this state-sensitive): the core fix end-to-end through the real public `run_agent_graph()` API;
+  the exception-path finish; the non-numeric-`task_id` non-fatal safety net; the throttle itself
+  (3 sub-tests: high interval → 1 heartbeat across 5 tool calls, zero interval → 5, no `run_id` → 0);
+  and — the test that actually matters —
+  `test_full_loop_a_run_that_stops_heartbeating_is_now_actually_reconciled`: creates a real
+  `AgentRun` the way `run_agent_graph()` now does, backdates its heartbeat past the threshold
+  (simulating the process dying), and proves `reconcile_orphaned_runs()` now genuinely marks it
+  `failed` — the exact reconciliation that was structurally impossible before this fix, since
+  `last_heartbeat_at` could never be anything but NULL. All 6 pre-existing `test_orphan_recovery.py`
+  tests still pass unchanged (the sweep's own SQL logic was never the problem).
+  `black`/`ruff`/`mypy --strict` clean on every touched/new file.
+  **Full regression**: 3715 passed (3708 Days-64-65 baseline + 7 new), 0 failed, 56 skipped, 17
+  deselected — exact match, zero regressions, despite this fix touching the one shared chokepoint
+  all 76 agents go through.
+  **`answers.md` updated**: Q38's "Docker crashes"/"Python crashes" lines flipped from the earlier
+  correction (documenting the bug) to documenting the real fix, with full evidence.
+  `65days_plan/STAGE4_BACKLOG.md`'s Cluster N marked resolved, moved out of the staging order's
+  first position.
+
+- **2026-08-04 (same day): Cluster N Production Verification — owner-requested real end-to-end
+  validation before trusting the fix, beyond unit/integration tests.** Owner: "This was the right
+  architectural approach instead of a quick patch... I want one final production-level validation" —
+  4 checks (true E2E manual test with a real process kill, performance under concurrency,
+  race/leak/transaction safety, and a final Production Verified doc update), with an explicit
+  "if any issue is discovered, stop and fix it before continuing."
+  **Built real validation tooling** (not reused from the pytest suite — genuine external
+  orchestration): a worker script run as a real separate OS subprocess calling the real
+  `run_agent_graph()` with a scripted-but-deterministic LLM (no `ANTHROPIC_API_KEY` configured in
+  this environment — confirmed empty, not assumed), and a parent orchestrator that creates a real
+  `DevTask`, polls the real `AgentRun` row every 3s, sends a real `SIGKILL`, and drives the real
+  `reconcile_orphaned_runs()` sweep.
+  **Check 1 (true E2E) result**: PASS, on a clean confirmation run. Observed two real heartbeats
+  exactly 30.000s apart (twice, across two separate runs) — the throttle fires at precisely the
+  configured interval. Real `SIGKILL` confirmed via exit code `-9`. Row confirmed still `running`
+  immediately post-kill (no cleanup ran). Real sweep reconciled it to `failed` with the correct
+  error and `finished_at`. Exactly one `AgentRun` row existed throughout — no duplicate execution.
+  **Check 2+3 (performance/concurrency/leaks) result**: 30 concurrent agents (real
+  `ThreadPoolExecutor`, matching production's real `asyncio.to_thread()` dispatch model) × 3
+  heartbeats = 90 concurrent writes in 5.02s, zero exceptions. Measured honestly, not just declared
+  passing: single-call latency baseline 66ms; under 30-way concurrency, mean rose to 1459ms (p95
+  2300ms, max 2471ms) — a real ~22x contention-driven slowdown, reported precisely rather than
+  glossed over, though it causes no correctness issue (well within the 30s throttle window, and
+  heartbeat writes are fire-and-forget, never blocking the agent's real work). Postgres connections:
+  baseline 8 → peak 19 during the burst → back to 6 within 1s — confirms `engine.dispose()` releases
+  every connection, no leak, peak stays far under `max_connections=100`.
+  **A real bug in the validation script itself was caught and fixed along the way**: the
+  concurrency-stress script nested `asyncio.run()` inside an already-running event loop (invalid) —
+  fixed by moving `AgentRun` row creation to plain sync code, matching how `create_agent_run_sync()`
+  is actually meant to be called. Noted here because it's exactly the kind of subtlety this
+  validation exercise exists to catch, even when it's in the harness rather than the product.
+  **Check 4 — a second, real, pre-existing, separate bug found and fixed by this validation pass
+  itself** (this is the actual payoff of the owner's insistence on real E2E validation over trusting
+  unit tests): `reconcile_orphaned_runs()`'s `cutoff` was timezone-naive
+  (`.replace(tzinfo=None)`); this environment's system timezone (Asia/Kolkata, UTC+5:30) causes the
+  DB driver to silently reinterpret a naive datetime as local time, not UTC — confirmed directly via
+  a raw SQL round-trip (a naive "UTC-intended" write came back shifted by exactly -5:30). Every
+  pre-existing test passed anyway because the test fixture's own stale-timestamp write had the
+  identical bug, so the erroneous shift canceled out on both sides of the comparison by coincidence
+  — invisible until a REAL, correctly timezone-aware heartbeat (this session's own earlier fix) was
+  compared against it for the first time. Root-caused precisely (not guessed) via a targeted
+  investigation script before touching any code. **Fixed**: kept `now`/`cutoff` timezone-aware end
+  to end in `app/fleet/failure_ladder.py`, matching `finish_agent_run()`'s own already-correct
+  convention; also fixed the identical bug in the test fixture itself
+  (`test_orphan_recovery.py::_make_agent_run`), since leaving it naive would have broken the
+  *existing* "fresh heartbeat left alone" test against the *fixed* reconcile function (hit that
+  failure for real before fixing it, not assumed). **New regression guard**:
+  `test_orphan_recovery.py::test_a_real_heartbeat_write_is_correctly_recognized_as_stale`, confirmed
+  via `git stash` to genuinely fail without the fix and pass with it. **A related, lower-severity
+  instance of the same bug class found in `app/services/retention.py`** (day-scale retention
+  cutoffs) — documented, deliberately not fixed today (out of scope, much lower real-world impact:
+  ~5.5h "late" daily cleanup vs. orphan-detection effectively never firing), added to
+  `STAGE4_BACKLOG.md` Tier 3 rather than silently dropped.
+  `black`/`ruff`/`mypy --strict` clean on every touched file.
+  **Full regression**: 3716 passed (3715 + 1 new regression-guard test), 0 failed, 56 skipped, 17
+  deselected — exact match, zero regressions.
+  **`answers.md` updated**: new "Production Verification (Cluster N)" subsection under Q38 with the
+  complete evidence above. `STAGE4_BACKLOG.md`'s Cluster N marked **PRODUCTION VERIFIED**; new Tier 3
+  item added for the `retention.py` finding.
+  **Cluster N: PRODUCTION VERIFIED.**
+  **Next: resume Stage 4 Tier 3 (cheap/verification items), now with the backlog's own critical
+  finding closed and production-verified rather than carried forward.**
