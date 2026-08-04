@@ -4769,3 +4769,92 @@ app/pipeline/cost_controller.py app/fleet/metrics.py app/agents/manager.py --str
 
 **Cluster P is now closed.** Next: awaiting user direction — Cluster C/D and Cluster Q are next in
 the backlog's "Suggested staging order" after Cluster P.
+
+## 2026-08-05 (continued) — ADR 007 + Cluster Q architecture review + Tests slice
+
+**ADR 007 written** (`docs/adr/007-epic-cost-tier-homogeneity-assumption.md`): documents the
+conditional invariant behind Cluster P's `compute_actual_cost_usd()` decision — flat-rate is correct
+today because all 4 real contributing agents (backend_dev, frontend_dev, qa, reviewer) are verified
+sonnet-tier, but this is not permanent. Guarded by a standing regression test
+(`test_manager_epic_tokens_contributors_are_all_sonnet_tier`); if it ever fails, the ADR documents
+exactly what must change (per-tier accumulation via `cost_rates_for_tier()`).
+
+**Cluster Q architecture review** (per explicit user instruction, before any aggregation code):
+verified all 9 real categories from Q117 (`Bhaskar's_questions.md`: Architecture, Prompts, Agents,
+Tools, Memory, Documentation, Tests, Performance, Security) against real code — submit-tool schemas,
+DB migrations, agent implementations — not name-pattern grep alone. Found the original backlog
+finding, while directionally right, had 2 real corrections: (1) Security's suggested fix path
+("parse dependency_security_agent's findings into a severity count") isn't available — `findings` is
+plain strings with no severity field, unlike `architecture_reviewer`'s already-structured `risks[]`;
+the real honest path is capturing the underlying `pip-audit`/`npm audit` tool's own raw JSON output,
+currently summarized by the LLM and discarded. (2) Two categories (Memory, Tools — plus arguably
+Performance) have a real *existing* signal that is the **wrong kind** of data for a subsystem-health
+score (`memory_score` is a per-item retrieval-ranking formula; `tool_accuracy`/`latency_p50` are
+per-run sub-metrics already folded into the Agents category) — reusing either would be exactly the
+"aggregation on inferred data" the user's instruction warned against. Full 9-category table written
+into `STAGE4_BACKLOG.md`'s Cluster Q section. Net: only 1 of 9 categories (Agents, via
+`benchmark_score`/`agent_benchmarks`) is fully real today; 3 (Tests, Architecture, Security) have a
+genuinely honest near-term path; the rest need real net-new instrumentation decisions. Recommended
+staging (cheapest/most-honest first): Tests → Architecture → Security, with the aggregation/weighting
+layer deferred until all 3 are real.
+
+User approved the Tests slice as the starting scope. **Implemented and verified**: `coverage_pct`
+added to `test_coverage_agent`'s submit schema (optional/nullable — never forces a fabricated number
+on a blocked run); role prompt + role file kept in sync. Found and fixed a second real gap in the
+same change: `specialized_agents.py`'s two persistence call sites never included `AgentResult.raw` in
+their artifact payload at all, so the new field would have been silently discarded a second time —
+fixed narrowly, scoped to `test_coverage_agent` only (not exposed fleet-wide). Found and documented
+(not fixed, flagged for later — avoiding scope creep) a pre-existing, unrelated schema-vs-role-file
+mismatch in `roles/test_coverage_agent.md`'s Output Contract section, same bug class as the Day
+48/49 `submit_arch_review` fix referenced in `tools.py`'s own comments.
+
+7 new tests (`tests/test_stage4_cluster_q_test_coverage_pct.py`): schema shape, real end-to-end
+propagation via mocked `run_agent_graph` (including the blocked-run-never-fabricates case), and both
+persistence call sites — proving `coverage_pct` is captured for `test_coverage_agent` and, as a
+regression guard, is *not* added for any other agent. `mypy --strict` clean on both touched modules;
+229 directly-related existing tests still green. Full backend suite run in background to confirm
+zero regressions fleet-wide (result pending at time of this entry).
+
+Next: Architecture (severity-weighted aggregate over `architecture_reviewer`'s `risks[]`) is the next
+staged Cluster Q effort — not yet started, awaiting user direction.
+
+**Full regression confirmed**: 3807 passed, 0 failed, 56 skipped, 17 deselected — exact match to
+3800 prior baseline (post-Cluster-P) + 7 new Cluster Q tests, zero regressions.
+
+**Tests slice is now closed.** Cluster Q remains open (Architecture and Security slices not started;
+aggregation/weighting layer not started; Prompts/Documentation/Memory/Tools/Performance need a
+separate net-new-instrumentation decision). Awaiting user direction on next step.
+
+## 2026-08-05 (continued) — Cluster Q Architecture slice implemented + verified
+
+Second of the 3 staged Cluster Q efforts (Tests → **Architecture** → Security). Re-verified before
+writing code: `architecture_reviewer`'s `submit_arch_review` schema's `risks[]` array has a real
+JSON-schema `severity` enum (critical/high/medium/low) — confirmed sufficient structured data exists,
+per the user's explicit precondition. Also found and correctly excluded a second real producer
+(`run_architecture_reviewer_scan()`, the periodic SCAN phase writing `EnhancementRequest` rows) as a
+genuinely different subsystem (an escalation backlog, not a review snapshot) — conflating the two
+would have violated the "narrowly scoped to Architecture only" instruction. Confirmed `run_arch_review()`
+has no existing scheduled trigger (on-demand only via `specialized_agents.py`'s `"arch_reviewer"` key,
+note: not `"architecture_reviewer"`, a real naming mismatch) — documented honestly rather than implying
+continuous operation that doesn't exist yet.
+
+Implemented: `app/config.py` per-severity weights + risk cap (policy defaults, same category as
+`benchmark_weight_*`); new `app/fleet/architecture_score.py` module mirroring `benchmark_manager.py`'s
+exact shape (pure `compute_architecture_score()` reading only the severity enum, never narrative text
+— proven by a dedicated test; vacuous 1.0 for a clean review; unrecognized severity excluded, never
+guessed); new `architecture_scores` table (migration 028, applied against real Postgres, repo_id
+resolved via Cluster O's `DevTask.repo_id` source of truth); `run_arch_review()` wired to persist a
+score only when `import_graph_ran` is real graph-verified True — never a score built on an unverified
+claim.
+
+9 new tests (`tests/test_stage4_cluster_q_architecture_score.py`): formula correctness, real-Postgres
+persist/read-back, and a full end-to-end test proving a real row is written and reads back exactly
+matching `compute_architecture_score()`'s own output. `git stash` on `architecture_reviewer.py`
+confirmed the end-to-end test genuinely fails without the wiring (`assert None is not None`) while
+the 8 other tests correctly still passed. `mypy app/ --strict` clean across all 193 files. 492 tests
+across every architecture_reviewer-referencing file green. **Full regression confirmed: 3816 passed,
+0 failed, 56 skipped, 17 deselected** — exact match to the 3807 prior baseline + 9 new tests, zero
+regressions.
+
+Architecture slice marked production verified in `STAGE4_BACKLOG.md` per user instruction — Security
+slice not started, awaiting direction.

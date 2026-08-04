@@ -735,6 +735,32 @@ class Settings(BaseSettings):
         description="Hours between checks for whether target_repo_path's local `main` HEAD has moved since changelog_agent/release_notes_agent last ran, auto-dispatching each when it has. 0 disables. Gap-closure Day 52, answers.md Q41.",
     )
 
+    # Stage 4 Cluster Q — Architecture slice (2026-08-05, app/fleet/architecture_score.py)
+    # Per-severity weights for architecture_reviewer's structured risks[]
+    # (a real JSON-schema enum, never narrative text). Policy defaults, same
+    # category of config as benchmark_weight_* above — critical risks
+    # dominate the score; a clean review (risks=[]) scores 1.0 vacuously,
+    # mirroring benchmark_manager.py's own "no negative signal -> 1.0"
+    # convention.
+    architecture_score_weight_critical: float = Field(
+        default=1.0, description="Per-risk weight for severity=critical."
+    )
+    architecture_score_weight_high: float = Field(
+        default=0.5, description="Per-risk weight for severity=high."
+    )
+    architecture_score_weight_medium: float = Field(
+        default=0.2, description="Per-risk weight for severity=medium."
+    )
+    architecture_score_weight_low: float = Field(
+        default=0.05, description="Per-risk weight for severity=low."
+    )
+    architecture_score_risk_cap: float = Field(
+        default=3.0,
+        description="Weighted risk-point sum at which architecture_score bottoms out at "
+        "0.0 (e.g. 3 uncleared critical risks, or an equivalent weighted mix). "
+        "Policy threshold, adjustable — not a measured constant.",
+    )
+
     # Day 11 — Fleet OS Versioned Memory (merge-on-conflict lesson lifecycle)
     memory_merge_similarity_threshold: float = Field(
         default=0.85,
