@@ -60,6 +60,13 @@ class Settings(BaseSettings):
         default="/tmp/gridiron-repos",
         description="Where cloned GitHub repos are stored",
     )
+    task_repo_id_cache_max_size: int = Field(
+        default=2048,
+        description="Stage 4 Cluster O (2026-08-05): max entries in the process-local "
+        "task_id -> repo_id cache (app/db/repository.py::get_task_repo_id/_sync). "
+        "DevTask.repo_id is immutable post-creation, so entries never need "
+        "invalidation, only a size cap against unbounded growth.",
+    )
     bg_process_registry_path: str = Field(
         default="/tmp/gridiron-bg-processes.json",
         description="Gap-closure Day 23 (Stage 1.3, answers.md) — durable "
@@ -104,11 +111,48 @@ class Settings(BaseSettings):
         default=1.0,
         description="Epic cost estimate (USD) above which human approval is required before agents start",
     )
+    # Stage 4 Cluster P (2026-08-05, STAGE4_BACKLOG.md) — before this fix, these
+    # two fields (labeled "Haiku pricing") were the ONLY cost rate in the
+    # codebase, applied to every agent's tokens regardless of real tier. 62 of
+    # 73 registered agents route to Sonnet, 9 to Opus (agent_models.json) — the
+    # overwhelming majority of real fleet cost was computed at the wrong,
+    # cheaper rate. These two fields are now the Sonnet-tier rate (also used as
+    # the fallback for any tier without its own dedicated field below, mirroring
+    # ModelRouter.route()'s own fallback-to-sonnet convention in
+    # app/fleet/model_router.py). See cost_controller.cost_rates_for_tier() for
+    # the tier-aware lookup. Sourced from Anthropic's published per-model
+    # pricing (claude-sonnet-5, standard rate — not the temporary introductory
+    # rate that expires 2026-08-31, so this default does not go stale on that
+    # date); verified 2026-08-05, not recalled from training data.
     cost_per_input_token: float = Field(
-        default=0.0000008, description="Cost per input token (USD) — Haiku pricing"
+        default=0.000003,
+        description="Cost per input token (USD) — Sonnet tier (claude-sonnet-5); "
+        "also the fallback rate for tiers without a dedicated field",
     )
     cost_per_output_token: float = Field(
-        default=0.000004, description="Cost per output token (USD) — Haiku pricing"
+        default=0.000015,
+        description="Cost per output token (USD) — Sonnet tier (claude-sonnet-5); "
+        "also the fallback rate for tiers without a dedicated field",
+    )
+    cost_per_input_token_haiku: float = Field(
+        default=0.000001,
+        description="Cost per input token (USD) — Haiku tier (claude-haiku-4-5). "
+        "Sourced from Anthropic's published pricing, verified 2026-08-05.",
+    )
+    cost_per_output_token_haiku: float = Field(
+        default=0.000005,
+        description="Cost per output token (USD) — Haiku tier (claude-haiku-4-5). "
+        "Sourced from Anthropic's published pricing, verified 2026-08-05.",
+    )
+    cost_per_input_token_opus: float = Field(
+        default=0.000005,
+        description="Cost per input token (USD) — Opus tier (claude-opus-4-8). "
+        "Sourced from Anthropic's published pricing, verified 2026-08-05.",
+    )
+    cost_per_output_token_opus: float = Field(
+        default=0.000025,
+        description="Cost per output token (USD) — Opus tier (claude-opus-4-8). "
+        "Sourced from Anthropic's published pricing, verified 2026-08-05.",
     )
     cost_tokens_per_subtask: int = Field(
         default=4000,
@@ -504,6 +548,57 @@ class Settings(BaseSettings):
             "run, even if many tool calls happen faster than this. Should "
             "stay well below agent_run_orphan_threshold_seconds."
         ),
+    )
+
+    # Stage 4 Tier 3 (2026-08-05, answer2.md Q92) — "abandoned library" is a
+    # distinct signal from "outdated": pip index versions/npm outdated only
+    # compare installed-vs-latest, never expose *when* latest was published,
+    # so a package with a recent latest release looks identical to one whose
+    # "latest" is itself years old. dependency_agent's new check_last_release
+    # tool queries the real PyPI/npm registry APIs for the latest release's
+    # publish date and classifies staleness against these thresholds.
+    dependency_abandoned_threshold_days: int = Field(
+        default=730,
+        description="Days since a package's latest release before it's classified abandoned.",
+    )
+    dependency_possibly_abandoned_threshold_days: int = Field(
+        default=365,
+        description="Days since a package's latest release before it's classified possibly abandoned.",
+    )
+
+    # Stage 4 Tier 3 (2026-08-05, answer2.md Q43) — RunMetrics.confidence is
+    # purely self-reported by the planner's own LLM call, never checked
+    # against anything. app.fleet.metrics.check_confidence_calibration()
+    # flags a real mismatch between that self-report and this same run's
+    # other, independently-computed signals (verification_pct,
+    # reflection_unsatisfied) using these 3 thresholds.
+    confidence_miscalibration_min_confidence: float = Field(
+        default=0.8,
+        description="Self-reported confidence at or above this is 'high confidence' for the calibration check.",
+    )
+    confidence_miscalibration_max_verification_pct: float = Field(
+        default=0.5,
+        description="Real verification_pct below this, alongside high self-reported confidence, is flagged as a mismatch.",
+    )
+    confidence_miscalibration_min_reflection_unsatisfied: int = Field(
+        default=2,
+        description="reflection_unsatisfied at or above this, alongside high self-reported confidence, is flagged as a mismatch.",
+    )
+
+    # Stage 4 Tier 3 (2026-08-05, answer2.md Q7) — real, bounded chat-side
+    # user-frustration detection (app.agents.user_sentiment). Thresholds for
+    # the 2 numeric signals (message repetition, excessive capitalization).
+    user_frustration_repeat_similarity_threshold: float = Field(
+        default=0.6,
+        description="Jaccard word-overlap ratio against a recent prior user message, at or above which the current message is flagged as a near-repeat.",
+    )
+    user_frustration_excessive_caps_ratio: float = Field(
+        default=0.5,
+        description="Fraction of alphabetic characters that are uppercase, at or above which a long-enough message is flagged as excessive caps.",
+    )
+    user_frustration_excessive_caps_min_len: int = Field(
+        default=10,
+        description="Minimum message length before the excessive-caps check applies (avoids flagging short messages like 'OK' or 'NO').",
     )
 
     # Day 5A — Fleet Platform enhancements

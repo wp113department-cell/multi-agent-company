@@ -38,6 +38,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "read_file",
         "list_files",
         "search_code",
+        "web_search",
         "submit_research",
         "record_learning",
     ],

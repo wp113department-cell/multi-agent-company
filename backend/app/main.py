@@ -386,6 +386,10 @@ async def _run_doc_agent_auto_trigger_once() -> None:
                     description=task.description,
                     result=result,
                     db=db,
+                    # Stage 4 Cluster O (2026-08-05) — task is already loaded
+                    # here (create_task() above), so its repo_id is directly
+                    # available with no extra lookup.
+                    repo_id=task.repo_id,
                 )
                 await set_setting(db, setting_key, current_sha)
                 logger.info(

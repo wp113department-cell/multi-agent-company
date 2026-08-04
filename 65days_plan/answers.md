@@ -177,7 +177,23 @@ for this kind of process transparency.
 - How are terminals managed?: **PARTIAL** — no persistent PTY/terminal object exists. Two patterns: (1) one-shot `subprocess.run(shell=True, timeout=N)` calls per tool invocation (dozens of handlers in `tools.py`, e.g. lines 718, 779, 855, 11678); (2) a session-scoped background-process registry `_session_bg_procs: dict[int, subprocess.Popen]` defined locally inside `make_chat_handlers` (`tools.py:6998`), populated by `run_background` (line 7787) and read via `read_output_h` (line 8818).
   Plan: Document this "no persistent terminal, per-call subprocess + PID-tracked background dict" model explicitly instead of implying a real terminal-session abstraction exists.
 - Can multiple terminals run simultaneously?: **YES** — `run_background` (`tools.py:7787`) can be called repeatedly, each producing a new `Popen` tracked by PID in `_session_bg_procs`; concurrent agent/subtask execution is also bounded by real `asyncio.Semaphore`s in `backend/app/pipeline/concurrency.py` (`epic_slot`, `agent_run_slot`, `subtask_slot`, lines 42-106).
-- How does Windows terminal support work?: **PARTIAL/NO** — no `executable=` override is set on any `subprocess.run(shell=True, ...)` call (verified via repo-wide grep), so on Windows this defaults to `cmd.exe`. But venv-activation and many tool commands are hardcoded POSIX shell syntax, e.g. `tools.py:7487` `f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true && python -m pytest..."` — `source`, `.venv/bin/activate`, and `/dev/null` are all invalid/no-ops under `cmd.exe` (Windows venvs use `Scripts\activate`, not `bin/activate`, and there is no `true` command). Windows-specific handling does exist elsewhere: `tools.py:9656` uses `msvcrt.locking` instead of `fcntl.flock` for memory-file locks, and `tools.py:8791` falls back to a threaded blocking read instead of `fcntl` O_NONBLOCK for background-process output on `sys.platform == "win32"`.
+- How does Windows terminal support work?: **PARTIAL, venv-activation half fixed Stage 4 Tier 3
+  (2026-08-05)** — no `executable=` override is set on any `subprocess.run(shell=True, ...)` call
+  (verified via repo-wide grep), so on Windows this defaults to `cmd.exe`. Venv-activation, the
+  specific gap this line named, is now real: all 11 real call sites (was hardcoded POSIX at each,
+  e.g. the old `tools.py:7487` `f"cd {repo_path} && source .venv/bin/activate 2>/dev/null || true
+  && python -m pytest..."`) now go through one shared `_venv_activate_snippet()` helper
+  (`sys.platform`-branched — POSIX unchanged, Windows gets real `.venv\Scripts\activate.bat`/`2>nul`/
+  `ver` cmd.exe syntax instead of the old bash-only `source`/`/dev/null`/no-`true`-equivalent).
+  Verified by real execution on the POSIX side (`tests/test_gap15_test_runner_exit_code.py`'s 8
+  real-subprocess tests still pass unchanged) and by construction on the Windows side (no Windows
+  host available in this environment to actually execute `cmd.exe` against — stated honestly, not
+  assumed). **Still open, a related but distinct gap, not touched by this fix**: 5 of those same 11
+  sites also pipe through `| head -N`/`| tail -N` (also POSIX-only utilities, not cmd.exe builtins).
+  Windows-specific handling also exists elsewhere, unaffected by this change: `tools.py`'s
+  `msvcrt.locking` (instead of `fcntl.flock`) for memory-file locks, and its threaded-blocking-read
+  fallback (instead of `fcntl` O_NONBLOCK) for background-process output on `sys.platform ==
+  "win32"`.
   Plan: Detect platform and either force `executable="/bin/bash"`/WSL for POSIX-syntax commands or branch to `Scripts\activate.bat`/PowerShell equivalents on Windows; add CI coverage running the tool suite on native Windows.
 - How does Ubuntu/Linux support work?: **YES** — same `shell=True` calls resolve to `/bin/sh` on Linux, and the hardcoded `source .venv/bin/activate` (`tools.py:7487` etc.), `fcntl`-based nonblocking IO (`tools.py:8791-8796`), and `ps aux`/`ss -tlnp`-based `list_processes_h`/`list_open_ports_h` (`tools.py:10569`, `10586`) all work natively on Linux.
 - How are Docker terminals handled?: **YES** — `backend/app/agents/tools.py:3978` `make_docker_agent_handlers()` and a `_DOCKER_LOGS_TOOL` (line 2581) wrap `docker ps`, `docker build`, `docker logs`, `docker-compose config` via `subprocess.run` with list-args (not shell=True) in several spots (e.g. line 3990 format string for `docker ps`); `_docker_container_risk_reason()` (`tools.py:6900`) runs `docker inspect` before allowing `docker_exec` into a container and denies if it is `--privileged`, shares host PID namespace, has dangerous `CapAdd`, or bind-mounts sensitive host paths (`/etc`, `/root`, `/var/run/docker.sock`, etc.) — a real pre-exec safety check, not just a docstring claim.
@@ -216,6 +232,17 @@ for this kind of process transparency.
   dependencies managed" above) — that precondition is met. Still sequential within the loop itself
   (dispatch order is now correct, but subtasks are not yet dispatched concurrently); parallelizing
   independent subtasks within one epic remains a distinct, unstarted piece of work.
+- Are priorities managed: **PARTIAL, DB-enforcement fixed Stage 4 Tier 3 (2026-08-05, answer2.md
+  Q2)** — `DevTask.priority` was a bare `String(20)` with zero validation anywhere (Pydantic or DB),
+  so any string could be stored. Confirmed no existing row would break a constraint (38/38 rows
+  already `'medium'`) before adding migration `027` (real `CHECK (priority IN ('low','medium',
+  'high'))`, actually run against this environment's live Postgres via `alembic upgrade head`, with
+  the downgrade path also actually exercised, not just authored). `CreateTaskRequest.priority` also
+  tightened to `Literal["low","medium","high"]` for a real 422 at the API boundary instead of a raw
+  DB `IntegrityError` reaching the client. Still PARTIAL, not YES: priority is now a *valid value*,
+  but still isn't *fed into scheduling order* anywhere (no dispatch-order logic reads it) — that's a
+  separate, larger piece (Cluster K in `STAGE4_BACKLOG.md`, a real scheduler/priority-queue, which
+  doesn't exist), deliberately not bundled into this fix.
 - Can agents create subtasks: **PARTIAL** — the `decomposer` agent creates the subtask list once, up front (`backend/app/agents/decomposer.py:115-194`, `submit_subtasks` tool). No worker agent (backend_dev, qa, reviewer, etc.) can create a *new* subtask mid-run; there is no `create_subtask` tool anywhere in `backend/app/agents/tools.py` (grepped, not found). Replanning (`_make_replan_node`, `base_graph.py:425-459`) revises the *plan text*, not the subtask list.
   Plan: add a `create_subtask` tool for worker agents (or route replan output back into the decomposer) if dynamic subtask creation is required.
 - Can agents request help from other agents: **NO** — grepped `backend/app/agents/tools.py` and `backend/app/fleet/` for any `call_agent`/`delegate_to_agent`/`ask_agent`/`invoke_agent`-style tool; none exists. `fleet_events.py` publishes `TaskCreated`/lifecycle events (pub/sub for observability) but no agent can invoke another agent's run from inside its own tool loop. `MASTER_AGENT_v2.md:1112-1132` (D.2) explicitly confirms formal cross-agent negotiation/consultation/recursive delegation is deferred, not built.
@@ -311,8 +338,31 @@ Separately: `POST /api/specialized-agents/{agent_name}/run` (`backend/app/api/sp
 
 - Select tools automatically: **YES** — the LLM (Claude, via Anthropic `messages.create` with a `tools=` list) picks which declared tool to call each turn; no rule-based pre-filter chooses for it. `_make_call_llm_node` (`backend/app/agents/base_graph.py:532-650`) passes the agent's full tool list every turn; `execute_tools` (lines 977-1205) executes whatever the model chose.
 - Call multiple tools: **YES** — `execute_tools` (`base_graph.py:1003-1205`) iterates `tool_uses = [b for b in content if b.get("type")=="tool_use"]` — a single LLM turn can contain multiple `tool_use` blocks and all are executed in the same turn, each producing its own `tool_result`.
-- Retry failed tools: **PARTIAL** — there is no automatic re-invocation of the *exact same failed tool call*. A failing tool returns a `"[ERROR] ..."` string as the `tool_result` (`base_graph.py:1056-1057`), which goes back to the model; the model itself then decides whether to retry, adjust, or give up (LLM-driven, not a hard retry loop). What IS a real automated retry is one layer up: `manager.py`'s subtask loop (`for attempt in range(max_retries)`, lines 292-539) re-runs the whole dev→QA→review sequence with exponential backoff (`await asyncio.sleep(0.5 * (2**attempt))`, line 360) via `should_retry()` (`backend/app/fleet/failure_ladder.py:79-81`).
-  Plan: if a hard automatic single-tool-call retry (e.g. on transient network error) is wanted, add it inside `execute_tools`'s handler-call `try/except` (currently line 1041-1058 catches and converts to `[ERROR]` on the first failure, no retry).
+- Retry failed tools: **YES, real single-tool-call retry built Stage 4 Tier 3 (2026-08-05)** — this
+  is exactly the fix this line's own "Plan" predicted. New `_run_tool_with_retry()`
+  (`app/agents/base_graph.py`) is wired into `execute_tools`'s handler-call site and finally
+  consumes `app/fleet/tool_manifest.py`'s `retry_policy` field (declared on all 193 tools, zero real
+  readers before this — confirmed by grep). Deliberately not a blind "policy says retry, so retry"
+  implementation: checked what's actually tagged `"once"`/`"backoff"` first and found 2 real hazard
+  classes hiding inside — `write_remote` tools (`create_pr`, `slack_send_message`, etc., where a
+  false-negative network error could mean the remote write already happened, so retrying risks a
+  real duplicate) and `execute`/`write_repo` tools (`run_tests`, `pip_install`, etc., which fail
+  *deterministically* far more often than transiently, so auto-retrying would double real
+  wall-clock cost for an outcome retrying can't change) — both excluded by permission, not a
+  hand-maintained tool list. Of 19 manifest-tagged-non-`"none"` tools, exactly 7 remain eligible —
+  all pure `permissions=["network"]` reads. `manager.py`'s own agent-run-level retry (unchanged,
+  still real, described below) now sits alongside this new, real, individual-tool-call-level retry
+  as a second, distinct layer — not a replacement for it.
+  Proven: `tests/test_stage4_tier3_tool_level_retry.py` (7 tests) — a real eligible tool retries and
+  succeeds; `run_tests`/`slack_send_message` each proven to NOT auto-retry despite their own
+  manifest saying `"once"` (the exclusions, proven directly); backoff gives up after 3 attempts with
+  the real error reaching the LLM unchanged; an unrecognized tool name defaults safely to no retry;
+  a real raised exception (not just an `[ERROR]` string) is caught and can still retry. What IS
+  still a separate, real automated retry one layer up: `manager.py`'s subtask loop (`for attempt in
+  range(max_retries)`, lines 292-539) re-runs the whole dev→QA→review sequence with exponential
+  backoff (`await asyncio.sleep(0.5 * (2**attempt))`, line 360) via `should_retry()`
+  (`backend/app/fleet/failure_ladder.py:79-81`) — this is the agent-run-level retry, distinct from
+  and complementary to the new tool-call-level one above.
 - Verify tool outputs: **YES** — `VerificationConfig` (`base_graph.py:105-125`) is a real, per-agent contract: `set_by` marks a verification flag True only when a tool completes without `[ERROR]`/`[POLICY]` prefix (lines 1078-1086); `reset_by`/`reset_keys` invalidate stale verification when a mutating tool runs afterward (lines 1088-1090); `enforce_in_result` (lines 1107-1119) overrides the model's own claimed result fields with the graph-tracked ground truth at submit time — the model literally cannot lie about "tests passed."
 - Recover from failures: **PARTIAL** — recovery exists at multiple real layers: `SlotAcquisitionTimeout` handling routes into the normal blocked-subtask path (`manager.py:266-290`), `should_retry`/backoff (above), `escalate()`/`abort()`/`request_human_review()` (`failure_ladder.py:90-193`), and `reconcile_orphaned_runs()` for crashed processes (lines 209-265). What's NOT automatic: `rollback`/`resume` (`failure_ladder.py:63-71`) are explicitly documented as "intentionally manual/operator-invoked tooling... not unwired oversights" (comment lines 52-61) — a real checkpoint/rollback mechanism exists (`fleet_checkpoint.py`) but nothing calls it automatically on failure.
   Plan: N/A per the codebase's own explicit design decision (rollback is a judgment call reserved for a human); document this clearly as a deliberate choice, not a gap, if audited externally.
@@ -460,7 +510,23 @@ exists (see Project Memory finding above), so sharing is effectively "everything
 - Long-Term Memory: **YES** — `memory_embeddings` (Postgres/pgvector) survives restarts and is shared across worker processes; confirmed real call sites now exist for all 4 categories (`embed_task_outcome`, `embed_learning_signal`, `embed_architecture_note`, `embed_failure` — the latter two were "fully dead" per `MASTER_AGENT_v2.md` §A.4 but now have live callers in `app/memory/hooks.py:91,112` and `chat_agent.py:463`, per `IMPLEMENTATION_PROGRESS.md` Phase 1.1). Caveat: the ONE store actually read before every LLM call, `LessonStore`, is still in-process/ephemeral — durable memory is a second, DB-backed layer queried in parallel (Phase 1.3), not the sole path.
 - Learn From Success: **YES** — `_extract_and_store_lesson` runs after every graph-agent submission unconditionally (not just failures).
 - Learn From Failure: **YES** — `embed_failure` has real call sites (`app/memory/hooks.py:91`, `chat_agent.py:463`) wired into the universal post-run hook (`record_agent_run_outcome`, Phase 1.1), which fires for all ~55 non-manager-driven agents dispatched via `app/api/specialized_agents.py`, not just manager-driven ones.
-- Detect User Satisfaction: **NO** — grep for "satisfaction"/"sentiment"/"rating"/"thumbs" across `backend/app` found only `reflection_node`'s self-assessment JSON field (`"satisfied": true/false`, `base_graph.py:665`), which is the agent judging its OWN tool output, not detecting the end user's satisfaction with a response. No feedback/rating API endpoint found under `app/api`.
+- Detect User Satisfaction: **PARTIAL, real code-level detection built Stage 4 Tier 3 (2026-08-05)**
+  — previously only `reflection_node`'s self-assessment (the agent judging its OWN tool output, not
+  the end user). New `app/agents/user_sentiment.py::detect_user_frustration()` — a real, bounded
+  pattern/heuristic detector (mirrors this codebase's own `_INJECTION_LOOKING_PATTERNS` precedent;
+  an honest v1, not a claim of real NLP/sentiment-analysis accuracy), computing 3 independent real
+  signals: known frustration phrases, a message that's a near-repeat of a recent prior one (real
+  Jaccard word-overlap against config, not a vague guess), and excessive capitalization. Wired into
+  `ChatAgent.run()` (the real entry point for every new user message) with a real consumer: a
+  `user_sentiment` SSE event pushed via the existing `session.push()` mechanism whenever frustration
+  is detected — not built-but-disconnected. Separate from `roles/chat.md`'s own pre-existing
+  prompt-level frustration guidance (Stage 1.6) — that's the LLM's behavior once it notices; this is
+  the independent, code-level signal the question specifically asked for. Still PARTIAL, not YES: no
+  feedback/rating API endpoint exists (a different, unaddressed part of "detect satisfaction"), and
+  the frustration signal isn't yet consumed by anything beyond the SSE push (e.g. no dashboard
+  surfaces it, no escalation triggers off it) — the detection itself is real, acting on it further is
+  not built. `tests/test_stage4_tier3_user_frustration_detection.py` (10 tests, including 2 through
+  the real `ChatAgent.run()` integration point, not just the standalone detector).
   Plan: add an explicit user-feedback signal (e.g. thumbs up/down on task results) feeding into `embed_learning_signal`, which already exists as a write path.
 - Verification Before Reply: **YES, 71/72** — `_run_quality_gate` (`base_graph.py:853-920`) runs at every `submit_*` call for all agents using `VerificationConfig`, checking verification-flag consistency, schema validity, critique outcome, and confidence threshold before a result is accepted.
 - Honest Error Handling: **YES** — uniform `[ERROR]`/`[POLICY DENIED]` prefixing convention surfaced directly into the model's context rather than swallowed (`execute_tools`, `base_graph.py:1056-1062`); `_validation_warning` surfaced into the submitted result rather than silently discarded when a `submit_*` call doesn't match its schema (`base_graph.py:1094-1106`).
@@ -865,17 +931,22 @@ Ran `cd backend && python -m pytest tests/ --collect-only -q` in the project's `
   builder (`make_chat_handlers`) but their own tool-schema lists never include these tools, so the
   model literally cannot invoke them even though the handler technically exists (verified: Anthropic's
   tool-use API only allows calling tools present in the request's `tools` array).
-- Summarize websites/understand documentation: **REAL DuckDuckGo-backed web search, but reachable by
-  only 2 of ~72 agents.** A genuine, newly-found gap: the dedicated `research.py` agent's tool
-  handler dict DOES wire `web_search`, but its tool-**schema** list (`RESEARCH_TOOLS`, what's
-  actually sent to the model) never includes it — so the one agent whose entire job is web research
-  cannot actually call `web_search`. This directly contradicts a specific line in this project's own
-  `MASTER_AGENT_v2.md` (which cites a now-stale line number for the tool's inclusion) — a real,
-  verified doc/code discrepancy, not assumed. `web_search` IS correctly wired end-to-end for
-  `agent_performance_reviewer`. No dedicated "summarize" tool exists anywhere — any summarization is
-  the LLM's own reasoning over raw truncated fetched text.
-  Plan: add `_WEB_SEARCH_TOOL` to `RESEARCH_TOOLS`'s actual schema list — the handler wiring already
-  exists, this is a one-line fix for a real, currently-broken capability.
+- Summarize websites/understand documentation: **FIXED 2026-08-05 (Stage 4 Tier 3, Q20).** Was: real
+  DuckDuckGo-backed web search, reachable by only 1 of ~72 agents (`agent_performance_reviewer`) —
+  the dedicated `research.py` agent's tool handler dict DID wire `web_search`
+  (`make_research_handlers`, `tools.py:1772`), but its tool-**schema** list (`RESEARCH_TOOLS`, what's
+  actually sent to the model, `tools.py:1729`) never included it, so the one agent whose entire job
+  is web research could not actually call it — confirmed live before fixing, not assumed. Fixed by
+  adding `_WEB_SEARCH_TOOL` to `RESEARCH_TOOLS` and `"web_search"` to
+  `research.py::AGENT_CONTRACT["allowed_tools"]` (which had the same omission, while the same file's
+  `_register()` capability-registry entry already claimed `"web_search"` as a capability — a real
+  contract/reality mismatch, also now consistent). `tests/test_stage4_tier3_research_web_search_wiring.py`
+  (5 tests): schema list now includes it, `AGENT_CONTRACT` now includes it, the live capability
+  registry entry's claimed capability is now backed by a real reachable tool (not just a label), the
+  handler-dict side (already correct) still wires the real function, and a regression guard proving
+  this didn't widen the agent's write/bash surface. No dedicated "summarize" tool exists anywhere;
+  any summarization is still the LLM's own reasoning over raw truncated fetched text — unchanged,
+  out of scope for this fix.
 - Inspect GitHub repositories via API: **REAL**, two independent mechanisms — genuine `httpx` REST
   PR-creation (`git_push_tool.py::create_github_pr`, real Bearer-token auth) and real `gh` CLI
   wrapping for issues/PRs/comments (chat agent only).
@@ -3758,8 +3829,20 @@ in the codebase.
 - Detect outdated packages: **YES** — `backend/app/agents/dependency_agent.py`'s `_VERIFICATION_CFG` (lines 59-69) forces `bash` execution (`"bash": "registry_checked"`) before it can report a version as outdated; the agent's own prompt (lines 84-98) explicitly instructs: "use bash (pip index versions / npm view) to get the LIVE latest version from the registry. Never state 'latest is X' from memory" — this is a real, verification-enforced (not just prompted) anti-hallucination mechanism; `manifest_read` is likewise forced true only when `read_file` actually ran on the manifest (`AGENT_CONTRACT["expected_verification"]`, line 55).
 - Identify breaking changes: **NOT VERIFIED** — the agent's report schema (`submit_dependency_report`) captures `current_version`/`latest_version`/`upgrade_recommended`, but nothing in the reviewed code confirms it specifically diffs semver major-version boundaries or changelogs to flag breaking changes as a distinct signal; this would need the tool schema itself inspected further than this pass covered.
 - Recommend upgrades: **YES** — `dependency_agent.py`'s contract states `upgrade_recommended` is "forced False unless tests_passed after upgrade attempt" (module docstring, line 6, and `_VERIFICATION_CFG.set_by={"run_tests": "tests_passed"}`, line 63) — recommendations are gated on evidence, not just asserted.
-- Identify abandoned libraries: **NO** — no code anywhere in `backend/app` checks package maintenance status, last-publish date, or archived-repo status (grep for `abandoned|unmaintained|last.?publish` across `backend/app` returned only one unrelated false-positive hit in `app/fleet/scratchpad.py`, about an abandoned *epic*, not a library).
-  Plan: extend `dependency_agent`'s bash step to also check `npm view <pkg> time.modified` / PyPI's last-release date and flag packages with no release in N years.
+- Identify abandoned libraries: **YES, built Stage 4 Tier 3 (2026-08-05)** — exactly the fix this
+  line's own "Plan" predicted. New `check_last_release` tool (`app/agents/tools.py`, wired into
+  `dependency_agent`'s real `AGENT_CONTRACT["allowed_tools"]`, not just defined) queries the real
+  PyPI/npm JSON registry APIs for the latest version's actual publish timestamp — both endpoint
+  shapes verified live against real packages before any code was written — and classifies staleness
+  against 2 new config thresholds (`dependency_abandoned_threshold_days`/
+  `dependency_possibly_abandoned_threshold_days`, not hardcoded). This is what `pip index versions`/
+  `npm outdated` (the existing "Detect outdated packages" mechanism above) structurally cannot do:
+  those only compare installed-vs-latest version numbers, never expose *when* "latest" was itself
+  published, so a package whose latest release is 4 years old looked identical to an actively
+  maintained one. `tests/test_stage4_tier3_check_last_release.py` (7 tests): 3 hit real, live
+  registries — including `left-pad`, npm's own famous abandoned package (last published 2018, the
+  subject of the 2016 npm ecosystem incident), confirmed correctly classified `ABANDONED` at 3039
+  real days since last release, not a synthetic date.
 - Detect security vulnerabilities: **YES** — two mechanisms, both now real evidence-gated live checks: (1) CI's `pip-audit -r requirements.txt` (`ci.yml`) actively gates merges. (2) `backend/app/agents/dependency_security_agent.py` — gap-closure Day 7 (2026-07-30) fixed the exact gap this item used to flag (agent claimed "LIVE audit tooling only" in its role prompt but had no tool capable of running one): it now has a scoped `bash` tool (`DEPENDENCY_AUDIT_BASH_TOOL`, `app/agents/tools.py`) allowlisted to `pip-audit`/`pip_audit`/`npm audit` prefixes only (`check_allowlisted_command`, everything else `[POLICY DENIED]`), and `_CFG` (`dependency_security_agent.py`) adds `"bash": "audited"` to `set_by` plus `enforce_in_result={"read": "read", "audited": "audited"}` — `AgentResult.verified` is now graph-enforced `False` whenever the audit tool never actually ran, mirroring `dependency_agent`'s existing `registry_checked` pattern exactly. `roles/dependency_security_agent.md`'s Process/Tools sections updated to match. Proven by `backend/tests/test_dependency_security_agent_audit_gate.py` (8 tests, including a real, non-mocked `pip-audit` subprocess invocation) and `backend/tests/test_analyzer_tier_confirmed.py::test_dependency_security_agent_bash_is_scoped_to_audit_only`.
 
 ---
@@ -3846,6 +3929,25 @@ All test counts and CI/lint results in this document were either read directly f
   Plan (gap-closure Day 4 closed the *dispatch* half — see "Agents never modify the wrong project"
   below; still open): thread the resolved repo's `id` into every `embed_*`/`query_*` call site in
   `app/memory/store.py` so memory itself, not just task dispatch, is scoped on real traffic.
+  **Re-verified exhaustively, Stage 4 (2026-08-04), converting "no real call site passes repo_id
+  yet" from a general statement into a precise, complete accounting**: read every one of the ~20
+  real call sites of the 14 `repo_id`-aware functions (`app/memory/hooks.py::
+  record_agent_run_outcome` and its 3 callers; `app/agents/chat_agent.py`'s read+write hooks;
+  `app/agents/base_graph.py::memory_hook_node`, run on **every single agent run across all ~76
+  agents**; `app/pipeline/graph.py`; `app/api/memory.py`'s search endpoint; `app/api/
+  fleet_dashboard.py`; `app/fleet/versioned_memory.py`; `app/agents/tools.py` (2 sites);
+  `app/agents/architect.py`; `app/agents/manager.py` (2 sites)). **Confirmed: 0 of 20 thread a
+  `repo_id`.** Root cause pinpointed precisely (not previously stated this specifically): no
+  `repo_path -> repo_id` resolver function exists anywhere in this codebase (confirmed by grep,
+  zero hits) — most call sites only ever have `repo_path` (a string) in scope. Where a real
+  `repo_id` *is* already sitting on a row the caller has in hand (`DevTask.repo_id`, confirmed
+  correctly populated at task-creation time by the real `POST /api/tasks` endpoint,
+  `app/api/tasks.py:107`), it's simply never fetched — `record_agent_run_outcome`'s 3 callers and
+  `manager.py`'s 2 sites are the clearest examples of "one query away and still unused." Full
+  finding and a properly-sized fix plan written up in `65days_plan/STAGE4_BACKLOG.md`'s new
+  **Cluster O** (sized comparably to Cluster N — a resolver plus ~20 call sites across ~10 files —
+  deliberately not fixed in this pass, per the standing "avoid bundling unrelated fixes unless
+  critical" instruction; this is a data-isolation correctness gap, not a safety-blocking one).
 - Memories remain isolated: **PARTIAL** (was NO) — same evidence and same caveat as above; Day 4
   did not touch memory-call wiring, only task-dispatch repo resolution (see below).
 - Tools use the correct repository: **PARTIAL** — corrected count from gap-closure Day 4's direct
@@ -4309,6 +4411,16 @@ Plan: same fix as Q5's Project Memory gap — add `repo_id`, migrate, filter eve
 - Per-agent quality score, tracked over time: **PARTIAL** — real: `benchmark_manager.py` computes 7 objectives per agent (`latency_p50`, `tool_accuracy`, `verification_coverage`, `retry_success`, `compile_success`, `hallucination_rate`, `benchmark_score`) from live `MetricsCollector` data, persisted to Postgres (`agent_benchmarks` table) with baseline history for regression comparison (`backend/app/fleet/benchmark_manager.py:1-13`). This is genuine, persisted, trackable quality scoring — but only for **agents' execution quality**, not the other 8 dimensions Q117 names.
 - Architecture / Prompts / Tools / Memory / Documentation / Tests / Performance / Security as a unified, tracked score: **NO** — no holistic scoring exists for these; each has at most an ad hoc, on-demand agent (architecture_reviewer, tech_debt_agent, quality_auditor) with no numeric score persisted/tracked over time for that dimension.
   Plan: extend `agent_benchmarks`-style persistence to the other 8 dimensions, or build a composite "platform quality score" that aggregates all of them.
+- **2026-08-05 (Stage 4 Tier 3 scoping)**: re-verified the "mostly already exists, just needs
+  aggregating" framing directly rather than trusting it, and it's false — `grep` for
+  `security_score`/`vulnerability_count`, `docs_coverage`, and `architecture_score`/
+  `complexity_score` across `app/` found zero matches; `dependency_security_agent` and
+  `tech_debt_agent` both return narrative `AgentResult` output, not a structured number to average.
+  Only the execution-quality category (`benchmark_score`) has real numeric data today. Promoted to
+  **Cluster Q** (`STAGE4_BACKLOG.md`) rather than fixed as a Tier 3 item — a real fix needs the
+  missing per-category scoring functions built first (without fabricating them), then a genuine
+  aggregation layer, which is architecturally comparable to Cluster N/O, not a query over existing
+  data.
 
 ---
 
@@ -4342,6 +4454,18 @@ Plan: same fix as Q5's Project Memory gap — add `repo_id`, migrate, filter eve
 - Project health: **NOT VERIFIED** — no single "project health score" endpoint/page found distinct from the per-agent health report.
 - **Overall**: **NO unified CEO Dashboard exists.** What's real is the single-purpose Fleet Enhancement Dashboard (`apps/web/app/fleet/page.tsx`) showing pending approvals + suggested improvements only. Several of the other panels have real backend data (`/reports/cost`, `/reports/health`, `/reports/repair-patterns`) sitting unconsumed, ready to be wired into a real unified dashboard, but nobody has built that page.
   Plan: build one dashboard page aggregating the existing `/api/fleet/reports/*` endpoints plus tech-debt/test-status/queue data that doesn't yet have an endpoint.
+- **2026-08-05 (Stage 4 Tier 3, Q119) — Active-agent status FIXED, tech-debt/security still
+  blocked.** Wired the real, previously-unconsumed `/api/fleet/reports/health` data into
+  `apps/web/app/fleet/page.tsx` (new "Agent Health" table: active runs, failure rate, avg heartbeat
+  staleness per agent type), closing the "Active agents" and part of the "Performance trends" gaps
+  named above with real data, non-fatal on fetch failure. `apps/web/app/fleet/page.test.tsx` (new
+  file, this page previously had zero test coverage): 2 tests, real table render + failure-doesn't-
+  clobber-error-banner. `tsc --noEmit`/`eslint` clean, full frontend suite 34/34 green. Technical
+  debt and Security warnings were deliberately **not** wired — per Cluster Q's finding (Q117 above),
+  `tech_debt_agent`/`dependency_security_agent` produce narrative findings only, no structured
+  count/score to render; a UI panel with nothing real behind it would be fabrication. Cost report
+  (`/reports/cost`) and repair-patterns (`/reports/repair-patterns`) remain unconsumed — out of
+  scope for this bounded pass, real follow-up candidates alongside Cluster Q.
 
 ---
 

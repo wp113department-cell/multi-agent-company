@@ -632,7 +632,12 @@ class ChatAgent:
             engine = new_isolated_async_engine()
             try:
                 async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                    mem = await query_memory_context(query, db)
+                    # Stage 4 Cluster O Phase 1b (2026-08-05) — repo-scoped
+                    # read, using the repo_id resolved once at session
+                    # creation (app/api/chat.py::create_chat_session).
+                    mem = await query_memory_context(
+                        query, db, repo_id=self.session.repo_id
+                    )
             finally:
                 await engine.dispose()
             return format_full_memory_context(
@@ -660,6 +665,8 @@ class ChatAgent:
             engine = new_isolated_async_engine()
             try:
                 async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                    # Stage 4 Cluster O Phase 1b (2026-08-05) — repo-scoped
+                    # write; see the matching read-side comment above.
                     await embed_task_outcome(
                         task_id=self.session.session_id,
                         description=description,
@@ -667,6 +674,7 @@ class ChatAgent:
                         outcome="blocked" if error else "completed",
                         files_changed=[],
                         db=db,
+                        repo_id=self.session.repo_id,
                     )
                     if error:
                         await embed_failure(
@@ -674,6 +682,7 @@ class ChatAgent:
                             error_description=error,
                             root_cause=error,
                             db=db,
+                            repo_id=self.session.repo_id,
                         )
             finally:
                 await engine.dispose()
@@ -2871,6 +2880,34 @@ class ChatAgent:
         _finalize_node is only reached when the graph actually completes.
         resume() continues a paused turn later.
         """
+        # Stage 4 Tier 3 (2026-08-05, answer2.md Q7: "Detect User
+        # Satisfaction: NO — no sentiment/satisfaction-detection code found
+        # anywhere in the agent graph") — real, bounded, code-level signal,
+        # separate from roles/chat.md's own prompt-level frustration
+        # guidance. Computed before the new message is appended to history,
+        # so "recent prior messages" genuinely excludes the current one.
+        try:
+            from app.agents.user_sentiment import detect_user_frustration
+
+            prior_user_messages = [
+                str(m.get("content", ""))
+                for m in self.session.history
+                if m.get("role") == "user"
+            ]
+            signal = detect_user_frustration(user_message, prior_user_messages)
+            if signal.frustrated:
+                await self.session.push(
+                    {
+                        "type": "user_sentiment",
+                        "frustrated": True,
+                        "signals": signal.signals,
+                    }
+                )
+        except Exception:
+            logger.debug(
+                "user frustration detection skipped (non-fatal)", exc_info=True
+            )
+
         self.session.history.append({"role": "user", "content": user_message})
         memory_block = await self._memory_read_context(user_message)
         system_prompt = (

@@ -126,6 +126,19 @@ def compute_actual_cost_usd(tokens_in: int, tokens_out: int, settings: Any) -> f
     estimate_epic_cost() uses, so the pre-run estimate and the post-run
     actual are computed consistently. A pure function (no DB/async) so it's
     directly unit-testable without mocking the rest of the epic pipeline.
+
+    Stage 4 Cluster P (2026-08-05, STAGE4_BACKLOG.md): settings.
+    cost_per_input_token/cost_per_output_token are the Sonnet-tier rate
+    (app/config.py). This is correct for every real caller of
+    run_manager() today: epic_tokens_in/epic_tokens_out (the tokens this
+    function is always called with — see _finalize_node below) are
+    accumulated from exactly 4 agents — backend_dev, frontend_dev, qa,
+    reviewer — and all 4 are sonnet-tier per agent_models.json (verified
+    2026-08-05, not assumed). If a future change ever dispatches a
+    non-sonnet-tier agent into that accumulation (e.g. an opus-tier
+    reviewer), this function must switch to per-tier accumulation via
+    app.pipeline.cost_controller.cost_rates_for_tier() instead of a single
+    flat rate — the exact bug this fix closed.
     """
     cost: float = tokens_in * settings.cost_per_input_token + tokens_out * (
         settings.cost_per_output_token
@@ -782,6 +795,17 @@ class EpicManagerState(TypedDict, total=False):
     repo: str
     stage: str  # "pending_cost_approval" | "halted_conflict" | "" (routing signal)
     task_id: int
+    # Stage 4 Cluster O Phase 1b (2026-08-05) — resolved in _planning_node
+    # from the epic's own internally-created DevTask.repo_id (INV-1 —
+    # DevTask.repo_id remains the single source of truth even here). Known,
+    # honestly-named limitation: CreateEpicRequest/Epic have no repo_id
+    # field anywhere in the real /api/epics creation path today, so this
+    # resolves to None for every real epic in production right now — not
+    # an unresolved technical gap, but the honest current state (see
+    # CLUSTER_O_DESIGN.md Phase 1b notes). The wiring is still correct and
+    # forward-compatible: once epics gain a real repo assignment mechanism,
+    # this starts scoping automatically with no further code change here.
+    repo_id: int | None
     plan_text: str
     subtasks: list[dict[str, Any]]
     architect_plan: dict[str, Any]
@@ -1055,6 +1079,9 @@ async def _planning_node(state: EpicManagerState) -> dict[str, Any]:
 
     return {
         "task_id": task_id,
+        # Stage 4 Cluster O Phase 1b (2026-08-05) — task was just created
+        # above, so task.repo_id is directly available, no extra lookup.
+        "repo_id": task.repo_id,
         "plan_text": plan_text,
         "subtasks": subtasks,
         "architect_plan": architect_plan,
@@ -1259,6 +1286,7 @@ async def _finalize_node(state: EpicManagerState) -> dict[str, Any]:
             files_changed=list(set(all_files)),
             db=db,
             epic_id=epic_id,
+            repo_id=state.get("repo_id"),
         )
         # Phase 1.7 (MASTER_AGENT_v2.md) — the epic reached a terminal state;
         # its scratchpad is no longer live working state for anyone.
@@ -1306,6 +1334,7 @@ async def _finalize_node(state: EpicManagerState) -> dict[str, Any]:
         files_changed=list(set(all_files)),
         db=db,
         epic_id=epic_id,
+        repo_id=state.get("repo_id"),
     )
     # Phase 1.7 (MASTER_AGENT_v2.md) — same terminal-state cleanup as the
     # halted path above; ready_for_review is also terminal for this epic's

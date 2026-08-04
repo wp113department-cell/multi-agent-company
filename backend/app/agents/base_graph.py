@@ -199,6 +199,13 @@ class AgentRunState(_AgentRunStateBase, total=False):
     tool_results_buffer: list[dict[str, Any]]
     batch_requires_human_approval: bool
 
+    # Stage 4 Cluster O (2026-08-05) — resolved once at run_agent_graph()
+    # entry from task_id (never the mutable _active_repo_path global, see
+    # CLUSTER_O_DESIGN.md INV-1), then read-only for the rest of the run
+    # (INV-6). None means unscoped/global — a legitimate, permanent value
+    # for synthetic task_ids or tasks with no assigned repo, not an error.
+    repo_id: int | None
+
 
 # ---------------------------------------------------------------------------
 # Verification configuration (per agent)
@@ -779,7 +786,13 @@ def _make_memory_hook_node(
             )
 
             _t0 = time.monotonic()
-            mem = query_memory_context_sync(query, top_k=3)
+            # Stage 4 Cluster O (2026-08-05) — repo-scoped read: task/failure/
+            # architecture/procedure memory. state["repo_id"] was resolved
+            # once at run_agent_graph() entry (INV-6); None means unscoped/
+            # global, the correct default when a task has no assigned repo.
+            mem = query_memory_context_sync(
+                query, top_k=3, repo_id=state.get("repo_id")
+            )
             record_phase_timing(
                 state.get("trace_id", ""),
                 "memory_retrieval",
@@ -1336,6 +1349,84 @@ def _flag_suspicious_tool_output(tool_name: str, content: str) -> str:
     return content
 
 
+# Stage 4 Tier 3 (2026-08-05, answer2.md Q4) — real automatic retry at the
+# individual-tool-call level. Before this, `app/fleet/tool_manifest.py`'s
+# `retry_policy` field (declared on all 193 tools — 3 "backoff", 16 "once",
+# the rest "none") was pure metadata with zero real readers anywhere
+# (grepped, confirmed) — the same "built but never wired" pattern this
+# project's own history keeps finding (Cluster N, Cluster O). Retry
+# previously only existed one level up, at the whole agent-run level
+# (`failure_ladder.py`), never per tool call.
+#
+# Deliberately NOT a blind "retry_policy != 'none' -> retry" implementation
+# — checked what's actually tagged "once"/"backoff" before writing this and
+# excluded two real hazard classes by *permission*, not a hand-maintained
+# tool-name list (so it stays correct if the manifest grows):
+#   - `write_remote` (create_pr, github_create_pr, github_comment,
+#     github_create_issue, linear_create_issue, slack_send_message): a
+#     network call that appears to fail (timeout, dropped connection after
+#     the request was already sent) may have already succeeded remotely —
+#     blindly retrying risks a real, visible duplicate side effect (a
+#     second PR, a second Slack message), strictly worse than the original
+#     failure.
+#   - `execute` / `write_repo` (run_tests, run_single_test, pip_install,
+#     npm_install, deps_outdated, git_pull): these return "[ERROR]" for
+#     genuinely *deterministic* failures far more often than transient ones
+#     (a real failing test, a real dependency conflict) — automatically
+#     re-running an entire test suite or package install on every failure
+#     would double real wall-clock cost for one of the most routine, common
+#     outcomes in a coding agent's own loop, for a retry that mathematically
+#     cannot change the tests' own result.
+# What remains eligible after both exclusions: exactly the tools whose only
+# permission is a plain network read (`git_fetch`, `http_request`,
+# `fetch_url`, `web_search`, `check_url_status`, `health_check`,
+# `github_list_prs`) — the class retry-with-backoff logic is classically
+# built for in the first place.
+_RETRY_MAX_ATTEMPTS: dict[str, int] = {"none": 1, "once": 2, "backoff": 3}
+_RETRY_EXCLUDED_PERMISSIONS = {"write_remote", "execute", "write_repo"}
+
+
+def _run_tool_with_retry(
+    handler: Callable[[dict[str, Any]], Any], tu_name: str, tu_input: dict[str, Any]
+) -> str:
+    """Runs handler(tu_input), retrying per tool_manifest.py's real
+    retry_policy for this tool name — except tools carrying a hazardous
+    permission (write_remote/execute/write_repo, see module comment above),
+    which are never automatically retried regardless of their declared
+    policy. Returns the final result string (still [ERROR]/[POLICY]-
+    prefixed on exhausted failure, exactly like a non-retried call would)."""
+    from app.fleet.tool_manifest import TOOL_MANIFEST
+
+    entry = TOOL_MANIFEST.get(tu_name)
+    policy = entry.retry_policy if entry else "none"
+    if entry and _RETRY_EXCLUDED_PERMISSIONS.intersection(entry.permissions):
+        policy = "none"
+    max_attempts = _RETRY_MAX_ATTEMPTS.get(policy, 1)
+
+    result_content = ""
+    for attempt in range(max_attempts):
+        try:
+            result_content = str(handler(tu_input))
+        except Exception as exc:
+            result_content = f"[ERROR] {tu_name} raised: {exc}"
+            logger.exception("Tool %s raised", tu_name)
+        ok = not result_content.startswith("[ERROR]") and not result_content.startswith(
+            "[POLICY"
+        )
+        if ok or attempt == max_attempts - 1:
+            break
+        if policy == "backoff":
+            time.sleep(min(0.5 * (2**attempt), 4.0))
+        logger.info(
+            "Tool %s failed (attempt %d/%d, retry_policy=%r) — retrying",
+            tu_name,
+            attempt + 1,
+            max_attempts,
+            policy,
+        )
+    return result_content
+
+
 def _make_execute_tools_node(
     tool_handlers: dict[str, Any],
     verification_cfg: VerificationConfig,
@@ -1502,24 +1593,20 @@ def _make_execute_tools_node(
                 result_content = f"[ERROR] Unknown tool: {tu_name}"
             else:
                 _t0 = time.monotonic()
-                try:
-                    result_content = str(handler(tu_input))
-                    if not result_content.startswith(
-                        "[ERROR]"
-                    ) and not result_content.startswith("[POLICY"):
-                        # Phase 6.3 — flag first (checks the real handler
-                        # output), then wrap: the delimiter must enclose
-                        # the warning too, so both stay inside the
-                        # "this is data" boundary.
-                        result_content = _flag_suspicious_tool_output(
-                            tu_name, result_content
-                        )
-                        result_content = _wrap_untrusted_tool_content(
-                            tu_name, result_content
-                        )
-                except Exception as exc:
-                    result_content = f"[ERROR] {tu_name} raised: {exc}"
-                    logger.exception("Tool %s raised", tu_name)
+                result_content = _run_tool_with_retry(handler, tu_name, tu_input)
+                if not result_content.startswith(
+                    "[ERROR]"
+                ) and not result_content.startswith("[POLICY"):
+                    # Phase 6.3 — flag first (checks the real handler
+                    # output), then wrap: the delimiter must enclose
+                    # the warning too, so both stay inside the
+                    # "this is data" boundary.
+                    result_content = _flag_suspicious_tool_output(
+                        tu_name, result_content
+                    )
+                    result_content = _wrap_untrusted_tool_content(
+                        tu_name, result_content
+                    )
                 _duration_ms = (time.monotonic() - _t0) * 1000
                 _ok = not result_content.startswith(
                     "[ERROR]"
@@ -1875,6 +1962,10 @@ def _maybe_store_procedure(
                         resolution=resolution,
                         agent_name=role_name,
                         db=session,
+                        # Stage 4 Cluster O (2026-08-05) — repo-scoped write;
+                        # see the matching read-side comment in
+                        # memory_hook_node above.
+                        repo_id=final_state.get("repo_id"),
                     )
             finally:
                 await engine.dispose()
@@ -2281,6 +2372,28 @@ def run_agent_graph(
         except Exception:
             _agent_run_id = None
 
+    # Stage 4 Cluster O (2026-08-05) — resolve repo_id once, the single
+    # source of truth for every repo-scoped memory read/write this run does
+    # (memory_hook_node, _maybe_store_procedure — both read state["repo_id"]
+    # rather than taking a new param, per CLUSTER_O_DESIGN.md §2 Q3's
+    # "reuse the chokepoint" approach). Independent of enable_run_tracking —
+    # memory scoping and AgentRun tracking are unrelated concerns. Cached
+    # (task_id -> repo_id never changes post-creation, INV-7), so repeated
+    # runs against the same task_id (e.g. multiple subtask agents under one
+    # epic) cost one DB round-trip total, not one per run.
+    _repo_id: int | None = None
+    if task_id:
+        try:
+            from app.db.repository import get_task_repo_id_sync
+
+            _repo_id = get_task_repo_id_sync(int(task_id))
+        except (ValueError, TypeError):
+            # Same synthetic-task_id case as _agent_run_id above — not an
+            # error, this run's memory is correctly unscoped/global (INV-8).
+            _repo_id = None
+        except Exception:
+            _repo_id = None
+
     # Lifecycle: agent transitions to RUNNING + emits TaskStarted (Gap 7 / Gap 10)
     try:
         from app.fleet.agent_registry import get_agent_registry
@@ -2428,6 +2541,8 @@ def run_agent_graph(
             "pending_tool_uses": [],
             "tool_results_buffer": [],
             "batch_requires_human_approval": False,
+            # Stage 4 Cluster O (2026-08-05)
+            "repo_id": _repo_id,
         }
 
         # Day 21 — tid is this run's stable identity end to end (already used
@@ -2467,6 +2582,16 @@ def run_agent_graph(
                 bool_values = [v for v in verification.values() if isinstance(v, bool)]
                 if bool_values:
                     _metrics.verification_pct = sum(bool_values) / len(bool_values)
+                # Stage 4 Tier 3 (2026-08-05, answer2.md Q43) — a real,
+                # bounded independent check of the model's own self-reported
+                # confidence against this same run's other real signals.
+                from app.fleet.metrics import check_confidence_calibration
+
+                _metrics.confidence_miscalibrated = check_confidence_calibration(
+                    _metrics.confidence,
+                    _metrics.verification_pct,
+                    _metrics.reflection_unsatisfied,
+                )
             except Exception:
                 pass
 

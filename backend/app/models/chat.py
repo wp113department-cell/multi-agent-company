@@ -32,6 +32,13 @@ class ChatSession:
 
     session_id: str
     repo_path: str
+    # Stage 4 Cluster O Phase 1b (2026-08-05) — resolved once at session
+    # creation (app/api/chat.py::create_chat_session) via
+    # app.db.repository.resolve_repo_id_from_path, the one documented
+    # exception to "never reverse-resolve from a path" (see that function's
+    # own docstring). None means unscoped/global (INV-8) — correct when no
+    # matching ready Repo row exists.
+    repo_id: int | None = None
     history: list[dict[str, Any]] = field(default_factory=list)
     _queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
     active: bool = False
@@ -43,9 +50,9 @@ class ChatSession:
 _sessions: dict[str, ChatSession] = {}
 
 
-def create_session(repo_path: str) -> ChatSession:
+def create_session(repo_path: str, repo_id: int | None = None) -> ChatSession:
     sid = str(uuid.uuid4())
-    session = ChatSession(session_id=sid, repo_path=repo_path)
+    session = ChatSession(session_id=sid, repo_path=repo_path, repo_id=repo_id)
     _sessions[sid] = session
     return session
 
@@ -117,7 +124,21 @@ async def get_or_restore_session(
     """Return an in-memory session, restoring history from DB if the session was lost."""
     session = get_session(session_id)
     if session is None:
-        session = ChatSession(session_id=session_id, repo_path=repo_path)
+        # Stage 4 Cluster O Phase 1b (2026-08-05) — same resolution as
+        # create_session's own real call site (app/api/chat.py), kept
+        # consistent here so a second ChatSession-construction path
+        # doesn't silently diverge and end up unscoped by omission.
+        repo_id: int | None = None
+        if db is not None:
+            try:
+                from app.db.repository import resolve_repo_id_from_path
+
+                repo_id = await resolve_repo_id_from_path(db, repo_path)
+            except Exception:
+                repo_id = None
+        session = ChatSession(
+            session_id=session_id, repo_path=repo_path, repo_id=repo_id
+        )
         _sessions[session_id] = session
 
     if not session.history and db is not None:

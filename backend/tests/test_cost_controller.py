@@ -19,20 +19,28 @@ def test_estimate_zero_subtasks() -> None:
 
 
 def test_estimate_small_does_not_require_approval() -> None:
-    # Default threshold=1.0, 5 subtasks with default coefficients → $0.04 < $1.0
+    # Default threshold=1.0, 5 subtasks with default (Sonnet-tier) coefficients
+    # → $0.15 < $1.0
     result = estimate_epic_cost_sync(subtask_count=5)
     assert result.estimated_cost_usd < 1.0
     assert result.requires_approval is False
 
 
 def test_estimate_large_requires_approval() -> None:
-    # 500 subtasks → ~$4 → over $1 threshold
+    # 500 subtasks → ~$15 (Sonnet-tier rate) → over $1 threshold
     result = estimate_epic_cost_sync(subtask_count=500)
     assert result.estimated_cost_usd > 1.0
     assert result.requires_approval is True
 
 
 def test_estimate_with_historical_averages() -> None:
+    """Stage 4 Cluster P (2026-08-05): reads the real config rates instead
+    of a hardcoded literal — the hardcoded literal in this test previously
+    happened to match the (wrong, Haiku) default and would have silently
+    kept passing even after the real per-tier fix if left un-updated."""
+    from app.config import get_settings
+
+    settings = get_settings()
     result = estimate_epic_cost_sync(
         subtask_count=3,
         avg_tokens_in=10_000,
@@ -40,7 +48,10 @@ def test_estimate_with_historical_averages() -> None:
     )
     expected_in = 10_000 * 3
     expected_out = 3_000 * 3
-    expected_cost = expected_in * 0.0000008 + expected_out * 0.000004
+    expected_cost = (
+        expected_in * settings.cost_per_input_token
+        + expected_out * settings.cost_per_output_token
+    )
     assert abs(result.estimated_cost_usd - round(expected_cost, 6)) < 1e-9
     assert result.historical_avg_tokens_in == 10_000
 

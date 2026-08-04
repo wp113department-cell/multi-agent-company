@@ -92,10 +92,24 @@ async def _event_stream(session: ChatSession) -> AsyncGenerator[str, None]:
 
 @router.post("/sessions", response_model=CreateSessionResponse)
 async def create_chat_session(
-    body: CreateSessionRequest, _actor: str = Depends(require_authenticated)
+    body: CreateSessionRequest,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> CreateSessionResponse:
     """Create a new chat session for a repository."""
-    session = create_session(repo_path=body.repo_path)
+    # Stage 4 Cluster O Phase 1b (2026-08-05) — resolved once here, at
+    # session creation, per CLUSTER_O_DESIGN.md §2 Q2 ("resolved once at
+    # the boundary, carried for the unit of work's lifetime"). Non-fatal:
+    # a resolution failure must never block chat session creation.
+    from app.db.repository import resolve_repo_id_from_path
+
+    try:
+        repo_id = await resolve_repo_id_from_path(db, body.repo_path)
+    except Exception:
+        logger.debug("chat session repo_id resolution skipped", exc_info=True)
+        repo_id = None
+
+    session = create_session(repo_path=body.repo_path, repo_id=repo_id)
     return CreateSessionResponse(session_id=session.session_id)
 
 
