@@ -38,13 +38,11 @@ from app.db.models import ArchitectureScore, DevTask, Repo
 from app.db.repository import create_task
 from app.db.session import new_isolated_async_engine
 from app.fleet.architecture_score import (
-    ArchitectureScoreResult,
     compute_architecture_score,
     get_architecture_score_trend,
     get_latest_architecture_score,
     store_architecture_score,
 )
-
 
 # ---------------------------------------------------------------------------
 # compute_architecture_score() — pure function, no DB
@@ -103,7 +101,11 @@ def test_unrecognized_severity_never_counted_or_weighted() -> None:
     )
     risks = [
         {"severity": "critical", "description": "x", "evidence": []},
-        {"severity": "catastrophic", "description": "not a real enum value", "evidence": []},
+        {
+            "severity": "catastrophic",
+            "description": "not a real enum value",
+            "evidence": [],
+        },
         {"description": "missing severity entirely", "evidence": []},
     ]
     result = compute_architecture_score(risks, settings=settings)
@@ -123,9 +125,10 @@ def test_compute_reads_only_severity_never_narrative_text() -> None:
             "evidence": ["fake:1", "fake:2", "fake:3"],
         }
     ]
-    assert compute_architecture_score(base).architecture_score == compute_architecture_score(
-        verbose
-    ).architecture_score
+    assert (
+        compute_architecture_score(base).architecture_score
+        == compute_architecture_score(verbose).architecture_score
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +181,9 @@ def _cleanup_sync(task_ids: list[int], repo_ids: list[int]) -> None:
                     )
                 )
                 if task_ids:
-                    await session.execute(delete(DevTask).where(DevTask.id.in_(task_ids)))
+                    await session.execute(
+                        delete(DevTask).where(DevTask.id.in_(task_ids))
+                    )
                 if repo_ids:
                     await session.execute(delete(Repo).where(Repo.id.in_(repo_ids)))
                 await session.commit()
@@ -236,7 +241,9 @@ def test_trend_returns_newest_first_real_postgres() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _fake_final_state(risks: list[dict[str, object]], verified: bool) -> dict[str, object]:
+def _fake_final_state(
+    risks: list[dict[str, object]], verified: bool
+) -> dict[str, object]:
     return {
         "result": {
             "structure_summary": "reviewed",
@@ -277,9 +284,7 @@ def test_run_arch_review_end_to_end_persists_real_score_and_is_readable() -> Non
                 "app.agents.architecture_reviewer.run_agent_graph",
                 return_value=_fake_final_state(risks, verified=True),
             ),
-            patch(
-                "app.db.repository.get_task_repo_id_sync", return_value=repo_id
-            ),
+            patch("app.db.repository.get_task_repo_id_sync", return_value=repo_id),
         ):
             result = run_arch_review(task_id=task_id, focus="test")
 
@@ -314,15 +319,13 @@ def test_run_arch_review_unverified_run_persists_no_score() -> None:
                 "app.agents.architecture_reviewer.run_agent_graph",
                 return_value=_fake_final_state(risks, verified=False),
             ),
-            patch(
-                "app.db.repository.get_task_repo_id_sync", return_value=repo_id
-            ),
+            patch("app.db.repository.get_task_repo_id_sync", return_value=repo_id),
         ):
             result = run_arch_review(task_id=task_id, focus="test")
 
         assert result.verified is False
-        assert get_latest_architecture_score(repo_id) is None, (
-            "an unverified run must never persist an architecture_score row"
-        )
+        assert (
+            get_latest_architecture_score(repo_id) is None
+        ), "an unverified run must never persist an architecture_score row"
     finally:
         _cleanup_sync([task_id], [repo_id])

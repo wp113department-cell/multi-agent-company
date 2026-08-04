@@ -33,7 +33,7 @@ PyJWT==2.13.0
 bcrypt==5.0.0
 openai==1.109.1
 python-multipart==0.0.32
-cryptography==49.0.0
+cryptography==50.0.0
 networkx==3.6.1
 scipy==1.17.1
 jsonschema==4.26.0

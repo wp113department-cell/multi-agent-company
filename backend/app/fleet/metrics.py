@@ -197,7 +197,9 @@ class RunMetrics:
             s = get_settings()
             tier = get_model_router().route(self.agent_name).tier
             rate_in, rate_out = cost_rates_for_tier(tier, s)
-            self.cost_estimate_usd = self.tokens_in * rate_in + self.tokens_out * rate_out
+            self.cost_estimate_usd = (
+                self.tokens_in * rate_in + self.tokens_out * rate_out
+            )
         except Exception:
             pass
 

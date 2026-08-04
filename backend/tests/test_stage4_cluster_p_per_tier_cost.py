@@ -89,7 +89,9 @@ def test_run_metrics_recompute_cost_uses_opus_rate_for_architect() -> None:
     m = RunMetrics(trace_id="t-cluster-p-1", agent_name="architect")
     m.record_tokens(100_000, 20_000)
 
-    expected = 100_000 * s.cost_per_input_token_opus + 20_000 * s.cost_per_output_token_opus
+    expected = (
+        100_000 * s.cost_per_input_token_opus + 20_000 * s.cost_per_output_token_opus
+    )
     assert m.cost_estimate_usd == expected
     # The old bug: applying the flat (pre-fix) Haiku rate would have been
     # cheaper than the real opus cost — prove the fix actually changed the
