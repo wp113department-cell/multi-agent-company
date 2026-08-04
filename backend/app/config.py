@@ -488,6 +488,23 @@ class Settings(BaseSettings):
             "'failed' as orphaned. Set to 0 to disable the sweep."
         ),
     )
+    # Stage 4 Cluster N (2026-08-04) — the heartbeat that feeds the sweep above
+    # was a documented no-op in run_planner()/run_coder() and entirely absent
+    # from run_manager()'s own pipeline, so last_heartbeat_at never left NULL
+    # and the sweep above never matched a real row. Fixed by having
+    # run_agent_graph() itself (the shared chokepoint ~76 agents already go
+    # through) own a real AgentRun row's heartbeat, throttled by this
+    # interval — far below agent_run_orphan_threshold_seconds's default so
+    # detection stays responsive, but not so frequent it churns a fresh
+    # throwaway DB connection on every single tool call.
+    agent_run_heartbeat_min_interval_seconds: float = Field(
+        default=30.0,
+        description=(
+            "Minimum real time between heartbeat DB writes for one agent "
+            "run, even if many tool calls happen faster than this. Should "
+            "stay well below agent_run_orphan_threshold_seconds."
+        ),
+    )
 
     # Day 5A — Fleet Platform enhancements
     agent_models_path: str = Field(

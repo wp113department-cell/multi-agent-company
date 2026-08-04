@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -20,6 +21,8 @@ from app.db.models import (
     TaskLog,
     can_transition,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class TransitionError(ValueError):
@@ -302,6 +305,122 @@ async def finish_agent_run(
         )
     )
     await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Sync bridges — Stage 4 Cluster N (2026-08-04)
+#
+# run_agent_graph() (app/agents/base_graph.py, the shared chokepoint ~76
+# agents go through) is a plain sync function, frequently invoked via
+# asyncio.to_thread() from an async caller — it cannot await the three async
+# functions above directly. Mirrors app/memory/store.py::
+# query_memory_context_sync's own established bridge pattern exactly:
+# new_isolated_async_engine() + asyncio.run(), never the shared engine
+# singleton (see that function's own docstring for why — asyncpg connections
+# are bound to the event loop they were created on, and asyncio.run() tears
+# its loop down after every call).
+#
+# Each is deliberately non-fatal, returning None / logging a warning on any
+# failure rather than raising into the graph — this is what makes it safe to
+# call unconditionally from run_agent_graph() regardless of DB availability:
+# a run whose AgentRun row couldn't be created/heartbeated/finished still
+# does its real work; it only loses orphan-recovery coverage for itself,
+# exactly the same non-fatal contract query_memory_context_sync already
+# established for memory_hook_node.
+# ---------------------------------------------------------------------------
+
+
+def create_agent_run_sync(task_id: int, agent_type: str, model_id: str) -> str | None:
+    """Sync bridge for create_agent_run(). Returns the new run's id, or None
+    on any failure (task_id not castable, no matching dev_tasks row causing
+    an FK violation, DB unavailable, etc.) — callers must treat None as
+    "this run has no AgentRun tracking," not as an error to propagate."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> str:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                run = await create_agent_run(session, task_id, agent_type, model_id)
+                return run.id
+        finally:
+            await engine.dispose()
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        logger.warning(
+            "create_agent_run_sync failed for task_id=%r agent_type=%r: %s",
+            task_id,
+            agent_type,
+            exc,
+        )
+        return None
+
+
+def heartbeat_agent_run_sync(run_id: str) -> None:
+    """Sync bridge for heartbeat_agent_run(). A missed heartbeat write just
+    degrades to the orphan sweep's own threshold-based tolerance — never
+    blocks or slows the real agent work it's reporting on."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> None:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                await heartbeat_agent_run(session, run_id)
+        finally:
+            await engine.dispose()
+
+    try:
+        asyncio.run(_run())
+    except Exception as exc:
+        logger.warning("heartbeat_agent_run_sync failed for run_id=%r: %s", run_id, exc)
+
+
+def finish_agent_run_sync(
+    run_id: str,
+    status: str,
+    tokens_in: int | None = None,
+    tokens_out: int | None = None,
+    cost_estimate: float | None = None,
+    error: str | None = None,
+) -> None:
+    """Sync bridge for finish_agent_run()."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> None:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                await finish_agent_run(
+                    session,
+                    run_id,
+                    status,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    cost_estimate=cost_estimate,
+                    error=error,
+                )
+        finally:
+            await engine.dispose()
+
+    try:
+        asyncio.run(_run())
+    except Exception as exc:
+        logger.warning("finish_agent_run_sync failed for run_id=%r: %s", run_id, exc)
 
 
 async def save_subtasks(

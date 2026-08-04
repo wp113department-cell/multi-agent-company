@@ -51,6 +51,95 @@ lifecycle — natural to sequence together.
 
 ---
 
+## Cluster N — Orphan recovery is dead in production (PRODUCTION VERIFIED 2026-08-04, same day it was found)
+
+**Fixed and production-verified**, per the owner's explicit request for real end-to-end validation
+beyond unit/integration tests before trusting this ("This was the right architectural approach
+instead of a quick patch... I want one final production-level validation"). See
+`65days_plan/answers.md`'s Q38 "Docker crashes"/"Python crashes" entries for the full fix writeup,
+and the "Production Verification" subsection there for the live-validation evidence: a real subprocess
+was launched, its real periodic heartbeats observed (twice, each exactly 30.000s apart), SIGKILLed
+abruptly, and the real `reconcile_orphaned_runs()` sweep correctly reconciled it — with zero
+duplicate execution and zero regressions. A 30-agent concurrent-heartbeat stress test found zero
+exceptions, zero connection leaks, and peak Postgres connections well under the configured limit.
+
+**This validation pass itself found and fixed a second, separate, pre-existing bug** — real
+production validation doing exactly what it's for: `reconcile_orphaned_runs()`'s cutoff computation
+used a timezone-naive datetime that a non-UTC system timezone (this environment: Asia/Kolkata,
+UTC+5:30) causes the DB driver to silently misinterpret, making the sweep's cutoff land ~5.5 hours
+earlier than intended — invisible in every pre-existing test because the test fixture's own stale-
+timestamp write had the identical bug, so the error canceled out on both sides by coincidence. Only
+a REAL heartbeat write (this session's own fix, previously nothing ever wrote one) exposed it. Fixed
+by keeping timestamps timezone-aware end to end. See `answers.md` for full detail and
+`tests/test_orphan_recovery.py::test_a_real_heartbeat_write_is_correctly_recognized_as_stale` for
+the regression guard (confirmed to fail without the fix, pass with it).
+
+**A related, lower-severity instance of the same bug class was found in a different subsystem**
+(`app/services/retention.py`'s day-scale log/memory retention cutoffs) but was NOT fixed — out of
+today's scope (Cluster N is about orphan recovery, not retention) and much lower real-world impact
+(a multi-day retention window landing ~5.5 hours "late" is a minor scheduling imprecision, not a
+correctness failure the way a 900-second orphan-detection threshold effectively never firing was).
+Flagged here for a future day, not silently dropped.
+
+This section is kept below as the original finding record, not an open item.
+
+Not in the original backlog — found while starting Tier 3's "verification-only" items (checking
+whether `on_heartbeat()` is wired into the main execution path, per the old Q102 note that this was
+"likely a 1-line fix if actually missing"). It was not a 1-line fix; it's a real, previously
+undetected production gap in a mechanism that has been repeatedly cited as "YES, real" throughout
+this project's entire audit history (`answers.md` Stage 1.3 Day 22, re-confirmed at the Day 57
+checkpoint, re-confirmed in this session's own Days 64-65 spot-checks — all wrong to the same
+degree, none of them checked whether the heartbeat was actually firing, only that the sweep function
+existed and its own SQL logic was correct in isolation).
+
+**What's actually true, verified via direct code reading + this suite's own existing test**
+(`test_orphan_recovery.py::test_never_heartbeated_run_is_left_alone_real_db`, whose docstring
+already documented the NULL-exclusion behavior without anyone connecting it to this):
+- `AgentRun.last_heartbeat_at` is only ever set by `heartbeat_agent_run()`
+  (`app/db/repository.py:274`), only ever called from a closure in `app/api/agents.py`, only ever
+  passed as the `on_heartbeat` argument to `run_planner()`/`run_coder()` — and **both functions
+  treat it as a documented no-op** ("kept for backward compat — no-op, run_span handles telemetry").
+  `run_span()` is a separate, in-process-only `MetricsCollector`, not the durable DB row
+  `reconcile_orphaned_runs()` actually queries.
+- `last_heartbeat_at` therefore stays NULL for the entire lifetime of every real run created via
+  those 2 dispatch paths. `WHERE last_heartbeat_at < :cutoff` never matches a NULL row (standard SQL
+  semantics) — the sweep can never reconcile anything.
+- **Worse**: `app/agents/manager.py::run_manager()` — the epic-manager dev→QA→review loop, the
+  *primary* way real coding tasks execute — never calls `create_agent_run()` at all (zero hits,
+  grepped). It has no `AgentRun` row and no orphan-recovery coverage whatsoever, not even the broken
+  kind. `AgentRun`/orphan-recovery only ever applied to 2 narrow "simple mode" dispatch paths
+  (direct planner-only, direct single-coder-only), and even there, it's dead.
+- **Likely why the no-op exists, not just an oversight**: the real `heartbeat()` closure calls
+  `_spawn_tracked()` → `asyncio.create_task(coro)`, which requires a running event loop in the
+  *calling thread*. `run_agent_graph()` runs synchronously, frequently inside an `asyncio.to_thread()`
+  worker thread — invoking that closure for real from inside its tool-call loop would likely raise
+  `RuntimeError: no running event loop`. Leaving it a no-op was probably a deliberate dodge of a real
+  cross-thread scheduling hazard someone ran into, not carelessness — which is exactly why this needs
+  a properly-designed fix, not a rushed patch to a foundational, heavily-used function.
+
+**What a real fix requires** (do not rush this into a "cheap items" batch):
+1. A thread-safe way to trigger an async DB heartbeat write from `run_agent_graph()`'s synchronous
+   tool-call loop, regardless of which thread is running it (e.g. `asyncio.run_coroutine_threadsafe`
+   against a captured loop reference, or a thread-safe queue the main event loop drains) — solving
+   the actual hazard that likely caused the no-op in the first place, not just calling the closure
+   and hoping.
+2. Wire a real periodic call (mirroring `base.py`'s existing "every 5 tool calls" pattern) into
+   `run_agent_graph()`'s own loop, since that's the shared, universal path ~76+ agents already go
+   through — not a per-agent patch.
+3. Extend real `AgentRun` row creation (`create_agent_run()`) to `run_manager()`'s own dispatch path,
+   so the primary work pipeline gets orphan-recovery coverage at all, not just the 2 narrow
+   "simple mode" paths that currently have (broken) coverage.
+4. A real reproduction test proving a run that stops heartbeating mid-execution (not just one
+   manually set stale in a test fixture, the way the existing test does) actually gets reconciled —
+   closing the exact gap between "the SQL sweep logic is correct" (already tested) and "a real run's
+   heartbeat actually reaches that SQL" (never tested, because never true).
+
+Size: **L** (touches a foundational, heavily-used function; needs real design for the cross-thread
+problem, not just effort). Severity: **Critical** — this is a currently-nonfunctional safety net for
+crash recovery across the entire fleet, not a nice-to-have.
+
+---
+
 ## Tier 2 — Clustered PARTIAL sub-gaps (existing feature, real named gap inside it)
 
 Grouped by root cause / shared code path, same style as `PLAN.md`'s Stage 0 clustering.
@@ -163,6 +252,17 @@ Size: **M**
 These mirror Stage 0's original "cheap fixes" bucket — small, mostly single-file, no architectural
 decision needed:
 
+- **NEW (found 2026-08-04 during Cluster N production validation, not yet fixed)**:
+  `app/services/retention.py`'s day-scale log/memory-embeddings retention cutoffs
+  (`_run_cleanup()`, lines ~88/95) use the same `.replace(tzinfo=None)` naive-datetime pattern
+  `reconcile_orphaned_runs()` had — confirmed the same real bug class (a non-UTC system timezone
+  causes the DB driver to misinterpret the naive cutoff, landing it ~5.5 hours off) — but the
+  file's own code comment (lines 44-52) explicitly claims this doesn't matter for raw `text()` SQL,
+  which is the same incorrect assumption that hid the orphan-recovery bug. Low real-world severity
+  (a multi-day retention window firing ~5.5 hours "late" daily is a minor scheduling imprecision,
+  not a correctness failure), so deliberately not fixed today (out of Cluster N's scope) — but the
+  comment is now known to be wrong and should be corrected alongside a real fix (keep `now`/`cutoff`
+  timezone-aware, matching `reconcile_orphaned_runs()`'s fix) when this item is picked up.
 - Q1: remaining POSIX-only shell patterns (`source .venv/bin/activate`) not yet ported to the
   Windows branches.
 - Q2: `DevTask.priority` not DB-enforced (ties into Cluster K, but the flag-only part is cheap).
@@ -181,9 +281,10 @@ decision needed:
 - Q92: "detect abandoned libraries" not confirmed as distinct from "outdated" — verification task.
 - Q95: `repo_id` threading at every `query_*`/`embed_*` call site — verification task (same item
   as Cluster L, listed here because it may resolve to "already fine" on inspection, not a build).
-- Q102: `on_heartbeat()` confirmed wired in `base.py`'s path, not confirmed wired into the main
-  `base_graph.py::run_agent_graph()` path every other agent uses — verification, likely a 1-line fix
-  if actually missing.
+- Q102: ~~`on_heartbeat()` confirmed wired in `base.py`'s path, not confirmed wired into the main
+  `base_graph.py::run_agent_graph()` path — verification, likely a 1-line fix if actually missing.~~
+  **RESOLVED BY INVESTIGATION 2026-08-04, moved to Cluster N above** — it was not a 1-line fix; it's
+  confirmed missing, and the real fix is L-sized, not a Tier 3 item.
 - Q117: no unified cross-category quality score (architecture/prompts/tools/docs/tests/security) —
   aggregation layer over data that mostly already exists (`benchmark_manager.py`,
   `dependency_security_agent`, test counts).
@@ -197,19 +298,20 @@ decision needed:
 Following `PLAN.md`'s own philosophy (root causes and cheap wins first, architecturally heavy work
 gets dedicated days instead of being bundled):
 
-1. **Tier 3 cheap items** first — same rationale as original Stage 0: fast, testable, builds
+1. ~~**Cluster N (orphan recovery is dead in production)**~~ — **DONE 2026-08-04**, same day found.
+2. **Tier 3 cheap items** — same rationale as original Stage 0: fast, testable, builds
    momentum, and a few of these may turn out to already be fine on inspection (verification-only
    items), shrinking the backlog before the big build starts.
-2. **Cluster C (agent lifecycle/selection)** and **Cluster D (self-improvement completeness)** —
+4. **Cluster C (agent lifecycle/selection)** and **Cluster D (self-improvement completeness)** —
    these extend `FleetManager`/`failure_ladder.py`, code you already have deep familiarity with
    from Stage 0-2.
-3. **Tier 1 items #8, #9, #12** (pattern recognition / tool evolution / capability-gap detection)
+5. **Tier 1 items #8, #9, #12** (pattern recognition / tool evolution / capability-gap detection)
    together — they share one aggregation layer.
-4. **Cluster F (file formats)**, **Cluster G (WebSocket)**, **Cluster I (deployment)** — mostly
+6. **Cluster F (file formats)**, **Cluster G (WebSocket)**, **Cluster I (deployment)** — mostly
    additive, low architectural risk.
-5. **Cluster H, J, K, L, M** — medium items, sequence flexibly.
-6. **Tier 1 remaining items (#1-7, #10, #11)** — the standalone new subsystems.
-7. **Cluster A (cross-process scale) and Cluster B (agent-to-agent collaboration)** — deliberately
+7. **Cluster H, J, K, L, M** — medium items, sequence flexibly.
+8. **Tier 1 remaining items (#1-7, #10, #11)** — the standalone new subsystems.
+9. **Cluster A (cross-process scale) and Cluster B (agent-to-agent collaboration)** — deliberately
    last: these are the two largest, highest-risk architectural changes (per `answer2.md`'s own
    "Critical blockers" list), and every other cluster above touches code that becomes more complex
    to change once agents can talk to each other or run across multiple processes.

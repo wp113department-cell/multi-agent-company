@@ -1735,16 +1735,173 @@ against user pressure/tone rather than conceding to match their certainty.
 
 ## Q38. Failure Recovery
 
-- Docker crashes: **PARTIAL** — Postgres data (DevTask/AgentRun/Epic/PendingApproval/MemoryEmbedding
-  rows) survives if Postgres itself is a separate container/volume; in-flight agent runs on the crashed
-  container are orphaned and later reconciled by `reconcile_orphaned_runs()`
-  (`app/fleet/failure_ladder.py`, threshold `agent_run_orphan_threshold_seconds`=900s default) — marked
-  `failed`, not resumed.
+- Docker crashes: **YES, real fix shipped Stage 4 Cluster N (2026-08-04)** — Postgres data
+  (DevTask/AgentRun/Epic/PendingApproval/MemoryEmbedding rows) survives if Postgres itself is a
+  separate container/volume, and in-flight agent runs are now genuinely orphaned-and-reconciled by
+  `reconcile_orphaned_runs()`, not just in claim. **Below is preserved as a record of the real bug
+  found and fixed, not a still-open gap** — this line previously asserted in-flight agent runs are
+  "orphaned and later reconciled by `reconcile_orphaned_runs()`" — real, live-repo investigation
+  while working Stage 4's backlog found this had **never actually been true in production** until
+  this fix, for a precise, verified reason (not a guess): `AgentRun.last_heartbeat_at` was
+  only ever set by `heartbeat_agent_run()` (`app/db/repository.py:274`), which is only ever invoked
+  from the `heartbeat()` closure at `app/api/agents.py:573,689` — but that closure is passed as the
+  `on_heartbeat` argument to `run_planner()`/`run_coder()`, and **both treat it as a documented
+  no-op** (`planner.py:8`, `coder.py:114`: "kept for backward compat — no-op, run_span handles
+  telemetry" — `run_span()` is `app/fleet/metrics.py`'s separate, in-process-only `MetricsCollector`,
+  unrelated to the durable `AgentRun` DB row `reconcile_orphaned_runs()` actually queries). So
+  `last_heartbeat_at` stays NULL for the entire lifetime of every real run created via those 2 paths,
+  and `WHERE last_heartbeat_at < :cutoff` (`failure_ladder.py:236`) never matches a NULL row by
+  standard SQL semantics — confirmed by this suite's own
+  `tests/test_orphan_recovery.py::test_never_heartbeated_run_is_left_alone_real_db`, whose own
+  docstring already documented this NULL-exclusion behavior, without anyone previously connecting it
+  to the fact that *every* real run is permanently in that "never heartbeated" state. **Worse**: the
+  primary work pipeline — `app/agents/manager.py::run_manager()`'s epic-manager dev→QA→review loop,
+  the main way real coding tasks actually execute — never called `create_agent_run()` at all (grepped,
+  zero hits in `manager.py`), so it had **no `AgentRun` row and no orphan-recovery coverage
+  whatsoever**, not even the broken kind. `AgentRun` rows/orphan-recovery previously only even applied
+  to the 2 narrow "simple mode" dispatch paths (`launch_planning_pipeline`'s planner step,
+  `launch_coder`'s direct single-coder mode) — and even there, it was dead. **Why the no-op likely
+  existed, not just an oversight**: `app/api/agents.py`'s `heartbeat()` closure calls
+  `_spawn_tracked()` (`asyncio.create_task(coro)`), which requires a running event loop *in the
+  calling thread* — `run_agent_graph()` runs synchronously, often inside an `asyncio.to_thread()`
+  worker thread, so invoking that closure for real from inside its tool-call loop would likely raise
+  `RuntimeError: no running event loop` rather than silently working; leaving it a no-op was probably
+  a deliberate (if ultimately incorrect-in-effect) dodge of a real cross-thread scheduling hazard, not
+  carelessness.
+
+  **The real fix, shipped this same day**: `run_agent_graph()` — the one shared chokepoint all ~76
+  agents go through (confirmed: `grep -l "run_agent_graph(" app/agents/*.py` returns 76 files) — now
+  owns a real `AgentRun` row's full lifecycle itself, solving the cross-thread hazard the old design
+  never solved: `app/db/repository.py::create_agent_run_sync`/`heartbeat_agent_run_sync`/
+  `finish_agent_run_sync` bridge sync→async via `asyncio.run()` + a throwaway isolated engine
+  (mirroring `app/memory/store.py::query_memory_context_sync`'s own established, already-proven-safe
+  pattern for exactly this "sync LangGraph node needs an async DB write" problem — not a new
+  mechanism). `run_agent_graph()` creates the row on start (non-fatal if `task_id` isn't a real
+  `dev_tasks` int id — e.g. a guardian agent's synthetic scan id — in which case the run proceeds
+  with no tracking, never crashes); `_make_execute_tools_node`'s real per-tool-call node heartbeats it
+  (throttled via new `agent_run_heartbeat_min_interval_seconds`, default 30s, well under the 900s
+  detection threshold); both the success and exception exit paths finish it (`completed`/`failed`)
+  so a run never sits in `status='running'` forever either way. Because this lives in the shared
+  chokepoint, `run_manager()`'s dev/QA/review dispatch (which calls role wrappers like
+  `run_frontend_dev()`/`run_backend_dev()`/`run_qa()`/`run_reviewer()`, every one of which calls
+  `run_agent_graph()` internally) gets real coverage for free — zero changes needed to `manager.py`
+  itself, closing the "no coverage whatsoever" gap alongside the "coverage but dead" gap in one fix.
+  **A second, more subtle bug was caught by this fix's own test suite before shipping**: the
+  heartbeat throttle's "never heartbeated yet" sentinel initially used `0.0`, which relies on
+  `time.monotonic()`'s absolute value (an undefined reference point, often just process/system
+  uptime) exceeding the configured interval — false whenever the interval is larger than current
+  uptime (confirmed live in this environment: `time.monotonic()` was ~5100s, so a 9999s-interval test
+  found 0 heartbeats fired instead of the expected 1). Fixed with a `None` sentinel so the first
+  heartbeat always fires regardless of interval size or absolute clock value.
+  **Tests**: `tests/test_stage4_clustern_real_agent_run_heartbeat.py` (7 tests, real Postgres, no
+  mocking of the DB) — the core fix end-to-end through the real `run_agent_graph()` public API (not
+  just the isolated bridge functions); the exception-path finish; a non-numeric `task_id` proving the
+  non-fatal safety net; the throttle itself (high-interval → 1 heartbeat across 5 tool calls,
+  zero-interval → 5, no `run_id` → 0); and — the test that actually matters —
+  `test_full_loop_a_run_that_stops_heartbeating_is_now_actually_reconciled`, which creates a real
+  `AgentRun` the way `run_agent_graph()` now does, backdates its heartbeat past the threshold
+  (simulating the process dying), and proves `reconcile_orphaned_runs()` now genuinely marks it
+  `failed` — the exact reconciliation that was structurally impossible before this fix, since
+  `last_heartbeat_at` could never be anything but NULL. All 6 pre-existing
+  `test_orphan_recovery.py` tests still pass unchanged (the sweep's own SQL logic was never the
+  problem). `black`/`ruff`/`mypy --strict` clean.
   Plan: extend checkpointing to `base_graph.py` (see Q24 High Priority) so orphaned runs can resume
-  instead of restart.
-- Python crashes: **PARTIAL** — same orphan-recovery mechanism; pm/architect/decomposer pipeline runs
-  (`app/pipeline/graph.py`, `AsyncPostgresSaver`) genuinely resume from their last checkpoint on
-  restart; the other ~70 agents' in-flight work must be redone.
+  instead of restart — still valid, now genuinely secondary since the *detection* half is real.
+- Python crashes: **YES, same fix applies** — the orphan-recovery mechanism cited above now
+  genuinely covers this case too; pm/architect/decomposer pipeline runs (`app/pipeline/graph.py`,
+  `AsyncPostgresSaver`) genuinely resume from their last checkpoint on restart (this part was always
+  real and is unaffected); other agents' in-flight work must still be redone (no mid-run resume, a
+  separate, still-open gap — see the Plan line above), but is now genuinely detected as orphaned and
+  marked `failed` automatically, not left silently sitting in `status='running'` forever.
+### Production Verification (Cluster N) — 2026-08-04, same day as the fix
+
+Per the owner's explicit request before trusting the fix: "I want one final production-level
+validation... not just unit/integration tests." Four checks, all run live against this environment's
+real Postgres, a real separate OS process, and real wall-clock time — not simulated.
+
+**1. True end-to-end manual verification.** A real, separate OS subprocess called the real, public
+`run_agent_graph()` (not a probe graph) with a scripted-but-deterministic LLM (no `ANTHROPIC_API_KEY`
+is configured in this environment, confirmed empty — the LLM response content is scripted, everything
+else is genuinely real: real process, real DB writes, real timing, real signal delivery). A parent
+orchestrator process:
+- Created a real `DevTask` row and launched the worker (`subprocess.Popen`).
+- Polled the real `AgentRun` row every 3s and recorded its real `last_heartbeat_at` timeline.
+- Observed **two real, distinct heartbeat timestamps exactly 30.000 seconds apart** (`06:49:09.42` →
+  `06:49:39.50` on the first run; `07:03:38.12` → `07:04:08.20` on the confirmation re-run) — proving
+  the throttle fires at precisely the configured interval, not approximately.
+- Sent a real `SIGKILL` (`proc.send_signal(signal.SIGKILL)`, confirmed exit code `-9`) mid-run, after
+  the 3rd tool call, well before the scripted 5th-call submit — a genuine abrupt process death, no
+  exception handler, no graceful `finish_agent_run_sync` call possible.
+- Confirmed the row was still `status='running'` immediately after the kill (proving no cleanup ran —
+  a real orphan, not a clean shutdown).
+- Ran the real `reconcile_orphaned_runs()` sweep and confirmed the row flipped to `status='failed'`,
+  `error='orphaned — process died without a clean shutdown'`, `finished_at` set.
+- Confirmed **exactly one `AgentRun` row existed for the task throughout** — before the kill, after
+  the kill, and after the sweep — proving no duplicate execution or accidental re-dispatch.
+Result: **PASS, both the initial run and a clean confirmation re-run** (see item 3 below for why two
+runs were needed).
+
+**2. Performance under concurrent execution.** 30 concurrent simulated agents (real
+`ThreadPoolExecutor`, the same concurrency model production uses — `run_agent_graph()` is dispatched
+via `asyncio.to_thread()` from real call sites), each heartbeating 3 times = 90 real concurrent DB
+writes, completed in 5.02s wall time, **zero exceptions**. Latency measured honestly, not just
+declared acceptable: a **single, non-concurrent** heartbeat call averages **66ms** (10 sequential
+calls, 62-80ms range — the real cost of this fix's sync-bridge pattern: new event loop + new asyncpg
+engine + connect + query + commit + dispose per call). Under the 30-way concurrent burst, mean
+latency rose to **1459ms** (p50 1368ms, p95 2300ms, max 2471ms) — a real, ~22x slowdown from
+thread/connection-setup contention, not hidden or rounded away. This does **not** cause a correctness
+or blocking problem (worst-case ~2.5s is a small fraction of the 30s throttle window, and a slow
+heartbeat write never blocks the agent's own real tool-call work — it's a fire-and-forget best-effort
+call), but it's a real, measured scalability characteristic worth knowing if concurrent agent count
+grows well past 30 — noted honestly rather than only reporting the passing case.
+
+**3. Race conditions / DB session leaks / transaction issues under concurrency.** Zero exceptions
+across all 90 concurrent writes (no deadlock, no race). Postgres connection count sampled throughout
+the burst: baseline 8 → peak 19 during the 30-way concurrent burst → back to 6 within 1s of the burst
+completing — **confirms `engine.dispose()` correctly releases every throwaway connection, no leak**,
+and peak usage (19) stays far under `max_connections=100`. **This concurrency-validation pass is what
+surfaced the async-nesting bug in the validation script itself** (`asyncio.run()` cannot be called
+from inside a already-running event loop — a bug in the test harness, not production code, fixed by
+creating `AgentRun` rows from plain sync code rather than nesting the bridge inside another
+`asyncio.run()`'d coroutine) — mentioned here because it's the kind of subtlety this exact validation
+exercise is designed to catch, even when it turns out to be in the test rig itself.
+
+**4. A real, separate, pre-existing bug found and fixed by this validation pass itself** (not
+invented by testing — a genuine production defect that predates today, exposed only because this
+session's fix was the first thing to ever write a real timestamp into this column): `app/fleet/
+failure_ladder.py::reconcile_orphaned_runs()`'s `cutoff` was computed as a **timezone-naive**
+datetime (`datetime.now(timezone.utc).replace(tzinfo=None)`). Confirmed directly, live, in this
+environment (system timezone `Asia/Kolkata`, UTC+5:30): writing a naive "UTC-intended" datetime into
+a `timestamptz` column round-trips back shifted by **exactly -5:30** — the DB driver silently
+reinterprets a naive parameter as system-local time, not UTC. Every pre-existing test passed anyway
+because `test_orphan_recovery.py::_make_agent_run`'s own fixture wrote its synthetic stale timestamp
+using the identical naive convention — the erroneous shift canceled out on both sides of the
+comparison by pure coincidence, masking the bug completely until a **real**, correctly-aware
+heartbeat (from this session's own fix) was compared against it for the first time. Verified the
+mechanism precisely before fixing (not guessed): reproduced the exact shift with a raw SQL round-trip
+test, confirmed an aware cutoff correctly identifies the same row as stale where the naive cutoff
+did not. **Fixed** by keeping `now`/`cutoff` timezone-aware end to end
+(`app/fleet/failure_ladder.py`), matching `finish_agent_run()`'s own already-correct
+`datetime.now(timezone.utc)` convention — and fixed the test fixture's matching bug in the same pass
+(`test_orphan_recovery.py::_make_agent_run`), since leaving it naive would have made the *fixed*
+reconcile function fail the *existing* "fresh heartbeat is left alone" test (confirmed by actually
+hitting that failure before fixing the fixture too, not assumed). **New regression guard**:
+`test_orphan_recovery.py::test_a_real_heartbeat_write_is_correctly_recognized_as_stale`, using the
+real `heartbeat_agent_run_sync()` production write path — confirmed via `git stash` that this test
+genuinely fails without the fix (reconciled=0) and passes with it (reconciled=1), not a coincidental
+pass. A related, lower-severity instance of the same bug class exists in `app/services/retention.py`
+(day-scale retention cutoffs) — found, documented, deliberately not fixed today (out of scope, much
+lower real-world impact) — see `65days_plan/STAGE4_BACKLOG.md`'s Tier 3.
+
+**Full regression after the timezone fix**: 3716 passed (3715 + 1 new regression-guard test), 0
+failed, 56 skipped, 17 deselected — exact match, zero regressions. `black`/`ruff`/`mypy --strict`
+clean on every touched file (pre-existing, unrelated mypy debt in `test_orphan_recovery.py`
+reconfirmed via `git stash`, not introduced by this pass).
+
+**Cluster N status: PRODUCTION VERIFIED.** Both the original heartbeat-never-fires bug and this
+validation-discovered timezone bug are fixed, tested against real infrastructure, and confirmed with
+zero regressions across the full suite.
+
 - Terminal closes: **YES** — backend is a long-running FastAPI process independent of any terminal
   session; closing a terminal that isn't running the server has no effect on server-side state.
 - VS Code closes: **YES** — same reasoning; the agent fleet runs server-side, not inside an editor

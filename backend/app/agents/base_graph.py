@@ -1344,6 +1344,7 @@ def _make_execute_tools_node(
     trace_id: str = "",
     tools: list[dict[str, Any]] | None = None,
     quality_gate_min_confidence: float = 0.0,
+    run_id: str = "",
 ) -> Callable[[AgentRunState], dict[str, Any]]:
     """Runs tool calls, enforces verification contract, resets stall counter.
     Pushes tool_call / tool_result / file_edit / terminal events to ActivityStream.
@@ -1375,6 +1376,22 @@ def _make_execute_tools_node(
         for t in (tools or [])
         if isinstance(t.get("input_schema"), dict)
     }
+
+    # Stage 4 Cluster N (2026-08-04) — real per-run heartbeat state, private
+    # to this one graph's own execute_tools_node closure (build_agent_graph()
+    # constructs a fresh node, and therefore a fresh closure, per
+    # run_agent_graph() call — no cross-run sharing, no concurrency hazard
+    # within a single run's own sequential node invocations). A mutable
+    # single-element list, not a plain float, so the nested function below
+    # can rebind it without a `nonlocal` declaration cluttering every
+    # early-return branch above. None (not 0.0) means "never heartbeated
+    # yet" — a real bug caught by this fix's own test suite: 0.0 relies on
+    # time.monotonic()'s absolute value (undefined reference point, often
+    # just process/system uptime) exceeding the configured interval, which
+    # is false whenever the interval is larger than current uptime (e.g. a
+    # freshly-started container) — the first heartbeat would silently never
+    # fire. None makes "first call always heartbeats" true unconditionally.
+    _last_heartbeat_monotonic: list[float | None] = [None]
 
     def execute_tools(state: AgentRunState) -> dict[str, Any]:
         # pending_tool_uses carries the batch across self-loop invocations.
@@ -1432,6 +1449,32 @@ def _make_execute_tools_node(
         tu_id = str(tu.get("id", ""))
         tu_name = str(tu.get("name", ""))
         tu_input = dict(tu.get("input", {}))
+
+        # Real AgentRun heartbeat (Stage 4 Cluster N) — a live signal that
+        # this run is still making progress, not the pre-existing on_heartbeat
+        # param base.py/planner.py/coder.py accept but never actually invoke.
+        # Throttled (agent_run_heartbeat_min_interval_seconds, default 30s)
+        # so a chatty agent doesn't open a fresh throwaway DB connection on
+        # every single tool call — still far more granular than
+        # agent_run_orphan_threshold_seconds (default 900s) needs. Placed
+        # here (once per real tool call about to execute, not once per
+        # LLM turn) so a run that hangs mid-tool-call still shows its last
+        # heartbeat from just before the hang, not from several tool calls
+        # earlier.
+        if run_id:
+            try:
+                import time as _time
+
+                _now = _time.monotonic()
+                _last = _last_heartbeat_monotonic[0]
+                _min_interval = get_settings().agent_run_heartbeat_min_interval_seconds
+                if _last is None or _now - _last >= _min_interval:
+                    _last_heartbeat_monotonic[0] = _now
+                    from app.db.repository import heartbeat_agent_run_sync
+
+                    heartbeat_agent_run_sync(run_id)
+            except Exception:
+                pass
 
         # Push tool_call event
         if task_id:
@@ -1941,6 +1984,11 @@ def build_agent_graph(
     max_stalls: int = 3,
     task_id: str = "",
     trace_id: str = "",
+    # Stage 4 Cluster N (2026-08-04) — real AgentRun id for the shared
+    # execute_tools node to heartbeat against. Empty string (the default,
+    # matching task_id/trace_id's own convention) means "no run tracking
+    # for this invocation" to the node below.
+    run_id: str = "",
 ) -> Any:
     """Build a production LangGraph StateGraph for a worker agent.
 
@@ -1959,6 +2007,7 @@ def build_agent_graph(
         trace_id,
         tools=tools,
         quality_gate_min_confidence=quality_gate_min_confidence,
+        run_id=run_id,
     )
     router = _make_router(max_turns, max_stalls, enable_reflection)
 
@@ -2100,6 +2149,11 @@ def run_agent_graph(
     trace_id: str = "",
     task_id: str = "",
     images: list[dict[str, str]] | None = None,
+    # Stage 4 Cluster N (2026-08-04) — real AgentRun DB tracking (heartbeat +
+    # orphan-recovery coverage), see the "Real AgentRun tracking" block below
+    # for why this replaces the on_heartbeat param base.py/planner.py/
+    # coder.py accept but never actually invoke.
+    enable_run_tracking: bool = True,
 ) -> AgentRunState:
     """Build + run the agent graph, return the final state.
 
@@ -2191,6 +2245,41 @@ def run_agent_graph(
     except Exception:
         _span = None
         _metrics = None
+
+    # Real AgentRun DB tracking (Stage 4 Cluster N, 2026-08-04) — NOT the
+    # same thing as _metrics/_span above: those are RunMetrics/
+    # MetricsCollector, an in-process-only, ephemeral observability system
+    # (reset on restart, invisible across processes). This is the durable
+    # `agent_runs` DB row app/fleet/failure_ladder.py::reconcile_orphaned_
+    # runs() actually queries for crash recovery — previously created only
+    # by 2 narrow "simple mode" dispatch paths in app/api/agents.py (never
+    # by this shared function, and never by run_manager()'s own dev/QA/
+    # review pipeline, which called neither), and even there, the heartbeat
+    # that would keep last_heartbeat_at non-stale was a documented no-op.
+    # Creating it HERE instead — the one real chokepoint ~76 agents already
+    # go through (confirmed: `grep -l "run_agent_graph(" app/agents/*.py`
+    # returns 76 files) — gives every real agent run orphan-recovery
+    # coverage for free, with no per-agent or per-caller changes needed.
+    # Non-fatal by construction (create_agent_run_sync returns None on any
+    # failure — invalid/synthetic task_id, no matching dev_tasks row, DB
+    # unavailable — never raises here): a run that can't be tracked still
+    # does its real work, it just has no orphan-recovery coverage for
+    # itself, same degrade-gracefully contract memory_hook_node already
+    # established for query_memory_context_sync.
+    _agent_run_id: str | None = None
+    if enable_run_tracking and task_id:
+        try:
+            from app.db.repository import create_agent_run_sync
+
+            _int_task_id = int(task_id)
+            _agent_run_id = create_agent_run_sync(_int_task_id, role_name, model)
+        except (ValueError, TypeError):
+            # task_id isn't a real dev_tasks integer id (e.g. a synthetic
+            # id like "fleet-scan" from a guardian agent's periodic scan) —
+            # not an error, just not a trackable run.
+            _agent_run_id = None
+        except Exception:
+            _agent_run_id = None
 
     # Lifecycle: agent transitions to RUNNING + emits TaskStarted (Gap 7 / Gap 10)
     try:
@@ -2308,6 +2397,7 @@ def run_agent_graph(
             max_stalls=max_stalls,
             task_id=task_id,
             trace_id=tid,
+            run_id=_agent_run_id or "",
         )
 
         initial_state: AgentRunState = {
@@ -2481,6 +2571,24 @@ def run_agent_graph(
         except Exception:
             pass
 
+        # Real AgentRun DB tracking (Stage 4 Cluster N) — mirrors the
+        # existing "completed" vs "failed" classification `create_agent_run`/
+        # `reconcile_orphaned_runs` already use elsewhere in this codebase,
+        # not a new status vocabulary downstream dashboards would need to
+        # learn. Non-fatal: finish_agent_run_sync itself never raises.
+        if _agent_run_id:
+            try:
+                from app.db.repository import finish_agent_run_sync
+
+                finish_agent_run_sync(
+                    _agent_run_id,
+                    "completed" if final_state.get("submitted") else "failed",
+                    tokens_in=final_state.get("tokens_in", 0),
+                    tokens_out=final_state.get("tokens_out", 0),
+                )
+            except Exception:
+                pass
+
         return final_state
 
     except Exception as exc:
@@ -2561,4 +2669,18 @@ def run_agent_graph(
                 _span.__exit__(type(exc), exc, exc.__traceback__)
             except Exception:
                 pass
+
+        # Real AgentRun DB tracking (Stage 4 Cluster N) — an unhandled
+        # exception means the run never reached final_state at all, so
+        # there's no tokens_in/tokens_out to report; still marks the row
+        # "failed" with the real error so it doesn't sit in "running"
+        # forever, which is the whole point of this fix. Non-fatal.
+        if _agent_run_id:
+            try:
+                from app.db.repository import finish_agent_run_sync
+
+                finish_agent_run_sync(_agent_run_id, "failed", error=str(exc)[:500])
+            except Exception:
+                pass
+
         raise

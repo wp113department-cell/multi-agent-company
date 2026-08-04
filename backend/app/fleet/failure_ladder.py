@@ -225,7 +225,29 @@ async def reconcile_orphaned_runs(threshold_seconds: int | None = None) -> int:
         if threshold_seconds is not None
         else get_settings().agent_run_orphan_threshold_seconds
     )
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # Stage 4 Cluster N production validation (2026-08-04) — a real E2E test
+    # against a non-UTC-system-timezone environment (Asia/Kolkata, UTC+5:30)
+    # caught a real, pre-existing bug here: .replace(tzinfo=None) produced a
+    # naive datetime that asyncpg/the DB driver silently reinterprets as
+    # SYSTEM-LOCAL time (not UTC) when bound as a raw-SQL parameter or
+    # written to a `timestamptz` column — confirmed directly: writing a
+    # naive "06:54:32" (UTC-intended) value round-tripped back as
+    # "01:24:32+00:00", a -5:30 shift exactly matching the system TZ offset.
+    # This was invisible before this session's fix because nothing had ever
+    # written a REAL (correctly timezone-aware) last_heartbeat_at to compare
+    # against — the pre-existing test's own fixture (test_orphan_recovery.py
+    # ::_make_agent_run) happened to write ITS stale timestamp using the
+    # same naive convention, so the erroneous offset canceled out on both
+    # sides of the comparison by coincidence, masking the bug. Real
+    # production heartbeats (heartbeat_agent_run(), correctly
+    # datetime.now(timezone.utc), aware) exposed it immediately: the cutoff
+    # below was landing ~5.5 hours earlier than intended, so a run would
+    # need to sit orphaned for threshold_seconds + ~5.5 hours before ever
+    # being detected in this environment. Fixed by keeping this
+    # timezone-AWARE end to end (matching finish_agent_run()'s own already-
+    # correct `datetime.now(timezone.utc)` convention) instead of stripping
+    # tzinfo.
+    now = datetime.now(timezone.utc)
     cutoff = now - timedelta(seconds=limit)
 
     factory = get_session_factory()
