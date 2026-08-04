@@ -180,5 +180,7 @@ async def test_run_sync_persists_coverage_pct_for_test_coverage_agent() -> None:
 @pytest.mark.asyncio
 async def test_run_sync_does_not_add_coverage_pct_for_other_agents() -> None:
     fake_result = AgentResult(summary="ok", status="completed", raw={})
-    payload = await _run_sync_dispatch_and_capture_artifact("debugger_agent", fake_result)
+    payload = await _run_sync_dispatch_and_capture_artifact(
+        "debugger_agent", fake_result
+    )
     assert "coverage_pct" not in payload
