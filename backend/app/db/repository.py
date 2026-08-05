@@ -22,7 +22,6 @@ from app.db.models import (
     SystemSetting,
     TaskImage,
     TaskLog,
-    can_transition,
 )
 
 logger = logging.getLogger(__name__)
@@ -229,15 +228,48 @@ async def list_tasks(
 
 
 async def transition_task(db: AsyncSession, task_id: int, new_status: str) -> DevTask:
-    task = await get_task(db, task_id)
-    if task is None:
-        raise ValueError(f"Task {task_id} not found")
-    if not can_transition(str(task.status), new_status):
+    """Atomic compare-and-swap transition (audit_v1.md 4.1/4.7 #1/#3: "no row
+    locking anywhere ... task status transitions are a genuine TOCTOU race").
+
+    Previously a plain read-check-write: two near-concurrent callers could
+    both read the same pre-transition status, both pass can_transition(),
+    and both commit — e.g. two POST /run requests both seeing "pending" and
+    both dispatching the same task, racing on `git worktree add` for the
+    same branch/path. Now a single atomic
+    `UPDATE ... WHERE status IN (:allowed) RETURNING id` — Postgres's own
+    row-level locking during the UPDATE serializes concurrent attempts, so
+    at most one caller's UPDATE can match and return a row; every other
+    concurrent caller sees 0 rows affected and gets TransitionError, exactly
+    as if it had checked and lost a race, without ever needing a separate
+    `SELECT ... FOR UPDATE` or new lock table.
+    """
+    from app.db.models import VALID_TRANSITIONS
+
+    allowed_sources = tuple(
+        status for status, targets in VALID_TRANSITIONS.items() if new_status in targets
+    )
+    updated_id: int | None = None
+    if allowed_sources:
+        result = await db.execute(
+            update(DevTask)
+            .where(DevTask.id == task_id, DevTask.status.in_(allowed_sources))
+            .values(status=new_status)
+            .returning(DevTask.id)
+        )
+        updated_id = result.scalar_one_or_none()
+        await db.commit()
+
+    if updated_id is None:
+        # The atomic CAS above already decided allowed/denied — this read is
+        # only to build an accurate error message (task missing vs. wrong
+        # status), not a second decision point, so it can't itself race.
+        task = await get_task(db, task_id)
+        if task is None:
+            raise ValueError(f"Task {task_id} not found")
         raise TransitionError(
             f"Cannot transition task {task_id} from {task.status!r} to {new_status!r}"
         )
-    task.status = new_status
-    await db.commit()
+
     # Re-fetch via get_task so the repo relationship is eagerly loaded (avoids MissingGreenlet)
     refreshed = await get_task(db, task_id)
     assert refreshed is not None
@@ -543,11 +575,31 @@ def finish_agent_run_sync(
 async def save_subtasks(
     db: AsyncSession, task_id: int, subtasks: list[dict[str, Any]]
 ) -> None:
+    """Blocker (audit_v1.md 4.3 #2): st["title"] used to raise a hard
+    KeyError on any subtask dict missing "title" — reachable because the
+    Decomposer's JSON schema only *softly* requires it (a validation
+    failure logs a warning, see _run_quality_gate's policy:schema_valid,
+    but never blocked the submission from reaching here). Subtask.title is
+    a non-nullable DB column with no default, so a malformed Decomposer
+    submission crashed launch_planning_pipeline's background task with no
+    caller left to transition the task out of "planning" — stuck forever
+    (restart_task refuses tasks in ("planning","coding","testing")).
+    Coerce defensively here instead of trusting the schema held.
+    """
     for st in subtasks:
+        title = str(st.get("title") or "").strip()
+        if not title:
+            description = str(st.get("description") or "").strip()
+            subtask_type = str(st.get("type") or "backend")
+            title = (
+                f"Untitled {subtask_type} subtask: {description[:80]}"
+                if description
+                else f"Untitled {subtask_type} subtask"
+            )
         sub = Subtask(
             task_id=task_id,
             type=st.get("type", "backend"),
-            title=st["title"],
+            title=title,
             description=st.get("description"),
             files_to_edit=st.get("files_to_edit"),
             depends_on=st.get("depends_on"),

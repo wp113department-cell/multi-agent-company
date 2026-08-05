@@ -359,8 +359,8 @@ async def _do_reindex() -> None:
     from app.repo_tools.context_builder import invalidate_context_cache
 
     repo_path = get_active_repo_path()
-    partial_index = index_repository(
-        repo_path, known_hashes=_known_hashes if _known_hashes else None
+    partial_index = await asyncio.to_thread(
+        index_repository, repo_path, known_hashes=_known_hashes if _known_hashes else None
     )
     # Gap-closure (2026-07-23): index_repository() with known_hashes set
     # returns ONLY the files that changed — scanner.merge_indexes() exists
@@ -384,11 +384,44 @@ async def _do_reindex() -> None:
         from app.repo_tools.cross_file_graph import build_cross_file_graph
         from app.repo_tools.persistence import persist_repo_index
 
-        graph_result = build_cross_file_graph(full_index)
+        # Blocker (audit_v1.md 4.2 #2 / 4.8 #12): build_cross_file_graph()
+        # re-reads and re-parses every file via ast.parse + runs full
+        # PageRank — genuinely CPU-bound. This background task still runs
+        # on the same asyncio event loop as every request handler
+        # (BackgroundTasks doesn't get its own thread), so leaving this
+        # unwrapped would still freeze concurrent requests for its
+        # duration.
+        graph_result = await asyncio.to_thread(build_cross_file_graph, full_index)
         async with get_async_session() as db:
             await persist_repo_index(repo_path, full_index, graph_result, db)
     except Exception:
         logger.exception("Failed to persist repo index for %s", repo_path)
+
+    # Blocker (audit_v1.md 4.2 #1): generate_embeddings() previously had no
+    # real caller anywhere in this codebase — wired here, the real reindex
+    # path, gated the same way generate_embeddings() itself already
+    # gracefully degrades (no-ops, returns []) when VOYAGE_API_KEY is unset.
+    # Both the Voyage API call and the parse-heavy generate_embeddings()
+    # call are blocking; to_thread keeps this off the event loop like the
+    # call graph build above.
+    if get_settings().voyage_api_key:
+        try:
+            from app.repo_tools.embeddings import (
+                generate_embeddings,
+                persist_code_embeddings,
+            )
+
+            code_embeddings = await asyncio.to_thread(generate_embeddings, full_index)
+            if code_embeddings:
+                async with get_async_session() as db:
+                    written = await persist_code_embeddings(
+                        repo_path, code_embeddings, db
+                    )
+                logger.info(
+                    "Code embeddings: persisted %d row(s) for %s", written, repo_path
+                )
+        except Exception:
+            logger.exception("Failed to generate/persist code embeddings for %s", repo_path)
 
 
 @router.post("/reindex")
@@ -422,8 +455,12 @@ async def get_context(task_description: str) -> dict[str, object]:
     else:
         from app.repo_tools.scanner import index_repository
 
-        idx = index_repository(repo_path)
-    ctx = build_context(task_description, idx)
+        idx = await asyncio.to_thread(index_repository, repo_path)
+    # Blocker (audit_v1.md 4.2 #2): CPU-bound (re-parses every file via
+    # ast.parse + runs PageRank internally) — agents call this endpoint
+    # routinely, and unwrapped it blocks the event loop for the whole
+    # duration, freezing every other concurrent request on this worker.
+    ctx = await asyncio.to_thread(build_context, task_description, idx)
     return {
         "relevantFiles": ctx.relevant_files,
         "dependencyChain": ctx.dependency_chain,
@@ -447,9 +484,9 @@ async def get_architecture() -> dict[str, object]:
     if idx is None:
         from app.repo_tools.scanner import index_repository
 
-        idx = index_repository(repo_path)
+        idx = await asyncio.to_thread(index_repository, repo_path)
 
-    arch_map = build_architecture_map(repo_path, idx)
+    arch_map = await asyncio.to_thread(build_architecture_map, repo_path, idx)
     return {
         "summary": arch_map.summary,
         "components": [c.model_dump() for c in arch_map.components],
@@ -472,9 +509,9 @@ async def get_class_graph() -> dict[str, object]:
     else:
         from app.repo_tools.scanner import index_repository
 
-        idx = index_repository(repo_path)
+        idx = await asyncio.to_thread(index_repository, repo_path)
 
-    edges = build_class_graph(idx)
+    edges = await asyncio.to_thread(build_class_graph, idx)
     return {
         "edges": [
             {
@@ -501,10 +538,10 @@ async def get_package_graph() -> dict[str, object]:
     else:
         from app.repo_tools.scanner import index_repository
 
-        idx = index_repository(repo_path)
+        idx = await asyncio.to_thread(index_repository, repo_path)
 
-    import_edges = build_call_graph(idx)
-    package_edges = build_package_graph(import_edges)
+    import_edges = await asyncio.to_thread(build_call_graph, idx)
+    package_edges = await asyncio.to_thread(build_package_graph, import_edges)
     return {
         "edges": [
             {

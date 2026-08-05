@@ -180,6 +180,24 @@ async def _find_near_duplicate(
         return None
 
     try:
+        # Blocker (audit_v1.md 4.4 #2): TOCTOU race — this SELECT and the
+        # caller's later INSERT used to have no lock between them, so two
+        # agents completing near-identical work concurrently could both
+        # pass this dedup check before either committed, producing
+        # duplicate rows anyway. pg_advisory_xact_lock is transaction-
+        # scoped (auto-released on this same db session's next commit/
+        # rollback — no separate unlock call needed) and keyed on
+        # (category, repo_id), matching the natural conflict domain: two
+        # writes to *different* categories or repos were never actually
+        # racing each other and shouldn't serialize. hashtext(category)
+        # collapses the category string to an int4; repo_id (nullable)
+        # uses -1 as its int4 sentinel for "unscoped", since NULL isn't a
+        # valid lock-key argument.
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:category)::int, CAST(:repo_id AS int))"),
+            {"category": category, "repo_id": repo_id if repo_id is not None else -1},
+        )
+
         vec_str = "[" + ",".join(str(v) for v in vector) + "]"
         sql = text("""
             SELECT id, 1 - (embedding <=> CAST(:vec AS vector)) AS similarity
@@ -329,10 +347,27 @@ async def query_similar_tasks(
         return []
 
     try:
-        # Use pgvector cosine distance operator (<=>). Ranked by the Day-41
-        # composite score (similarity + recency + reuse + importance +
-        # verified), not pure cosine distance — see _COMPOSITE_SCORE_EXPR.
+        # Blocker (audit_v1.md 4.4 #1): two-stage retrieval. The inner
+        # `candidates` CTE does the ONLY thing HNSW actually accelerates —
+        # a bare `ORDER BY embedding <=> :vec LIMIT :candidate_limit` — then
+        # the outer query re-ranks just that small candidate set by the
+        # full Day-41 composite score. Previously the composite expression
+        # was the ORDER BY directly against the full table, which Postgres
+        # cannot satisfy from the HNSW index (it only accelerates a bare
+        # distance sort), degrading to a full scan+sort as the table grows.
         sql = text(f"""
+            WITH candidates AS (
+                SELECT id, task_id, epic_id, outcome, description, summary,
+                       files_changed, embedding, created_at, reuse_count,
+                       importance, verified
+                FROM memory_embeddings
+                WHERE embedding IS NOT NULL
+                  AND vector_norm(embedding) > 0
+                  AND archived = false
+                  AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+                ORDER BY embedding <=> CAST(:vec AS vector)
+                LIMIT :candidate_limit
+            )
             SELECT
                 id,
                 task_id,
@@ -343,11 +378,7 @@ async def query_similar_tasks(
                 files_changed,
                 1 - (embedding <=> CAST(:vec AS vector)) AS similarity,
                 {_COMPOSITE_SCORE_EXPR} AS composite_score
-            FROM memory_embeddings
-            WHERE embedding IS NOT NULL
-              AND vector_norm(embedding) > 0
-              AND archived = false
-              AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+            FROM candidates
             ORDER BY {_COMPOSITE_SCORE_EXPR} DESC
             LIMIT :k
         """)
@@ -355,6 +386,7 @@ async def query_similar_tasks(
         params = {
             "vec": vec_str,
             "k": k,
+            "candidate_limit": k * settings.memory_candidate_overfetch_factor,
             "repo_id": repo_id,
             **_composite_score_params(settings),
         }
@@ -648,7 +680,22 @@ async def query_architecture_notes(
         return []
 
     try:
+        # Blocker (audit_v1.md 4.4 #1): two-stage retrieval — see
+        # query_similar_tasks's own comment above for the full reasoning.
         sql = text(f"""
+            WITH candidates AS (
+                SELECT id, task_id, epic_id, outcome, description, summary,
+                       files_changed, embedding, created_at, reuse_count,
+                       importance, verified
+                FROM memory_embeddings
+                WHERE outcome = 'architecture'
+                  AND embedding IS NOT NULL
+                  AND vector_norm(embedding) > 0
+                  AND archived = false
+                  AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+                ORDER BY embedding <=> CAST(:vec AS vector)
+                LIMIT :candidate_limit
+            )
             SELECT
                 id,
                 task_id,
@@ -659,12 +706,7 @@ async def query_architecture_notes(
                 files_changed,
                 1 - (embedding <=> CAST(:vec AS vector)) AS similarity,
                 {_COMPOSITE_SCORE_EXPR} AS composite_score
-            FROM memory_embeddings
-            WHERE outcome = 'architecture'
-              AND embedding IS NOT NULL
-              AND vector_norm(embedding) > 0
-              AND archived = false
-              AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+            FROM candidates
             ORDER BY {_COMPOSITE_SCORE_EXPR} DESC
             LIMIT :k
         """)
@@ -672,6 +714,7 @@ async def query_architecture_notes(
         params = {
             "vec": vec_str,
             "k": top_k,
+            "candidate_limit": top_k * settings.memory_candidate_overfetch_factor,
             "repo_id": repo_id,
             **_composite_score_params(settings),
         }
@@ -776,7 +819,21 @@ async def query_failures(
         return []
 
     try:
+        # Blocker (audit_v1.md 4.4 #1): two-stage retrieval — see
+        # query_similar_tasks's own comment above for the full reasoning.
         sql = text(f"""
+            WITH candidates AS (
+                SELECT id, task_id, epic_id, description, summary, embedding,
+                       created_at, reuse_count, importance, verified
+                FROM memory_embeddings
+                WHERE outcome = 'failure'
+                  AND embedding IS NOT NULL
+                  AND vector_norm(embedding) > 0
+                  AND archived = false
+                  AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+                ORDER BY embedding <=> CAST(:vec AS vector)
+                LIMIT :candidate_limit
+            )
             SELECT
                 id,
                 task_id,
@@ -785,12 +842,7 @@ async def query_failures(
                 summary,
                 1 - (embedding <=> CAST(:vec AS vector)) AS similarity,
                 {_COMPOSITE_SCORE_EXPR} AS composite_score
-            FROM memory_embeddings
-            WHERE outcome = 'failure'
-              AND embedding IS NOT NULL
-              AND vector_norm(embedding) > 0
-              AND archived = false
-              AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+            FROM candidates
             ORDER BY {_COMPOSITE_SCORE_EXPR} DESC
             LIMIT :k
         """)
@@ -798,6 +850,7 @@ async def query_failures(
         params = {
             "vec": vec_str,
             "k": top_k,
+            "candidate_limit": top_k * settings.memory_candidate_overfetch_factor,
             "repo_id": repo_id,
             **_composite_score_params(settings),
         }
@@ -944,7 +997,21 @@ async def query_learning_signals(
         return []
 
     try:
+        # Blocker (audit_v1.md 4.4 #1): two-stage retrieval — see
+        # query_similar_tasks's own comment above for the full reasoning.
         sql = text(f"""
+            WITH candidates AS (
+                SELECT id, task_id, description, summary, embedding,
+                       created_at, reuse_count, importance, verified
+                FROM memory_embeddings
+                WHERE category = 'learning'
+                  AND embedding IS NOT NULL
+                  AND vector_norm(embedding) > 0
+                  AND archived = false
+                  AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+                ORDER BY embedding <=> CAST(:vec AS vector)
+                LIMIT :candidate_limit
+            )
             SELECT
                 id,
                 task_id,
@@ -952,12 +1019,7 @@ async def query_learning_signals(
                 summary,
                 1 - (embedding <=> CAST(:vec AS vector)) AS similarity,
                 {_COMPOSITE_SCORE_EXPR} AS composite_score
-            FROM memory_embeddings
-            WHERE category = 'learning'
-              AND embedding IS NOT NULL
-              AND vector_norm(embedding) > 0
-              AND archived = false
-              AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+            FROM candidates
             ORDER BY {_COMPOSITE_SCORE_EXPR} DESC
             LIMIT :k
         """)
@@ -965,6 +1027,7 @@ async def query_learning_signals(
         params = {
             "vec": vec_str,
             "k": top_k,
+            "candidate_limit": top_k * settings.memory_candidate_overfetch_factor,
             "repo_id": repo_id,
             **_composite_score_params(settings),
         }
@@ -1103,7 +1166,21 @@ async def query_procedures(
         return []
 
     try:
+        # Blocker (audit_v1.md 4.4 #1): two-stage retrieval — see
+        # query_similar_tasks's own comment above for the full reasoning.
         sql = text(f"""
+            WITH candidates AS (
+                SELECT id, task_id, epic_id, description, summary, embedding,
+                       created_at, reuse_count, importance, verified
+                FROM memory_embeddings
+                WHERE category = 'procedure'
+                  AND embedding IS NOT NULL
+                  AND vector_norm(embedding) > 0
+                  AND archived = false
+                  AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+                ORDER BY embedding <=> CAST(:vec AS vector)
+                LIMIT :candidate_limit
+            )
             SELECT
                 id,
                 task_id,
@@ -1112,12 +1189,7 @@ async def query_procedures(
                 summary,
                 1 - (embedding <=> CAST(:vec AS vector)) AS similarity,
                 {_COMPOSITE_SCORE_EXPR} AS composite_score
-            FROM memory_embeddings
-            WHERE category = 'procedure'
-              AND embedding IS NOT NULL
-              AND vector_norm(embedding) > 0
-              AND archived = false
-              AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+            FROM candidates
             ORDER BY {_COMPOSITE_SCORE_EXPR} DESC
             LIMIT :k
         """)
@@ -1125,6 +1197,7 @@ async def query_procedures(
         params = {
             "vec": vec_str,
             "k": top_k,
+            "candidate_limit": top_k * settings.memory_candidate_overfetch_factor,
             "repo_id": repo_id,
             **_composite_score_params(settings),
         }

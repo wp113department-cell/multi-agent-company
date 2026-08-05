@@ -365,6 +365,25 @@ def _run_subprocess(
 # decision and message formatting identical between both graphs.
 # ---------------------------------------------------------------------------
 
+def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
+    """Cheap, no-API-call token estimate (~4 chars/token, a standard rough
+    heuristic — not exact, but only used to gate the condense decision when
+    self._tokens_in hasn't observed a real API response yet, e.g. the first
+    turn of a restored session; a real response's usage.input_tokens
+    replaces this estimate for every subsequent turn). See the condense
+    gate in _call_llm_node for why this exists (audit_v1.md 4.4 #3)."""
+    total_chars = 0
+    for m in messages:
+        content = m.get("content", "")
+        if isinstance(content, str):
+            total_chars += len(content)
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict):
+                    total_chars += len(str(block.get("text") or block.get("content") or ""))
+    return total_chars // 4
+
+
 _CHAT_CONDENSE_SUMMARY_PROMPT = (
     "Summarize the key facts, decisions, file names/paths, and progress "
     "from this earlier part of a chat conversation, in 3-8 concrete bullet "
@@ -2625,12 +2644,29 @@ class ChatAgent:
         # condensed. Condensing mutates self.session.history in place so it
         # persists for every later turn, not just this one call.
         context_token_budget = settings.context_token_budget
-        if self._tokens_in > 0 and context_token_budget > 0:
+        # Blocker (audit_v1.md 4.4 #3): this gate used to be
+        # `self._tokens_in > 0` — always false on the very first call of a
+        # freshly-constructed ChatAgent (self._tokens_in inits to 0 and
+        # only becomes real after a real LLM response's usage.input_tokens
+        # comes back), which is exactly the state a restored session is in
+        # on its first resumed turn. That meant the entire unbounded-until-
+        # bounded-by-load_history_from_db's-own-fix history skipped condense
+        # entirely on precisely the turn budget protection matters most.
+        # When self._tokens_in is still 0, fall back to a cheap character-
+        # based estimate of the actual restored history so the condense
+        # decision is based on real content size, not a counter that hasn't
+        # observed a real API response yet.
+        effective_tokens_in = (
+            self._tokens_in
+            if self._tokens_in > 0
+            else _estimate_tokens(self.session.history)
+        )
+        if effective_tokens_in > 0 and context_token_budget > 0:
             messages_before = len(self.session.history)
             condensed, was_condensed = await _condense_history_async(
                 list(self.session.history),
                 token_budget=context_token_budget,
-                tokens_in=self._tokens_in,
+                tokens_in=effective_tokens_in,
                 client=client,
                 model_haiku=self._haiku_model(),
             )
@@ -2644,12 +2680,12 @@ class ChatAgent:
                     }
                 )
             else:
-                pct = self._tokens_in / context_token_budget
+                pct = effective_tokens_in / context_token_budget
                 if 0.8 <= pct < 1.0:
                     await self.session.push(
                         {
                             "type": "approaching_limit",
-                            "tokens_in": self._tokens_in,
+                            "tokens_in": effective_tokens_in,
                             "token_budget": context_token_budget,
                             "pct": round(pct, 3),
                         }

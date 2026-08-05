@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db.repository import (
+    TransitionError,
     append_log,
     create_agent_run,
     finish_agent_run,
@@ -245,6 +246,23 @@ async def launch_planning_pipeline(
             logger.exception("Planning pipeline failed for task %d", task_id)
             async with factory() as db2:
                 await append_log(db2, task_id, "pipeline_error", str(e))
+                # Blocker (audit_v1.md 4.3 #2): this handler used to log and
+                # alert but never transition the task out of "planning" —
+                # status stayed "planning" forever, and restart_task
+                # explicitly refuses tasks in ("planning","coding","testing")
+                # (409), leaving no self-service recovery path (only manual
+                # DB intervention). Move it to the terminal-ish "blocked"
+                # status, which restart_task DOES accept, restoring a real
+                # recovery path for the exact failure this except clause
+                # catches (e.g. save_subtasks() raising on malformed
+                # Decomposer output).
+                try:
+                    await update_pipeline_state(db2, task_id, "blocked")
+                    await transition_task(db2, task_id, "blocked")
+                except (TransitionError, ValueError):
+                    # Already in a terminal status (e.g. a concurrent
+                    # request already moved it) — nothing more to do.
+                    pass
             await send_task_alert(
                 task_id, "failed", f"Planning pipeline exception: {e}"
             )

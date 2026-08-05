@@ -115,7 +115,13 @@ def test_gate_reports_verification_and_consistency_informationally() -> None:
     assert result.passed is True  # still passes — informational only
 
 
-def test_gate_flags_schema_validation_warning_informationally() -> None:
+def test_gate_blocks_on_schema_validation_failure() -> None:
+    """audit_v1.md 4.3 #1: policy:schema_valid used to be tracked but
+    excluded from the `passed` computation entirely, so a schema-invalid
+    submission could still yield gate.passed=True — malformed LLM output
+    flowed through as "successful." Now a real gate: schema-invalid fails
+    the gate (and therefore forces _requires_human_approval=True at the
+    execute_tools boundary), same as confidence/critique already did."""
     result = _run_quality_gate(
         _state(),
         _cfg(),
@@ -124,7 +130,7 @@ def test_gate_flags_schema_validation_warning_informationally() -> None:
     )
     assert result.checks["policy:schema_valid"] is False
     assert any("missing required field" in w for w in result.warnings)
-    assert result.passed is True  # schema warnings are informational, not blocking
+    assert result.passed is False
 
 
 # ---------------------------------------------------------------------------

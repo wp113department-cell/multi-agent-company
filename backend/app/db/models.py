@@ -15,6 +15,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
@@ -885,5 +886,41 @@ class TestScore(Base):
     coverage_pct: Mapped[float] = mapped_column(Float, nullable=False)
     test_score: Mapped[float] = mapped_column(Float, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class CodeEmbedding(Base):
+    """Blocker (audit_v1.md 4.2 #1): migration 001 created this table with a
+    real vector(1536) column, but no SQLAlchemy model ever existed for it —
+    nothing wrote or read it, generate_embeddings() had no real caller, and
+    semantic_search() did a pure-Python brute-force loop over a caller-
+    supplied `embeddings` list that no caller ever populated (always []).
+    This model, migration 032's HNSW index, and the rewritten
+    generate/persist/query functions in app/repo_tools/embeddings.py close
+    that gap for real.
+
+    One row per indexed file (chunk_index reserved for a future
+    per-function/chunk granularity — always 0 today, matching
+    _file_summary()'s whole-file-as-one-chunk approach). repo_path is a
+    plain string (not a Repo FK) to match migration 001's own schema
+    exactly — this table predates the Repo model's introduction.
+    """
+
+    __tablename__ = "code_embeddings"
+    __table_args__ = (
+        UniqueConstraint(
+            "repo_path", "file_path", "chunk_index", name="code_embeddings_repo_path_file_path_chunk_index_key"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    repo_path: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    file_path: Mapped[str] = mapped_column(Text, nullable=False)
+    chunk_index: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[Any] = mapped_column(Vector(1536), nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
