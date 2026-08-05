@@ -354,6 +354,16 @@ class Epic(Base):
     cost_estimate: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
     cost_actual: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
     halt_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Stage 4 Cluster R Phase 1 (2026-08-05, migration 031, CLUSTER_R_DESIGN.md
+    # §2/§4/§6): the epic's own source of truth for which repository its
+    # work happens in — mirrors DevTask.repo_id's exact shape (nullable FK,
+    # ondelete SET NULL). NULL means legacy/unscoped (same convention as
+    # Cluster O's Q8), never a forced backfill. Phase 1 only adds the
+    # column/relationship; execution-path wiring (epic-manager graph,
+    # DevTask.repo_id inheritance) is Phase 2, not implemented yet.
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("repos.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -362,6 +372,7 @@ class Epic(Base):
     )
 
     tasks: Mapped[list["DevTask"]] = relationship("DevTask", back_populates="epic")
+    repo: Mapped["Repo | None"] = relationship("Repo", foreign_keys=[repo_id])
 
 
 class Policy(Base):

@@ -34,6 +34,11 @@ class CreateEpicRequest(BaseModel):
     title: str
     description: str
     complexity_multiplier: float = 1.0
+    # Stage 4 Cluster R Phase 1 (2026-08-05, migration 031,
+    # CLUSTER_R_DESIGN.md) — mirrors CreateTaskRequest.repo_id's exact
+    # optional shape. Phase 1 only persists this; execution-path wiring
+    # (epic-manager graph, DevTask.repo_id inheritance) is Phase 2.
+    repo_id: int | None = None
 
 
 class ApprovePolicyRequest(BaseModel):
@@ -64,6 +69,7 @@ def _epic_to_response(epic: Epic, tasks: list[DevTask]) -> dict[str, Any]:
         "title": epic.title,
         "description": epic.description,
         "status": epic.status,
+        "repoId": epic.repo_id,
         "costEstimate": float(epic.cost_estimate) if epic.cost_estimate else None,
         "costActual": float(epic.cost_actual) if epic.cost_actual else None,
         "haltReason": epic.halt_reason,
@@ -108,6 +114,7 @@ async def create_epic(
         description=body.description,
         status="pending",
         cost_estimate=Decimal(str(estimate.estimated_cost_usd)),
+        repo_id=body.repo_id,
     )
     db.add(epic)
     await db.commit()
@@ -135,6 +142,7 @@ async def list_epics(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]
             "epicId": e.epic_id,
             "title": e.title,
             "status": e.status,
+            "repoId": e.repo_id,
             "costEstimate": float(e.cost_estimate) if e.cost_estimate else None,
             "costActual": float(e.cost_actual) if e.cost_actual else None,
             "haltReason": e.halt_reason,
@@ -347,12 +355,40 @@ async def batch_review(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
 
 
 async def _launch_epic_manager(epic_id: str, goal: str) -> None:
-    """Fire-and-forget: run the epic manager pipeline."""
+    """Fire-and-forget: run the epic manager pipeline.
+
+    Stage 4 Cluster R Phase 2 (2026-08-05, CLUSTER_R_DESIGN.md §3/§6):
+    re-loads the epic (eager-loading .repo, mirroring get_task()'s own
+    selectinload(DevTask.repo)) to resolve its real repo_id/repo_path
+    before invoking the graph — the epic was already committed with its
+    repo_id by create_epic()/approve_epic_cost() before either call site
+    schedules this task, so a fresh read here is the single source of
+    truth, not a second one.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.db.models import Epic
+    from app.db.repository import resolve_epic_repo_path
     from app.db.session import get_async_session
     from app.agents.manager import run_epic_manager
 
     try:
         async with get_async_session() as db:
-            await run_epic_manager(epic_id=epic_id, goal=goal, db=db)
+            result = await db.execute(
+                select(Epic)
+                .options(selectinload(Epic.repo))
+                .where(Epic.epic_id == epic_id)
+            )
+            epic = result.scalar_one_or_none()
+            repo_id = epic.repo_id if epic is not None else None
+            repo_path = resolve_epic_repo_path(epic) if epic is not None else None
+            await run_epic_manager(
+                epic_id=epic_id,
+                goal=goal,
+                db=db,
+                repo_id=repo_id,
+                repo_path=repo_path,
+            )
     except Exception:
         logger.exception("Epic manager pipeline failed for epic %s", epic_id)

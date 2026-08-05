@@ -1097,6 +1097,9 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
 
     def read_file(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
+        policy = check_path_in_worktree(rel, repo_path)
+        if not policy.allowed:
+            return f"[POLICY DENIED] {policy.reason}"
         p = base / rel
         if not p.exists():
             return f"[ERROR] File not found: {rel}"
@@ -1203,6 +1206,10 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
     def get_file_tree(inp: dict[str, Any]) -> str:
         directory = str(inp.get("directory", ""))
         max_depth = min(int(inp.get("max_depth", 3)), 4)
+        if directory:
+            policy = check_path_in_worktree(directory, repo_path)
+            if not policy.allowed:
+                return f"[POLICY DENIED] {policy.reason}"
         start = base / directory if directory else base
         if not start.exists():
             return f"[ERROR] Directory not found: {directory}"
@@ -1259,6 +1266,10 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
         paths: list[str] = inp.get("paths", [])[:20]
         parts: list[str] = []
         for rel in paths:
+            policy = check_path_in_worktree(rel, repo_path)
+            if not policy.allowed:
+                parts.append(f"=== {rel} ===\n[POLICY DENIED] {policy.reason}")
+                continue
             p = base / rel
             if not p.exists():
                 parts.append(f"=== {rel} ===\n[ERROR] Not found")
@@ -1271,7 +1282,11 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
         return "\n\n".join(parts) if parts else "[ERROR] No paths provided"
 
     def file_exists(inp: dict[str, Any]) -> str:
-        p = base / str(inp["path"])
+        rel = str(inp["path"])
+        policy = check_path_in_worktree(rel, repo_path)
+        if not policy.allowed:
+            return f"[POLICY DENIED] {policy.reason}"
+        p = base / rel
         if p.is_file():
             return "file"
         if p.is_dir():
@@ -1280,6 +1295,9 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
 
     def file_info(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
+        policy = check_path_in_worktree(rel, repo_path)
+        if not policy.allowed:
+            return f"[POLICY DENIED] {policy.reason}"
         p = base / rel
         if not p.exists():
             return f"[ERROR] Not found: {rel}"
@@ -1935,15 +1953,17 @@ def make_doc_generator_handlers(repo_path: str) -> dict[str, Any]:
     docs_result: dict[str, Any] = {}
 
     def dg_write_file(inp: dict[str, Any]) -> str:
+        from app.policy.engine import check_path_in_worktree
+
         rel = str(inp["path"])
         if not (rel.endswith(".md") or rel.startswith("docs/")):
             return (
                 f"[POLICY DENIED] Doc generator agents may only write .md files "
                 f"or paths under docs/. Got: {rel!r}"
             )
-        result = check_path(rel)
+        result = check_path_in_worktree(rel, repo_path)
         if not result.allowed:
-            return f"[POLICY DENIED] {rel}: {result.reason}"
+            return f"[POLICY DENIED] {result.reason}"
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(str(inp["content"]), encoding="utf-8")
@@ -5014,11 +5034,16 @@ def make_readme_agent_handlers(repo_path: str) -> dict[str, Any]:
         return r.stdout[:6000] if r.stdout else "(no classes)"
 
     def rm_write_file(inp: dict[str, Any]) -> str:
+        from app.policy.engine import check_path_in_worktree
+
         rel = str(inp["path"])
         if not (rel.endswith(".md") or rel.startswith("docs/")):
             return (
                 f"[POLICY DENIED] README agent may only write .md files. Got: {rel!r}"
             )
+        result = check_path_in_worktree(rel, repo_path)
+        if not result.allowed:
+            return f"[POLICY DENIED] {result.reason}"
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(inp["content"], encoding="utf-8")
@@ -5101,11 +5126,16 @@ def make_api_docs_agent_handlers(repo_path: str) -> dict[str, Any]:
         return r.stdout[:6000] if r.stdout else "(no functions)"
 
     def ad_write_file(inp: dict[str, Any]) -> str:
+        from app.policy.engine import check_path_in_worktree
+
         rel = str(inp["path"])
         if not (rel.endswith(".md") or rel.startswith("docs/")):
             return (
                 f"[POLICY DENIED] API docs agent may only write .md files. Got: {rel!r}"
             )
+        result = check_path_in_worktree(rel, repo_path)
+        if not result.allowed:
+            return f"[POLICY DENIED] {result.reason}"
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(inp["content"], encoding="utf-8")
@@ -6551,10 +6581,14 @@ def make_ai_engineer_handlers(repo_path: str) -> dict[str, Any]:
     handlers = make_read_only_handlers(repo_path)
     ai_result: dict[str, Any] = {}
 
+    # Blocker 6 (audit_v1.md 4.5/4.8): bare "python "/"python3 "/"pip install "
+    # prefixes are inherently unrestrictable (any script path/package name
+    # satisfies the prefix match; pip install is a supply-chain RCE vector
+    # via install-time hooks). Dropped. "python -m "/"python3 -m " restrict
+    # execution to installed modules, which is materially narrower, and are
+    # kept — same as the rest of this allowlist, they now also run inside
+    # the Docker sandbox (see ae_bash below), not directly on the host.
     _AI_BASH_ALLOWLIST = (
-        "python ",
-        "python3 ",
-        "pip install ",
         "pip show ",
         "pip list",
         "pytest ",
@@ -6566,36 +6600,28 @@ def make_ai_engineer_handlers(repo_path: str) -> dict[str, Any]:
     )
 
     def ae_run_python_snippet(inp: dict[str, Any]) -> str:
+        import shlex as _shlex
+
         code = str(inp["code"])
-        try:
-            r = _sp.run(
-                ["python", "-c", code],
-                capture_output=True,
-                text=True,
-                cwd=str(root),
-                timeout=30,
-            )
-            return (r.stdout + r.stderr).strip() or "(no output)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        cmd = f"python -c {_shlex.quote(code)}"
+        stdout, stderr, _returncode, timed_out = _run_bash_command(
+            cmd, str(root), timeout=30
+        )
+        if timed_out:
+            return "[ERROR] Command timed out after 30s"
+        return (stdout + stderr).strip() or "(no output)"
 
     def ae_bash(inp: dict[str, Any]) -> str:
         cmd = str(inp["command"])
         policy = check_allowlisted_command(cmd, _AI_BASH_ALLOWLIST)
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
-        try:
-            r = _sp.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                cwd=str(root),
-                timeout=120,
-            )
-            return (r.stdout + r.stderr).strip() or "(no output)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        stdout, stderr, _returncode, timed_out = _run_bash_command(
+            cmd, str(root), timeout=120
+        )
+        if timed_out:
+            return "[ERROR] Command timed out after 120s"
+        return (stdout + stderr).strip() or "(no output)"
 
     def ae_write_file(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
@@ -6614,6 +6640,9 @@ def make_ai_engineer_handlers(repo_path: str) -> dict[str, Any]:
         import urllib.request as _ur
 
         url = str(inp["url"])
+        _ssrf_reason = _ssrf_denial_reason(url)
+        if _ssrf_reason:
+            return f"[POLICY DENIED] {_ssrf_reason}"
         try:
             with _ur.urlopen(url, timeout=10) as resp:
                 body = resp.read(8192).decode("utf-8", errors="replace")
@@ -6728,18 +6757,19 @@ def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
         policy = check_allowlisted_command(cmd, _CLEANUP_BASH_ALLOWLIST)
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
-        try:
-            r = _sp.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                cwd=str(root),
-                timeout=60,
-            )
-            return (r.stdout + r.stderr).strip() or "(no output)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        # Blocker 5 (audit_v1.md 4.5): bare "find " in this allowlist,
+        # combined with unsandboxed subprocess.run(shell=True), reproduced
+        # the exact `find /workspace -mindepth 1 -delete` case
+        # app.policy.sandbox's own docstring cites as the proof case for
+        # Docker sandboxing. Route through the same Docker-sandboxed
+        # primitive every other bash-shaped tool uses instead of running
+        # directly on the host.
+        stdout, stderr, _returncode, timed_out = _run_bash_command(
+            cmd, str(root), timeout=60
+        )
+        if timed_out:
+            return "[ERROR] Command timed out after 60s"
+        return (stdout + stderr).strip() or "(no output)"
 
     def cu_submit(inp: dict[str, Any]) -> str:
         cleanup_result.update(inp)
@@ -7600,6 +7630,64 @@ def _is_dangerous_command(command: str) -> bool:
     return not check_command(command, strict=False).allowed
 
 
+def _ssrf_denial_reason(url: str) -> str | None:
+    """SSRF guard for every agent-controlled outbound-fetch tool (audit_v1.md
+    4.5/4.8, finding "fetch_url ... is SSRF-capable with no allowlist").
+
+    Rejects non-http(s) schemes and resolves the hostname, denying if ANY
+    resolved address falls in a private/loopback/link-local/reserved range
+    (RFC1918, 127.0.0.0/8, 169.254.0.0/16 incl. the 169.254.169.254 cloud
+    metadata endpoint, ::1, fc00::/7, etc.) — checking the resolved IP, not
+    just the hostname string, so a DNS-rebinding or bare-IP URL is caught
+    the same way a friendly hostname would be. Returns a denial reason, or
+    None if the URL is safe to fetch.
+    """
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return f"Could not parse URL: {url!r}"
+
+    if parsed.scheme not in ("http", "https"):
+        return f"URL scheme {parsed.scheme!r} is not allowed (only http/https)"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return f"URL has no hostname: {url!r}"
+
+    try:
+        addr_infos = socket.getaddrinfo(hostname, None)
+    except Exception as e:
+        return f"Could not resolve host {hostname!r}: {e}"
+
+    if not addr_infos:
+        return f"Could not resolve host {hostname!r}"
+
+    for info in addr_infos:
+        raw_addr = info[4][0]
+        try:
+            ip = ipaddress.ip_address(raw_addr)
+        except ValueError:
+            return f"Host {hostname!r} resolved to an unparseable address {raw_addr!r}"
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            return (
+                f"URL host {hostname!r} resolves to {raw_addr!r}, which is a "
+                "private/loopback/link-local/reserved address — refusing to "
+                "fetch (SSRF protection)"
+            )
+    return None
+
+
 def _is_protected_path(path: str, worktree_path: str = "") -> bool:
     """Denylist + optional worktree containment check.
 
@@ -7610,6 +7698,33 @@ def _is_protected_path(path: str, worktree_path: str = "") -> bool:
     if worktree_path:
         return not check_path_in_worktree(path, worktree_path).allowed
     return not check_path(path).allowed
+
+
+def _extract_patch_target_paths(patch_content: str, strip: int) -> list[str]:
+    """Extract real target file paths from unified-diff `+++`/`---` header
+    lines, applying the same `-pN` leading-component strip that the `patch`
+    CLI itself applies (see apply_patch, Blocker 1 in audit_v1.md 4.5/4.8).
+
+    A unified diff's actual file targets live in these header lines (e.g.
+    `+++ b/app/config.py`), not in any top-level "path" field — apply_patch's
+    schema has none. `/dev/null` (used for pure adds/deletes) is skipped.
+    """
+    paths: list[str] = []
+    for line in patch_content.splitlines():
+        if not (line.startswith("+++ ") or line.startswith("--- ")):
+            continue
+        raw = line[4:].strip()
+        raw = raw.split("\t", 1)[0].strip()  # drop optional diff timestamp
+        if not raw or raw == "/dev/null":
+            continue
+        parts = raw.split("/")
+        if strip > 0 and len(parts) > strip:
+            raw = "/".join(parts[strip:])
+        elif strip > 0:
+            raw = parts[-1]
+        if raw and raw not in paths:
+            paths.append(raw)
+    return paths
 
 
 _SHELL_METACHARS_RE = None  # set on first use — avoids a module-level `re` import
@@ -7670,6 +7785,66 @@ def _mask_secret_value(name: str, value: str) -> str:
         return value
     prefix = value[:6]
     return f"{prefix}***REDACTED"
+
+
+_SECRET_CONTENT_RE = None
+
+
+def _scan_content_for_secrets(content: str) -> str | None:
+    """Pre-commit content scanner (audit_v1.md 4.5, finding #9: "No
+    secret-content scanner before commit; only filename-pattern denylist").
+
+    check_path()/_is_protected_path() only ever inspected file *paths*
+    (.env, secrets/, *.pem, id_rsa) — a real credential embedded inside an
+    otherwise-ordinary source file (e.g. a hardcoded AWS key in a .py file)
+    sailed straight through to a real `git commit`. This scans file
+    *content* line-by-line for the same secret shapes _mask_secret_value
+    already recognizes (KEY=value/KEY: value pairs whose name looks secret,
+    or standalone tokens matching known provider prefixes), plus PEM
+    private-key headers. Returns a denial reason for the first match found,
+    or None if the content looks clean.
+    """
+    global _SECRET_CONTENT_RE
+    if _SECRET_CONTENT_RE is None:
+        import re as _re
+
+        _SECRET_CONTENT_RE = {
+            "assignment": _re.compile(
+                r"(?im)^[^\S\n]*[\w.\-]*(KEY|SECRET|TOKEN|PASSWORD|PWD|CREDENTIAL|AUTH|PRIVATE)[\w.\-]*"
+                r"\s*[:=]\s*['\"]?([A-Za-z0-9_\-./+=]{8,})['\"]?\s*$"
+            ),
+            "provider_token": _re.compile(
+                r"\b(sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{12,}|gh[opsu]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9\-]{10,})\b"
+            ),
+            "pem_header": _re.compile(
+                r"-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"
+            ),
+        }
+    for line_no, line in enumerate(content.splitlines(), 1):
+        m = _SECRET_CONTENT_RE["provider_token"].search(line)
+        if m:
+            return f"line {line_no} contains a value matching a known secret-token pattern ({m.group(1)[:6]}***REDACTED)"
+        if _SECRET_CONTENT_RE["pem_header"].search(line):
+            return f"line {line_no} contains a private key header (-----BEGIN ... PRIVATE KEY-----)"
+        am = _SECRET_CONTENT_RE["assignment"].match(line)
+        if am:
+            value = am.group(2)
+            # Plausible placeholder/test values shouldn't hard-block a
+            # commit — only flag values that are actually secret-shaped
+            # (long, high-entropy-looking), matching _mask_secret_value's
+            # own generic-token heuristic.
+            if len(value) >= 12 and not value.lower() in (
+                "changeme",
+                "placeholder",
+                "your_key_here",
+                "your-key-here",
+                "xxxxxxxxxxxx",
+            ):
+                return (
+                    f"line {line_no} assigns a secret-shaped value to a "
+                    f"credential-looking name ({value[:4]}***REDACTED)"
+                )
+    return None
 
 
 _SENSITIVE_HOST_MOUNT_PATHS = (
@@ -8538,6 +8713,23 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
         patch_content = str(inp["patch"])
         strip = int(inp.get("strip", 1))
+
+        # Blocker 1 fix (audit_v1.md 4.5/4.8): apply_patch's schema has no
+        # top-level "path" field (targets are embedded in the diff's own
+        # +++/--- header lines), so the universal tool gate's
+        # tool_input.get("path", "") lookup always silently passes. Extract
+        # every target path from the diff text itself and run each through
+        # the same worktree-containment + denylist check every other write
+        # tool enforces (_is_protected_path -> check_path_in_worktree).
+        target_paths = _extract_patch_target_paths(patch_content, strip)
+        if not target_paths:
+            return (
+                "[ERROR] Could not determine any target file path from the "
+                "patch's +++/--- headers — refusing to apply"
+            )
+        for _tp in target_paths:
+            if _is_protected_path(_tp, repo_path):
+                return f"[POLICY DENIED] apply_patch target {_tp!r} is denied by policy"
         try:
             with _tempfile.NamedTemporaryFile(
                 mode="w", suffix=".patch", delete=False
@@ -8717,6 +8909,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def fetch_url(inp: dict[str, Any]) -> str:
         fu_url = str(inp["url"])
         fu_timeout = int(inp.get("timeout", 15))
+        _ssrf_reason = _ssrf_denial_reason(fu_url)
+        if _ssrf_reason:
+            return f"[POLICY DENIED] {_ssrf_reason}"
         try:
             r = subprocess.run(
                 [
@@ -12556,6 +12751,19 @@ def make_git_commit_change_handler(repo_path: str) -> Any:
             result = check_path(f)
             if not result.allowed:
                 return f"[POLICY DENIED] {f}: {result.reason}"
+            fpath = Path(repo_path) / f
+            if fpath.is_file():
+                try:
+                    fcontent = fpath.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    fcontent = ""
+                secret_reason = _scan_content_for_secrets(fcontent)
+                if secret_reason:
+                    return (
+                        f"[POLICY DENIED] Refusing to commit {f}: {secret_reason}. "
+                        "Remove the secret and use an environment variable/config "
+                        "reference instead."
+                    )
 
         try:
             add_result = subprocess.run(

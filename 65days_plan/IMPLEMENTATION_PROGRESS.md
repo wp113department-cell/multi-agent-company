@@ -5073,3 +5073,128 @@ S-M — no revision from the original backlog estimate.
 
 **Not implemented.** This is a design-only pass per explicit instruction. Awaiting go-ahead before
 writing migration 031 or touching `app/agents/manager.py`.
+
+## 2026-08-05 (continued) — Cluster R Phase 1 implemented + verified (schema + API schema only)
+
+Per explicit user instruction: implemented Phase 1 exactly as scoped in `CLUSTER_R_DESIGN.md` —
+migration 031, the nullable `Epic.repo_id` column/relationship, and the `CreateEpicRequest.repo_id`
+API field. **Execution-path wiring (epic-manager graph, `_planning_node`'s `DevTask.repo_id`
+inheritance, `resolve_epic_repo_path()`) was deliberately not touched** — that is Phase 2, reviewed
+independently per the user's own instruction.
+
+**Migration 031** (`migrations/versions/031_epic_repo_id.py`) mirrors migration 007/024's exact shape:
+nullable `BigInteger` FK to `repos.id`, `ondelete="SET NULL"`, dedicated index
+(`ix_epics_repo_id`/`fk_epics_repo_id_repos`). Run against the real live Postgres
+(`alembic upgrade head`, 030 → 031) — not just authored and assumed. Verified directly via
+`information_schema`/`pg_indexes` queries against the real DB (not inferred from the migration file):
+`repo_id bigint`, nullable, real FK constraint present, real index present. Confirmed zero existing
+epic rows were affected (0 epics in this environment's DB at migration time — the column is additive
+regardless).
+
+**Model** (`app/db/models.py::Epic`): added `repo_id: Mapped[int | None]` + `repo` relationship,
+identical shape to `DevTask.repo_id`/`DevTask.repo`.
+
+**API** (`app/api/epics.py`): `CreateEpicRequest.repo_id: int | None = None` (mirrors
+`CreateTaskRequest.repo_id`'s exact optional shape); `create_epic()` persists it;
+`_epic_to_response()`/`list_epics()` both gained a `repoId` field for parity with `DevTask`'s existing
+`repoId`. `get_epic()` inherits this for free via `_epic_to_response()`. `approve_epic_cost()`'s
+re-launch call site and all execution-path threading are explicitly out of scope for Phase 1 — not
+touched.
+
+**10 new tests** (`tests/test_stage4_cluster_r_epic_repo_id.py`): 3 Pydantic-layer (default None,
+accepts a real int, rejects a non-integer), 4 real-Postgres model/schema-layer (legacy epic with
+`repo_id=NULL` persists and reads back unchanged; new epic with a real `repo_id` persists and reads
+back correctly; the real FK constraint rejects a nonexistent `repo_id` via direct SQL — proven, not
+assumed; deleting the referenced `Repo` row real-cascades to `repo_id=NULL` via `ondelete=SET NULL`),
+and 3 end-to-end HTTP tests through the real `create_epic`/`list_epics`/`get_epic` endpoints (real
+Postgres, `_launch_epic_manager` patched out since exercising the real orchestration graph is
+explicitly Phase 2 scope) covering: repo_id populated end-to-end, repo_id omitted end-to-end (the
+literal backward-compatibility proof — a pre-Phase-1 request body still gets a clean 200 with
+`repoId: null`), and `list_epics()` including the new field.
+
+**Confirmed genuinely fails without the implementation**: `git stash` on the two tracked files this
+phase touched (`app/db/models.py`, `app/api/epics.py`) and re-ran the new test file — 9 of 10 failed
+(the 10th, the direct-SQL FK-constraint test, correctly still passed, since it exercises the real DB
+schema independently of the ORM model — expected and correct, not a gap). Restored via `git stash
+pop`, re-ran, all 10 passed again.
+
+**Regression**: `mypy app/ --strict` clean (198 files). All 27 directly-related existing tests
+(`test_phase51_epic_manager_graph.py`, `test_epic_cost_actual.py`,
+`test_cluster_o_phase1b_repo_scoped_memory_isolation.py`,
+`test_cluster_o_repo_scoped_memory_isolation.py`) green — confirming the epic-manager graph and
+Cluster O's memory-scoping wiring are genuinely untouched, as intended. **Full backend suite: 3863
+passed, 0 failed, 56 skipped, 17 deselected** — exact match to the 3853 prior baseline + 10 new
+Cluster R tests, zero regressions.
+
+**Cluster R Phase 1 is production verified**, scoped exactly as instructed (schema + API schema
+only, backward compatible, no execution-path changes). Awaiting review before Phase 2
+(execution-path wiring: `_launch_epic_manager`/`run_epic_manager` threading `repo_id`/`repo_path`,
+`resolve_epic_repo_path()`, and the `_planning_node` `DevTask(repo_id=...)` fix documented in
+`CLUSTER_R_DESIGN.md` §1.3/§6).
+
+## 2026-08-05 (continued) — Cluster R Phase 2 implemented + verified (execution-path wiring only)
+
+Per explicit user instruction: implemented Phase 2 exactly as scoped — thread `repo_id` through
+`_launch_epic_manager()`/`run_epic_manager()`, implement `resolve_epic_repo_path()`, fix
+`_planning_node` to inherit the epic's `repo_id` onto the `DevTask` it creates. **No product
+behavior or UI changes; the optional-vs-required `repo_id` product decision was explicitly left
+untouched**, per instruction.
+
+**`resolve_epic_repo_path()`** (`app/db/repository.py`): added directly beside
+`resolve_task_repo_path()`, identical shape and contract (same `Repo.status == "ready"` gate, same
+"return None, let the caller fall back to `settings.target_repo_path`" behavior for a legacy or
+not-yet-ready repo) — not a new resolution strategy, a second instance of the proven one.
+
+**`_launch_epic_manager()`** (`app/api/epics.py`): now re-loads the epic (eager-loading `.repo` via
+`selectinload`, mirroring `get_task()`'s own pattern) and resolves both `repo_id` and `repo_path`
+before calling `run_epic_manager()` — a fresh read of the epic already committed by
+`create_epic()`/`approve_epic_cost()`, not a second source of truth. Both real call sites
+(`create_epic`'s initial launch and `approve_epic_cost`'s re-launch) are covered automatically since
+they share this one function.
+
+**`run_epic_manager()`/`_run_epic_manager_body()`** (`app/agents/manager.py`): gained an optional
+`repo_id: int | None = None` parameter, threaded into the graph's `initial_state["repo_id"]` from the
+start (previously this key only ever existed as an *output* `_planning_node` derived after the fact
+from a field nothing set). All existing test call sites use kwargs with no `repo_id`, so this is
+backward compatible by construction — confirmed by the full regression run below, not just by
+inspection.
+
+**`_planning_node()`'s `DevTask(...)` construction**: the one required logic fix identified during
+the Phase 1 design review (`CLUSTER_R_DESIGN.md` §1.3) — a real correction to `EpicManagerState`'s own
+prior docstring, which claimed downstream scoping would "start working automatically" once epics had
+a real `repo_id`. That was only true for the two `embed_task_outcome()` calls in `_finalize_node`
+(already correct, untouched). `_planning_node` now passes `repo_id=state.get("repo_id")` when
+constructing the `DevTask`, closing the actual gap. `EpicManagerState`'s docstring and the return-dict
+comment were both updated to describe the corrected (not the stale) causality.
+
+**7 new tests** (`tests/test_stage4_cluster_r_epic_repo_id_execution_path.py`): `resolve_epic_repo_path()`
+unit-level (ready repo resolves to its path; not-ready repo returns `None`; a legacy epic with no
+`repo` at all returns `None`), a direct `_planning_node()` proof (a real `repo_id` in state produces a
+`DevTask` row in real Postgres with that same `repo_id`), `_launch_epic_manager()` threading proofs at
+both ends (a repo-scoped epic resolves and passes the correct `repo_id`/`repo_path` to
+`run_epic_manager`; a legacy epic passes `None`/`None`, exactly today's pre-Phase-2 call shape), and a
+full end-to-end proof driving the real graph through `run_epic_manager()` (resource_check → cost_estimate
+→ planning → conflict_check, mirroring `test_phase51_epic_manager_graph.py`'s own conflict-halt style
+to stop short of the real coding/LLM node) confirming the real `DevTask` row created in Postgres carries
+the epic's `repo_id`. Also updated the pre-existing Cluster O Phase 1b test
+(`test_planning_node_honestly_reads_the_newly_created_tasks_repo_id`) whose docstring had gone stale —
+it now correctly documents that it exercises the legacy/unscoped path, not an unresolved limitation.
+
+**Confirmed genuinely fails without the implementation**: `git stash` on the two pure-Phase-2 files
+(`app/agents/manager.py`, `app/db/repository.py`) plus a targeted temporary revert of
+`_launch_epic_manager()`'s Phase-2 portion in `app/api/epics.py` (done via direct edit, not `git
+stash`, since that file also carries Phase 1's already-verified changes which needed to stay intact)
+— the new execution-path test file failed to even collect (`ImportError: cannot import name
+'resolve_epic_repo_path'`), an unambiguous proof the tests depend on the new implementation. Phase 1's
+own 10 tests were re-run in this same reverted state and confirmed still green, proving the two phases
+are cleanly separable. Restored via `git stash pop` + re-applying the manual edit; all 35
+directly-related tests (Phase 1 + Phase 2 + existing epic-manager/Cluster O suites) pass again.
+
+**Regression**: `mypy app/ --strict` clean (198 files), `black --check`/`ruff check` clean on every
+touched file. All 35 directly-related tests green. **Full backend suite: 3870 passed, 0 failed, 56
+skipped, 17 deselected** — exact match to the 3863 prior baseline + 7 new Phase 2 tests, zero
+regressions.
+
+**Cluster R Phase 2 is production verified**, scoped exactly as instructed (execution-path wiring
+only — no UI, no product decisions, no enhancements beyond repository propagation). Design doc updated
+with evidence. Awaiting review before Phase 3.

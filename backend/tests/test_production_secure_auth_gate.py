@@ -35,6 +35,9 @@ def _secure_production_kwargs(**overrides: object) -> dict[str, object]:
         rbac_enabled=True,
         allow_legacy_role_header=False,
         default_admin_password="a-genuinely-non-default-password",
+        worktrees_dir="/var/lib/gridiron/worktrees",
+        repos_dir="/var/lib/gridiron/repos",
+        bg_process_registry_path="/var/lib/gridiron/bg-processes.json",
     )
     base.update(overrides)
     return base

@@ -1,7 +1,16 @@
 # Cluster R — Epic Repository Assignment: Architecture Design Proposal
 
-Status: **design only, not yet implemented** — per explicit user instruction to review before
-writing code, mirroring the process used for Clusters N/O/P/Q.
+Status: **Phase 1 (schema + API schema) and Phase 2 (execution-path wiring) both implemented and
+production verified, 2026-08-05.** Phase 1: migration 031, `Epic.repo_id` model field/relationship,
+`CreateEpicRequest.repo_id`. Phase 2: `resolve_epic_repo_path()`, `_launch_epic_manager()`/
+`run_epic_manager()`/`_run_epic_manager_body()` threading `repo_id`/`repo_path`, and the
+`_planning_node` `DevTask(repo_id=...)` fix (§1.3's real correction). See
+`IMPLEMENTATION_PROGRESS.md`'s matching entries for full evidence (Phase 1: 10 tests, real-Postgres
+migration verification; Phase 2: 7 tests including a full run through the real graph; both phases'
+tests proven to fail without their implementation; full regression after Phase 2: 3870 passed/0
+failed; `mypy --strict` clean throughout). **Phase 3 (the optional-vs-required `repo_id` product
+decision, UI default, and the frontend repo picker — §7/§10 step 6) is not started** — scoped for
+independent review before implementation, per explicit user instruction.
 
 ## 0. Executive summary
 

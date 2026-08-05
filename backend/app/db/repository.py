@@ -15,6 +15,7 @@ from app.config import get_settings
 from app.db.models import (
     AgentRun,
     DevTask,
+    Epic,
     PipelineState,
     Repo,
     Subtask,
@@ -86,6 +87,27 @@ def resolve_task_repo_path(task: DevTask) -> str | None:
     """
     if task.repo is not None and task.repo.status == "ready":
         return task.repo.local_path
+    return None
+
+
+def resolve_epic_repo_path(epic: Epic) -> str | None:
+    """Stage 4 Cluster R Phase 2 (2026-08-05, migration 031,
+    CLUSTER_R_DESIGN.md §1.4/§6): the epic-level counterpart to
+    resolve_task_repo_path() above — same source of truth (the
+    DB-persisted repo_id, resolved through Repo.status == "ready"), same
+    "return None, let the caller fall back to settings.target_repo_path"
+    contract, deliberately not a new resolution strategy. Requires
+    epic.repo to already be loaded (selectinload(Epic.repo), mirroring
+    get_task()'s own eager-load of DevTask.repo) — this function never
+    issues its own query.
+
+    Returns None for a legacy epic (repo_id=NULL) exactly as it does for a
+    repo whose clone isn't ready yet — both cases correctly preserve
+    today's real fallback behavior (settings.target_repo_path), not a
+    forced choice.
+    """
+    if epic.repo is not None and epic.repo.status == "ready":
+        return epic.repo.local_path
     return None
 
 

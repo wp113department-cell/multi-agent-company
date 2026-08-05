@@ -218,6 +218,41 @@ async def _versioned_lesson_archive_loop() -> None:
             logger.warning("Versioned lesson archive loop failed: %s", exc)
 
 
+async def _failed_rq_job_sweep_loop() -> None:
+    """Blocker 8 (audit_v1.md 4.7 #2): "A failed job goes into RQ's own
+    registry with no automatic retry and no application code ever reads
+    it — effectively a silent drop." Periodically drains RQ's
+    FailedJobRegistry into structured failed_events rows (see
+    app.pipeline.queue_adapter.sweep_failed_rq_jobs) so a job that
+    exhausted its retries is at least visible, not just sitting silently
+    in Redis. No-ops immediately when QUEUE_BACKEND != rq (the default),
+    same as every other RQ-only code path in this codebase.
+    """
+    settings = get_settings()
+    if settings.queue_backend.lower() != "rq":
+        return
+    interval_seconds = settings.queue_failed_job_sweep_interval_seconds
+    if interval_seconds <= 0:
+        logger.info(
+            "Failed RQ job sweep loop disabled (QUEUE_FAILED_JOB_SWEEP_INTERVAL_SECONDS=0)"
+        )
+        return
+
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            from app.pipeline.queue_adapter import sweep_failed_rq_jobs
+
+            recorded = await sweep_failed_rq_jobs()
+            if recorded:
+                logger.warning(
+                    "Failed RQ job sweep: recorded %d failed job(s) to failed_events",
+                    recorded,
+                )
+        except Exception as exc:
+            logger.warning("Failed RQ job sweep loop failed: %s", exc)
+
+
 async def _benchmark_baseline_loop() -> None:
     """Gap-closure (2026-07-21) — Day 10 built benchmark_manager.store_baseline()
     but nothing ever called it automatically, so no real agent has ever had a
@@ -536,6 +571,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     benchmark_baseline_task = asyncio.create_task(_benchmark_baseline_loop())
     orphan_recovery_task = asyncio.create_task(start_orphan_recovery_loop())
     doc_agent_auto_trigger_task = asyncio.create_task(_doc_agent_auto_trigger_loop())
+    failed_rq_job_sweep_task = asyncio.create_task(_failed_rq_job_sweep_loop())
 
     yield
 
@@ -546,6 +582,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     benchmark_baseline_task.cancel()
     orphan_recovery_task.cancel()
     doc_agent_auto_trigger_task.cancel()
+    failed_rq_job_sweep_task.cancel()
     for task in (
         reindex_task,
         retention_task,
@@ -554,6 +591,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         benchmark_baseline_task,
         orphan_recovery_task,
         doc_agent_auto_trigger_task,
+        failed_rq_job_sweep_task,
     ):
         try:
             await task

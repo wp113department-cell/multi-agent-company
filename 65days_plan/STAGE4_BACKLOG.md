@@ -896,8 +896,35 @@ S-M. One real correction found during the review, not assumed from the original 
 `EpicManagerState` docstring claims downstream memory-scoping "starts working automatically, no
 further code change" once epics get a real `repo_id` — true for the two `embed_task_outcome()` call
 sites in `_finalize_node`, but **not** true for `_planning_node`'s `DevTask(...)` construction, which
-never passes `repo_id=` today and needs a one-line fix, not just upstream plumbing. Not implemented —
-awaiting go-ahead on the design before writing code.
+never passes `repo_id=` today and needs a one-line fix, not just upstream plumbing.
+
+**Phase 1 implemented + production verified, 2026-08-05** (migration 031, `Epic.repo_id` model
+field + relationship, `CreateEpicRequest.repo_id` — schema/API-schema only, per explicit instruction
+to scope strictly and leave execution-path wiring for independent review). 10 new tests
+(`tests/test_stage4_cluster_r_epic_repo_id.py`): Pydantic layer, real-Postgres model/FK/cascade
+layer (including a real `ondelete=SET NULL` proof), and end-to-end HTTP layer covering both legacy
+(`repo_id` omitted) and new (`repo_id` populated) epics. Real migration run against live Postgres and
+verified via `information_schema`/`pg_indexes` queries, not assumed. Tests confirmed to genuinely
+fail without the implementation via `git stash` on the two touched tracked files (9/10 failed; the
+10th, a direct-SQL FK test, correctly still passed since it exercises the DB schema independently of
+the ORM). Full regression: 3863 passed, 0 failed, 56 skipped, 17 deselected — exact match to the
+3853 prior baseline + 10 new tests. `mypy --strict` clean. Full evidence in
+`IMPLEMENTATION_PROGRESS.md`'s matching entry.
+
+**Phase 2 implemented + production verified, 2026-08-05** (execution-path wiring only, per explicit
+instruction — no UI/product decisions). `resolve_epic_repo_path()` added (mirrors
+`resolve_task_repo_path()` exactly); `_launch_epic_manager()` resolves and threads
+`repo_id`/`repo_path` into `run_epic_manager()`/`_run_epic_manager_body()`; `_planning_node`'s
+`DevTask(...)` construction now inherits `repo_id=state.get("repo_id")` — the real one-line fix the
+Phase 1 design review identified as still needed even after Phase 1's schema work. 7 new tests
+(`tests/test_stage4_cluster_r_epic_repo_id_execution_path.py`) covering the resolver, `_planning_node`
+directly, `_launch_epic_manager`'s threading for both a repo-scoped and a legacy epic, and a full
+end-to-end run through the real graph. Confirmed to genuinely fail without the implementation (`git
+stash` + a targeted temporary revert caused an `ImportError` at collection). Full regression: 3870
+passed, 0 failed, 56 skipped, 17 deselected — exact match to the 3863 prior baseline + 7 new tests.
+`mypy --strict` clean. Full evidence in `IMPLEMENTATION_PROGRESS.md`'s matching entry. **Phase 3
+(optional-vs-required `repo_id` product decision, UI repo picker) not started — awaiting independent
+review, per explicit instruction.**
 
 ---
 

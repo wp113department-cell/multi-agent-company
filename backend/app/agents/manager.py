@@ -762,6 +762,7 @@ async def run_epic_manager(
     goal: str,
     db: AsyncSession,
     repo_path: str | None = None,
+    repo_id: int | None = None,
 ) -> EpicApprovalPackage:
     """Top-level epic orchestrator — thin wrapper around _run_epic_manager_body()
     that holds the epic concurrency slot for the whole call.
@@ -772,11 +773,17 @@ async def run_epic_manager(
     __aenter__/__aexit__ scattered through the body) guarantees the slot is
     released even if the body raises, without needing to re-indent the whole
     function.
+
+    Stage 4 Cluster R Phase 2 (2026-08-05, CLUSTER_R_DESIGN.md §3/§6):
+    repo_id is the epic's own resolved repo_id (app/api/epics.py's
+    _launch_epic_manager() resolves it via resolve_epic_repo_path() before
+    calling this), threaded straight into the graph's initial state so
+    _planning_node can inherit it onto the DevTask it creates.
     """
     from app.pipeline.concurrency import epic_slot
 
     async with epic_slot():
-        return await _run_epic_manager_body(epic_id, goal, db, repo_path)
+        return await _run_epic_manager_body(epic_id, goal, db, repo_path, repo_id)
 
 
 class EpicManagerState(TypedDict, total=False):
@@ -795,16 +802,22 @@ class EpicManagerState(TypedDict, total=False):
     repo: str
     stage: str  # "pending_cost_approval" | "halted_conflict" | "" (routing signal)
     task_id: int
-    # Stage 4 Cluster O Phase 1b (2026-08-05) — resolved in _planning_node
-    # from the epic's own internally-created DevTask.repo_id (INV-1 —
-    # DevTask.repo_id remains the single source of truth even here). Known,
-    # honestly-named limitation: CreateEpicRequest/Epic have no repo_id
-    # field anywhere in the real /api/epics creation path today, so this
-    # resolves to None for every real epic in production right now — not
-    # an unresolved technical gap, but the honest current state (see
-    # CLUSTER_O_DESIGN.md Phase 1b notes). The wiring is still correct and
-    # forward-compatible: once epics gain a real repo assignment mechanism,
-    # this starts scoping automatically with no further code change here.
+    # Stage 4 Cluster O Phase 1b (2026-08-05) wired the two
+    # embed_task_outcome() calls in _finalize_node to read this. Stage 4
+    # Cluster R Phase 2 (2026-08-05, CLUSTER_R_DESIGN.md §1.3/§3) supplies
+    # the real value: _launch_epic_manager() (app/api/epics.py) resolves
+    # the epic's own persisted repo_id and threads it into this state's
+    # initial value via run_epic_manager()/_run_epic_manager_body(); a
+    # correction found during the Cluster R design review, not assumed —
+    # the previous comment here claimed downstream scoping would "start
+    # working automatically" once epics had a real repo_id, but that was
+    # only true for the _finalize_node call sites. _planning_node still
+    # needed its own one-line fix (DevTask(repo_id=state.get("repo_id"))
+    # below) to actually inherit it onto the task it creates — done as
+    # part of this same phase. Still None for a legacy epic (repo_id=NULL)
+    # or one whose repo isn't in "ready" status — both correctly preserve
+    # today's fallback behavior (settings.target_repo_path), same as
+    # before this phase.
     repo_id: int | None
     plan_text: str
     subtasks: list[dict[str, Any]]
@@ -1036,12 +1049,20 @@ async def _planning_node(state: EpicManagerState) -> dict[str, Any]:
         db=db,
     )
 
-    # Create a DevTask for this epic
+    # Create a DevTask for this epic. Stage 4 Cluster R Phase 2 (2026-08-05,
+    # CLUSTER_R_DESIGN.md §1.3): repo_id is inherited from the epic's own
+    # resolved state["repo_id"] (seeded by _run_epic_manager_body from the
+    # epic's persisted Epic.repo_id) — this is the one-line fix the
+    # Cluster R design review found was still needed even after epics
+    # gained a real repo_id: a legacy/unscoped epic keeps state["repo_id"]
+    # as None here, so its DevTask is created unscoped exactly as before
+    # this phase.
     task = DevTask(
         title=goal[:500],
         description=goal,
         status="planning",
         epic_id=epic_id,
+        repo_id=state.get("repo_id"),
     )
     db.add(task)
     await db.flush()
@@ -1079,8 +1100,12 @@ async def _planning_node(state: EpicManagerState) -> dict[str, Any]:
 
     return {
         "task_id": task_id,
-        # Stage 4 Cluster O Phase 1b (2026-08-05) — task was just created
-        # above, so task.repo_id is directly available, no extra lookup.
+        # Stage 4 Cluster R Phase 2 (2026-08-05) — task.repo_id (read back
+        # after the flush/refresh above) is the DB-committed confirmation
+        # of the same state["repo_id"] the DevTask(...) call above was
+        # given; re-reading it here rather than reusing state["repo_id"]
+        # directly keeps this the actual persisted value, not just the
+        # value we intended to persist.
         "repo_id": task.repo_id,
         "plan_text": plan_text,
         "subtasks": subtasks,
@@ -1446,6 +1471,7 @@ async def _run_epic_manager_body(
     goal: str,
     db: AsyncSession,
     repo_path: str | None = None,
+    repo_id: int | None = None,
 ) -> EpicApprovalPackage:
     """The real epic orchestration logic — now a LangGraph supervisor graph
     (build_epic_manager_graph() above). Split out so run_epic_manager() can
@@ -1462,6 +1488,11 @@ async def _run_epic_manager_body(
     3. Mark epic 'coding' → run per-subtask Dev→QA→Review pipeline
     4. If ≥ MANAGER_MAX_EPIC_FAILURES blocked → emit epic.halted, mark epic 'halted'
     5. On all complete → assemble batched approval package → emit epic.ready_for_review
+
+    Stage 4 Cluster R Phase 2 (2026-08-05, CLUSTER_R_DESIGN.md §3): repo_id
+    seeds EpicManagerState["repo_id"] from the start (rather than being an
+    output _planning_node derives after the fact) so _planning_node can
+    inherit it onto the DevTask it creates.
     """
     graph = get_epic_manager_graph()
     initial_state: EpicManagerState = {
@@ -1469,6 +1500,7 @@ async def _run_epic_manager_body(
         "goal": goal,
         "db": db,
         "repo_path": repo_path,
+        "repo_id": repo_id,
     }
     final_state = await graph.ainvoke(initial_state)
     package: EpicApprovalPackage = final_state["package"]
