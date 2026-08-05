@@ -9,10 +9,9 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from slowapi.util import get_remote_address
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.tasks import router as tasks_router
@@ -33,13 +32,9 @@ from app.api.fleet_dashboard import router as fleet_dashboard_router
 from app.api.approvals import router as approvals_router
 
 from app.config import get_settings
+from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
-
-# Rate limiter — keyed by remote IP; enabled only when RATE_LIMIT_ENABLED=true
-limiter = Limiter(
-    key_func=get_remote_address, enabled=get_settings().rate_limit_enabled
-)
 
 
 def _init_sentry(settings: "Settings") -> None:  # type: ignore[name-defined]  # noqa: F821
@@ -644,7 +639,8 @@ async def health() -> dict[str, object]:
             await db.execute(text("SELECT 1"))
         checks["db"] = "ok"
     except Exception as exc:
-        checks["db"] = f"error: {exc}"
+        logger.warning("Database health check failed: %s", exc)
+        checks["db"] = "error"
 
     # Redis check (optional — only when redis_streams_enabled or queue_backend=rq)
     settings = get_settings()
@@ -657,7 +653,8 @@ async def health() -> dict[str, object]:
             await r.aclose()
             checks["redis"] = "ok"
         except Exception as exc:
-            checks["redis"] = f"error: {exc}"
+            logger.warning("Redis health check failed: %s", exc)
+            checks["redis"] = "error"
 
     # S3 check (optional — only when artifact_backend=s3)
     if settings.artifact_backend == "s3":
@@ -668,7 +665,8 @@ async def health() -> dict[str, object]:
             await asyncio.to_thread(s3.head_bucket, Bucket=settings.s3_bucket)
             checks["s3"] = "ok"
         except Exception as exc:
-            checks["s3"] = f"error: {exc}"
+            logger.warning("S3 health check failed: %s", exc)
+            checks["s3"] = "error"
 
     # Day 19 — Cloud Deployment prep. Agent count, so a deployment's own
     # health check can confirm the fleet actually loaded (not just that the

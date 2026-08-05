@@ -51,8 +51,12 @@ async def get_current_user(request: Request) -> CurrentUser:
 
     if settings.jwt_auth_enabled:
         auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header[len("Bearer ") :]
+        token = (
+            auth_header[len("Bearer ") :]
+            if auth_header.startswith("Bearer ")
+            else request.cookies.get("gridiron_token")
+        )
+        if token:
             try:
                 from app.auth.jwt import decode_access_token
 
@@ -64,7 +68,7 @@ async def get_current_user(request: Request) -> CurrentUser:
             except JWTError:
                 raise HTTPException(status_code=401, detail="Invalid or expired token")
         raise HTTPException(
-            status_code=401, detail="Authorization header missing or malformed"
+            status_code=401, detail="Authentication token missing or malformed"
         )
 
     # Legacy fallback: X-User-Role header — opt-in only (Audit 05 fix, SEC-05-014).

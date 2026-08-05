@@ -4,4 +4,21 @@ packages:
   - "tests"
 allowBuilds:
   esbuild: true
+  # sharp compiles/downloads a native binary via its install script — Next.js's
+  # image optimization needs a working sharp install, so this must be true, not
+  # a placeholder (was previously left as the literal string "set this to true
+  # or false", which is not valid YAML and meant the build script never ran).
+  sharp: true
   unrs-resolver: true
+overrides:
+  esbuild: ">=0.25.0"
+  minimatch: ">=9.0.7"
+  vite: ">=6.4.3"
+  sharp: ">=0.35.0"
+  # postcss is also bundled *inside* next@15.5.21 itself (its own internal
+  # build pipeline dep, not just apps/web's direct devDependency) — without
+  # this override that inner copy stays pinned to next's old postcss@8.4.31.
+  postcss: ">=8.5.25"
+  "brace-expansion@1": ">=1.1.17"
+  "brace-expansion@2": ">=2.1.2"
+  "brace-expansion@5": ">=5.0.9"

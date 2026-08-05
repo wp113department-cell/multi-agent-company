@@ -761,6 +761,17 @@ class Settings(BaseSettings):
         "Policy threshold, adjustable — not a measured constant.",
     )
 
+    # Stage 4 Cluster Q — Security slice (2026-08-05, app/fleet/security_score.py)
+    # pip-audit's real JSON schema (verified by reading the installed
+    # package) has no severity field, so this is a vulnerability-count
+    # threshold, not a severity weight — a real, honest difference from
+    # architecture_score_risk_cap above, not an oversight.
+    security_score_vuln_cap: float = Field(
+        default=5.0,
+        description="Total unresolved-vulnerability count at which security_score "
+        "bottoms out at 0.0. Policy threshold, adjustable — not a measured constant.",
+    )
+
     # Day 11 — Fleet OS Versioned Memory (merge-on-conflict lesson lifecycle)
     memory_merge_similarity_threshold: float = Field(
         default=0.85,
@@ -859,6 +870,34 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _require_secure_production_auth(self) -> "Settings":
+        """Reject production configurations that leave control-plane access open."""
+        if self.deployment_env != "production":
+            return self
+
+        if not self.jwt_auth_enabled:
+            raise ValueError(
+                "JWT_AUTH_ENABLED=true is required when DEPLOYMENT_ENV=production."
+            )
+        if not self.rbac_enabled:
+            raise ValueError(
+                "RBAC_ENABLED=true is required when DEPLOYMENT_ENV=production."
+            )
+        if self.allow_legacy_role_header:
+            raise ValueError(
+                "ALLOW_LEGACY_ROLE_HEADER=false is required when DEPLOYMENT_ENV=production."
+            )
+        if (
+            self.default_admin_password == "gridiron123"
+            or len(self.default_admin_password) < 12
+        ):
+            raise ValueError(
+                "DEFAULT_ADMIN_PASSWORD must be a non-default value of at least 12 "
+                "characters when DEPLOYMENT_ENV=production."
+            )
+        return self
+
+    @model_validator(mode="after")
     def _require_s3_bucket_when_s3_backend(self) -> "Settings":
         if self.artifact_backend == "s3" and not self.s3_bucket:
             raise ValueError("S3_BUCKET is required when ARTIFACT_BACKEND=s3.")
@@ -866,6 +905,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_enum_fields(self) -> "Settings":
+        if self.deployment_env not in ("development", "staging", "production"):
+            raise ValueError(
+                "DEPLOYMENT_ENV must be 'development', 'staging', or 'production', "
+                f"got {self.deployment_env!r}"
+            )
         if self.pipeline_mode not in ("simple", "full"):
             raise ValueError(
                 f"PIPELINE_MODE must be 'simple' or 'full', got {self.pipeline_mode!r}"
@@ -930,6 +974,11 @@ class Settings(BaseSettings):
     rate_limit_agents: str = Field(
         default="30/minute",
         description="Rate limit for specialized agent dispatch endpoints.",
+    )
+    rate_limit_login: str = Field(
+        default="10/minute",
+        description="Rate limit for the unauthenticated login/setup endpoints — deliberately "
+        "tighter than rate_limit_default to slow credential stuffing/brute force.",
     )
 
     # JWT auth

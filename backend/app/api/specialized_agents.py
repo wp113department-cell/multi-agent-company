@@ -22,13 +22,15 @@ import inspect
 import logging
 from typing import Any, Callable
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db.repository import append_log, transition_task
 from app.db.session import get_db
 from app.middleware.rbac import require_authenticated
+from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -335,7 +337,9 @@ async def list_specialized_agents() -> dict[str, Any]:
 
 
 @router.post("/{agent_name}/run", response_model=dict[str, str])
+@limiter.limit(get_settings().rate_limit_agents)
 async def run_specialized_agent(
+    request: Request,
     agent_name: str,
     body: RunAgentRequest,
     background_tasks: BackgroundTasks,
@@ -383,7 +387,9 @@ async def run_specialized_agent(
 
 
 @router.post("/{agent_name}/run-sync", response_model=RunAgentResponse)
+@limiter.limit(get_settings().rate_limit_agents)
 async def run_specialized_agent_sync(
+    request: Request,
     agent_name: str,
     body: RunAgentRequest,
     db: AsyncSession = Depends(get_db),

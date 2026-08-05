@@ -14,9 +14,29 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from starlette.requests import Request
 
 from app.agents.agent_result import AgentResult
 from app.memory.hooks import record_agent_run_outcome
+
+
+def _fake_request() -> Request:
+    """Minimal real Starlette Request (not a MagicMock) — needed because
+    run_specialized_agent_sync/run_specialized_agent carry a real
+    @limiter.limit(...) decorator (app/rate_limit.py) that requires an actual
+    Request instance, not just a keyword-argument named `request`."""
+    return Request(
+        scope={
+            "type": "http",
+            "method": "POST",
+            "path": "/api/specialized-agents/x/run-sync",
+            "headers": [],
+            "client": ("testclient", 12345),
+            "server": ("testserver", 80),
+            "scheme": "http",
+            "query_string": b"",
+        }
+    )
 
 # ---------------------------------------------------------------------------
 # record_agent_run_outcome — unit tests
@@ -196,7 +216,11 @@ async def test_run_sync_dispatch_calls_record_agent_run_outcome() -> None:
     ):
         body = RunAgentRequest(task_id=7, description="do it", repo_path=None)
         await run_specialized_agent_sync(
-            agent_name="debugger_agent", body=body, db=mock_db, _actor="tester"
+            request=_fake_request(),
+            agent_name="debugger_agent",
+            body=body,
+            db=mock_db,
+            _actor="tester",
         )
 
     mock_hook.assert_awaited_once()

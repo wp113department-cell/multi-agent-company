@@ -6,6 +6,7 @@ from fastapi import (
     File,
     HTTPException,
     Query,
+    Request,
     Response,
     UploadFile,
 )
@@ -32,6 +33,7 @@ from app.db.repository import (
 )
 from app.config import get_settings
 from app.middleware.rbac import require_approver, require_authenticated
+from app.rate_limit import limiter
 from app.repo_tools.worktree import remove_worktree
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -104,7 +106,9 @@ def _task_to_dict(task: Any, logs: list[Any] | None = None) -> dict[str, Any]:
 
 
 @router.post("", status_code=201)
+@limiter.limit(get_settings().rate_limit_tasks)
 async def create(
+    request: Request,
     body: CreateTaskRequest,
     db: AsyncSession = Depends(get_db),
     _actor: str = Depends(require_authenticated),
@@ -181,7 +185,9 @@ async def get_logs(
 
 
 @router.post("/{task_id}/run")
+@limiter.limit(get_settings().rate_limit_tasks)
 async def run_task(
+    request: Request,
     task_id: int,
     body: RunRequest,
     background_tasks: BackgroundTasks,
@@ -225,7 +231,9 @@ async def run_task(
 
 
 @router.post("/{task_id}/restart")
+@limiter.limit(get_settings().rate_limit_tasks)
 async def restart_task(
+    request: Request,
     task_id: int,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),

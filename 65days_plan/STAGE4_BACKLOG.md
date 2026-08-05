@@ -561,6 +561,280 @@ begin until this is fully documented — this entry is that record.
 architecture review's corrected finding — not the originally-assumed `dependency_security_agent`
 `findings` parse) is the last of the 3 staged efforts — not yet started, awaiting user direction.
 
+### Security slice — implemented + verified 2026-08-05
+
+Re-verified before writing any code (per user instruction), and this pass found the real picture
+**differs from both the original finding and the Architecture slice's precedent** — not just
+confirmed:
+
+- `dependency_security_agent`'s own `submit_dependency_security_agent` schema (`app/agents/tools.py`)
+  has **only `findings: array[string]`** — plain narrative text, no structured severity field at all.
+  Genuinely less structured than `architecture_reviewer`'s `risks[].severity` enum, confirmed by
+  reading the schema directly, not assumed from the earlier grep-based finding.
+- `pip-audit`'s own real JSON output schema (`pip_audit._service.interface.VulnerabilityResult`,
+  read directly from the installed package's dataclass fields — `id, description, fix_versions,
+  aliases, published`) **has no severity field either.** So a severity-weighted score (the
+  Architecture slice's formula shape) is not buildable from real data here — the honest score is a
+  **vulnerability count**, not severity-weighted, and this is documented as a genuine difference in
+  data shape, not a shortcut.
+- `npm audit` — allowed by `DEPENDENCY_AUDIT_BASH_TOOL`'s allowlist alongside `pip-audit` — is
+  **confirmed non-functional in this project's own frontend** (`npm audit --json` returns `{"error":
+  {"code": "ENOLOCK", ...}}` because the frontend uses pnpm, not npm — no `package-lock.json` exists;
+  confirmed by running it directly). Its real vulnerability JSON schema was not verified in this pass.
+  **Per the user's explicit instruction ("if the structured data does not exist, stop, document the
+  root cause... rather than fabricating a scoring mechanism"), Node/npm dependency scoring is
+  documented here as a known, separate gap and explicitly NOT covered by this slice** — not
+  fabricated, not guessed at.
+- `app/agents/tools.py`'s existing `make_dependency_audit_bash_handler()` (the LLM-facing bash tool)
+  doesn't force `--format=json` and truncates output at 6000 characters — an unreliable structured-
+  data source even for pip-audit. Left **completely untouched** (shared plumbing, out of this slice's
+  scope) in favor of independently, deterministically re-running `pip-audit --format=json` ourselves
+  after the agent's own run verifies audit tooling is invokable.
+
+**Implemented**:
+- `app/config.py`: `security_score_vuln_cap` (default 5.0 — total vulnerability count at which the
+  score bottoms at 0.0; a count threshold, not a severity weight — a real, honest difference from
+  `architecture_score_weight_*`, not an oversight).
+- `app/fleet/security_score.py` (new module, mirrors `architecture_score.py`/`benchmark_manager.py`'s
+  shape): `run_pip_audit_json(repo_path)` independently re-runs the real `pip-audit --format=json -r
+  <repo>/requirements.txt` CLI (never the caller's own runtime environment — pip-audit with no `-r`
+  audits the active Python env, not the target repo, which would silently score the wrong thing);
+  returns `None` (never raises) when there's no requirements.txt, the tool errors, or output isn't
+  valid JSON. `compute_security_score()` is a pure function reading only `dependencies[].vulns`
+  (list length) — never `description` or any narrative field (proven by a dedicated test); raises
+  `ValueError` on a malformed/unexpected shape rather than silently scoring it as "clean" (a parse
+  failure must never masquerade as a passing audit). `store_security_score()`/
+  `get_latest_security_score()`/`get_security_score_trend()` — same sync isolated-engine shape as
+  the Architecture slice.
+- New `security_scores` table (migration 029, applied and verified against real Postgres): `task_id`,
+  `repo_id` (Cluster O's `DevTask.repo_id` source of truth), `vulnerable_package_count`,
+  `total_vuln_count`, `security_score`, `created_at` — no risk-breakdown JSONB (unlike
+  `architecture_scores`) since there's no severity dimension to break down.
+- `app/agents/dependency_security_agent.py::run_dependency_security_agent()`: computes and persists a
+  score only when `audited` is real graph-verified True (the same flag `AgentResult.verified` already
+  uses) — an unverified run's tool-use claim isn't grounded, so no row is written. Non-fatal: a
+  persistence failure logs and returns, never breaks the real review.
+
+**Verified**: `tests/test_stage4_cluster_q_security_score.py` (12 new tests) — pure-function formula
+correctness (counting, clamping at 0, vacuous 1.0, malformed-input raises rather than silently
+scoring clean, and a dedicated test proving identical scores regardless of narrative description
+text); `run_pip_audit_json()` exercised against the **real pip-audit CLI** (not mocked) — including a
+genuinely non-zero case using `requests==2.32.3` (2 real, permanently-historical CVEs — CVEs against
+an already-pinned old version are never retracted, so this is a stable fixture, not flaky live-data
+dependence) and a genuinely clean case (`requests==2.33.0`); real-Postgres persist/read-back; and a
+full end-to-end test (`run_dependency_security_agent()` with `run_agent_graph` mocked at the LLM seam
+only — the real `pip-audit` subprocess call is **not** mocked — proving a real Postgres row is
+written with the exact counts the real tool reported) plus the unverified-run-persists-nothing gate.
+**`git stash` confirmed the real discriminating test fails without the wiring**: with
+`dependency_security_agent.py`'s implementation reverted, the end-to-end test failed with a clear
+message (`assert None is not None`) while the other 11 tests correctly still passed. `mypy app/
+--strict` clean across all 194 source files; `ruff`/`black` clean. 439 tests across every file
+referencing `dependency_security_agent` still green.
+
+**Full backend suite: 3827 passed, 1 failed, 56 skipped.** The 1 failure
+(`test_credential_encryption_production_gate.py::test_production_with_valid_encryption_key_does_not_raise`)
+is confirmed **unrelated to this slice** — isolated by `git stash`-ing every file this slice touched
+(`security_score.py`, `dependency_security_agent.py`, `config.py`'s `security_score_vuln_cap` field,
+`models.py`'s `SecurityScore`) and re-running the failing test in complete isolation: it fails
+identically with those changes absent. It traces to the RBAC/JWT/admin-password production-mode
+validator in `app/config.py` (`_require_secure_production_auth`), an area this slice never touched,
+observed to be under unrelated concurrent change elsewhere in the repo during this session. Not
+fixed here — out of this slice's scope, and touching it risks colliding with in-flight work this
+session did not originate. All 39 tests across Cluster P + all 3 Cluster Q slices pass cleanly on
+their own, and `mypy --strict` is clean on every file this slice touched.
+
+**Security slice is production verified.** All 3 staged Cluster Q efforts (Tests, Architecture,
+Security) are now complete and independently production-verified — each its own module, its own
+table, its own tests, none sharing scoring logic across categories (only genuinely shared
+infrastructure: `new_isolated_async_engine()`, `get_task_repo_id_sync()`, the migration/model
+conventions).
+
+### Cross-category aggregation layer — implemented + verified 2026-08-05
+
+Real prerequisite found while building this (not assumed in advance): unlike Architecture and
+Security, the Tests slice's `coverage_pct` was persisted only inside the generic `artifacts` table's
+opaque JSON payload (`app/api/specialized_agents.py`'s `artifact_payload`) — that table has no
+`repo_id` column and no dedicated read-back function, unlike `architecture_scores`/`security_scores`.
+Aggregating it uniformly with the other two would have meant either a fragile artifact-content parse
+at read time, or exactly the kind of per-category special-casing that violates "keep the aggregation
+extensible... without redesign." **Fixed as a small, in-scope prerequisite**, not scope creep: a new
+`test_scores` table (migration 030) and `app/fleet/test_score.py` module, mirroring
+`architecture_score.py`/`security_score.py`'s exact shape (`store_test_score`/
+`get_latest_test_score`/`get_test_score_trend`), wired into `run_test_coverage_agent()` the same way
+— only persisted when `coverage_measured` is real graph-verified True and a real `coverage_pct` was
+reported. The existing `artifacts`-table persistence path is unchanged, additive only. `test_score` is
+`coverage_pct` normalized to `[0.0, 1.0]` (`coverage_pct / 100`) so it combines meaningfully with
+`architecture_score`/`security_score`, which are already on that scale.
+
+**Implemented**: `app/fleet/quality_score.py` — `get_quality_score(repo_id)` reads only each
+category's own `get_latest_*_score(repo_id)` function (never recomputes; the "never recompute" claim
+is directly tested by patching all 3 `compute_*_score()` functions and asserting none are called
+during aggregation). A `_category_registry()` lists all 9 real Q117 categories
+(`Bhaskar's_questions.md` #117): the 3 production-verified ones (tests, architecture, security) each
+wired to their real read-back function; the other 6 (documentation, performance, memory, tools,
+agents, prompts) marked `implemented=False` up front, reporting `status="unavailable",
+reason="not_implemented"` — never a placeholder/zero score. A category that IS implemented but has no
+persisted row yet for a given repo also reports `"unavailable"`, but `reason="no_data"` — distinct
+from `"not_implemented"` so a caller can tell "doesn't exist yet" from "exists, hasn't scored this
+repo yet." `overall_score` is the mean of *available* categories only — unavailable categories are
+excluded from the average entirely, never treated as 0 (so 1 real category scored among 8 unavailable
+ones shows that category's real score, not a value dragged toward 0). Extensibility: adding a future
+category means one new `CategoryDefinition` entry in `_category_registry()` plus removing its name
+from `_NOT_YET_IMPLEMENTED` — the aggregation logic itself never changes, a claim `test_category_
+registry_covers_exactly_the_9_real_q117_categories` directly guards. No new aggregate-history table
+was added — the aggregate itself is a live, on-demand read-time composition of already-persisted
+per-category rows, not a new redundant snapshot-of-a-snapshot.
+
+**Verified**: `tests/test_stage4_cluster_q_quality_score_aggregation.py` (7 new tests, real Postgres,
+seeding via each category's own real `store_*_score()` function, never raw SQL) — the fresh-repo
+all-unavailable case; the not-yet-implemented categories never misreport as `no_data`; a single
+available category's `overall_score` equals that category exactly; all 3 available categories average
+correctly; **the literal live-update proof the user asked for** (persist an architecture score,
+read the aggregate, persist a *second, different* architecture score for the same repo, read the
+aggregate again, assert it reflects the new value — not the first one it ever saw); the
+never-recompute proof (patches all 3 `compute_*_score()` functions, asserts none called); and the
+9-category registry-completeness guard. Plus `tests/test_stage4_cluster_q_test_coverage_pct.py`
+gained 2 new tests for the `test_scores` prerequisite itself (real end-to-end persistence via
+`run_test_coverage_agent()`, and the blocked-run-persists-nothing gate), mirroring Architecture/
+Security's own precedent exactly. **Confirmed the tests genuinely fail without the implementation**:
+moving `quality_score.py` aside caused all 7 aggregation tests to fail at collection
+(`ModuleNotFoundError`); `git stash`-ing `test_coverage_agent.py`'s wiring caused the new
+end-to-end `test_scores` persistence test to fail cleanly (`assert None is not None`) while every
+other test in that file correctly still passed. `mypy app/ --strict` clean across all 196 source
+files; `ruff`/`black` clean.
+
+**Full backend suite confirmed: 3836 passed, 1 failed, 56 skipped** — exact match to the 3827 prior
+baseline + 9 new tests. The 1 failure is the same pre-existing, already-isolated, unrelated
+`test_credential_encryption_production_gate.py::test_production_with_valid_encryption_key_does_not_raise`
+(RBAC/JWT/admin-password production-validator; per user instruction, not counted against this slice
+and not fixed here). All 48 tests across Cluster P + all Cluster Q work (Tests, Architecture,
+Security, aggregation) pass cleanly on their own — zero regressions from this work.
+
+**The cross-category aggregation layer is production verified.** Cluster Q now has 3 real,
+independently-verified score producers and a real, extensible, live aggregation over them —
+9 categories tracked, 3 real, 6 honestly reported as not yet built.
+
+### Remaining categories — per-category re-verification pass, 2026-08-05
+
+Per explicit user instruction: re-verified all 6 remaining Q117 categories (Prompts, Documentation,
+Memory, Tools, Performance, plus Agents — not explicitly named by the user but found while reviewing
+the aggregator and included for completeness) directly against current code, one at a time, before
+writing any aggregation logic for any of them. Verdict: **1 of the 6 was genuinely buildable and
+implemented (Memory); 4 are genuinely blocked by missing infrastructure and documented, not
+fabricated; 1 (Agents) has a real producer but is blocked by an unmade scoping-design decision, a
+different kind of gap than "missing infrastructure."**
+
+#### Memory — implemented + verified 2026-08-05
+
+Re-verification found this category is **not** in the same "blocked" bucket as the other 4: unlike
+Prompts/Documentation/Tools (zero or non-aggregable data), `memory_embeddings` has real, structured,
+already-persisted, repo-scoped per-row columns — `verified` (bool, set at write time by
+`app/memory/store.py::_default_verified()`, True only when `outcome == "completed"`, never invented),
+`reuse_count`, `importance`, and `repo_id` (Cluster O's own established scoping column) — that were
+never aggregated into a subsystem-health signal. The original architecture review's finding (that
+`memory_score` — the retrieval-ranking formula — is the wrong kind of signal) is still correct and
+unchanged; the fix isn't to reuse that formula, it's to aggregate the real per-row facts it doesn't
+use.
+
+**Implemented**: `app/fleet/memory_score.py` computes `verified_ratio` — the fraction of a repo's
+real (non-archived) memory rows that are verified. Deliberately **not** persisted to a new snapshot
+table, unlike Tests/Architecture/Security: those 3 categories are computed once per discrete agent
+run; Memory has no equivalent discrete "review" — `memory_embeddings` is a continuously-accumulating
+pool written by many different agent runs over time, and its `repo_id`/`verified` columns are already
+durably persisted by that real write path. `get_latest_memory_score(repo_id)` is therefore a live SQL
+aggregate (`COUNT`/`COUNT FILTER`) over already-recorded facts — not a new redundant snapshot, and not
+"recomputing a category score" in the sense the aggregation layer's contract guards against (it never
+re-derives what `verified` means, only counts real, already-set values). `compute_memory_score()`
+returns `None` (never a fabricated score) when a repo has zero memory rows — absence of data is
+absence of evidence, not itself a health signal, unlike a clean architecture review which genuinely is
+one. Wired into `app/fleet/quality_score.py`'s registry — the 4th real category.
+
+**Verified**: `tests/test_stage4_cluster_q_memory_score.py` (9 new tests) — pure-function ratio math,
+zero-count returns `None`; real end-to-end tests seeded through the **real**
+`embed_task_outcome()`/`embed_failure()` write path (never raw SQL) — including a genuine finding
+along the way: `embed_task_outcome`'s real near-duplicate detection
+(`app/memory/store.py::_find_near_duplicate`) legitimately merged two identically-worded seed calls
+into one row on first attempt, confirming that mechanism works correctly; fixed by giving each seed
+call distinct text, not by working around the dedup. A live-update test proves a new memory write
+immediately changes `get_latest_memory_score()`'s result (the "no staleness" analog of Tests/
+Architecture/Security's persisted-row proof). Two more tests prove Memory appears correctly inside
+`get_quality_score()` itself, including the aggregate `overall_score` changing when new memory is
+written. **Confirmed genuinely fails without the implementation**: moving `memory_score.py` aside
+caused all 9 tests to fail at collection; temporarily reverting just the registry-wiring lines in
+`quality_score.py` (the file is new/untracked, so this was done as a direct temporary edit rather than
+`git stash`) caused exactly the 3 memory-registry-dependent tests to fail cleanly while the other 13
+aggregation/memory tests correctly still passed. `mypy app/ --strict` clean across all 198 source
+files; `ruff`/`black` clean on every file this pass touched.
+
+#### Prompts, Documentation, Tools, Performance — blocked by missing infrastructure, re-confirmed 2026-08-05
+
+Each re-verified directly (not assumed from the original architecture review) — same verdict, still
+true:
+
+- **Prompts**: zero real signal anywhere. `app/fleet/prompt_registry.py` has no quality/score fields;
+  no agent evaluates prompt quality. Real fix needs net-new instrumentation from scratch — no existing
+  data to build on, honestly or otherwise.
+- **Documentation**: zero real signal anywhere. `submit_docs`'s real schema (`app/agents/tools.py`)
+  has only `files_written: array[string]` (file paths) and `summary` (narrative) — agents that write
+  documentation don't measure its coverage, staleness, or quality. Real fix needs net-new
+  instrumentation (e.g. docstring/README coverage via AST, staleness via git-blame vs. code-change
+  recency).
+- **Tools**: `ToolCallRecord` (`app/fleet/metrics.py`: `tool_name`, `success`, `duration_ms`, `error`)
+  is transient in-memory per-run data only — confirmed it is never persisted to any database table,
+  let alone one with `repo_id` scoping. `tool_accuracy` (the aggregate derived from it) only exists
+  inside `agent_benchmarks.objectives`, keyed by `agent_name` — the same scoping mismatch as Agents
+  below, on top of already being a different category's sub-metric. No structured, repo-scoped record
+  exists to aggregate.
+- **Performance**: no real application-runtime signal exists anywhere. The only real latency data
+  (`agent_benchmarks.objectives.latency_p50`) measures agent orchestration time, not application
+  performance, and carries the same agent-name (not repo) scoping problem as Agents. `load_test_agent`
+  — the one agent whose whole job is load testing — has a purely narrative submit schema
+  (`summary`/`findings: array[string]`/`recommendations`), confirmed directly: no throughput/latency
+  field despite the role existing specifically to measure that.
+
+None fabricated. Not fixed in this pass — documented here as the authoritative record; a real fix for
+any of them is net-new instrumentation work, not aggregation work, and should get its own scoping pass
+(mirroring how Tests' `coverage_pct` field was added) before any score exists for it.
+
+#### Agents — real producer exists, blocked by an unmade scoping decision, found 2026-08-05
+
+Distinct from the 4 above: `app/fleet/benchmark_manager.py`/`agent_benchmarks` (migration 012) **is**
+a real, working, historically-tracked producer — the one category the original architecture review
+found fully real from the start. It was never wired into `app/fleet/quality_score.py`, found while
+reviewing the aggregator for this pass. The reason isn't missing data — it's a genuine structural
+mismatch: `agent_benchmarks` has **no `repo_id` column at all** (confirmed directly), because it's
+scoped by `agent_name`. An agent like `architect` runs across many different repos; its execution-
+quality score (`benchmark_score`: latency/tool_accuracy/verification_coverage/retry_success/
+compile_success/hallucination) is a property of the *agent*, not of any one repo — there is no
+natural "the Agents score for repo X" the way there's a natural "the Architecture score for repo X."
+
+Two real options, neither implemented without a decision: (a) report a **fleet-wide** Agents score
+(average `benchmark_score` across all agents, repo-agnostic) — simple, but doesn't fit the per-repo
+`get_quality_score(repo_id)` signature the other 4 categories use; or (b) derive a **repo-scoped**
+Agents score via a join through `agent_runs`/`dev_tasks.repo_id` (which agents actually ran against
+this repo, and how did they score) — fits the existing signature, but is real new query-design work,
+not a two-line registry addition like Memory turned out to be. Documented here rather than choosing
+unilaterally, since it's a design decision on the aggregator's own scoping model, not a "does the data
+exist" question.
+
+**Next**: with 4 of 9 categories real (Tests, Architecture, Security, Memory) and 5 documented as
+blocked (4 by missing infrastructure, 1 by an unmade scoping decision), Cluster Q's per-category work
+is at a natural decision point — either resolve the Agents scoping question, begin net-new
+instrumentation for one of the 4 infrastructure-blocked categories, or move to Cluster R (below).
+Awaiting user direction on priority.
+
+#### Cluster Q — CLOSED for this phase (user-approved, 2026-08-05)
+
+Tests, Architecture, Security, and Memory are production verified (real producer → persistence →
+aggregation → end-to-end tests proving the tests fail without the implementation → full regression
+green: 3853 passed, 0 failed, 56 skipped, 17 deselected — `mypy --strict` clean). The aggregation
+framework (`app/fleet/quality_score.py`) is production verified and extensible. The remaining 5
+categories (Prompts, Documentation, Tools, Performance, Agents) are explicitly documented above as
+blocked — 4 by missing infrastructure, 1 (Agents) by an unmade scoping decision — not implemented with
+placeholder logic, per explicit instruction not to build artificial instrumentation just to raise a
+completion percentage. Cluster Q is closed for this phase; the blocked items remain open backlog items
+to be picked up later, on their own scoping passes, same as any other Tier 1/2 item. **Next: Cluster R.**
+
 ---
 
 ## Cluster R — Epics have no repository assignment mechanism (found 2026-08-05, discovered implementing Cluster O Phase 1b)
@@ -611,6 +885,19 @@ Size: **S-M** (one migration, one API field, threading through an already-unders
 call path — Cluster O's Phase 1b work already identified exactly where `repo_id` needs to enter the
 epic-manager graph). Not fixed in this pass — documented and promoted to its own cluster per explicit
 instruction, rather than treated as a footnote inside Cluster O.
+
+**Architecture review complete, 2026-08-05 — see `CLUSTER_R_DESIGN.md`.** Full design produced before
+any implementation, per explicit instruction: current Epic domain model verified directly (no
+`repo_id` column, no relationship), true source of repository ownership identified (`Epic.repo_id`,
+resolved to a path the same way `DevTask.repo_id` already is via `resolve_task_repo_path()`'s proven
+pattern), every affected execution path mapped (API layer, epic-manager LangGraph node-by-node, model
+layer, frontend), migration drafted (mirrors migration 007/024's exact shape), size re-confirmed at
+S-M. One real correction found during the review, not assumed from the original finding: the existing
+`EpicManagerState` docstring claims downstream memory-scoping "starts working automatically, no
+further code change" once epics get a real `repo_id` — true for the two `embed_task_outcome()` call
+sites in `_finalize_node`, but **not** true for `_planning_node`'s `DevTask(...)` construction, which
+never passes `repo_id=` today and needs a one-line fix, not just upstream plumbing. Not implemented —
+awaiting go-ahead on the design before writing code.
 
 ---
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { fetchGoal, Goal } from "@/lib/api";
 
@@ -25,9 +26,9 @@ export default function GoalDetailPage() {
 
   return (
     <div>
-      <a href="/goals" className="mb-4 inline-block text-xs text-blue-600 hover:underline">
+      <Link href="/goals" className="mb-4 inline-block text-xs text-blue-600 hover:underline">
         ← All Goals
-      </a>
+      </Link>
 
       <div className="rounded border border-slate-200 bg-white p-6 shadow-sm">
         <h1 className="mb-2 text-xl font-bold">{goal.text}</h1>
@@ -53,12 +54,12 @@ export default function GoalDetailPage() {
             <ul className="space-y-1">
               {goal.epicIds.map((id) => (
                 <li key={id}>
-                  <a
+                  <Link
                     href={`/epics/${id}`}
                     className="text-sm text-blue-600 hover:underline"
                   >
                     {id}
-                  </a>
+                  </Link>
                 </li>
               ))}
             </ul>

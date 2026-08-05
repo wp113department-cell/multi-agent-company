@@ -3,7 +3,7 @@
 Routes:
   POST /api/auth/login     → exchange username+password for a JWT
   GET  /api/auth/me        → return the current user's identity from their token
-  POST /api/auth/refresh   → stub (not yet implemented — return 501)
+  POST /api/auth/refresh   → renew an already-valid session's JWT and cookie
 
 For Phase 1, credentials are stored in the system_settings table
 (key="auth_users", value=JSON list of {username, hashed_password, role}).
@@ -11,6 +11,11 @@ This avoids adding a users table before full RBAC is needed.
 
 When JWT_AUTH_ENABLED=false, login still works but the token is optional
 for all other endpoints (backward compat with X-User-Role header).
+
+login and setup are deliberately rate-limited far below rate_limit_default
+(Settings.rate_limit_login) since they are the only unauthenticated,
+credential-checking endpoints in the API — the natural target for brute
+force / credential stuffing.
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +32,7 @@ from app.auth.dependencies import CurrentUser, get_current_user
 from app.auth.jwt import create_access_token, verify_password
 from app.config import get_settings
 from app.db import get_db
+from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +45,6 @@ class LoginRequest(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    access_token: str
     token_type: str = "bearer"
     role: str
     username: str
@@ -58,8 +63,12 @@ class ChangePasswordRequest(BaseModel):
 
 
 @router.post("/login", response_model=LoginResponse)
+@limiter.limit(get_settings().rate_limit_login)
 async def login(
-    body: LoginRequest, db: AsyncSession = Depends(get_db)
+    request: Request,
+    body: LoginRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
 ) -> LoginResponse:
     """Exchange username + password for a signed JWT access token.
 
@@ -97,8 +106,16 @@ async def login(
 
     role = user.get("role", "viewer")
     token = create_access_token({"sub": body.username, "role": role})
+    response.set_cookie(
+        key="gridiron_token",
+        value=token,
+        max_age=settings.jwt_access_token_expire_minutes * 60,
+        httponly=True,
+        secure=settings.deployment_env in ("staging", "production"),
+        samesite="lax",
+        path="/",
+    )
     return LoginResponse(
-        access_token=token,
         role=role,
         username=body.username,
         must_change_password=bool(user.get("must_change_password", False)),
@@ -115,8 +132,45 @@ async def me(current_user: CurrentUser = Depends(get_current_user)) -> MeRespons
     )
 
 
+@router.post("/refresh", response_model=LoginResponse)
+async def refresh_token(
+    response: Response,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> LoginResponse:
+    """Renew the caller's session: issues a fresh JWT (full expiry window) for
+    an already-valid, unexpired session and resets the httponly cookie.
+
+    Requires a real, currently-valid JWT — get_current_user() only sets
+    is_authenticated=True for a verified token (never for the legacy
+    X-User-Role header, and never for an expired/invalid one), so a caller
+    whose session already lapsed must log in again rather than refresh.
+    """
+    if not current_user.is_authenticated:
+        raise HTTPException(
+            status_code=401,
+            detail="A valid session is required to refresh (log in again).",
+        )
+
+    settings = get_settings()
+    token = create_access_token(
+        {"sub": current_user.username, "role": current_user.role}
+    )
+    response.set_cookie(
+        key="gridiron_token",
+        value=token,
+        max_age=settings.jwt_access_token_expire_minutes * 60,
+        httponly=True,
+        secure=settings.deployment_env in ("staging", "production"),
+        samesite="lax",
+        path="/",
+    )
+    return LoginResponse(role=current_user.role, username=current_user.username)
+
+
 @router.post("/setup")
+@limiter.limit(get_settings().rate_limit_login)
 async def setup_first_user(
+    request: Request,
     body: LoginRequest,
     role: str = "approver",
     db: AsyncSession = Depends(get_db),
@@ -127,6 +181,8 @@ async def setup_first_user(
     additional users.
     """
     settings = get_settings()
+    if settings.deployment_env == "production":
+        raise HTTPException(status_code=404, detail="Not found")
     if not settings.jwt_secret_key:
         raise HTTPException(
             status_code=501, detail="JWT_SECRET_KEY must be set to use auth."
@@ -170,6 +226,13 @@ async def setup_first_user(
     await db.commit()
     logger.info("First auth user created: %s (role=%s)", body.username, role)
     return {"status": "created", "username": body.username, "role": role}
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(response: Response) -> Response:
+    """Clear the browser session cookie without exposing it to JavaScript."""
+    response.delete_cookie(key="gridiron_token", path="/")
+    return response
 
 
 @router.post("/change-password")
