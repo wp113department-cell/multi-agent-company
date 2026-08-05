@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { useParams } from "next/navigation";
 import { fetchEpic, approveEpic, rejectEpic, approveCost } from "../../../lib/api";
 import { isApprover } from "../../../lib/auth";
 
@@ -25,7 +26,8 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-export default function EpicDetailPage({ params }: { params: { id: string } }) {
+export default function EpicDetailPage() {
+  const params = useParams<{ id: string }>();
   const epicId = params.id;
   const [userId, setUserId] = useState("approver-1");
   const qc = useQueryClient();
@@ -33,6 +35,7 @@ export default function EpicDetailPage({ params }: { params: { id: string } }) {
   const { data: epic, isLoading, error } = useQuery({
     queryKey: ["epic", epicId],
     queryFn: () => fetchEpic(epicId),
+    enabled: Boolean(epicId),
     refetchInterval: 5000,
   });
 

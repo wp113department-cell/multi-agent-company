@@ -171,12 +171,46 @@ def run_dependency_security_agent(
     # claim; the old priority let a false verification claim leak into
     # AgentResult.raw even though .verified itself was already correct.
     raw = final_state["result"] if final_state["result"] else result
+    verified = bool(final_state["verification"].get("read")) and bool(
+        final_state["verification"].get("audited")
+    )
+
+    # Stage 4 Cluster Q — Security slice (2026-08-05). Only compute/persist
+    # a score when this run's audit claim is graph-verified grounded
+    # (audited, the same flag `verified` above uses) — never build a score
+    # on an unverified claim. Independently re-runs pip-audit itself
+    # (never parses the LLM's own narrative findings — see
+    # app/fleet/security_score.py's module docstring for why) against the
+    # real repo's requirements.txt; repo_id resolved via DevTask.repo_id,
+    # Cluster O's single source of truth for repo scoping (ADR 006).
+    if verified:
+        try:
+            from app.db.repository import get_task_repo_id_sync
+            from app.fleet.security_score import (
+                compute_security_score,
+                run_pip_audit_json,
+                store_security_score,
+            )
+
+            pip_audit_result = run_pip_audit_json(repo)
+            if pip_audit_result is not None:
+                score_result = compute_security_score(pip_audit_result)
+                store_security_score(
+                    str(task_id), get_task_repo_id_sync(task_id), score_result
+                )
+        except Exception as exc:
+            logger.warning(
+                "Stage 4 Cluster Q: failed to compute/persist security_score "
+                "for task %s: %s",
+                task_id,
+                exc,
+            )
+
     return AgentResult(
         summary=str(raw.get("summary", description[:100])),
         findings=list(raw.get("findings", [])),
         files_touched=[],
-        verified=bool(final_state["verification"].get("read"))
-        and bool(final_state["verification"].get("audited")),
+        verified=verified,
         requires_human_approval=False,
         tokens_in=final_state["tokens_in"],
         tokens_out=final_state["tokens_out"],

@@ -7,11 +7,12 @@ import json
 import logging
 from typing import Any, AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db import get_db
 from app.middleware.rbac import require_authenticated
 from app.models.chat import (
@@ -23,6 +24,7 @@ from app.models.chat import (
     load_history_from_db,
     save_message_to_db,
 )
+from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +116,9 @@ async def create_chat_session(
 
 
 @router.post("/sessions/{session_id}/messages")
+@limiter.limit(get_settings().rate_limit_agents)
 async def send_message(
+    request: Request,
     session_id: str,
     body: SendMessageRequest,
     db: AsyncSession = Depends(get_db),

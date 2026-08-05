@@ -776,3 +776,103 @@ class ArchitectureScore(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class SecurityScore(Base):
+    """Stage 4 Cluster Q — Security slice (2026-08-05,
+    app/fleet/security_score.py).
+
+    Each row is one dependency_security_agent run's real, independently
+    computed `pip-audit --format=json` result against the target repo's
+    requirements.txt — never parsed from the agent's own narrative
+    `findings` (verified before implementing: dependency_security_agent's
+    submit_dependency_security_agent schema has only `findings:
+    array[string]`, plain narrative text, no structured severity field at
+    all — a different, less-structured shape than architecture_reviewer's
+    risks[].severity enum). pip-audit's own real JSON schema
+    (pip_audit._service.interface.VulnerabilityResult, confirmed by reading
+    the installed package directly, not assumed) has no severity field
+    either (id/description/fix_versions/aliases/published only) — so this
+    score is a real vulnerability COUNT, not severity-weighted, honestly
+    reflecting what the tool actually reports. Only ever written when this
+    run's `audited` verification flag is real True (the same graph-enforced
+    signal AgentResult.verified already uses for this agent) — an
+    unverified run's tool-use claim isn't grounded, so no row is written.
+
+    Node/npm dependency scoring is a documented, separate gap, not covered
+    by this table: `npm audit` is allowed by DEPENDENCY_AUDIT_BASH_TOOL's
+    allowlist but is non-functional in this project's own frontend (pnpm,
+    not npm — no package-lock.json) and its real JSON schema was not
+    verified in this pass. See STAGE4_BACKLOG.md's Cluster Q Security slice.
+
+    repo_id resolved via DevTask.repo_id — Cluster O's single source of
+    truth for repo scoping (ADR 006, INV-1) — nullable per INV-8, same
+    convention as ArchitectureScore.repo_id above.
+    """
+
+    __tablename__ = "security_scores"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(100), index=True)
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("repos.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    vulnerable_package_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_vuln_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    security_score: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class TestScore(Base):
+    """Stage 4 Cluster Q — Tests slice, dedicated persistence added
+    2026-08-05 while building the cross-category aggregation layer
+    (app/fleet/quality_score.py).
+
+    Found while building the aggregator: the Tests slice's own
+    `coverage_pct` field (added to test_coverage_agent's submit schema)
+    was captured and persisted, but only inside the generic `artifacts`
+    table's opaque JSON payload (app/api/specialized_agents.py's
+    artifact_payload) — that table has no `repo_id` column and no
+    dedicated read-back function, unlike ArchitectureScore/SecurityScore
+    above. That shape can't be aggregated without either a fragile
+    artifact-content parse at read time or a real, structured table like
+    this one. This table brings Tests to the same structural bar as
+    Architecture/Security — a real prerequisite for uniform aggregation,
+    not a redesign of the existing artifact-persistence path (which stays,
+    unchanged, for its own purpose).
+
+    test_score is coverage_pct normalized to [0.0, 1.0] (coverage_pct / 100)
+    so it combines meaningfully with architecture_score/security_score,
+    which are already on that scale — coverage_pct itself is kept
+    unrounded alongside it as the real, human-readable measured percentage.
+
+    Only ever written when the run's `coverage_measured` verification flag
+    is real True AND the model actually reported a coverage_pct (schema
+    allows omitting it on a blocked run) — never a score built on an
+    unverified or absent claim.
+
+    repo_id resolved via DevTask.repo_id — Cluster O's single source of
+    truth for repo scoping (ADR 006, INV-1) — nullable per INV-8, same
+    convention as ArchitectureScore/SecurityScore.repo_id above.
+    """
+
+    __tablename__ = "test_scores"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(100), index=True)
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("repos.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    coverage_pct: Mapped[float] = mapped_column(Float, nullable=False)
+    test_score: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

@@ -1,14 +1,19 @@
+# Local/dev orchestration only — not a production deployment manifest.
+# Postgres/Redis are bound to 127.0.0.1 (host-only, not reachable from the
+# network) rather than a secrets-managed internal network, and POSTGRES_PASSWORD
+# below defaults to a known dev-only value for zero-config `docker compose up`.
+# Override POSTGRES_PASSWORD (and set DATABASE_URL to match) via a .env file or
+# your orchestrator's real secrets store before using this anywhere shared.
 services:
   db:
     image: pgvector/pgvector:pg16
-    container_name: gridiron-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: gridiron
-      POSTGRES_PASSWORD: gridiron_dev_only
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gridiron_dev_only}
       POSTGRES_DB: gridiron_dev
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -19,10 +24,9 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: gridiron-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -34,11 +38,30 @@ services:
       context: ./backend
     command: alembic upgrade head
     environment:
-      DATABASE_URL: postgresql+asyncpg://gridiron:gridiron_dev_only@db:5432/gridiron_dev
+      DATABASE_URL: postgresql+asyncpg://gridiron:${POSTGRES_PASSWORD:-gridiron_dev_only}@db:5432/gridiron_dev
     depends_on:
       db:
         condition: service_healthy
 
+  # NOTE — bash_sandbox_enabled (Settings, default True) routes the 3 fully-
+  # generic bash tools through app.policy.sandbox.run_sandboxed(), which
+  # requires a `docker` CLI + a reachable Docker daemon *inside this
+  # container*. Neither is provided here (backend/Dockerfile has no docker
+  # client, and this service has no docker.sock mount), so those tools will
+  # raise SandboxUnavailableError rather than silently running unsandboxed —
+  # that's the intended fail-closed behavior, not a bug. Two real ways to
+  # give the backend container working sandboxed execution:
+  #   1. Docker-outside-of-Docker: install the `docker` CLI in
+  #      backend/Dockerfile and mount `/var/run/docker.sock:/var/run/docker.sock`
+  #      here. Tradeoff: docker.sock access is equivalent to root on the host
+  #      — only do this if the host running `docker compose` is itself
+  #      disposable/sandboxed infrastructure, not a shared production host.
+  #   2. Point sandboxed execution at a remote/isolated Docker host (DOCKER_HOST)
+  #      dedicated to this purpose, so a compromised backend container never
+  #      has a path to the host it's running on.
+  # Until one of those is wired up, either accept that sandboxed bash tools
+  # are unavailable, or set BASH_SANDBOX_ENABLED=false as an explicit,
+  # operator-acknowledged opt-out (see Settings.bash_sandbox_enabled).
   backend:
     build:
       context: ./backend
@@ -46,14 +69,20 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://gridiron:gridiron_dev_only@db:5432/gridiron_dev
+      DATABASE_URL: postgresql+asyncpg://gridiron:${POSTGRES_PASSWORD:-gridiron_dev_only}@db:5432/gridiron_dev
       REDIS_URL: redis://redis:6379/0
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       QUEUE_BACKEND: ${QUEUE_BACKEND:-asyncio}
       SENTRY_DSN: ${SENTRY_DSN:-}
+      DEPLOYMENT_ENV: ${DEPLOYMENT_ENV:-development}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
       JWT_AUTH_ENABLED: ${JWT_AUTH_ENABLED:-false}
+      RBAC_ENABLED: ${RBAC_ENABLED:-true}
+      ALLOW_LEGACY_ROLE_HEADER: ${ALLOW_LEGACY_ROLE_HEADER:-false}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-gridiron123}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
+      BASH_SANDBOX_ENABLED: ${BASH_SANDBOX_ENABLED:-true}
     depends_on:
       db:
         condition: service_healthy
@@ -71,7 +100,7 @@ services:
       context: ./backend
     command: rq worker gridiron-high gridiron-default --url ${REDIS_URL:-redis://redis:6379/0} --with-scheduler
     environment:
-      DATABASE_URL: postgresql+asyncpg://gridiron:gridiron_dev_only@db:5432/gridiron_dev
+      DATABASE_URL: postgresql+asyncpg://gridiron:${POSTGRES_PASSWORD:-gridiron_dev_only}@db:5432/gridiron_dev
       REDIS_URL: redis://redis:6379/0
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     depends_on:

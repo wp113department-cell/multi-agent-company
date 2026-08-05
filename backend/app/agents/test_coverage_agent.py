@@ -198,15 +198,43 @@ def run_test_coverage_agent(
     # claim; the old priority let a false verification claim leak into
     # AgentResult.raw even though .verified itself was already correct.
     raw = final_state["result"] if final_state["result"] else result
+    # MASTER_AGENT_v2.md Phase 2.1 — this role's own contract explicitly
+    # forbids reporting coverage from memory, so "verified" requires the
+    # coverage tool to have actually run, not just that code was read.
+    verified = bool(final_state["verification"].get("read")) and bool(
+        final_state["verification"].get("coverage_measured")
+    )
+
+    # Stage 4 Cluster Q (2026-08-05) — dedicated structured persistence,
+    # added while building the cross-category aggregation layer (see
+    # app/fleet/test_score.py's module docstring for why this exists
+    # alongside the pre-existing artifact_payload path in
+    # app/api/specialized_agents.py, which is unchanged). Only persisted
+    # when this run's coverage claim is graph-verified grounded AND a real
+    # coverage_pct was actually reported (the schema allows omitting it on
+    # a blocked run — never build a score from an absent or unverified
+    # claim).
+    coverage_pct = raw.get("coverage_pct")
+    if verified and coverage_pct is not None:
+        try:
+            from app.db.repository import get_task_repo_id_sync
+            from app.fleet.test_score import compute_test_score, store_test_score
+
+            score_result = compute_test_score(float(coverage_pct))
+            store_test_score(str(task_id), get_task_repo_id_sync(task_id), score_result)
+        except Exception as exc:
+            logger.warning(
+                "Stage 4 Cluster Q: failed to compute/persist test_score "
+                "for task %s: %s",
+                task_id,
+                exc,
+            )
+
     return AgentResult(
         summary=str(raw.get("summary", description[:100])),
         findings=list(raw.get("findings", [])),
         files_touched=[],
-        # MASTER_AGENT_v2.md Phase 2.1 — this role's own contract explicitly
-        # forbids reporting coverage from memory, so "verified" requires the
-        # coverage tool to have actually run, not just that code was read.
-        verified=bool(final_state["verification"].get("read"))
-        and bool(final_state["verification"].get("coverage_measured")),
+        verified=verified,
         requires_human_approval=False,
         tokens_in=final_state["tokens_in"],
         tokens_out=final_state["tokens_out"],

@@ -8,17 +8,19 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db import get_db
 from app.db.models import DevTask, Epic
 from app.event_bus.bus import publish_event
 from app.event_bus.models import GridironEvent
 from app.middleware.rbac import require_approver, require_authenticated
 from app.pipeline.cost_controller import estimate_epic_cost
+from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +85,9 @@ def _epic_to_response(epic: Epic, tasks: list[DevTask]) -> dict[str, Any]:
 
 
 @router.post("")
+@limiter.limit(get_settings().rate_limit_tasks)
 async def create_epic(
+    request: Request,
     body: CreateEpicRequest,
     db: AsyncSession = Depends(get_db),
     _actor: str = Depends(require_authenticated),

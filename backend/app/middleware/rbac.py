@@ -59,8 +59,12 @@ async def require_approver(
     # 1. JWT path — takes precedence when enabled
     if settings.jwt_auth_enabled:
         auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header[len("Bearer ") :]
+        token = (
+            auth_header[len("Bearer ") :]
+            if auth_header.startswith("Bearer ")
+            else request.cookies.get("gridiron_token")
+        )
+        if token:
             try:
                 from app.auth.jwt import decode_access_token
 
@@ -81,7 +85,7 @@ async def require_approver(
                 ) from exc
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization: Bearer <token> header required when JWT auth is enabled",
+            detail="Authentication required when JWT auth is enabled",
         )
 
     # 2. X-User-Role shortcut — opt-in only (Audit 05 fix, SEC-05-014).

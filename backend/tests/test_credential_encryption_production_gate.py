@@ -37,9 +37,20 @@ def test_production_without_encryption_key_raises() -> None:
 
 
 def test_production_with_valid_encryption_key_does_not_raise() -> None:
+    """Isolates the credential-encryption gate: a production config that also
+    satisfies _require_secure_production_auth's other gates (JWT/RBAC/admin
+    password — see test_production_secure_auth_gate.py for those in
+    isolation) must not raise once CREDENTIAL_ENCRYPTION_KEY is valid."""
     key = Fernet.generate_key().decode()
     s = Settings(
-        database_url=_DB_URL, deployment_env="production", credential_encryption_key=key
+        database_url=_DB_URL,
+        deployment_env="production",
+        credential_encryption_key=key,
+        jwt_auth_enabled=True,
+        jwt_secret_key="a" * 32,
+        rbac_enabled=True,
+        allow_legacy_role_header=False,
+        default_admin_password="a-genuinely-non-default-password",
     )
     assert s.deployment_env == "production"
     assert s.credential_encryption_key == key

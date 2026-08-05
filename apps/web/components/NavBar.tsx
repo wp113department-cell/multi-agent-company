@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { logout, isAuthenticated, authHeaders } from "../lib/auth";
 
@@ -137,12 +138,12 @@ export function NavBar() {
 
   return (
     <header className="mb-6 flex items-center justify-between">
-      <a href="/tasks" className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+      <Link href="/tasks" className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">
         Mission Control
-      </a>
+      </Link>
       <nav className="flex items-center gap-1">
         {NAV_LINKS.map(({ href, label }) => (
-          <a
+          <Link
             key={href}
             href={href}
             className={`rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors ${
@@ -162,13 +163,13 @@ export function NavBar() {
                 {approvalsPending}
               </span>
             )}
-          </a>
+          </Link>
         ))}
         <div className="mx-1 h-4 w-px bg-slate-200 dark:bg-slate-700" />
         <ThemeToggle />
         {authed && (
           <button
-            onClick={logout}
+            onClick={() => void logout()}
             className="ml-1 rounded-md px-2.5 py-1.5 text-sm font-medium text-slate-500 hover:bg-red-50 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-900/20 dark:hover:text-red-400"
           >
             Sign out
