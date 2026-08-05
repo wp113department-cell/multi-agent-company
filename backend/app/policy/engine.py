@@ -204,16 +204,18 @@ _DENIED_COMMAND_PATTERNS = [
     r"\bbase64\s+-d\b.*\|\s*(bash|sh)\b",
 ]
 
-_CHAINING_METACHARS = re.compile(r"(;|&&|\|\||\|(?!\|)|`|\$\()")
+_CHAINING_METACHARS = re.compile(r"(;|&&|\|\||\|(?!\|)|`|\$\(|\n|\r|>|<)")
 
 
 def check_command(command: str, *, strict: bool = False) -> PolicyResult:
     """Check a command against the denylist.
 
     strict=True additionally rejects shell metacharacters that enable command
-    chaining/substitution (;, &&, ||, |, backticks, $()). Use strict=True for
-    any agent whose bash tool is gated by a command-prefix allowlist — prefix
-    matching alone is not safe against `allowed_cmd && malicious_cmd`.
+    chaining/substitution/redirection (;, &&, ||, |, backticks, $(), newline,
+    carriage return, >, <). Use strict=True for any agent whose bash tool is
+    gated by a command-prefix allowlist — prefix matching alone is not safe
+    against `allowed_cmd && malicious_cmd`, `allowed_cmd\nmalicious_cmd`, or
+    `allowed_cmd > /some/sensitive/file`.
     """
     normalized = _normalize_command(command)
 
@@ -226,8 +228,9 @@ def check_command(command: str, *, strict: bool = False) -> PolicyResult:
     if strict and _CHAINING_METACHARS.search(command):
         return PolicyResult(
             allowed=False,
-            reason="Policy denied: command contains shell chaining/substitution metacharacters "
-            "(;, &&, ||, |, `, $()) which are not permitted for allowlisted agents",
+            reason="Policy denied: command contains shell chaining/substitution/redirection "
+            "metacharacters (;, &&, ||, |, `, $(), newline, CR, >, <) which are not "
+            "permitted for allowlisted agents",
         )
 
     return PolicyResult(allowed=True)

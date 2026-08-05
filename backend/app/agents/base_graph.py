@@ -546,11 +546,24 @@ def _condense_messages(
 
 def _policy_check(tool_name: str, tool_input: dict[str, Any]) -> str | None:
     """Return denial string if the tool call is policy-denied, else None."""
-    if tool_name in ("write_file", "edit_file", "apply_patch", "delete_file"):
+    if tool_name in ("write_file", "edit_file", "delete_file"):
         path = str(tool_input.get("path", ""))
         result = check_path(path)
         if not result.allowed:
             return result.reason
+    if tool_name == "apply_patch":
+        # Blocker 1 (audit_v1.md 4.5/4.8): apply_patch's schema has no
+        # "path" field — tool_input.get("path", "") is always "" here, so
+        # check_path("") always silently passed. Real targets live inside
+        # the diff's own +++/--- header lines; extract and check each one.
+        from app.agents.tools import _extract_patch_target_paths
+
+        patch_content = str(tool_input.get("patch", ""))
+        strip = int(tool_input.get("strip", 1))
+        for target in _extract_patch_target_paths(patch_content, strip):
+            result = check_path(target)
+            if not result.allowed:
+                return result.reason
     if tool_name == "bash":
         cmd = str(tool_input.get("command", ""))
         result = check_command(cmd)
@@ -1305,7 +1318,9 @@ def _run_quality_gate(
 # applied there to tool *input*) reused here for tool *output*.
 # ---------------------------------------------------------------------------
 
-_UNTRUSTED_CONTENT_TOOLS = frozenset({"web_search", "read_file", "read_files"})
+_UNTRUSTED_CONTENT_TOOLS = frozenset(
+    {"web_search", "read_file", "read_files", "fetch_url", "http_request"}
+)
 
 # Patterns that look like an attempt to inject a fake system/assistant turn
 # into tool output the model will read as context. Flag, don't silently
@@ -1436,6 +1451,7 @@ def _make_execute_tools_node(
     tools: list[dict[str, Any]] | None = None,
     quality_gate_min_confidence: float = 0.0,
     run_id: str = "",
+    agent_name: str = "",
 ) -> Callable[[AgentRunState], dict[str, Any]]:
     """Runs tool calls, enforces verification contract, resets stall counter.
     Pushes tool_call / tool_result / file_edit / terminal events to ActivityStream.
@@ -1587,6 +1603,26 @@ def _make_execute_tools_node(
         if denial:
             result_content = f"[POLICY DENIED] {denial}"
             logger.warning("Policy denied %s: %s", tu_name, denial)
+            # Blocker/finding (audit_v1.md 4.5 #8): policy denials only ever
+            # hit a transient logger.warning() line — the structured,
+            # queryable AuditLog existed but was never called from this,
+            # the one real chokepoint every policy-denied tool call passes
+            # through. Wired here so "what did agent X attempt and get
+            # blocked on" is answerable from the audit log, not just logs.
+            try:
+                from app.fleet.audit_log import audit as _audit
+
+                _audit(
+                    action_type="policy_denial",
+                    agent_name=agent_name or "unknown",
+                    description=f"{tu_name} denied: {denial}",
+                    task_id=task_id or None,
+                    trace_id=trace_id or None,
+                    outcome="denied",
+                    details={"tool_name": tu_name, "tool_input": tu_input},
+                )
+            except Exception:
+                pass
         else:
             handler = tool_handlers.get(tu_name)
             if handler is None:
@@ -2099,6 +2135,7 @@ def build_agent_graph(
         tools=tools,
         quality_gate_min_confidence=quality_gate_min_confidence,
         run_id=run_id,
+        agent_name=role_name,
     )
     router = _make_router(max_turns, max_stalls, enable_reflection)
 

@@ -210,3 +210,110 @@ def queue() -> QueueAdapter:
     if _adapter is None:
         _adapter = get_queue_adapter()
     return _adapter
+
+
+async def dispatch_job(
+    background_tasks: Any,
+    job_fn: JobFn,
+    *args: Any,
+    **kwargs: Any,
+) -> None:
+    """Blocker 8 (audit_v1.md 4.7/4.8): the real fix for "every real
+    task-launch call site dispatches via BackgroundTasks.add_task(), so
+    QUEUE_BACKEND=rq has zero effect on real processing regardless of
+    setting." This is the one real chokepoint every task-launch endpoint in
+    api/tasks.py now calls instead of BackgroundTasks.add_task() directly.
+
+    QUEUE_BACKEND=rq -> a real, persistent, retried (queue_job_retry_max)
+    Redis Queue job that survives this process restarting.
+    QUEUE_BACKEND=asyncio (default) -> unchanged pre-existing behavior:
+    fire-and-forget within this request's own process via FastAPI's
+    BackgroundTasks, no behavior change for anyone not opting into rq.
+    """
+    from app.config import get_settings
+
+    if get_settings().queue_backend.lower() == "rq":
+        await queue().enqueue(job_fn, *args, **kwargs)
+    else:
+        background_tasks.add_task(job_fn, *args, **kwargs)
+
+
+async def sweep_failed_rq_jobs() -> int:
+    """Blocker 8 / Phase O finding #2 (audit_v1.md 4.7): "No retry
+    configuration on RQ jobs, and no dead-letter handling code ... A failed
+    job goes into RQ's own registry with no automatic retry and no
+    application code ever reads it — effectively a silent drop."
+
+    Retry is now real (see RQQueueAdapter.enqueue's `retry=Retry(...)`).
+    This closes the second half: a periodic sweep — mirroring the existing
+    orphan-run-recovery loop's own pattern in fleet/failure_ladder.py —
+    reading RQ's FailedJobRegistry for jobs that exhausted their retries and
+    recording each as a structured, queryable failed_events row (via the
+    real app.event_bus.bus._write_failed_event, the same function the
+    in-process event bus itself uses for its own retry exhaustion) instead
+    of leaving it to silently sit in Redis with nothing surfacing it.
+
+    Async + a fresh, disposed-after-use DB engine per call — never the
+    shared app.db.session singleton from a background-loop context (see
+    fleet/failure_ladder.py's own _new_isolated_db_engine for the same
+    pattern and the reasoning: reusing one engine across independent
+    asyncio.run()-style call boundaries raises "attached to a different
+    loop").
+
+    Returns the number of failed jobs recorded this sweep. Safe to call
+    repeatedly — FailedJobRegistry.remove() below both records and drains
+    each job, so a job is never recorded twice.
+    """
+    from app.config import get_settings
+
+    if get_settings().queue_backend.lower() != "rq":
+        return 0
+
+    from rq.job import Job
+    from rq.registry import FailedJobRegistry
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.event_bus.bus import _write_failed_event
+    from app.event_bus.models import GridironEvent
+    from app.queue.rq_adapter import get_rq_adapter
+
+    adapter = get_rq_adapter()
+    engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
+    recorded = 0
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            for queue_name, rq_queue in (
+                ("gridiron-high", adapter._high),
+                ("gridiron-default", adapter._default),
+            ):
+                registry = FailedJobRegistry(queue=rq_queue)
+                for job_id in registry.get_job_ids():
+                    try:
+                        job = Job.fetch(job_id, connection=adapter.connection)
+                    except Exception:
+                        registry.remove(job_id)
+                        continue
+                    event = GridironEvent(
+                        event_type="rq_job_failed",
+                        payload={
+                            "job_id": job_id,
+                            "queue": queue_name,
+                            "func_name": getattr(job, "func_name", "unknown"),
+                            "exc_info": (job.exc_info or "")[-2000:],
+                        },
+                        emitted_by="rq_failed_job_sweep",
+                    )
+                    await _write_failed_event(
+                        event,
+                        handler_name="rq_worker",
+                        error=f"RQ job {job_id} exhausted its retries on {queue_name}",
+                        db=session,
+                    )
+                    # Drain from the registry either way — leaving it there
+                    # forever would just mean re-recording the same job on
+                    # every future sweep.
+                    registry.remove(job)
+                    recorded += 1
+    finally:
+        await engine.dispose()
+    return recorded

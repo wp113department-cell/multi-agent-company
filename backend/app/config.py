@@ -440,6 +440,20 @@ class Settings(BaseSettings):
         default="asyncio",
         description="Task queue backend: asyncio (in-process) or rq (Redis Queue)",
     )
+    queue_job_retry_max: int = Field(
+        default=3,
+        description="Blocker 8 (audit_v1.md 4.7 #2): max automatic RQ retries "
+        "per enqueued job before it lands in RQ's own FailedJobRegistry. Only "
+        "applies when QUEUE_BACKEND=rq.",
+    )
+    queue_failed_job_sweep_interval_seconds: int = Field(
+        default=300,
+        description="How often the background loop scans RQ's FailedJobRegistry "
+        "for jobs that exhausted queue_job_retry_max and records them as "
+        "structured failed_events rows (Blocker 8, audit_v1.md 4.7 #2 — "
+        "previously a failed RQ job was a silent drop, no application code "
+        "ever read FailedJobRegistry). Only runs when QUEUE_BACKEND=rq.",
+    )
 
     # Redis — used by RQ queue adapter and Redis Streams event bus
     redis_url: str = Field(
@@ -895,6 +909,36 @@ class Settings(BaseSettings):
                 "DEFAULT_ADMIN_PASSWORD must be a non-default value of at least 12 "
                 "characters when DEPLOYMENT_ENV=production."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _require_durable_workspace_in_production(self) -> "Settings":
+        # Blocker 7 (audit_v1.md 4.8 #10): worktrees_dir/repos_dir/
+        # bg_process_registry_path all default to /tmp/... — a host
+        # crash, container restart, or routine /tmp cleanup job silently
+        # loses every in-flight git worktree and cloned repo, leaving DB
+        # rows referencing paths that no longer exist. All three are
+        # already fully operator-configurable via env vars (WORKTREES_DIR/
+        # REPOS_DIR/BG_PROCESS_REGISTRY_PATH) — this only hard-fails
+        # startup if a production deployment left them on the ephemeral
+        # /tmp default, matching this file's existing pattern of refusing
+        # to silently boot production with an unsafe default.
+        if self.deployment_env != "production":
+            return self
+        _ephemeral = ("/tmp/", "/tmp")
+        for field_name, value in (
+            ("WORKTREES_DIR", self.worktrees_dir),
+            ("REPOS_DIR", self.repos_dir),
+            ("BG_PROCESS_REGISTRY_PATH", self.bg_process_registry_path),
+        ):
+            if value == "/tmp" or value.startswith("/tmp/"):
+                raise ValueError(
+                    f"{field_name} is set to {value!r}, under the ephemeral /tmp "
+                    "filesystem, which is not permitted when DEPLOYMENT_ENV="
+                    "production (a host restart or /tmp cleanup silently loses "
+                    "in-flight worktrees/repos/state). Point it at a durable, "
+                    "persistent-volume-backed path instead."
+                )
         return self
 
     @model_validator(mode="after")

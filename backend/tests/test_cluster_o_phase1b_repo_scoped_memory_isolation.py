@@ -299,14 +299,18 @@ def test_architect_node_writes_distinct_repo_id_per_task() -> None:
 
 @pytest.mark.asyncio
 async def test_planning_node_honestly_reads_the_newly_created_tasks_repo_id() -> None:
-    """CLUSTER_O_DESIGN.md's Phase 1b notes: CreateEpicRequest/Epic have no
-    repo_id field anywhere in the real /api/epics creation path today, so
-    _planning_node's internally-created DevTask never gets one set — this
-    is an honest limitation, not a bug this phase introduces. What's
-    verified here is that the WIRING itself is correct: state["repo_id"]
-    faithfully reflects task.repo_id (currently always None in real
-    production, but the wiring is forward-compatible for whenever epics
-    do gain a real repo assignment)."""
+    """CLUSTER_O_DESIGN.md's Phase 1b notes originally documented that
+    CreateEpicRequest/Epic had no repo_id field, so _planning_node's
+    internally-created DevTask never got one set. Stage 4 Cluster R Phase 2
+    (2026-08-05, CLUSTER_R_DESIGN.md) closed that gap: epics can now carry
+    a real repo_id, and _planning_node inherits it via
+    state.get("repo_id"). This test exercises the still-real legacy path —
+    a state dict with no "repo_id" key at all (the exact shape a
+    repo_id=NULL epic produces) — and confirms the DevTask it creates
+    stays correctly unscoped (repo_id=None), not that the field is
+    unimplemented. The scoped path (a real repo_id flowing through to the
+    created DevTask) is covered by
+    tests/test_stage4_cluster_r_epic_repo_id_execution_path.py."""
     engine = _engine()
     suffix = uuid.uuid4().hex[:8]
     try:
@@ -342,7 +346,7 @@ async def test_planning_node_honestly_reads_the_newly_created_tasks_repo_id() ->
                 result = await _planning_node(state)
 
             assert "repo_id" in result
-            assert result["repo_id"] is None  # honest current-state assertion
+            assert result["repo_id"] is None  # legacy/unscoped epic path
 
             await session.execute(
                 delete(DevTask).where(DevTask.id == result["task_id"])

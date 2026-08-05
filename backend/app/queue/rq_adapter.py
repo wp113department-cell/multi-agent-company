@@ -60,14 +60,33 @@ class RQQueueAdapter:
         """Enqueue fn(*args, **kwargs) on the selected priority queue.
 
         Returns the rq.Job object (has .id and .get_status()).
+
+        Blocker 8 (audit_v1.md 4.7 #2): previously called queue.enqueue()
+        with no `retry=` at all, so a failed job got zero automatic retries
+        and landed in RQ's own FailedJobRegistry with nothing in this
+        codebase ever reading it — an effectively silent drop. Real retry
+        count now comes from config (queue_job_retry_max), not a hardcoded
+        number, per CLAUDE.md's zero-hardcoding rule; still exhausts into
+        FailedJobRegistry on final failure, which sweep_failed_rq_jobs()
+        below now actually reads.
         """
+        from rq import Retry
+
+        retry_max = get_settings().queue_job_retry_max
         queue = self._high if priority == "high" else self._default
-        job = queue.enqueue(fn, *args, job_timeout=job_timeout, **kwargs)
+        job = queue.enqueue(
+            fn,
+            *args,
+            job_timeout=job_timeout,
+            retry=Retry(max=retry_max) if retry_max > 0 else None,
+            **kwargs,
+        )
         logger.info(
-            "Enqueued job %s fn=%s queue=%s",
+            "Enqueued job %s fn=%s queue=%s retry_max=%d",
             job.id,
             getattr(fn, "__name__", repr(fn)),
             queue.name,
+            retry_max,
         )
         return job
 

@@ -33,6 +33,7 @@ from app.db.repository import (
 )
 from app.config import get_settings
 from app.middleware.rbac import require_approver, require_authenticated
+from app.pipeline.queue_adapter import dispatch_job
 from app.rate_limit import limiter
 from app.repo_tools.worktree import remove_worktree
 
@@ -215,7 +216,8 @@ async def run_task(
     mode = body.mode or settings.pipeline_mode
 
     if mode == "full":
-        background_tasks.add_task(
+        await dispatch_job(
+            background_tasks,
             launch_planning_pipeline,
             task_id,
             str(task.title),
@@ -223,8 +225,13 @@ async def run_task(
             repo_path,
         )
     else:
-        background_tasks.add_task(
-            launch_planner, task_id, str(task.title), str(task.description), repo_path
+        await dispatch_job(
+            background_tasks,
+            launch_planner,
+            task_id,
+            str(task.title),
+            str(task.description),
+            repo_path,
         )
 
     return {"triggered": True, "mode": mode}
@@ -287,7 +294,8 @@ async def restart_task(
         db, task_id, "pipeline", "Task restarted — planning pipeline re-triggered"
     )
 
-    background_tasks.add_task(
+    await dispatch_job(
+        background_tasks,
         launch_planning_pipeline,
         task_id,
         str(task.title),
@@ -344,7 +352,7 @@ async def approve_task(
     task = await transition_task(db, task_id, "coding")
     await append_log(db, task_id, "approval", "Plan approved — coding agent starting")
 
-    background_tasks.add_task(launch_coder, task_id, plan, repo_path)
+    await dispatch_job(background_tasks, launch_coder, task_id, plan, repo_path)
     return {"approved": True, "task": _task_to_dict(task)}
 
 
@@ -415,7 +423,7 @@ async def pipeline_approve(
             repo_path = repo_obj.local_path
 
     await append_log(db, task_id, "approval", "Plan approved — resuming pipeline")
-    background_tasks.add_task(resume_planning_pipeline, task_id, True, repo_path)
+    await dispatch_job(background_tasks, resume_planning_pipeline, task_id, True, repo_path)
     return {"approved": True}
 
 
@@ -441,7 +449,7 @@ async def pipeline_reject(
         )
 
     await append_log(db, task_id, "rejection", "Plan rejected — pipeline cancelled")
-    background_tasks.add_task(resume_planning_pipeline, task_id, False)
+    await dispatch_job(background_tasks, resume_planning_pipeline, task_id, False)
     return {"rejected": True}
 
 
@@ -574,7 +582,7 @@ async def push_task(
             detail="Task has no branch to push — has coding completed yet?",
         )
 
-    background_tasks.add_task(dispatch_git_push_decision, task_id, True)
+    await dispatch_job(background_tasks, dispatch_git_push_decision, task_id, True)
     return {"triggered": True, "taskId": task_id}
 
 

@@ -52,7 +52,8 @@ def _validate_workspace(path: str) -> None:
     except Exception:
         parent = "/home"
     real = os.path.realpath(path)
-    if not real.startswith(os.path.realpath(parent)):
+    real_parent = os.path.realpath(parent)
+    if not (real == real_parent or real.startswith(real_parent + os.sep)):
         raise ValueError(
             f"Path '{path}' is outside allowed workspace parent '{parent}'."
         )
