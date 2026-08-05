@@ -73,6 +73,84 @@ async def _archive_table(table: str, age_column: str, cutoff: datetime) -> int:
         return count
 
 
+async def _cleanup_checkpoints(cutoff: datetime) -> int:
+    """Blocker (audit_v1.md 4.1 #5): "LangGraph Postgres checkpoint tables
+    have no retention/cleanup — unbounded growth." _RETAINED_TABLES above
+    never covered checkpoints/checkpoint_blobs/checkpoint_writes, and every
+    run_agent_graph() call mints a fresh uuid4 trace_id used as the
+    checkpointer thread_id — confirmed no caller ever passes a stable one —
+    so every dispatch/retry/subtask/epic permanently creates a brand-new
+    LangGraph thread that nothing ever cleaned up.
+
+    Hard DELETE (not archive-flag, unlike the app's own tables above) —
+    these three tables are AsyncPostgresSaver's own replay/resume
+    scaffolding, not this app's audit history; there is no archived column
+    on them (they're framework-owned schema, not an app model) and no
+    legitimate reason to keep a checkpoint around after its retention
+    window — the run it belonged to is long since finished or abandoned.
+
+    checkpoint_id has no timestamp column to compare against directly, but
+    LangGraph's own checkpoint_id is a real UUIDv6 (verified: `SELECT
+    checkpoint_id FROM checkpoints LIMIT 5` against this app's own DB
+    returns values with the version-6 nibble, e.g.
+    '1f184278-3b07-6999-...') — a time-sortable UUID variant that encodes
+    its own creation timestamp, decoded here via LangGraph's own bundled
+    `langgraph.checkpoint.base.id.UUID.time` (the exact class LangGraph
+    itself uses to generate these IDs), not a hand-rolled/guessed format.
+    A thread's newest checkpoint_id (MAX() is valid because UUIDv6 is
+    lexicographically time-ordered by design — "reordered for improved DB
+    locality", the format's own stated purpose) decides whether the whole
+    thread is stale; if so, every row for that thread_id is deleted from
+    all three tables.
+    """
+    from langgraph.checkpoint.base.id import UUID as _LGUUID
+
+    _UUID_EPOCH = datetime(1582, 10, 15, tzinfo=timezone.utc)
+
+    factory = get_session_factory()
+    async with factory() as db:
+        result = await db.execute(
+            text(
+                "SELECT thread_id, MAX(checkpoint_id) AS newest "
+                "FROM checkpoints GROUP BY thread_id"
+            )
+        )
+        rows = result.fetchall()
+
+        stale_thread_ids: list[str] = []
+        for thread_id, newest_checkpoint_id in rows:
+            try:
+                parsed = _LGUUID(str(newest_checkpoint_id))
+                if parsed.version != 6:
+                    continue  # not a decodable time-ordered id — leave alone
+                ts = _UUID_EPOCH + timedelta(microseconds=parsed.time / 10)
+            except (ValueError, AttributeError):
+                continue  # malformed/legacy checkpoint_id — leave alone, not our call to guess
+            if ts < cutoff:
+                stale_thread_ids.append(str(thread_id))
+
+        if not stale_thread_ids:
+            return 0
+
+        total_deleted = 0
+        for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
+            del_result = await db.execute(
+                text(f"DELETE FROM {table} WHERE thread_id = ANY(:thread_ids)"),
+                {"thread_ids": stale_thread_ids},
+            )
+            total_deleted += getattr(del_result, "rowcount", 0) or 0
+        await db.commit()
+
+        logger.info(
+            "Checkpoint retention: deleted %d row(s) across %d stale thread(s) "
+            "(cutoff %s)",
+            total_deleted,
+            len(stale_thread_ids),
+            cutoff.date(),
+        )
+        return total_deleted
+
+
 async def _run_cleanup() -> int:
     """Archive rows older than LOG_RETENTION_DAYS across task_logs,
     agent_runs, and artifacts, plus memory_embeddings on its own separate
@@ -97,6 +175,15 @@ async def _run_cleanup() -> int:
         )
         total += await _archive_table("memory_embeddings", "created_at", memory_cutoff)
 
+    if settings.checkpoint_retention_days > 0:
+        checkpoint_cutoff = datetime.now(timezone.utc) - timedelta(
+            days=settings.checkpoint_retention_days
+        )
+        try:
+            total += await _cleanup_checkpoints(checkpoint_cutoff)
+        except Exception as exc:
+            logger.warning("Checkpoint retention cleanup error: %s", exc)
+
     return total
 
 
@@ -112,18 +199,22 @@ async def start_retention_loop() -> None:
     if (
         settings.log_retention_days <= 0
         and settings.memory_embeddings_retention_days <= 0
+        and settings.checkpoint_retention_days <= 0
     ):
         logger.info(
-            "Retention disabled (LOG_RETENTION_DAYS=0 and "
-            "MEMORY_EMBEDDINGS_RETENTION_DAYS=0)"
+            "Retention disabled (LOG_RETENTION_DAYS=0, "
+            "MEMORY_EMBEDDINGS_RETENTION_DAYS=0, and "
+            "CHECKPOINT_RETENTION_DAYS=0)"
         )
         return
 
     logger.info(
         "Retention started: task_logs/agent_runs/artifacts older than %d days, "
-        "memory_embeddings older than %d days, checked every 24 h",
+        "memory_embeddings older than %d days, LangGraph checkpoints older "
+        "than %d days, checked every 24 h",
         settings.log_retention_days,
         settings.memory_embeddings_retention_days,
+        settings.checkpoint_retention_days,
     )
 
     while True:

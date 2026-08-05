@@ -909,6 +909,42 @@ def _make_call_llm_node(
             except Exception:
                 pass
 
+        # Blocker (audit_v1.md 4.1 #3): budget enforcement used to be purely
+        # detective — BudgetManager.check_run/check_daily only ran AFTER
+        # graph.stream() had already fully finished, so a single run could
+        # already exceed max_tokens_per_agent_run before BudgetExceeded was
+        # ever raised (the code's own prior comment: "a run that already
+        # finished can't be un-run"). This is the preventive half: checked
+        # inside this same per-turn node, before spending tokens on yet
+        # another LLM call, using the running tokens_in/tokens_out this
+        # state already accumulates turn-to-turn — no new signal invented.
+        _tokens_so_far = state.get("tokens_in", 0) + state.get("tokens_out", 0)
+        _max_tokens = get_settings().max_tokens_per_agent_run
+        if _max_tokens > 0 and _tokens_so_far >= _max_tokens:
+            logger.warning(
+                "Preventive budget stop for %s: %d tokens >= max_tokens_per_agent_run=%d",
+                role_name,
+                _tokens_so_far,
+                _max_tokens,
+            )
+            if task_id:
+                try:
+                    from app.fleet.fleet_events import health_updated, publish
+
+                    publish(
+                        health_updated(
+                            role_name,
+                            health="budget_exceeded",
+                            state=(
+                                f"tokens {_tokens_so_far} >= max_tokens_per_agent_run "
+                                f"{_max_tokens} — stopped before another LLM call"
+                            ),
+                        )
+                    )
+                except Exception:
+                    pass
+            return {"submitted": True, "status": "blocked"}
+
         client = _make_client()
 
         # Context condense (real LLM summarization, not silent drop-oldest)
@@ -1302,6 +1338,11 @@ def _run_quality_gate(
         and checks["confidence:threshold"]
         and checks.get("escalation:limitation_taxonomy", True)
         and checks.get("escalation:alternative_proposed", True)
+        # Blocker (audit_v1.md 4.3 #1): previously excluded entirely — a
+        # schema-invalid submission (checks["policy:schema_valid"] = False,
+        # set above) could still yield gate.passed=True, so malformed LLM
+        # output flowed through as "successful."
+        and checks.get("policy:schema_valid", True)
     )
     return QualityGateResult(
         passed=passed, checks=checks, warnings=warnings, confidence=confidence
@@ -2648,6 +2689,12 @@ def run_agent_graph(
                 try:
                     bm.check_run(_metrics)
                     bm.check_daily(agent_name=role_name)
+                    # Blocker (audit_v1.md 4.1 #4): the in-process check
+                    # above is a fast first pass but resets per-process;
+                    # this is the real, shared, restart-surviving check
+                    # (see check_daily_db's own docstring). Only reached
+                    # when the cheap in-memory check didn't already raise.
+                    bm.check_daily_db(agent_name=role_name)
                 except BudgetExceeded as exc:
                     final_state["status"] = "blocked"
                     publish(

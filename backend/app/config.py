@@ -85,6 +85,14 @@ class Settings(BaseSettings):
     context_token_budget: int = Field(
         default=8000, description="Max tokens for context assembly"
     )
+    chat_history_restore_limit: int = Field(
+        default=200,
+        description="audit_v1.md 4.4 #3: load_history_from_db() had no LIMIT "
+        "at all — loaded every message row for a session, unbounded, whenever "
+        "an in-memory chat session needed restoring. Caps the restore query to "
+        "the most recent N messages; ChatAgent's own condense step still runs "
+        "on top of this bounded set for anything still over the token budget.",
+    )
     llm_call_timeout_seconds: float = Field(
         default=300.0,
         description="Timeout (seconds) applied to every Anthropic SDK client "
@@ -301,11 +309,29 @@ class Settings(BaseSettings):
     )
     memory_recency_half_life_days: float = Field(
         default=30.0,
-        description="Days for a memory's recency contribution to decay to half its initial value",
+        gt=0,
+        description="Days for a memory's recency contribution to decay to half its "
+        "initial value. audit_v1.md 4.4 #4: previously had no positivity guard — "
+        "a misconfigured 0 was a divisor in the composite score expression, "
+        "silently zeroing every memory retrieval fleet-wide (caught by a broad "
+        "except Exception, returns []) instead of failing loudly at startup per "
+        "CLAUDE.md's own 'never a silent default' rule. Now fails fast.",
     )
     memory_reuse_cap: int = Field(
         default=20,
         description="reuse_count value at which the reuse contribution to composite ranking saturates at 1.0",
+    )
+    memory_candidate_overfetch_factor: int = Field(
+        default=10,
+        description="audit_v1.md 4.4 #1: composite ranking's ORDER BY buries the "
+        "pgvector distance operator inside a larger arithmetic expression, which "
+        "defeats the HNSW index — Postgres can't use it for that sort shape. The "
+        "fix is two-stage retrieval: an inner, index-accelerated "
+        "'ORDER BY embedding <=> :vec LIMIT top_k * this_factor' overfetch, then "
+        "the full composite formula re-ranks only that small candidate set. "
+        "Higher = better recall (composite ranking sees more candidates) at the "
+        "cost of a slightly larger re-rank step; the ANN fetch itself stays cheap "
+        "either way since it's index-accelerated.",
     )
 
     # Gap-closure Day 42 (Stage 2, answers.md Q120 "Automatic Memory Cleanup" / "Shared
@@ -386,6 +412,16 @@ class Settings(BaseSettings):
     file_fold_fallback_max_chars: int = Field(
         default=20000,
         description="Maximum characters returned for a large, non-tree-sitter-parseable file (e.g. .md/.json/.txt) — a plain bounded truncation, since folding isn't possible for these",
+    )
+    scanner_max_indexable_file_bytes: int = Field(
+        default=2_000_000,
+        description="audit_v1.md 4.2 #3: repo_tools/scanner.py's index_repository() "
+        "used to read full file bytes for every file on every walk (even an "
+        "'incremental' reindex only skipped the parse, not the disk read), with "
+        "no per-file size cap. Files larger than this (checked via a cheap "
+        "os.stat() before ever reading bytes) are skipped from indexing entirely "
+        "— generated bundles/lockfiles/binary-like files don't belong in the "
+        "symbol index anyway.",
     )
 
     # Gap-closure Day 46 (Stage 2, "Context compression beyond Stage-1 basics" —
@@ -535,6 +571,15 @@ class Settings(BaseSettings):
     log_retention_days: int = Field(
         default=90,
         description="Days to keep task_logs rows before automated cleanup. Set to 0 to disable cleanup.",
+    )
+    checkpoint_retention_days: int = Field(
+        default=30,
+        description="Blocker (audit_v1.md 4.1 #5): days to keep LangGraph "
+        "checkpoint/checkpoint_blobs/checkpoint_writes rows before deletion "
+        "(hard delete, not archive — these are replay/resume scaffolding, "
+        "not audit history). Every run_agent_graph() call mints a fresh "
+        "uuid4/uuid6 thread_id never reused, so this table previously grew "
+        "unbounded forever with zero cleanup. Set to 0 to disable.",
     )
 
     # MASTER_AGENT_v2.md Phase 5.6 — orphan agent_run recovery

@@ -69,7 +69,7 @@ _TOOLS = [
     },
     {
         "name": "semantic_search",
-        "description": "Search for files most relevant to a query using keyword scoring (falls back gracefully when Voyage embeddings are not pre-built).",
+        "description": "Search for files most relevant to a query using real pgvector semantic search over indexed code embeddings when VOYAGE_API_KEY is configured and this repo has been indexed with embeddings; falls back to keyword scoring otherwise.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -101,8 +101,52 @@ _TOOLS = [
 ]
 
 
+class McpRepoPathDenied(ValueError):
+    """Raised when a caller-supplied repo_path resolves outside every
+    configured allowed root."""
+
+
+def _is_under_allowed_root(candidate: str, settings: Any) -> bool:
+    import os
+
+    real = os.path.realpath(candidate)
+    for root in (
+        settings.target_repo_path,
+        settings.repos_dir,
+        settings.worktrees_dir,
+    ):
+        if not root:
+            continue
+        real_root = os.path.realpath(root)
+        if real == real_root or real.startswith(real_root + os.sep):
+            return True
+    return False
+
+
 def _get_repo(params: dict[str, Any]) -> str:
-    return params.get("repo_path") or get_settings().target_repo_path
+    """Blocker (audit_v1.md 4.2 #4): "MCP server accepts an unvalidated
+    repo_path override on every tool call" — _get_repo() used to return
+    params.get("repo_path") with no validation that it resolves under any
+    allowed root, flowing directly into an unrestricted os.walk()
+    (index_repository) — any MCP client able to specify repo_path (e.g.
+    "/etc", "../") could make the server scan and return path/symbol-name
+    info from arbitrary directories on the host.
+
+    Now validated against the same real roots this deployment actually
+    uses for repos (target_repo_path, repos_dir for cloned GitHub repos,
+    worktrees_dir for task worktrees) — an operator-configured allowlist,
+    not a hardcoded path.
+    """
+    settings = get_settings()
+    repo_path = params.get("repo_path")
+    if not repo_path:
+        return str(settings.target_repo_path)
+    if not _is_under_allowed_root(str(repo_path), settings):
+        raise McpRepoPathDenied(
+            f"repo_path {repo_path!r} does not resolve under any configured "
+            "allowed root (TARGET_REPO_PATH/REPOS_DIR/WORKTREES_DIR)"
+        )
+    return str(repo_path)
 
 
 def _handle(method: str, params: dict[str, Any]) -> Any:
@@ -185,8 +229,33 @@ def _handle(method: str, params: dict[str, Any]) -> Any:
         if tool_name == "semantic_search":
             import re
 
+            from app.repo_tools.embeddings import semantic_search as _vector_search
+
             query = tool_params.get("query", "")
             top_k = int(tool_params.get("top_k", 20))
+
+            # Blocker (audit_v1.md 4.2 #1): this tool is literally named
+            # "semantic_search" but used to only do keyword scoring —
+            # despite its own description claiming otherwise. Now tries
+            # the real pgvector query first; _vector_search itself no-ops
+            # (returns []) when VOYAGE_API_KEY is unset or this repo
+            # hasn't been indexed with embeddings, so falling through to
+            # keyword scoring below is a real, not theoretical, fallback.
+            semantic_matches = _vector_search(query, repo, top_k=top_k)
+            if semantic_matches:
+                results = [
+                    {"file": p, "score": None, "method": "semantic"}
+                    for p in semantic_matches
+                ]
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps({"results": results, "query": query}),
+                        }
+                    ]
+                }
+
             idx = index_repository(repo)
             query_tokens = [w.lower() for w in re.split(r"\W+", query) if len(w) > 2]
             scores: dict[str, float] = {}
@@ -197,9 +266,11 @@ def _handle(method: str, params: dict[str, Any]) -> Any:
                 )
                 scores[rel_path] = sum(1.0 for tok in query_tokens if tok in combined)
             sorted_files = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-            results = [{"file": p, "score": s} for p, s in sorted_files if s > 0][
-                :top_k
-            ]
+            results = [
+                {"file": p, "score": s, "method": "keyword"}
+                for p, s in sorted_files
+                if s > 0
+            ][:top_k]
             return {
                 "content": [
                     {

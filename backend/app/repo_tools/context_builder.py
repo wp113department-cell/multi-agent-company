@@ -60,7 +60,6 @@ def _keyword_score(
 def build_context(
     task_description: str,
     index: RepoIndex,
-    embeddings: list[dict[str, object]] | None = None,
     top_k: int = 15,
     use_cache: bool = True,
     memory_context: str = "",
@@ -68,7 +67,9 @@ def build_context(
     """
     Build context for a task by combining:
     1. Keyword scoring (query tokens vs file paths + symbol names)
-    2. Semantic search (Voyage AI, if embeddings available)
+    2. Semantic search (real pgvector query over code_embeddings, when
+       VOYAGE_API_KEY is set and this repo has been indexed with embeddings —
+       see app.repo_tools.embeddings.semantic_search)
     3. Dependency chain (files imported by top-scoring files)
 
     Results are cached in-memory by (task_description, repo_path) so repeated
@@ -88,12 +89,15 @@ def build_context(
         symbol_names = [s.name for s in fi.symbols]
         scores[rel_path] = _keyword_score(rel_path, symbol_names, query_tokens)
 
-    # Semantic search (if embeddings provided)
-    semantic_matches: list[str] = []
-    if embeddings:
-        semantic_matches = semantic_search(task_description, embeddings, top_k=top_k)
-        for path in semantic_matches:
-            scores[path] = scores.get(path, 0.0) + 2.0
+    # Blocker (audit_v1.md 4.2 #1): previously only ran when a caller
+    # passed a pre-computed `embeddings` list — no real caller ever did,
+    # so this branch was permanently dead. Now a real DB-backed query;
+    # semantic_search() itself no-ops (returns []) when VOYAGE_API_KEY is
+    # unset or this repo hasn't been indexed with embeddings yet, so this
+    # call is always safe to make unconditionally.
+    semantic_matches = semantic_search(task_description, index.repo_path, top_k=top_k)
+    for path in semantic_matches:
+        scores[path] = scores.get(path, 0.0) + 2.0
 
     # Gap-closure (2026-07-23): the real, function-level cross-file call
     # graph (app/repo_tools/cross_file_graph.py) was built and persisted to

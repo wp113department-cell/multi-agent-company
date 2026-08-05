@@ -223,6 +223,10 @@ def index_repository(
     Files whose hash hasn't changed are skipped (incremental re-index).
     Returns a full RepoIndex merging unchanged entries with newly parsed ones.
     """
+    from app.config import get_settings
+
+    max_bytes = get_settings().scanner_max_indexable_file_bytes
+
     base = Path(repo_path)
     index = RepoIndex(repo_path=repo_path)
 
@@ -240,6 +244,17 @@ def index_repository(
 
             abs_path = Path(root) / fname
             rel_path = str(abs_path.relative_to(base))
+
+            # Blocker (audit_v1.md 4.2 #3 / 4.8 #12): a cheap os.stat() size
+            # check BEFORE ever reading file bytes — the previous code read
+            # full file contents for every file on every walk (even an
+            # "incremental" reindex only skipped the parse afterward, not
+            # this read), with no size cap at all.
+            try:
+                if abs_path.stat().st_size > max_bytes:
+                    continue
+            except OSError:
+                continue
 
             try:
                 content = abs_path.read_bytes()

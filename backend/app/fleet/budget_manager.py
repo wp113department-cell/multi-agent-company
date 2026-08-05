@@ -144,6 +144,57 @@ class BudgetManager:
         if total_cost > s.cost_budget_daily_usd:
             raise BudgetExceeded("cost", "daily", s.cost_budget_daily_usd, total_cost)
 
+    def check_daily_db(self, agent_name: str | None = None) -> None:
+        """Blocker (audit_v1.md 4.1 #4): check_daily() above sums from
+        MetricsCollector's in-process `deque(maxlen=capacity)` — "since this
+        process last restarted," not a real calendar-day limit; silently
+        resets/fragments across restarts or multiple worker processes.
+        This queries `agent_runs` directly (SUM(cost_estimate) WHERE
+        started_at >= today), the real shared source of truth every worker
+        process (and every restart) sees the same way.
+
+        Sync facade over an async DB query — a fresh, disposed-after-use
+        engine per call, never the shared app.db.session singleton (see
+        fleet/failure_ladder.py's own _new_isolated_db_engine for the same
+        pattern/reasoning: reusing one engine across independent
+        asyncio.run()-style call boundaries raises "attached to a different
+        loop"). Real callers (base_graph.py's post-run budget check) run
+        inside a worker thread with no running event loop of its own
+        (dispatched via asyncio.to_thread from manager.py), so asyncio.run()
+        here is safe — never call this from a coroutine already running on
+        an event loop.
+        """
+        import asyncio
+        from datetime import datetime, timezone
+
+        s = get_settings()
+
+        async def _query() -> float:
+            from sqlalchemy import func, select
+            from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+            from app.db.models import AgentRun
+
+            engine = create_async_engine(s.database_url, pool_pre_ping=True)
+            try:
+                async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                    today_start = datetime.now(timezone.utc).replace(
+                        hour=0, minute=0, second=0, microsecond=0
+                    )
+                    stmt = select(
+                        func.coalesce(func.sum(AgentRun.cost_estimate), 0)
+                    ).where(AgentRun.started_at >= today_start)
+                    if agent_name is not None:
+                        stmt = stmt.where(AgentRun.agent_type == agent_name)
+                    result = await session.execute(stmt)
+                    return float(result.scalar_one())
+            finally:
+                await engine.dispose()
+
+        total_cost = asyncio.run(_query())
+        if total_cost > s.cost_budget_daily_usd:
+            raise BudgetExceeded("cost", "daily", s.cost_budget_daily_usd, total_cost)
+
 
 _budget_manager_singleton: BudgetManager | None = None
 

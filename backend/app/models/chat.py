@@ -96,21 +96,36 @@ async def save_message_to_db(
 
 
 async def load_history_from_db(session_id: str, db: Any) -> list[dict[str, Any]]:
-    """Load message history for a session from the DB. Returns [] on error."""
+    """Load message history for a session from the DB. Returns [] on error.
+
+    Blocker (audit_v1.md 4.4 #3): previously had no LIMIT at all — every
+    message row for the session's entire lifetime, unbounded. Bounded here
+    to the most recent chat_history_restore_limit messages (fetch newest-
+    first with a LIMIT, so the query itself stays cheap regardless of how
+    long-lived the session is, then reverse back to chronological order for
+    the caller). ChatAgent's own condense step (see
+    app.agents.chat_agent._call_llm_node) still runs on top of this bounded
+    set for anything still over the token budget — this bound and that
+    condense step are complementary, not alternatives.
+    """
     try:
         from sqlalchemy import text
 
+        from app.config import get_settings
+
+        limit = get_settings().chat_history_restore_limit
         rows = await db.execute(
             text(
                 "SELECT role, content FROM chat_messages "
-                "WHERE session_id = :sid ORDER BY created_at ASC"
+                "WHERE session_id = :sid ORDER BY created_at DESC LIMIT :limit"
             ),
-            {"sid": session_id},
+            {"sid": session_id, "limit": limit},
         )
-        return [
+        newest_first = [
             {"role": str(r["role"]), "content": str(r["content"])}
             for r in rows.mappings().all()
         ]
+        return list(reversed(newest_first))
     except Exception as exc:
         logger.warning(
             "Failed to load chat history for session %s: %s", session_id, exc
