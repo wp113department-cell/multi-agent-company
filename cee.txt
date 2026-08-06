@@ -1,99 +1,216 @@
-Re-Verification Report: Specs 06–10 vs Actual Code
-Methodology: read each spec fresh, extracted every checkable claim, then grepped/read the live code (not filenames) to confirm real callers/wiring. Findings below are evidence-based, not carried over from prior reports.
+# Production Implementation Agent
 
-06 — Agent SDK Specification: ~85% done
-Done and verified:
+You are acting as a **Principal Software Architect, Staff Engineer, Production Reliability Engineer, Security Engineer, AI Systems Architect, and Code Auditor**.
 
-Lifecycle created→planning→coding→testing→blocked|completed|failed is real, enforced in code — backend/app/db/models.py:83-104 VALID_TRANSITIONS dict + can_transition(), consumed by transition_task() in db/repository.py. Comments in the file show it was actively fixed in gap-closure (added "failed" and "rejected" transitions that were missing).
-Shared base template / lifecycle enforced in code, not prompt: backend/app/agents/base_graph.py — build_agent_graph()/run_agent_graph() (900+ lines) is the real shared LangGraph builder used by all 72 agents. Confirmed: state["verification"] overrides model claims (line 603-631), _policy_check() gates every tool call before execution (line 257-269, called at line 566), heartbeat/status via agent_registry + fleet_events.publish(task_started/completed/failed) (lines 1005-1018, 1256-1268, 1282-1309).
-72 real agent modules confirmed by direct count (79 files in agents/ minus 7 infra files = 72), and 73 files (72 agents + count includes a shared match) carry AGENT_CONTRACT blocks with name/description/allowed_tools/input_types/output_types/capabilities/risk_level (verified structure in backend_dev.py:30-60, planner.py:27+).
-ensure_all_agents_registered() is real and wired: backend/app/fleet/capability_registry.py:122-145 scans app/agents/*.py at runtime (not hardcoded list) and imports each so its _register() fires; called at FastAPI startup in main.py:223-229 inside lifespan(). The code comment documents this closing a genuine startup-gap bug (only 3-6 agents registered before this fix).
-Agent Registry dispatch-by-capability is real: backend/app/fleet/fleet_manager.py — FleetManager.select() calls capability_registry.find_by_capability() (not hardcoded dispatch); manager.py:144-151 calls get_fleet_manager().select().
-Context Contract: agents receive prebuilt context via memory_hook_node → build_context() (base_graph.py:358-374), not independent file discovery.
-Permissions model matches: read-only roles (planner.py, architect.py) import READ_ONLY_TOOLS/make_read_only_handlers only — no Edit/Write/Bash tool defs present. Coding roles (backend_dev.py) use CODER_TOOLS.
-State checkpointing to Postgres confirmed real: backend/app/pipeline/graph.py:38-56 — AsyncPostgresSaver.from_conn_string(), replacing MemorySaver fallback, called from main.py lifespan.
-Error/event contract: task_logs append (append_log), Event Bus emission of exact named events task.planned, subtask.assigned, qa.passed etc. — real, defined in backend/app/event_bus/models.py:58-133 and mapped in backend/app/fleet/fleet_events.py:172-189.
-Missing/deviated:
+Your objective is **NOT** to build new features blindly.
 
-Spec says role plan outputs are "Zod-validated" and added to a shared-types package — no such package exists (packages/ and apps/ dirs in repo root are effectively empty of this; no zod reference anywhere in backend/app). Actual validation is via Anthropic tool input_schema JSON dicts + the verification_cfg.enforce_in_result override mechanism in base_graph.py, which is functionally similar but not the literal TS/Zod contract the spec describes.
-Agent Registry table spec (agents table with capabilities, tools, owner) doesn't fully match the actual Agent ORM model, which uses capability_tags/tool_list and has no owner/type column (see DB section below).
-"Add a new agent role" checklist step 4 ("test against 3 representative tasks before dispatch table") — no evidence of a formal per-agent acceptance gate; agents get registered and become dispatchable as soon as their module imports cleanly.
-07 — Tool / MCP Specification: ~55% done
-Done and verified:
+Your objective is to convert **one audit batch** from its current state to the highest possible **YES** score while preserving **100% existing functionality**.
 
-Tool Access Matrix is real and enforced structurally, not by instruction: backend/app/agents/tools.py defines READ_ONLY_TOOLS, CODER_TOOLS = READ_ONLY_TOOLS + [edit_file, write_file, git_diff, bash, submit_patch], QA_TOOLS, REVIEWER_TOOLS (read-only, no edit/bash), DEVOPS_TOOLS (bash but read-only health checks), RESEARCH_TOOLS (web+GitHub read only, no bash/write) — matches the spec's matrix row-for-row.
-No deploy credentials anywhere in any tool list — grep confirms no "deploy" tool/handler exists in tools.py.
-PreToolUse-style enforcement is real: guardrails.py (check_path/check_command) denylists .env, secrets/, .github/workflows/, .git/, and blocks rm -rf, git push --force, DROP DATABASE, etc.; called unconditionally in base_graph.py:_policy_check() before every tool execution (execute_tools node, line 566) — matches "enforced at the application layer... regardless of role."
-A genuine custom MCP server exists for Repository Intelligence: backend/app/mcp/server.py — real JSON-RPC 2.0 stdio server (initialize, tools/list, tools/call) exposing index_repository, search_symbols, build_context, query_dependencies, semantic_search, get_file_summary. This is the one server the spec explicitly calls for building custom (10_Repository_Intelligence spec).
-GitHub write capability is real: backend/app/tools/git_push_tool.py — create_github_pr() calls the real GitHub REST API ({settings.github_api_base_url}/repos/{repo}/pulls), used by push_and_create_pr().
-Web search real (DuckDuckGo, no API key) for Research Agent: tools.py:1136-1155.
-Missing/deviated:
+---
 
-The spec's central claim — "Tools are standardized through MCP... used directly rather than reimplemented" for Filesystem/Git/GitHub/Postgres/Web-Search MCP servers — is not what's actually built. Grep for "Model Context Protocol", "MCPServer", Postgres-MCP, Filesystem-MCP, Git-MCP integration returns nothing outside the one custom repo-intel server. All filesystem/git/read/edit/bash capability is implemented as bespoke in-process Python functions styled as Anthropic tool-use handlers (make_read_only_handlers, make_coder_handlers, etc. in tools.py), not as connections to standard MCP servers. Functionally equivalent, architecturally a full deviation from the "use existing MCP servers" principle.
-No literal "Postgres MCP" (agents don't get scoped DB read access via any such server; DB access, where it exists, is baked into specific agent tool handlers instead).
-No public MCP registry search step evidenced anywhere ("Adding a New Tool" checklist step 1).
-08 — API Specification: ~80% done
-Done and verified (route-by-route, grep -rn "@router\.(get|post|put|delete|patch)" across backend/app/api/*.py, cross-checked against main.py include_router list):
+## Audit File
 
-Stage 1 Task Queue: POST/GET /tasks, GET/PATCH /tasks/:id, POST /tasks/:id/logs — all present in tasks.py:96-148, router included at main.py:336.
-Stage 2 Patch Review: GET /tasks/:id/diff (tasks.py:402), POST /tasks/:id/approve / /reject (tasks.py:253,292) — present.
-Stage 4 Artifacts: GET /tasks/:id/artifacts, GET /artifacts/:id — present verbatim (artifacts.py:15,35).
-Stage 5 Epics: POST /epics, GET /epics/:id, POST /epics/:id/approve — present (epics.py:85,142,156), plus extra reject/approve-cost/policy-approval/batch-review endpoints beyond spec.
-Stage 6 Agent Registry: GET /agents, GET /agents/:id/metrics — present verbatim (registry.py:74,100, prefix /api/agents).
-Stage 7 Executive: POST /goals, GET /goals/:id — present verbatim (goals.py:35,63).
-Error envelope { error: { code, message } } real: main.py:354-370, http_exception_handler/validation_exception_handler.
-Cursor pagination on GET /tasks is real: tasks.py:108-115 (cursor, limit=20 default, max 100).
-main.py registers 16 routers total (tasks, repo, artifacts, auth, epics, registry, memory, goals, metrics, settings, chat, specialized_agents, activity, console, fleet_dashboard, approvals) — 98 total @router.* route definitions found, well beyond the spec's minimal surface (console/chat/fleet_dashboard/approvals are Fleet-Enhancement-era additions not in this spec at all, which is expected — the spec predates them).
-No versioning prefix, no external API-key tier — matches spec's explicit deferral. Rate limiting exists as infra (slowapi/Limiter) but gated behind RATE_LIMIT_ENABLED config flag — consistent with the spec's "deferred, not urgent" framing rather than a contradiction.
-Missing/deviated:
+Audit Batch:
 
-Spec: cursor pagination on GET /agents — not implemented. registry.py:74-88 list_agents() has only an optional ?tag= filter, no cursor/limit params — returns the full unpaginated list. Direct spec violation.
-Spec: "Authenticated via Supabase Auth session for all endpoints" — actual auth is a custom JWT system (backend/app/auth/jwt.py, api/auth.py) backed by a system_settings key, not Supabase. Full architectural deviation from this spec's stated auth model (later specs/ADRs may supersede this, but as written in 08 it's wrong).
-POST /tasks request body per spec includes priority and project; actual CreateTaskRequest only has title/description/repo_id (tasks.py) — priority/project/assignedAgent/finalSummary in the response are hardcoded placeholder values (_task_to_dict(), tasks.py:73-89: "project": None, "priority": "medium", "assignedAgent": None, "finalSummary": None), not real stored/settable fields. This is a genuine "looks done but isn't" gap.
-09 — Database Design Specification: ~80% done
-Done and verified (26 __tablename__ classes in backend/app/db/models.py, 17 migrations 001-017):
+```
+<PASTE_BATCH_FILE_PATH_HERE>
+```
 
-Core Stage 1 tables real: dev_tasks, task_logs, agent_runs all present with FK relationships (models.py:56-160) and used by real CRUD in db/repository.py.
-Stage 4: artifacts, events present (models.py:245-291) plus a failed_events dead-letter table beyond spec.
-Stage 5: epics, policies (+ policy_approvals audit table beyond spec) present (models.py:292-347).
-Stage 6: agents table present (models.py:363-380).
-Migration strategy matches ("single migration tool, versioned, checked-in") — Alembic confirmed (backend/migrations/env.py imports alembic), 17 sequential version files 001-017, each mapping to real schema growth (phase4/5/6 tables, repos, system_settings, agent_benchmarks, prompt_versions, versioned_lessons, pending_approvals, task_images, etc.) — well beyond the spec's Stage 1-6 scope (expected, given later specs 11-19 exist).
-pgvector real and used: MemoryEmbedding.embedding: Vector(1536) (models.py:428-450), pgvector.sqlalchemy.Vector import confirmed.
-Indexes: dev_tasks(status) and task_logs(task_id) confirmed in migration 001 (ix_dev_tasks_status, ix_task_logs_task_id).
-Missing/deviated:
+Example:
 
-dev_tasks table is missing spec's priority, assigned_agent, project, final_summary columns entirely — confirmed by full read of the DevTask class (models.py:56-97); these are faked in the API layer (see 08 findings) rather than real columns. Table instead grew epic_id, repo_id, branch_name, pr_url, pr_status (legitimate but undocumented-by-spec evolution).
-Spec's Stage 3 embeddings table (source_type: code_summary|doc|past_task) doesn't exist as such — the actual pgvector table is memory_embeddings (task-outcome-scoped, outcome/category columns), serving Memory System spec 11 rather than generic repo-intel embeddings.
-Spec's status CHECK (status IN (...)) constraints are not implemented as DB constraints — status is a free String(50) column; validity is enforced only in application code (VALID_TRANSITIONS dict). A direct SQL write could set an invalid status.
-dev_tasks(project) index doesn't exist (consistent with project column not existing).
-agent_runs(task_id) index from spec not found in migration 001 (only status/task_logs indexes created).
-Repo-Intelligence-specific tables indexed_files, symbols, call_edges exist as real ORM models and are migrated (models.py:200-238, present in migration 001) but have zero real writers anywhere in the codebase — grep for IndexedFile(, Symbol(, CallEdge( instantiations (excluding class defs) returns nothing. This is same-named-but-unwired: the actual scanner (repo_tools/scanner.py) builds an in-memory RepoIndex dataclass and never persists to these tables. A real gap worth flagging distinctly since it looks complete (tables + migration exist) but isn't functionally connected.
-10 — Repository Intelligence Specification: ~60% done
-Done and verified:
+```
+docs/reports/audit/AUDIT_Q_BATCH05.md
+```
 
-Repository Scanner real, Tree-sitter based: backend/app/repo_tools/scanner.py:1,11-13 imports tree_sitter, tree_sitter_python, tree_sitter_javascript (confirmed in requirements.txt); index_repository() (line 172) walks the filesystem, parses .py/.js files, extracts SymbolInfo (functions/classes with line numbers) and imports. Supports incremental re-parse via known_hashes content-hash comparison (lines 179-209).
-Dependency/Import graph real: build_call_graph() in scanner.py:237-262 builds {caller_file: [callee_file,...]} from import statements (file-level, not function-level — see gap below).
-Context Builder + Context Cache real and matches spec almost verbatim: backend/app/repo_tools/context_builder.py — build_context() returns {relevant_files, dependency_chain, related_symbols, summary} combining keyword scoring + semantic search + dependency chain (lines 53-131); explicit in-memory cache keyed on SHA-256(task+repo) with invalidate_context_cache() called after reindex (context_builder.py:12-31, called from api/repo.py:341).
-Embedding Search real (Voyage AI, pgvector-adjacent): repo_tools/embeddings.py — generate_embeddings()/semantic_search() with cosine similarity, gracefully degrades to keyword scoring when VOYAGE_API_KEY unset (matches mcp/server.py's semantic_search tool description).
-MCP Interface real: backend/app/mcp/server.py exposes query_dependencies, search_symbols/semantic_search (renamed from spec's search_semantic but same function) as real JSON-RPC tools, consumed conceptually by Architect via build_context in the shared graph pipeline.
-Update/Re-index: incremental reindex via POST /api/repo/reindex (api/repo.py:345-348, background task) is real; weekly full re-index is also real — main.py:72-84 _weekly_reindex_loop(), started as an asyncio.create_task() at main.py:288 in lifespan().
-Missing/deviated:
+Only work from this audit batch.
 
-Call Graph is not function-level as the spec explicitly requires ("maps which functions call which other functions, across file boundaries"). scanner.py's build_call_graph() is actually a file-level import graph mislabeled as a call graph. A genuine function-level call graph exists in repo_tools/ast_engine.py:119-165 (build_call_graph(path, function_name), uses Python ast module to find ast.Call nodes inside function bodies) — but it's single-file only, not cross-file, and is exposed as a standalone chat-agent tool (not part of the Context Builder / MCP server pipeline). So the cross-file, function-level call graph the spec describes doesn't exist as a unified component.
-Architecture Mapper is missing entirely — no architecture_mapper.py or equivalent; grep for "architecture_mapper"/"ArchitectureMapper" across the whole backend returns nothing. There's no derived "which services/modules does this belong to" layer.
-Symbol Graph is real only in-memory (via index_repository()'s per-file symbol list + search_symbols/find_references tool handlers), not persisted/queryable as a graph DB (the symbols/indexed_files tables that would back this exist in the DB schema but are unwired — see 09 findings).
-"Re-indexing must complete before an Architect Agent run is allowed to start" — not enforced anywhere. No blocking/gating logic found between reindex completion and architect_node dispatch in pipeline/graph.py; the Architect just calls build_context/index_repository fresh each run, so there's no formal race-condition guard, just implicit freshness from re-walking the filesystem synchronously.
-No webhook-triggered reindex on merge to main — only manual API trigger (POST /api/repo/reindex) and the 7-day timer loop. No CI/git-hook integration found.
-"Standalone internal service... any future internal tool can query it" — in practice the MCP server (mcp/server.py) is a stdio script, not a running network service other tools could discover/connect to at will; it's not started by main.py or documented as a long-running process — it exists as invocable code, not a deployed standalone service.
-Overall Cross-File Observations
-The 72-agent/AGENT_CONTRACT/ensure_all_agents_registered() claims in the task prompt are all independently confirmed correct via direct code reads, not just filenames.
-The most consistent pattern of "looks done, isn't wired" across these five specs is the Repository-Intelligence DB persistence layer (indexed_files/symbols/call_edges tables — real schema, zero writers) and the API-layer field faking in dev_tasks (priority/project/assigned_agent/final_summary returned as static placeholders, not real columns).
-The MCP principle in spec 07 is the largest philosophical gap: the actual system uses custom in-process tool handlers everywhere except the one genuinely-custom Repository Intelligence MCP server, rather than "use existing MCP servers directly" as spec 07 prescribes.
+Do not use previous chat history.
 
+Do not assume anything not supported by the repository.
 
+---
 
+# Rules
 
+Treat the audit as the single source of truth.
 
+Every checkpoint must become one of these:
 
+* YES
+* Already Production Ready (skip implementation)
+* Impossible without changing project scope (explain)
 
+Never leave an implementable checkpoint unfinished.
 
+---
+
+# Implementation Rules
+
+Before writing code:
+
+1. Read the complete audit batch.
+2. Read every referenced file.
+3. Discover additional dependent files automatically.
+4. Build the dependency graph.
+5. Find the true root cause.
+6. Reuse existing architecture whenever possible.
+
+Never duplicate functionality.
+
+If something already exists:
+
+* verify it
+* improve it if required
+* otherwise skip implementation
+
+Never reimplement existing production code.
+
+---
+
+# Engineering Requirements
+
+Everything must be production-grade.
+
+No:
+
+* placeholders
+* TODOs
+* fake implementations
+* temporary fixes
+* mocks
+* shortcuts
+* hacks
+* duplicate code
+* unnecessary abstractions
+* dead code
+
+Never reduce existing functionality.
+
+Existing behaviour must remain 100% compatible.
+
+Backward compatibility is mandatory.
+
+---
+
+# Quality Requirements
+
+Zero:
+
+* hallucination
+* guessing
+* hardcoding
+* regex-based architecture
+* fake success
+* fake tests
+* fake metrics
+
+Every decision must be based on actual repository evidence.
+
+---
+
+# Safety
+
+Before changing code:
+
+* search for every caller
+* search for every dependency
+* search for every integration
+* search for every API usage
+
+Do not break:
+
+* APIs
+* database
+* frontend
+* agents
+* workflows
+* memory
+* orchestration
+* tests
+* plugins
+* authentication
+* permissions
+
+If a change has risk, refactor safely.
+
+---
+
+# Testing
+
+After implementation automatically run every applicable validation.
+
+Examples:
+
+* unit tests
+* integration tests
+* regression tests
+* lint
+* formatter
+* type checking
+* build
+* startup validation
+
+Fix every failure.
+
+Do not stop while failures remain.
+
+---
+
+# Audit Update
+
+After implementation:
+
+Re-audit every checkpoint inside this batch.
+
+If implementation satisfies the requirement:
+
+PARTIAL → YES
+
+NO → YES
+
+If evidence proves it was already production-ready:
+
+mark YES without reimplementation.
+
+Do not mark YES without evidence.
+
+Update the audit file accordingly.
+
+Remove resolved findings.
+
+Keep unresolved findings only if they are genuinely impossible within project scope.
+
+Update:
+
+* verdicts
+* summaries
+* totals
+* production enhancement notes
+
+---
+
+# Success Criteria
+
+Only finish when all of the following are true:
+
+✓ Maximum possible YES achieved
+
+✓ Production-ready
+
+✓ No regression introduced
+
+✓ No functionality lost
+
+✓ No duplicate implementation
+
+✓ All tests passing
+
+✓ All quality checks passing
+
+✓ Audit updated
+
+Only then return:
+
+🟢 GREEN FLAG — Batch Complete
+
+Otherwise continue working until every achievable checkpoint has been completed.
