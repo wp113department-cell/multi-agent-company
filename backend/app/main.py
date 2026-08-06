@@ -719,13 +719,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         else None
     )
     reindex_task = asyncio.create_task(
-        _run_as_leader("loop:weekly_reindex", _weekly_reindex_loop, _leader_election_engine)
+        _run_as_leader(
+            "loop:weekly_reindex", _weekly_reindex_loop, _leader_election_engine
+        )
     )
     retention_task = asyncio.create_task(
         _run_as_leader("loop:retention", start_retention_loop, _leader_election_engine)
     )
     fleet_scan_task = asyncio.create_task(
-        _run_as_leader("loop:fleet_agents_scan", _fleet_agents_scan_loop, _leader_election_engine)
+        _run_as_leader(
+            "loop:fleet_agents_scan", _fleet_agents_scan_loop, _leader_election_engine
+        )
     )
     lesson_archive_task = asyncio.create_task(
         _run_as_leader(
@@ -753,12 +757,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     failed_rq_job_sweep_task = asyncio.create_task(
         _run_as_leader(
-            "loop:failed_rq_job_sweep", _failed_rq_job_sweep_loop, _leader_election_engine
+            "loop:failed_rq_job_sweep",
+            _failed_rq_job_sweep_loop,
+            _leader_election_engine,
         )
     )
     redis_streams_drain_task = asyncio.create_task(
         _run_as_leader(
-            "loop:redis_streams_drain", _redis_streams_drain_loop, _leader_election_engine
+            "loop:redis_streams_drain",
+            _redis_streams_drain_loop,
+            _leader_election_engine,
         )
     )
 

@@ -918,7 +918,10 @@ class CodeEmbedding(Base):
     __tablename__ = "code_embeddings"
     __table_args__ = (
         UniqueConstraint(
-            "repo_path", "file_path", "chunk_index", name="code_embeddings_repo_path_file_path_chunk_index_key"
+            "repo_path",
+            "file_path",
+            "chunk_index",
+            name="code_embeddings_repo_path_file_path_chunk_index_key",
         ),
     )
 

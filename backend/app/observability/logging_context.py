@@ -38,9 +38,7 @@ from typing import Any, Iterator
 trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
     "trace_id", default=""
 )
-task_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "task_id", default=""
-)
+task_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("task_id", default="")
 agent_run_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
     "agent_run_id", default=""
 )

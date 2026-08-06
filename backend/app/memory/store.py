@@ -194,7 +194,9 @@ async def _find_near_duplicate(
         # uses -1 as its int4 sentinel for "unscoped", since NULL isn't a
         # valid lock-key argument.
         await db.execute(
-            text("SELECT pg_advisory_xact_lock(hashtext(:category)::int, CAST(:repo_id AS int))"),
+            text(
+                "SELECT pg_advisory_xact_lock(hashtext(:category)::int, CAST(:repo_id AS int))"
+            ),
             {"category": category, "repo_id": repo_id if repo_id is not None else -1},
         )
 

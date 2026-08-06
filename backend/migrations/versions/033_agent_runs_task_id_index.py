@@ -22,9 +22,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_index(
-        "ix_agent_runs_task_id", "agent_runs", ["task_id"], unique=False
-    )
+    op.create_index("ix_agent_runs_task_id", "agent_runs", ["task_id"], unique=False)
 
 
 def downgrade() -> None:

@@ -61,17 +61,23 @@ def test_rbac_disabled_in_production_raises() -> None:
 
 
 def test_legacy_role_header_allowed_in_production_raises() -> None:
-    with pytest.raises(ValidationError, match="ALLOW_LEGACY_ROLE_HEADER=false is required"):
+    with pytest.raises(
+        ValidationError, match="ALLOW_LEGACY_ROLE_HEADER=false is required"
+    ):
         Settings(**_secure_production_kwargs(allow_legacy_role_header=True))  # type: ignore[arg-type]
 
 
 def test_default_admin_password_in_production_raises() -> None:
-    with pytest.raises(ValidationError, match="DEFAULT_ADMIN_PASSWORD must be a non-default value"):
+    with pytest.raises(
+        ValidationError, match="DEFAULT_ADMIN_PASSWORD must be a non-default value"
+    ):
         Settings(**_secure_production_kwargs(default_admin_password="gridiron123"))  # type: ignore[arg-type]
 
 
 def test_short_admin_password_in_production_raises() -> None:
-    with pytest.raises(ValidationError, match="DEFAULT_ADMIN_PASSWORD must be a non-default value"):
+    with pytest.raises(
+        ValidationError, match="DEFAULT_ADMIN_PASSWORD must be a non-default value"
+    ):
         Settings(**_secure_production_kwargs(default_admin_password="short1"))  # type: ignore[arg-type]
 
 

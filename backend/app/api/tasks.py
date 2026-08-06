@@ -423,7 +423,9 @@ async def pipeline_approve(
             repo_path = repo_obj.local_path
 
     await append_log(db, task_id, "approval", "Plan approved — resuming pipeline")
-    await dispatch_job(background_tasks, resume_planning_pipeline, task_id, True, repo_path)
+    await dispatch_job(
+        background_tasks, resume_planning_pipeline, task_id, True, repo_path
+    )
     return {"approved": True}
 
 
