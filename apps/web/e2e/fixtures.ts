@@ -6,49 +6,30 @@ import type { BrowserContext, Page } from "@playwright/test";
  */
 
 /**
- * Builds a JWT-*shaped* fake token (header.payload.signature, unsigned) —
- * not a real signed JWT, but enough for lib/auth.ts's client-side
- * decodeJwtPayload() (which never verifies a signature; the server's real
- * signature-checked auth is the actual boundary) to read a `role` claim
- * out of it. Gap-closure Stage 1.4 added UI-level role gating
- * (isApprover()) on Approve/Reject buttons in review/approvals/epics/fleet
- * pages; the previous plain-string fake token had no payload segment at
- * all, so decodeJwtPayload() silently returned null and every
- * isApprover()-gated button rendered as if the user were a viewer —
- * breaking e2e/review.spec.ts, which predates the role-gating feature and
- * expects the buttons to be visible.
- */
-function buildFakeToken(role: string): string {
-  const payload = Buffer.from(
-    JSON.stringify({ sub: "e2e-test-user", role })
-  ).toString("base64");
-  return `e2e-fake-header.${payload}.e2e-fake-signature`;
-}
-
-/**
- * Sets the auth cookie (read by middleware.ts to gate page navigation) and
- * localStorage token (read by lib/auth.ts's getToken()/isAuthenticated(),
- * which drives NavBar's UI state) — mirrors exactly what a real login()
- * call does via setToken(), without driving the login form for every spec
- * that isn't specifically testing login itself. Defaults to "approver" so
- * existing specs (written before role gating existed) keep seeing the same
- * full-access UI; pass "viewer" to test the restricted-UI path instead.
+ * Sets the auth cookie (read by middleware.ts to gate page navigation — an
+ * httpOnly cookie in production, but Playwright can set it directly) and the
+ * localStorage role marker (read by lib/auth.ts's isAuthenticated()/getRole()/
+ * isApprover(), which drive NavBar's UI state and Approve/Reject gating) —
+ * mirrors exactly what a real login() call leaves behind, without driving
+ * the login form for every spec that isn't specifically testing login
+ * itself. Defaults to "approver" so existing specs (written before role
+ * gating existed) keep seeing the same full-access UI; pass "viewer" to
+ * test the restricted-UI path instead.
  */
 export async function authenticate(
   context: BrowserContext,
   role: string = "approver"
 ): Promise<void> {
-  const token = buildFakeToken(role);
   await context.addCookies([
     {
       name: "gridiron_token",
-      value: encodeURIComponent(token),
+      value: "e2e-fake-session-token",
       url: "http://localhost:3100",
     },
   ]);
-  await context.addInitScript((t) => {
-    window.localStorage.setItem("gridiron_token", t);
-  }, token);
+  await context.addInitScript((r) => {
+    window.localStorage.setItem("gridiron_role", r);
+  }, role);
 
   // NavBar renders on every page and polls these three endpoints in the
   // background (fleet pending count, approvals pending count, and an SSE

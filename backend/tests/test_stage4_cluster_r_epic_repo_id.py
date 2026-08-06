@@ -29,7 +29,6 @@ from app.api.epics import CreateEpicRequest
 from app.db.models import Epic, Repo
 from app.db.session import new_isolated_async_engine
 
-
 # ---------------------------------------------------------------------------
 # Pydantic layer — CreateEpicRequest
 # ---------------------------------------------------------------------------

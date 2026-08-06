@@ -104,7 +104,9 @@ async def persist_code_embeddings(
     written = 0
     for emb in embeddings:
         raw_vec = emb.get("embedding")
-        vec = [float(v) for v in raw_vec] if isinstance(raw_vec, (list, tuple)) else None
+        vec = (
+            [float(v) for v in raw_vec] if isinstance(raw_vec, (list, tuple)) else None
+        )
         stmt = (
             pg_insert(CodeEmbedding)
             .values(

@@ -36,6 +36,9 @@ from starlette.requests import Request
 from app.agents.agent_result import AgentResult
 from app.agents.test_coverage_agent import _SUBMIT, run_test_coverage_agent
 from app.db.models import DevTask, Repo, TestScore
+from app.db.repository import create_task
+from app.db.session import new_isolated_async_engine
+from app.fleet.test_score import get_latest_test_score
 
 
 def _fake_request() -> Request:
@@ -54,9 +57,6 @@ def _fake_request() -> Request:
             "query_string": b"",
         }
     )
-from app.db.repository import create_task
-from app.db.session import new_isolated_async_engine
-from app.fleet.test_score import get_latest_test_score
 
 
 def test_submit_schema_declares_optional_nullable_coverage_pct() -> None:

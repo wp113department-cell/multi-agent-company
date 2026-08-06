@@ -365,6 +365,7 @@ def _run_subprocess(
 # decision and message formatting identical between both graphs.
 # ---------------------------------------------------------------------------
 
+
 def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
     """Cheap, no-API-call token estimate (~4 chars/token, a standard rough
     heuristic — not exact, but only used to gate the condense decision when
@@ -380,7 +381,9 @@ def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
         elif isinstance(content, list):
             for block in content:
                 if isinstance(block, dict):
-                    total_chars += len(str(block.get("text") or block.get("content") or ""))
+                    total_chars += len(
+                        str(block.get("text") or block.get("content") or "")
+                    )
     return total_chars // 4
 
 

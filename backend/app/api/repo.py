@@ -360,7 +360,9 @@ async def _do_reindex() -> None:
 
     repo_path = get_active_repo_path()
     partial_index = await asyncio.to_thread(
-        index_repository, repo_path, known_hashes=_known_hashes if _known_hashes else None
+        index_repository,
+        repo_path,
+        known_hashes=_known_hashes if _known_hashes else None,
     )
     # Gap-closure (2026-07-23): index_repository() with known_hashes set
     # returns ONLY the files that changed — scanner.merge_indexes() exists
@@ -421,7 +423,9 @@ async def _do_reindex() -> None:
                     "Code embeddings: persisted %d row(s) for %s", written, repo_path
                 )
         except Exception:
-            logger.exception("Failed to generate/persist code embeddings for %s", repo_path)
+            logger.exception(
+                "Failed to generate/persist code embeddings for %s", repo_path
+            )
 
 
 @router.post("/reindex")

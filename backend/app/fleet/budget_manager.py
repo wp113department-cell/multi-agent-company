@@ -177,7 +177,9 @@ class BudgetManager:
 
             engine = create_async_engine(s.database_url, pool_pre_ping=True)
             try:
-                async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                async with async_sessionmaker(
+                    engine, expire_on_commit=False
+                )() as session:
                     today_start = datetime.now(timezone.utc).replace(
                         hour=0, minute=0, second=0, microsecond=0
                     )

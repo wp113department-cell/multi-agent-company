@@ -3,8 +3,24 @@ import { json } from "./fixtures";
 
 test.describe("Login", () => {
   test("signs in and redirects to /repo on success", async ({ page }) => {
+    // Matches the backend's real LoginResponse shape (app/api/auth.py) —
+    // {token_type, role, username, must_change_password}, no access_token
+    // in the body since the JWT itself travels only as an httpOnly cookie.
+    // The Set-Cookie header here stands in for that cookie so
+    // middleware.ts's auth check (which looks for the gridiron_token
+    // cookie) lets the post-login navigation to /repo through.
     await page.route("**/api/auth/login", (route) =>
-      route.fulfill(json({ access_token: "e2e-fake-token" }))
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: { "set-cookie": "gridiron_token=e2e-fake-session-token; Path=/" },
+        body: JSON.stringify({
+          token_type: "bearer",
+          role: "approver",
+          username: "admin",
+          must_change_password: false,
+        }),
+      })
     );
     // /repo is where a successful login redirects to (LoginPage's
     // router.push("/repo")) — mock its API calls too so the destination
