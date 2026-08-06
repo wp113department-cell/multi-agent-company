@@ -11,6 +11,7 @@ No paths, keys, or bucket names are hardcoded.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import uuid
@@ -44,6 +45,7 @@ class ArtifactRecord:
     storage_path: str
     created_by_agent: str
     created_at: datetime
+    content_sha256: str | None = None
 
 
 def _artifacts_dir() -> Path:
@@ -81,6 +83,13 @@ def save_artifact(
 
     Path(storage_path).write_text(raw, encoding="utf-8")
 
+    # Blocker (audit_v1.md 4.6 #4): no integrity verification existed on
+    # artifacts in either backend — silent disk corruption (or a corrupted
+    # S3 object) would be returned to a caller with no detection. Computed
+    # at save time from the exact bytes written; get_artifact_content()
+    # recomputes and compares on read.
+    content_sha256 = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
     record = ArtifactRecord(
         artifact_id=artifact_id,
         task_id=str(task_id),
@@ -89,6 +98,7 @@ def save_artifact(
         storage_path=storage_path,
         created_by_agent=created_by_agent,
         created_at=datetime.now(timezone.utc),
+        content_sha256=content_sha256,
     )
 
     logger.info(
@@ -114,9 +124,14 @@ async def save_artifact_async(
         payload: dict[str, Any] = (
             content if isinstance(content, dict) else {"content": content}
         )
+        # Checksum computed over the exact same serialization
+        # get_artifact_content()'s S3 read path reconstructs (json.dumps(...,
+        # indent=2, default=str)) so a later comparison is meaningful.
+        content_sha256: str | None = hashlib.sha256(
+            json.dumps(payload, indent=2, default=str).encode("utf-8")
+        ).hexdigest()
         artifact_id = str(uuid.uuid4())
         try:
-            import asyncio
             from app.artifacts.s3_store import save_artifact_s3
 
             s3_key = await asyncio.to_thread(
@@ -125,9 +140,12 @@ async def save_artifact_async(
             storage_path = f"s3://{settings.s3_bucket}/{s3_key}"
         except Exception:
             logger.exception("S3 upload failed for artifact %s — falling back to disk", artifact_id)
-            record = save_artifact(task_id, artifact_type, content, created_by_agent)
+            record = await asyncio.to_thread(
+                save_artifact, task_id, artifact_type, content, created_by_agent
+            )
             artifact_id = record.artifact_id
             storage_path = record.storage_path
+            content_sha256 = record.content_sha256
 
         record = ArtifactRecord(
             artifact_id=artifact_id,
@@ -137,9 +155,16 @@ async def save_artifact_async(
             storage_path=storage_path,
             created_by_agent=created_by_agent,
             created_at=datetime.now(timezone.utc),
+            content_sha256=content_sha256,
         )
     else:
-        record = save_artifact(task_id, artifact_type, content, created_by_agent)
+        # Blocker (audit_v1.md 4.6 #2): the non-S3 branch called a plain
+        # sync disk-write function with no asyncio.to_thread wrapping,
+        # unlike the S3 branch — every artifact save under the default
+        # backend blocked the event loop for the write's duration.
+        record = await asyncio.to_thread(
+            save_artifact, task_id, artifact_type, content, created_by_agent
+        )
 
     if db is not None:
         try:
@@ -147,8 +172,8 @@ async def save_artifact_async(
             await db.execute(
                 text(
                     "INSERT INTO artifacts (artifact_id, task_id, type, version, storage_path, "
-                    "created_by_agent, created_at) VALUES "
-                    "(:aid, :tid, :atype, :version, :spath, :agent, :created_at)"
+                    "created_by_agent, created_at, content_sha256) VALUES "
+                    "(:aid, :tid, :atype, :version, :spath, :agent, :created_at, :sha256)"
                 ),
                 {
                     "aid": record.artifact_id,
@@ -158,6 +183,7 @@ async def save_artifact_async(
                     "spath": record.storage_path,
                     "agent": record.created_by_agent,
                     "created_at": record.created_at,
+                    "sha256": record.content_sha256,
                 },
             )
             await db.commit()
@@ -191,14 +217,17 @@ async def get_artifact_content(artifact_id: str, db: Any) -> str | None:
     if db is None:
         # No DB configured -- fall back to the local-disk-only path (matches
         # get_artifact()'s existing behavior for db=None callers).
-        return get_artifact(artifact_id)
+        return await asyncio.to_thread(get_artifact, artifact_id)
 
     try:
         from sqlalchemy import text
 
         row = (
             await db.execute(
-                text("SELECT storage_path FROM artifacts WHERE artifact_id = :aid"),
+                text(
+                    "SELECT storage_path, content_sha256 FROM artifacts "
+                    "WHERE artifact_id = :aid"
+                ),
                 {"aid": artifact_id},
             )
         ).mappings().first()
@@ -210,9 +239,10 @@ async def get_artifact_content(artifact_id: str, db: Any) -> str | None:
         # No DB row (or DB lookup failed) -- fall back to local disk, since
         # older artifacts saved before this DB-lookup path existed may still
         # be retrievable there even without a matching artifacts row.
-        return get_artifact(artifact_id)
+        return await asyncio.to_thread(get_artifact, artifact_id)
 
     storage_path = str(row["storage_path"])
+    expected_sha256 = row["content_sha256"]
     if storage_path.startswith("s3://"):
         from app.artifacts.s3_store import load_artifact_s3_by_key
 
@@ -225,13 +255,44 @@ async def get_artifact_content(artifact_id: str, db: Any) -> str | None:
         except Exception:
             logger.exception("Failed to load artifact %s from S3", artifact_id)
             return None
-        return json.dumps(payload, indent=2, default=str)
+        text_content = json.dumps(payload, indent=2, default=str)
+        _verify_checksum(artifact_id, text_content, expected_sha256)
+        return text_content
 
-    p = Path(storage_path)
-    if not p.exists():
-        logger.warning("Artifact not found on disk: %s (%s)", artifact_id, storage_path)
-        return None
-    return p.read_text(encoding="utf-8")
+    def _read_disk() -> str | None:
+        p = Path(storage_path)
+        if not p.exists():
+            logger.warning("Artifact not found on disk: %s (%s)", artifact_id, storage_path)
+            return None
+        return p.read_text(encoding="utf-8")
+
+    # Blocker (audit_v1.md 4.6 #2): plain sync disk read inside an async
+    # function — same event-loop-blocking issue as the save path.
+    disk_content: str | None = await asyncio.to_thread(_read_disk)
+    if disk_content is not None:
+        _verify_checksum(artifact_id, disk_content, expected_sha256)
+    return disk_content
+
+
+def _verify_checksum(artifact_id: str, content: str, expected_sha256: Any) -> None:
+    """Blocker (audit_v1.md 4.6 #4): no integrity verification existed on
+    artifacts in either backend. Logs loudly on mismatch rather than
+    raising — a corrupted artifact should still be visible to a human
+    (e.g. rendered in Mission Control) with a clear warning, not silently
+    swallowed as a 500. expected_sha256 is None for any artifact saved
+    before this column existed — nothing to compare against, not an error.
+    """
+    if not expected_sha256:
+        return
+    actual = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    if actual != expected_sha256:
+        logger.warning(
+            "Artifact %s failed integrity check: expected sha256=%s, got %s "
+            "— content may be corrupted",
+            artifact_id,
+            expected_sha256,
+            actual,
+        )
 
 
 async def list_artifacts(task_id: str | int, db: Any = None) -> list[ArtifactRecord]:

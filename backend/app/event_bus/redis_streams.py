@@ -154,6 +154,81 @@ def acknowledge(msg_id: str) -> None:
         logger.exception("Failed to ack Redis Streams msg_id=%s", msg_id)
 
 
+def drain_and_ack_stream(consumer_name: str, count: int = 100) -> int:
+    """Blocker (audit_v1.md 4.6 #2, Phase K finding #2): "Redis Streams is
+    write-only — no consumer anywhere ever reads/acks the stream ... a
+    crash after xreadgroup but before xack leaves a message permanently
+    stuck in the Pending Entries List." read_pending()/acknowledge() were
+    both real, correct implementations with zero real callers.
+
+    This is that caller: reads up to `count` pending messages and acks each
+    one after logging its event_type, so events actually drain out of the
+    Pending Entries List instead of accumulating there forever. This is
+    deliberately a drain/observability consumer, not a claim that real
+    business-logic dispatch happens here — the in-process bus
+    (app.event_bus.bus) is the one place this codebase does real handler
+    dispatch, and it currently has zero registered subscribers of its own
+    (a separate, larger architectural decision this fix does not make on
+    its own).
+
+    Uses a short 100ms block (not 0 — passing block=0 to XREADGROUP means
+    "block forever" in Redis, not "don't block", which would hang this
+    periodic background loop indefinitely whenever nothing is pending).
+
+    Also reclaims (via XAUTOCLAIM) any entries left stuck in another
+    consumer's Pending Entries List for longer than
+    redis_streams_stale_pending_ms — the real gap the audit's own finding
+    named directly: "a crash after xreadgroup but before xack leaves a
+    message permanently stuck in the PEL — no recovery path." Reclaimed
+    entries are logged and acked the same way as freshly-read ones.
+
+    Returns the number of messages acknowledged (new + reclaimed).
+    """
+    from app.config import get_settings
+
+    settings = get_settings()
+    acked = 0
+
+    if settings.redis_streams_enabled:
+        try:
+            _ensure_group()
+            client = _get_client()
+            _next_cursor, reclaimed, _deleted = client.xautoclaim(
+                _STREAM_KEY,
+                settings.redis_consumer_group,
+                consumer_name,
+                min_idle_time=settings.redis_streams_stale_pending_ms,
+                count=count,
+            )
+            for msg_id, data in reclaimed:
+                logger.warning(
+                    "Redis Streams reclaimed stale pending entry: "
+                    "event_type=%s event_id=%s msg_id=%s (idle > %dms — a "
+                    "previous consumer likely crashed before acking)",
+                    data.get("event_type", "?"),
+                    data.get("event_id", "?"),
+                    msg_id,
+                    settings.redis_streams_stale_pending_ms,
+                )
+                acknowledge(msg_id)
+                acked += 1
+        except Exception:
+            logger.exception("Failed to XAUTOCLAIM stale Redis Streams entries")
+
+    messages = read_pending(consumer_name, count=count, block_ms=100)
+    for msg in messages:
+        data = msg.get("data", {})
+        logger.info(
+            "Redis Streams drain: event_type=%s event_id=%s msg_id=%s",
+            data.get("event_type", "?"),
+            data.get("event_id", "?"),
+            msg["msg_id"],
+        )
+        acknowledge(msg["msg_id"])
+        acked += 1
+    return acked
+
+
 def stream_length() -> int:
     """Return current stream length. Returns 0 when disabled or on error."""
     from app.config import get_settings

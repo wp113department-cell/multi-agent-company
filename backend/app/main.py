@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import AsyncGenerator
+from typing import Any
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -253,6 +255,35 @@ async def _failed_rq_job_sweep_loop() -> None:
             logger.warning("Failed RQ job sweep loop failed: %s", exc)
 
 
+async def _redis_streams_drain_loop() -> None:
+    """Blocker (audit_v1.md 4.6 #2, Phase K finding #2): "Redis Streams is
+    write-only — no consumer anywhere ever reads/acks the stream." Periodic
+    consumer that drains new entries and reclaims stale (crashed-consumer)
+    pending ones via app.event_bus.redis_streams.drain_and_ack_stream — see
+    that function's own docstring for the full reasoning. No-ops
+    immediately when REDIS_STREAMS_ENABLED=false (the default), same as
+    every other Redis-Streams-only code path in this codebase.
+    """
+    settings = get_settings()
+    if not settings.redis_streams_enabled:
+        return
+    interval_seconds = settings.redis_streams_drain_interval_seconds
+    if interval_seconds <= 0:
+        return
+
+    consumer_name = f"drain-{os.getpid()}"
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            from app.event_bus.redis_streams import drain_and_ack_stream
+
+            acked = await asyncio.to_thread(drain_and_ack_stream, consumer_name)
+            if acked:
+                logger.info("Redis Streams drain: acked %d message(s)", acked)
+        except Exception as exc:
+            logger.warning("Redis Streams drain loop failed: %s", exc)
+
+
 async def _benchmark_baseline_loop() -> None:
     """Gap-closure (2026-07-21) — Day 10 built benchmark_manager.store_baseline()
     but nothing ever called it automatically, so no real agent has ever had a
@@ -433,6 +464,83 @@ async def _run_doc_agent_auto_trigger_once() -> None:
             logger.warning("Doc-agent auto-trigger failed for %s: %s", agent_name, exc)
 
 
+def _make_leader_election_engine(settings: Any, pool_size: int) -> Any:
+    """One shared engine for every _run_as_leader() task, sized to hold a
+    dedicated connection per concurrently-lock-holding loop. Deliberately
+    NOT one create_async_engine() per loop (the original shape): under
+    test (TestClient(app) real-lifespan startups), N independently-
+    cancelled per-loop engines each tearing down their own asyncpg
+    connection at shutdown raced the *shared* app.db.session engine's own
+    connections for the same closing event loop — reproduced directly
+    (test_audit04_orchestration_fixes.py's two-TestClient-in-one-test
+    pattern went from reliably passing to reliably failing with "attached
+    to a different loop" specifically when leader election was enabled,
+    confirmed by toggling LEADER_ELECTION_ENABLED). One engine, disposed
+    once, after every consuming task is already cancelled+awaited (see
+    lifespan()'s shutdown sequence) rather than mid-cancellation, removes
+    that race.
+    """
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    return create_async_engine(
+        settings.database_url, pool_size=pool_size, max_overflow=0
+    )
+
+
+async def _run_as_leader(lock_name: str, run_loop: Any, engine: Any) -> None:
+    """Blocker (audit_v1.md 4.8 #5): "No leader election / distributed
+    lock — every backend instance runs every singleton background loop ...
+    N× duplicate work, some of which is likely idempotent by accident, not
+    by design/verification." Gates a background loop behind a Postgres
+    session-scoped advisory lock (pg_try_advisory_lock) keyed on lock_name
+    — a lock is tied to the DB connection that acquired it, so it releases
+    automatically the moment that connection closes (this instance
+    shutting down, crashing, or losing its DB connection), no heartbeat or
+    manual unlock required for correctness. Instances that don't win the
+    lock retry periodically (leader_election_retry_seconds) so a new
+    leader takes over promptly if the current one dies.
+
+    run_loop is called (and awaited) only once this instance has won the
+    lock — it owns the loop's actual `while True: sleep + work` body
+    unchanged; this wrapper only decides whether that body runs at all on
+    this instance. engine is the shared _make_leader_election_engine()
+    instance — this function never creates or disposes its own (see that
+    function's docstring for why).
+    """
+    settings = get_settings()
+    if not settings.leader_election_enabled:
+        await run_loop()
+        return
+
+    from sqlalchemy import text
+
+    retry_seconds = settings.leader_election_retry_seconds
+    while True:
+        async with engine.connect() as conn:
+            acquired = (
+                await conn.execute(
+                    text("SELECT pg_try_advisory_lock(hashtext(:name)::bigint)"),
+                    {"name": lock_name},
+                )
+            ).scalar_one()
+            if acquired:
+                logger.info(
+                    "Leader election: this instance is leader for %r", lock_name
+                )
+                try:
+                    await run_loop()
+                finally:
+                    try:
+                        await conn.execute(
+                            text("SELECT pg_advisory_unlock(hashtext(:name)::bigint)"),
+                            {"name": lock_name},
+                        )
+                    except Exception:
+                        pass
+                return
+        await asyncio.sleep(retry_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.pipeline.graph import init_checkpointer, close_checkpointer
@@ -447,7 +555,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.fleet.failure_ladder import start_orphan_recovery_loop
 
     settings = get_settings()
-    logging.basicConfig(level=settings.log_level.upper())
+
+    # A fresh lifespan startup means a fresh event loop context (a new app
+    # instance/process) — app.db.session's module-level engine singleton,
+    # if left over from a *previous* lifespan in this same process (e.g.
+    # two `with TestClient(app):` blocks in one test — real pattern in
+    # this test suite), is bound to that previous, possibly-now-closed
+    # event loop. Reusing it here would eventually surface as "attached to
+    # a different loop" on some later query. get_engine()/
+    # get_session_factory() both lazily recreate on next use, so this is
+    # always safe — never leaves anything mid-use.
+    import app.db.session as _db_session
+
+    _db_session._engine = None
+    _db_session._session_factory = None
+
+    # Blocker (audit_v1.md 4.7 #2): plain logging.basicConfig() — no JSON
+    # structure, no trace_id correlation, despite fleet/metrics.py's own
+    # module docstring claiming logs are trace_id-correlated. See
+    # app.observability.logging_context's own docstring for the full design.
+    from app.observability.logging_context import configure_structured_logging
+
+    configure_structured_logging(settings.log_level)
 
     # Audit 01 gap-closure (2026-07-24) — capture the real main event loop so
     # FleetBus (app/fleet/fleet_events.py) can forward events published from
@@ -564,14 +693,74 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as exc:
             logger.warning("Could not seed admin user: %s", exc)
 
-    reindex_task = asyncio.create_task(_weekly_reindex_loop())
-    retention_task = asyncio.create_task(start_retention_loop())
-    fleet_scan_task = asyncio.create_task(_fleet_agents_scan_loop())
-    lesson_archive_task = asyncio.create_task(_versioned_lesson_archive_loop())
-    benchmark_baseline_task = asyncio.create_task(_benchmark_baseline_loop())
-    orphan_recovery_task = asyncio.create_task(start_orphan_recovery_loop())
-    doc_agent_auto_trigger_task = asyncio.create_task(_doc_agent_auto_trigger_loop())
-    failed_rq_job_sweep_task = asyncio.create_task(_failed_rq_job_sweep_loop())
+    # Blocker (audit_v1.md 4.8 #5): each of these singleton loops is now
+    # gated by _run_as_leader() so only one backend instance actually runs
+    # it under a real multi-instance deployment — see that function's own
+    # docstring. Single-instance dev/test behavior is unchanged (this
+    # instance always wins its own uncontested locks). One shared engine
+    # for all 9 (see _make_leader_election_engine's docstring for why not
+    # one per loop), sized so every loop can hold its own lock-holding
+    # connection concurrently; disposed once, after every consuming task
+    # below is confirmed cancelled+awaited, not mid-cancellation.
+    _leader_loop_names = (
+        "loop:weekly_reindex",
+        "loop:retention",
+        "loop:fleet_agents_scan",
+        "loop:versioned_lesson_archive",
+        "loop:benchmark_baseline",
+        "loop:orphan_recovery",
+        "loop:doc_agent_auto_trigger",
+        "loop:failed_rq_job_sweep",
+        "loop:redis_streams_drain",
+    )
+    _leader_election_engine = (
+        _make_leader_election_engine(settings, pool_size=len(_leader_loop_names))
+        if settings.leader_election_enabled
+        else None
+    )
+    reindex_task = asyncio.create_task(
+        _run_as_leader("loop:weekly_reindex", _weekly_reindex_loop, _leader_election_engine)
+    )
+    retention_task = asyncio.create_task(
+        _run_as_leader("loop:retention", start_retention_loop, _leader_election_engine)
+    )
+    fleet_scan_task = asyncio.create_task(
+        _run_as_leader("loop:fleet_agents_scan", _fleet_agents_scan_loop, _leader_election_engine)
+    )
+    lesson_archive_task = asyncio.create_task(
+        _run_as_leader(
+            "loop:versioned_lesson_archive",
+            _versioned_lesson_archive_loop,
+            _leader_election_engine,
+        )
+    )
+    benchmark_baseline_task = asyncio.create_task(
+        _run_as_leader(
+            "loop:benchmark_baseline", _benchmark_baseline_loop, _leader_election_engine
+        )
+    )
+    orphan_recovery_task = asyncio.create_task(
+        _run_as_leader(
+            "loop:orphan_recovery", start_orphan_recovery_loop, _leader_election_engine
+        )
+    )
+    doc_agent_auto_trigger_task = asyncio.create_task(
+        _run_as_leader(
+            "loop:doc_agent_auto_trigger",
+            _doc_agent_auto_trigger_loop,
+            _leader_election_engine,
+        )
+    )
+    failed_rq_job_sweep_task = asyncio.create_task(
+        _run_as_leader(
+            "loop:failed_rq_job_sweep", _failed_rq_job_sweep_loop, _leader_election_engine
+        )
+    )
+    redis_streams_drain_task = asyncio.create_task(
+        _run_as_leader(
+            "loop:redis_streams_drain", _redis_streams_drain_loop, _leader_election_engine
+        )
+    )
 
     yield
 
@@ -583,6 +772,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     orphan_recovery_task.cancel()
     doc_agent_auto_trigger_task.cancel()
     failed_rq_job_sweep_task.cancel()
+    redis_streams_drain_task.cancel()
     for task in (
         reindex_task,
         retention_task,
@@ -592,11 +782,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         orphan_recovery_task,
         doc_agent_auto_trigger_task,
         failed_rq_job_sweep_task,
+        redis_streams_drain_task,
     ):
         try:
             await task
         except asyncio.CancelledError:
             pass
+    # Every leader-election-consuming task above is now fully cancelled and
+    # awaited — no in-flight use of this engine's connections remains, so
+    # disposing it here is an orderly teardown, not a race with in-flight
+    # asyncpg cleanup tasks (see _make_leader_election_engine's docstring).
+    if _leader_election_engine is not None:
+        await _leader_election_engine.dispose()
     await close_checkpointer()
     await close_agent_checkpointer()
 

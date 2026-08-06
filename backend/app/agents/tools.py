@@ -6575,8 +6575,6 @@ def make_schema_agent_handlers(repo_path: str) -> dict[str, Any]:
 
 def make_ai_engineer_handlers(repo_path: str) -> dict[str, Any]:
     """Handler factory for AI/ML Engineer agent."""
-    import subprocess as _sp
-
     root = Path(repo_path)
     handlers = make_read_only_handlers(repo_path)
     ai_result: dict[str, Any] = {}
@@ -7833,7 +7831,7 @@ def _scan_content_for_secrets(content: str) -> str | None:
             # commit — only flag values that are actually secret-shaped
             # (long, high-entropy-looking), matching _mask_secret_value's
             # own generic-token heuristic.
-            if len(value) >= 12 and not value.lower() in (
+            if len(value) >= 12 and value.lower() not in (
                 "changeme",
                 "placeholder",
                 "your_key_here",

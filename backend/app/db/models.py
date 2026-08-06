@@ -172,8 +172,13 @@ class AgentRun(Base):
     __tablename__ = "agent_runs"
 
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    # Blocker (audit_v1.md 4.7 #1): this FK had no index anywhere in the
+    # schema (confirmed absent from all 31 prior migrations) — Postgres
+    # does not auto-index FK columns, so every query joining/filtering
+    # agent_runs by task_id (including the metrics dashboard) did a
+    # sequential scan. index=True here + migration 033 add the real index.
     task_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("dev_tasks.id", ondelete="CASCADE")
+        BigInteger, ForeignKey("dev_tasks.id", ondelete="CASCADE"), index=True
     )
     agent_type: Mapped[str] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(String(50), default="running")
@@ -338,6 +343,9 @@ class Artifact(Base):
     )
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Blocker (audit_v1.md 4.6 #4): no checksum/integrity verification
+    # existed on artifacts in either backend — migration 034.
+    content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 # ---- Phase 5 tables ----

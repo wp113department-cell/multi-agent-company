@@ -41,6 +41,7 @@ from app.agents.base import get_effective_api_key, load_role
 from app.agents.guardrails import check_command, check_path
 from app.config import get_settings
 from app.fleet.circuit_breaker import get_anthropic_breaker
+from app.observability.logging_context import bind_log_context
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
@@ -2628,10 +2629,20 @@ def run_agent_graph(
         # it as the checkpointer's thread_id is what makes a resumed run
         # actually address the SAME checkpoint rather than starting fresh.
         run_config = {"configurable": {"thread_id": tid}}
-        for _step_state in graph.stream(
-            initial_state, config=run_config, stream_mode="values"
+        # Blocker (audit_v1.md 4.7 #2): every log line emitted by any node
+        # function during this run (tool calls, LLM calls, policy denials,
+        # budget checks, etc.) — from already-existing, unmodified logger
+        # calls anywhere in the call stack underneath graph.stream() —
+        # now carries this run's real trace_id/task_id/agent_run_id via
+        # contextvars, without each of those call sites needing to know
+        # about it. See app.observability.logging_context's own docstring.
+        with bind_log_context(
+            trace_id=tid, task_id=str(task_id or ""), agent_run_id=_agent_run_id or ""
         ):
-            _last_known_state = _step_state
+            for _step_state in graph.stream(
+                initial_state, config=run_config, stream_mode="values"
+            ):
+                _last_known_state = _step_state
         final_state: AgentRunState = (
             _last_known_state if _last_known_state is not None else initial_state
         )
