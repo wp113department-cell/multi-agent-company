@@ -2,7 +2,7 @@
 
 **This is a living document. Update it every session — it is the single source of truth for "what actually exists right now," separate from `PLAN.md` (what's intended) and `files/` (the original spec suite, which describes the full 7-stage vision, not the current build).**
 
-Last updated: 2026-07-20 (Day 6 complete — Karpathy skills across 60+ role files + 17 Day 6B agents with AGENT_CONTRACT + 205 tests)
+Last updated: 2026-08-06 (Audit v1 remediation complete — all 8 release blockers + Phases 3-6 hardening, 3871 tests passing)
 
 ---
 
@@ -3316,3 +3316,192 @@ Frontend: pnpm typecheck (clean), pnpm lint (0 errors, 3 pre-existing unrelated 
 ✅ GREEN FLAG — GAP-CLOSURE (DAYS 0-18) + DAY 19 PRODUCTION-READINESS PREP COMPLETE. Deployment
 itself intentionally not performed — see `docs/DEPLOYMENT.md` for the remaining manual account-
 setup steps.
+
+---
+
+## 2026-08-06 — Audit v1 Remediation: 8 Release Blockers + Phases 3-6 Hardening
+
+A full read-only production audit (`audit_v1.md`, dated 2026-08-05, 21 phases A-T, 8 parallel
+specialist passes) had previously identified 8 release blockers and a long list of Medium/High
+findings across concurrency, repo intelligence, memory, event bus, artifacts, DB performance, and
+observability. This session fixed all 8 blockers and every targeted finding from Phases 3-6,
+verifying each against real infrastructure (the live dev Postgres/Redis containers), not mocks.
+
+### Part 1 — All 8 Release Blockers Fixed
+
+1. **`apply_patch` path-denylist bypass** — the universal tool gate read `tool_input.get("path","")`,
+   but apply_patch's schema has no `path` field (targets live inside the diff text). Added
+   `_extract_patch_target_paths()` (parses `+++`/`---` headers, honors `-pN` strip), wired into both
+   the universal gate (`base_graph.py::_policy_check`) and the handler itself. Verified: `.env`,
+   `.github/workflows/`, and `../../../../tmp/pwned.txt` targets all now denied.
+2. **`read_file`/`read_files`/`file_exists`/`file_info`/`get_file_tree` had zero path containment**
+   — verified via the audit's own exploit (`../`×10 traversal, absolute `/etc/passwd` both returned
+   full file contents). All five now call `check_path_in_worktree()`. Re-verified: both now denied.
+3. **Doc-writing agents bypassed worktree containment** — `dg_write_file`/`rm_write_file`/
+   `ad_write_file` used ad-hoc suffix checks or no check at all; a correct sibling pattern
+   (`make_docs_handlers.write_file`) already existed in the same file. Applied it to all three.
+   Verified: `docs/../../.github/workflows/evil.yml` now denied (previously wrote the file for real).
+4. **Command-chaining allowlist gate omitted newline/redirect** — `_CHAINING_METACHARS` blocked
+   `;`/`&&`/`||`/backticks/`$(` but not `\n`/`\r`/`>`/`<`. Added all four. Verified:
+   `echo pwned > ~/.ssh/authorized_keys` and `git status\nnc -e /bin/sh ...` both now denied.
+5. **Cleanup Agent's `find` allowlist entry ran unsandboxed** — reproduced the exact
+   `find /workspace -mindepth 1 -delete` case Docker sandboxing was built to prevent. `cu_bash`
+   routed through the existing `_run_bash_command` sandboxed primitive instead of raw
+   `subprocess.run(shell=True)`.
+6. **AI Engineer's `run_python_snippet` had no policy check; `pip install`/bare `python` in
+   allowlist** — routed through the sandbox via a shlex-quoted `python -c` command; dropped
+   `python `/`python3 `/`pip install ` from `_AI_BASH_ALLOWLIST` (kept `python -m `/`pytest ` —
+   materially narrower). Verified: `python /tmp/reverse_shell.py` and `pip install malicious-pkg`
+   both now denied.
+7. **No database backup mechanism anywhere** — added `scripts/backup_db.sh` (pg_dump -Fc,
+   verifies its own output via `pg_restore --list`, retention-pruned) and `scripts/restore_db.sh`
+   (interactive confirmation, verifies via `alembic_version` row count), plus
+   `docs/disaster_recovery.md`. **Actually run** against the live dev Postgres: backed up, restored
+   into a throwaway `restore_drill_test` database, `dev_tasks` row counts matched exactly (213=213).
+   Also added a production-only startup validator (`Settings._require_durable_workspace_in_production`)
+   that hard-fails if `WORKTREES_DIR`/`REPOS_DIR`/`BG_PROCESS_REGISTRY_PATH` are still under the
+   ephemeral `/tmp` default.
+8. **RQ queue infrastructure entirely disconnected from real dispatch** — `QUEUE_BACKEND=rq` had
+   zero effect on real task launches (all 6 real call sites in `api/tasks.py` used
+   `BackgroundTasks.add_task()` directly). Added `dispatch_job()` — the real chokepoint, now used by
+   all 6 sites — which routes to `queue().enqueue()` when `QUEUE_BACKEND=rq`. Added real
+   `Retry(max=queue_job_retry_max)` on enqueue (was previously zero retry config) and a new
+   `sweep_failed_rq_jobs()` + background loop draining RQ's `FailedJobRegistry` into structured
+   `failed_events` rows (was previously a silent drop — nothing ever read that registry).
+
+Also closed in the same pass (named in the same audit sections): SSRF guard on `fetch_url`
+(resolves the hostname and checks every resolved IP against private/loopback/link-local/reserved
+ranges — verified against `169.254.169.254`, RFC1918, `localhost`; deliberately **not** applied to
+`check_url_status`/`http_request`'s devops variants, which an existing test confirmed are
+intentionally used to health-check `localhost`); `fetch_url`/`http_request` added to
+`_UNTRUSTED_CONTENT_TOOLS`; `git_service._validate_workspace`'s prefix-without-separator bypass
+fixed (`real == real_parent or real.startswith(real_parent + os.sep)`, verified `/home2/evil` no
+longer passes as inside `/home`); structured `AuditLog.append()` wired into the real policy-denial
+chokepoint in `base_graph.py` (was previously `logger.warning()` only); new
+`_scan_content_for_secrets()` pre-commit scanner in `git_commit_change` (AWS/OpenAI-shaped tokens,
+PEM headers, credential-shaped assignments — verified against real and placeholder values).
+
+### Part 2 — Phase 3 (Concurrency & Reliability)
+
+- **Atomic task transitions**: `transition_task()` rewritten from read-check-write to a single
+  `UPDATE dev_tasks SET status=:new WHERE id=:id AND status IN (:allowed) RETURNING id`. Verified
+  with 10 real concurrent `transition_task()` calls against the same DB row — exactly 1 succeeded.
+- **Planner quality gate**: `policy:schema_valid` folded into `_run_quality_gate()`'s `passed`
+  computation (previously computed but excluded — a schema-invalid submission could still pass).
+- **Decomposer crash recovery**: `save_subtasks()` no longer hard-KeyErrors on a missing `title`;
+  `launch_planning_pipeline`'s exception handler now transitions the task to `blocked` (previously
+  left it stuck in `planning` forever with `restart_task` refusing to touch it).
+- **Preventive budget enforcement**: token-budget check added inside `call_llm`'s per-turn node
+  (before another LLM call is made), not only after the graph fully drains. New
+  `BudgetManager.check_daily_db()` — a real `SUM(cost_estimate) FROM agent_runs WHERE started_at
+  >= today` query — replaces the in-process-only daily check that silently reset on every restart.
+- **Checkpoint retention**: new `checkpoint_retention_days` setting (default 30) + real cleanup —
+  decodes each thread's newest `checkpoint_id` as a UUIDv6 (LangGraph's own bundled decoder) to
+  find stale threads, hard-deletes across `checkpoints`/`checkpoint_blobs`/`checkpoint_writes`
+  (previously zero cleanup ever — unbounded growth). Verified against a disposable copy of the real
+  table.
+- **NOT fixed (deliberately)**: subtask concurrency fan-out (`asyncio.gather` over topological
+  waves). Investigation found `run_backend_dev`/`run_frontend_dev` write files, run test suites,
+  and git-commit directly against one **shared, mutable** `worktree_path` per epic — there is no
+  per-subtask worktree isolation. Naive `asyncio.gather()` would make multiple agents concurrently
+  write/commit/test in the same git working directory — a real corruption hazard, not a safe
+  speedup. Needs per-subtask worktree isolation first; flagged for dedicated follow-up rather than
+  shipped with a known regression.
+
+### Part 3 — Phase 4 (Repository Intelligence)
+
+- **Real vector semantic search wired for the first time**: new `CodeEmbedding` model + migration
+  032 (HNSW index — migration 001 created the table but never got one), `persist_code_embeddings()`
+  (real upsert during reindex), and `semantic_search()` rewritten from a dead brute-force loop over
+  a never-populated argument into a real `ORDER BY embedding.cosine_distance(...)` pgvector query.
+  Wired into `api/repo.py::_do_reindex` and the MCP `semantic_search` tool (previously did keyword
+  scoring only despite its own description claiming otherwise). Verified end-to-end against the
+  real DB — exact-vector match correctly ranked first by the real ANN query.
+- **Non-blocking indexing/call-graph**: `build_context`, `build_architecture_map`,
+  `build_class_graph`, `build_call_graph`/`build_package_graph`, and every fallback
+  `index_repository()` call across `api/repo.py`'s 4 repo-intelligence endpoints now run via
+  `asyncio.to_thread()` — previously blocked the event loop for every concurrent request.
+- **Scanner size guard**: new `scanner_max_indexable_file_bytes` (default 2MB) — checked via
+  `os.stat()` before ever reading file bytes.
+- **MCP `repo_path` validation**: `_get_repo()` now validates against `target_repo_path`/
+  `repos_dir`/`worktrees_dir`. Verified: `repo_path: "/etc"` and `"../"` traversal both denied
+  (previously scanned and returned real host filesystem contents).
+
+### Part 4 — Phase 5 (Memory System)
+
+- **Two-stage HNSW retrieval**: all 5 `query_*` functions in `app/memory/store.py` rewritten as a
+  `WITH candidates AS (...ORDER BY embedding <=> :vec LIMIT :candidate_limit...)` CTE (index-
+  accelerated) feeding an outer composite-score re-rank — the composite formula no longer defeats
+  the HNSW index. New `memory_candidate_overfetch_factor` setting (default 10). Verified against
+  real DB with synthetic vectors.
+- **Atomic memory dedup**: `_find_near_duplicate()` now acquires
+  `pg_advisory_xact_lock(hashtext(category), repo_id)` before its check. Verified: 8 concurrent
+  writers with identical content -> exactly 1 row inserted (previously would have raced).
+- **Chat history condensation on restore**: `load_history_from_db()` bounded to the most-recent
+  `chat_history_restore_limit` (200, new setting) messages. `ChatAgent._call_llm_node`'s condense
+  gate no longer silently skips on a freshly-restored session's first turn (`self._tokens_in == 0`
+  previously always short-circuited it) — falls back to a character-based token estimate of the
+  actual restored history. Verified against real DB.
+- Also: `memory_recency_half_life_days` now has `gt=0` (was a silent division-by-zero that zeroed
+  all retrieval fleet-wide on a config typo, per CLAUDE.md's own "never a silent default" rule).
+
+### Part 5 — Phase 6 (Event Bus, Artifacts, DB, Observability)
+
+- **DB indexing + pool sizing**: migration 033 adds the missing `agent_runs.task_id` index
+  (absent from all 31 prior migrations). New `db_pool_size`/`db_pool_max_overflow` settings
+  (default 20/10) wired into `create_async_engine()` — was relying on SQLAlchemy's default (5+10),
+  smaller than the app's own 20-run concurrency ceiling.
+- **Artifact store**: non-S3 save/read paths wrapped in `asyncio.to_thread()` (only the S3 branch
+  was before). New `content_sha256` column (migration 034) — real SHA-256 computed at save,
+  verified at read, loud warning on mismatch instead of silently returning corrupted content.
+  Verified end-to-end including simulated on-disk corruption.
+- **Redis Streams consumer**: new `drain_and_ack_stream()` calling the already-correct-but-never-
+  called `read_pending()`/`acknowledge()`, plus `XAUTOCLAIM`-based reclaim of stale pending entries
+  (new `redis_streams_stale_pending_ms` setting). New background loop, gated on
+  `REDIS_STREAMS_ENABLED`. Verified against the real Redis container: normal drain and crash-
+  recovery (XAUTOCLAIM) both confirmed working.
+- **Leader election**: new `_run_as_leader()` wraps all 9 singleton background loops behind a
+  `pg_try_advisory_lock` per loop name — only one backend instance runs each loop under a real
+  multi-instance deployment; standbys retry periodically for automatic failover. Verified against
+  real Postgres: only one of two competing "instances" won the lock; cancelling the leader
+  triggered failover to the standby within one retry interval.
+- **Structured, trace-correlated logging**: new `app/observability/logging_context.py` —
+  `contextvars`-based `trace_id`/`task_id`/`agent_run_id` propagation (confirmed to survive
+  `asyncio.to_thread()` worker-thread boundaries — exactly how `run_agent_graph` is dispatched from
+  `manager.py`) + JSON formatter. Wired at `run_agent_graph`'s graph-execution boundary so every log
+  line from any node function during a run carries the real trace_id, without rewriting hundreds of
+  individual call sites. `main.py`'s bare `logging.basicConfig()` replaced.
+
+### Regression found and fixed during verification
+Enabling leader election initially broke a test that opens two `TestClient(app)` instances within
+one test function (each running the real `lifespan()`). Root cause: 9 independently-cancelled
+per-loop advisory-lock engines raced the shared `app.db.session` engine's connection teardown at
+shutdown; fixed by consolidating to one shared leader-election engine (created once, disposed once
+after every consuming task is confirmed cancelled+awaited). A second, genuinely pre-existing hazard
+then surfaced: `app.db.session`'s engine singleton wasn't reset between two `lifespan()` startups
+in the same process. Fixed by resetting it at the start of every `lifespan()` call — correct
+regardless of leader election, since a fresh startup should never inherit an engine bound to a
+stale event loop. Verified stable across repeated runs after the fix.
+
+### Test Results
+```
+pytest tests/ -q
+→ 3871 passed, 0 failed, 56 skipped, 17 deselected, 15 warnings in 343.29s
+
+mypy app/ --strict
+→ Success: no issues found in 200 source files
+
+ruff check app/
+→ All checks passed!
+```
+No frontend changes made this session (backend/Python only, matching audit_v1.md's scope) — not
+re-verified. `.env.example` updated with all 12 new settings introduced this session (verified via
+programmatic diff against `Settings.model_fields`); ~52 pre-existing gaps from prior sessions left
+untouched (out of scope). Migrations `032`/`033`/`034` applied to the live dev database and
+verified. Full remediation detail: `docs/reports/AUDIT_V1_REMEDIATION_REPORT.md`.
+
+### Verdict
+✅ GREEN FLAG — AUDIT V1 REMEDIATION COMPLETE. All 8 release blockers and every targeted Phase 3-6
+finding fixed and independently verified against real infrastructure. One item (subtask
+concurrency fan-out) intentionally deferred with a documented reason rather than shipped with a
+known correctness regression.

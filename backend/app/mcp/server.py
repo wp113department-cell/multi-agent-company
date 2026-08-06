@@ -243,7 +243,7 @@ def _handle(method: str, params: dict[str, Any]) -> Any:
             # keyword scoring below is a real, not theoretical, fallback.
             semantic_matches = _vector_search(query, repo, top_k=top_k)
             if semantic_matches:
-                results = [
+                results: list[dict[str, Any]] = [
                     {"file": p, "score": None, "method": "semantic"}
                     for p in semantic_matches
                 ]

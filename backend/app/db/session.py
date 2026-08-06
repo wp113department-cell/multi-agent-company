@@ -16,8 +16,21 @@ def get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
         settings = get_settings()
+        # Blocker (audit_v1.md 4.7 #2): no explicit pool_size/max_overflow —
+        # SQLAlchemy's async default (5 + 10 overflow = 15) is already
+        # smaller than max_concurrent_agent_runs's own designed ceiling (20),
+        # before accounting for request-handling connections and this
+        # codebase's own isolated throwaway engines (new_isolated_async_engine
+        # above). Under real concurrent load this risked QueuePool limit
+        # exceeded surfacing as opaque 500s or silently-failed background
+        # tasks. Real config values (db_pool_size/db_pool_max_overflow), not
+        # hardcoded numbers.
         _engine = create_async_engine(
-            settings.database_url, echo=settings.debug, pool_pre_ping=True
+            settings.database_url,
+            echo=settings.debug,
+            pool_pre_ping=True,
+            pool_size=settings.db_pool_size,
+            max_overflow=settings.db_pool_max_overflow,
         )
     return _engine
 

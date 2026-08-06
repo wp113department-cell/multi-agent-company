@@ -451,6 +451,21 @@ class Settings(BaseSettings):
     max_concurrent_agent_runs: int = Field(
         default=20, description="Max total agent runs running at once across all epics"
     )
+    db_pool_size: int = Field(
+        default=20,
+        description="Blocker (audit_v1.md 4.7 #2): create_async_engine() had "
+        "no explicit pool sizing — SQLAlchemy's async default is 5 + 10 "
+        "overflow = 15, already smaller than max_concurrent_agent_runs's own "
+        "designed concurrency ceiling (20) before accounting for request "
+        "handling and the isolated throwaway engines this codebase also "
+        "creates elsewhere. Matches max_concurrent_agent_runs by default so "
+        "the pool isn't the bottleneck under the app's own designed load.",
+    )
+    db_pool_max_overflow: int = Field(
+        default=10,
+        description="Extra connections beyond db_pool_size the pool may open "
+        "under burst load before QueuePool raises.",
+    )
     max_concurrent_subtasks_per_epic: int = Field(
         default=5,
         description="Max subtasks running simultaneously within a single epic",
@@ -503,11 +518,29 @@ class Settings(BaseSettings):
     redis_consumer_group: str = Field(
         default="gridiron-consumers", description="Redis Streams consumer group name."
     )
+    redis_streams_drain_interval_seconds: int = Field(
+        default=60,
+        description="How often the background loop drains/acks the Redis "
+        "Streams event stream (see app.event_bus.redis_streams."
+        "drain_and_ack_stream). Only runs when REDIS_STREAMS_ENABLED=true.",
+    )
+    redis_streams_stale_pending_ms: int = Field(
+        default=60_000,
+        description="audit_v1.md 4.6 #2 (Phase K): a message read via "
+        "XREADGROUP but never XACK'd (consumer crashed mid-processing) sits "
+        "in the Pending Entries List forever with no recovery path unless "
+        "reclaimed. The drain loop (app.event_bus.redis_streams."
+        "drain_and_ack_stream) uses XAUTOCLAIM to reclaim entries idle "
+        "longer than this many milliseconds.",
+    )
 
     # S3 artifact storage (optional — falls back to DB when unset)
     artifact_backend: str = Field(
         default="db",
-        description="Artifact storage backend: 'db' (PostgreSQL) or 's3' (AWS S3).",
+        description="Artifact storage backend: 'db' (local disk with the "
+        "artifact's path tracked in a Postgres row — NOT the artifact bytes "
+        "themselves, despite the name; see audit_v1.md 4.6 finding L-1) or "
+        "'s3' (AWS S3, bytes actually stored in S3).",
     )
     s3_bucket: str = Field(
         default="",
@@ -792,6 +825,24 @@ class Settings(BaseSettings):
     doc_agent_auto_trigger_interval_hours: float = Field(
         default=6,
         description="Hours between checks for whether target_repo_path's local `main` HEAD has moved since changelog_agent/release_notes_agent last ran, auto-dispatching each when it has. 0 disables. Gap-closure Day 52, answers.md Q41.",
+    )
+    leader_election_enabled: bool = Field(
+        default=True,
+        description="Blocker (audit_v1.md 4.8 #5): 'No leader election / "
+        "distributed lock — every backend instance runs every singleton "
+        "background loop.' When true (default), each of main.py's background "
+        "loops is gated by a Postgres pg_try_advisory_lock so only one "
+        "backend instance actually runs it at a time; other instances retry "
+        "acquisition periodically so a new leader takes over if the current "
+        "one dies (the lock is session-scoped — released automatically when "
+        "its holding connection closes, no heartbeat needed). Set false only "
+        "for a deliberately single-instance deployment that wants to skip "
+        "the lock round-trip.",
+    )
+    leader_election_retry_seconds: int = Field(
+        default=30,
+        description="How often a non-leader instance retries acquiring a "
+        "background loop's advisory lock.",
     )
 
     # Stage 4 Cluster Q — Architecture slice (2026-08-05, app/fleet/architecture_score.py)

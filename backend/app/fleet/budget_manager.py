@@ -187,7 +187,8 @@ class BudgetManager:
                     if agent_name is not None:
                         stmt = stmt.where(AgentRun.agent_type == agent_name)
                     result = await session.execute(stmt)
-                    return float(result.scalar_one())
+                    scalar = result.scalar_one()
+                    return float(scalar) if scalar is not None else 0.0
             finally:
                 await engine.dispose()
 
