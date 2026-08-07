@@ -52,9 +52,23 @@ def new_isolated_async_engine() -> AsyncEngine:
     the second such call. app/fleet/versioned_memory.py was the first place
     this pattern was needed; app/memory/store.py's query_memory_context_sync
     is the second.
+
+    Callers dispose() this engine right after their single asyncio.run()
+    call returns, so it never holds pool_size connections open concurrently
+    — but it still shares the same explicit pool_size/max_overflow config as
+    get_engine() (rather than silently falling back to SQLAlchemy's smaller
+    async defaults) so a caller that batches multiple concurrent sessions
+    against one isolated engine gets the same tuned ceiling as the shared
+    pool (audit_v1.md 4.7 #2 follow-up: AUDIT_Q_BATCH05 §46 "Connection
+    pooling").
     """
     settings = get_settings()
-    return create_async_engine(settings.database_url, pool_pre_ping=True)
+    return create_async_engine(
+        settings.database_url,
+        pool_pre_ping=True,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_pool_max_overflow,
+    )
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

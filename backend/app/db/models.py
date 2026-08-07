@@ -716,7 +716,7 @@ class PendingApproval(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     thread_id: Mapped[str] = mapped_column(String(100), index=True)
     task_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
-    agent_name: Mapped[str] = mapped_column(String(100), default="")
+    agent_name: Mapped[str] = mapped_column(String(100), default="", index=True)
     action: Mapped[str] = mapped_column(String(50))  # e.g. "plan_review"
     details: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(
@@ -748,7 +748,7 @@ class EpicScratchpad(Base):
     epic_id: Mapped[str] = mapped_column(String(100), index=True)
     key: Mapped[str] = mapped_column(String(200))
     value: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    agent_name: Mapped[str] = mapped_column(String(100), default="")
+    agent_name: Mapped[str] = mapped_column(String(100), default="", index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

@@ -326,6 +326,55 @@ class MetricsCollector:
             return None
         return sum(accuracies) / len(accuracies)
 
+    def tool_latency_stats(
+        self, tool_names: str | tuple[str, ...]
+    ) -> dict[str, float | int] | None:
+        """Aggregate real per-call duration_ms across every tool_calls entry
+        (already captured by record_tool(), base_graph.py:1703 — every tool
+        call's real timing, not fabricated) matching tool_names, across the
+        whole ring buffer. The per-tool-name equivalent of p50/p95_latency_ms's
+        per-agent aggregation; powers editing_speed_stats() below and is
+        reusable for any other single tool or tool group.
+        """
+        names = (tool_names,) if isinstance(tool_names, str) else tool_names
+        durations = sorted(
+            t.duration_ms
+            for m in self.all_runs()
+            for t in m.tool_calls
+            if t.tool_name in names
+        )
+        if not durations:
+            return None
+        count = len(durations)
+        return {
+            "count": count,
+            "avg_ms": round(sum(durations) / count, 3),
+            "p50_ms": round(durations[count // 2], 3),
+            "p95_ms": round(durations[min(int(count * 0.95), count - 1)], 3),
+            "min_ms": round(durations[0], 3),
+            "max_ms": round(durations[-1], 3),
+        }
+
+
+# File-mutating tool names registered across every tool-suite builder in
+# app/agents/tools.py (backend/frontend dev, dependency-update, computer-use,
+# chat) — all of them register under these exact literal names regardless of
+# which handler set builds them.
+EDIT_TOOL_NAMES: tuple[str, ...] = ("edit_file", "write_file", "apply_patch")
+
+
+def editing_speed_stats() -> dict[str, float | int] | None:
+    """"Editing speed" (AUDIT_Q_BATCH05_PERFORMANCE_ARCHITECTURE.md §8: "No
+    dedicated timing metric for edit operations specifically" — NOT FOUND).
+    Every edit_file/write_file/apply_patch call already has real duration_ms
+    recorded via record_tool(); the gap was the missing aggregate across
+    them, not missing instrumentation. Mirrors
+    orchestration_analytics.get_orchestration_time_stats()/
+    memory.analytics.get_retrieval_time_stats()'s existing per-category
+    rollup shape instead of introducing a new one.
+    """
+    return get_metrics_collector().tool_latency_stats(EDIT_TOOL_NAMES)
+
 
 # ---------------------------------------------------------------------------
 # OpenTelemetry bridge (MASTER_AGENT_v2.md Phase 6.1)

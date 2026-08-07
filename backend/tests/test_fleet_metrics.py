@@ -7,8 +7,10 @@ import time
 import pytest
 
 from app.fleet.metrics import (
+    EDIT_TOOL_NAMES,
     MetricsCollector,
     RunMetrics,
+    editing_speed_stats,
     get_metrics_collector,
     new_trace_id,
     run_span,
@@ -148,6 +150,36 @@ class TestMetricsCollector:
         assert m.trace_id == "my-custom-trace"
         assert c.get("my-custom-trace") is m
 
+    def test_tool_latency_stats_single_name(self) -> None:
+        c = MetricsCollector()
+        m = c.start_run("backend_dev")
+        m.record_tool("edit_file", True, 10.0)
+        m.record_tool("edit_file", True, 30.0)
+        m.record_tool("run_tests", True, 500.0)
+        stats = c.tool_latency_stats("edit_file")
+        assert stats is not None
+        assert stats["count"] == 2
+        assert stats["avg_ms"] == pytest.approx(20.0)
+        assert stats["min_ms"] == 10.0
+        assert stats["max_ms"] == 30.0
+
+    def test_tool_latency_stats_multiple_names(self) -> None:
+        c = MetricsCollector()
+        m = c.start_run("frontend_dev")
+        m.record_tool("edit_file", True, 10.0)
+        m.record_tool("write_file", True, 20.0)
+        m.record_tool("apply_patch", True, 30.0)
+        m.record_tool("run_tests", True, 500.0)
+        stats = c.tool_latency_stats(("edit_file", "write_file", "apply_patch"))
+        assert stats is not None
+        assert stats["count"] == 3
+
+    def test_tool_latency_stats_none_when_no_matching_calls(self) -> None:
+        c = MetricsCollector()
+        m = c.start_run("qa")
+        m.record_tool("run_tests", True, 500.0)
+        assert c.tool_latency_stats("edit_file") is None
+
 
 class TestRunSpan:
     def test_run_span_times_execution(self) -> None:
@@ -170,6 +202,29 @@ class TestRunSpan:
         after = collector.recent(1000)
         traces = [m.trace_id for m in after]
         assert "span-test-001" in traces
+
+
+class TestEditingSpeedStats:
+    """AUDIT_Q_BATCH05_PERFORMANCE_ARCHITECTURE.md §8 "Editing speed" —
+    NOT FOUND until this test/implementation pair: record_tool() already
+    timed every edit_file/write_file/apply_patch call, but nothing
+    aggregated those entries by name. Uses the real process-wide collector
+    (editing_speed_stats() is hardwired to it, matching
+    get_orchestration_time_stats()'s own module-level-singleton shape), so
+    assertions only check that OUR recorded call is reflected, not exact
+    counts — other tests share this same ring buffer."""
+
+    def test_editing_speed_stats_reflects_recorded_edit_calls(self) -> None:
+        collector = get_metrics_collector()
+        m = collector.start_run("backend_dev", trace_id="editing-speed-test-001")
+        m.record_tool("edit_file", True, 12345.0)
+        stats = editing_speed_stats()
+        assert stats is not None
+        assert stats["count"] >= 1
+        assert stats["max_ms"] >= 12345.0
+
+    def test_editing_speed_stats_covers_all_edit_tool_names(self) -> None:
+        assert EDIT_TOOL_NAMES == ("edit_file", "write_file", "apply_patch")
 
 
 # ---- Day 0 exit criterion: 7 measurable objectives computable from real data ----
