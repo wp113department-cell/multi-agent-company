@@ -74,10 +74,17 @@ class AuditEntry:
         requires_human_approval: bool = False,
         approved_by: str | None = None,
         trace_id: str | None = None,
+        entry_id: str | None = None,
+        timestamp: str | None = None,
     ) -> None:
-        self.entry_id = str(uuid.uuid4())
+        # entry_id/timestamp are normally auto-generated (real append()
+        # calls never pass them) — the two optional overrides exist only
+        # for AuditLog._row_to_entry (AUDIT_Q_BATCH11 §96), which
+        # reconstructs an AuditEntry from a DB row and must preserve that
+        # row's original identity/time, not mint a fresh one.
+        self.entry_id = entry_id or str(uuid.uuid4())
         self.trace_id = trace_id or ""
-        self.timestamp = _now()
+        self.timestamp = timestamp or _now()
         self.action_type = action_type
         self.agent_name = agent_name
         self.task_id = task_id
@@ -205,6 +212,175 @@ class AuditLog:
     @property
     def total_appended(self) -> int:
         return self._total_appended
+
+    # ------------------------------------------------------------------
+    # Async query (read from the durable DB table) — AUDIT_Q_BATCH11 §96
+    # ------------------------------------------------------------------
+    #
+    # recent()/by_trace()/by_task()/approvals() above are real and stay
+    # exactly as they were (every existing sync caller/test keeps working
+    # unchanged) — but they only ever read the in-process ring buffer:
+    # capped at `capacity` (2000) entries and reset to empty on every
+    # process restart, even though _write_to_db() has been durably
+    # persisting every entry to Postgres the entire time. These async
+    # counterparts read the actual source of truth. Each falls back to the
+    # ring-buffer version (best-effort, matching append()'s own "audit must
+    # not block or fail the caller" philosophy) if the DB is unreachable —
+    # a broken audit *query* path should degrade, not raise, for the exact
+    # same reason a broken audit *write* path already doesn't raise.
+
+    @staticmethod
+    def _row_to_entry(row: Any) -> AuditEntry:
+        details = row["details"]
+        if isinstance(details, str):  # defensive: some drivers may not auto-decode
+            try:
+                details = json.loads(details)
+            except (TypeError, ValueError):
+                details = {}
+        return AuditEntry(
+            entry_id=row["entry_id"],
+            trace_id=row["trace_id"] or None,
+            timestamp=row["timestamp"],
+            action_type=row["action_type"],
+            agent_name=row["agent_name"],
+            task_id=row["task_id"],
+            description=row["description"],
+            details=details or {},
+            outcome=row["outcome"],
+            requires_human_approval=row["requires_human_approval"],
+            approved_by=row["approved_by"],
+        )
+
+    async def _query_db(
+        self,
+        *,
+        trace_id: str | None = None,
+        task_id: str | None = None,
+        requires_human_approval: bool | None = None,
+        limit: int,
+    ) -> list[AuditEntry]:
+        from sqlalchemy import text
+
+        from app.db.session import get_session_factory
+
+        conditions: list[str] = []
+        params: dict[str, Any] = {"limit": limit}
+        if trace_id is not None:
+            conditions.append("trace_id = :trace_id")
+            params["trace_id"] = trace_id
+        if task_id is not None:
+            conditions.append("task_id = :task_id")
+            params["task_id"] = task_id
+        if requires_human_approval is not None:
+            conditions.append("requires_human_approval = :requires_human_approval")
+            params["requires_human_approval"] = requires_human_approval
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        async with get_session_factory()() as session:
+            result = await session.execute(
+                text(
+                    "SELECT entry_id, trace_id, timestamp, action_type, agent_name, "
+                    "task_id, description, details, outcome, "
+                    "requires_human_approval, approved_by "
+                    f"FROM audit_log {where_clause} "
+                    "ORDER BY timestamp DESC LIMIT :limit"
+                ),
+                params,
+            )
+            rows = result.mappings().all()
+        return [self._row_to_entry(row) for row in rows]
+
+    async def recent_async(self, n: int = 50) -> list[AuditEntry]:
+        """DB-backed, authoritative version of recent() — survives restarts
+        and isn't capped at the ring buffer's 2000 entries."""
+        try:
+            return await self._query_db(limit=n)
+        except Exception:
+            logger.warning(
+                "AuditLog.recent_async DB query failed — falling back to the "
+                "in-process ring buffer",
+                exc_info=True,
+            )
+            return self.recent(n)
+
+    async def by_trace_async(
+        self, trace_id: str, *, limit: int = 500
+    ) -> list[AuditEntry]:
+        """DB-backed, authoritative version of by_trace()."""
+        try:
+            return await self._query_db(trace_id=trace_id, limit=limit)
+        except Exception:
+            logger.warning(
+                "AuditLog.by_trace_async DB query failed — falling back to "
+                "the in-process ring buffer",
+                exc_info=True,
+            )
+            return self.by_trace(trace_id)
+
+    async def by_task_async(
+        self, task_id: str, *, limit: int = 500
+    ) -> list[AuditEntry]:
+        """DB-backed, authoritative version of by_task()."""
+        try:
+            return await self._query_db(task_id=task_id, limit=limit)
+        except Exception:
+            logger.warning(
+                "AuditLog.by_task_async DB query failed — falling back to "
+                "the in-process ring buffer",
+                exc_info=True,
+            )
+            return self.by_task(task_id)
+
+    async def by_actor_async(self, actor: str, *, limit: int = 500) -> list[AuditEntry]:
+        """DB-backed: every entry where `actor` is either the acting agent
+        (agent_name) or the human who made an approval decision
+        (approved_by). Used by app/api/privacy.py's GDPR/CCPA data-export
+        endpoint (AUDIT_Q_BATCH11 §96 "Compliance readiness") to answer
+        "what audit history is attributable to this identity" — a genuine
+        OR across two columns, so it doesn't fit _query_db's AND-only
+        condition builder."""
+        try:
+            from sqlalchemy import text
+
+            from app.db.session import get_session_factory
+
+            async with get_session_factory()() as session:
+                result = await session.execute(
+                    text(
+                        "SELECT entry_id, trace_id, timestamp, action_type, agent_name, "
+                        "task_id, description, details, outcome, "
+                        "requires_human_approval, approved_by "
+                        "FROM audit_log WHERE agent_name = :actor OR approved_by = :actor "
+                        "ORDER BY timestamp DESC LIMIT :limit"
+                    ),
+                    {"actor": actor, "limit": limit},
+                )
+                rows = result.mappings().all()
+            return [self._row_to_entry(row) for row in rows]
+        except Exception:
+            logger.warning(
+                "AuditLog.by_actor_async DB query failed — falling back to "
+                "the in-process ring buffer",
+                exc_info=True,
+            )
+            with self._lock:
+                return [
+                    e
+                    for e in self._ring
+                    if e.agent_name == actor or e.approved_by == actor
+                ][-limit:]
+
+    async def approvals_async(self, *, limit: int = 100) -> list[AuditEntry]:
+        """DB-backed, authoritative version of approvals()."""
+        try:
+            return await self._query_db(requires_human_approval=True, limit=limit)
+        except Exception:
+            logger.warning(
+                "AuditLog.approvals_async DB query failed — falling back to "
+                "the in-process ring buffer",
+                exc_info=True,
+            )
+            return self.approvals(limit=limit)
 
     # ------------------------------------------------------------------
     # Async persistence (fire-and-forget; no DB required)

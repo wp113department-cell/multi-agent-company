@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AgentRun, Epic
 from app.db.session import get_db
+from app.middleware.rbac import require_authenticated
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
@@ -62,7 +63,10 @@ class EpicCostSummary(_CamelModel):
 
 
 @router.get("", response_model=SystemMetrics, response_model_by_alias=True)
-async def get_system_metrics(db: AsyncSession = Depends(get_db)) -> Any:
+async def get_system_metrics(
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> Any:
     # Epic status counts
     epic_result = await db.execute(
         select(Epic.status, func.count(Epic.epic_id)).group_by(Epic.status)
@@ -131,7 +135,10 @@ async def get_system_metrics(db: AsyncSession = Depends(get_db)) -> Any:
 @router.get(
     "/epics", response_model=list[EpicCostSummary], response_model_by_alias=True
 )
-async def get_epic_cost_breakdown(db: AsyncSession = Depends(get_db)) -> Any:
+async def get_epic_cost_breakdown(
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> Any:
     epics_result = await db.execute(select(Epic).order_by(Epic.created_at.desc()))
     epics = epics_result.scalars().all()
 

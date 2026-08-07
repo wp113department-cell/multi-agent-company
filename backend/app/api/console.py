@@ -171,7 +171,9 @@ async def clone_repo(
 
 
 @router.get("/repos/{rpath:path}/status")
-async def repo_status(rpath: str) -> dict[str, Any]:
+async def repo_status(
+    rpath: str, _actor: str = Depends(require_authenticated)
+) -> dict[str, Any]:
     path = _decode_path(rpath)
     try:
         return await git_service.git_status(path)
@@ -180,7 +182,9 @@ async def repo_status(rpath: str) -> dict[str, Any]:
 
 
 @router.get("/repos/{rpath:path}/log")
-async def repo_log(rpath: str, limit: int = 20) -> dict[str, Any]:
+async def repo_log(
+    rpath: str, limit: int = 20, _actor: str = Depends(require_authenticated)
+) -> dict[str, Any]:
     path = _decode_path(rpath)
     try:
         return await git_service.git_log(path, limit=min(limit, 100))
@@ -189,7 +193,9 @@ async def repo_log(rpath: str, limit: int = 20) -> dict[str, Any]:
 
 
 @router.get("/repos/{rpath:path}/diff")
-async def repo_diff(rpath: str, staged: bool = False) -> dict[str, Any]:
+async def repo_diff(
+    rpath: str, staged: bool = False, _actor: str = Depends(require_authenticated)
+) -> dict[str, Any]:
     path = _decode_path(rpath)
     try:
         return await git_service.git_diff(path, staged=staged)
@@ -233,7 +239,9 @@ async def repo_push(
 
 
 @router.get("/repos/{rpath:path}/branches")
-async def repo_branches(rpath: str) -> dict[str, Any]:
+async def repo_branches(
+    rpath: str, _actor: str = Depends(require_authenticated)
+) -> dict[str, Any]:
     path = _decode_path(rpath)
     try:
         return await git_service.git_branch_list(path)

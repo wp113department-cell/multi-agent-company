@@ -747,6 +747,26 @@ class Settings(BaseSettings):
         description="Fernet key encrypting SystemSetting-backed credentials at rest. Required when DEPLOYMENT_ENV=production; falls back to plaintext (with a startup warning) when unset outside production.",
     )
 
+    # AUDIT_Q_BATCH11 §21 "Secret management" — optional AWS Secrets Manager
+    # overlay (app/security/secrets_manager.py). Disabled by default: every
+    # field continues to load from env vars/.env exactly as before. When
+    # enabled, values fetched from the named secret fill in any field NOT
+    # already set via env var/.env (explicit env always wins), and a fetch
+    # failure fails startup loudly rather than silently booting with
+    # whatever was already in the environment.
+    secrets_manager_enabled: bool = Field(
+        default=False,
+        description="When true, load Settings overrides from AWS Secrets Manager at startup (see SECRETS_MANAGER_SECRET_ID). Disabled by default — no behavior change unless explicitly opted in.",
+    )
+    secrets_manager_secret_id: str = Field(
+        default="",
+        description="AWS Secrets Manager secret name or ARN, holding a JSON object of Settings field-name -> value pairs. Required when SECRETS_MANAGER_ENABLED=true.",
+    )
+    secrets_manager_region: str = Field(
+        default="",
+        description="AWS region for the Secrets Manager client. Leave empty to use boto3's default region resolution (env var / instance profile / ~/.aws/config).",
+    )
+
     # Gap-closure Day 9 (answers.md Q21) — real per-command sandboxing for
     # the fully-generic, denylist-only bash tools (app/policy/sandbox.py),
     # replacing/augmenting the regex denylist the policy engine's own
@@ -922,6 +942,28 @@ class Settings(BaseSettings):
         default="llama-3.1-8b-instant",
         description="Groq model for triage/summary/heartbeat (Haiku equivalent)",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _load_secrets_manager_overrides(cls, values: object) -> object:
+        """Overlays AWS Secrets Manager values (app/security/secrets_manager.py)
+        onto whatever pydantic-settings already resolved from env vars/.env,
+        BEFORE field validation/type-coercion runs. A no-op unless
+        SECRETS_MANAGER_ENABLED=true (read directly from os.environ, since
+        `values` here reflects env/.env/init — Settings itself doesn't exist
+        yet). Only fills fields that aren't already set, so an explicit env
+        var always takes precedence over the fetched value — predictable,
+        and never silently overrides a value an operator deliberately set."""
+        if not isinstance(values, dict):
+            return values
+
+        from app.security.secrets_manager import fetch_secrets_manager_overrides
+
+        overrides = fetch_secrets_manager_overrides()
+        for field_name, value in overrides.items():
+            if not values.get(field_name):
+                values[field_name] = value
+        return values
 
     @model_validator(mode="after")
     def _require_llm_key(self) -> "Settings":

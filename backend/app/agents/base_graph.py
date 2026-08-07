@@ -39,8 +39,10 @@ import jsonschema
 
 from app.agents.base import get_effective_api_key, load_role
 from app.agents.guardrails import check_command, check_path
+from app.agents.tool_security import _redact_secrets_in_text
 from app.config import get_settings
 from app.fleet.circuit_breaker import get_anthropic_breaker
+from app.fleet.tool_manifest import TOOL_MANIFEST
 from app.observability.logging_context import bind_log_context
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
@@ -545,13 +547,49 @@ def _condense_messages(
 # ---------------------------------------------------------------------------
 
 
+# AUDIT_Q_BATCH11 §85 "All agents automatically follow policy" — the
+# original hand-picked tool set (write_file/edit_file/delete_file/
+# apply_patch/bash) only covered the 5 tools whoever wrote it happened to
+# think of; the other ~45 write_repo/write_remote/execute-permission tools
+# (append_file, copy_file, rename_file, git_commit, git_push, docker_exec,
+# ...) relied ENTIRELY on their own per-handler check inside
+# app/agents/tools.py — real and correct everywhere sampled, but "a future
+# handler could simply forget," exactly the finding this closes. Driven by
+# TOOL_MANIFEST's permission tags (manifest-derived, matching the same
+# pattern _UNTRUSTED_CONTENT_TOOLS above already uses for the read side),
+# not a hand-maintained tool-name list — a newly added tool is covered
+# automatically by virtue of the permission it declares.
+#
+# Restricted to a known-safe allowlist of *field names* (not every field of
+# every tool_input) — checked against real input_schema property names
+# across every write_repo/write_remote tool (grepped, 2026-08-07). This
+# deliberately does NOT scan fields like "content"/"description"/"message"
+# through check_path(): those hold arbitrary file/PR/commit content, and
+# _matches_path_rule does exact-basename/glob matching on the LAST "/"-
+# separated segment — a huge content string that happens to end in
+# something exactly matching a denylist entry (e.g. "...id_rsa") would be a
+# real, if narrow, false-positive risk. Field-name-scoped, not value-shape-
+# scoped, avoids that entirely.
+_POLICY_PATH_FIELD_NAMES = frozenset(
+    {
+        "path",
+        "paths",
+        "from_path",
+        "to_path",
+        "source",
+        "dest",
+        "destination",
+        "output",
+        "archive",
+        "directory",
+    }
+)
+_POLICY_COMMAND_FIELD_NAMES = frozenset({"command"})
+_POLICY_WRITE_PERMISSIONS = frozenset({"write_repo", "write_remote"})
+
+
 def _policy_check(tool_name: str, tool_input: dict[str, Any]) -> str | None:
     """Return denial string if the tool call is policy-denied, else None."""
-    if tool_name in ("write_file", "edit_file", "delete_file"):
-        path = str(tool_input.get("path", ""))
-        result = check_path(path)
-        if not result.allowed:
-            return result.reason
     if tool_name == "apply_patch":
         # Blocker 1 (audit_v1.md 4.5/4.8): apply_patch's schema has no
         # "path" field — tool_input.get("path", "") is always "" here, so
@@ -565,11 +603,51 @@ def _policy_check(tool_name: str, tool_input: dict[str, Any]) -> str | None:
             result = check_path(target)
             if not result.allowed:
                 return result.reason
-    if tool_name == "bash":
-        cmd = str(tool_input.get("command", ""))
-        result = check_command(cmd)
-        if not result.allowed:
-            return result.reason
+        return None
+
+    entry = TOOL_MANIFEST.get(tool_name)
+    perms = set(entry.permissions) if entry is not None else set()
+
+    if tool_name in ("write_file", "edit_file", "delete_file") or (
+        perms & _POLICY_WRITE_PERMISSIONS
+    ):
+        for field_name in _POLICY_PATH_FIELD_NAMES:
+            if field_name not in tool_input:
+                continue
+            value = tool_input[field_name]
+            candidates = value if isinstance(value, list) else [value]
+            for candidate in candidates:
+                if not isinstance(candidate, str) or not candidate:
+                    continue
+                result = check_path(candidate)
+                if not result.allowed:
+                    return result.reason
+
+    if tool_name == "bash" or "execute" in perms:
+        for field_name in _POLICY_COMMAND_FIELD_NAMES:
+            value = tool_input.get(field_name)
+            if isinstance(value, str) and value:
+                result = check_command(value)
+                if not result.allowed:
+                    return result.reason
+
+    # AUDIT_Q_BATCH11 §85 "Central governance system beyond the
+    # security-focused policy engine" — same chokepoint, a genuinely
+    # separate concern (framework-approval, not command/path safety). Only
+    # checkable on write_file (whose "content" field is the FULL new file
+    # body) — edit_file's old_string/new_string diff doesn't give enough
+    # to reconstruct the resulting package.json without reading the
+    # existing file, out of scope for a pure tool_input check.
+    if tool_name == "write_file":
+        path = str(tool_input.get("path", ""))
+        content = str(tool_input.get("content", ""))
+        if path:
+            from app.policy.governance import check_backend_framework_governance
+
+            gov_result = check_backend_framework_governance(path, content)
+            if not gov_result.allowed:
+                return gov_result.reason
+
     return None
 
 
@@ -1010,6 +1088,28 @@ def _make_call_llm_node(
         )
         serialized = _serialize_content(response.content)
 
+        # AUDIT_Q_BATCH11 §21 "Data leakage prevention" — a secret the agent
+        # encountered via read_file/bash/etc and then quoted back in its own
+        # text response used to sail straight through to the user, task
+        # summary, and activity stream unredacted: _mask_secret_value and
+        # _scan_content_for_secrets each covered exactly one narrow call
+        # site (read_env_var_h output, pre-commit content) and neither ran
+        # on the model's own generated text. Unlike chat_agent.py's live
+        # token-by-token SSE stream, this whole response already exists in
+        # memory before anything downstream sees it — so redaction here is
+        # a clean, complete fix, not a best-effort one.
+        for _block in serialized:
+            if isinstance(_block, dict) and _block.get("type") == "text":
+                _redacted, _found = _redact_secrets_in_text(str(_block.get("text", "")))
+                if _found:
+                    _block["text"] = _redacted
+                    logger.warning(
+                        "Redacted apparent secret(s) from %s's own generated "
+                        "text response (task_id=%s)",
+                        role_name,
+                        task_id or "-",
+                    )
+
         # Push activity stream events (non-fatal)
         if task_id:
             try:
@@ -1360,9 +1460,34 @@ def _run_quality_gate(
 # applied there to tool *input*) reused here for tool *output*.
 # ---------------------------------------------------------------------------
 
-_UNTRUSTED_CONTENT_TOOLS = frozenset(
-    {"web_search", "read_file", "read_files", "fetch_url", "http_request"}
+# AUDIT_Q_BATCH11 §21 "Prompt injection resistance" — the original hand-picked
+# 5-tool set (web_search, read_file, read_files, fetch_url, http_request) only
+# covered the tools whoever wrote it happened to think of, while dozens of
+# other read-capable tools (search_code, list_files, git_show, git_blame, the
+# agent-specific read_file variants, memory_read, run_sql, ...) returned raw,
+# unwrapped, unflagged content despite being equally capable of surfacing
+# adversarial content (a comment in a malicious PR branch, a poisoned memory
+# entry, external network content). Derived from TOOL_MANIFEST's own
+# permission tags instead of a hand-maintained tool-name list, so a newly
+# added tool is automatically covered by virtue of the permission it
+# declares, not by someone remembering to add its name here (the same
+# "structural chokepoint vs. per-handler discipline" gap §85 flags for write
+# tools — this closes the read-side equivalent).
+_UNTRUSTED_CONTENT_PERMISSIONS = frozenset(
+    {"read_repo", "network", "read_db", "read_memory"}
 )
+
+_UNTRUSTED_CONTENT_TOOLS = frozenset(
+    name
+    for name, entry in TOOL_MANIFEST.items()
+    if set(entry.permissions) & _UNTRUSTED_CONTENT_PERMISSIONS
+)
+
+# Injection-pattern flagging reuses the same manifest-derived set, plus
+# `bash` (execute permission only, so not covered by the permission tags
+# above) which was already flagged pre-existing — its stdout can just as
+# easily echo back adversarial content (e.g. `cat` on a malicious file).
+_INJECTION_FLAG_TOOLS = _UNTRUSTED_CONTENT_TOOLS | {"bash"}
 
 # Patterns that look like an attempt to inject a fake system/assistant turn
 # into tool output the model will read as context. Flag, don't silently
@@ -1395,7 +1520,7 @@ def _flag_suspicious_tool_output(tool_name: str, content: str) -> str:
     spec's own named pair) for patterns that look like an injected fake
     system/assistant message. Flags, doesn't reject — rejecting real tool
     output on a pattern match risks discarding legitimate content."""
-    if tool_name not in ("bash", "web_search"):
+    if tool_name not in _INJECTION_FLAG_TOOLS:
         return content
     if any(p.search(content) for p in _INJECTION_LOOKING_PATTERNS):
         return (

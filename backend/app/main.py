@@ -32,6 +32,8 @@ from app.api.activity import router as activity_router
 from app.api.console import router as console_router
 from app.api.fleet_dashboard import router as fleet_dashboard_router
 from app.api.approvals import router as approvals_router
+from app.api.audit import router as audit_router
+from app.api.privacy import router as privacy_router
 
 from app.config import get_settings
 from app.rate_limit import limiter
@@ -843,6 +845,8 @@ app.include_router(activity_router)
 app.include_router(console_router)
 app.include_router(fleet_dashboard_router)
 app.include_router(approvals_router)
+app.include_router(audit_router)
+app.include_router(privacy_router)
 
 
 @app.exception_handler(StarletteHTTPException)

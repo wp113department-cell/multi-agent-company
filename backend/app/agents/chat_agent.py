@@ -82,10 +82,19 @@ from langgraph.types import Command, interrupt
 from app.agents.base import get_effective_api_key
 from app.agents.base_graph import (
     VerificationConfig,
+    _flag_suspicious_tool_output,
+    _policy_check,
     _select_messages_to_condense,
     _stringify_messages_for_summary,
+    _wrap_untrusted_tool_content,
 )
-from app.agents.tools import CHAT_TOOLS, _is_dangerous_command, _is_protected_path
+from app.agents.tools import (
+    CHAT_TOOLS,
+    _is_dangerous_command,
+    _is_protected_path,
+    _redact_secrets_in_text,
+    _run_bash_command,
+)
 from app.config import get_settings
 from app.models.chat import ChatSession
 from app.repo_tools import ast_engine as _ast_engine
@@ -352,6 +361,38 @@ def _run_subprocess(
         return f"[ERROR] Command timed out after {timeout}s"
     except Exception as e:
         return f"[ERROR] {e}"
+
+
+def _run_bash_tool(command: str, cwd: str, timeout: int = 120) -> str:
+    """Formats app.agents.tools._run_bash_command's (stdout, stderr,
+    returncode, timed_out) tuple into the exact same string shape
+    _run_subprocess above already produces, so this tool's output is
+    unchanged — only the execution engine underneath moves from a raw host
+    `subprocess.run` to the real Docker sandbox (Settings.bash_sandbox_enabled)
+    that _run_subprocess never routed through.
+
+    AUDIT_Q_BATCH11 §21 "Sandboxing" — chat_agent.py's own generic `bash`
+    tool handler called _run_subprocess directly, bypassing
+    app.policy.sandbox.run_sandboxed entirely (a finding cross-validated
+    three times across audit batches). Scoped to just the generic `bash`
+    tool, matching sandbox.py's own documented rollout scope: the other
+    _run_subprocess call sites in this file (run_tests, run_linter, git
+    plumbing, npm/pip installs, ...) are allowlist-scoped commands that
+    need the target repo's own installed toolchain (venv/node_modules),
+    which the minimal default sandbox image does not have — routing those
+    through the sandbox too would break them, not secure them further.
+    """
+    stdout, stderr, returncode, timed_out = _run_bash_command(
+        command, cwd, timeout=timeout
+    )
+    if timed_out:
+        return f"[ERROR] Command timed out after {timeout}s"
+    out = stdout
+    if stderr:
+        out += "\n[stderr]\n" + stderr
+    if returncode != 0:
+        out += f"\n[exit {returncode}]"
+    return out.strip() or "(no output)"
 
 
 # ---------------------------------------------------------------------------
@@ -715,9 +756,7 @@ class ChatAgent:
     # Tool execution — dispatches all 36 CHAT_TOOLS
     # ------------------------------------------------------------------
 
-    async def _execute_tool(
-        self, tool_name: str, inp: dict[str, Any]
-    ) -> str:  # noqa: C901
+    async def _execute_tool(self, tool_name: str, inp: dict[str, Any]) -> str:  # noqa: C901
         root = self.root
         repo = str(root)
 
@@ -1268,7 +1307,7 @@ class ChatAgent:
                 )
                 if not approved:
                     return f"[DENIED] User declined: {command!r}"
-            return await asyncio.to_thread(_run_subprocess, command, cwd, 120)
+            return await asyncio.to_thread(_run_bash_tool, command, cwd, 120)
 
         # ========== TESTING / LINTING ==========
 
@@ -2266,7 +2305,9 @@ class ChatAgent:
                 rscr_interp = (
                     "python3"
                     if rscr_fp.suffix == ".py"
-                    else "node" if rscr_fp.suffix in (".js", ".mjs", ".cjs") else "bash"
+                    else "node"
+                    if rscr_fp.suffix in (".js", ".mjs", ".cjs")
+                    else "bash"
                 )
             rscr_cmd = f"{rscr_interp} {str(rscr_fp)} 2>&1"
             return await asyncio.to_thread(_run_subprocess, rscr_cmd, repo, 120)
@@ -2758,6 +2799,38 @@ class ChatAgent:
         else:
             breaker.record_success()
 
+        # AUDIT_Q_BATCH11 §21 "Data leakage prevention" — a secret the agent
+        # encountered via read_file/bash/etc and then quoted back in its own
+        # reply used to sail straight through unredacted: _mask_secret_value
+        # and _scan_content_for_secrets each covered exactly one narrow call
+        # site, neither the model's own generated text. This chat graph
+        # streams full_text live to the user token-by-token via text_delta
+        # events *before* this point runs, so the raw bytes the user
+        # already saw can't be un-sent — redacting here still closes the
+        # more consequential half of the gap: it stops the secret from
+        # being replayed into session.history (future LLM turns, DB
+        # persistence, memory embeddings), and a security_warning event
+        # gives the frontend/user an explicit, visible signal that the
+        # reply they just read likely contained a live credential.
+        if full_text:
+            full_text, _secret_found = _redact_secrets_in_text(full_text)
+            if _secret_found:
+                await self.session.push(
+                    {
+                        "type": "security_warning",
+                        "message": (
+                            "This response appeared to contain a secret/credential "
+                            "and has been redacted before being saved to this "
+                            "session's history."
+                        ),
+                    }
+                )
+                logger.warning(
+                    "Redacted apparent secret(s) from chat agent's own "
+                    "generated reply (session_id=%s)",
+                    self.session.session_id,
+                )
+
         # Append assistant turn to history
         turn_content: list[dict[str, Any]] = []
         update: dict[str, Any] = {}
@@ -2812,7 +2885,38 @@ class ChatAgent:
             state.get("verification") or _VERIFICATION_CFG.initial
         )
         blocking_key = _VERIFICATION_CFG.blocking_until.get(tu["name"])
-        if blocking_key is not None and not verification.get(blocking_key, False):
+
+        # AUDIT_Q_BATCH11 §85 "All agents automatically follow policy
+        # (structural guarantee)" — this graph's own tool dispatch never
+        # had a central pre-execution policy gate at all (unlike
+        # base_graph.py's execute_tools(), which already calls
+        # _policy_check before every one of the ~72-agent fleet's tool
+        # calls): every one of this file's ~150 `if tool_name ==` branches
+        # relied entirely on its own inline _is_protected_path/
+        # _is_dangerous_command call — real everywhere sampled, but with no
+        # structural guarantee a future branch couldn't skip it. Reusing
+        # base_graph.py's manifest-driven _policy_check here (not a second,
+        # independently-maintained copy) gives this graph the same
+        # structural chokepoint, checked first so a policy denial always
+        # wins over a verification-gate denial.
+        policy_denial = _policy_check(tu["name"], tu["input"])
+        if policy_denial:
+            result = f"[POLICY DENIED] {policy_denial}"
+            logger.warning("Policy denied %s: %s", tu["name"], policy_denial)
+            try:
+                from app.fleet.audit_log import audit as _audit
+
+                _audit(
+                    action_type="policy_denial",
+                    agent_name="chat_agent",
+                    description=f"{tu['name']} denied: {policy_denial}",
+                    task_id=self.session.session_id or None,
+                    outcome="denied",
+                    details={"tool_name": tu["name"], "tool_input": tu["input"]},
+                )
+            except Exception:
+                pass
+        elif blocking_key is not None and not verification.get(blocking_key, False):
             result = (
                 f"[POLICY DENIED] {tu['name']} is refused until "
                 f"'{blocking_key}' is satisfied first — "
@@ -2836,6 +2940,18 @@ class ChatAgent:
                 logger.exception("Tool %s failed", tu["name"])
 
             if not result.startswith("[ERROR]") and not result.startswith("[POLICY"):
+                # AUDIT_Q_BATCH11 §21 — base_graph.py's execute_tools node
+                # already flags+wraps tool output at its own chokepoint, but
+                # this chat graph runs its own separate _execute_tool_node
+                # (Phase 5.2) that never routed through either mitigation,
+                # so every one of the 36 chat tools returned raw, unwrapped
+                # content regardless of the base-graph fix's coverage. Same
+                # order as base_graph.py: flag first (inspects the real
+                # handler output), then wrap, so the delimiter encloses the
+                # warning too.
+                result = _flag_suspicious_tool_output(tu["name"], result)
+                result = _wrap_untrusted_tool_content(tu["name"], result)
+
                 set_key = _VERIFICATION_CFG.set_by.get(tu["name"])
                 if set_key is not None:
                     verification[set_key] = True
