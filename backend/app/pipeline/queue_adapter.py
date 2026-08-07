@@ -79,7 +79,15 @@ class AsyncioQueueAdapter(QueueAdapter):
             job_id, fn, kwargs = await self._queue.get()
             self._statuses[job_id] = "running"
             try:
-                await fn(**kwargs)
+                # AUDIT_Q_BATCH08 §102 "Long-Running Jobs": bounded to the
+                # same wall-clock timeout dispatch_job() applies to the real
+                # BackgroundTasks dispatch path below, for defense-in-depth
+                # on any caller that enqueues here directly.
+                from app.config import get_settings
+
+                await asyncio.wait_for(
+                    fn(**kwargs), timeout=get_settings().job_wall_clock_timeout_seconds
+                )
                 self._statuses[job_id] = "completed"
             except Exception:
                 logger.exception("Job %s failed", job_id)
@@ -212,6 +220,38 @@ def queue() -> QueueAdapter:
     return _adapter
 
 
+def _with_wall_clock_timeout(job_fn: JobFn, timeout: float) -> JobFn:
+    """AUDIT_Q_BATCH08 §102 "Long-Running Jobs": app.queue.rq_adapter's
+    RQQueueAdapter already bounds every job to _DEFAULT_JOB_TIMEOUT (30 min)
+    — but only QUEUE_BACKEND=rq goes through that adapter. The default
+    QUEUE_BACKEND=asyncio path below (FastAPI BackgroundTasks) had no
+    wall-clock bound at all, only max_turns's turn-count limit — so
+    whether a genuinely runaway job is ever killed silently depended on
+    which backend an operator happened to configure. Wraps job_fn so BOTH
+    paths share the same real bound (job_wall_clock_timeout_seconds,
+    default 1800s to match RQ's own default) rather than force-wiring every
+    task-launch site onto the RQ adapter (a bigger, separate architectural
+    decision — see this module's own header docstring on why real dispatch
+    still goes through BackgroundTasks by default)."""
+
+    async def _wrapped(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return await asyncio.wait_for(job_fn(*args, **kwargs), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.error(
+                "Job %s exceeded wall-clock timeout of %.0fs — cancelled. "
+                "Its underlying task_id/agent_run (if any) will surface as "
+                "failed via the existing orphan-recovery heartbeat sweep "
+                "(app/fleet/failure_ladder.py::reconcile_orphaned_runs).",
+                getattr(job_fn, "__name__", repr(job_fn)),
+                timeout,
+            )
+            raise
+
+    _wrapped.__name__ = getattr(job_fn, "__name__", "job_fn")
+    return _wrapped
+
+
 async def dispatch_job(
     background_tasks: Any,
     job_fn: JobFn,
@@ -225,17 +265,22 @@ async def dispatch_job(
     api/tasks.py now calls instead of BackgroundTasks.add_task() directly.
 
     QUEUE_BACKEND=rq -> a real, persistent, retried (queue_job_retry_max)
-    Redis Queue job that survives this process restarting.
-    QUEUE_BACKEND=asyncio (default) -> unchanged pre-existing behavior:
-    fire-and-forget within this request's own process via FastAPI's
-    BackgroundTasks, no behavior change for anyone not opting into rq.
+    Redis Queue job that survives this process restarting, already bounded
+    by RQQueueAdapter's own job_timeout.
+    QUEUE_BACKEND=asyncio (default) -> fire-and-forget within this request's
+    own process via FastAPI's BackgroundTasks, now wrapped in the same
+    wall-clock bound RQ already had (AUDIT_Q_BATCH08 §102) — otherwise
+    unchanged pre-existing behavior for any job that finishes within it.
     """
     from app.config import get_settings
 
     if get_settings().queue_backend.lower() == "rq":
         await queue().enqueue(job_fn, *args, **kwargs)
     else:
-        background_tasks.add_task(job_fn, *args, **kwargs)
+        wrapped = _with_wall_clock_timeout(
+            job_fn, get_settings().job_wall_clock_timeout_seconds
+        )
+        background_tasks.add_task(wrapped, *args, **kwargs)
 
 
 async def sweep_failed_rq_jobs() -> int:

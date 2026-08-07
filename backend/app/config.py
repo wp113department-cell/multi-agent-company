@@ -99,6 +99,20 @@ class Settings(BaseSettings):
         "construction. Without this, LLM calls rely entirely on the SDK's own "
         "undocumented default, which could hang a worker thread indefinitely.",
     )
+    llm_call_max_retries: int = Field(
+        default=3,
+        description="AUDIT_Q_BATCH08 §38/§66 'Internet disconnects'/'Exponential "
+        "backoff': explicit, config-driven max_retries passed to every "
+        "Anthropic SDK client construction. The SDK already retries "
+        "connection errors/408/409/429/5xx with exponential backoff and "
+        "jitter internally when this is set >0 (its own undocumented-here "
+        "default was 2, applied implicitly) — making it explicit and "
+        "settings-driven, per this codebase's zero-hardcoding convention, "
+        "instead of leaving real retry behavior silently dependent on the "
+        "SDK's own default. Distinct from and complementary to the circuit "
+        "breaker below: this retries a single call transparently; the "
+        "breaker fails fast across calls once a provider is clearly down.",
+    )
     llm_circuit_breaker_failure_threshold: int = Field(
         default=5,
         description="Gap-closure Day 22 (Stage 1.3, answers.md) — consecutive "
@@ -466,6 +480,15 @@ class Settings(BaseSettings):
         description="Extra connections beyond db_pool_size the pool may open "
         "under burst load before QueuePool raises.",
     )
+    db_statement_timeout_ms: int = Field(
+        default=30000,
+        description="AUDIT_Q_BATCH08 §66 'Timeout handling': server-side "
+        "statement_timeout (ms) applied to every connection this app's pool "
+        "opens, via asyncpg's server_settings — no DB query could previously "
+        "hang a connection (and, transitively, an agent run or request "
+        "handler awaiting it) indefinitely. 0 disables (Postgres default: no "
+        "timeout) for callers that need a longer-running query.",
+    )
     max_concurrent_subtasks_per_epic: int = Field(
         default=5,
         description="Max subtasks running simultaneously within a single epic",
@@ -496,6 +519,26 @@ class Settings(BaseSettings):
         description="Blocker 8 (audit_v1.md 4.7 #2): max automatic RQ retries "
         "per enqueued job before it lands in RQ's own FailedJobRegistry. Only "
         "applies when QUEUE_BACKEND=rq.",
+    )
+    job_wall_clock_timeout_seconds: int = Field(
+        default=1800,
+        description="AUDIT_Q_BATCH08 §102 'Long-Running Jobs': wall-clock "
+        "timeout applied to every job dispatched via "
+        "app.pipeline.queue_adapter.dispatch_job(), regardless of backend. "
+        "Previously only QUEUE_BACKEND=rq had a bound "
+        "(app.queue.rq_adapter._DEFAULT_JOB_TIMEOUT) — the default "
+        "QUEUE_BACKEND=asyncio path (FastAPI BackgroundTasks) had no wall-clock "
+        "bound at all, only max_turns's turn-count limit. Same 1800s default "
+        "as the RQ path so behavior doesn't silently depend on which backend "
+        "an operator chose.",
+    )
+    idempotency_key_ttl_seconds: int = Field(
+        default=86400,
+        description="AUDIT_Q_BATCH08 §66 'Idempotency': how long a stored "
+        "Idempotency-Key response (app.middleware.idempotency, "
+        "idempotency_keys table) is honored before the retention loop "
+        "purges it. 24h default — long enough to cover a client's realistic "
+        "retry window, short enough that the table doesn't grow unbounded.",
     )
     queue_failed_job_sweep_interval_seconds: int = Field(
         default=300,

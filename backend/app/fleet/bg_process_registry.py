@@ -124,3 +124,111 @@ def sweep_orphaned_processes() -> list[int]:
         if path.exists():
             path.unlink()
         return killed
+
+
+# ---------------------------------------------------------------------------
+# AUDIT_Q_BATCH08 §38 "Failure Recovery — Terminal/shell session closes":
+# sweep_orphaned_processes() above only ever runs once, at the next app
+# startup — nothing previously detected a background shell process (started
+# via the run_background tool) dying on its own — crashing, being killed
+# externally, or its underlying terminal/shell session closing — WHILE the
+# app keeps running. This is that live, periodic counterpart, mirroring
+# app/services/retention.py::start_retention_loop()'s exact shape (run
+# forever, log + swallow errors, fixed interval) — not a new scheduling
+# mechanism.
+# ---------------------------------------------------------------------------
+
+_LIVENESS_SWEEP_INTERVAL_SECONDS = 60
+
+
+def _is_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Exists but owned by someone else — cannot happen for a PID this
+        # process itself spawned, but fail toward "alive" rather than
+        # falsely reaping a process this check can't actually confirm is
+        # dead.
+        return True
+
+
+def _sweep_dead_registry_entries() -> list[int]:
+    """One liveness pass: any PID no longer alive (exited on its own,
+    without a code path calling kill_process()/unregister() first — e.g. a
+    run_background shell session that closed or crashed mid-run) is removed
+    from the durable registry and reported. Synchronous/blocking (os.kill is
+    a cheap syscall, not I/O-bound) — start_bg_process_liveness_loop() below
+    runs this via asyncio.to_thread so it never blocks the event loop."""
+    with _lock:
+        path = _registry_path()
+        entries = _read(path)
+        if not entries:
+            return []
+        dead: list[int] = []
+        changed = False
+        for pid_str in list(entries):
+            try:
+                pid = int(pid_str)
+            except ValueError:
+                del entries[pid_str]
+                changed = True
+                continue
+            if not _is_alive(pid):
+                dead.append(pid)
+                del entries[pid_str]
+                changed = True
+        if changed:
+            _write(path, entries)
+        return dead
+
+
+async def start_bg_process_liveness_loop() -> None:
+    """Background task: while the app keeps running (not just at the next
+    startup), periodically checks every registered background-process PID
+    for liveness and reaps any that exited on their own from the durable
+    registry, publishing a health event so the loss is observable instead of
+    silently discovered only at the next restart's startup sweep.
+
+    Deliberately NOT gated by app.main.py's leader-election mechanism
+    (_run_as_leader): the registry is a local JSON file
+    (bg_process_registry_path) tracking PIDs spawned by THIS host process —
+    meaningless to any other instance in a multi-instance deployment, unlike
+    the DB-backed loops that mechanism protects against duplicate work
+    across instances. sweep_orphaned_processes() above is, for the same
+    reason, also called directly rather than through leader election.
+    """
+    import asyncio
+
+    while True:
+        try:
+            dead = await asyncio.to_thread(_sweep_dead_registry_entries)
+            if dead:
+                logger.warning(
+                    "Background-process liveness sweep: %d process(es) exited "
+                    "without cleanup (PIDs %s) — registry entries reaped",
+                    len(dead),
+                    dead,
+                )
+                try:
+                    from app.fleet.fleet_events import health_updated, publish
+
+                    publish(
+                        health_updated(
+                            "bg_process_registry",
+                            health="degraded",
+                            state=(
+                                f"{len(dead)} background process(es) exited "
+                                "without cleanup (closed shell/crash while "
+                                "the app kept running)"
+                            ),
+                        )
+                    )
+                except Exception:
+                    pass
+        except Exception as exc:
+            logger.warning("Background-process liveness sweep error: %s", exc)
+
+        await asyncio.sleep(_LIVENESS_SWEEP_INTERVAL_SECONDS)

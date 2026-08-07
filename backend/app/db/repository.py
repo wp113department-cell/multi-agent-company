@@ -408,7 +408,11 @@ async def list_logs(
 
 
 async def create_agent_run(
-    db: AsyncSession, task_id: int, agent_type: str, model_id: str
+    db: AsyncSession,
+    task_id: int,
+    agent_type: str,
+    model_id: str,
+    trace_id: str | None = None,
 ) -> AgentRun:
     run = AgentRun(
         id=str(uuid.uuid4()),
@@ -416,6 +420,7 @@ async def create_agent_run(
         agent_type=agent_type,
         status="running",
         model_id=model_id,
+        trace_id=trace_id,
     )
     db.add(run)
     await db.commit()
@@ -479,7 +484,9 @@ async def finish_agent_run(
 # ---------------------------------------------------------------------------
 
 
-def create_agent_run_sync(task_id: int, agent_type: str, model_id: str) -> str | None:
+def create_agent_run_sync(
+    task_id: int, agent_type: str, model_id: str, trace_id: str | None = None
+) -> str | None:
     """Sync bridge for create_agent_run(). Returns the new run's id, or None
     on any failure (task_id not castable, no matching dev_tasks row causing
     an FK violation, DB unavailable, etc.) — callers must treat None as
@@ -494,7 +501,9 @@ def create_agent_run_sync(task_id: int, agent_type: str, model_id: str) -> str |
         engine = new_isolated_async_engine()
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                run = await create_agent_run(session, task_id, agent_type, model_id)
+                run = await create_agent_run(
+                    session, task_id, agent_type, model_id, trace_id=trace_id
+                )
                 return run.id
         finally:
             await engine.dispose()

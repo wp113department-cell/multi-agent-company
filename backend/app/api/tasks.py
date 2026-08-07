@@ -32,6 +32,7 @@ from app.db.repository import (
     resolve_task_repo_path,
 )
 from app.config import get_settings
+from app.middleware.idempotency import get_cached_response, store_response
 from app.middleware.rbac import require_approver, require_authenticated
 from app.pipeline.queue_adapter import dispatch_job
 from app.rate_limit import limiter
@@ -114,6 +115,15 @@ async def create(
     db: AsyncSession = Depends(get_db),
     _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
+    # AUDIT_Q_BATCH08 §66 "Idempotency" — a client retrying task creation
+    # after a dropped response (e.g. a network timeout on a request that
+    # actually already succeeded) previously always created a second,
+    # duplicate task row. An Idempotency-Key header makes a retried call
+    # return the original created task instead.
+    cached = await get_cached_response(db, request, "create_task")
+    if cached is not None:
+        return cached
+
     task = await create_task(
         db,
         body.title,
@@ -122,7 +132,9 @@ async def create(
         priority=body.priority,
         project=body.project,
     )
-    return _task_to_dict(task)
+    result = _task_to_dict(task)
+    await store_response(db, request, "create_task", result)
+    return result
 
 
 @router.get("")
@@ -566,14 +578,30 @@ async def get_pr(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, 
 @router.post("/{task_id}/push")
 async def push_task(
     task_id: int,
+    request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Day 14 — Git Push Workflow. Manual retry: re-runs push+PR creation
     directly, bypassing the approval gate since approval already happened
-    once for a previously-approved push that failed transiently."""
+    once for a previously-approved push that failed transiently.
+
+    AUDIT_Q_BATCH08 §66 "Idempotency" — a real git push/PR creation is
+    exactly the "write_remote" hazard class app/agents/base_graph.py's own
+    `_RETRY_EXCLUDED_PERMISSIONS` documents ("a network call that appears to
+    fail may have already succeeded remotely — blindly retrying risks a
+    real, visible duplicate side effect"): a client retrying this endpoint
+    after a timeout (with no idea whether the first request's dispatch
+    already went through) previously had no way to avoid double-triggering
+    a push. An `Idempotency-Key` header now makes a retried call return the
+    original trigger response instead of dispatching a second time.
+    """
     from app.api.approvals import dispatch_git_push_decision
+
+    cached = await get_cached_response(db, request, "push_task")
+    if cached is not None:
+        return cached
 
     task = await get_task(db, task_id)
     if not task:
@@ -585,7 +613,9 @@ async def push_task(
         )
 
     await dispatch_job(background_tasks, dispatch_git_push_decision, task_id, True)
-    return {"triggered": True, "taskId": task_id}
+    result = {"triggered": True, "taskId": task_id}
+    await store_response(db, request, "push_task", result)
+    return result
 
 
 # ---------------------------------------------------------------------------

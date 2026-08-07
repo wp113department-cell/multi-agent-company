@@ -1,0 +1,15 @@
+# Companion to gridiron-backup.service — see that file's header for install
+# steps. Daily at 03:00 local time, with a randomized 0-30min splay to avoid
+# every host in a fleet hitting Postgres at the exact same instant, and
+# Persistent=true so a backup that was missed because the host was off at
+# 03:00 still runs once at next boot instead of silently skipping a day.
+[Unit]
+Description=Daily timer for gridiron-backup.service
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=1800
+Persistent=true
+
+[Install]
+WantedBy=timers.target

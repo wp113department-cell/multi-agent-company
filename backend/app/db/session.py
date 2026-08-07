@@ -1,15 +1,35 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from app.config import get_settings
+from app.config import Settings, get_settings
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
+
+
+def _connect_args(settings: Settings) -> dict[str, Any]:
+    """AUDIT_Q_BATCH08 §66 'Timeout handling': no statement_timeout/
+    command_timeout anywhere in the session/engine config — a hung query
+    (e.g. a lock wait against a busy table) could previously block its
+    connection, and transitively whatever request handler or agent run was
+    awaiting it, indefinitely. asyncpg applies server_settings via `SET` at
+    connection time, so this is a real server-side enforced timeout, not a
+    client-side guess. db_statement_timeout_ms=0 opts back out (Postgres's
+    own default: no timeout) for a deployment that needs a longer-running
+    query than the default allows."""
+    if settings.db_statement_timeout_ms <= 0:
+        return {}
+    return {
+        "server_settings": {
+            "statement_timeout": str(settings.db_statement_timeout_ms)
+        }
+    }
 
 
 def get_engine() -> AsyncEngine:
@@ -31,6 +51,7 @@ def get_engine() -> AsyncEngine:
             pool_pre_ping=True,
             pool_size=settings.db_pool_size,
             max_overflow=settings.db_pool_max_overflow,
+            connect_args=_connect_args(settings),
         )
     return _engine
 
@@ -68,6 +89,7 @@ def new_isolated_async_engine() -> AsyncEngine:
         pool_pre_ping=True,
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_pool_max_overflow,
+        connect_args=_connect_args(settings),
     )
 
 

@@ -550,6 +550,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         init_agent_checkpointer,
         close_agent_checkpointer,
     )
+    from app.agents.chat_agent import (
+        init_chat_checkpointer,
+        close_chat_checkpointer,
+    )
     from app.db.session import get_session_factory
     from app.db.repository import get_setting
     from app.agents.base import set_api_key_override
@@ -618,7 +622,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # in a fresh process could have legitimately started it, so being in
     # the registry at this point IS the orphan signal.
     try:
-        from app.fleet.bg_process_registry import sweep_orphaned_processes
+        from app.fleet.bg_process_registry import (
+            sweep_orphaned_processes,
+            start_bg_process_liveness_loop,
+        )
 
         killed = sweep_orphaned_processes()
         if killed:
@@ -630,9 +637,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning("Startup orphan-process sweep failed (non-fatal): %s", exc)
 
+    # AUDIT_Q_BATCH08 §38 "Terminal/shell session closes": the live,
+    # while-the-app-keeps-running counterpart to the startup-only sweep
+    # above. Not leader-gated — see start_bg_process_liveness_loop()'s own
+    # docstring for why (a local-filesystem, per-instance concern, not a
+    # cluster-wide one).
+    bg_process_liveness_task = asyncio.create_task(start_bg_process_liveness_loop())
+
     await init_active_repo()
     await init_checkpointer(settings.database_url)
     await init_agent_checkpointer(settings.database_url)
+    # AUDIT_Q_BATCH08 §14 "Checkpoints" — chat sessions were the one
+    # execution path left on MemorySaver; see chat_agent.py's own
+    # init_chat_checkpointer() docstring.
+    await init_chat_checkpointer(settings.database_url)
 
     # Load DB-stored API key override (if user saved one via UI)
     try:
@@ -783,6 +801,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     doc_agent_auto_trigger_task.cancel()
     failed_rq_job_sweep_task.cancel()
     redis_streams_drain_task.cancel()
+    bg_process_liveness_task.cancel()
     for task in (
         reindex_task,
         retention_task,
@@ -793,6 +812,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         doc_agent_auto_trigger_task,
         failed_rq_job_sweep_task,
         redis_streams_drain_task,
+        bg_process_liveness_task,
     ):
         try:
             await task
@@ -806,6 +826,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await _leader_election_engine.dispose()
     await close_checkpointer()
     await close_agent_checkpointer()
+    await close_chat_checkpointer()
 
 
 app = FastAPI(

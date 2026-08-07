@@ -272,7 +272,12 @@ async def _merge_via_llm(old_content: str, new_content: str, model: str) -> str:
         f"Version A (existing):\n{old_content}\n\nVersion B (new):\n{new_content}\n\n"
         "Respond with ONLY the merged lesson text — no preamble, no JSON, no labels."
     )
-    client = anthropic.Anthropic(api_key=get_effective_api_key())
+    # AUDIT_Q_BATCH08 §38/§66 — explicit, config-driven max_retries, matching
+    # app/agents/base_graph.py::_make_client().
+    client = anthropic.Anthropic(
+        api_key=get_effective_api_key(),
+        max_retries=get_settings().llm_call_max_retries,
+    )
     r = client.messages.create(
         model=model, max_tokens=512, messages=[{"role": "user", "content": prompt}]
     )

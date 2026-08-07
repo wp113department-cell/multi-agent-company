@@ -103,6 +103,106 @@ async def get_request(
 
 
 # ---------------------------------------------------------------------------
+# Checkpoint / Rollback — AUDIT_Q_BATCH08 §14 "Rollback (NO — confirmed not
+# auto-wired)". app.fleet.fleet_checkpoint.rollback_to (re-exported as
+# app.fleet.failure_ladder.rollback) was a real function with zero
+# production callers — deliberately manual-only per that module's own
+# docstring, matching the precedent already set for prompt_registry.deploy()
+# before it got a real caller (app/agents/tools.py's
+# _propose_and_deploy_role_prompt). These two endpoints are that caller: a
+# human-operated "inspect checkpoints, roll one back" dashboard action, not
+# an automatic trigger — the same judgment-call boundary this module's own
+# comment draws around Rollback/Resume being intentionally different from
+# Checkpoint/Escalate/Abort/Human Review/Retry (which do have automatic
+# call sites).
+# ---------------------------------------------------------------------------
+
+
+@router.get("/checkpoints")
+async def list_checkpoints(
+    agent_name: str | None = Query(default=None),
+    task_id: str | None = Query(default=None),
+    _approver: str = Depends(require_approver),
+) -> list[dict[str, Any]]:
+    """List saved agent-run checkpoints (app.fleet.fleet_checkpoint's
+    in-process ring buffer), optionally filtered — the real prerequisite for
+    an operator to pick a checkpoint_id to roll back to below."""
+    from app.fleet.fleet_checkpoint import get_checkpoint_store
+
+    store = get_checkpoint_store()
+    checkpoints = store.list_checkpoints(agent_name=agent_name, task_id=task_id)
+    return [c.to_dict() for c in checkpoints]
+
+
+@router.post("/checkpoints/{checkpoint_id}/rollback")
+async def rollback_checkpoint(
+    checkpoint_id: str,
+    _approver: str = Depends(require_approver),
+) -> dict[str, Any]:
+    """Operator-invoked rollback to a previously saved checkpoint. Returns
+    the restored state snapshot for inspection and records a health event so
+    the action has an audit trail (mirrors
+    app/fleet/failure_ladder.py::escalate()'s own event-publishing shape).
+
+    Does not re-inject the restored state into a live, still-running agent
+    process — that path belongs to LangGraph's own checkpointer (a resumed
+    graph.stream() call against the same thread_id), which this in-process
+    ring-buffer checkpoint store is deliberately separate from (see
+    fleet_checkpoint.py's own module docstring: it exists for a
+    "save -> restore -> rollback" cycle an agent's own code can call
+    inline before/after a risky operation). This endpoint's job is making
+    the rollback primitive itself reachable by a human, closing the "zero
+    production callers" finding — not building a second, riskier live-run
+    state-mutation path in the same change.
+    """
+    from app.fleet.failure_ladder import rollback
+    from app.fleet.fleet_checkpoint import get_checkpoint_store
+    from app.fleet.fleet_events import health_updated, publish
+
+    store = get_checkpoint_store()
+    meta = store.get(checkpoint_id)
+    if meta is None:
+        raise HTTPException(
+            status_code=404, detail=f"Checkpoint {checkpoint_id!r} not found"
+        )
+
+    try:
+        restored_state = rollback(checkpoint_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    logger.warning(
+        "Operator-invoked rollback: checkpoint %s (agent=%s, task=%s, label=%r)",
+        checkpoint_id,
+        meta.agent_name,
+        meta.task_id,
+        meta.label,
+    )
+    try:
+        publish(
+            health_updated(
+                meta.agent_name or "unknown",
+                health="degraded",
+                state=(
+                    f"operator rolled back to checkpoint {checkpoint_id} "
+                    f"({meta.label or 'unlabeled'})"
+                ),
+            )
+        )
+    except Exception:
+        pass
+
+    return {
+        "checkpointId": checkpoint_id,
+        "agentName": meta.agent_name,
+        "taskId": meta.task_id,
+        "label": meta.label,
+        "createdAt": meta.created_at.isoformat(),
+        "restoredState": restored_state,
+    }
+
+
+# ---------------------------------------------------------------------------
 # APPLY-phase dispatch — lazy-imported so a broken/missing agent module never
 # breaks the whole router at import time.
 # ---------------------------------------------------------------------------
