@@ -47,9 +47,14 @@ def load_role(name: str) -> str:
 
 
 def _make_client() -> anthropic.Anthropic:
+    # AUDIT_Q_BATCH08 §38/§66 — explicit, config-driven max_retries (the SDK
+    # already retries connection/408/409/429/5xx errors with exponential
+    # backoff internally when this is >0; leaving it unset relied on the
+    # SDK's own undocumented-here default instead of a real settings value).
     return anthropic.Anthropic(
         api_key=get_effective_api_key(),
         timeout=get_settings().llm_call_timeout_seconds,
+        max_retries=get_settings().llm_call_max_retries,
     )
 
 

@@ -184,6 +184,26 @@ async def _run_cleanup() -> int:
         except Exception as exc:
             logger.warning("Checkpoint retention cleanup error: %s", exc)
 
+    # AUDIT_Q_BATCH08 §66 "Idempotency" — idempotency_keys rows are ephemeral
+    # dedup records (not audit history like task_logs/agent_runs), so a hard
+    # delete on the same cadence as _cleanup_checkpoints's own hard delete,
+    # not the archive-flag pattern the app's own tables above use.
+    if settings.idempotency_key_ttl_seconds > 0:
+        try:
+            from app.middleware.idempotency import purge_expired_idempotency_keys
+
+            factory = get_session_factory()
+            async with factory() as db:
+                purged = await purge_expired_idempotency_keys(db)
+                if purged:
+                    logger.info(
+                        "Idempotency-key retention: purged %d expired record(s)",
+                        purged,
+                    )
+                total += purged
+        except Exception as exc:
+            logger.warning("Idempotency-key retention cleanup error: %s", exc)
+
     return total
 
 
@@ -200,21 +220,23 @@ async def start_retention_loop() -> None:
         settings.log_retention_days <= 0
         and settings.memory_embeddings_retention_days <= 0
         and settings.checkpoint_retention_days <= 0
+        and settings.idempotency_key_ttl_seconds <= 0
     ):
         logger.info(
             "Retention disabled (LOG_RETENTION_DAYS=0, "
-            "MEMORY_EMBEDDINGS_RETENTION_DAYS=0, and "
-            "CHECKPOINT_RETENTION_DAYS=0)"
+            "MEMORY_EMBEDDINGS_RETENTION_DAYS=0, CHECKPOINT_RETENTION_DAYS=0, "
+            "and IDEMPOTENCY_KEY_TTL_SECONDS=0)"
         )
         return
 
     logger.info(
         "Retention started: task_logs/agent_runs/artifacts older than %d days, "
         "memory_embeddings older than %d days, LangGraph checkpoints older "
-        "than %d days, checked every 24 h",
+        "than %d days, idempotency keys older than %d seconds, checked every 24 h",
         settings.log_retention_days,
         settings.memory_embeddings_retention_days,
         settings.checkpoint_retention_days,
+        settings.idempotency_key_ttl_seconds,
     )
 
     while True:

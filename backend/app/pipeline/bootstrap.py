@@ -92,6 +92,7 @@ async def detect_project_type(task_description: str, model: str) -> str:
     import anthropic
 
     from app.agents.base import get_effective_api_key
+    from app.config import get_settings
 
     prompt = (
         "What type of software project does this task describe? Respond with "
@@ -99,7 +100,12 @@ async def detect_project_type(task_description: str, model: str) -> str:
         f"Task: {task_description[:500]}"
     )
     try:
-        client = anthropic.Anthropic(api_key=get_effective_api_key())
+        # AUDIT_Q_BATCH08 §38/§66 — explicit, config-driven max_retries,
+        # matching app/agents/base_graph.py::_make_client().
+        client = anthropic.Anthropic(
+            api_key=get_effective_api_key(),
+            max_retries=get_settings().llm_call_max_retries,
+        )
         r = client.messages.create(
             model=model, max_tokens=10, messages=[{"role": "user", "content": prompt}]
         )

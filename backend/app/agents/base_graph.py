@@ -123,10 +123,17 @@ async def close_agent_checkpointer() -> None:
 def _make_client() -> anthropic.Anthropic:
     """Every Anthropic client in this file goes through here so the call-site
     timeout (Audit 02 gap-closure, 2026-07-24) can't be forgotten at a new
-    call site the way it was omitted everywhere before this fix."""
+    call site the way it was omitted everywhere before this fix.
+
+    AUDIT_Q_BATCH08 §38/§66 — max_retries is now explicit and
+    settings-driven (llm_call_max_retries) rather than left to the SDK's own
+    undocumented-here default; the SDK retries connection/408/409/429/5xx
+    errors with exponential backoff + jitter internally whenever this is >0.
+    """
     return anthropic.Anthropic(
         api_key=get_effective_api_key(),
         timeout=get_settings().llm_call_timeout_seconds,
+        max_retries=get_settings().llm_call_max_retries,
     )
 
 
@@ -141,7 +148,21 @@ def _call_anthropic(client: anthropic.Anthropic, **kwargs: Any) -> Any:
     full regression run, not assumed, and fixed by wrapping the CALL
     instead of the callee attribute, matching this file's own established
     "shared node builder wraps behavior, doesn't mutate the client SDK
-    object" style)."""
+    object" style).
+
+    AUDIT_Q_BATCH08 §38/§66 — no separate outer retry-with-backoff loop
+    here: tests/test_gap58_59_llm_outage_retry_and_breaker.py already
+    proves, against the real `anthropic` SDK (not a mock), that
+    `client.messages.create()` retries connection/408/409/429/5xx errors
+    with real exponential backoff + jitter internally (`max_retries`, now
+    explicit via `_make_client()`'s `llm_call_max_retries` setting instead
+    of the SDK's own undocumented default), and that this breaker counts
+    one failure per fully-retried `create()` call, not per raw HTTP
+    attempt. A second retry loop wrapped around that would double-retry
+    every transient failure and desync the breaker's failure count from
+    that already-proven, tested contract — duplicate functionality, not a
+    real gap.
+    """
     breaker = get_anthropic_breaker()
     return breaker.call(lambda: client.messages.create(**kwargs))
 
@@ -2567,7 +2588,14 @@ def run_agent_graph(
             from app.db.repository import create_agent_run_sync
 
             _int_task_id = int(task_id)
-            _agent_run_id = create_agent_run_sync(_int_task_id, role_name, model)
+            # AUDIT_Q_BATCH08 §14 "Recovery after reboot" — trace_id=tid
+            # links this DB row to the actual LangGraph checkpointer
+            # thread_id (see run_config below), so an orphaned run is no
+            # longer traceable-in-name-only: its checkpoint can genuinely
+            # be looked up from the agent_runs row alone.
+            _agent_run_id = create_agent_run_sync(
+                _int_task_id, role_name, model, trace_id=tid
+            )
         except (ValueError, TypeError):
             # task_id isn't a real dev_tasks integer id (e.g. a synthetic
             # id like "fleet-scan" from a guardian agent's periodic scan) —

@@ -45,15 +45,36 @@ VALID_TRANSITIONS: dict[str, list[str]] = {
     # assumed. Reached automatically when a git push succeeds
     # (approvals.dispatch_git_push_decision) or manually via
     # POST /api/tasks/{id}/complete for tasks with no push flow.
-    "pending": ["planning", "blocked", "failed"],
-    "planning": ["ready_for_review", "blocked", "rejected", "failed"],
-    "ready_for_review": ["coding", "blocked", "rejected", "failed", "completed"],
-    "coding": ["testing", "blocked", "failed"],
-    "testing": ["ready_for_review", "blocked", "failed"],
-    "rejected": ["planning"],
-    "blocked": ["planning", "failed"],
+    #
+    # "cancelled" added to every in-progress state (AUDIT_Q_BATCH08 §14
+    # "Cancel (distinct terminal state)"): previously the only pause
+    # primitive was Stop/Resume (app/api/activity.py), an in-process abort
+    # flag that is always resumable — there was no separate, irreversible
+    # cancel a human could reach for when a task should genuinely stop for
+    # good, not just pause. POST /api/tasks/{task_id}/cancel is the real
+    # caller (app/api/activity.py) — sets the same in-process abort flag
+    # Stop uses AND transitions the DB row here, and resume_task() refuses
+    # to resume a task whose status has no outgoing transitions (see
+    # _TERMINAL_STATUSES below), which "cancelled" now shares with
+    # "completed"/"failed" — the property that actually makes it distinct
+    # from Stop/Resume's always-resumable pause.
+    "pending": ["planning", "blocked", "failed", "cancelled"],
+    "planning": ["ready_for_review", "blocked", "rejected", "failed", "cancelled"],
+    "ready_for_review": [
+        "coding",
+        "blocked",
+        "rejected",
+        "failed",
+        "completed",
+        "cancelled",
+    ],
+    "coding": ["testing", "blocked", "failed", "cancelled"],
+    "testing": ["ready_for_review", "blocked", "failed", "cancelled"],
+    "rejected": ["planning", "cancelled"],
+    "blocked": ["planning", "failed", "cancelled"],
     "completed": [],
     "failed": [],
+    "cancelled": [],
 }
 
 
@@ -182,6 +203,24 @@ class AgentRun(Base):
     )
     agent_type: Mapped[str] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(String(50), default="running")
+    # AUDIT_Q_BATCH08 §14 "Recovery after reboot"/"Continue from checkpoint
+    # if interrupted": before this column, there was no stored link between
+    # an agent_runs row and the LangGraph checkpointer thread_id
+    # (run_agent_graph()'s own `tid`) its worker-agent run was actually
+    # checkpointed under — an orphaned run's checkpoint existed in Postgres
+    # but nothing could ever look it up starting from the agent_runs row
+    # alone. Nullable: legacy rows predating this column, and runs with no
+    # AgentRun tracking at all (create_agent_run_sync's own documented
+    # "returns None on any failure" contract), both correctly have no
+    # trace_id rather than a guessed one. This makes the checkpoint
+    # genuinely traceable/auditable per run; it does not by itself
+    # implement automatic cross-restart resume — see
+    # app/fleet/failure_ladder.py::reconcile_orphaned_runs()'s own comment
+    # on why that remains a deliberately separate, larger decision (each of
+    # the ~76 agent modules builds its own graph/tool_handlers inline; a
+    # generic resume dispatcher would need a per-agent-type graph-rebuild
+    # registry that doesn't exist yet).
+    trace_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     model_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     tokens_in: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tokens_out: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -934,4 +973,35 @@ class CodeEmbedding(Base):
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class IdempotencyKey(Base):
+    """AUDIT_Q_BATCH08 §66 "Idempotency — PARTIAL": generalizes the narrow,
+    state-based guard already established for approve_task() (HTTP 409 if
+    already coded — functional for that one case only) into a reusable
+    primitive any mutating endpoint can opt into via
+    app/middleware/idempotency.py. A client that retries a request (e.g.
+    after a timeout on a call that actually already succeeded) with the same
+    Idempotency-Key header gets back the original response instead of
+    re-executing a real side effect a second time — the same hazard class
+    app/agents/base_graph.py's `_RETRY_EXCLUDED_PERMISSIONS` already
+    documents at the tool-retry layer ("a network call that appears to fail
+    may have already succeeded — blindly retrying risks a real, visible
+    duplicate side effect"), closed here at the HTTP layer.
+
+    Composite primary key (key, endpoint): the same client-generated key is
+    only meaningful scoped to one endpoint — nothing requires idempotency
+    keys to be globally unique across unrelated endpoints.
+    """
+
+    __tablename__ = "idempotency_keys"
+
+    key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    endpoint: Mapped[str] = mapped_column(String(255), primary_key=True)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    response_status: Mapped[int] = mapped_column(Integer, nullable=False)
+    response_body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
     )

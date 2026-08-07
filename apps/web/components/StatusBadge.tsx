@@ -7,7 +7,8 @@ type TaskStatus =
   | "blocked"
   | "completed"
   | "failed"
-  | "rejected";
+  | "rejected"
+  | "cancelled";
 
 // Consistent color coding across every page per 15_Mission_Control_Dashboard_Specification.md
 // ("amber for blocked/in-review, green for completed, red for failed").
@@ -21,6 +22,10 @@ const STYLES: Record<TaskStatus, string> = {
   completed: "bg-green-100 text-green-700",
   failed: "bg-red-100 text-red-700",
   rejected: "bg-red-100 text-red-700",
+  // AUDIT_Q_BATCH08 §14 "Cancel (distinct terminal state)" — slate (not
+  // red) to visually distinguish an intentional, human-initiated stop from
+  // an actual failure.
+  cancelled: "bg-slate-200 text-slate-700",
 };
 
 export function StatusBadge({ status }: { status: string }) {

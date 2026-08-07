@@ -1,0 +1,34 @@
+# AUDIT_Q_BATCH08 §97 "Disaster Recovery — Backup exists": scripts/backup_db.sh
+# was real and well-built (pg_dump -Fc, pg_restore --list verification,
+# retention pruning) but nothing ever invoked it on a schedule — it only ran
+# when an operator remembered to run it by hand. This unit + its companion
+# .timer is that trigger. The backup script itself needs no changes.
+#
+# Install (on the host running the production Postgres, or any host with
+# network access to it + a matching-major-version pg_dump on PATH):
+#   sudo cp gridiron-backup.service gridiron-backup.timer /etc/systemd/system/
+#   sudo systemctl edit gridiron-backup.service   # set DATABASE_URL (Environment=)
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now gridiron-backup.timer
+#   systemctl list-timers gridiron-backup.timer     # confirm next run
+#   journalctl -u gridiron-backup.service            # inspect run history
+#
+# DATABASE_URL/BACKUP_DIR/BACKUP_RETENTION_COUNT are intentionally not baked
+# in here (same zero-hardcoding convention backup_db.sh itself documents) —
+# set them via `systemctl edit` (drop-in) or an EnvironmentFile, not by
+# editing this shipped unit file directly.
+[Unit]
+Description=Gridiron Developer Department — Postgres backup (scripts/backup_db.sh)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Overridable via `systemctl edit gridiron-backup.service` — see header.
+Environment=BACKUP_DIR=/var/backups/gridiron
+Environment=BACKUP_RETENTION_COUNT=30
+WorkingDirectory=/opt/gridiron
+ExecStart=/opt/gridiron/scripts/backup_db.sh
+# Backups can legitimately take a while against a large DB — bound it so a
+# stuck pg_dump doesn't wedge this unit forever instead of failing loudly.
+TimeoutStartSec=3600

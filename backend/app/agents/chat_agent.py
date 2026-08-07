@@ -140,6 +140,65 @@ class ChatGraphState(TypedDict, total=False):
 # survives a pause/resume cycle exactly as it did under the old mechanism.
 # ---------------------------------------------------------------------------
 
+# AUDIT_Q_BATCH08 §14 "Checkpoints" — chat sessions were the one execution
+# path left on MemorySaver (in-process, lost on crash/restart) while the
+# pipeline graph (app/pipeline/graph.py) and every run_agent_graph()-based
+# worker agent (app/agents/base_graph.py) were already Postgres-backed.
+# Mirrors app.agents.base_graph.init_agent_checkpointer()/
+# close_agent_checkpointer() exactly — same driver, same
+# fallback-to-MemorySaver-on-init-failure behavior, same "called once from
+# FastAPI lifespan startup" contract — kept as its own independent
+# module-level checkpointer/connection rather than importing base_graph.py's
+# or pipeline/graph.py's, matching the architectural boundary base_graph.py
+# itself already established (its own docstring: kept independent "so
+# base_graph.py ... doesn't depend on the higher-level pipeline orchestrator
+# module"); the same reasoning applies one layer up here.
+_chat_checkpointer: Any = MemorySaver()
+_chat_pg_cm: Any = None  # holds the AsyncPostgresSaver context manager open
+
+
+async def init_chat_checkpointer(database_url: str) -> None:
+    """Initialize the LangGraph PostgreSQL checkpointer so chat sessions
+    survive server restarts. Called once from FastAPI lifespan startup."""
+    global _chat_checkpointer, _chat_pg_cm
+    try:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+        psycopg_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
+        cm = AsyncPostgresSaver.from_conn_string(psycopg_url)
+        saver = await cm.__aenter__()
+        await saver.setup()  # creates langgraph checkpoint tables if missing
+        _chat_pg_cm = cm
+        _chat_checkpointer = saver
+        logger.info(
+            "Chat agent PostgreSQL checkpointer initialized — chat sessions "
+            "are now durably checkpointed"
+        )
+    except Exception as exc:
+        logger.warning(
+            "Chat agent PostgreSQL checkpointer init failed, falling back "
+            "to MemorySaver: %s",
+            exc,
+        )
+
+
+async def close_chat_checkpointer() -> None:
+    """Close the PostgreSQL checkpointer connection. Called at FastAPI
+    shutdown. Also resets _chat_checkpointer back to a fresh MemorySaver —
+    mirrors base_graph.py::close_agent_checkpointer()'s own reasoning:
+    without this reset, a process that inits+closes+keeps running (this
+    test suite's own pattern) would keep referencing the just-closed,
+    now-dead-event-loop-bound AsyncPostgresSaver."""
+    global _chat_pg_cm, _chat_checkpointer
+    if _chat_pg_cm is not None:
+        try:
+            await _chat_pg_cm.__aexit__(None, None, None)
+        except Exception as exc:
+            logger.warning("Error closing chat agent checkpointer: %s", exc)
+        _chat_pg_cm = None
+    _chat_checkpointer = MemorySaver()
+
+
 _chat_agents: dict[str, "ChatAgent"] = {}
 
 
@@ -570,7 +629,6 @@ class ChatAgent:
         # uuid4() would differ between the paused and resumed pass of the
         # same node, since node bodies re-run from the top on resume).
         self._current_tool_use_id: str = ""
-        self._checkpointer = MemorySaver()
         self._graph = self._build_chat_graph()
         # Gap-closure Stage 1.5 (answers.md) — chat_agent.py had ZERO
         # token-budget tracking before this (confirmed by grep: no
@@ -584,7 +642,17 @@ class ChatAgent:
         self._tokens_out: int = 0
 
     def _client(self) -> anthropic.AsyncAnthropic:
-        return anthropic.AsyncAnthropic(api_key=get_effective_api_key())
+        # AUDIT_Q_BATCH08 §38/§66 — explicit, config-driven max_retries,
+        # matching app/agents/base_graph.py::_make_client() — the SDK
+        # already retries connection/408/409/429/5xx errors with real
+        # exponential backoff internally (proven against the real SDK by
+        # tests/test_gap58_59_llm_outage_retry_and_breaker.py) whenever this
+        # is >0; previously unset here, relying on the SDK's own
+        # undocumented default instead of a real settings value.
+        return anthropic.AsyncAnthropic(
+            api_key=get_effective_api_key(),
+            max_retries=get_settings().llm_call_max_retries,
+        )
 
     def _haiku_model(self) -> str:
         """Gap-closure Stage 1.5 (answers.md) — cheap model for the context
@@ -3023,7 +3091,14 @@ class ChatAgent:
         )
         graph.add_edge("finalize", END)
 
-        return graph.compile(checkpointer=self._checkpointer)
+        # Reads the current module-level singleton at compile time (not a
+        # value captured once at import time) — same property
+        # base_graph.py::build_agent_graph() relies on for
+        # _agent_checkpointer, and what makes init_chat_checkpointer()
+        # (called from FastAPI lifespan startup, strictly before any
+        # ChatAgent can be constructed from a real request) actually take
+        # effect for every session created afterward.
+        return graph.compile(checkpointer=_chat_checkpointer)
 
     async def run(self, user_message: str) -> None:
         """

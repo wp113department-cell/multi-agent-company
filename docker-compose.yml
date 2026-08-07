@@ -37,6 +37,15 @@ services:
     build:
       context: ./backend
     command: alembic upgrade head
+    # AUDIT_Q_BATCH08 §97 "Auto-restart on crash": on-failure (not
+    # unless-stopped) — this is a one-shot job that's supposed to exit 0 and
+    # stay stopped once migrations succeed (backend's own `condition:
+    # service_completed_successfully` depends on that). unless-stopped would
+    # restart it forever after every successful exit, fighting that
+    # dependency instead of satisfying it. on-failure retries only a real,
+    # non-zero-exit migration failure, bounded so a persistently broken
+    # migration doesn't loop forever.
+    restart: on-failure:3
     environment:
       DATABASE_URL: postgresql+asyncpg://gridiron:${POSTGRES_PASSWORD:-gridiron_dev_only}@db:5432/gridiron_dev
     depends_on:
@@ -66,6 +75,11 @@ services:
     build:
       context: ./backend
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    # AUDIT_Q_BATCH08 §97 "Auto-restart on crash": previously only db/redis
+    # had a restart policy — the core service disaster recovery is supposed
+    # to protect had none, so it stayed down after any crash until an
+    # operator noticed and ran `docker compose up` again.
+    restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
@@ -99,6 +113,7 @@ services:
     build:
       context: ./backend
     command: rq worker gridiron-high gridiron-default --url ${REDIS_URL:-redis://redis:6379/0} --with-scheduler
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://gridiron:${POSTGRES_PASSWORD:-gridiron_dev_only}@db:5432/gridiron_dev
       REDIS_URL: redis://redis:6379/0
@@ -121,6 +136,7 @@ services:
       # comment for the same reasoning.
       context: .
       dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:

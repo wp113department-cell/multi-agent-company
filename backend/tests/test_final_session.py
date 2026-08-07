@@ -240,6 +240,10 @@ async def test_enforce_retention_disabled_returns_zero() -> None:
         mock_settings.return_value.log_retention_days = 0
         mock_settings.return_value.memory_embeddings_retention_days = 0
         mock_settings.return_value.checkpoint_retention_days = 0
+        # AUDIT_Q_BATCH08 §66 "Idempotency" — _run_cleanup() also purges
+        # expired idempotency_keys rows now; 0 disables it, matching this
+        # test's "everything disabled -> 0" intent for the other 3 knobs.
+        mock_settings.return_value.idempotency_key_ttl_seconds = 0
         from app.services.retention import enforce_retention_policy
 
         count = await enforce_retention_policy()
@@ -272,6 +276,12 @@ async def test_enforce_retention_archives_across_all_three_tables() -> None:
         mock_s.return_value.log_retention_days = 90
         mock_s.return_value.memory_embeddings_retention_days = 0
         mock_s.return_value.checkpoint_retention_days = 0
+        # AUDIT_Q_BATCH08 §66 "Idempotency" — 0 disables the idempotency-key
+        # purge branch so it doesn't add a 4th DELETE call against this
+        # test's mocked session (which would break both the exact count==9
+        # assertion and the "every execute call is an UPDATE" assertion
+        # below).
+        mock_s.return_value.idempotency_key_ttl_seconds = 0
         from app.services.retention import enforce_retention_policy
 
         count = await enforce_retention_policy()

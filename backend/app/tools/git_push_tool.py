@@ -74,7 +74,12 @@ async def generate_commit_message(task_title: str, diff: str, model: str) -> str
         f"Task: {task_title[:200]}\n\nDiff (truncated):\n{diff[:3000]}"
     )
     try:
-        client = anthropic.Anthropic(api_key=get_effective_api_key())
+        # AUDIT_Q_BATCH08 §38/§66 — explicit, config-driven max_retries,
+        # matching app/agents/base_graph.py::_make_client().
+        client = anthropic.Anthropic(
+            api_key=get_effective_api_key(),
+            max_retries=get_settings().llm_call_max_retries,
+        )
         r = client.messages.create(
             model=model, max_tokens=100, messages=[{"role": "user", "content": prompt}]
         )
@@ -123,7 +128,12 @@ async def generate_pr_body(
         f"{task_description[:500]}\n\nDiff (truncated):\n{diff[:6000]}"
     )
     try:
-        client = anthropic.Anthropic(api_key=get_effective_api_key())
+        # AUDIT_Q_BATCH08 §38/§66 — explicit, config-driven max_retries,
+        # matching app/agents/base_graph.py::_make_client().
+        client = anthropic.Anthropic(
+            api_key=get_effective_api_key(),
+            max_retries=get_settings().llm_call_max_retries,
+        )
         r = client.messages.create(
             model=model, max_tokens=600, messages=[{"role": "user", "content": prompt}]
         )
