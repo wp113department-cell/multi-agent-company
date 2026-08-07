@@ -26,9 +26,7 @@ def _connect_args(settings: Settings) -> dict[str, Any]:
     if settings.db_statement_timeout_ms <= 0:
         return {}
     return {
-        "server_settings": {
-            "statement_timeout": str(settings.db_statement_timeout_ms)
-        }
+        "server_settings": {"statement_timeout": str(settings.db_statement_timeout_ms)}
     }
 
 

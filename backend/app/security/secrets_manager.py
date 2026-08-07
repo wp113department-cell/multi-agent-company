@@ -76,7 +76,9 @@ def fetch_secrets_manager_overrides() -> dict[str, str]:
     try:
         import boto3
         from botocore.exceptions import BotoCoreError, ClientError
-    except ImportError as exc:  # pragma: no cover — boto3 is a real, already-installed dependency (s3_store.py)
+    except (
+        ImportError
+    ) as exc:  # pragma: no cover — boto3 is a real, already-installed dependency (s3_store.py)
         raise SecretsManagerError(
             "SECRETS_MANAGER_ENABLED=true but boto3 is not installed."
         ) from exc

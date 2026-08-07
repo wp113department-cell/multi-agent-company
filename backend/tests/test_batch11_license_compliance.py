@@ -67,13 +67,16 @@ class TestClassifyOne:
         assert finding.category == "review"
 
     def test_compound_spdx_expression_flags_the_copyleft_component(self) -> None:
-        dist = _fake_dist("orjson", license_expression="MPL-2.0 AND (Apache-2.0 OR MIT)")
+        dist = _fake_dist(
+            "orjson", license_expression="MPL-2.0 AND (Apache-2.0 OR MIT)"
+        )
         finding = _classify_one(dist)
         assert finding.category == "review"
 
     def test_classifier_based_permissive_license_is_allowed(self) -> None:
         dist = _fake_dist(
-            "requests", classifiers=["License :: OSI Approved :: Apache Software License"]
+            "requests",
+            classifiers=["License :: OSI Approved :: Apache Software License"],
         )
         finding = _classify_one(dist)
         assert finding.category == "allowed"
@@ -122,7 +125,9 @@ class TestClassifyOne:
         dist = _fake_dist(
             "pkg",
             license_expression="MIT",
-            classifiers=["License :: OSI Approved :: GNU General Public License v3 (GPLv3)"],
+            classifiers=[
+                "License :: OSI Approved :: GNU General Public License v3 (GPLv3)"
+            ],
         )
         finding = _classify_one(dist)
         assert finding.license_source == "license-expression"
@@ -146,11 +151,15 @@ class TestScanInstalledPackageLicenses:
         first_review_idx = next(
             (i for i, c in enumerate(categories) if c == "review"), len(categories)
         )
-        assert all(c == "disallowed" for c in categories[:0])  # no-op if none disallowed
+        assert all(
+            c == "disallowed" for c in categories[:0]
+        )  # no-op if none disallowed
         # every "disallowed" entry (if any) must sort before every "review"/other entry
         for i, c in enumerate(categories):
             if c == "disallowed":
-                assert i < first_review_idx or categories[first_review_idx] == "disallowed"
+                assert (
+                    i < first_review_idx or categories[first_review_idx] == "disallowed"
+                )
 
     def test_format_report_mentions_disallowed_and_review_sections(self) -> None:
         report = scan_installed_package_licenses()

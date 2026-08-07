@@ -86,9 +86,7 @@ class TestBaseGraphCallLlmRedaction:
 
         with (
             patch("app.agents.base_graph._make_client", return_value=MagicMock()),
-            patch(
-                "app.agents.base_graph._call_anthropic", return_value=fake_response
-            ),
+            patch("app.agents.base_graph._call_anthropic", return_value=fake_response),
         ):
             result = node(state)
 

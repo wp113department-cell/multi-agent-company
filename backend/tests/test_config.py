@@ -116,9 +116,7 @@ def test_config_secrets_manager_fills_unset_fields_only():
         with patch("boto3.client", return_value=mock_client) as mock_boto:
             s = Settings()
 
-        mock_boto.assert_called_once_with(
-            "secretsmanager", region_name=None
-        )
+        mock_boto.assert_called_once_with("secretsmanager", region_name=None)
         assert s.anthropic_api_key == "sk-ant-explicit-env-value"
         assert s.openai_api_key == "sk-oai-from-secrets-manager"
         cfg_module._settings = None

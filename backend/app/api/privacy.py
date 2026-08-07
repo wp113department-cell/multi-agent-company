@@ -86,9 +86,9 @@ async def _export_for_username(username: str, db: AsyncSession) -> dict[str, Any
         {
             "userId": role_row.user_id,
             "role": role_row.role,
-            "createdAt": role_row.created_at.isoformat()
-            if role_row.created_at
-            else None,
+            "createdAt": (
+                role_row.created_at.isoformat() if role_row.created_at else None
+            ),
         }
         if role_row is not None
         else None
@@ -206,12 +206,14 @@ async def delete_user_data(
         "retained": {
             "auditLogEntries": audit_count > 0,
             "reason": (
-                "audit_log is a legally-relevant approval/action trail, "
-                "retained under the same legal-obligation basis GDPR "
-                "Article 17(3)(b) recognizes for records like this — see "
-                "this module's docstring."
-            )
-            if audit_count > 0
-            else None,
+                (
+                    "audit_log is a legally-relevant approval/action trail, "
+                    "retained under the same legal-obligation basis GDPR "
+                    "Article 17(3)(b) recognizes for records like this — see "
+                    "this module's docstring."
+                )
+                if audit_count > 0
+                else None
+            ),
         },
     }

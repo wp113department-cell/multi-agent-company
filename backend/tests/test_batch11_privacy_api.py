@@ -84,9 +84,7 @@ async def _seed(username: str, audit_entry: AuditEntry) -> None:
                 {"v": json.dumps(existing)},
             )
             await conn.execute(
-                text(
-                    "INSERT INTO user_roles (user_id, role) VALUES (:u, 'viewer')"
-                ),
+                text("INSERT INTO user_roles (user_id, role) VALUES (:u, 'viewer')"),
                 {"u": username},
             )
     finally:

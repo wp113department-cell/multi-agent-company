@@ -70,7 +70,9 @@ async def test_a_new_row_gets_a_non_empty_server_computed_hash() -> None:
         assert row is not None
         assert row["seq"] is not None
         assert len(row["entry_hash"]) == 64  # hex-encoded sha256
-        assert row["prev_hash"] is not None  # "" for the very first row ever, else a real hash
+        assert (
+            row["prev_hash"] is not None
+        )  # "" for the very first row ever, else a real hash
     finally:
         await _purge(engine, entry.entry_id)
         await engine.dispose()
@@ -85,24 +87,32 @@ async def test_chain_links_two_consecutive_rows() -> None:
     log = AuditLog()
     suffix = uuid.uuid4().hex[:8]
     e1 = AuditEntry(
-        action_type="tamper_test", agent_name="test_agent", description=f"chain-1-{suffix}"
+        action_type="tamper_test",
+        agent_name="test_agent",
+        description=f"chain-1-{suffix}",
     )
     e2 = AuditEntry(
-        action_type="tamper_test", agent_name="test_agent", description=f"chain-2-{suffix}"
+        action_type="tamper_test",
+        agent_name="test_agent",
+        description=f"chain-2-{suffix}",
     )
     try:
         await log._write_to_db(e1)
         await log._write_to_db(e2)
         async with engine.connect() as conn:
             rows = (
-                await conn.execute(
-                    text(
-                        "SELECT entry_id, seq, prev_hash, entry_hash FROM audit_log "
-                        "WHERE entry_id IN (:a, :b) ORDER BY seq ASC"
-                    ),
-                    {"a": e1.entry_id, "b": e2.entry_id},
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT entry_id, seq, prev_hash, entry_hash FROM audit_log "
+                            "WHERE entry_id IN (:a, :b) ORDER BY seq ASC"
+                        ),
+                        {"a": e1.entry_id, "b": e2.entry_id},
+                    )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
         assert len(rows) == 2
         row1, row2 = rows
         assert row1["entry_id"] == e1.entry_id
@@ -129,7 +139,9 @@ async def test_direct_update_is_rejected_by_the_db() -> None:
         async with engine.connect() as conn:
             with pytest.raises(DBAPIError, match="append-only"):
                 await conn.execute(
-                    text("UPDATE audit_log SET description = 'TAMPERED' WHERE entry_id = :id"),
+                    text(
+                        "UPDATE audit_log SET description = 'TAMPERED' WHERE entry_id = :id"
+                    ),
                     {"id": entry.entry_id},
                 )
                 await conn.commit()
