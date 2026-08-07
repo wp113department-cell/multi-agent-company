@@ -209,9 +209,24 @@ export default function ChatPage() {
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [reconnecting, setReconnecting] = useState(false);
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const esRef = useRef<EventSource | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reachedTerminalRef = useRef(false);
+
+  // Streaming-turn state shared between the initial fetch-based reader and
+  // a reconnect (GET /stream, EventSource-based — a POST body can't be
+  // resent to reattach without re-running the agent). Refs, not locals,
+  // since a reconnect can pick up mid-turn after sendMessage's closure
+  // has already returned.
+  const assistantMsgIdRef = useRef<string>(uid());
+  const assistantContentRef = useRef<string>("");
+  const hasAssistantMsgRef = useRef(false);
 
   // Load repos on mount
   useEffect(() => {
@@ -246,12 +261,26 @@ export default function ChatPage() {
 
   const endSession = useCallback(async () => {
     if (!sessionId) return;
+    reachedTerminalRef.current = true;
+    if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+    esRef.current?.close();
+    esRef.current = null;
     abortRef.current?.abort();
     await deleteChatSession(sessionId).catch(() => {});
     setSessionId(null);
     setMessages([]);
     setStreaming(false);
+    setReconnecting(false);
   }, [sessionId]);
+
+  // Unmount safety — mirrors the task activity feed's cleanup.
+  useEffect(() => {
+    return () => {
+      reachedTerminalRef.current = true;
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      esRef.current?.close();
+    };
+  }, []);
 
   // ---- Confirmation handler ----
   const handleConfirm = useCallback(
@@ -282,6 +311,151 @@ export default function ChatPage() {
     );
   }, []);
 
+  const MAX_RECONNECT_ATTEMPTS = 5;
+  const BASE_RECONNECT_DELAY_MS = 1000;
+
+  // ---- Shared SSE event handling (initial fetch-stream + reconnect EventSource) ----
+  const handleSseEvent = useCallback((event: SseEvent) => {
+    if (event.type === "text_delta") {
+      assistantContentRef.current += event.text;
+      const id = assistantMsgIdRef.current;
+      const content = assistantContentRef.current;
+      setMessages((prev) =>
+        prev.map((m) => (m.id === id && m.kind === "text" ? { ...m, content } : m)),
+      );
+    } else if (event.type === "tool_call") {
+      if (assistantContentRef.current.trim()) {
+        assistantMsgIdRef.current = uid();
+        assistantContentRef.current = "";
+      } else if (hasAssistantMsgRef.current) {
+        const staleId = assistantMsgIdRef.current;
+        setMessages((prev) => prev.filter((m) => m.id !== staleId));
+        hasAssistantMsgRef.current = false;
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          kind: "tool_call",
+          id: uid(),
+          tool_use_id: event.tool_use_id,
+          tool_name: event.tool_name,
+          tool_input: event.tool_input,
+          expanded: false,
+        } satisfies ToolCallMessage,
+      ]);
+
+      assistantMsgIdRef.current = uid();
+      assistantContentRef.current = "";
+      hasAssistantMsgRef.current = false;
+    } else if (event.type === "tool_result") {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.kind === "tool_call" && m.tool_use_id === event.tool_use_id
+            ? { ...m, output: event.output, expanded: true }
+            : m,
+        ),
+      );
+    } else if (event.type === "thinking") {
+      if (!hasAssistantMsgRef.current) {
+        assistantMsgIdRef.current = uid();
+        assistantContentRef.current = "";
+        const id = assistantMsgIdRef.current;
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", kind: "text", id, content: "" } satisfies TextMessage,
+        ]);
+        hasAssistantMsgRef.current = true;
+      }
+    } else if (event.type === "confirmation_required") {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "system",
+          kind: "confirm",
+          id: uid(),
+          actionId: event.actionId,
+          description: event.description,
+          details: event.details,
+          resolved: false,
+        } satisfies ConfirmMessage,
+      ]);
+    } else if (event.type === "done") {
+      reachedTerminalRef.current = true;
+      if (hasAssistantMsgRef.current && !assistantContentRef.current.trim()) {
+        const staleId = assistantMsgIdRef.current;
+        setMessages((prev) => prev.filter((m) => m.id !== staleId));
+      }
+    } else if (event.type === "error") {
+      reachedTerminalRef.current = true;
+      setError(event.message);
+      if (hasAssistantMsgRef.current && !assistantContentRef.current.trim()) {
+        const staleId = assistantMsgIdRef.current;
+        setMessages((prev) => prev.filter((m) => m.id !== staleId));
+      }
+    }
+  }, []);
+
+  // ---- Reconnect to a dropped stream ----
+  // The agent runs as a backend background task decoupled from the HTTP
+  // connection that started it (backend/app/api/chat.py::send_message) — a
+  // dropped fetch stream doesn't stop the agent mid-turn, it only stops
+  // delivery of its events. Re-attach via GET /stream (EventSource-
+  // compatible, unlike the POST that starts a turn) with capped exponential
+  // backoff, same shape as the task activity feed's proven reconnect
+  // (app/stream/[taskId]/page.tsx).
+  const reconnect = useCallback(
+    (activeSessionId: string, attempt: number) => {
+      setReconnecting(true);
+      setReconnectAttempt(attempt);
+
+      const es = new EventSource(`/api/chat/sessions/${activeSessionId}/stream`);
+      esRef.current = es;
+
+      es.onopen = () => {
+        setReconnecting(false);
+        setReconnectAttempt(0);
+      };
+
+      es.onmessage = (e: MessageEvent) => {
+        let event: SseEvent;
+        try {
+          event = JSON.parse(e.data) as SseEvent;
+        } catch {
+          return;
+        }
+        handleSseEvent(event);
+        if (event.type === "done" || event.type === "error") {
+          es.close();
+          esRef.current = null;
+          setStreaming(false);
+        }
+      };
+
+      es.onerror = () => {
+        es.close();
+        esRef.current = null;
+        if (reachedTerminalRef.current) {
+          setReconnecting(false);
+          setStreaming(false);
+          return;
+        }
+        if (attempt >= MAX_RECONNECT_ATTEMPTS) {
+          setReconnecting(false);
+          setStreaming(false);
+          setError("Lost connection to the agent's response stream and could not reconnect.");
+          return;
+        }
+        const nextAttempt = attempt + 1;
+        setReconnectAttempt(nextAttempt);
+        const delay = Math.min(BASE_RECONNECT_DELAY_MS * 2 ** attempt, 30000);
+        reconnectTimeoutRef.current = setTimeout(() => reconnect(activeSessionId, nextAttempt), delay);
+      };
+    },
+    [handleSseEvent],
+  );
+
   // ---- Send message ----
   const sendMessage = useCallback(async () => {
     if (!input.trim() || !sessionId || streaming) return;
@@ -290,6 +464,7 @@ export default function ChatPage() {
     setInput("");
     setError(null);
     setStreaming(true);
+    reachedTerminalRef.current = false;
 
     // Add user message immediately
     setMessages((prev) => [
@@ -299,6 +474,12 @@ export default function ChatPage() {
 
     const abortCtrl = new AbortController();
     abortRef.current = abortCtrl;
+
+    // Set once the turn is actually dispatched server-side (session.active
+    // flips true before the response streams back) — only then is a dropped
+    // connection safe to treat as reconnectable instead of a hard failure.
+    let dispatched = false;
+    let dispatchedReconnect = false;
 
     try {
       const res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
@@ -315,19 +496,19 @@ export default function ChatPage() {
       }
 
       if (!res.body) throw new Error("No response body");
+      dispatched = true;
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let assistantMsgId = uid();
-      let assistantContent = "";
-      let hasAssistantMsg = false;
+      assistantMsgIdRef.current = uid();
+      assistantContentRef.current = "";
 
       // Add placeholder for streaming text
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", kind: "text", id: assistantMsgId, content: "" } satisfies TextMessage,
+        { role: "assistant", kind: "text", id: assistantMsgIdRef.current, content: "" } satisfies TextMessage,
       ]);
-      hasAssistantMsg = true;
+      hasAssistantMsgRef.current = true;
 
       let buffer = "";
 
@@ -352,99 +533,27 @@ export default function ChatPage() {
             continue;
           }
 
-          if (event.type === "text_delta") {
-            assistantContent += event.text;
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsgId && m.kind === "text"
-                  ? { ...m, content: assistantContent }
-                  : m,
-              ),
-            );
-          } else if (event.type === "tool_call") {
-            // Close current assistant text block if it had content
-            if (assistantContent.trim()) {
-              assistantMsgId = uid();
-              assistantContent = "";
-            } else if (hasAssistantMsg) {
-              // Remove the empty assistant placeholder
-              setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId));
-              hasAssistantMsg = false;
-            }
-
-            setMessages((prev) => [
-              ...prev,
-              {
-                role: "assistant",
-                kind: "tool_call",
-                id: uid(),
-                tool_use_id: event.tool_use_id,
-                tool_name: event.tool_name,
-                tool_input: event.tool_input,
-                expanded: false,
-              } satisfies ToolCallMessage,
-            ]);
-
-            // Reset assistant msg for next text chunk
-            assistantMsgId = uid();
-            assistantContent = "";
-            hasAssistantMsg = false;
-          } else if (event.type === "tool_result") {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.kind === "tool_call" && m.tool_use_id === event.tool_use_id
-                  ? { ...m, output: event.output, expanded: true }
-                  : m,
-              ),
-            );
-          } else if (event.type === "thinking") {
-            // If no assistant message exists yet for next round, add one
-            if (!hasAssistantMsg) {
-              assistantMsgId = uid();
-              assistantContent = "";
-              setMessages((prev) => [
-                ...prev,
-                { role: "assistant", kind: "text", id: assistantMsgId, content: "" } satisfies TextMessage,
-              ]);
-              hasAssistantMsg = true;
-            }
-          } else if (event.type === "confirmation_required") {
-            setMessages((prev) => [
-              ...prev,
-              {
-                role: "system",
-                kind: "confirm",
-                id: uid(),
-                actionId: event.actionId,
-                description: event.description,
-                details: event.details,
-                resolved: false,
-              } satisfies ConfirmMessage,
-            ]);
-          } else if (event.type === "done") {
-            // Remove trailing empty assistant message
-            if (hasAssistantMsg && !assistantContent.trim()) {
-              setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId));
-            }
-            break;
-          } else if (event.type === "error") {
-            setError(event.message);
-            if (hasAssistantMsg && !assistantContent.trim()) {
-              setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId));
-            }
-            break;
-          }
+          handleSseEvent(event);
         }
+        if (reachedTerminalRef.current) break;
       }
     } catch (e: unknown) {
       if ((e as Error).name === "AbortError") return;
+
+      if (dispatched && !reachedTerminalRef.current) {
+        dispatchedReconnect = true;
+        reconnect(sessionId, 0);
+        return;
+      }
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setStreaming(false);
+      if (!dispatchedReconnect) {
+        setStreaming(false);
+      }
       abortRef.current = null;
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [input, sessionId, streaming]);
+  }, [input, sessionId, streaming, handleSseEvent, reconnect]);
 
   // Keyboard: Ctrl+Enter or Enter to send
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -471,8 +580,10 @@ export default function ChatPage() {
         {sessionId && (
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1.5 text-xs text-slate-500">
-              <span className="h-2 w-2 rounded-full bg-green-400" />
-              Connected · {repoPath.split("/").slice(-2).join("/")}
+              <span className={`h-2 w-2 rounded-full ${reconnecting ? "bg-amber-400 animate-pulse" : "bg-green-400"}`} />
+              {reconnecting
+                ? `Reconnecting… (attempt ${reconnectAttempt}/${MAX_RECONNECT_ATTEMPTS})`
+                : `Connected · ${repoPath.split("/").slice(-2).join("/")}`}
             </span>
             <button
               onClick={() => void endSession()}

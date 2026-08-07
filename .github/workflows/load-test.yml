@@ -1,0 +1,133 @@
+name: Load Test (k6)
+
+# AUDIT_Q_BATCH06 §11 "Performance Tests"/"Load Tests / Stress Tests" gap-
+# closure: tests/load/gridiron_load_test.js (k6) existed and was verified
+# manually, but was never wired into any automated pipeline — a performance
+# regression would not have been caught before this. Scheduled, not per-PR,
+# per the audit's own recommendation (avoids cost/flakiness on every push).
+#
+# Honest scope note: this project has no provisioned staging deployment to
+# target, so — same as this repo's own real-execution pytest coverage
+# (backend/tests/test_gap55_56_load_test_and_cicd_inspection.py::
+# TestLoadTestScriptRealExecution) — this job stands up a real, live
+# instance of the app against an ephemeral CI Postgres and runs k6 against
+# that. BASE_URL is still env-driven (matching the script's own zero-
+# hardcoding design): pass the `staging_base_url` input to point this at a
+# real deployed environment instead, once one exists, with no script changes.
+
+on:
+  schedule:
+    # 03:00 UTC daily — off peak, clear of the per-push `ci` workflow.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      staging_base_url:
+        description: "Optional: run against a real deployed BASE_URL instead of spinning up a local instance"
+        required: false
+        type: string
+      api_token:
+        description: "Optional: bearer token for auth-gated endpoints (/api/tasks, /api/metrics)"
+        required: false
+        type: string
+
+concurrency:
+  group: load-test-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  k6-load-and-stress:
+    name: k6 load + stress
+    runs-on: ubuntu-latest
+    if: github.event.inputs.staging_base_url == ''
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: gridiron
+          POSTGRES_PASSWORD: gridiron_dev_only
+          POSTGRES_DB: gridiron_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://gridiron:gridiron_dev_only@localhost:5432/gridiron_test
+      USE_GROQ: "false"
+      SENTRY_DSN: ""
+      ALERT_WEBHOOK_URL: ""
+      REDIS_STREAMS_ENABLED: "false"
+      ARTIFACT_BACKEND: "db"
+      RBAC_ENABLED: "false"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run Alembic migrations
+        run: alembic upgrade head
+
+      - name: Install k6
+        run: |
+          curl -sL https://dl.k6.io/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: Start backend
+        run: |
+          nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 \
+            > uvicorn.log 2>&1 &
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/health || true)
+            [ "$code" = "200" ] && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8000/health
+
+      - name: k6 load scenario
+        run: k6 run -e BASE_URL=http://127.0.0.1:8000 -e SCENARIO=load tests/load/gridiron_load_test.js
+
+      - name: k6 stress scenario
+        run: k6 run -e BASE_URL=http://127.0.0.1:8000 -e SCENARIO=stress tests/load/gridiron_load_test.js
+
+      - name: Dump backend log on failure
+        if: failure()
+        run: cat backend/uvicorn.log || true
+
+  k6-against-staging:
+    name: k6 load + stress (staging)
+    runs-on: ubuntu-latest
+    if: github.event.inputs.staging_base_url != ''
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install k6
+        run: |
+          curl -sL https://dl.k6.io/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: k6 load scenario
+        run: k6 run -e BASE_URL="${{ github.event.inputs.staging_base_url }}" -e API_TOKEN="${{ github.event.inputs.api_token }}" -e SCENARIO=load backend/tests/load/gridiron_load_test.js
+
+      - name: k6 stress scenario
+        run: k6 run -e BASE_URL="${{ github.event.inputs.staging_base_url }}" -e API_TOKEN="${{ github.event.inputs.api_token }}" -e SCENARIO=stress backend/tests/load/gridiron_load_test.js

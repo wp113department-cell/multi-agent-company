@@ -11,7 +11,10 @@
  * not guessed):
  *   GET /health              — app/main.py::health(), no auth
  *   GET /api/agents          — app/api/registry.py::list_agents(), no auth
- *   GET /api/metrics         — app/api/metrics.py::get_system_metrics(), no auth
+ *   GET /api/metrics         — app/api/metrics.py::get_system_metrics(), requires
+ *                               auth when JWT_AUTH_ENABLED=true (set API_TOKEN;
+ *                               AUDIT_Q_BATCH06 §9 gap-closure added
+ *                               require_authenticated here)
  *   GET /api/tasks           — app/api/tasks.py::list_all(), requires auth
  *                               when JWT_AUTH_ENABLED=true (set API_TOKEN)
  *
@@ -103,9 +106,9 @@ export default function () {
     },
   });
 
-  const metrics = http.get(`${BASE_URL}/api/metrics`);
+  const metrics = http.get(`${BASE_URL}/api/metrics`, { headers: authHeaders });
   check(metrics, {
-    "/api/metrics status is 200": (r) => r.status === 200,
+    "/api/metrics status is 200 or 401": (r) => r.status === 200 || r.status === 401,
   });
 
   const tasks = http.get(`${BASE_URL}/api/tasks`, { headers: authHeaders });

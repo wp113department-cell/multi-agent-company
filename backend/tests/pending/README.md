@@ -1,6 +1,9 @@
-# Pending Tests — Require API Keys
+# Pending Tests — Require Real API Keys
 
-All tests in this folder are **skipped** until the matching environment variable is set.
+All tests in this folder are **skipped** until the matching environment variable is set,
+because they make real, billed calls to an external LLM (or embedding) provider — not
+because they need a database. Real-DB-only integration tests (no LLM key needed) live in
+`tests/integration/` instead and run by default; see that folder's own README.
 
 | File | Requires | What it tests |
 |---|---|---|
@@ -10,8 +13,8 @@ All tests in this folder are **skipped** until the matching environment variable
 | `test_planner_agent.py` | `ANTHROPIC_API_KEY` | Planner Agent produces validated markdown plan, retries on bad output |
 | `test_coder_agent.py` | `ANTHROPIC_API_KEY` | Coder Agent writes a file in a worktree, passes mypy+ruff |
 | `test_pipeline_e2e.py` | `ANTHROPIC_API_KEY` | Full PM → Architect → Decomposer LangGraph run |
+| `test_manager_integration.py` | `ANTHROPIC_API_KEY` + `DATABASE_URL` | Manager Agent + Epic lifecycle: goal → epic → subtasks → approval package |
 | `test_embeddings.py` | `VOYAGE_API_KEY` | Voyage AI embedding generation + semantic search |
-| `test_db_integration.py` | `DATABASE_URL` (real PG) | Full CRUD: tasks, logs, agent_runs, subtasks |
 | `test_api_e2e.py` | `ANTHROPIC_API_KEY` + `DATABASE_URL` | POST /tasks → /run → /pipeline → /approve → /diff |
 
 ## How to run once you have the keys
