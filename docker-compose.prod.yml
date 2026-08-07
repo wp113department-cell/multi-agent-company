@@ -1,0 +1,232 @@
+# Production deployment manifest (AUDIT_Q_BATCH05_PERFORMANCE_ARCHITECTURE.md
+# §10 "Deployment readiness" — docker-compose.yml self-documents as dev-only;
+# this is the production counterpart it was missing).
+#
+# Differences from docker-compose.yml (dev):
+#   - No default/dev-fallback secrets. Every credential below uses compose's
+#     `${VAR:?err}` syntax, which hard-fails `docker compose up` immediately
+#     if the variable isn't set — never a silent insecure default.
+#   - DEPLOYMENT_ENV=production is hardcoded (not operator-overridable here).
+#     This flips on real, already-existing startup validation in
+#     app/config.py (Settings' `_require_secure_production_auth`,
+#     `_require_credential_encryption_in_production`,
+#     `_require_durable_workspace_in_production` model_validators) — the app
+#     itself refuses to start with JWT auth disabled, RBAC disabled, the
+#     legacy role header allowed, a default/short admin password, a missing
+#     credential-encryption key, or worktree/repo/bg-process-registry paths
+#     left under ephemeral /tmp. That existing enforcement is the real
+#     safety net this manifest relies on rather than re-implementing.
+#   - Postgres/Redis publish no host ports at all (internal network only) —
+#     the dev manifest bound them to 127.0.0.1 for local psql/redis-cli
+#     access, which has no equivalent need here.
+#   - Named, durable volumes for worktrees/repos/bg-process-registry state
+#     (required by _require_durable_workspace_in_production above).
+#   - The RQ worker and QUEUE_BACKEND=rq are the default (not profile-gated
+#     opt-ins as in dev) — durable, restart-safe job execution is a real
+#     production requirement docker-compose.yml's asyncio in-process default
+#     doesn't provide.
+#   - Bounded json-file logging (no unbounded log growth) and per-service
+#     memory limits.
+#
+# What this manifest deliberately does NOT add: TLS termination / a reverse
+# proxy, or multiple `backend` replicas. Multiple backend replicas are not
+# safe yet — see AUDIT_Q_BATCH05_PERFORMANCE_ARCHITECTURE.md §46
+# "Horizontal scaling": AgentRegistry/CapabilityRegistry/chat-session state
+# are in-process singletons, so two backend containers would silently
+# diverge on agent health/capability/chat state. Put a TLS-terminating
+# load balancer (managed LB, Caddy, nginx) in front of a single `backend`
+# replica; do not scale `backend` past 1 until that finding is resolved.
+#
+# Usage:
+#   cp backend/.env.example .env.production   # fill in every required value
+#   docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+#   docker compose --env-file .env.production -f docker-compose.prod.yml --profile frontend up -d
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gridiron}
+      POSTGRES_PASSWORD: '${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in production - generate one with "openssl rand -hex 32"}'
+      POSTGRES_DB: ${POSTGRES_DB:-gridiron}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gridiron} -d ${POSTGRES_DB:-gridiron}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  migrate:
+    build:
+      context: ./backend
+    restart: "no"
+    logging: *default-logging
+    command: alembic upgrade head
+    environment:
+      DATABASE_URL: 'postgresql+asyncpg://${POSTGRES_USER:-gridiron}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in production}@db:5432/${POSTGRES_DB:-gridiron}'
+    depends_on:
+      db:
+        condition: service_healthy
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    logging: *default-logging
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      DEPLOYMENT_ENV: production
+      DATABASE_URL: 'postgresql+asyncpg://${POSTGRES_USER:-gridiron}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in production}@db:5432/${POSTGRES_DB:-gridiron}'
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      DB_POOL_MAX_OVERFLOW: ${DB_POOL_MAX_OVERFLOW:-10}
+      REDIS_URL: redis://redis:6379/0
+      QUEUE_BACKEND: ${QUEUE_BACKEND:-rq}
+      ANTHROPIC_API_KEY: '${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}'
+      CORS_ORIGINS: '${CORS_ORIGINS:?CORS_ORIGINS is required in production — comma-separated list of your real frontend origin(s)}'
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      # Real, already-enforced by Settings' _require_secure_production_auth
+      # once DEPLOYMENT_ENV=production — startup raises ValueError instead
+      # of booting insecure if these are wrong, so they are NOT given
+      # insecure fallbacks here the way docker-compose.yml's dev defaults do.
+      JWT_SECRET_KEY: '${JWT_SECRET_KEY:?JWT_SECRET_KEY is required in production — generate one with: openssl rand -hex 32}'
+      JWT_AUTH_ENABLED: "true"
+      RBAC_ENABLED: "true"
+      ALLOW_LEGACY_ROLE_HEADER: "false"
+      DEFAULT_ADMIN_PASSWORD: '${DEFAULT_ADMIN_PASSWORD:?DEFAULT_ADMIN_PASSWORD is required in production — must be >= 12 characters and not the "gridiron123" default}'
+      CREDENTIAL_ENCRYPTION_KEY: '${CREDENTIAL_ENCRYPTION_KEY:?CREDENTIAL_ENCRYPTION_KEY is required in production — generate one with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"}'
+      # _require_durable_workspace_in_production rejects the /tmp defaults —
+      # these three are bind-mounted named volumes below, not /tmp.
+      WORKTREES_DIR: /data/worktrees
+      REPOS_DIR: /data/repos
+      BG_PROCESS_REGISTRY_PATH: /data/bg-processes.json
+      # See this file's header comment — sandboxed bash tools need a Docker
+      # daemon reachable from inside this container, which this manifest
+      # deliberately does not wire (docker.sock access is host-root
+      # equivalent). Leaving this at the app's own secure-by-default `true`
+      # means those 3 generic bash tools fail closed (raise
+      # SandboxUnavailableError) rather than silently running unsandboxed —
+      # set to "false" only as an explicit, operator-acknowledged opt-out.
+      BASH_SANDBOX_ENABLED: ${BASH_SANDBOX_ENABLED:-true}
+      ALLOWED_WORKSPACE_PARENT: '${ALLOWED_WORKSPACE_PARENT:?ALLOWED_WORKSPACE_PARENT is required in production — a real, restrictive parent directory for the Repo Console''s path-traversal guard}'
+    volumes:
+      - worktrees:/data/worktrees
+      - repos:/data/repos
+      - bgprocesses:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  worker:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    logging: *default-logging
+    command: rq worker gridiron-high gridiron-default --url redis://redis:6379/0 --with-scheduler
+    environment:
+      DEPLOYMENT_ENV: production
+      DATABASE_URL: 'postgresql+asyncpg://${POSTGRES_USER:-gridiron}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in production}@db:5432/${POSTGRES_DB:-gridiron}'
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      DB_POOL_MAX_OVERFLOW: ${DB_POOL_MAX_OVERFLOW:-10}
+      REDIS_URL: redis://redis:6379/0
+      ANTHROPIC_API_KEY: '${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}'
+      JWT_SECRET_KEY: '${JWT_SECRET_KEY:?JWT_SECRET_KEY is required in production}'
+      JWT_AUTH_ENABLED: "true"
+      RBAC_ENABLED: "true"
+      ALLOW_LEGACY_ROLE_HEADER: "false"
+      DEFAULT_ADMIN_PASSWORD: '${DEFAULT_ADMIN_PASSWORD:?DEFAULT_ADMIN_PASSWORD is required in production}'
+      CREDENTIAL_ENCRYPTION_KEY: '${CREDENTIAL_ENCRYPTION_KEY:?CREDENTIAL_ENCRYPTION_KEY is required in production}'
+      WORKTREES_DIR: /data/worktrees
+      REPOS_DIR: /data/repos
+      BG_PROCESS_REGISTRY_PATH: /data/bg-processes.json
+      ALLOWED_WORKSPACE_PARENT: '${ALLOWED_WORKSPACE_PARENT:?ALLOWED_WORKSPACE_PARENT is required in production}'
+    volumes:
+      - worktrees:/data/worktrees
+      - repos:/data/repos
+      - bgprocesses:/data
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  # Frontend — enabled via: docker compose -f docker-compose.prod.yml --profile frontend up.
+  # Caveat carried over unresolved from docker-compose.yml (out of scope for
+  # this batch's backend performance/architecture findings): Next.js inlines
+  # NEXT_PUBLIC_* variables into the client bundle at `next build` time, not
+  # at container start — setting NEXT_PUBLIC_API_URL only as a runtime
+  # `environment:` value here has no effect on client-side code. Pass it as
+  # a build arg (and add the matching ARG/ENV to apps/web/Dockerfile) if the
+  # client bundle needs a real public API origin baked in.
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    logging: *default-logging
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    profiles:
+      - frontend
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+volumes:
+  pgdata:
+  redisdata:
+  worktrees:
+  repos:
+  bgprocesses:
