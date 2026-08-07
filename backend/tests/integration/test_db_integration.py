@@ -1,12 +1,20 @@
-"""Database integration tests — require a real Postgres (DATABASE_URL pointing to localhost)."""
+"""Database integration tests — real multi-component coverage against the
+same Postgres every other test in this suite already runs against (see
+tests/conftest.py's DATABASE_URL default + reset_db_engine fixture). No
+LLM/API key involved, so — unlike tests/pending/'s LLM-gated integration
+tests (test_manager_integration.py, test_api_e2e.py, ...) — this runs by
+default, not behind RUN_PENDING_TESTS. Relocated from tests/pending/
+(AUDIT_Q_BATCH06 §11 "Integration Tests" gap-closure): tests/integration/
+existed as an empty shell while this file, real integration coverage, sat
+gated behind an env var most CI runs never set — misleading to anyone
+auditing coverage by directory structure alone.
+"""
 
 from __future__ import annotations
 
 import uuid
-from tests.pending.conftest import requires_db
 
 
-@requires_db
 class TestDBIntegration:
     """Full CRUD + state transition tests against a real Postgres database."""
 

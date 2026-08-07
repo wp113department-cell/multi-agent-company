@@ -3,17 +3,15 @@
 
 import { authHeaders } from "./auth";
 
-// Gap-closure Stage 1.4 (answers.md) — before this, authHeaders() (the
-// Authorization: Bearer <token> header the backend's RBAC middleware
-// actually reads — app/middleware/rbac.py has no cookie fallback, only
-// this header) was threaded through exactly one page (app/repo/page.tsx)
-// out of every fetch call in this file. Every other call — GET reads
-// included, not just mutating writes, since a GET fails the identical way
-// under RBAC_ENABLED=true — silently omitted it. apiFetch() is the one
-// chokepoint every function below now calls instead of the global fetch,
-// so the header can't be forgotten at a new call site the way it was
-// omitted at all 43 existing ones. Safe when RBAC is disabled or no user
-// is logged in yet: authHeaders() returns {} in both cases.
+// Auth is a signed, HttpOnly JWT cookie set by POST /api/auth/login and
+// read directly by the backend's RBAC middleware (app/middleware/rbac.py)
+// via the request cookie jar — the browser attaches it automatically, so
+// no client-side Authorization header is needed or sent. authHeaders()
+// intentionally returns {} (see lib/auth.ts): the token is never held in
+// JS-reachable storage, which keeps it safe from XSS-driven exfiltration.
+// apiFetch() remains the single chokepoint every function below calls
+// instead of the global fetch, so any future auth mechanism only needs
+// to change in one place.
 async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   return fetch(input, {
     ...init,

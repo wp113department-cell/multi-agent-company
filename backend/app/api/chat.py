@@ -169,6 +169,38 @@ async def send_message(
     )
 
 
+@router.get("/sessions/{session_id}/stream")
+async def stream_chat_session(
+    session_id: str,
+    _actor: str = Depends(require_authenticated),
+) -> StreamingResponse:
+    """Reattach to an in-progress turn's event stream after a dropped connection.
+
+    The agent already runs as a background task decoupled from the
+    originating HTTP connection (see send_message/_run_agent) — a client
+    network drop does not stop it, it just stops delivery. This lets the
+    frontend re-subscribe to the same session._queue via a plain GET (usable
+    with EventSource, unlike the POST that starts a turn) and keep receiving
+    events through to a real 'done'/'error' terminal event, mirroring
+    GET /api/tasks/{id}/stream's reconnect model.
+    """
+    session = _require_session(session_id)
+    if not session.active:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Session {session_id!r} has no message currently streaming",
+        )
+    return StreamingResponse(
+        _event_stream(session),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
 async def _persist_new_messages(
     session: ChatSession, history_len_before: int, db_factory: Any
 ) -> None:
