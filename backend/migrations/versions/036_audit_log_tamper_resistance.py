@@ -53,13 +53,13 @@ def upgrade() -> None:
         "audit_log",
         sa.Column("seq", sa.BigInteger(), nullable=True),
     )
-    op.execute(
-        "CREATE SEQUENCE IF NOT EXISTS audit_log_seq_seq OWNED BY audit_log.seq"
-    )
+    op.execute("CREATE SEQUENCE IF NOT EXISTS audit_log_seq_seq OWNED BY audit_log.seq")
     op.execute(
         "ALTER TABLE audit_log ALTER COLUMN seq SET DEFAULT nextval('audit_log_seq_seq')"
     )
-    op.execute("UPDATE audit_log SET seq = nextval('audit_log_seq_seq') WHERE seq IS NULL")
+    op.execute(
+        "UPDATE audit_log SET seq = nextval('audit_log_seq_seq') WHERE seq IS NULL"
+    )
     op.alter_column("audit_log", "seq", nullable=False)
     op.create_unique_constraint("uq_audit_log_seq", "audit_log", ["seq"])
     op.create_index("ix_audit_log_seq", "audit_log", ["seq"])
@@ -77,8 +77,7 @@ def upgrade() -> None:
     # seq order) so the trigger below can assume every row it ever sees as
     # "the previous row" already has a real hash — no NULL special-casing
     # needed in steady state.
-    op.execute(
-        """
+    op.execute("""
         DO $$
         DECLARE
             r RECORD;
@@ -105,12 +104,10 @@ def upgrade() -> None:
                 SELECT entry_hash INTO prev FROM audit_log WHERE seq = r.seq;
             END LOOP;
         END $$;
-        """
-    )
+        """)
     op.alter_column("audit_log", "entry_hash", nullable=False)
 
-    op.execute(
-        """
+    op.execute("""
         CREATE OR REPLACE FUNCTION audit_log_set_chain_hash() RETURNS trigger AS $$
         DECLARE
             prev_h text;
@@ -134,18 +131,14 @@ def upgrade() -> None:
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
-        """
-    )
-    op.execute(
-        """
+        """)
+    op.execute("""
         CREATE TRIGGER audit_log_chain_hash_trigger
         BEFORE INSERT ON audit_log
         FOR EACH ROW EXECUTE FUNCTION audit_log_set_chain_hash();
-        """
-    )
+        """)
 
-    op.execute(
-        """
+    op.execute("""
         CREATE OR REPLACE FUNCTION audit_log_block_mutation() RETURNS trigger AS $$
         BEGIN
             IF current_setting('audit_log.allow_mutation', true) = 'true' THEN
@@ -154,22 +147,17 @@ def upgrade() -> None:
             RAISE EXCEPTION 'audit_log is append-only: % is not permitted', TG_OP;
         END;
         $$ LANGUAGE plpgsql;
-        """
-    )
-    op.execute(
-        """
+        """)
+    op.execute("""
         CREATE TRIGGER audit_log_no_update
         BEFORE UPDATE ON audit_log
         FOR EACH ROW EXECUTE FUNCTION audit_log_block_mutation();
-        """
-    )
-    op.execute(
-        """
+        """)
+    op.execute("""
         CREATE TRIGGER audit_log_no_delete
         BEFORE DELETE ON audit_log
         FOR EACH ROW EXECUTE FUNCTION audit_log_block_mutation();
-        """
-    )
+        """)
 
 
 def downgrade() -> None:

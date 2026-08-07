@@ -18,7 +18,10 @@ in here — see the batch summary for this note.
 
 from __future__ import annotations
 
-from tests.test_audit05_security_fixes import _collect_dependency_names, _iter_leaf_routes
+from tests.test_audit05_security_fixes import (
+    _collect_dependency_names,
+    _iter_leaf_routes,
+)
 
 _AUTH_DEPENDENCY_NAMES = {
     "require_approver",
@@ -55,9 +58,9 @@ def test_the_12_previously_unauthenticated_batch6_routes_are_now_covered() -> No
     }
 
     missing_routes = _PREVIOUSLY_OPEN_ROUTES - routes_by_path.keys()
-    assert not missing_routes, (
-        f"Expected route(s) not found in app — path changed? {missing_routes}"
-    )
+    assert (
+        not missing_routes
+    ), f"Expected route(s) not found in app — path changed? {missing_routes}"
 
     still_open: list[str] = []
     for path, route in routes_by_path.items():

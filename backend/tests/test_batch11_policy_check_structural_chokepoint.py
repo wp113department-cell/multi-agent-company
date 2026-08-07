@@ -47,13 +47,13 @@ class TestBroadenedPathCoverage:
         assert result is not None
 
     def test_move_file_protected_destination_denied(self) -> None:
-        result = _policy_check("move_file", {"source": "a.txt", "dest": ".env.production"})
+        result = _policy_check(
+            "move_file", {"source": "a.txt", "dest": ".env.production"}
+        )
         assert result is not None
 
     def test_zip_files_protected_output_denied(self) -> None:
-        result = _policy_check(
-            "zip_files", {"source": "src/", "output": ".git/config"}
-        )
+        result = _policy_check("zip_files", {"source": "src/", "output": ".git/config"})
         assert result is not None
 
     def test_list_valued_path_field_is_checked_per_element(self) -> None:
@@ -86,9 +86,7 @@ class TestBroadenedCommandCoverage:
         assert result is not None
 
     def test_docker_exec_safe_command_allowed(self) -> None:
-        result = _policy_check(
-            "docker_exec", {"container": "web", "command": "ls -la"}
-        )
+        result = _policy_check("docker_exec", {"container": "web", "command": "ls -la"})
         assert result is None
 
 

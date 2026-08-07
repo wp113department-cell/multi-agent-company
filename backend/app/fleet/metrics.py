@@ -364,7 +364,7 @@ EDIT_TOOL_NAMES: tuple[str, ...] = ("edit_file", "write_file", "apply_patch")
 
 
 def editing_speed_stats() -> dict[str, float | int] | None:
-    """"Editing speed" (AUDIT_Q_BATCH05_PERFORMANCE_ARCHITECTURE.md §8: "No
+    """ "Editing speed" (AUDIT_Q_BATCH05_PERFORMANCE_ARCHITECTURE.md §8: "No
     dedicated timing metric for edit operations specifically" — NOT FOUND).
     Every edit_file/write_file/apply_patch call already has real duration_ms
     recorded via record_tool(); the gap was the missing aggregate across

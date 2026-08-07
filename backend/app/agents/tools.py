@@ -9504,9 +9504,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             rscr_interp = (
                 "python3"
                 if ext == ".py"
-                else "node"
-                if ext in (".js", ".mjs", ".cjs")
-                else "bash"
+                else "node" if ext in (".js", ".mjs", ".cjs") else "bash"
             )
         try:
             r = subprocess.run(
@@ -10831,9 +10829,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 from_ref = (
                     tag_list[1]
                     if len(tag_list) >= 2
-                    else tag_list[0]
-                    if tag_list
-                    else ""
+                    else tag_list[0] if tag_list else ""
                 )
             ref_range = f"{from_ref}..{to_ref}" if from_ref else to_ref
             log = subprocess.run(

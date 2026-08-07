@@ -824,7 +824,9 @@ class ChatAgent:
     # Tool execution — dispatches all 36 CHAT_TOOLS
     # ------------------------------------------------------------------
 
-    async def _execute_tool(self, tool_name: str, inp: dict[str, Any]) -> str:  # noqa: C901
+    async def _execute_tool(
+        self, tool_name: str, inp: dict[str, Any]
+    ) -> str:  # noqa: C901
         root = self.root
         repo = str(root)
 
@@ -2373,9 +2375,7 @@ class ChatAgent:
                 rscr_interp = (
                     "python3"
                     if rscr_fp.suffix == ".py"
-                    else "node"
-                    if rscr_fp.suffix in (".js", ".mjs", ".cjs")
-                    else "bash"
+                    else "node" if rscr_fp.suffix in (".js", ".mjs", ".cjs") else "bash"
                 )
             rscr_cmd = f"{rscr_interp} {str(rscr_fp)} 2>&1"
             return await asyncio.to_thread(_run_subprocess, rscr_cmd, repo, 120)

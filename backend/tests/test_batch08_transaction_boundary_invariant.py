@@ -57,7 +57,9 @@ def _direct_commit_call_count(func: ast.AsyncFunctionDef | ast.FunctionDef) -> i
     return count
 
 
-def _all_function_defs(tree: ast.Module) -> list[ast.AsyncFunctionDef | ast.FunctionDef]:
+def _all_function_defs(
+    tree: ast.Module,
+) -> list[ast.AsyncFunctionDef | ast.FunctionDef]:
     """Every function definition at any nesting level (module-level async
     handlers, and the inner `async def _run()` closures the sync bridges
     define) — ast.walk() finds nested defs regardless of depth."""
@@ -76,7 +78,9 @@ def test_no_repository_function_commits_more_than_once_in_its_own_scope() -> Non
     for func in _all_function_defs(tree):
         commits = _direct_commit_call_count(func)
         if commits > 1:
-            offenders.append(f"{func.name} (line {func.lineno}): {commits} commit() calls")
+            offenders.append(
+                f"{func.name} (line {func.lineno}): {commits} commit() calls"
+            )
 
     assert not offenders, (
         "app/db/repository.py function(s) with more than one commit() call "
