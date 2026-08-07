@@ -76,6 +76,10 @@ async def test_audit_log_table_exists_with_expected_columns() -> None:
             "outcome",
             "requires_human_approval",
             "approved_by",
+            # AUDIT_Q_BATCH11 §96 — migration 036's tamper-resistance columns
+            "seq",
+            "prev_hash",
+            "entry_hash",
         }
     finally:
         await engine.dispose()
@@ -126,7 +130,13 @@ async def test_write_to_db_round_trips_a_real_entry() -> None:
         assert row["approved_by"] == "tester"
         assert row["trace_id"] == f"trace-{suffix}"
     finally:
+        # AUDIT_Q_BATCH11 §96 — migration 036 made audit_log genuinely
+        # append-only at the DB layer (BEFORE DELETE/UPDATE triggers), so
+        # test cleanup must now explicitly opt into the same
+        # maintenance-only bypass GUC real retention-purge tooling would
+        # use — a plain DELETE here would now be rejected by the trigger.
         async with engine.connect() as conn:
+            await conn.execute(text("SET LOCAL audit_log.allow_mutation = 'true'"))
             await conn.execute(
                 text("DELETE FROM audit_log WHERE entry_id = :id"),
                 {"id": entry.entry_id},
@@ -162,7 +172,13 @@ async def test_write_to_db_upsert_is_idempotent_on_conflict() -> None:
             ).scalar_one()
         assert count == 1
     finally:
+        # AUDIT_Q_BATCH11 §96 — migration 036 made audit_log genuinely
+        # append-only at the DB layer (BEFORE DELETE/UPDATE triggers), so
+        # test cleanup must now explicitly opt into the same
+        # maintenance-only bypass GUC real retention-purge tooling would
+        # use — a plain DELETE here would now be rejected by the trigger.
         async with engine.connect() as conn:
+            await conn.execute(text("SET LOCAL audit_log.allow_mutation = 'true'"))
             await conn.execute(
                 text("DELETE FROM audit_log WHERE entry_id = :id"),
                 {"id": entry.entry_id},

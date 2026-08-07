@@ -12,6 +12,7 @@ sites and app.agents.chat_agent's own direct
 from __future__ import annotations
 
 import subprocess
+from typing import Any
 
 from app.policy.engine import check_command, check_path, check_path_in_worktree
 
@@ -205,7 +206,15 @@ def _scan_content_for_secrets(content: str) -> str | None:
                 r"\s*[:=]\s*['\"]?([A-Za-z0-9_\-./+=]{8,})['\"]?\s*$"
             ),
             "provider_token": _re.compile(
-                r"\b(sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{12,}|gh[opsu]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9\-]{10,})\b"
+                # AUDIT_Q_BATCH11 §96 "Secret scanning" — the AWS access-key-id
+                # prefix list was widened from AKIA-only to every real AWS key
+                # type (root/user/temp-session/etc.) while consolidating the
+                # two separately-maintained repo-wide `secrets_scan` tool
+                # implementations (app/agents/tools.py) onto this one shared
+                # pattern set instead of three independently-drifting regex
+                # lists.
+                r"\b(sk-[A-Za-z0-9]{16,}|(?:AKIA|AGPA|AROA|AIPA|ANPA|ANVA|ASIA)[0-9A-Z]{12,}"
+                r"|gh[opsu]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9\-]{10,})\b"
             ),
             "pem_header": _re.compile(
                 r"-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"
@@ -236,6 +245,124 @@ def _scan_content_for_secrets(content: str) -> str | None:
                     f"credential-looking name ({value[:4]}***REDACTED)"
                 )
     return None
+
+
+_REPO_SCAN_SKIP_DIRS = frozenset(
+    {".git", "__pycache__", ".venv", "venv", "node_modules", ".next", "dist", "build"}
+)
+_REPO_SCAN_SKIP_EXTS = frozenset(
+    {
+        ".pyc",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".ico",
+        ".woff",
+        ".woff2",
+        ".zip",
+        ".pdf",
+        ".lock",
+    }
+)
+
+
+def _scan_directory_for_secrets(
+    root: Any, directory: str = "", *, max_hits: int = 50
+) -> str:
+    """Repo-wide secret scan, reusing _scan_content_for_secrets's canonical
+    pattern set (assignment-style + provider-token + PEM headers) instead of
+    a third, independently-maintained regex list.
+
+    AUDIT_Q_BATCH11 §96 "Secret scanning" — two separate `secrets_scan` tool
+    implementations existed in app/agents/tools.py (sec_secrets_scan, used
+    by make_security_reviewer_handlers, and secrets_scan, used by
+    make_coder_handlers), each maintaining its OWN independent regex list —
+    different again from this module's own _scan_content_for_secrets (the
+    pre-commit content scanner). All three now share this one canonical
+    detector, so a future improvement to secret-shape detection applies
+    everywhere at once instead of needing three synchronized edits (the
+    exact kind of narrow-coverage drift this audit finding is about).
+
+    `root` is a pathlib.Path (repo root); typed Any here to avoid importing
+    pathlib into this otherwise dependency-light module for a type hint
+    only — every real caller already has a real Path.
+    """
+    scan_root = (root / directory) if directory else root
+    hits: list[str] = []
+    for fp in scan_root.rglob("*"):
+        if len(hits) >= max_hits:
+            break
+        if fp.is_dir() or any(part in _REPO_SCAN_SKIP_DIRS for part in fp.parts):
+            continue
+        if fp.suffix.lower() in _REPO_SCAN_SKIP_EXTS:
+            continue
+        try:
+            content = fp.read_text(encoding="utf-8", errors="replace")
+        except (OSError, PermissionError):
+            continue
+        reason = _scan_content_for_secrets(content)
+        if reason:
+            try:
+                rel = fp.relative_to(root)
+            except ValueError:
+                rel = fp
+            hits.append(f"{rel}: {reason}")
+    if not hits:
+        return "✅ No hardcoded secrets detected."
+    return f"⚠️  {len(hits)} potential secret(s):\n" + "\n".join(hits[:max_hits])
+
+
+def _redact_secrets_in_text(content: str) -> tuple[str, bool]:
+    """Non-blocking counterpart to _scan_content_for_secrets — redacts every
+    line matching the same secret shapes in place and returns
+    (redacted_content, any_found), instead of a single denial reason for
+    the first match. Built for LLM-generated *output* (a chat reply, an
+    agent's submitted summary) that already exists and must still reach the
+    user in some form — unlike a `git commit`, there's no "refuse the whole
+    thing" option that makes sense here.
+
+    AUDIT_Q_BATCH11 §21 "Data leakage prevention" — _mask_secret_value only
+    ever ran on read_env_var_h's own output and _scan_content_for_secrets
+    only ever ran pre-commit; neither covered arbitrary agent output/chat
+    text, so a secret the agent encountered via read_file and then quoted
+    back in its own reply sailed straight through to the user unredacted.
+    """
+    if not content:
+        return content, False
+    if _SECRET_CONTENT_RE is None:
+        _scan_content_for_secrets("")  # populate the shared compiled patterns
+
+    patterns = _SECRET_CONTENT_RE
+    assert patterns is not None
+    found = False
+    out_lines: list[str] = []
+    for line in content.splitlines():
+        new_line = line
+        m = patterns["provider_token"].search(new_line)
+        if m:
+            token = m.group(1)
+            new_line = new_line.replace(token, _mask_secret_value("TOKEN", token))
+            found = True
+        if patterns["pem_header"].search(new_line):
+            new_line = "[REDACTED: private key header]"
+            found = True
+        am = patterns["assignment"].match(new_line)
+        if am:
+            value = am.group(2)
+            if len(value) >= 12 and value.lower() not in (
+                "changeme",
+                "placeholder",
+                "your_key_here",
+                "your-key-here",
+                "xxxxxxxxxxxx",
+            ):
+                new_line = new_line.replace(
+                    value, _mask_secret_value(am.group(1), value)
+                )
+                found = True
+        out_lines.append(new_line)
+    return "\n".join(out_lines), found
 
 
 _SENSITIVE_HOST_MOUNT_PATHS = (

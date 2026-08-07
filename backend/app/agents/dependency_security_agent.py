@@ -42,6 +42,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "search_imports",
         "write_file",
         "bash",
+        "check_license_compliance",
         "submit_dependency_security_agent",
         "record_learning",
     ],

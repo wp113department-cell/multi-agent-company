@@ -174,22 +174,77 @@ def _collect_dependency_names(
     return names
 
 
+def _iter_leaf_routes(app: object) -> list[object]:
+    """Flatten `app.routes` into real, leaf `APIRoute` objects.
+
+    AUDIT_Q_BATCH11 (found while adding a GET-route auth regression test) —
+    the FastAPI version this project runs (0.139.0) restructured
+    `include_router` to build a lazy tree of internal `_IncludedRouter` /
+    `_EffectiveRouteContext` wrapper objects instead of eagerly flattening
+    every included router's routes into `app.routes` directly. Those
+    wrappers report `path=None`/`dependant=None` at the top level, so the
+    naive `for route in app.routes: ... if path is None: continue` pattern
+    (used by this file's own TestAllMutatingEndpointsHaveAuth before this
+    fix) silently skips every one of them — the loop body never runs for
+    any of the ~116 real routes, so the test passed vacuously, having
+    checked nothing, for an unknown period after this FastAPI version
+    landed. Confirmed by direct count: `app.routes` has 21 top-level
+    entries (4 docs/openapi routes + 16 opaque `_IncludedRouter` wrappers +
+    /health), while this recursive flatten resolves 116 real `APIRoute`
+    leaves with usable `.path`/`.methods`/`.dependant`.
+    """
+    from fastapi.routing import _EffectiveRouteContext, _IncludedRouter
+
+    out: list[object] = []
+    for route in getattr(app, "routes", []):
+        if isinstance(route, _IncludedRouter):
+            out.extend(_iter_leaf_routes_from_router_list(route.effective_candidates()))
+        elif isinstance(route, _EffectiveRouteContext):
+            out.append(route.original_route)
+        else:
+            out.append(route)
+    return out
+
+
+def _iter_leaf_routes_from_router_list(candidates: list[object]) -> list[object]:
+    """Same flattening as _iter_leaf_routes, for a list of candidates
+    already produced by `_IncludedRouter.effective_candidates()` (which can
+    itself contain nested `_IncludedRouter` instances for sub-routers)."""
+    from fastapi.routing import _EffectiveRouteContext, _IncludedRouter
+
+    out: list[object] = []
+    for route in candidates:
+        if isinstance(route, _IncludedRouter):
+            out.extend(_iter_leaf_routes_from_router_list(route.effective_candidates()))
+        elif isinstance(route, _EffectiveRouteContext):
+            out.append(route.original_route)
+        else:
+            out.append(route)
+    return out
+
+
 class TestAllMutatingEndpointsHaveAuth:
     def test_every_mutating_route_has_an_auth_dependency(self) -> None:
         """Regression guard for SEC-05-012/013: fails loudly if a future
         route is added without wiring require_approver/require_authenticated.
-        /api/auth/login and /api/auth/setup are the only 2 routes exempted
-        outright (must be reachable pre-auth, to bootstrap auth itself);
-        /api/auth/change-password is NOT in the exempt set but still passes
-        because it depends on get_current_user directly, which is also an
-        accepted auth dependency. Relies on FastAPI's internal
-        route.dependant tree structure — see this file's module docstring
-        for the extra caveat on this specific test."""
+        /api/auth/login, /api/auth/setup, and /api/auth/logout are the only
+        3 routes exempted outright (login/setup must be reachable pre-auth
+        to bootstrap auth itself; logout must remain reachable even with an
+        expired/invalid token so a stuck client can always clear its
+        cookie). /api/auth/change-password is NOT in the exempt set but
+        still passes because it depends on get_current_user directly, which
+        is also an accepted auth dependency. Walks real leaf APIRoute
+        objects via _iter_leaf_routes (see that helper's docstring for why
+        a naive `app.routes` walk silently checks nothing on this FastAPI
+        version) — relies on FastAPI's internal route.dependant tree
+        structure, so see this file's module docstring for the extra
+        caveat on this specific test."""
         from app.main import app
 
         exempt_paths = {
             "/api/auth/login",
             "/api/auth/setup",
+            "/api/auth/logout",
         }
         auth_dependency_names = {
             "require_approver",
@@ -198,7 +253,7 @@ class TestAllMutatingEndpointsHaveAuth:
         }
 
         missing: list[str] = []
-        for route in app.routes:
+        for route in _iter_leaf_routes(app):
             path = getattr(route, "path", None)
             methods = getattr(route, "methods", None)
             dependant = getattr(route, "dependant", None)

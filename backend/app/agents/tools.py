@@ -18,7 +18,9 @@ from app.agents.tool_security import (
     _is_dangerous_command as _is_dangerous_command,
     _is_protected_path as _is_protected_path,
     _mask_secret_value as _mask_secret_value,
+    _redact_secrets_in_text as _redact_secrets_in_text,
     _scan_content_for_secrets as _scan_content_for_secrets,
+    _scan_directory_for_secrets as _scan_directory_for_secrets,
     _shell_metachar_reason as _shell_metachar_reason,
     _ssrf_denial_reason as _ssrf_denial_reason,
 )
@@ -4248,43 +4250,17 @@ def make_bug_fix_handlers(repo_path: str) -> dict[str, Any]:
 
 def make_security_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     """Security reviewer: read-only + specialized search + submit_security_report. No writes."""
-    import re as _re
-
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
     security_result: dict[str, Any] = {}
 
-    _SEC_PATTERNS = [
-        r"(api_key|apikey|secret|password|token|passwd|private_key)\s*=\s*['\"][^'\"]{8,}['\"]",
-        r"(AKIA|AGPA|AROA|AIPA|ANPA|ANVA|ASIA)[0-9A-Z]{16}",
-        r"-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----",
-        r"ghp_[0-9A-Za-z]{36}",
-        r"sk-[0-9A-Za-z]{48}",
-    ]
-    _SEC_SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "node_modules", ".next"}
-    _SEC_SKIP_EXTS = {".pyc", ".png", ".jpg", ".gif", ".ico", ".woff", ".woff2", ".zip"}
-
     def sec_secrets_scan(inp: dict[str, Any]) -> str:
+        # AUDIT_Q_BATCH11 §96 "Secret scanning" — delegates to the same
+        # canonical scanner secrets_scan() (below, make_coder_handlers) and
+        # _scan_content_for_secrets (pre-commit) now share, instead of this
+        # handler's own independently-maintained regex list.
         directory = str(inp.get("directory", ""))
-        scan_root = root / directory if directory else root
-        hits: list[str] = []
-        for fp in scan_root.rglob("*"):
-            if fp.is_dir() or any(p in _SEC_SKIP_DIRS for p in fp.parts):
-                continue
-            if fp.suffix in _SEC_SKIP_EXTS:
-                continue
-            try:
-                text = fp.read_text(encoding="utf-8", errors="replace")
-            except (OSError, PermissionError):
-                continue
-            for pat in _SEC_PATTERNS:
-                for m in _re.finditer(pat, text, _re.IGNORECASE):
-                    rel = str(fp.relative_to(root))
-                    line_no = text[: m.start()].count("\n") + 1
-                    hits.append(f"  {rel}:{line_no}  {m.group()[:80]}")
-        if not hits:
-            return "✅ No obvious secrets detected."
-        return f"⚠️  {len(hits)} potential secret(s):\n" + "\n".join(hits[:50])
+        return _scan_directory_for_secrets(root, directory)
 
     def sec_find_sql(inp: dict[str, Any]) -> str:
         keyword = str(inp.get("keyword", ""))
@@ -7153,6 +7129,21 @@ _DEPS_OUTDATED_TOOL: dict[str, Any] = {
         "required": [],
     },
 }
+_CHECK_LICENSE_COMPLIANCE_TOOL: dict[str, Any] = {
+    "name": "check_license_compliance",
+    "description": (
+        "Scan every installed Python package's license against SPDX identifiers "
+        "(PEP 639 License-Expression, PyPI trove classifiers, or a short License "
+        "metadata field) and classify each as allowed (permissive), review (weak "
+        "copyleft — LGPL/MPL), disallowed (strong copyleft — GPL/AGPL/SSPL), or "
+        "unknown (no determinable license). Real dependency metadata, not a guess."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+    },
+}
 _LOC_STATS_TOOL: dict[str, Any] = {
     "name": "loc_stats",
     "description": "Lines-of-code statistics for the repo broken down by file extension/language.",
@@ -7493,6 +7484,7 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _EXPORT_MARKDOWN_TOOL,
     _FIND_UNUSED_IMPORTS_TOOL,
     _DEPS_OUTDATED_TOOL,
+    _CHECK_LICENSE_COMPLIANCE_TOOL,
     _LOC_STATS_TOOL,
     # Package management
     _NPM_INSTALL_TOOL,
@@ -7505,7 +7497,6 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _BASE64_ENCODE_TOOL,
     _TEMPLATE_RENDER_TOOL,
 ]
-
 
 
 def task_history_query(inp: dict[str, Any]) -> str:
@@ -9244,51 +9235,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # =========================================================================
 
     def secrets_scan(inp: dict[str, Any]) -> str:
+        # AUDIT_Q_BATCH11 §96 "Secret scanning" — delegates to the same
+        # canonical scanner sec_secrets_scan() (make_security_reviewer_
+        # handlers) and _scan_content_for_secrets (pre-commit) now share,
+        # instead of this handler's own independently-maintained regex list
+        # and grep-subprocess implementation (also more portable: no
+        # dependency on a `grep` binary being on PATH).
         ss_dir = str(inp.get("directory", ""))
-        ss_root = (root / ss_dir) if ss_dir else root
-        ss_patterns = [
-            r"(?i)(password|passwd|pwd)\s*[=:]\s*['\"][^'\"]{4,}['\"]",
-            r"(?i)(api[_-]?key|apikey|api[_-]?secret)\s*[=:]\s*['\"][^'\"]{8,}['\"]",
-            r"(?i)(secret[_-]?key|secretkey)\s*[=:]\s*['\"][^'\"]{8,}['\"]",
-            r"(?i)(access[_-]?token|auth[_-]?token)\s*[=:]\s*['\"][^'\"]{8,}['\"]",
-            r"(sk-[a-zA-Z0-9]{20,})",
-            r"(AKIA[0-9A-Z]{16})",
-            r"(ghp_[a-zA-Z0-9]{36})",
-        ]
-        ss_exclude = [
-            "node_modules",
-            ".git",
-            ".venv",
-            "venv",
-            "__pycache__",
-            "dist",
-            "build",
-            ".next",
-        ]
-        ss_findings: list[str] = []
-        for ss_pat in ss_patterns:
-            ss_cmd = ["grep", "-rn", "-E", ss_pat, str(ss_root)]
-            for ex in ss_exclude:
-                ss_cmd += ["--exclude-dir", ex]
-            ss_cmd += [
-                "--exclude",
-                "*.env",
-                "--exclude",
-                ".env*",
-                "--exclude",
-                "*.example",
-            ]
-            try:
-                r = subprocess.run(ss_cmd, capture_output=True, text=True, timeout=15)
-                if r.stdout.strip():
-                    ss_findings.append(r.stdout.strip())
-            except subprocess.TimeoutExpired:
-                pass
-            except Exception:
-                pass
-        if not ss_findings:
-            return "✅ No hardcoded secrets detected."
-        return "⚠️  Potential secrets found:\n\n" + "\n\n".join(ss_findings)[:5000]
+        return _scan_directory_for_secrets(root, ss_dir)
 
     handlers["edit_file"] = edit_file
     handlers["write_file"] = write_file
@@ -9550,7 +9504,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             rscr_interp = (
                 "python3"
                 if ext == ".py"
-                else "node" if ext in (".js", ".mjs", ".cjs") else "bash"
+                else "node"
+                if ext in (".js", ".mjs", ".cjs")
+                else "bash"
             )
         try:
             r = subprocess.run(
@@ -10875,7 +10831,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 from_ref = (
                     tag_list[1]
                     if len(tag_list) >= 2
-                    else tag_list[0] if tag_list else ""
+                    else tag_list[0]
+                    if tag_list
+                    else ""
                 )
             ref_range = f"{from_ref}..{to_ref}" if from_ref else to_ref
             log = subprocess.run(
@@ -11585,6 +11543,21 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] deps_outdated: {e}"
 
+    def check_license_compliance_h(inp: dict[str, Any]) -> str:
+        # AUDIT_Q_BATCH11 §85 "Licensing policy enforcement" — real SPDX-
+        # based classification of every installed package's license
+        # (app/policy/license_check.py), not a placeholder.
+        from app.policy.license_check import (
+            format_report,
+            scan_installed_package_licenses,
+        )
+
+        try:
+            report = scan_installed_package_licenses()
+            return format_report(report)
+        except Exception as e:
+            return f"[ERROR] check_license_compliance: {e}"
+
     def loc_stats_h(inp: dict[str, Any]) -> str:
         directory = str(inp.get("directory", "."))
         target = root / directory
@@ -11603,7 +11576,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                         pass
             rows = sorted(totals.items(), key=lambda x: -x[1])[:20]
             out = "\n".join(f"{ext:15} {n:>8,}" for ext, n in rows)
-            return f"{'Extension':15} {'Lines':>8}\n{'-'*25}\n{out}\n{'':15} {sum(totals.values()):>8,} total"
+            return f"{'Extension':15} {'Lines':>8}\n{'-' * 25}\n{out}\n{'':15} {sum(totals.values()):>8,} total"
         except Exception as e:
             return f"[ERROR] loc_stats: {e}"
 
@@ -11775,6 +11748,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["export_markdown"] = export_markdown_h
     handlers["find_unused_imports"] = find_unused_imports_h
     handlers["deps_outdated"] = deps_outdated_h
+    handlers["check_license_compliance"] = check_license_compliance_h
     handlers["loc_stats"] = loc_stats_h
     handlers["npm_install"] = npm_install_h
     handlers["npm_run"] = npm_run_h

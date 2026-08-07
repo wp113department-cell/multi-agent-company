@@ -22,7 +22,7 @@ from app.fleet.approval_gate import (
     alist_pending,
     arecord_decision,
 )
-from app.middleware.rbac import require_approver
+from app.middleware.rbac import require_approver, require_authenticated
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +45,17 @@ def _serialize(row: PendingApprovalRecord) -> dict[str, Any]:
 
 
 @router.get("/pending")
-async def list_pending_approvals() -> dict[str, Any]:
+async def list_pending_approvals(
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
     rows = await alist_pending()
     return {"approvals": [_serialize(r) for r in rows]}
 
 
 @router.get("/{thread_id}")
-async def get_approval(thread_id: str) -> dict[str, Any]:
+async def get_approval(
+    thread_id: str, _actor: str = Depends(require_authenticated)
+) -> dict[str, Any]:
     row = await aget_pending(thread_id)
     if row is None:
         raise HTTPException(

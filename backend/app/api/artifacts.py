@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.artifacts.store import get_artifact_content, list_artifacts
+from app.middleware.rbac import require_authenticated
 
 router = APIRouter(prefix="/api", tags=["artifacts"])
 
@@ -16,6 +17,7 @@ router = APIRouter(prefix="/api", tags=["artifacts"])
 async def list_task_artifacts(
     task_id: int,
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> list[dict[str, object]]:
     """List all artifacts for a task (newest first)."""
     records = await list_artifacts(str(task_id), db=db)
@@ -36,6 +38,7 @@ async def list_task_artifacts(
 async def get_artifact_route(
     artifact_id: str,
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> PlainTextResponse:
     """Download artifact content by ID — works for both the local-disk and
     S3 storage backends (Audit 06 fix, INFRA-06-002)."""

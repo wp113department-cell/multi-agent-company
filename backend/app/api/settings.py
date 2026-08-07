@@ -43,7 +43,10 @@ def _mask(key: str) -> str:
 
 
 @router.get("")
-async def get_settings_view(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def get_settings_view(
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
     """Return current settings. API keys masked — shows only first 8 + last 4 chars."""
     settings = get_settings()
 
@@ -226,7 +229,10 @@ class CustomSecretRequest(BaseModel):
 
 
 @router.get("/custom-secrets")
-async def list_custom_secrets(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def list_custom_secrets(
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
     """Names only — never values."""
     keys = await list_setting_keys(db, _CUSTOM_SECRET_PREFIX)
     names = sorted(k[len(_CUSTOM_SECRET_PREFIX) :] for k in keys)

@@ -969,6 +969,15 @@ TOOL_MANIFEST: dict[str, ToolManifestEntry] = {
         verification_required=False,
         risk_level="low",
     ),
+    "check_license_compliance": ToolManifestEntry(
+        purpose="Classify every installed package's license against SPDX identifiers "
+        "(AUDIT_Q_BATCH11 §85 'Licensing policy enforcement')",
+        permissions=["read_env"],
+        timeout_s=15,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
     "npm_install": ToolManifestEntry(
         purpose="Run npm install",
         permissions=["execute", "network"],
