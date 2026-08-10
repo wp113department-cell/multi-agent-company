@@ -321,6 +321,77 @@ class TestMemoryHookNodeFires:
 
     @patch("app.agents.base_graph.load_role", return_value="You are a test agent.")
     @patch("app.agents.base_graph.get_effective_api_key", return_value="test-key")
+    @patch("app.memory.store.query_memory_context_sync")
+    def test_memory_hook_caps_oversized_memory_context(
+        self, mock_query: Any, _k: Any, _l: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AUDIT_Q_BATCH03 §120 'Context Window Management' — nothing
+        previously capped the combined memory_context block before it's
+        injected into the system prompt. A DB block far over the configured
+        memory_injection_token_budget must be truncated, not passed through
+        whole."""
+        from app.agents.base_graph import (
+            Lesson,
+            _make_memory_hook_node,
+            get_lesson_store,
+        )
+        from app.config import get_settings
+
+        monkeypatch.setattr(get_settings(), "memory_injection_token_budget", 10)
+        mock_query.return_value = {
+            "tasks": [
+                {
+                    "task_id": "t-99",
+                    "epic_id": None,
+                    "outcome": "completed",
+                    "description": "x" * 2000,
+                    "summary": "y" * 2000,
+                    "files_changed": [],
+                    "similarity": 0.93,
+                }
+            ],
+            "failures": [],
+            "learnings": [],
+        }
+        ls = get_lesson_store()
+        ls.add(Lesson("test_agent", "z" * 2000, "oversized", "testing"))
+
+        hook = _make_memory_hook_node("fix the flaky retry loop", "")
+        state: AgentRunState = {
+            "messages": [{"role": "user", "content": "fix the flaky retry loop"}],
+            "verification": {},
+            "result": {},
+            "turns": 0,
+            "submitted": False,
+            "requires_human_approval": False,
+            "tokens_in": 0,
+            "tokens_out": 0,
+        }
+        out = hook(state)
+        assert "memory_context" in out
+        assert len(out["memory_context"]) <= 10 * 4 + len(
+            "\n\n[...memory context truncated to fit token budget...]"
+        )
+        assert "truncated to fit token budget" in out["memory_context"]
+
+    def test_cap_memory_context_tokens_disabled_when_budget_zero(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.agents.base_graph import _cap_memory_context_tokens
+        from app.config import get_settings
+
+        monkeypatch.setattr(get_settings(), "memory_injection_token_budget", 0)
+        huge = "a" * 100_000
+        assert _cap_memory_context_tokens(huge, trace_id="t") == huge
+
+    def test_cap_memory_context_tokens_passes_through_when_under_budget(self) -> None:
+        from app.agents.base_graph import _cap_memory_context_tokens
+
+        small = "concise memory context"
+        assert _cap_memory_context_tokens(small, trace_id="t") == small
+
+    @patch("app.agents.base_graph.load_role", return_value="You are a test agent.")
+    @patch("app.agents.base_graph.get_effective_api_key", return_value="test-key")
     @patch(
         "app.memory.store.query_memory_context_sync",
         side_effect=RuntimeError("db unreachable"),

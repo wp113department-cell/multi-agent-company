@@ -96,15 +96,18 @@ def test_publish_similar_content_after_promotion_creates_a_merge_draft() -> None
     as any real curator-approved lesson would be. The merge result itself is
     now a DRAFT too (not immediately published) — it needs its own
     promotion, proven separately below."""
-    with patch(
-        "app.memory.store._embed",
-        # v1 content, v1 promote's sync embed, v2 content (similar, to match
-        # the now-published v1), merged-content embed. The sync embed's
-        # value is a don't-care.
-        _patched_embed(
-            [_BASE_VECTOR, _DIFFERENT_VECTOR, _SIMILAR_VECTOR, _DIFFERENT_VECTOR]
+    with (
+        patch(
+            "app.memory.store._embed",
+            # v1 content, v1 promote's sync embed, v2 content (similar, to match
+            # the now-published v1), merged-content embed. The sync embed's
+            # value is a don't-care.
+            _patched_embed(
+                [_BASE_VECTOR, _DIFFERENT_VECTOR, _SIMILAR_VECTOR, _DIFFERENT_VECTOR]
+            ),
         ),
-    ), patch("anthropic.Anthropic") as MockAnthropic:
+        patch("anthropic.Anthropic") as MockAnthropic,
+    ):
         mock_client = MagicMock()
         mock_client.messages.create.return_value = _mock_merge_response(
             "MERGED best-of-both content"
@@ -155,20 +158,23 @@ def test_promoting_a_merge_draft_flips_the_prior_published_version_to_superseded
     knowledge_curator promotion flips both — proven here by calling
     promote() twice: once to publish v1, once to promote the merge draft
     that supersedes it."""
-    with patch(
-        "app.memory.store._embed",
-        # v1 content, v1-promote sync, v2 content (similar), merged content,
-        # merge-promote sync.
-        _patched_embed(
-            [
-                _BASE_VECTOR,
-                _DIFFERENT_VECTOR,
-                _SIMILAR_VECTOR,
-                _DIFFERENT_VECTOR,
-                _DIFFERENT_VECTOR,
-            ]
+    with (
+        patch(
+            "app.memory.store._embed",
+            # v1 content, v1-promote sync, v2 content (similar), merged content,
+            # merge-promote sync.
+            _patched_embed(
+                [
+                    _BASE_VECTOR,
+                    _DIFFERENT_VECTOR,
+                    _SIMILAR_VECTOR,
+                    _DIFFERENT_VECTOR,
+                    _DIFFERENT_VECTOR,
+                ]
+            ),
         ),
-    ), patch("anthropic.Anthropic") as MockAnthropic:
+        patch("anthropic.Anthropic") as MockAnthropic,
+    ):
         mock_client = MagicMock()
         mock_client.messages.create.return_value = _mock_merge_response(
             "MERGED content"
@@ -265,20 +271,23 @@ def test_publish_with_zero_vector_never_merges() -> None:
 
 
 def test_rollback_restores_previous_published_version_and_state() -> None:
-    with patch(
-        "app.memory.store._embed",
-        # v1 content, v1-promote sync, v2 content (similar), merged content,
-        # merge-promote sync.
-        _patched_embed(
-            [
-                _BASE_VECTOR,
-                _DIFFERENT_VECTOR,
-                _SIMILAR_VECTOR,
-                _DIFFERENT_VECTOR,
-                _DIFFERENT_VECTOR,
-            ]
+    with (
+        patch(
+            "app.memory.store._embed",
+            # v1 content, v1-promote sync, v2 content (similar), merged content,
+            # merge-promote sync.
+            _patched_embed(
+                [
+                    _BASE_VECTOR,
+                    _DIFFERENT_VECTOR,
+                    _SIMILAR_VECTOR,
+                    _DIFFERENT_VECTOR,
+                    _DIFFERENT_VECTOR,
+                ]
+            ),
         ),
-    ), patch("anthropic.Anthropic") as MockAnthropic:
+        patch("anthropic.Anthropic") as MockAnthropic,
+    ):
         mock_client = MagicMock()
         mock_client.messages.create.return_value = _mock_merge_response(
             "merged content"
@@ -308,20 +317,23 @@ def test_rollback_with_no_superseded_version_raises() -> None:
 
 
 def test_archive_expired_marks_old_superseded_rows_archived() -> None:
-    with patch(
-        "app.memory.store._embed",
-        # v1 content, v1-promote sync, v2 content (similar), merged content,
-        # merge-promote sync.
-        _patched_embed(
-            [
-                _BASE_VECTOR,
-                _DIFFERENT_VECTOR,
-                _SIMILAR_VECTOR,
-                _DIFFERENT_VECTOR,
-                _DIFFERENT_VECTOR,
-            ]
+    with (
+        patch(
+            "app.memory.store._embed",
+            # v1 content, v1-promote sync, v2 content (similar), merged content,
+            # merge-promote sync.
+            _patched_embed(
+                [
+                    _BASE_VECTOR,
+                    _DIFFERENT_VECTOR,
+                    _SIMILAR_VECTOR,
+                    _DIFFERENT_VECTOR,
+                    _DIFFERENT_VECTOR,
+                ]
+            ),
         ),
-    ), patch("anthropic.Anthropic") as MockAnthropic:
+        patch("anthropic.Anthropic") as MockAnthropic,
+    ):
         mock_client = MagicMock()
         mock_client.messages.create.return_value = _mock_merge_response(
             "merged content"
@@ -544,3 +556,101 @@ def test_promote_raises_when_no_draft_exists() -> None:
     with pytest.raises(ValueError, match="No draft version to promote"):
         VersionedMemoryStore().promote("td_vm_never_existed_lesson_id")
         _cleanup_memory_embeddings("fleet-td_vm_sync_agent")
+
+
+def test_lesson_lock_serializes_same_key_but_not_different_keys() -> None:
+    """AUDIT_Q_BATCH03 §5 'How synchronized' PARTIAL: no test previously
+    proved or disproved concurrent-write safety for versioned_lessons,
+    unlike memory_embeddings's pg_advisory_xact_lock (test_gap42_memory_
+    dedup.py). Directly exercises the new _lesson_lock primitive: two
+    holders of the SAME key must never be inside the critical section at
+    the same time; two holders of DIFFERENT keys must not block each
+    other (a global mutex would defeat the whole point — unrelated
+    lessons/topics were never actually racing). A plain sync test (not
+    @pytest.mark.asyncio) driving its own asyncio.run() per phase, matching
+    every other real-DB test in this file — _cleanup/_cleanup_memory_
+    embeddings below also use asyncio.run() and would raise "asyncio.run()
+    cannot be called from a running event loop" if this were itself already
+    inside a pytest-asyncio event loop."""
+    from app.fleet.versioned_memory import _lesson_lock
+
+    events: list[str] = []
+
+    async def _worker(name: str, key: str) -> None:
+        async with _lesson_lock(key):
+            events.append(f"{name}-start")
+            await asyncio.sleep(0.05)
+            events.append(f"{name}-end")
+
+    async def _run_same_key() -> None:
+        await asyncio.gather(
+            _worker("a", "td_vm_lock_same_key"), _worker("b", "td_vm_lock_same_key")
+        )
+
+    asyncio.run(_run_same_key())
+    # Serialized: whichever holder starts first must also finish first —
+    # true concurrent entry would interleave as [a-start, b-start, ...].
+    assert events in (
+        ["a-start", "a-end", "b-start", "b-end"],
+        ["b-start", "b-end", "a-start", "a-end"],
+    )
+
+    events.clear()
+
+    async def _run_diff_keys() -> None:
+        await asyncio.gather(
+            _worker("c", "td_vm_lock_key_one"), _worker("d", "td_vm_lock_key_two")
+        )
+
+    asyncio.run(_run_diff_keys())
+    # Not serialized: both holders' critical sections overlap, so both
+    # start events land before either end event — a wall-clock comparison
+    # would also work but is flaky under real DB connection-setup jitter,
+    # which the same-key assertion above already has to tolerate too.
+    assert events[0].endswith("-start") and events[1].endswith("-start")
+
+
+def test_concurrent_promote_on_same_lesson_only_promotes_once() -> None:
+    """Without _lesson_lock, two concurrent promote() calls for the same
+    lesson_id could both read the single draft row via
+    _most_recent_draft_for_lineage before either commits its state flip to
+    "published", and both would silently re-run a state transition meant
+    to happen exactly once. With the lock, the second call only starts
+    after the first's flip has committed, so it correctly finds no
+    remaining draft and raises — proving real serialization, not just
+    that the lock primitive itself works in isolation."""
+    lesson_id: str | None = None
+    try:
+        with patch(
+            "app.memory.store._embed",
+            # One _embed call for publish(), one more for the single
+            # winning promote()'s sync-to-memory-embeddings call.
+            _patched_embed([_DIFFERENT_VECTOR, _DIFFERENT_VECTOR]),
+        ):
+            store = VersionedMemoryStore()
+            published = store.publish(
+                "td_vm_concurrent_promote",
+                "td_vm_concurrent_promote_marker: race-safe promotion",
+                agent_name="td_vm_concurrent_agent",
+            )
+            lesson_id = published.lesson_id
+
+            async def _run() -> list[Any]:
+                return await asyncio.gather(
+                    store._promote(lesson_id, agent_name="td_vm_concurrent_agent"),
+                    store._promote(lesson_id, agent_name="td_vm_concurrent_agent"),
+                    return_exceptions=True,
+                )
+
+            results = asyncio.run(_run())
+
+        successes = [r for r in results if not isinstance(r, Exception)]
+        failures = [r for r in results if isinstance(r, ValueError)]
+        assert len(successes) == 1
+        assert successes[0].state == "published"
+        assert len(failures) == 1
+        assert "No draft version to promote" in str(failures[0])
+    finally:
+        if lesson_id is not None:
+            _cleanup(lesson_id)
+        _cleanup_memory_embeddings("fleet-td_vm_concurrent_agent")

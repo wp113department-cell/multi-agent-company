@@ -395,6 +395,22 @@ class Settings(BaseSettings):
         description="Cosine similarity above which a new memory write is treated as a near-duplicate of an existing row (same category/repo scope) rather than a genuinely new memory",
     )
 
+    # AUDIT_Q_BATCH03 §120 "Context Window Management" — NO/not found:
+    # format_full_memory_context truncates individual fields ([:500]/[:300]/
+    # [:800]) but nothing capped the combined memory_context block itself
+    # before it's injected into the system prompt, so a query returning
+    # several large sections (tasks + failures + learnings + procedures, each
+    # near its own per-field cap) had no aggregate ceiling. Set to 0 to
+    # disable (no cap, prior behaviour).
+    memory_injection_token_budget: int = Field(
+        default=3000,
+        description="Max estimated tokens (~4 chars/token, same rough "
+        "heuristic app.agents.chat_agent._estimate_tokens already uses) for "
+        "the memory_context block memory_hook_node injects into the system "
+        "prompt each run; the block is truncated with a logged warning if "
+        "the estimate exceeds this. 0 disables the cap.",
+    )
+
     # Gap-closure Day 43 (Stage 2, answers.md Q120 "Memory Analytics" — "a real, fairly
     # large gap": average retrieval time, memory growth, duplicate count, and unused
     # memories were all NO/PARTIAL with zero instrumentation).

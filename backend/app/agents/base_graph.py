@@ -859,6 +859,38 @@ def _make_replan_node(
     return replan_node
 
 
+def _cap_memory_context_tokens(memory_context: str, *, trace_id: str) -> str:
+    """AUDIT_Q_BATCH03 §120 'Context Window Management' — format_full_memory_
+    context/LessonStore.format_for_injection already truncate individual
+    fields (store.py's [:500]/[:300]/[:800]), but nothing capped the
+    *combined* memory_context block before this, so several large sections
+    together had no aggregate ceiling before landing in the system prompt
+    (base_graph.py's call_llm node appends it to full_system unconditionally).
+    ~4 chars/token is the same rough, no-API-call heuristic
+    app.agents.chat_agent._estimate_tokens already uses to gate its own
+    condense decision — not exact, only precise enough to gate a truncation
+    decision here too."""
+    budget = get_settings().memory_injection_token_budget
+    if budget <= 0:
+        return memory_context
+    estimated_tokens = len(memory_context) // 4
+    if estimated_tokens <= budget:
+        return memory_context
+    max_chars = budget * 4
+    logger.warning(
+        "memory_hook_node: memory_context for trace=%s estimated at ~%d tokens, "
+        "exceeding memory_injection_token_budget=%d — truncating to ~%d chars.",
+        trace_id or "-",
+        estimated_tokens,
+        budget,
+        max_chars,
+    )
+    return (
+        memory_context[:max_chars]
+        + "\n\n[...memory context truncated to fit token budget...]"
+    )
+
+
 def _make_memory_hook_node(
     task_description: str,
     repo_path: str,
@@ -923,7 +955,10 @@ def _make_memory_hook_node(
             logger.debug("memory_hook_node: memory_embeddings query skipped: %s", exc)
 
         if context_blocks:
-            updates["memory_context"] = "\n\n".join(context_blocks)
+            updates["memory_context"] = _cap_memory_context_tokens(
+                "\n\n".join(context_blocks),
+                trace_id=state.get("trace_id", ""),
+            )
 
         # 2. Repo context injection (sync, non-fatal)
         if repo_path and not state.get("repo_context"):

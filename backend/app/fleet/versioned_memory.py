@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -57,6 +59,54 @@ def _new_isolated_db_engine() -> Any:
     from app.db.session import new_isolated_async_engine
 
     return new_isolated_async_engine()
+
+
+@asynccontextmanager
+async def _lesson_lock(key: str) -> AsyncIterator[None]:
+    """AUDIT_Q_BATCH03 §5 'How synchronized' PARTIAL: app.memory.store's
+    _find_near_duplicate closed an identical read-then-write TOCTOU race with
+    a `pg_advisory_xact_lock` — that fix was never applied here, even though
+    publish() (read _find_most_similar_published, then write _insert) and
+    promote()/rollback() (read the current lineage row, then write its state)
+    have the exact same shape. Two concurrent publish() calls for the same
+    topic could both observe "no similar published lesson" and each insert
+    their own version 1; two concurrent promote()/rollback() calls on the
+    same lesson_id could race the superseded/published state flips.
+
+    A transaction-scoped `pg_advisory_xact_lock` (store.py's own fix) doesn't
+    work here: every helper in this module opens its own throwaway engine/
+    session (`_new_isolated_db_engine()` per call, see that function's
+    docstring for why this module never reuses the shared app.db.session
+    engine), so a lock tied to one of those transactions would already be
+    released before the paired read or write runs on the next one. Postgres
+    advisory locks are keyed globally (visible to every backend, not just the
+    connection that took them) regardless of scope, so a session-scoped
+    `pg_advisory_lock`/`pg_advisory_unlock` pair held on one dedicated
+    connection for this context manager's lifetime still fully serializes
+    concurrent publish()/promote()/rollback() calls sharing the same key,
+    even though the actual reads/writes inside happen on other connections.
+    -2 is a fixed second key distinguishing this lock's namespace from
+    app.memory.store's (category_hash, repo_id) domain, so the two stores'
+    lock keyspaces can never collide."""
+    from sqlalchemy import text as sa_text
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    engine = _new_isolated_db_engine()
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            await session.execute(
+                sa_text("SELECT pg_advisory_lock(hashtext(:key)::int, -2)"),
+                {"key": key},
+            )
+            try:
+                yield
+            finally:
+                await session.execute(
+                    sa_text("SELECT pg_advisory_unlock(hashtext(:key)::int, -2)"),
+                    {"key": key},
+                )
+    finally:
+        await engine.dispose()
 
 
 async def _find_most_similar_published(vector: list[float]) -> tuple[Any, float] | None:
@@ -322,36 +372,38 @@ class VersionedMemoryStore:
 
         s = get_settings()
         vector = await _embed(content)
-        match = await _find_most_similar_published(vector)
 
-        if match is None or match[1] < s.memory_merge_similarity_threshold:
-            lesson_id = str(uuid.uuid4())
-            row = await _insert(
-                lesson_id=lesson_id,
-                topic=topic,
-                content=content,
-                embedding=vector,
-                version=1,
-                state="draft",
-                supersedes_id=None,
+        async with _lesson_lock(topic):
+            match = await _find_most_similar_published(vector)
+
+            if match is None or match[1] < s.memory_merge_similarity_threshold:
+                lesson_id = str(uuid.uuid4())
+                row = await _insert(
+                    lesson_id=lesson_id,
+                    topic=topic,
+                    content=content,
+                    embedding=vector,
+                    version=1,
+                    state="draft",
+                    supersedes_id=None,
+                )
+                return _to_record(row)
+
+            existing_row, _similarity = match
+            merged_content = await _merge_via_llm(
+                existing_row.content, content, get_settings().model_router
             )
-            return _to_record(row)
-
-        existing_row, _similarity = match
-        merged_content = await _merge_via_llm(
-            existing_row.content, content, get_settings().model_router
-        )
-        merged_vector = await _embed(merged_content)
-        merged_row = await _insert(
-            lesson_id=existing_row.lesson_id,
-            topic=topic,
-            content=merged_content,
-            embedding=merged_vector,
-            version=existing_row.version + 1,
-            state="draft",
-            supersedes_id=existing_row.id,
-        )
-        return _to_record(merged_row)
+            merged_vector = await _embed(merged_content)
+            merged_row = await _insert(
+                lesson_id=existing_row.lesson_id,
+                topic=topic,
+                content=merged_content,
+                embedding=merged_vector,
+                version=existing_row.version + 1,
+                state="draft",
+                supersedes_id=existing_row.id,
+            )
+            return _to_record(merged_row)
 
     def promote(self, lesson_id: str, agent_name: str = "") -> VersionedLessonRecord:
         """Gap-closure Day 6: the explicit gate a draft must pass through to
@@ -363,14 +415,21 @@ class VersionedMemoryStore:
     async def _promote(
         self, lesson_id: str, agent_name: str = ""
     ) -> VersionedLessonRecord:
-        row = await _most_recent_draft_for_lineage(lesson_id)
+        async with _lesson_lock(lesson_id):
+            row = await _most_recent_draft_for_lineage(lesson_id)
 
-        if row is None:
-            raise ValueError(f"No draft version to promote for lesson_id={lesson_id!r}")
+            if row is None:
+                raise ValueError(
+                    f"No draft version to promote for lesson_id={lesson_id!r}"
+                )
 
-        if row.supersedes_id is not None:
-            await _set_state(row.supersedes_id, "superseded")
-        await _set_state(row.id, "published")
+            if row.supersedes_id is not None:
+                await _set_state(row.supersedes_id, "superseded")
+            await _set_state(row.id, "published")
+
+        # Non-fatal sync to memory_embeddings — deliberately outside the lock,
+        # since it doesn't read or write versioned_lessons state and holding
+        # the lock across it would only add unnecessary contention.
         await _sync_to_memory_embeddings(row.topic, row.content, agent_name)
 
         record = _to_record(row)
@@ -378,12 +437,21 @@ class VersionedMemoryStore:
         return record
 
     def rollback(self, lesson_id: str) -> VersionedLessonRecord:
-        prior = asyncio.run(_most_recent_superseded_for_lineage(lesson_id))
-        if prior is None:
-            raise ValueError(
-                f"No superseded version to roll back to for lesson_id={lesson_id!r}"
-            )
-        asyncio.run(self._rollback(lesson_id, prior))
+        return asyncio.run(self._rollback_locked(lesson_id))
+
+    async def _rollback_locked(self, lesson_id: str) -> VersionedLessonRecord:
+        """Merges what used to be two separate asyncio.run() calls (a read,
+        then a write) in rollback() into one, so the whole read-then-write
+        critical section can share a single _lesson_lock — a lock acquired
+        and released within one asyncio.run() call cannot span a second,
+        later one."""
+        async with _lesson_lock(lesson_id):
+            prior = await _most_recent_superseded_for_lineage(lesson_id)
+            if prior is None:
+                raise ValueError(
+                    f"No superseded version to roll back to for lesson_id={lesson_id!r}"
+                )
+            await self._rollback(lesson_id, prior)
         record = _to_record(prior)
         record.state = "published"  # prior was fetched before the flip — reflect the real post-rollback state
         return record
