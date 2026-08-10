@@ -440,7 +440,9 @@ async def _dispatch_one_subtask(
     # dev/qa/reviewer call and publish_event() already catches its own
     # exceptions, matching this module's established no-raise convention
     # for the per-subtask loop).
-    _subtask_slot_cm = subtask_slot(epic_id or f"task-{task_id}", priority=task_priority)
+    _subtask_slot_cm = subtask_slot(
+        epic_id or f"task-{task_id}", priority=task_priority
+    )
     try:
         await _subtask_slot_cm.__aenter__()
     except SlotAcquisitionTimeout as exc:
@@ -621,9 +623,7 @@ async def _dispatch_one_subtask(
                 ),
                 db=db,
             )
-            logger.warning(
-                "QA failed attempt %d subtask %d", attempt + 1, subtask_id
-            )
+            logger.warning("QA failed attempt %d subtask %d", attempt + 1, subtask_id)
             if not should_retry(attempt + 1, max_retries):
                 break
             await asyncio.sleep(0.5 * (2**attempt))

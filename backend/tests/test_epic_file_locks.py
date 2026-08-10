@@ -107,10 +107,14 @@ async def test_losing_reserve_leaves_no_partial_locks() -> None:
 
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:  # type: ignore[arg-type]
             rows = (
-                await session.execute(
-                    select(EpicFileLock).where(EpicFileLock.file_path == free_file)
+                (
+                    await session.execute(
+                        select(EpicFileLock).where(EpicFileLock.file_path == free_file)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
         assert rows == [], "losing reserve must not leave the free file locked"
     finally:
         await engine.dispose()  # type: ignore[attr-defined]

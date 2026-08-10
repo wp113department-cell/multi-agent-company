@@ -185,9 +185,7 @@ def run_security_review(
                     summary=str(raw.get("summary", last_error)),
                     findings=findings,
                     files_touched=[],
-                    verified=bool(
-                        final_state["verification"].get("scan_ran", False)
-                    ),
+                    verified=bool(final_state["verification"].get("scan_ran", False)),
                     requires_human_approval=False,
                     tokens_in=total_in,
                     tokens_out=total_out,

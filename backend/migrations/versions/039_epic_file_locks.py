@@ -44,9 +44,7 @@ def upgrade() -> None:
         ["file_path"],
         unique=True,
     )
-    op.create_index(
-        "ix_epic_file_locks_expires_at", "epic_file_locks", ["expires_at"]
-    )
+    op.create_index("ix_epic_file_locks_expires_at", "epic_file_locks", ["expires_at"])
 
 
 def downgrade() -> None:

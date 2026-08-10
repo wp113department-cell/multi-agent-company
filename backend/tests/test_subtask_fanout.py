@@ -114,9 +114,7 @@ def test_independent_subtasks_run_concurrently_not_sequentially(
         return ([], None, 10, 5)
 
     with (
-        patch(
-            "app.agents.backend_dev.run_backend_dev", side_effect=_slow_backend_dev
-        ),
+        patch("app.agents.backend_dev.run_backend_dev", side_effect=_slow_backend_dev),
         patch("app.agents.qa.run_qa") as mock_qa,
         patch("app.agents.reviewer.run_reviewer") as mock_reviewer,
         patch("app.repo_tools.worktree.get_diff", return_value=""),

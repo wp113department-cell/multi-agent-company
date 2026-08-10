@@ -195,9 +195,7 @@ async def agent_run_slot(priority: str = "medium") -> AsyncIterator[None]:
 
 
 @asynccontextmanager
-async def subtask_slot(
-    epic_id: str, priority: str = "medium"
-) -> AsyncIterator[None]:
+async def subtask_slot(epic_id: str, priority: str = "medium") -> AsyncIterator[None]:
     """Acquire a per-epic subtask slot before dispatching a subtask. Bounded
     wait (Phase 5.6) — raises SlotAcquisitionTimeout instead of hanging
     forever if no slot frees up in time.

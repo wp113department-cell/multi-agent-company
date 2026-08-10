@@ -65,9 +65,7 @@ async def reserve_epic_files(
                         epic_id=epic_id,
                         file_path=path,
                         expires_at=now
-                        + timedelta(
-                            seconds=get_settings().epic_file_lock_ttl_seconds
-                        ),
+                        + timedelta(seconds=get_settings().epic_file_lock_ttl_seconds),
                     )
                 )
             await db.flush()
