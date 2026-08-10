@@ -22,7 +22,7 @@ from app.pipeline.concurrency import SlotAcquisitionTimeout
 
 
 @asynccontextmanager
-async def _always_times_out() -> AsyncIterator[None]:
+async def _always_times_out(priority: str = "medium") -> AsyncIterator[None]:
     raise SlotAcquisitionTimeout("agent_run", 0.01)
     yield  # pragma: no cover - unreachable, satisfies the generator shape
 

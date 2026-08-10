@@ -85,6 +85,68 @@ def _topological_subtask_order(subtasks: list[dict[str, Any]]) -> list[int]:
     return order
 
 
+def _topological_subtask_waves(subtasks: list[dict[str, Any]]) -> list[list[int]]:
+    """Gap-closure (Batch 2 audit, §2 "Multiple agents work simultaneously
+    (fan-out)"): same dependency semantics as `_topological_subtask_order()`
+    above (0-based `depends_on` indices, malformed-graph fallback) but
+    grouped into WAVES instead of a single flat order — each wave is a list
+    of original-list indices whose dependencies are ALL satisfied by
+    subtasks in previous waves, so every index within one wave is safe to
+    dispatch concurrently (`asyncio.gather`) without violating any
+    `depends_on` edge. A pure Kahn's-algorithm layer-by-layer BFS rather
+    than `_topological_subtask_order()`'s own single min-heap pass — the
+    heap version deliberately interleaves ready subtasks in index order one
+    at a time (right for a strictly sequential dispatcher); this version
+    deliberately batches everything that's ready at once into the same
+    wave (right for a concurrent dispatcher).
+
+    Only consulted when `run_manager(..., enable_fanout=True)` — the
+    default sequential path keeps using `_topological_subtask_order()`
+    completely unchanged. Same fallback contract on a malformed graph: a
+    cycle or an out-of-range `depends_on` index returns one subtask per
+    wave in original order (equivalent to full sequential dispatch),
+    logged, never raised.
+    """
+    n = len(subtasks)
+    deps: list[list[int]] = []
+    for i, st in enumerate(subtasks):
+        raw = st.get("depends_on") or []
+        valid = [d for d in raw if isinstance(d, int) and 0 <= d < n and d != i]
+        deps.append(valid)
+
+    in_degree = [0] * n
+    dependents: list[list[int]] = [[] for _ in range(n)]
+    for i, dep_list in enumerate(deps):
+        for d in dep_list:
+            dependents[d].append(i)
+            in_degree[i] += 1
+
+    waves: list[list[int]] = []
+    current = sorted(i for i in range(n) if in_degree[i] == 0)
+    resolved = 0
+    while current:
+        waves.append(current)
+        resolved += len(current)
+        next_wave: set[int] = set()
+        for i in current:
+            for nxt in dependents[i]:
+                in_degree[nxt] -= 1
+                if in_degree[nxt] == 0:
+                    next_wave.add(nxt)
+        current = sorted(next_wave)
+
+    if resolved != n:
+        logger.warning(
+            "Subtask depends_on graph has a cycle or references an "
+            "out-of-range index — dispatching subtasks one-per-wave in "
+            "original order instead (n=%d, resolved=%d)",
+            n,
+            resolved,
+        )
+        return [[i] for i in range(n)]
+    return waves
+
+
 # ---------------------------------------------------------------------------
 # AGENT_CONTRACT — Fleet OS capability declaration
 # Note: manager is an async orchestrator, not a LangGraph node.
@@ -170,34 +232,50 @@ class EpicApprovalPackage:
     halt_reason: str | None = None
 
 
-async def run_manager(
+async def _dispatch_one_subtask(
+    *,
+    subtask_idx: int,
+    subtask: dict[str, Any],
     task_id: int,
-    subtasks: list[dict[str, Any]],
     worktree_path: str,
     plan: str,
-    repo_path: str | None = None,
-    on_status: Any = None,
-    epic_id: str | None = None,
-    images: list[dict[str, str]] | None = None,
-    extra_env: dict[str, str] | None = None,
-    db: AsyncSession | None = None,
+    repo: str,
+    epic_id: str | None,
+    images: list[dict[str, str]] | None,
+    extra_env: dict[str, str] | None,
+    db: AsyncSession | None,
+    max_retries: int,
+    manager_trace_id: str,
+    task_priority: str,
+    db_subtask_rows: list[Any],
+    git_commit_lock: asyncio.Lock,
 ) -> dict[str, Any]:
-    """Orchestrate Dev → QA → Review per subtask.
+    """Gap-closure (Batch 2 audit, §2 "Multiple agents work simultaneously
+    (fan-out)"): the FULL per-subtask dispatch→dev→QA→review→retry flow,
+    extracted verbatim from what used to be run_manager()'s own inline
+    `for` loop body so it can be awaited either one-at-a-time (the default
+    sequential path, `enable_fanout=False`) or concurrently via
+    `asyncio.gather` across a dependency-satisfied wave (`enable_fanout=
+    True`) — a structural extraction only, not a behavior change: every
+    comment, exception path, and event below is unchanged from before this
+    split, just reading from parameters instead of the enclosing loop's
+    closure variables.
 
-    Returns {"status": "completed"|"blocked"|"halted", "results": [...], "blocked_count": N}
+    Returns everything the caller needs to do its OWN bookkeeping (append
+    to `results`, accumulate epic-wide tokens, decide whether to halt the
+    epic) — bookkeeping that depends on OTHER subtasks' outcomes (the
+    cumulative `blocked_count` epic-halt threshold) deliberately stays in
+    run_manager() itself, sequential, evaluated once per WAVE after
+    `asyncio.gather` returns, so halt semantics are "stop before starting
+    the next wave" rather than "stop mid-wave" (work already in flight in
+    a wave always runs to completion — it cannot be un-started).
 
-    images (Day 16): optional reference images (e.g. a website design
-    screenshot) — passed to run_frontend_dev (UI implementation) and
-    run_reviewer (visual comparison). Not passed to run_backend_dev, matching
-    the plan's own agent list.
-    extra_env (Day 17): custom secrets merged into both backend_dev's and
-    frontend_dev's bash tool subprocess env.
-    db (Audit 01, gap-closure 2026-07-24): optional session, forwarded to every
-    publish_event() call in this function so events actually persist to the
-    events table — every prior call site omitted it, so db was always None and
-    _persist_event() was always a no-op. Optional because run_manager() has no
-    other DB dependency of its own; callers without a session simply keep the
-    previous (non-persisting) behavior instead of being forced to acquire one.
+    git_commit_lock: real, new safety fix this extraction required — every
+    subtask in one run_manager() call shares the SAME worktree_path, and
+    `git add`/`git commit` are NOT safe to run concurrently against one
+    working tree (a real `.git/index.lock` collision risk). Serializes
+    only that step; the actual LLM dev/QA/review calls — the expensive,
+    genuinely parallelizable part — are NOT serialized by this lock.
     """
     from app.agents.backend_dev import run_backend_dev
     from app.agents.frontend_dev import run_frontend_dev
@@ -212,6 +290,513 @@ async def run_manager(
         subtask_slot,
     )
     from app.repo_tools.worktree import get_diff
+
+    local_tokens_in = 0
+    local_tokens_out = 0
+
+    subtask_id = int(subtask.get("id", 0))
+    subtask_type = str(subtask.get("type", "backend"))
+    subtask_title = str(subtask.get("title", ""))
+    subtask_plan = str(subtask.get("description") or plan)
+
+    logger.info(
+        "Manager dispatching subtask %d type=%s for task %d",
+        subtask_id,
+        subtask_type,
+        task_id,
+    )
+
+    # Gap-closure Days 11-14 (Stage 1.1, answers.md): fleet_manager
+    # selects an agent for this capability and its output now IS the
+    # dispatch decision below — previously (Day 12 Part 4) the select()
+    # call ran but its result was discarded, an "additive
+    # instrumentation only, does not change which function runs" side
+    # channel (capability_registry/fleet_manager/agent_bus existed and
+    # were unit-tested in isolation, but nothing in the live task-flow
+    # ever acted on the result). Since exactly one concrete agent is
+    # currently registered per capability (backend_dev/frontend_dev),
+    # today this produces the same routing the old subtask_type check
+    # did in the common case — the real change is that a plan.agent_name
+    # FleetManager wouldn't currently select (e.g. an unhealthy/
+    # unavailable instance) is now actually honored instead of silently
+    # ignored, and this is the real hook a future second agent
+    # registered for the same capability would need to ever actually get
+    # dispatched. Falls back to the subtask_type-based default on any
+    # infrastructure failure (agent not found, registry unavailable) —
+    # never blocks a subtask on the scheduler's OWN health.
+    selected_agent_name = (
+        "frontend_dev" if subtask_type == "frontend" else "backend_dev"
+    )
+    # Gap-closure (Batch 2 audit, §2 "Agents reject tasks they're not
+    # suited for"): a real refusal (select() returning None — no healthy
+    # available agent covers this capability) is NOT an infrastructure
+    # failure of the scheduler itself, so it must not share the
+    # catch-all `except Exception: pass` below — that swallowed the
+    # refusal and dispatched to the hardcoded default anyway, defeating
+    # FleetManager's own health/availability gating entirely. Tracked
+    # separately so a real refusal can actually block dispatch while a
+    # broken registry/import still falls back exactly as before (see
+    # test_gap11_14_fleet_manager_dispatch.py's
+    # test_select_unavailable_falls_back_to_subtask_type_default).
+    fleet_refusal_reason: str | None = None
+    try:
+        from app.fleet.fleet_events import publish, task_created
+        from app.fleet.fleet_manager import get_fleet_manager
+
+        required_capability = (
+            "frontend_development"
+            if subtask_type == "frontend"
+            else "backend_development"
+        )
+        dispatch_plan = get_fleet_manager().select(
+            required_capability=required_capability, verify_tool_availability=True
+        )
+        if dispatch_plan is not None and dispatch_plan.agent_name in (
+            "frontend_dev",
+            "backend_dev",
+        ):
+            selected_agent_name = dispatch_plan.agent_name
+        elif dispatch_plan is None:
+            fleet_refusal_reason = (
+                f"FleetManager refused dispatch for capability "
+                f"{required_capability!r}: no healthy available agent "
+                f"(unhealthy, busy, or a declared tool failed "
+                f"verify_tool_availability)"
+            )
+        publish(
+            task_created(
+                task_id=str(task_id),
+                title=subtask_title,
+                agent_name="manager",
+                trace_id=manager_trace_id,
+            )
+        )
+    except Exception:
+        pass
+
+    if fleet_refusal_reason:
+        logger.warning(
+            "Subtask %d dispatch refused by FleetManager: %s",
+            subtask_id,
+            fleet_refusal_reason,
+        )
+        await publish_event(
+            GridironEvent(
+                event_type="subtask.dispatch_refused",
+                task_id=str(task_id),
+                epic_id=epic_id,
+                payload={
+                    "subtask_id": subtask_id,
+                    "reason": fleet_refusal_reason,
+                },
+                emitted_by="manager",
+            ),
+            db=db,
+        )
+        return {
+            "result": {
+                "subtask_id": subtask_id,
+                "type": subtask_type,
+                "status": "blocked",
+                "files_changed": [],
+                "review_summary": "",
+                "qa_summary": fleet_refusal_reason,
+                "review_findings": [],
+                "diff": "",
+            },
+            "blocked": True,
+            "tokens_in": local_tokens_in,
+            "tokens_out": local_tokens_out,
+        }
+
+    await publish_event(
+        GridironEvent(
+            event_type="subtask.assigned",
+            task_id=str(task_id),
+            epic_id=epic_id,
+            payload={
+                "subtask_id": subtask_id,
+                "type": subtask_type,
+                "title": subtask_title,
+            },
+            emitted_by="manager",
+        ),
+        db=db,
+    )
+
+    subtask_status = "blocked"
+    files_changed: list[str] = []
+    qa_errors: list[str] = []
+    review_summary = ""
+    qa_summary = ""
+    review_findings: list[dict[str, Any]] = []
+    subtask_diff = ""
+
+    # Gap-closure (Audit 04 fix, ORCH-04-009): concurrency.py's semaphores
+    # were fully built and unit-tested but had zero real callers anywhere
+    # in the dispatch path. Manual __aenter__/__aexit__ (not `async with`)
+    # deliberately avoids re-indenting the whole retry loop below — safe
+    # here because nothing in this loop raises past this function (every
+    # dev/qa/reviewer call and publish_event() already catches its own
+    # exceptions, matching this module's established no-raise convention
+    # for the per-subtask loop).
+    _subtask_slot_cm = subtask_slot(epic_id or f"task-{task_id}", priority=task_priority)
+    try:
+        await _subtask_slot_cm.__aenter__()
+    except SlotAcquisitionTimeout as exc:
+        # MASTER_AGENT_v2.md Phase 5.6 — a slot that can never free up must
+        # fail loudly (already real, concurrency.py), and this loop's own
+        # "nothing raises past this function" invariant must still hold —
+        # route it through the exact same blocked-subtask path every other
+        # subtask failure already uses (no __aexit__ call: __aenter__
+        # never actually acquired anything).
+        logger.warning(
+            "Could not acquire subtask slot for subtask %d: %s", subtask_id, exc
+        )
+        return {
+            "result": {
+                "subtask_id": subtask_id,
+                "type": subtask_type,
+                "status": "blocked",
+                "files_changed": [],
+                "review_summary": "",
+                "qa_summary": f"Could not acquire an agent-run slot in time: {exc}",
+                "review_findings": [],
+                "diff": "",
+            },
+            "blocked": True,
+            "tokens_in": local_tokens_in,
+            "tokens_out": local_tokens_out,
+        }
+
+    for attempt in range(max_retries):
+        retry_context = ""
+        if attempt > 0 and qa_errors:
+            retry_context = (
+                f"\n\nPrevious QA/review errors (attempt {attempt}):\n"
+                + "\n".join(qa_errors[:5])
+            )
+
+        full_plan = subtask_plan + retry_context
+
+        # Day 18 — Real-Time Streaming.
+        try:
+            from app.services.activity_stream import push_agent_switch
+
+            push_agent_switch(
+                str(task_id),
+                selected_agent_name,
+                f"subtask {subtask_id}",
+            )
+        except Exception:
+            pass
+
+        try:
+            async with agent_run_slot(priority=task_priority):
+                if selected_agent_name == "frontend_dev":
+                    files_changed, dev_error, dev_tokens_in, dev_tokens_out = (
+                        await asyncio.to_thread(
+                            run_frontend_dev,
+                            task_id=task_id,
+                            subtask_id=subtask_id,
+                            plan=full_plan,
+                            worktree_path=worktree_path,
+                            repo_path=repo,
+                            images=images,
+                            extra_env=extra_env,
+                        )
+                    )
+                else:
+                    files_changed, dev_error, dev_tokens_in, dev_tokens_out = (
+                        await asyncio.to_thread(
+                            run_backend_dev,
+                            task_id=task_id,
+                            subtask_id=subtask_id,
+                            plan=full_plan,
+                            worktree_path=worktree_path,
+                            repo_path=repo,
+                            extra_env=extra_env,
+                        )
+                    )
+        except SlotAcquisitionTimeout as exc:
+            # Phase 5.6 — same treatment as a real dev-agent error, reusing
+            # the existing retry/escalate path rather than a new one.
+            files_changed = []
+            dev_error = f"Could not acquire an agent-run slot in time: {exc}"
+            dev_tokens_in = dev_tokens_out = 0
+        local_tokens_in += dev_tokens_in
+        local_tokens_out += dev_tokens_out
+
+        if dev_error:
+            qa_errors = [f"Dev agent error: {dev_error}"]
+            logger.warning(
+                "Dev error attempt %d subtask %d: %s",
+                attempt + 1,
+                subtask_id,
+                dev_error,
+            )
+            if not should_retry(attempt + 1, max_retries):
+                break
+            await asyncio.sleep(0.5 * (2**attempt))
+            continue
+
+        # Gap-closure (2026-07-22, Day 14 prep) — nothing in the dev-agent
+        # path ever committed changes to the worktree's branch (confirmed
+        # by grep before writing this: submit_patch only ever recorded
+        # files_changed in a local dict). Since get_diff() compares
+        # HEAD...branch, this meant the Reviewer agent's own diff review
+        # has been reviewing an empty diff since Day 0. Commit here, before
+        # QA/review, using git_service.py's existing attributed-commit
+        # mechanism (same GIT_AUTHOR_NAME/GIT_COMMITTER_NAME env-var
+        # pattern aider's GitRepo.commit() uses). Batch 2 audit gap-closure:
+        # serialized via git_commit_lock — see this function's docstring.
+        if files_changed:
+            from app.services.git_service import git_add, git_commit
+
+            async with git_commit_lock:
+                add_result = await git_add(worktree_path, files_changed)
+                if add_result["ok"]:
+                    commit_result = await git_commit(
+                        worktree_path,
+                        f"{subtask_type}: {subtask_title}",
+                        author_name="Gridiron Agent",
+                        author_email="agent@gridiron.local",
+                    )
+                    if not commit_result["ok"]:
+                        logger.warning(
+                            "Commit failed for subtask %d (attempt %d): %s",
+                            subtask_id,
+                            attempt + 1,
+                            commit_result["stderr"][:300],
+                        )
+                else:
+                    logger.warning(
+                        "git add failed for subtask %d (attempt %d): %s",
+                        subtask_id,
+                        attempt + 1,
+                        add_result["stderr"][:300],
+                    )
+
+        try:
+            from app.services.activity_stream import push_agent_switch
+
+            push_agent_switch(str(task_id), "qa", f"subtask {subtask_id}")
+        except Exception:
+            pass
+
+        try:
+            async with agent_run_slot(priority=task_priority):
+                qa_result = await asyncio.to_thread(
+                    run_qa,
+                    task_id=task_id,
+                    subtask_id=subtask_id,
+                    files_changed=files_changed,
+                    worktree_path=worktree_path,
+                    repo_path=repo,
+                )
+        except SlotAcquisitionTimeout as exc:
+            qa_result = QAResult(
+                status="failed",
+                tests_run=0,
+                tests_passed=0,
+                tests_failed=0,
+                typecheck_clean=False,
+                lint_clean=False,
+                errors=[f"Could not acquire an agent-run slot in time: {exc}"],
+                summary=f"Could not acquire an agent-run slot in time: {exc}",
+            )
+        local_tokens_in += qa_result.tokens_in
+        local_tokens_out += qa_result.tokens_out
+        qa_summary = qa_result.summary
+
+        if qa_result.status == "failed":
+            qa_errors = qa_result.errors or [qa_result.summary]
+            await publish_event(
+                GridironEvent(
+                    event_type="qa.failed",
+                    task_id=str(task_id),
+                    epic_id=epic_id,
+                    payload={"subtask_id": subtask_id, "errors": qa_errors[:3]},
+                    emitted_by="qa",
+                ),
+                db=db,
+            )
+            logger.warning(
+                "QA failed attempt %d subtask %d", attempt + 1, subtask_id
+            )
+            if not should_retry(attempt + 1, max_retries):
+                break
+            await asyncio.sleep(0.5 * (2**attempt))
+            continue
+
+        await publish_event(
+            GridironEvent(
+                event_type="qa.passed",
+                task_id=str(task_id),
+                epic_id=epic_id,
+                payload={"subtask_id": subtask_id},
+                emitted_by="qa",
+            ),
+            db=db,
+        )
+
+        subtask_diff = get_diff(task_id, repo)
+        try:
+            from app.services.activity_stream import push_agent_switch
+
+            push_agent_switch(str(task_id), "reviewer", f"subtask {subtask_id}")
+        except Exception:
+            pass
+
+        try:
+            async with agent_run_slot(priority=task_priority):
+                review_result = await asyncio.to_thread(
+                    run_reviewer,
+                    task_id=task_id,
+                    subtask_id=subtask_id,
+                    diff=subtask_diff,
+                    plan=subtask_plan,
+                    repo_path=repo,
+                    images=images,
+                )
+        except SlotAcquisitionTimeout as exc:
+            review_result = ReviewResult(
+                verdict="changes_required",
+                findings=[
+                    ReviewFinding(
+                        severity="blocking",
+                        file="",
+                        line=None,
+                        finding=f"Could not acquire an agent-run slot in time: {exc}",
+                        recommendation="Retry once fleet load decreases.",
+                    )
+                ],
+                summary=f"Could not acquire an agent-run slot in time: {exc}",
+            )
+        local_tokens_in += review_result.tokens_in
+        local_tokens_out += review_result.tokens_out
+        review_summary = review_result.summary
+        review_findings = [
+            {
+                "severity": f.severity,
+                "file": f.file,
+                "line": f.line,
+                "finding": f.finding,
+                "recommendation": f.recommendation,
+            }
+            for f in review_result.findings
+        ]
+
+        await publish_event(
+            GridironEvent(
+                event_type="review.completed",
+                task_id=str(task_id),
+                epic_id=epic_id,
+                payload={
+                    "subtask_id": subtask_id,
+                    "verdict": review_result.verdict,
+                    "blocking_count": review_result.blocking_count,
+                },
+                emitted_by="reviewer",
+            ),
+            db=db,
+        )
+
+        if not review_result.has_blocking:
+            subtask_status = "completed"
+            break
+
+        qa_errors = [
+            f"Blocking review in {f.file}: {f.finding} → {f.recommendation}"
+            for f in review_result.findings
+            if f.severity == "blocking"
+        ]
+        logger.warning(
+            "Reviewer blocking findings attempt %d subtask %d",
+            attempt + 1,
+            subtask_id,
+        )
+        if not should_retry(attempt + 1, max_retries):
+            break
+        await asyncio.sleep(0.5 * (2**attempt))
+
+    await _subtask_slot_cm.__aexit__(None, None, None)
+
+    if db is not None and subtask_idx < len(db_subtask_rows):
+        try:
+            from app.db.repository import update_subtask_status
+
+            await update_subtask_status(
+                db, db_subtask_rows[subtask_idx].id, subtask_status
+            )
+        except Exception:
+            logger.debug(
+                "Could not persist status for subtask %d (non-fatal)",
+                subtask_id,
+                exc_info=True,
+            )
+
+    return {
+        "result": {
+            "subtask_id": subtask_id,
+            "type": subtask_type,
+            "status": subtask_status,
+            "files_changed": files_changed,
+            "review_summary": review_summary,
+            "qa_summary": qa_summary,
+            "review_findings": review_findings,
+            "diff": subtask_diff,
+        },
+        "blocked": subtask_status == "blocked",
+        "tokens_in": local_tokens_in,
+        "tokens_out": local_tokens_out,
+    }
+
+
+async def run_manager(
+    task_id: int,
+    subtasks: list[dict[str, Any]],
+    worktree_path: str,
+    plan: str,
+    repo_path: str | None = None,
+    on_status: Any = None,
+    epic_id: str | None = None,
+    images: list[dict[str, str]] | None = None,
+    extra_env: dict[str, str] | None = None,
+    db: AsyncSession | None = None,
+    enable_fanout: bool = False,
+) -> dict[str, Any]:
+    """Orchestrate Dev → QA → Review per subtask.
+
+    Returns {"status": "completed"|"blocked"|"halted", "results": [...], "blocked_count": N}
+
+    enable_fanout (Batch 2 audit gap-closure, §2 "Multiple agents work
+    simultaneously"): when True, subtasks with no `depends_on` edge between
+    them are dispatched CONCURRENTLY in dependency-respecting waves
+    (`_topological_subtask_waves`) via `asyncio.gather`, bounded by the
+    existing `agent_run_slot`/`subtask_slot` semaphores — real parallelism,
+    not just interleaved awaits. Defaults False so every existing caller
+    (and this function's own 180+ tests, which assume strict one-at-a-time
+    dispatch order) keeps today's exact sequential behavior unchanged; real
+    callers opt in via `settings.enable_subtask_fanout` (see
+    `_coding_node`). A wave of size 1 (a strict dependency chain, or a
+    single subtask) behaves identically whether this is True or False.
+
+    images (Day 16): optional reference images (e.g. a website design
+    screenshot) — passed to run_frontend_dev (UI implementation) and
+    run_reviewer (visual comparison). Not passed to run_backend_dev, matching
+    the plan's own agent list.
+    extra_env (Day 17): custom secrets merged into both backend_dev's and
+    frontend_dev's bash tool subprocess env.
+    db (Audit 01, gap-closure 2026-07-24): optional session, forwarded to every
+    publish_event() call in this function so events actually persist to the
+    events table — every prior call site omitted it, so db was always None and
+    _persist_event() was always a no-op. Optional because run_manager() has no
+    other DB dependency of its own; callers without a session simply keep the
+    previous (non-persisting) behavior instead of being forced to acquire one.
+    """
+    from app.event_bus.bus import publish_event
+    from app.event_bus.models import GridironEvent
 
     settings = get_settings()
     # Gap-closure (Audit 04 fix, ORCH-04-015): this loop previously reused
@@ -266,411 +851,85 @@ async def run_manager(
                 exc_info=True,
             )
 
-    for _subtask_idx in _topological_subtask_order(subtasks):
-        subtask = subtasks[_subtask_idx]
-        subtask_id = int(subtask.get("id", 0))
-        subtask_type = str(subtask.get("type", "backend"))
-        subtask_title = str(subtask.get("title", ""))
-        subtask_plan = str(subtask.get("description") or plan)
-
-        logger.info(
-            "Manager dispatching subtask %d type=%s for task %d",
-            subtask_id,
-            subtask_type,
-            task_id,
-        )
-
-        # Gap-closure Days 11-14 (Stage 1.1, answers.md): fleet_manager
-        # selects an agent for this capability and its output now IS the
-        # dispatch decision below — previously (Day 12 Part 4) the select()
-        # call ran but its result was discarded, an "additive
-        # instrumentation only, does not change which function runs" side
-        # channel (capability_registry/fleet_manager/agent_bus existed and
-        # were unit-tested in isolation, but nothing in the live task-flow
-        # ever acted on the result). Since exactly one concrete agent is
-        # currently registered per capability (backend_dev/frontend_dev),
-        # today this produces the same routing the old subtask_type check
-        # did in the common case — the real change is that a plan.agent_name
-        # FleetManager wouldn't currently select (e.g. an unhealthy/
-        # unavailable instance) is now actually honored instead of silently
-        # ignored, and this is the real hook a future second agent
-        # registered for the same capability would need to ever actually get
-        # dispatched. Falls back to the subtask_type-based default on any
-        # failure (agent not found, registry unavailable) — never blocks a
-        # subtask on the scheduler's own health.
-        selected_agent_name = (
-            "frontend_dev" if subtask_type == "frontend" else "backend_dev"
-        )
+    # Gap-closure (Batch 2 audit, §2 "Priorities managed"): DevTask.priority
+    # was stored and read back into API responses but consulted by nothing —
+    # decorative. All subtasks in this one run_manager() call share a single
+    # task, so priority can't break a tie inside _topological_subtask_order()
+    # (a constant compared to itself never changes an order); the real place
+    # it has an observable effect is where MULTIPLE DIFFERENT tasks' agents
+    # actually contend for a shared bounded resource — the global
+    # agent_run_slot cap and this epic's own subtask_slot cap (see
+    # PrioritySemaphore, app/pipeline/concurrency.py). Fetched once,
+    # best-effort (db is optional; a task not found or no db keeps today's
+    # behavior — every waiter effectively "medium", i.e. plain FIFO).
+    task_priority = "medium"
+    if db is not None:
         try:
-            from app.fleet.fleet_events import publish, task_created
-            from app.fleet.fleet_manager import get_fleet_manager
+            from app.db.repository import get_task as _get_task
 
-            required_capability = (
-                "frontend_development"
-                if subtask_type == "frontend"
-                else "backend_development"
-            )
-            dispatch_plan = get_fleet_manager().select(
-                required_capability=required_capability, verify_tool_availability=True
-            )
-            if dispatch_plan is not None and dispatch_plan.agent_name in (
-                "frontend_dev",
-                "backend_dev",
-            ):
-                selected_agent_name = dispatch_plan.agent_name
-            publish(
-                task_created(
-                    task_id=str(task_id),
-                    title=subtask_title,
-                    agent_name="manager",
-                    trace_id=manager_trace_id,
-                )
-            )
+            _task_row = await _get_task(db, task_id)
+            if _task_row is not None:
+                task_priority = _task_row.priority
         except Exception:
-            pass
-
-        await publish_event(
-            GridironEvent(
-                event_type="subtask.assigned",
-                task_id=str(task_id),
-                epic_id=epic_id,
-                payload={
-                    "subtask_id": subtask_id,
-                    "type": subtask_type,
-                    "title": subtask_title,
-                },
-                emitted_by="manager",
-            ),
-            db=db,
-        )
-
-        if on_status:
-            on_status(subtask_id, "dispatched")
-
-        subtask_status = "blocked"
-        files_changed: list[str] = []
-        qa_errors: list[str] = []
-        review_summary = ""
-        qa_summary = ""
-        review_findings: list[dict[str, Any]] = []
-        subtask_diff = ""
-
-        # Gap-closure (Audit 04 fix, ORCH-04-009): concurrency.py's semaphores
-        # were fully built and unit-tested but had zero real callers anywhere
-        # in the dispatch path. Manual __aenter__/__aexit__ (not `async with`)
-        # deliberately avoids re-indenting the whole retry loop below — safe
-        # here because nothing in this loop raises past this function (every
-        # dev/qa/reviewer call and publish_event() already catches its own
-        # exceptions, matching this module's established no-raise convention
-        # for the per-subtask loop).
-        _subtask_slot_cm = subtask_slot(epic_id or f"task-{task_id}")
-        try:
-            await _subtask_slot_cm.__aenter__()
-        except SlotAcquisitionTimeout as exc:
-            # MASTER_AGENT_v2.md Phase 5.6 — a slot that can never free up must
-            # fail loudly (already real, concurrency.py), and this loop's own
-            # "nothing raises past this function" invariant must still hold —
-            # route it through the exact same blocked-subtask path every other
-            # subtask failure already uses, via `continue` to the next subtask
-            # (no __aexit__ call: __aenter__ never actually acquired anything).
-            logger.warning(
-                "Could not acquire subtask slot for subtask %d: %s", subtask_id, exc
+            logger.debug(
+                "Could not fetch DevTask.priority for task %d (defaulting to "
+                "medium)",
+                task_id,
+                exc_info=True,
             )
-            results.append(
-                {
-                    "subtask_id": subtask_id,
-                    "type": subtask_type,
-                    "status": "blocked",
-                    "files_changed": [],
-                    "review_summary": "",
-                    "qa_summary": f"Could not acquire an agent-run slot in time: {exc}",
-                    "review_findings": [],
-                    "diff": "",
-                }
-            )
-            blocked_count += 1
-            overall_status = "blocked"
-            continue
 
-        for attempt in range(max_retries):
-            retry_context = ""
-            if attempt > 0 and qa_errors:
-                retry_context = (
-                    f"\n\nPrevious QA/review errors (attempt {attempt}):\n"
-                    + "\n".join(qa_errors[:5])
-                )
+    git_commit_lock = asyncio.Lock()
 
-            full_plan = subtask_plan + retry_context
+    # Gap-closure (Batch 2 audit, §2 "Multiple agents work simultaneously
+    # (fan-out)"): the default (enable_fanout=False) path keeps
+    # _topological_subtask_order()'s exact flat order, one subtask per
+    # "wave" — behaviorally IDENTICAL to the pre-fan-out inline loop this
+    # replaced (verified by the pre-existing 180+ tests across 13 modules
+    # this file's own docstring references). Only when a real caller opts
+    # in does _topological_subtask_waves() group independent subtasks so
+    # asyncio.gather() below actually runs them concurrently.
+    if enable_fanout:
+        waves = _topological_subtask_waves(subtasks)
+    else:
+        waves = [[idx] for idx in _topological_subtask_order(subtasks)]
 
-            # Day 18 — Real-Time Streaming.
-            try:
-                from app.services.activity_stream import push_agent_switch
-
-                push_agent_switch(
-                    str(task_id),
-                    selected_agent_name,
-                    f"subtask {subtask_id}",
-                )
-            except Exception:
-                pass
-
-            try:
-                async with agent_run_slot():
-                    if selected_agent_name == "frontend_dev":
-                        files_changed, dev_error, dev_tokens_in, dev_tokens_out = (
-                            await asyncio.to_thread(
-                                run_frontend_dev,
-                                task_id=task_id,
-                                subtask_id=subtask_id,
-                                plan=full_plan,
-                                worktree_path=worktree_path,
-                                repo_path=repo,
-                                images=images,
-                                extra_env=extra_env,
-                            )
-                        )
-                    else:
-                        files_changed, dev_error, dev_tokens_in, dev_tokens_out = (
-                            await asyncio.to_thread(
-                                run_backend_dev,
-                                task_id=task_id,
-                                subtask_id=subtask_id,
-                                plan=full_plan,
-                                worktree_path=worktree_path,
-                                repo_path=repo,
-                                extra_env=extra_env,
-                            )
-                        )
-            except SlotAcquisitionTimeout as exc:
-                # Phase 5.6 — same treatment as a real dev-agent error, reusing
-                # the existing retry/escalate path rather than a new one.
-                files_changed = []
-                dev_error = f"Could not acquire an agent-run slot in time: {exc}"
-                dev_tokens_in = dev_tokens_out = 0
-            epic_tokens_in += dev_tokens_in
-            epic_tokens_out += dev_tokens_out
-
-            if dev_error:
-                qa_errors = [f"Dev agent error: {dev_error}"]
-                logger.warning(
-                    "Dev error attempt %d subtask %d: %s",
-                    attempt + 1,
-                    subtask_id,
-                    dev_error,
-                )
-                if not should_retry(attempt + 1, max_retries):
-                    break
-                await asyncio.sleep(0.5 * (2**attempt))
-                continue
-
-            # Gap-closure (2026-07-22, Day 14 prep) — nothing in the dev-agent
-            # path ever committed changes to the worktree's branch (confirmed
-            # by grep before writing this: submit_patch only ever recorded
-            # files_changed in a local dict). Since get_diff() compares
-            # HEAD...branch, this meant the Reviewer agent's own diff review
-            # has been reviewing an empty diff since Day 0. Commit here, before
-            # QA/review, using git_service.py's existing attributed-commit
-            # mechanism (same GIT_AUTHOR_NAME/GIT_COMMITTER_NAME env-var
-            # pattern aider's GitRepo.commit() uses).
-            if files_changed:
-                from app.services.git_service import git_add, git_commit
-
-                add_result = await git_add(worktree_path, files_changed)
-                if add_result["ok"]:
-                    commit_result = await git_commit(
-                        worktree_path,
-                        f"{subtask_type}: {subtask_title}",
-                        author_name="Gridiron Agent",
-                        author_email="agent@gridiron.local",
-                    )
-                    if not commit_result["ok"]:
-                        logger.warning(
-                            "Commit failed for subtask %d (attempt %d): %s",
-                            subtask_id,
-                            attempt + 1,
-                            commit_result["stderr"][:300],
-                        )
-                else:
-                    logger.warning(
-                        "git add failed for subtask %d (attempt %d): %s",
-                        subtask_id,
-                        attempt + 1,
-                        add_result["stderr"][:300],
-                    )
-
-            try:
-                from app.services.activity_stream import push_agent_switch
-
-                push_agent_switch(str(task_id), "qa", f"subtask {subtask_id}")
-            except Exception:
-                pass
-
-            try:
-                async with agent_run_slot():
-                    qa_result = await asyncio.to_thread(
-                        run_qa,
-                        task_id=task_id,
-                        subtask_id=subtask_id,
-                        files_changed=files_changed,
-                        worktree_path=worktree_path,
-                        repo_path=repo,
-                    )
-            except SlotAcquisitionTimeout as exc:
-                qa_result = QAResult(
-                    status="failed",
-                    tests_run=0,
-                    tests_passed=0,
-                    tests_failed=0,
-                    typecheck_clean=False,
-                    lint_clean=False,
-                    errors=[f"Could not acquire an agent-run slot in time: {exc}"],
-                    summary=f"Could not acquire an agent-run slot in time: {exc}",
-                )
-            epic_tokens_in += qa_result.tokens_in
-            epic_tokens_out += qa_result.tokens_out
-            qa_summary = qa_result.summary
-
-            if qa_result.status == "failed":
-                qa_errors = qa_result.errors or [qa_result.summary]
-                await publish_event(
-                    GridironEvent(
-                        event_type="qa.failed",
-                        task_id=str(task_id),
-                        epic_id=epic_id,
-                        payload={"subtask_id": subtask_id, "errors": qa_errors[:3]},
-                        emitted_by="qa",
-                    ),
+    halted = False
+    for wave in waves:
+        outcomes = await asyncio.gather(
+            *[
+                _dispatch_one_subtask(
+                    subtask_idx=idx,
+                    subtask=subtasks[idx],
+                    task_id=task_id,
+                    worktree_path=worktree_path,
+                    plan=plan,
+                    repo=repo,
+                    epic_id=epic_id,
+                    images=images,
+                    extra_env=extra_env,
                     db=db,
+                    max_retries=max_retries,
+                    manager_trace_id=manager_trace_id,
+                    task_priority=task_priority,
+                    db_subtask_rows=_db_subtask_rows,
+                    git_commit_lock=git_commit_lock,
                 )
-                logger.warning(
-                    "QA failed attempt %d subtask %d", attempt + 1, subtask_id
-                )
-                if not should_retry(attempt + 1, max_retries):
-                    break
-                await asyncio.sleep(0.5 * (2**attempt))
-                continue
-
-            await publish_event(
-                GridironEvent(
-                    event_type="qa.passed",
-                    task_id=str(task_id),
-                    epic_id=epic_id,
-                    payload={"subtask_id": subtask_id},
-                    emitted_by="qa",
-                ),
-                db=db,
-            )
-
-            subtask_diff = get_diff(task_id, repo)
-            try:
-                from app.services.activity_stream import push_agent_switch
-
-                push_agent_switch(str(task_id), "reviewer", f"subtask {subtask_id}")
-            except Exception:
-                pass
-
-            try:
-                async with agent_run_slot():
-                    review_result = await asyncio.to_thread(
-                        run_reviewer,
-                        task_id=task_id,
-                        subtask_id=subtask_id,
-                        diff=subtask_diff,
-                        plan=subtask_plan,
-                        repo_path=repo,
-                        images=images,
-                    )
-            except SlotAcquisitionTimeout as exc:
-                review_result = ReviewResult(
-                    verdict="changes_required",
-                    findings=[
-                        ReviewFinding(
-                            severity="blocking",
-                            file="",
-                            line=None,
-                            finding=f"Could not acquire an agent-run slot in time: {exc}",
-                            recommendation="Retry once fleet load decreases.",
-                        )
-                    ],
-                    summary=f"Could not acquire an agent-run slot in time: {exc}",
-                )
-            epic_tokens_in += review_result.tokens_in
-            epic_tokens_out += review_result.tokens_out
-            review_summary = review_result.summary
-            review_findings = [
-                {
-                    "severity": f.severity,
-                    "file": f.file,
-                    "line": f.line,
-                    "finding": f.finding,
-                    "recommendation": f.recommendation,
-                }
-                for f in review_result.findings
+                for idx in wave
             ]
-
-            await publish_event(
-                GridironEvent(
-                    event_type="review.completed",
-                    task_id=str(task_id),
-                    epic_id=epic_id,
-                    payload={
-                        "subtask_id": subtask_id,
-                        "verdict": review_result.verdict,
-                        "blocking_count": review_result.blocking_count,
-                    },
-                    emitted_by="reviewer",
-                ),
-                db=db,
-            )
-
-            if not review_result.has_blocking:
-                subtask_status = "completed"
-                break
-
-            qa_errors = [
-                f"Blocking review in {f.file}: {f.finding} → {f.recommendation}"
-                for f in review_result.findings
-                if f.severity == "blocking"
-            ]
-            logger.warning(
-                "Reviewer blocking findings attempt %d subtask %d",
-                attempt + 1,
-                subtask_id,
-            )
-            if not should_retry(attempt + 1, max_retries):
-                break
-            await asyncio.sleep(0.5 * (2**attempt))
-
-        await _subtask_slot_cm.__aexit__(None, None, None)
-
-        if db is not None and _subtask_idx < len(_db_subtask_rows):
-            try:
-                from app.db.repository import update_subtask_status
-
-                await update_subtask_status(
-                    db, _db_subtask_rows[_subtask_idx].id, subtask_status
-                )
-            except Exception:
-                logger.debug(
-                    "Could not persist status for subtask %d (non-fatal)",
-                    subtask_id,
-                    exc_info=True,
-                )
-
-        results.append(
-            {
-                "subtask_id": subtask_id,
-                "type": subtask_type,
-                "status": subtask_status,
-                "files_changed": files_changed,
-                "review_summary": review_summary,
-                "qa_summary": qa_summary,
-                "review_findings": review_findings,
-                "diff": subtask_diff,
-            }
         )
 
-        if subtask_status == "blocked":
+        for outcome in outcomes:
+            result = outcome["result"]
+            subtask_id = result["subtask_id"]
+            results.append(result)
+            epic_tokens_in += outcome["tokens_in"]
+            epic_tokens_out += outcome["tokens_out"]
+
+            if not outcome["blocked"]:
+                if on_status:
+                    on_status(subtask_id, "completed")
+                continue
+
             blocked_count += 1
             await publish_event(
                 GridironEvent(
@@ -685,6 +944,15 @@ async def run_manager(
                 ),
                 db=db,
             )
+
+            if halted:
+                # Already decided to halt earlier in THIS SAME wave — this
+                # outcome was already in flight when that decision was
+                # made (fan-out waves can't be partially un-started), so
+                # its result/tokens/blocked_count above are still real and
+                # recorded, but no further per-subtask escalate/abort
+                # bookkeeping runs once the epic-level halt is decided.
+                continue
 
             # Halt the epic early if too many subtasks failed
             if blocked_count >= max_epic_failures:
@@ -721,7 +989,8 @@ async def run_manager(
                     )
                 except Exception:
                     pass
-                break
+                halted = True
+                continue
 
             # A single subtask exhausted its retries but the epic continues —
             # recoverable, not terminal: escalate (mark manager degraded) and
@@ -744,9 +1013,9 @@ async def run_manager(
                 pass
 
             overall_status = "blocked"
-        else:
-            if on_status:
-                on_status(subtask_id, "completed")
+
+        if halted:
+            break
 
     return {
         "status": overall_status,
@@ -1119,7 +1388,19 @@ async def _conflict_check_node(state: EpicManagerState) -> dict[str, Any]:
     a coder/backend-dev/frontend-dev subtask" but had zero real callers.
     Checked here, right before coding starts, using the architect plan's
     impacted_files — the same field conflict_guard.py's own
-    _get_epic_files() reads from PipelineState.architect_plan."""
+    _get_epic_files() reads from PipelineState.architect_plan.
+
+    Gap-closure (Batch 2 audit, §2 "Duplicate work prevented"):
+    check_file_conflicts() above is a real, useful point-in-time READ, but
+    not a HELD lock — a second epic's own check could still land in the
+    race window before this epic's reservation below completes. Batch 2
+    audit gap-closure) also reserves a real, DB-enforced held lock
+    (app/pipeline/file_locks.py::reserve_epic_files(), UNIQUE constraint on
+    file_path) right after the advisory check passes — this is the actual
+    correctness guarantee; the check above just gives a nicer, epic-title-
+    attributed error message in the common (non-race) case. Released once
+    the epic reaches a terminal state (_finalize_node, mirroring the
+    existing clear_epic_scratchpad() calls there)."""
     from sqlalchemy import update as sa_update
 
     from app.db.models import Epic
@@ -1135,10 +1416,16 @@ async def _conflict_check_node(state: EpicManagerState) -> dict[str, Any]:
         for f in architect_plan.get("impacted_files", [])
         if isinstance(f, dict) and f.get("path")
     ]
+    conflict: str | None = None
     if candidate_files:
         from app.pipeline.conflict_guard import check_file_conflicts
 
         conflict = await check_file_conflicts(candidate_files, epic_id, db)
+        if not conflict:
+            from app.pipeline.file_locks import reserve_epic_files
+
+            conflict = await reserve_epic_files(candidate_files, epic_id, db)
+
         if conflict:
             logger.warning("Epic %s halted on file conflict: %s", epic_id, conflict)
             await db.execute(
@@ -1216,6 +1503,7 @@ async def _coding_node(state: EpicManagerState) -> dict[str, Any]:
         repo_path=repo,
         epic_id=epic_id,
         db=db,
+        enable_fanout=get_settings().enable_subtask_fanout,
     )
     record_orchestration_time("run_manager", (_time.monotonic() - _t0) * 1000)
 
@@ -1318,6 +1606,12 @@ async def _finalize_node(state: EpicManagerState) -> dict[str, Any]:
         from app.fleet.scratchpad import clear_epic_scratchpad
 
         await clear_epic_scratchpad(epic_id, db)
+        # Batch 2 audit gap-closure (§2 "Duplicate work prevented") — release
+        # this epic's held file locks (app/pipeline/file_locks.py) now that
+        # it's terminal, same lifecycle as the scratchpad clear above.
+        from app.pipeline.file_locks import release_epic_files
+
+        await release_epic_files(epic_id, db)
         return {
             "package": EpicApprovalPackage(
                 epic_id=epic_id,
@@ -1368,6 +1662,12 @@ async def _finalize_node(state: EpicManagerState) -> dict[str, Any]:
     from app.fleet.scratchpad import clear_epic_scratchpad
 
     await clear_epic_scratchpad(epic_id, db)
+    # Batch 2 audit gap-closure (§2 "Duplicate work prevented") — release
+    # this epic's held file locks (app/pipeline/file_locks.py) now that
+    # it's terminal, same lifecycle as the scratchpad clear above.
+    from app.pipeline.file_locks import release_epic_files
+
+    await release_epic_files(epic_id, db)
 
     return {
         "package": EpicApprovalPackage(

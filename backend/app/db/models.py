@@ -794,6 +794,41 @@ class EpicScratchpad(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class EpicFileLock(Base):
+    """Batch 2 audit gap-closure (§2 "Duplicate work prevented") —
+    app/pipeline/file_locks.py.
+
+    `conflict_guard.check_file_conflicts()` (app/pipeline/conflict_guard.py)
+    was only ever a point-in-time READ of other epics' architect_plan —
+    real, but not a HELD lock: a second epic whose own check ran in the
+    gap between that read and this epic's own conflict_check_node
+    completing could still race in and start coding the same files. This
+    table is the real held lock: a UNIQUE constraint on file_path means at
+    most one epic can ever hold a row for a given file, enforced by
+    Postgres itself (not app-level timing), acquired atomically for every
+    candidate file at once (a partial acquire is rolled back entirely —
+    see reserve_epic_files()) right before the epic enters its coding
+    phase, and released the moment the epic reaches a terminal state
+    (halted or ready_for_review — see app/agents/manager.py's
+    _finalize_node, which already does the same for EpicScratchpad).
+
+    expires_at mirrors EpicScratchpad's own TTL safety net: an epic that
+    crashes mid-coding (never reaching _finalize_node) must not permanently
+    deadlock some file for every future epic — see
+    settings.epic_file_lock_ttl_seconds.
+    """
+
+    __tablename__ = "epic_file_locks"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    epic_id: Mapped[str] = mapped_column(String(100), index=True)
+    file_path: Mapped[str] = mapped_column(Text, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ArchitectureScore(Base):
     """Stage 4 Cluster Q — Architecture slice (2026-08-05,
     app/fleet/architecture_score.py).

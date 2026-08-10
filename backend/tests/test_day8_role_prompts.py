@@ -53,11 +53,16 @@ _REQUIRED_ROLE_SPECIFIC_SECTIONS = (
 )
 
 
-def test_role_file_count_is_72() -> None:
+def test_role_file_count_is_76() -> None:
     # 67 from Day 0-8 (68 agent_models.json entries minus groq_adapter, which has no role
     # file) + 5 Day 9 fleet-enhancement agents (agent_performance_reviewer, agent_debugger,
-    # agent_advisor, knowledge_curator, quality_auditor).
-    assert len(_ROLE_NAMES) == 72, f"expected 72 role files, found {len(_ROLE_NAMES)}"
+    # agent_advisor, knowledge_curator, quality_auditor) = 72.
+    # + 4 (Batch 2 audit gap-closure, 2026-08-10): agent_roster_doc_agent,
+    # architecture_doc_agent, migration_guide_doc_agent, tool_catalog_doc_agent
+    # each had a real caller (app/api/specialized_agents.py) but no role file —
+    # load_role() would raise FileNotFoundError on first real invocation. Fixed
+    # by adding the 4 missing files, not by removing the callers.
+    assert len(_ROLE_NAMES) == 76, f"expected 76 role files, found {len(_ROLE_NAMES)}"
 
 
 def test_global_standards_file_exists() -> None:

@@ -44,6 +44,16 @@ class AgentInstance:
     health: str = "healthy"
     error_count: int = 0
     total_runs: int = 0
+    # Gap-closure (Batch 2 audit, §3 "Confidence"): the planner's own
+    # self-reported confidence (base_graph.py's `state["confidence"]`,
+    # 0.0-1.0) from this agent's most recent completed runs, as an
+    # exponential moving average — real per-run data that already existed
+    # and already gated a post-hoc quality check, but was never carried
+    # forward into anything FleetManager.select() could read. None until
+    # this agent has completed at least one run through run_agent_graph()
+    # with planning enabled (matches every real backend_dev/frontend_dev
+    # call — see base_graph.py's complete_task() call site).
+    avg_confidence: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -59,10 +69,20 @@ class AgentInstance:
         self.last_active = _now()
         self.total_runs += 1
 
-    def complete(self) -> None:
+    def complete(self, confidence: float | None = None) -> None:
         self.state = AgentState.SLEEP
         self.current_task_id = None
         self.last_active = _now()
+        if confidence is not None:
+            # EMA (alpha=0.3): weights recent runs more than old ones
+            # without a single bad/good run swinging the average wildly —
+            # same smoothing rationale as success_rate's own accumulation
+            # elsewhere in the fleet layer.
+            self.avg_confidence = (
+                confidence
+                if self.avg_confidence is None
+                else (0.3 * confidence + 0.7 * self.avg_confidence)
+            )
 
     def fail(self, reason: str) -> None:
         self.state = AgentState.ERROR
@@ -120,11 +140,13 @@ class AgentRegistry:
             instance.start(task_id or str(uuid.uuid4()))
             return instance
 
-    def complete_task(self, name: str) -> AgentInstance | None:
+    def complete_task(
+        self, name: str, confidence: float | None = None
+    ) -> AgentInstance | None:
         with self._lock:
             instance = self._instances.get(name)
             if instance:
-                instance.complete()
+                instance.complete(confidence=confidence)
             return instance
 
     def fail_task(self, name: str, reason: str) -> AgentInstance | None:

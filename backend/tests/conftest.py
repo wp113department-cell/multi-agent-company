@@ -86,6 +86,31 @@ def reset_db_engine():  # type: ignore[no-untyped-def]
 
 
 @pytest.fixture(autouse=True)
+def reset_concurrency_semaphores():  # type: ignore[no-untyped-def]
+    """Batch 2 audit gap-closure (2026-08-10) — same process-wide-singleton
+    hazard class as reset_db_engine/reset_circuit_breakers above, just never
+    extended to this third module: app.pipeline.concurrency's _epic_sem/
+    _agent_run_sem/_subtask_sems are lazily-created process-global
+    singletons, and several tests (test_concurrency.py's
+    TestSlotAcquisitionTimeout, in particular) call reset_for_testing() with
+    a deliberately tiny cap (e.g. max_agent_runs=1) to exercise the timeout
+    path, with no teardown to restore a normal cap afterward. Without this
+    fixture, any test running later in the SAME pytest session — regardless
+    of which file it's in — silently inherits that cap-of-1, making real
+    concurrency (e.g. tests/test_subtask_fanout.py's fan-out tests)
+    impossible to observe even though the code under test is correct.
+    Reset to None (not to a specific reset_for_testing() value) so the next
+    _get_*_sem() call rebuilds fresh from that test's own real settings,
+    matching the module's own lazy-init pattern."""
+    yield
+    import app.pipeline.concurrency as _conc
+
+    _conc._epic_sem = None
+    _conc._agent_run_sem = None
+    _conc._subtask_sems = {}
+
+
+@pytest.fixture(autouse=True)
 def reset_circuit_breakers():  # type: ignore[no-untyped-def]
     """Gap-closure Day 22 (Stage 1.3, answers.md) — get_anthropic_breaker()/
     get_groq_breaker() are module-level singletons shared across the whole

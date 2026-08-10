@@ -2936,7 +2936,14 @@ def run_agent_graph(
 
             _reg = get_agent_registry()
             if _reg.get(role_name) is not None:
-                _reg.complete_task(role_name)  # → AgentState.SLEEP
+                # Gap-closure (Batch 2 audit, §3 "Confidence") — the
+                # planner's own self-reported confidence for this run
+                # (already real, already gates the quality gate below) now
+                # also feeds AgentInstance.avg_confidence, so a future
+                # dispatch decision (FleetManager.select()) can read it.
+                _reg.complete_task(
+                    role_name, confidence=final_state.get("confidence")
+                )  # → AgentState.SLEEP
             publish(task_completed(task_id=task_id, agent_name=role_name, trace_id=tid))
             publish(
                 health_updated(role_name, health="healthy", state="sleep", trace_id=tid)

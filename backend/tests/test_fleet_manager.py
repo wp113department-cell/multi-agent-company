@@ -99,6 +99,100 @@ class TestScoring:
         assert plan.agent_name == "safe"
 
 
+class TestTenureAndConfidenceScoring:
+    """Batch 2 audit gap-closure (§3 "Experience (tenure)" / "Confidence")
+    — both were real AgentInstance-adjacent signals (total_runs already
+    existed; confidence is real per-run planner output) that select()
+    never read. Neutral for a fresh agent (matches every other test in
+    this file, none of which override total_runs/avg_confidence); only
+    differentiates candidates once real run history exists.
+    """
+
+    def test_fresh_agents_score_identically_regardless_of_tenure_fields_existing(
+        self,
+    ) -> None:
+        """Same setup as test_prefers_higher_success_rate but confirms the
+        NEW factors don't change WHICH agent wins when both start fresh —
+        success_rate alone still decides it."""
+        fm = _setup(
+            [
+                _cap("good", ["coding"], success_rate=0.95),
+                _cap("bad", ["coding"], success_rate=0.50),
+            ]
+        )
+        plan = fm.select("coding")
+        assert plan is not None
+        assert plan.agent_name == "good"
+
+    def test_more_experienced_agent_wins_a_tie(self) -> None:
+        fm = _setup(
+            [
+                _cap("veteran", ["coding"], success_rate=0.9),
+                _cap("rookie", ["coding"], success_rate=0.9),
+            ]
+        )
+        fm._agents.get("veteran").total_runs = 50
+        plan = fm.select("coding")
+        assert plan is not None
+        assert plan.agent_name == "veteran"
+
+    def test_higher_confidence_wins_a_tie(self) -> None:
+        fm = _setup(
+            [
+                _cap("confident", ["coding"], success_rate=0.9),
+                _cap("unsure", ["coding"], success_rate=0.9),
+            ]
+        )
+        fm._agents.get("confident").avg_confidence = 0.95
+        fm._agents.get("unsure").avg_confidence = 0.4
+        plan = fm.select("coding")
+        assert plan is not None
+        assert plan.agent_name == "confident"
+
+    def test_tenure_bonus_cannot_overcome_a_real_health_gap(self) -> None:
+        """The tenure/confidence factors must never let an unhealthy or
+        low-success agent outrank a healthy one just by having run more —
+        capped small enough (max +30% via log1p) to never close a real
+        success_rate gap this large (0.95 vs 0.3)."""
+        fm = _setup(
+            [
+                _cap("healthy_newcomer", ["coding"], success_rate=0.95),
+                _cap("degraded_veteran", ["coding"], success_rate=0.3),
+            ]
+        )
+        veteran = fm._agents.get("degraded_veteran")
+        veteran.total_runs = 100_000
+        veteran.avg_confidence = 1.0
+        plan = fm.select("coding")
+        assert plan is not None
+        assert plan.agent_name == "healthy_newcomer"
+
+
+class TestAgentInstanceConfidenceTracking:
+    def test_complete_task_sets_confidence_on_first_run(self) -> None:
+        reg = AgentRegistry()
+        reg.register("agent_x")
+        reg.complete_task("agent_x", confidence=0.8)
+        assert reg.get("agent_x").avg_confidence == 0.8
+
+    def test_complete_task_without_confidence_leaves_avg_confidence_none(self) -> None:
+        reg = AgentRegistry()
+        reg.register("agent_x")
+        reg.complete_task("agent_x")
+        assert reg.get("agent_x").avg_confidence is None
+
+    def test_repeated_completions_average_via_ema(self) -> None:
+        reg = AgentRegistry()
+        reg.register("agent_x")
+        reg.complete_task("agent_x", confidence=1.0)
+        first = reg.get("agent_x").avg_confidence
+        reg.complete_task("agent_x", confidence=0.0)
+        second = reg.get("agent_x").avg_confidence
+        assert first == 1.0
+        # EMA (alpha=0.3): 0.3*0.0 + 0.7*1.0 = 0.7, not a full reset to 0.0
+        assert second is not None and abs(second - 0.7) < 1e-9
+
+
 class TestDispatch:
     def test_dispatch_marks_agent_as_running(self) -> None:
         fm = _setup([_cap("worker", ["processing"])])

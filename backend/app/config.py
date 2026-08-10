@@ -274,6 +274,19 @@ class Settings(BaseSettings):
     manager_max_epic_failures: int = Field(
         default=2, description="Number of subtask failures that trigger epic.halted"
     )
+    # Gap-closure (Batch 2 audit, §2 "Multiple agents work simultaneously
+    # (fan-out)"): run_manager()'s subtask loop was a strict sequential
+    # for-loop even for subtasks with no depends_on edge between them.
+    # Real, tested wave-based concurrent dispatch now exists (bounded by
+    # the existing agent_run_slot/subtask_slot semaphores, same as the
+    # sequential path), gated behind this flag and defaulting False for
+    # the same reason base_graph.py's own enable_replanning defaults False
+    # — landing a new capability without changing behavior for any
+    # existing caller/test that never opts in.
+    enable_subtask_fanout: bool = Field(
+        default=False,
+        description="Dispatch independent subtasks (no depends_on edge) concurrently in dependency-respecting waves instead of strictly sequentially",
+    )
 
     # Phase 5 — DevOps Agent bash allowlist (comma-separated command prefixes)
     devops_bash_allowlist: str = Field(
@@ -980,6 +993,15 @@ class Settings(BaseSettings):
     scratchpad_ttl_seconds: int = Field(
         default=14400,
         description="Max lifetime (seconds) of an epic_scratchpad entry before it's treated as expired, even if the epic never explicitly completes. Default 4 hours. Entries are also cleared outright the moment their epic completes — this TTL only matters for an epic that stalls or never finishes.",
+    )
+    # Gap-closure (Batch 2 audit, §2 "Duplicate work prevented"): same TTL
+    # safety-net pattern as scratchpad_ttl_seconds above, for
+    # app/pipeline/file_locks.py's real held file locks — an epic that
+    # crashes mid-coding (never reaching _finalize_node's release call)
+    # must not permanently deadlock a file for every future epic.
+    epic_file_lock_ttl_seconds: int = Field(
+        default=14400,
+        description="Max lifetime (seconds) of an epic_file_locks row before it's treated as expired/stale, even if the epic never explicitly completes. Default 4 hours. Locks are also released outright the moment their epic completes — this TTL only matters for an epic that stalls or crashes mid-coding.",
     )
 
     # Groq (optional — enables Groq as LLM backend when ANTHROPIC_API_KEY is unavailable)

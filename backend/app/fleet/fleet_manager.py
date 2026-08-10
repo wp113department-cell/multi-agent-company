@@ -8,6 +8,9 @@ Rules (from Master Prompt §3):
 - Query capability_registry for agents that cover the requested capabilities.
 - Query agent_registry to confirm the candidate is actually available (Sleep/Idle).
 - Score candidates by: health weight (1.0/0.5/0.0) × success_rate × (1 / (1+error_count))
+  × tenure factor × confidence factor (Batch 2 audit gap-closure — see select()'s
+  own docstring for the exact formula and why each factor is neutral, not
+  score-dominant, for a freshly-registered agent with no run history yet).
 - Refuse dispatch if no healthy available agent covers the requested capabilities.
 - Refuse dispatch if the agent's contract does not cover requested side_effects.
 
@@ -20,6 +23,7 @@ Design decisions:
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -81,6 +85,25 @@ class FleetManager:
         (tool_discovery.check_availability()), catching a stale or typo'd
         tool name in an agent's own contract. Defaults False so every
         existing caller keeps its exact current behavior.
+
+        Scoring (Batch 2 audit gap-closure, §3 "Experience (tenure)" /
+        "Confidence"): the base health/success_rate/error_count formula is
+        multiplied by two more real, already-tracked-but-previously-unread
+        AgentInstance factors:
+        - tenure_factor = 1 + min(log1p(total_runs) * 0.05, 0.3) — a
+          diminishing-returns bonus (capped at +30%) for an agent with more
+          completed runs under its belt. log1p rather than a raw count so
+          run #1 -> #2 matters more than run #500 -> #501.
+        - confidence_factor = avg_confidence if the agent has completed at
+          least one planned run, else 1.0 (neutral — no history yet to
+          judge by, matches every pre-existing test's freshly-registered
+          agents, which all have avg_confidence=None).
+        Both are 1.0 for a brand-new agent instance (total_runs=0,
+        avg_confidence=None), so a fresh registry is scored IDENTICALLY to
+        before this change — these factors only start differentiating
+        candidates once real run history exists, and even then the tenure
+        bonus is capped small enough that a genuinely unhealthy/low-success
+        agent can never outscore a healthy one on tenure alone.
         """
         candidates = self._caps.find_by_capability(required_capability)
         if not candidates:
@@ -137,8 +160,16 @@ class FleetManager:
             health_weight = {"healthy": 1.0, "degraded": 0.5, "unhealthy": 0.0}.get(
                 instance.health, 0.0
             )
+            tenure_factor = 1.0 + min(math.log1p(instance.total_runs) * 0.05, 0.3)
+            confidence_factor = (
+                instance.avg_confidence if instance.avg_confidence is not None else 1.0
+            )
             score = (
-                health_weight * cap.success_rate * (1.0 / (1.0 + instance.error_count))
+                health_weight
+                * cap.success_rate
+                * (1.0 / (1.0 + instance.error_count))
+                * tenure_factor
+                * confidence_factor
             )
             scored.append((score, cap, instance))
 
