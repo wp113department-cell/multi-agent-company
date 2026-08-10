@@ -376,9 +376,7 @@ def rename_symbol(
         count: int
         if fp.suffix == ".py":
             try:
-                modified, count = _rename_in_python_source(
-                    original, old_name, new_name
-                )
+                modified, count = _rename_in_python_source(original, old_name, new_name)
             except (SyntaxError, IndentationError, ValueError, OSError):
                 count = len(pattern.findall(original))
                 modified = pattern.sub(new_name, original) if count else original
@@ -399,7 +397,9 @@ def rename_symbol(
             f"  {fp.relative_to(d)}  ({count} occurrence(s))"
             for fp, _modified, count in planned[:50]
         )
-        more = f"\n  ... and {len(planned) - 50} more file(s)" if len(planned) > 50 else ""
+        more = (
+            f"\n  ... and {len(planned) - 50} more file(s)" if len(planned) > 50 else ""
+        )
         return (
             f"[DRY RUN] '{old_name}' → '{new_name}' would touch {len(planned)} "
             f"file(s), above the safety threshold of {max_files}. No files "

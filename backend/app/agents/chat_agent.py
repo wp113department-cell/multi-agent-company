@@ -845,8 +845,11 @@ class ChatAgent:
                 return f"[ERROR] {e}"
 
         if tool_name == "read_files":
+            rf_all_paths = inp.get("paths") or []
+            rf_offset = max(0, int(inp.get("offset", 0)))
+            rf_page = rf_all_paths[rf_offset : rf_offset + 20]
             file_parts: list[str] = []
-            for rel in (inp.get("paths") or [])[:20]:
+            for rel in rf_page:
                 fp = root / str(rel)
                 try:
                     file_parts.append(
@@ -856,7 +859,20 @@ class ChatAgent:
                     )
                 except Exception as e:
                     file_parts.append(f"=== {rel} ===\n[ERROR] {e}")
-            return "\n\n".join(file_parts) or "[ERROR] No paths given"
+            if not file_parts:
+                return (
+                    "[ERROR] No paths given"
+                    if not rf_all_paths
+                    else "(no paths at this offset)"
+                )
+            rf_remaining = len(rf_all_paths) - (rf_offset + len(rf_page))
+            if rf_remaining > 0:
+                file_parts.append(
+                    f"[NOTICE] {rf_remaining} of {len(rf_all_paths)} requested "
+                    f"path(s) were not read (20-per-call limit). Call again "
+                    f"with offset={rf_offset + len(rf_page)} to continue."
+                )
+            return "\n\n".join(file_parts)
 
         if tool_name == "file_exists":
             p = root / str(inp["path"])
@@ -1462,7 +1478,9 @@ class ChatAgent:
             async def _lint(cmd_str: str, label: str, diag_tool: str = "") -> None:
                 out = await asyncio.to_thread(_run_subprocess, cmd_str, repo, 90)
                 out = out or "clean"
-                summary = parse_diagnostic_summary(out, diag_tool) if diag_tool else None
+                summary = (
+                    parse_diagnostic_summary(out, diag_tool) if diag_tool else None
+                )
                 header = f"=== {label} ===" + (f" {summary}" if summary else "")
                 lint_parts.append(f"{header}\n{out}")
 

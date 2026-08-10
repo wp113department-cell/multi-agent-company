@@ -301,14 +301,18 @@ READ_ONLY_TOOLS = [
     # ---- Enhanced search & analysis tools (non-destructive) ----
     {
         "name": "read_files",
-        "description": "Read multiple files at once. Returns each file's content labeled by path. Far more efficient than calling read_file repeatedly when you need to explore several files.",
+        "description": "Read multiple files at once. Returns each file's content labeled by path. Far more efficient than calling read_file repeatedly when you need to explore several files. Only 20 files are read per call; if more paths are given, the result ends with a [NOTICE] telling you the offset to pass on the next call to read the rest.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "paths": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "List of file paths relative to repo root (max 20 files)",
+                    "description": "List of file paths relative to repo root (20 read per call, see offset)",
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Index into paths to start reading from, for paging through more than 20 paths across multiple calls (default 0)",
                 },
             },
             "required": ["paths"],
@@ -1283,7 +1287,15 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
             return "[ERROR] git log timed out"
 
     def read_files(inp: dict[str, Any]) -> str:
-        paths: list[str] = inp.get("paths", [])[:20]
+        # AUDIT_Q_BATCH01 §59 "Read hundreds of files safely" — previously
+        # silently truncated to the first 20 paths with no signal to the
+        # caller that anything was dropped. offset lets a caller page
+        # through more than 20 paths across repeated calls; the truncation
+        # notice makes it explicit rather than a caller having to notice a
+        # missing file on its own.
+        all_paths: list[str] = inp.get("paths", [])
+        rf_offset = max(0, int(inp.get("offset", 0)))
+        paths = all_paths[rf_offset : rf_offset + 20]
         parts: list[str] = []
         for rel in paths:
             policy = check_path_in_worktree(rel, repo_path)
@@ -1299,7 +1311,20 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
                     parts.append(f"=== {rel} ===\n{content}")
                 except Exception as e:
                     parts.append(f"=== {rel} ===\n[ERROR] {e}")
-        return "\n\n".join(parts) if parts else "[ERROR] No paths provided"
+        if not parts:
+            return (
+                "[ERROR] No paths provided"
+                if not all_paths
+                else "(no paths at this offset)"
+            )
+        remaining = len(all_paths) - (rf_offset + len(paths))
+        if remaining > 0:
+            parts.append(
+                f"[NOTICE] {remaining} of {len(all_paths)} requested path(s) were "
+                f"not read (20-per-call limit). Call again with "
+                f"offset={rf_offset + len(paths)} to continue."
+            )
+        return "\n\n".join(parts)
 
     def file_exists(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
@@ -8475,7 +8500,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         sf_source_policy = check_path_in_worktree(sf_source, repo_path)
         if not sf_source_policy.allowed:
             return f"[POLICY DENIED] {sf_source_policy.reason}"
-        sf_source_path = base / sf_source
+        sf_source_path = root / sf_source
         if not sf_source_path.exists():
             return f"[ERROR] Source file not found: {sf_source}"
         try:
@@ -8488,9 +8513,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             sf_target = str(sf_target)
             sf_tgt_policy = check_path_in_worktree(sf_target, repo_path)
             if not sf_tgt_policy.allowed:
-                sf_results.append(f"  {sf_target}: [POLICY DENIED] {sf_tgt_policy.reason}")
+                sf_results.append(
+                    f"  {sf_target}: [POLICY DENIED] {sf_tgt_policy.reason}"
+                )
                 continue
-            sf_tgt_path = base / sf_target
+            sf_tgt_path = root / sf_target
             try:
                 sf_existing = (
                     sf_tgt_path.read_text(encoding="utf-8")
@@ -8552,7 +8579,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
         raw_commands = inp.get("commands")
         if not isinstance(raw_commands, list) or not raw_commands:
-            return "[ERROR] commands must be a non-empty list of {command, cwd?} objects"
+            return (
+                "[ERROR] commands must be a non-empty list of {command, cwd?} objects"
+            )
         if len(raw_commands) > _MAX_PARALLEL_COMMANDS:
             return f"[ERROR] run_parallel_commands supports at most {_MAX_PARALLEL_COMMANDS} commands per call"
         rpc_timeout = int(inp.get("timeout", 60))
