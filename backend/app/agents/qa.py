@@ -113,45 +113,94 @@ def run_qa(
     on_heartbeat: Any = None,  # kept for backward compat — no-op
     on_tool_call: Any = None,  # kept for backward compat — no-op
 ) -> QAResult:
-    """Run QA agent against the worktree. Returns QAResult (never raises — errors become failed status)."""
+    """Run QA agent against the worktree. Returns QAResult (never raises — errors become failed status).
+
+    AUDIT_Q_BATCH04 §6 gap-closure (2026-08-10) — outer retry+feedback loop,
+    reusing app.fleet.failure_ladder.should_retry exactly as backend_dev.py/
+    frontend_dev.py already do for their static-check retries. QA has no
+    static check of its own to retry (pytest/mypy/ruff run INSIDE the graph
+    via the bash tool, not after it), so the retry trigger here is either an
+    exception or the agent never reaching submit_qa_result — previously
+    both cases gave up after a single attempt, unlike coder/backend_dev/
+    frontend_dev.
+    """
+    from app.fleet.failure_ladder import should_retry
+
     settings = get_settings()
     repo = repo_path or settings.target_repo_path
-    handlers = make_qa_handlers(worktree_path, repo)
-    handlers["record_learning"] = make_record_learning_handler("qa")
+    max_retries = settings.max_retries
+    total_in = 0
+    total_out = 0
+    last_error = ""
 
-    initial_message = (
-        f"Task ID: {task_id}, Subtask ID: {subtask_id}\n\n"
-        f"Files changed by developer: {', '.join(files_changed) or '(none listed)'}\n\n"
-        "Run the test suite and all checks:\n"
-        "1. Run pytest (or npm test for frontend changes)\n"
-        "2. Run mypy typecheck\n"
-        "3. Run ruff lint\n"
-        "Capture all output. Then call submit_qa_result with the structured results."
-    )
+    for attempt in range(max_retries):
+        handlers = make_qa_handlers(worktree_path, repo)
+        handlers["record_learning"] = make_record_learning_handler("qa")
 
-    try:
-        final_state = run_agent_graph(
-            role_name="qa",
-            model=settings.model_coder,
-            tools=QA_TOOLS,
-            tool_handlers=handlers,
-            verification_cfg=_VERIFICATION_CFG,
-            initial_message=initial_message,
-            task_description=f"QA testing — subtask {subtask_id}",
-            repo_path=repo,
-            model_haiku=settings.model_router,
-            enable_planning=True,
-            enable_memory=True,
-            enable_reflection=True,
-            enable_lesson=True,
-            # Gap-closure Days 11-14 (Stage 1.1, answers.md): one of the 5
-            # highest output-risk agents opted into self-critique ahead of a
-            # fleet-wide default flip — see coder.py's identical comment for
-            # the mechanism.
-            enable_critique=True,
-            max_turns=20,
-            task_id=str(task_id),
+        initial_message = (
+            f"Task ID: {task_id}, Subtask ID: {subtask_id}\n\n"
+            f"Files changed by developer: {', '.join(files_changed) or '(none listed)'}\n\n"
+            "Run the test suite and all checks:\n"
+            "1. Run pytest (or npm test for frontend changes)\n"
+            "2. Run mypy typecheck\n"
+            "3. Run ruff lint\n"
+            "Capture all output. Then call submit_qa_result with the structured results."
         )
+        if attempt > 0 and last_error:
+            initial_message += (
+                f"\n\n[RETRY {attempt}] Previous attempt failed: {last_error}\n"
+                "Make sure to run the checks and call submit_qa_result before "
+                "running out of turns."
+            )
+
+        try:
+            final_state = run_agent_graph(
+                role_name="qa",
+                model=settings.model_coder,
+                tools=QA_TOOLS,
+                tool_handlers=handlers,
+                verification_cfg=_VERIFICATION_CFG,
+                initial_message=initial_message,
+                task_description=f"QA testing — subtask {subtask_id}",
+                repo_path=repo,
+                model_haiku=settings.model_router,
+                enable_planning=True,
+                enable_memory=True,
+                enable_reflection=True,
+                enable_lesson=True,
+                # Gap-closure Days 11-14 (Stage 1.1, answers.md): one of the 5
+                # highest output-risk agents opted into self-critique ahead of
+                # a fleet-wide default flip — see coder.py's identical
+                # comment for the mechanism.
+                enable_critique=True,
+                # AUDIT_Q_BATCH04 §6 gap-closure (2026-08-10) — same opt-in as
+                # coder.py: qa.md has a real Quality Gates section.
+                enable_replanning=True,
+                max_turns=20,
+                task_id=str(task_id),
+            )
+        except Exception as exc:
+            logger.exception(
+                "QA agent failed for subtask %d (attempt %d)", subtask_id, attempt + 1
+            )
+            last_error = f"QA agent error: {exc}"
+            if not should_retry(attempt + 1, max_retries):
+                return QAResult(
+                    status="failed",
+                    tests_run=0,
+                    tests_passed=0,
+                    tests_failed=0,
+                    typecheck_clean=False,
+                    lint_clean=False,
+                    tokens_in=total_in,
+                    tokens_out=total_out,
+                    errors=[last_error],
+                    summary=last_error,
+                )
+            continue
+
+        total_in += final_state.get("tokens_in", 0)
+        total_out += final_state.get("tokens_out", 0)
         logger.info(
             "QA done — subtask %d, in=%d out=%d submitted=%s",
             subtask_id,
@@ -159,37 +208,56 @@ def run_qa(
             final_state.get("tokens_out", 0),
             final_state.get("submitted", False),
         )
-    except Exception as exc:
-        logger.exception("QA agent failed for subtask %d", subtask_id)
-        return QAResult(
-            status="failed",
-            tests_run=0,
-            tests_passed=0,
-            tests_failed=0,
-            typecheck_clean=False,
-            lint_clean=False,
-            errors=[f"QA agent error: {exc}"],
-            summary=f"QA agent error: {exc}",
+
+        if not final_state.get("submitted"):
+            last_error = "QA agent did not call submit_qa_result within the turn limit"
+            if not should_retry(attempt + 1, max_retries):
+                raw = handlers.get("_qa_result", {})
+                return QAResult(
+                    status=str(raw.get("status", "failed")),
+                    tests_run=int(raw.get("tests_run", 0)),
+                    tests_passed=int(raw.get("tests_passed", 0)),
+                    tests_failed=int(raw.get("tests_failed", 0)),
+                    typecheck_clean=bool(raw.get("typecheck_clean", False)),
+                    lint_clean=bool(raw.get("lint_clean", False)),
+                    tokens_in=total_in,
+                    tokens_out=total_out,
+                    errors=list(raw.get("errors", [])) or [last_error],
+                    summary=str(raw.get("summary", "")) or last_error,
+                )
+            continue
+
+        raw = handlers.get("_qa_result", {})
+        logger.info(
+            "QA result — subtask %d, status=%s",
+            subtask_id,
+            raw.get("status", "unknown"),
         )
 
-    raw = handlers.get("_qa_result", {})
-    logger.info(
-        "QA result — subtask %d, status=%s",
-        subtask_id,
-        raw.get("status", "unknown"),
-    )
+        return QAResult(
+            status=str(raw.get("status", "failed")),
+            tests_run=int(raw.get("tests_run", 0)),
+            tests_passed=int(raw.get("tests_passed", 0)),
+            tests_failed=int(raw.get("tests_failed", 0)),
+            typecheck_clean=bool(raw.get("typecheck_clean", False)),
+            lint_clean=bool(raw.get("lint_clean", False)),
+            tokens_in=total_in,
+            tokens_out=total_out,
+            errors=list(raw.get("errors", [])),
+            summary=str(raw.get("summary", "")),
+        )
 
     return QAResult(
-        status=str(raw.get("status", "failed")),
-        tests_run=int(raw.get("tests_run", 0)),
-        tests_passed=int(raw.get("tests_passed", 0)),
-        tests_failed=int(raw.get("tests_failed", 0)),
-        typecheck_clean=bool(raw.get("typecheck_clean", False)),
-        lint_clean=bool(raw.get("lint_clean", False)),
-        tokens_in=int(final_state.get("tokens_in", 0)),
-        tokens_out=int(final_state.get("tokens_out", 0)),
-        errors=list(raw.get("errors", [])),
-        summary=str(raw.get("summary", "")),
+        status="failed",
+        tests_run=0,
+        tests_passed=0,
+        tests_failed=0,
+        typecheck_clean=False,
+        lint_clean=False,
+        tokens_in=total_in,
+        tokens_out=total_out,
+        errors=[last_error or f"QA blocked after {max_retries} attempts"],
+        summary=last_error or f"QA blocked after {max_retries} attempts",
     )
 
 

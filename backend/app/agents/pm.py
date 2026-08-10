@@ -102,11 +102,18 @@ _VERIFICATION_CFG = VerificationConfig(
 
 
 def pm_node(state: PipelineState) -> PipelineState:
+    """AUDIT_Q_BATCH04 §6 gap-closure (2026-08-10) — outer retry+feedback
+    loop, reusing app.fleet.failure_ladder.should_retry exactly as
+    backend_dev.py/frontend_dev.py/coder.py/qa.py already do. pm has no
+    static check to retry (it's read-only), so the trigger is either an
+    exception or the agent never reaching submit_brief — previously both
+    cases gave up after a single attempt, the only sampled agent (besides
+    the now also gap-closed qa/security_reviewer) with no outer recovery.
+    """
+    from app.fleet.failure_ladder import should_retry
+
     settings = get_settings()
     repo = state.get("repo_path", settings.target_repo_path)
-    handlers = make_read_only_handlers(repo)
-    handlers["submit_brief"] = lambda inp: "Brief submitted"
-    handlers["record_learning"] = make_record_learning_handler("pm")
 
     # Day 18 — Real-Time Streaming. task_id was never threaded into
     # run_agent_graph() from any pipeline node, so the activity stream (fully
@@ -132,47 +139,82 @@ def pm_node(state: PipelineState) -> PipelineState:
         else ""
     )
 
-    initial_message = (
-        f"Task title: {state['task_title']}\n\n"
-        f"Task description:\n{state['task_description']}"
-        f"{memory_block}{image_block}\n\n"
-        "Produce the PM brief using the submit_brief tool."
-    )
+    max_retries = settings.max_retries
+    total_in = 0
+    total_out = 0
+    last_error = ""
 
-    try:
-        final_state = run_agent_graph(
-            role_name="pm",
-            model=settings.model_planner,
-            tools=READ_ONLY_TOOLS + [_SUBMIT_TOOL, RECORD_LEARNING_TOOL],
-            tool_handlers=handlers,
-            verification_cfg=_VERIFICATION_CFG,
-            initial_message=initial_message,
-            task_description=state["task_description"],
-            repo_path=repo,
-            model_haiku=settings.model_router,
-            enable_planning=True,
-            enable_memory=True,
-            enable_reflection=True,
-            enable_lesson=True,
-            max_turns=10,
-            images=images,
-            task_id=stream_task_id,
+    for attempt in range(max_retries):
+        handlers = make_read_only_handlers(repo)
+        handlers["submit_brief"] = lambda inp: "Brief submitted"
+        handlers["record_learning"] = make_record_learning_handler("pm")
+
+        initial_message = (
+            f"Task title: {state['task_title']}\n\n"
+            f"Task description:\n{state['task_description']}"
+            f"{memory_block}{image_block}\n\n"
+            "Produce the PM brief using the submit_brief tool."
         )
+        if attempt > 0 and last_error:
+            initial_message += (
+                f"\n\n[RETRY {attempt}] Previous attempt failed: {last_error}\n"
+                "Make sure to call submit_brief before running out of turns."
+            )
+
+        try:
+            final_state = run_agent_graph(
+                role_name="pm",
+                model=settings.model_planner,
+                tools=READ_ONLY_TOOLS + [_SUBMIT_TOOL, RECORD_LEARNING_TOOL],
+                tool_handlers=handlers,
+                verification_cfg=_VERIFICATION_CFG,
+                initial_message=initial_message,
+                task_description=state["task_description"],
+                repo_path=repo,
+                model_haiku=settings.model_router,
+                enable_planning=True,
+                enable_memory=True,
+                enable_reflection=True,
+                enable_lesson=True,
+                # AUDIT_Q_BATCH04 §6 gap-closure (2026-08-10) — same ahead-of-
+                # fleet-flip opt-in as coder.py/qa.py: pm.md has a real
+                # Quality Gates section.
+                enable_critique=True,
+                enable_replanning=True,
+                max_turns=10,
+                images=images,
+                task_id=stream_task_id,
+            )
+        except Exception as exc:
+            logger.exception("PM Agent failed (attempt %d)", attempt + 1)
+            last_error = f"PM Agent failed: {exc}"
+            if not should_retry(attempt + 1, max_retries):
+                return {**state, "stage": "blocked", "error": last_error}
+            continue
+
+        total_in += final_state.get("tokens_in", 0)
+        total_out += final_state.get("tokens_out", 0)
         logger.info(
             "PM Agent done — tokens_in=%d tokens_out=%d submitted=%s",
             final_state.get("tokens_in", 0),
             final_state.get("tokens_out", 0),
             final_state.get("submitted", False),
         )
-    except Exception as exc:
-        logger.exception("PM Agent failed")
-        return {**state, "stage": "blocked", "error": f"PM Agent failed: {exc}"}
 
-    brief_result = final_state.get("result", {})
-    if not brief_result or not final_state.get("submitted"):
-        return {**state, "stage": "blocked", "error": "PM Agent did not submit a brief"}
+        brief_result = final_state.get("result", {})
+        if not brief_result or not final_state.get("submitted"):
+            last_error = "PM Agent did not submit a brief"
+            if not should_retry(attempt + 1, max_retries):
+                return {**state, "stage": "blocked", "error": last_error}
+            continue
 
-    return {**state, "pm_brief": brief_result, "stage": "architect"}
+        return {**state, "pm_brief": brief_result, "stage": "architect"}
+
+    return {
+        **state,
+        "stage": "blocked",
+        "error": last_error or f"PM Agent blocked after {max_retries} attempts",
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -98,6 +98,8 @@ def test_chat_agent_pushes_a_real_sse_event_when_frustrated() -> None:
     agent.session.history = [{"role": "user", "content": "fix the login bug now"}]
     agent._system = "system prompt"
     agent._memory_read_context = AsyncMock(return_value="")  # type: ignore[method-assign]
+    agent._tokens_in = 0
+    agent._tokens_out = 0
     agent._graph = MagicMock()
     agent._graph.ainvoke = AsyncMock()
 
@@ -119,6 +121,8 @@ def test_chat_agent_does_not_push_sentiment_event_for_a_neutral_message() -> Non
     agent.session.history = []
     agent._system = "system prompt"
     agent._memory_read_context = AsyncMock(return_value="")  # type: ignore[method-assign]
+    agent._tokens_in = 0
+    agent._tokens_out = 0
     agent._graph = MagicMock()
     agent._graph.ainvoke = AsyncMock()
 

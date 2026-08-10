@@ -63,6 +63,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any, TypedDict, cast
@@ -79,7 +80,7 @@ from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
-from app.agents.base import get_effective_api_key
+from app.agents.base import get_effective_api_key, load_role
 from app.agents.base_graph import (
     VerificationConfig,
     _flag_suspicious_tool_output,
@@ -380,12 +381,6 @@ def _register() -> None:
 _register()
 
 
-def _load_role(name: str) -> str:
-    roles_dir = Path(__file__).parent.parent.parent / "roles"
-    p = roles_dir / f"{name}.md"
-    return p.read_text(encoding="utf-8") if p.exists() else f"You are the {name} agent."
-
-
 def _run_subprocess(
     command: str, cwd: str, timeout: int = 120, *, fail_on_nonzero_exit: bool = False
 ) -> str:
@@ -617,7 +612,19 @@ class ChatAgent:
     def __init__(self, session: ChatSession) -> None:
         self.session = session
         self.root = Path(session.repo_path)
-        self._system = _load_role("chat")
+        # AUDIT_Q_BATCH04 §6 gap-closure (2026-08-10) — was chat_agent's own
+        # local _load_role() (a pure roles_dir/name.md read, no global-
+        # standards prepend), a real divergence from every other agent: the
+        # shared app.agents.base.load_role() also prepends
+        # roles/_GLOBAL_STANDARDS.md (the honest-errors/verification/
+        # self-review constitution every one of the other ~76 agents'
+        # system prompts already carries — tests/test_day8_role_prompts.py
+        # ::test_load_role_prepends_global_standards_at_runtime already
+        # covers "chat" in its role-file parametrization and passes against
+        # load_role() directly, proving roles/chat.md was always compliant;
+        # this call site just wasn't using it). Same roles/ directory, same
+        # file — reusing the shared loader instead of a second copy.
+        self._system = load_role("chat")
         # Per-session background process table (one ChatAgent per ChatSession) —
         # mirrors make_chat_handlers()'s per-session isolation in tools.py so one
         # session cannot kill or read another session's background process.
@@ -643,6 +650,20 @@ class ChatAgent:
         # needing to round-trip through checkpointed graph state.
         self._tokens_in: int = 0
         self._tokens_out: int = 0
+        # AUDIT_Q_BATCH04 §6 gap-closure (2026-08-10) — chat_agent tracked
+        # tokens/tools entirely on its own instance state and never fed the
+        # shared app.fleet.metrics.RunMetrics span the other ~76
+        # run_agent_graph()-based agents all use (confirmed by grep: no
+        # "fleet.metrics" reference anywhere in this file before this fix).
+        # Set for the duration of one graph ainvoke() (run() or resume(),
+        # each its own span — a paused-for-confirmation turn genuinely
+        # completes its pre-interrupt span; resume() opens a new one for the
+        # post-interrupt continuation, since RunMetrics has no notion of a
+        # single span suspended across two separate ASGI requests) so
+        # _execute_tool_node can attach real per-tool-call timing via the
+        # same get_metrics_collector().get(trace_id) lookup base_graph.py's
+        # execute_tools node already uses (app/agents/base_graph.py:1844).
+        self._current_trace_id: str = ""
 
     def _client(self) -> anthropic.AsyncAnthropic:
         # AUDIT_Q_BATCH08 §38/§66 — explicit, config-driven max_retries,
@@ -3117,6 +3138,7 @@ class ChatAgent:
                 f"{AGENT_CONTRACT['expected_verification'].get(blocking_key, '')}"
             )
         else:
+            _tool_t0 = time.monotonic()
             try:
                 result = await self._execute_tool(tu["name"], tu["input"])
             except GraphBubbleUp:
@@ -3132,6 +3154,23 @@ class ChatAgent:
             except Exception as e:
                 result = f"[ERROR] Tool {tu['name']} failed: {e}"
                 logger.exception("Tool %s failed", tu["name"])
+
+            _tool_duration_ms = (time.monotonic() - _tool_t0) * 1000
+            _tool_ok = not result.startswith("[ERROR]") and not result.startswith(
+                "[POLICY"
+            )
+            if self._current_trace_id:
+                try:
+                    from app.fleet.metrics import get_metrics_collector
+
+                    _m = get_metrics_collector().get(self._current_trace_id)
+                    if _m is not None:
+                        _tool_err = None if _tool_ok else result[:200]
+                        _m.record_tool(
+                            tu["name"], _tool_ok, _tool_duration_ms, _tool_err
+                        )
+                except Exception:
+                    pass
 
             if not result.startswith("[ERROR]") and not result.startswith("[POLICY"):
                 # AUDIT_Q_BATCH11 §21 — base_graph.py's execute_tools node
@@ -3281,7 +3320,20 @@ class ChatAgent:
             "last_error": None,
             "stop": False,
         }
-        await self._graph.ainvoke(initial_state, config=config)
+
+        from app.fleet.metrics import run_span
+
+        tokens_in_before, tokens_out_before = self._tokens_in, self._tokens_out
+        with run_span("chat_agent", task_id=self.session.session_id) as _metrics:
+            self._current_trace_id = _metrics.trace_id
+            try:
+                await self._graph.ainvoke(initial_state, config=config)
+            finally:
+                _metrics.record_tokens(
+                    self._tokens_in - tokens_in_before,
+                    self._tokens_out - tokens_out_before,
+                )
+                self._current_trace_id = ""
 
     async def resume(self, action_id: str, approved: bool) -> bool:
         """Resume a turn paused at a real interrupt() after a human
@@ -3306,5 +3358,19 @@ class ChatAgent:
             )
             return False
 
-        await self._graph.ainvoke(Command(resume={"approved": approved}), config=config)
+        from app.fleet.metrics import run_span
+
+        tokens_in_before, tokens_out_before = self._tokens_in, self._tokens_out
+        with run_span("chat_agent", task_id=self.session.session_id) as _metrics:
+            self._current_trace_id = _metrics.trace_id
+            try:
+                await self._graph.ainvoke(
+                    Command(resume={"approved": approved}), config=config
+                )
+            finally:
+                _metrics.record_tokens(
+                    self._tokens_in - tokens_in_before,
+                    self._tokens_out - tokens_out_before,
+                )
+                self._current_trace_id = ""
         return True

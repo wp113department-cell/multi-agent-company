@@ -27,6 +27,7 @@ def _make_agent() -> ChatAgent:
     agent.session.push = AsyncMock()
     agent.session.history = []
     agent._current_tool_use_id = ""
+    agent._current_trace_id = ""
     return agent
 
 

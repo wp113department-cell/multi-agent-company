@@ -169,6 +169,13 @@ def run_coder(
                 # bounded to max_critique_retries=1 (default) so a flaky/
                 # unsatisfiable critique can't loop forever.
                 enable_critique=True,
+                # AUDIT_Q_BATCH04 §6 gap-closure (2026-08-10) — same ahead-of-
+                # fleet-flip opt-in as enable_critique above: coder.md has a
+                # real Quality Gates section, so critique_retries can
+                # legitimately reach the >=2 threshold _should_replan checks
+                # (base_graph.py::_should_replan) when the same criteria keep
+                # failing across retries. Bounded by max_replans=1 (default).
+                enable_replanning=True,
                 max_turns=30,
                 task_id=str(task_id),
             )

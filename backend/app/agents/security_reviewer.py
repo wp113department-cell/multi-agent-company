@@ -83,54 +83,143 @@ def run_security_review(
     on_heartbeat: Any = None,
     on_tool_call: Any = None,
 ) -> AgentResult:
+    """Run the security review agent. Returns AgentResult (never raises —
+    errors become status="failed").
+
+    AUDIT_Q_BATCH04 §6 gap-closure (2026-08-10) — this previously had no
+    try/except around run_agent_graph() at all (a real gap: a mid-run
+    exception, e.g. an LLM outage the circuit breaker doesn't fully absorb,
+    propagated straight out to whatever called run_security_review instead
+    of degrading gracefully like every other sampled agent). Now catches and
+    retries with feedback, reusing app.fleet.failure_ladder.should_retry —
+    the same bounded-retry primitive backend_dev.py/frontend_dev.py/coder.py
+    already use, matching this agent's read-only, no-static-check shape the
+    same way qa.py's retry (also gap-closed this pass) does.
+    """
+    from app.fleet.failure_ladder import should_retry
+
     settings = get_settings()
     repo = repo_path or str(settings.target_repo_path)
-    handlers = make_security_reviewer_handlers(repo)
+    max_retries = settings.max_retries
+    total_in = 0
+    total_out = 0
+    last_error = ""
 
-    handlers["record_learning"] = make_record_learning_handler("security_reviewer")
-    message = (
-        f"Task #{task_id} — Security Review\n\nFocus: {focus}\n\n"
-        "Process (read-only — never edit files):\n"
-        "1. Run secrets_scan to find hardcoded credentials.\n"
-        "2. Use find_sql to locate raw SQL — check for unparameterised queries.\n"
-        "3. Use find_route / find_api to enumerate endpoints and check auth decorators.\n"
-        "4. Use find_config to check for insecure defaults.\n"
-        "5. Use read_file / search_code to inspect suspicious code in context.\n"
-        "6. Call submit_security_report with findings (each must cite file:line read this run), "
-        "severity, scope_covered, scope_not_covered.\n"
-        "RULE: Never claim a vulnerability without reading the actual code line."
-    )
+    for attempt in range(max_retries):
+        handlers = make_security_reviewer_handlers(repo)
+        handlers["record_learning"] = make_record_learning_handler("security_reviewer")
+        message = (
+            f"Task #{task_id} — Security Review\n\nFocus: {focus}\n\n"
+            "Process (read-only — never edit files):\n"
+            "1. Run secrets_scan to find hardcoded credentials.\n"
+            "2. Use find_sql to locate raw SQL — check for unparameterised queries.\n"
+            "3. Use find_route / find_api to enumerate endpoints and check auth decorators.\n"
+            "4. Use find_config to check for insecure defaults.\n"
+            "5. Use read_file / search_code to inspect suspicious code in context.\n"
+            "6. Call submit_security_report with findings (each must cite file:line read this run), "
+            "severity, scope_covered, scope_not_covered.\n"
+            "RULE: Never claim a vulnerability without reading the actual code line."
+        )
+        if attempt > 0 and last_error:
+            message += (
+                f"\n\n[RETRY {attempt}] Previous attempt failed: {last_error}\n"
+                "Make sure to call submit_security_report before running out of turns."
+            )
 
-    final_state = run_agent_graph(
-        task_id=str(task_id),
-        role_name="security_reviewer",
-        model=settings.model_coder,
-        tools=SECURITY_REVIEWER_TOOLS + [RECORD_LEARNING_TOOL],
-        tool_handlers=handlers,
-        verification_cfg=_VERIFICATION_CFG,
-        initial_message=message,
-        task_description=f"Security review — task {task_id}: {focus}",
-        repo_path=repo,
-        model_haiku=settings.model_router,
-        enable_planning=True,
-        enable_memory=True,
-        enable_reflection=True,
-        enable_lesson=True,
-        max_turns=20,
-    )
+        try:
+            final_state = run_agent_graph(
+                task_id=str(task_id),
+                role_name="security_reviewer",
+                model=settings.model_coder,
+                tools=SECURITY_REVIEWER_TOOLS + [RECORD_LEARNING_TOOL],
+                tool_handlers=handlers,
+                verification_cfg=_VERIFICATION_CFG,
+                initial_message=message,
+                task_description=f"Security review — task {task_id}: {focus}",
+                repo_path=repo,
+                model_haiku=settings.model_router,
+                enable_planning=True,
+                enable_memory=True,
+                enable_reflection=True,
+                enable_lesson=True,
+                # AUDIT_Q_BATCH04 §6 gap-closure (2026-08-10) — same ahead-of-
+                # fleet-flip opt-in as coder.py/qa.py: security_reviewer.md
+                # has a real Quality Gates section.
+                enable_critique=True,
+                enable_replanning=True,
+                max_turns=20,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Security reviewer failed for task %d (attempt %d)",
+                task_id,
+                attempt + 1,
+            )
+            last_error = f"Security reviewer error: {exc}"
+            if not should_retry(attempt + 1, max_retries):
+                return AgentResult(
+                    summary=last_error,
+                    findings=[],
+                    files_touched=[],
+                    verified=False,
+                    requires_human_approval=False,
+                    tokens_in=total_in,
+                    tokens_out=total_out,
+                    status="failed",
+                    raw={},
+                )
+            continue
 
-    raw = final_state["result"]
-    findings = list(raw.get("findings", []))
+        total_in += final_state["tokens_in"]
+        total_out += final_state["tokens_out"]
+
+        if not final_state["submitted"]:
+            last_error = (
+                "Security reviewer did not call submit_security_report "
+                "within the turn limit"
+            )
+            if not should_retry(attempt + 1, max_retries):
+                raw = final_state["result"]
+                findings = list(raw.get("findings", []))
+                return AgentResult(
+                    summary=str(raw.get("summary", last_error)),
+                    findings=findings,
+                    files_touched=[],
+                    verified=bool(
+                        final_state["verification"].get("scan_ran", False)
+                    ),
+                    requires_human_approval=False,
+                    tokens_in=total_in,
+                    tokens_out=total_out,
+                    status="blocked",
+                    raw=raw,
+                )
+            continue
+
+        raw = final_state["result"]
+        findings = list(raw.get("findings", []))
+        return AgentResult(
+            summary=str(raw.get("summary", f"{len(findings)} security findings")),
+            findings=findings,
+            files_touched=[],
+            verified=bool(final_state["verification"].get("scan_ran", False)),
+            requires_human_approval=False,
+            tokens_in=total_in,
+            tokens_out=total_out,
+            status="completed",
+            raw=raw,
+        )
+
     return AgentResult(
-        summary=str(raw.get("summary", f"{len(findings)} security findings")),
-        findings=findings,
+        summary=last_error or f"Security reviewer blocked after {max_retries} attempts",
+        findings=[],
         files_touched=[],
-        verified=bool(final_state["verification"].get("scan_ran", False)),
+        verified=False,
         requires_human_approval=False,
-        tokens_in=final_state["tokens_in"],
-        tokens_out=final_state["tokens_out"],
-        status="completed" if final_state["submitted"] else "blocked",
-        raw=raw,
+        tokens_in=total_in,
+        tokens_out=total_out,
+        status="failed",
+        raw={},
     )
 
 
