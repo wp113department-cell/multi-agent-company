@@ -74,6 +74,25 @@ class Settings(BaseSettings):
         "or restarted server can find and terminate orphans left running "
         "with nothing else able to stop them (app/fleet/bg_process_registry.py).",
     )
+    bg_process_hang_threshold_seconds: int = Field(
+        default=3600,
+        description="AUDIT_Q_BATCH01 §17/§58 'Detect hanging processes' — a "
+        "background process (run_background) still alive past this age is "
+        "flagged 'possibly_hung' in list_background_processes and the "
+        "liveness sweep's health event, distinct from the dead-process "
+        "reap sweep. Advisory only — never auto-killed, since many "
+        "legitimate background commands (dev servers, watchers) run "
+        "indefinitely by design.",
+    )
+    rename_symbol_max_files: int = Field(
+        default=200,
+        description="AUDIT_Q_BATCH01 §59 'Edit hundreds of files safely' — "
+        "rename_symbol returns a dry-run preview (no writes) instead of "
+        "rewriting every matching file when the match count exceeds this, "
+        "unless the caller passes confirm_large_batch=true. Safety valve "
+        "against an unbounded, blast-radius write triggered by an "
+        "over-broad old_name/directory combination.",
+    )
 
     # Pipeline behaviour
     pipeline_mode: str = Field(

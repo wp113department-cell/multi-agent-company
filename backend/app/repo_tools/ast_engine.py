@@ -286,10 +286,64 @@ def detect_circular_imports(directory: str) -> str:
     return "\n".join(lines)
 
 
+def _rename_in_python_source(
+    source: str, old_name: str, new_name: str
+) -> tuple[str, int]:
+    """Token-based rename for Python source (AUDIT_Q_BATCH01 §18 "Refactor
+    projects" — the previous whole-file regex substitution matched
+    old_name's text inside string literals and comments too, not just real
+    identifier references). Only NAME tokens exactly equal to old_name are
+    replaced, at their exact (line, column) span in the ORIGINAL text — no
+    full untokenize() reconstruction, so every other character (including
+    all whitespace/formatting) is left byte-identical, the same guarantee
+    the regex path already had, just now identifier-aware.
+
+    Raises tokenize.TokenizeError/IndentationError/SyntaxError on genuinely
+    unparseable source — callers catch this and fall back to the regex path
+    for that one file, rather than the whole rename_symbol call failing.
+    """
+    import io
+    import tokenize as _tokenize
+
+    tokens = list(_tokenize.generate_tokens(io.StringIO(source).readline))
+    by_line: dict[int, list[tuple[int, int]]] = {}
+    count = 0
+    for tok in tokens:
+        if tok.type == _tokenize.NAME and tok.string == old_name:
+            by_line.setdefault(tok.start[0], []).append((tok.start[1], tok.end[1]))
+            count += 1
+    if count == 0:
+        return source, 0
+
+    lines = source.splitlines(keepends=True)
+    for lineno, spans in by_line.items():
+        line = lines[lineno - 1]
+        for col_start, col_end in sorted(spans, reverse=True):
+            line = line[:col_start] + new_name + line[col_end:]
+        lines[lineno - 1] = line
+    return "".join(lines), count
+
+
 def rename_symbol(
-    old_name: str, new_name: str, directory: str, file_pattern: str = "*.py"
+    old_name: str,
+    new_name: str,
+    directory: str,
+    file_pattern: str = "*.py",
+    confirm_large_batch: bool = False,
 ) -> str:
-    """Word-boundary rename old_name → new_name across files matching file_pattern in directory."""
+    """Rename old_name → new_name across files matching file_pattern in
+    directory. .py files (when file_pattern selects them) use a token-based
+    rename that skips string/comment content; other file patterns (e.g.
+    "*.ts") use the original word-boundary regex substitution, since a
+    stdlib-only, zero-extra-dependency tool has no non-Python tokenizer
+    available — a documented, honest limitation, not a silent gap.
+
+    AUDIT_Q_BATCH01 §59 "Edit hundreds of files safely" — a match count
+    over Settings.rename_symbol_max_files returns a dry-run preview (lists
+    affected files, writes nothing) instead of rewriting an unbounded
+    number of files in one call, unless confirm_large_batch=True. This is
+    the safety valve the previous unconditional-write version had none of.
+    """
     d = Path(directory)
     if not d.exists():
         return f"[ERROR] Directory not found: {directory}"
@@ -301,28 +355,79 @@ def rename_symbol(
         return f"[ERROR] new_name must be a valid identifier: {new_name!r}"
 
     pattern = re.compile(r"\b" + re.escape(old_name) + r"\b")
-    changed: list[str] = []
-
-    for fp in d.rglob(file_pattern):
-        if any(
+    candidates: list[Path] = [
+        fp
+        for fp in d.rglob(file_pattern)
+        if not any(
             part in (".git", "__pycache__", ".venv", "node_modules")
             for part in fp.parts
-        ):
-            continue
+        )
+    ]
+
+    # First pass: count matches per file without writing anything, so a
+    # dry-run preview never has to do the rewrite work twice.
+    planned: list[tuple[Path, str, int]] = []  # (path, new_content, count)
+    for fp in candidates:
         try:
             original = fp.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        count = len(pattern.findall(original))
-        if count == 0:
-            continue
-        modified = pattern.sub(new_name, original)
+        modified: str
+        count: int
+        if fp.suffix == ".py":
+            try:
+                modified, count = _rename_in_python_source(
+                    original, old_name, new_name
+                )
+            except (SyntaxError, IndentationError, ValueError, OSError):
+                count = len(pattern.findall(original))
+                modified = pattern.sub(new_name, original) if count else original
+        else:
+            count = len(pattern.findall(original))
+            modified = pattern.sub(new_name, original) if count else original
+        if count:
+            planned.append((fp, modified, count))
+
+    if not planned:
+        return f"(no occurrences of '{old_name}' found in {file_pattern!r} files under {directory!r})"
+
+    from app.config import get_settings
+
+    max_files = get_settings().rename_symbol_max_files
+    if len(planned) > max_files and not confirm_large_batch:
+        preview = "\n".join(
+            f"  {fp.relative_to(d)}  ({count} occurrence(s))"
+            for fp, _modified, count in planned[:50]
+        )
+        more = f"\n  ... and {len(planned) - 50} more file(s)" if len(planned) > 50 else ""
+        return (
+            f"[DRY RUN] '{old_name}' → '{new_name}' would touch {len(planned)} "
+            f"file(s), above the safety threshold of {max_files}. No files "
+            f"were written. Preview:\n{preview}{more}\n"
+            "Re-run with confirm_large_batch=true to actually apply this rename."
+        )
+
+    changed: list[str] = []
+    for fp, modified, count in planned:
         fp.write_text(modified, encoding="utf-8")
         changed.append(f"  {fp.relative_to(d)}  ({count} replacement(s))")
 
-    if not changed:
-        return f"(no occurrences of '{old_name}' found in {file_pattern!r} files under {directory!r})"
-    return (
+    result = (
         f"Renamed '{old_name}' → '{new_name}' across {len(changed)} file(s):\n"
         + "\n".join(changed)
     )
+
+    # AUDIT_Q_BATCH01 §59 "Preserve architecture consistency" — a batch
+    # rename is exactly the kind of multi-file mechanical edit that can
+    # silently introduce a circular import (e.g. renaming a module-level
+    # name into one already used by a sibling module it imports from). Only
+    # worth the extra AST pass for a real multi-file batch, not a
+    # single-file rename.
+    if len(changed) > 1:
+        py_files_changed = any(fp.suffix == ".py" for fp, _m, _c in planned)
+        if py_files_changed:
+            consistency = detect_circular_imports(str(d))
+            if "No circular imports detected" not in consistency:
+                result += f"\n\n[ARCHITECTURE CHECK] {consistency}"
+
+    return result

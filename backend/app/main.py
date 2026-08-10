@@ -891,6 +891,18 @@ async def validation_exception_handler(
 
 
 @app.get("/health")
+# k6 load-test gap-closure (2026-08-10): a liveness/readiness probe must
+# never be rate-limited — load balancers, container orchestrators (k8s
+# livenessProbe/readinessProbe), and uptime monitors all poll it far more
+# frequently than rate_limit_default (200/minute) allows, and a false 429
+# here reads as "unhealthy", which is actively harmful (can trigger a
+# real, unwarranted restart/failover). This was previously masked by the
+# _find_route_handler bug fixed in app/rate_limit.py — every OTHER route
+# was accidentally exempt too, so /health being subject to the default
+# limit never stood out until that bug was fixed and this became the one
+# route still incorrectly throttled, exactly matching the k6 load-test
+# failure (46% of /health requests got 429'd at just 10 concurrent VUs).
+@limiter.exempt  # type: ignore[untyped-decorator]  # slowapi's Limiter.exempt has no upstream type annotations
 async def health() -> dict[str, object]:
     """Liveness + readiness probe: checks DB, Redis (if enabled), S3 (if enabled)."""
     import asyncio

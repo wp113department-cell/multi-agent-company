@@ -12,6 +12,10 @@ from app.agents.conflict_resolution import (
     _apply_conflict_resolutions as _apply_conflict_resolutions,
     _parse_conflict_markers as _parse_conflict_markers,
 )
+from app.agents.output_parsers import (
+    parse_diagnostic_summary,
+    parse_pytest_summary,
+)
 from app.agents.tool_security import (
     _docker_container_risk_reason as _docker_container_risk_reason,
     _extract_patch_target_paths as _extract_patch_target_paths,
@@ -2593,13 +2597,40 @@ _COMPARE_FILES_TOOL = {
     },
 }
 
+# AUDIT_Q_BATCH01 §18 "Synchronize files" — no dedicated cross-file
+# synchronization tool previously existed (rename_symbol's multi-file
+# rewrite is incidental to a rename, not a general sync primitive). "paths"
+# (not "targets") deliberately matches _POLICY_PATH_FIELD_NAMES in
+# base_graph.py so the shared single-interceptor _policy_check
+# automatically path-checks every target here, the same as read_files'
+# own "paths" field — no special-casing needed there.
+_SYNC_FILES_TOOL = {
+    "name": "sync_files",
+    "description": "Copy a source file's content to one or more target paths, but only where the content actually differs (also creates targets that don't exist yet). Use to keep intentionally-duplicated files (e.g. a shared config copied into multiple packages) consistent.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "source": {
+                "type": "string",
+                "description": "Source file path relative to repo root",
+            },
+            "paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Target file paths to synchronize from source",
+            },
+        },
+        "required": ["source", "paths"],
+    },
+}
+
 # ---------------------------------------------------------------------------
 # NEW TOOL SPECS — Batch 2: Terminal extras
 # ---------------------------------------------------------------------------
 
 _RUN_BACKGROUND_TOOL_DEF = {
     "name": "run_background",
-    "description": "Start a shell command in the background. Returns immediately with a PID. Use kill_process to stop it.",
+    "description": "Start a shell command in the background. Returns immediately with a PID. Use kill_process to stop it. Pass wait_for_pids to only start this command after other background PID(s) have exited (task dependency chaining).",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -2611,8 +2642,59 @@ _RUN_BACKGROUND_TOOL_DEF = {
                 "type": "string",
                 "description": "Working directory (default: repo root)",
             },
+            "wait_for_pids": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "PIDs (from earlier run_background calls) that must exit before this command starts running — expresses a dependency between background jobs.",
+            },
         },
         "required": ["command"],
+    },
+}
+
+_LIST_BACKGROUND_PROCESSES_TOOL = {
+    "name": "list_background_processes",
+    "description": "List background processes started in this session via run_background, with age and whether each is possibly hung (alive well past the expected runtime). Distinct from list_processes, which lists all OS processes.",
+    "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+    },
+}
+
+# AUDIT_Q_BATCH01 §58 "Concurrent command execution (fan-out)" — previously
+# zero asyncio.gather/TaskGroup usage anywhere in backend/app; every
+# bash-shaped tool ran exactly one command at a time even when a caller had
+# several genuinely independent commands to run.
+_MAX_PARALLEL_COMMANDS = 10
+
+_RUN_PARALLEL_COMMANDS_TOOL = {
+    "name": "run_parallel_commands",
+    "description": f"Run up to {_MAX_PARALLEL_COMMANDS} independent shell commands concurrently (fan-out) and return each result. Use only for commands that do NOT depend on each other's output (e.g. two unrelated test suites); for anything destructive or that needs human confirmation, use the bash tool individually instead.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "commands": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "string"},
+                        "cwd": {
+                            "type": "string",
+                            "description": "Working directory (default: repo root)",
+                        },
+                    },
+                    "required": ["command"],
+                },
+                "description": f"Commands to run concurrently (max {_MAX_PARALLEL_COMMANDS})",
+            },
+            "timeout": {
+                "type": "integer",
+                "description": "Per-command timeout in seconds (default 60)",
+            },
+        },
+        "required": ["commands"],
     },
 }
 
@@ -3257,8 +3339,12 @@ _CIRCULAR_DEP_DETECT_TOOL = {
 _RENAME_SYMBOL_TOOL = {
     "name": "rename_symbol",
     "description": (
-        "Word-boundary rename a symbol (function, class, variable) across all matching files. "
-        "Uses Python regex to avoid false positives. Shows each file changed and replacement count. "
+        "Rename a symbol (function, class, variable) across all matching files. "
+        "For .py files, uses a token-based rename that skips occurrences inside "
+        "string literals and comments (other file patterns use word-boundary regex). "
+        "Shows each file changed and replacement count. If more files would be "
+        "touched than the configured safety threshold, returns a no-write dry-run "
+        "preview instead — pass confirm_large_batch=true to actually apply it. "
         "Always read the file first to confirm the symbol before renaming."
     ),
     "input_schema": {
@@ -3279,6 +3365,10 @@ _RENAME_SYMBOL_TOOL = {
             "file_pattern": {
                 "type": "string",
                 "description": "Glob pattern for files (default: *.py)",
+            },
+            "confirm_large_batch": {
+                "type": "boolean",
+                "description": "Set true to actually apply a rename that would touch more files than the safety threshold (otherwise a dry-run preview is returned instead)",
             },
         },
         "required": ["old_name", "new_name"],
@@ -4786,6 +4876,7 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
             inp["new_name"],
             str(root / directory) if directory else str(root),
             str(inp.get("file_pattern", "*.py")),
+            confirm_large_batch=bool(inp.get("confirm_large_batch", False)),
         )
 
     def rf_replace_function(inp: dict[str, Any]) -> str:
@@ -7339,9 +7430,12 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _DELETE_LINES_TOOL,
     _APPLY_PATCH_TOOL_DEF,
     _COMPARE_FILES_TOOL,
+    _SYNC_FILES_TOOL,
     # Batch 2 — Terminal extras
     _RUN_BACKGROUND_TOOL_DEF,
     _KILL_PROCESS_TOOL,
+    _LIST_BACKGROUND_PROCESSES_TOOL,
+    _RUN_PARALLEL_COMMANDS_TOOL,
     _RUN_PYTHON_SNIPPET_TOOL,
     _RUN_MAKE_TOOL,
     _FETCH_URL_TOOL,
@@ -8038,6 +8132,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 cmd, shell=True, capture_output=True, text=True, timeout=180
             )
             out = (result.stdout + result.stderr)[:5000]
+            # AUDIT_Q_BATCH01 §17 "Parse test output (pytest/etc.)" —
+            # structured pass/fail/error/skip counts from pytest's own
+            # summary line, prepended so the exit code isn't the only
+            # signal a caller has to distinguish e.g. 1 assertion failure
+            # from 40 collection errors.
+            summary = parse_pytest_summary(out) if runner == "pytest" else None
+            if summary:
+                out = f"{summary}\n{out}"
             # Gap-closure Day 15 (Stage 1.2, answers.md): the real exit code
             # used to be discarded entirely — any non-crashing run (all
             # tests failing included) returned plain text, which every
@@ -8074,7 +8176,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             r = subprocess.run(
                 cmd, shell=True, capture_output=True, text=True, timeout=60
             )
-            results.append(f"=== ruff ===\n{(r.stdout + r.stderr)[:2000] or 'clean'}")
+            ruff_out = (r.stdout + r.stderr)[:2000] or "clean"
+            ruff_summary = parse_diagnostic_summary(ruff_out, "ruff")
+            results.append(
+                f"=== ruff ==={f' {ruff_summary}' if ruff_summary else ''}\n{ruff_out}"
+            )
 
         if tool in ("mypy", "all"):
             target = qpath or f"{repo_path}"
@@ -8082,7 +8188,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             r = subprocess.run(
                 cmd, shell=True, capture_output=True, text=True, timeout=90
             )
-            results.append(f"=== mypy ===\n{(r.stdout + r.stderr)[:2000] or 'clean'}")
+            mypy_out = (r.stdout + r.stderr)[:2000] or "clean"
+            mypy_summary = parse_diagnostic_summary(mypy_out, "mypy")
+            results.append(
+                f"=== mypy ==={f' {mypy_summary}' if mypy_summary else ''}\n{mypy_out}"
+            )
 
         if tool in ("tsc", "all"):
             web = str(root.parent / "apps" / "web")
@@ -8090,7 +8200,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             r = subprocess.run(
                 cmd, shell=True, capture_output=True, text=True, timeout=90
             )
-            results.append(f"=== tsc ===\n{(r.stdout + r.stderr)[:2000] or 'clean'}")
+            tsc_out = (r.stdout + r.stderr)[:2000] or "clean"
+            tsc_summary = parse_diagnostic_summary(tsc_out, "tsc")
+            results.append(
+                f"=== tsc ==={f' {tsc_summary}' if tsc_summary else ''}\n{tsc_out}"
+            )
 
         if tool == "black":
             target = qpath or f"{repo_path}"
@@ -8353,65 +8467,140 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         )
         return r.stdout[:8000] or "Files are identical"
 
+    def sync_files(inp: dict[str, Any]) -> str:
+        sf_source = str(inp["source"])
+        sf_targets = inp.get("paths") or []
+        if not sf_targets:
+            return "[ERROR] paths must be a non-empty list of target file paths"
+        sf_source_policy = check_path_in_worktree(sf_source, repo_path)
+        if not sf_source_policy.allowed:
+            return f"[POLICY DENIED] {sf_source_policy.reason}"
+        sf_source_path = base / sf_source
+        if not sf_source_path.exists():
+            return f"[ERROR] Source file not found: {sf_source}"
+        try:
+            sf_content = sf_source_path.read_text(encoding="utf-8")
+        except Exception as e:
+            return f"[ERROR] Could not read source {sf_source}: {e}"
+
+        sf_results: list[str] = []
+        for sf_target in sf_targets:
+            sf_target = str(sf_target)
+            sf_tgt_policy = check_path_in_worktree(sf_target, repo_path)
+            if not sf_tgt_policy.allowed:
+                sf_results.append(f"  {sf_target}: [POLICY DENIED] {sf_tgt_policy.reason}")
+                continue
+            sf_tgt_path = base / sf_target
+            try:
+                sf_existing = (
+                    sf_tgt_path.read_text(encoding="utf-8")
+                    if sf_tgt_path.exists()
+                    else None
+                )
+            except Exception as e:
+                sf_results.append(f"  {sf_target}: [ERROR] {e}")
+                continue
+            if sf_existing == sf_content:
+                sf_results.append(f"  {sf_target}: unchanged (already in sync)")
+                continue
+            try:
+                sf_tgt_path.parent.mkdir(parents=True, exist_ok=True)
+                sf_tgt_path.write_text(sf_content, encoding="utf-8")
+                sf_results.append(
+                    f"  {sf_target}: "
+                    f"{'created' if sf_existing is None else 'updated'} from {sf_source}"
+                )
+            except Exception as e:
+                sf_results.append(f"  {sf_target}: [ERROR] {e}")
+        return (
+            f"Synchronized '{sf_source}' to {len(sf_targets)} target(s):\n"
+            + "\n".join(sf_results)
+        )
+
     # =========================================================================
     # BATCH 2 — Terminal extras
     # =========================================================================
 
     def run_background(inp: dict[str, Any]) -> str:
+        from app.fleet import process_manager as _pm
+
         rb_command = str(inp["command"])
         rb_cwd = str(inp.get("cwd") or repo_path)
         rb_policy = check_command(rb_command)
         if not rb_policy.allowed:
             return f"[POLICY DENIED] {rb_policy.reason}"
-        try:
-            proc = subprocess.Popen(
-                rb_command,
-                shell=True,
-                cwd=rb_cwd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            _session_bg_procs[proc.pid] = proc
-            # Gap-closure Day 23 (Stage 1.3, answers.md) — durably persisted
-            # so a crash/restart before kill_process ever runs still leaves
-            # a trail sweep_orphaned_processes() can find and clean up at
-            # the next startup, instead of leaking the OS process forever.
-            from app.fleet.bg_process_registry import register as _bg_register
-
-            _bg_register(proc.pid, rb_command, rb_cwd)
-            return f"Started background process PID {proc.pid}: {rb_command[:80]}"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        rb_wait_for = inp.get("wait_for_pids")
+        rb_wait_pids = [int(p) for p in rb_wait_for] if rb_wait_for else None
+        return _pm.spawn(
+            rb_command, rb_cwd, _session_bg_procs, wait_for_pids=rb_wait_pids
+        )
 
     def kill_process(inp: dict[str, Any]) -> str:
-        import os as _os
-        import signal as _signal
-
-        from app.fleet.bg_process_registry import unregister as _bg_unregister
+        from app.fleet import process_manager as _pm
 
         kp_pid = int(inp["pid"])
         kp_sig_name = str(inp.get("signal", "TERM"))
-        # SIGKILL doesn't exist on Windows (found via real execution:
-        # AttributeError). os.kill()+SIGTERM on Windows already maps to
-        # TerminateProcess (an unconditional hard-kill, no graceful-shutdown
-        # distinction like POSIX), so falling back to SIGTERM for "KILL"
-        # produces the same practical effect there.
-        sig_map = {
-            "TERM": _signal.SIGTERM,
-            "KILL": getattr(_signal, "SIGKILL", _signal.SIGTERM),
-            "INT": _signal.SIGINT,
-        }
-        kp_sig = sig_map.get(kp_sig_name, _signal.SIGTERM)
-        _session_bg_procs.pop(kp_pid, None)
-        _bg_unregister(kp_pid)
-        try:
-            _os.kill(kp_pid, kp_sig)
-            return f"Sent {kp_sig_name} to PID {kp_pid}"
-        except ProcessLookupError:
-            return f"[ERROR] No process with PID {kp_pid}"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return _pm.kill(kp_pid, kp_sig_name, _session_bg_procs)
+
+    def list_background_processes_h(inp: dict[str, Any]) -> str:
+        from app.fleet import process_manager as _pm
+
+        return _pm.format_tracked(_session_bg_procs)
+
+    def run_parallel_commands_h(inp: dict[str, Any]) -> str:
+        import asyncio as _asyncio
+
+        raw_commands = inp.get("commands")
+        if not isinstance(raw_commands, list) or not raw_commands:
+            return "[ERROR] commands must be a non-empty list of {command, cwd?} objects"
+        if len(raw_commands) > _MAX_PARALLEL_COMMANDS:
+            return f"[ERROR] run_parallel_commands supports at most {_MAX_PARALLEL_COMMANDS} commands per call"
+        rpc_timeout = int(inp.get("timeout", 60))
+
+        parsed: list[tuple[str, str]] = []
+        for entry in raw_commands:
+            if isinstance(entry, dict):
+                cmd = str(entry.get("command", ""))
+                cwd = str(entry.get("cwd") or repo_path)
+            else:
+                cmd = str(entry)
+                cwd = repo_path
+            parsed.append((cmd, cwd))
+
+        for cmd, _cwd in parsed:
+            if cmd and _is_dangerous_command(cmd):
+                return (
+                    f"[POLICY DENIED] {cmd!r} looks destructive/dangerous — "
+                    "run_parallel_commands does not support the bash tool's "
+                    "human-confirmation flow. Run it individually via bash instead."
+                )
+
+        async def _run_one(cmd: str, cwd: str) -> str:
+            if not cmd:
+                return "[ERROR] empty command"
+            rpc_policy = check_command(cmd)
+            if not rpc_policy.allowed:
+                return f"[POLICY DENIED] {rpc_policy.reason}"
+            stdout, stderr, returncode, timed_out = await _asyncio.to_thread(
+                _run_bash_command, cmd, cwd, timeout=rpc_timeout
+            )
+            if timed_out:
+                return f"[ERROR] Command timed out after {rpc_timeout}s"
+            out = stdout
+            if stderr:
+                out += f"\n[stderr]\n{stderr}"
+            if returncode != 0:
+                out += f"\n[exit {returncode}]"
+            return out.strip() or "(no output)"
+
+        async def _run_all() -> list[str]:
+            return await _asyncio.gather(*(_run_one(c, w) for c, w in parsed))
+
+        results = _asyncio.run(_run_all())
+        return "\n\n".join(
+            f"=== [{i}] {cmd[:80]!r} ===\n{res}"
+            for i, ((cmd, _cwd), res) in enumerate(zip(parsed, results))
+        )
 
     def run_python_snippet(inp: dict[str, Any]) -> str:
         import shlex as _shlex
@@ -8793,8 +8982,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 cwd=repo_path,
                 timeout=90,
             )
+            tc_mypy_out = (r.stdout + r.stderr)[:3000] or "clean"
+            tc_mypy_summary = parse_diagnostic_summary(tc_mypy_out, "mypy")
             tc_results.append(
-                f"=== mypy ===\n{(r.stdout + r.stderr)[:3000] or 'clean'}"
+                f"=== mypy ==={f' {tc_mypy_summary}' if tc_mypy_summary else ''}\n{tc_mypy_out}"
             )
         if tc_lang in ("typescript", "both"):
             web = str(root.parent / "apps" / "web")
@@ -8802,7 +8993,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             r = subprocess.run(
                 cmd, shell=True, capture_output=True, text=True, timeout=90
             )
-            tc_results.append(f"=== tsc ===\n{(r.stdout + r.stderr)[:3000] or 'clean'}")
+            tc_tsc_out = (r.stdout + r.stderr)[:3000] or "clean"
+            tc_tsc_summary = parse_diagnostic_summary(tc_tsc_out, "tsc")
+            tc_results.append(
+                f"=== tsc ==={f' {tc_tsc_summary}' if tc_tsc_summary else ''}\n{tc_tsc_out}"
+            )
         return "\n\n".join(tc_results) if tc_results else "[ERROR] No language selected"
 
     # =========================================================================
@@ -9273,9 +9468,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["delete_lines"] = delete_lines
     handlers["apply_patch"] = apply_patch
     handlers["compare_files"] = compare_files
+    handlers["sync_files"] = sync_files
     # Batch 2
     handlers["run_background"] = run_background
     handlers["kill_process"] = kill_process
+    handlers["list_background_processes"] = list_background_processes_h
+    handlers["run_parallel_commands"] = run_parallel_commands_h
     handlers["run_python_snippet"] = run_python_snippet
     handlers["run_make"] = run_make
     handlers["fetch_url"] = fetch_url
@@ -9446,24 +9644,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         return result["data"]
 
     def read_output_h(inp: dict[str, Any]) -> str:
+        from app.fleet import process_manager as _pm
+
         ro_pid = int(inp["pid"])
         ro_max = int(inp.get("lines", 50))
-        proc = _session_bg_procs.get(ro_pid)
-        if proc is None:
-            return f"[ERROR] No tracked background process with PID {ro_pid}"
-        if proc.poll() is not None:
-            return f"Process {ro_pid} has exited (code {proc.returncode})"
-        out_lines: list[str] = []
-        for stream in [proc.stdout, proc.stderr]:
-            if stream is None:
-                continue
-            chunk = _read_stream_nonblocking(stream)
-            if chunk:
-                out_lines.extend(chunk.splitlines())
-        return (
-            "\n".join(out_lines[-ro_max:])
-            if out_lines
-            else f"(no output yet from PID {ro_pid})"
+        return _pm.read_output(
+            ro_pid, ro_max, _session_bg_procs, _read_stream_nonblocking
         )
 
     def run_node_h(inp: dict[str, Any]) -> str:

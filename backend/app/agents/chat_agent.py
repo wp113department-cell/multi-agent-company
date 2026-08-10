@@ -88,12 +88,15 @@ from app.agents.base_graph import (
     _stringify_messages_for_summary,
     _wrap_untrusted_tool_content,
 )
+from app.agents.output_parsers import parse_diagnostic_summary, parse_pytest_summary
 from app.agents.tools import (
     CHAT_TOOLS,
+    _MAX_PARALLEL_COMMANDS,
     _is_dangerous_command,
     _is_protected_path,
     _redact_secrets_in_text,
     _run_bash_command,
+    _venv_activate_snippet,
 )
 from app.config import get_settings
 from app.models.chat import ChatSession
@@ -1379,6 +1382,43 @@ class ChatAgent:
                     return f"[DENIED] User declined: {command!r}"
             return await asyncio.to_thread(_run_bash_tool, command, cwd, 120)
 
+        if tool_name == "run_parallel_commands":
+            rpc_raw = inp.get("commands")
+            if not isinstance(rpc_raw, list) or not rpc_raw:
+                return "[ERROR] commands must be a non-empty list of {command, cwd?} objects"
+            if len(rpc_raw) > _MAX_PARALLEL_COMMANDS:
+                return f"[ERROR] run_parallel_commands supports at most {_MAX_PARALLEL_COMMANDS} commands per call"
+            rpc_timeout = int(inp.get("timeout", 60))
+            rpc_parsed: list[tuple[str, str]] = []
+            for rpc_entry in rpc_raw:
+                if isinstance(rpc_entry, dict):
+                    rpc_cmd = str(rpc_entry.get("command", ""))
+                    rpc_cwd = str(rpc_entry.get("cwd") or repo)
+                else:
+                    rpc_cmd = str(rpc_entry)
+                    rpc_cwd = repo
+                rpc_parsed.append((rpc_cmd, rpc_cwd))
+            for rpc_cmd, _rpc_cwd in rpc_parsed:
+                if rpc_cmd and _is_dangerous_command(rpc_cmd):
+                    return (
+                        f"[POLICY DENIED] {rpc_cmd!r} looks destructive/dangerous — "
+                        "run_parallel_commands does not support the bash tool's "
+                        "human-confirmation flow. Run it individually via bash instead."
+                    )
+
+            async def _rpc_run_one(cmd: str, cwd: str) -> str:
+                if not cmd:
+                    return "[ERROR] empty command"
+                return await asyncio.to_thread(_run_bash_tool, cmd, cwd, rpc_timeout)
+
+            rpc_results = await asyncio.gather(
+                *(_rpc_run_one(c, w) for c, w in rpc_parsed)
+            )
+            return "\n\n".join(
+                f"=== [{i}] {cmd[:80]!r} ===\n{res}"
+                for i, ((cmd, _w), res) in enumerate(zip(rpc_parsed, rpc_results))
+            )
+
         # ========== TESTING / LINTING ==========
 
         if tool_name == "run_tests":
@@ -1392,7 +1432,7 @@ class ChatAgent:
             # before fail_on_nonzero_exit below could ever see it. Removed;
             # truncated in Python instead, after _run_subprocess returns.
             if runner == "pytest":
-                cmd_str = f"cd {repo} && source .venv/bin/activate 2>/dev/null; python -m pytest {test_path} {flags} --tb=short -q 2>&1"
+                cmd_str = f"cd {repo} && {_venv_activate_snippet()} && python -m pytest {test_path} {flags} --tb=short -q 2>&1"
             elif runner == "npm_test":
                 web = str(root.parent / "apps" / "web")
                 cmd_str = f"cd {web} && npm test {flags} 2>&1"
@@ -1404,6 +1444,13 @@ class ChatAgent:
             output = await asyncio.to_thread(
                 _run_subprocess, cmd_str, repo, 180, fail_on_nonzero_exit=True
             )
+            # AUDIT_Q_BATCH01 §17 "Parse test output (pytest/etc.)" —
+            # structured pass/fail/error/skip counts, not just the exit
+            # code, prepended when pytest's own summary line is present.
+            if runner == "pytest":
+                summary = parse_pytest_summary(output)
+                if summary:
+                    output = f"{summary}\n{output}"
             return output[:8000]
 
         if tool_name == "run_linter":
@@ -1412,29 +1459,36 @@ class ChatAgent:
             fix = bool(inp.get("fix", False))
             lint_parts: list[str] = []
 
-            async def _lint(cmd_str: str, label: str) -> None:
+            async def _lint(cmd_str: str, label: str, diag_tool: str = "") -> None:
                 out = await asyncio.to_thread(_run_subprocess, cmd_str, repo, 90)
-                lint_parts.append(f"=== {label} ===\n{out or 'clean'}")
+                out = out or "clean"
+                summary = parse_diagnostic_summary(out, diag_tool) if diag_tool else None
+                header = f"=== {label} ===" + (f" {summary}" if summary else "")
+                lint_parts.append(f"{header}\n{out}")
 
             if lint_tool in ("ruff", "all"):
                 t = lint_path or repo
                 await _lint(
-                    f"cd {repo} && source .venv/bin/activate 2>/dev/null; python -m ruff check {t} {'--fix' if fix else ''} 2>&1 | head -50",
+                    f"cd {repo} && {_venv_activate_snippet()} && python -m ruff check {t} {'--fix' if fix else ''} 2>&1 | head -50",
+                    "ruff",
                     "ruff",
                 )
             if lint_tool in ("mypy", "all"):
                 t = lint_path or repo
                 await _lint(
-                    f"cd {repo} && source .venv/bin/activate 2>/dev/null; python -m mypy {t} --ignore-missing-imports 2>&1 | head -50",
+                    f"cd {repo} && {_venv_activate_snippet()} && python -m mypy {t} --ignore-missing-imports 2>&1 | head -50",
+                    "mypy",
                     "mypy",
                 )
             if lint_tool in ("tsc", "all"):
                 web = str(root.parent / "apps" / "web")
-                await _lint(f"cd {web} && npx tsc --noEmit 2>&1 | head -50", "tsc")
+                await _lint(
+                    f"cd {web} && npx tsc --noEmit 2>&1 | head -50", "tsc", "tsc"
+                )
             if lint_tool == "black":
                 t = lint_path or repo
                 await _lint(
-                    f"cd {repo} && source .venv/bin/activate 2>/dev/null; python -m black {'--check' if not fix else ''} {t} 2>&1 | head -50",
+                    f"cd {repo} && {_venv_activate_snippet()} && python -m black {'--check' if not fix else ''} {t} 2>&1 | head -50",
                     "black",
                 )
 
@@ -1497,7 +1551,13 @@ class ChatAgent:
                 return f"[ERROR] File not found: {rel}"
             if formatter == "auto":
                 formatter = "ruff" if fmt_target.suffix == ".py" else "prettier"
-            activate = f"source {repo}/.venv/bin/activate 2>/dev/null || true"
+            # AUDIT_Q_BATCH01 §1 "Windows terminal support" — was hardcoded
+            # POSIX `source`, silently never activating the venv on Windows
+            # (relative path is safe here: _run_subprocess always passes
+            # cwd=repo, so the shell's starting directory is already repo,
+            # matching this line's previous absolute-path behavior exactly
+            # on POSIX while adding a real Windows branch).
+            activate = _venv_activate_snippet()
             if formatter in ("ruff", "black"):
                 cmd_s = (
                     f"{activate} && python -m {formatter} format {str(fmt_target)} 2>&1"
@@ -1511,7 +1571,13 @@ class ChatAgent:
             oi_target = root / rel
             if not oi_target.exists():
                 return f"[ERROR] File not found: {rel}"
-            activate = f"source {repo}/.venv/bin/activate 2>/dev/null || true"
+            # AUDIT_Q_BATCH01 §1 "Windows terminal support" — was hardcoded
+            # POSIX `source`, silently never activating the venv on Windows
+            # (relative path is safe here: _run_subprocess always passes
+            # cwd=repo, so the shell's starting directory is already repo,
+            # matching this line's previous absolute-path behavior exactly
+            # on POSIX while adding a real Windows branch).
+            activate = _venv_activate_snippet()
             cmd_s = f"{activate} && python -m ruff check --select I --fix {str(oi_target)} 2>&1"
             return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 30)
 
@@ -1663,67 +1729,88 @@ class ChatAgent:
             )
             return r.stdout[:8000] or "Files are identical"
 
+        if tool_name == "sync_files":
+            sf_source = str(inp["source"])
+            sf_targets = inp.get("paths") or []
+            if not sf_targets:
+                return "[ERROR] paths must be a non-empty list of target file paths"
+            sf_source_path = root / sf_source
+            if not sf_source_path.exists():
+                return f"[ERROR] Source file not found: {sf_source}"
+            try:
+                sf_content = sf_source_path.read_text(encoding="utf-8")
+            except Exception as e:
+                return f"[ERROR] Could not read source {sf_source}: {e}"
+            sf_results: list[str] = []
+            for sf_target in sf_targets:
+                sf_target = str(sf_target)
+                sf_tgt_path = root / sf_target
+                try:
+                    sf_existing = (
+                        sf_tgt_path.read_text(encoding="utf-8")
+                        if sf_tgt_path.exists()
+                        else None
+                    )
+                except Exception as e:
+                    sf_results.append(f"  {sf_target}: [ERROR] {e}")
+                    continue
+                if sf_existing == sf_content:
+                    sf_results.append(f"  {sf_target}: unchanged (already in sync)")
+                    continue
+                try:
+                    sf_tgt_path.parent.mkdir(parents=True, exist_ok=True)
+                    sf_tgt_path.write_text(sf_content, encoding="utf-8")
+                    sf_results.append(
+                        f"  {sf_target}: "
+                        f"{'created' if sf_existing is None else 'updated'} from {sf_source}"
+                    )
+                except Exception as e:
+                    sf_results.append(f"  {sf_target}: [ERROR] {e}")
+            return (
+                f"Synchronized '{sf_source}' to {len(sf_targets)} target(s):\n"
+                + "\n".join(sf_results)
+            )
+
         # ========== BATCH 2 — Terminal extras ==========
 
         if tool_name == "run_background":
+            from app.fleet import process_manager as _pm
+
             rb_command = str(inp["command"])
             rb_cwd = str(inp.get("cwd") or repo)
-            try:
-                proc = subprocess.Popen(
-                    rb_command,
-                    shell=True,
-                    cwd=rb_cwd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
-                self._background_processes[proc.pid] = proc
-                # Gap-closure Day 23 (Stage 1.3, answers.md) — durably
-                # persisted so a crash (or a session that never gets a
-                # graceful delete_chat_agent() call) still leaves a trail
-                # sweep_orphaned_processes() can find at the next startup.
-                from app.fleet.bg_process_registry import register as _bg_register
-
-                _bg_register(proc.pid, rb_command, rb_cwd)
-                return f"Started background process PID {proc.pid}: {rb_command[:80]}"
-            except Exception as e:
-                return f"[ERROR] {e}"
+            rb_wait_for = inp.get("wait_for_pids")
+            rb_wait_pids = [int(p) for p in rb_wait_for] if rb_wait_for else None
+            return _pm.spawn(
+                rb_command,
+                rb_cwd,
+                self._background_processes,
+                wait_for_pids=rb_wait_pids,
+            )
 
         if tool_name == "kill_process":
-            import os as _os
-            import signal as _signal
+            from app.fleet import process_manager as _pm
 
             kp_pid = int(inp["pid"])
             kp_sig_name = str(inp.get("signal", "TERM"))
-            # SIGKILL doesn't exist on Windows (found via real execution:
-            # AttributeError). os.kill()+SIGTERM on Windows already maps to
-            # TerminateProcess (an unconditional hard-kill, no graceful-
-            # shutdown distinction like POSIX), so falling back to SIGTERM
-            # for "KILL" produces the same practical effect there.
-            sig_map = {
-                "TERM": _signal.SIGTERM,
-                "KILL": getattr(_signal, "SIGKILL", _signal.SIGTERM),
-                "INT": _signal.SIGINT,
-            }
-            kp_sig = sig_map.get(kp_sig_name, _signal.SIGTERM)
-            self._background_processes.pop(kp_pid, None)
-            from app.fleet.bg_process_registry import unregister as _bg_unregister
+            return _pm.kill(kp_pid, kp_sig_name, self._background_processes)
 
-            _bg_unregister(kp_pid)
-            try:
-                _os.kill(kp_pid, kp_sig)
-                return f"Sent {kp_sig_name} to PID {kp_pid}"
-            except ProcessLookupError:
-                return f"[ERROR] No process with PID {kp_pid}"
-            except Exception as e:
-                return f"[ERROR] {e}"
+        if tool_name == "list_background_processes":
+            from app.fleet import process_manager as _pm
+
+            return _pm.format_tracked(self._background_processes)
 
         if tool_name == "run_python_snippet":
             import shlex as _shlex
 
             code = str(inp["code"])
             ps_timeout = int(inp.get("timeout", 30))
-            activate = f"source {repo}/.venv/bin/activate 2>/dev/null || true"
+            # AUDIT_Q_BATCH01 §1 "Windows terminal support" — was hardcoded
+            # POSIX `source`, silently never activating the venv on Windows
+            # (relative path is safe here: _run_subprocess always passes
+            # cwd=repo, so the shell's starting directory is already repo,
+            # matching this line's previous absolute-path behavior exactly
+            # on POSIX while adding a real Windows branch).
+            activate = _venv_activate_snippet()
             cmd_s = f"{activate} && python3 -c {_shlex.quote(code)} 2>&1"
             return await asyncio.to_thread(_run_subprocess, cmd_s, repo, ps_timeout)
 
@@ -1858,7 +1945,13 @@ class ChatAgent:
             rst_file = str(inp.get("file", ""))
             rst_verbose = bool(inp.get("verbose", True))
             rst_vflag = "-v" if rst_verbose else "-q"
-            activate = f"source {repo}/.venv/bin/activate 2>/dev/null || true"
+            # AUDIT_Q_BATCH01 §1 "Windows terminal support" — was hardcoded
+            # POSIX `source`, silently never activating the venv on Windows
+            # (relative path is safe here: _run_subprocess always passes
+            # cwd=repo, so the shell's starting directory is already repo,
+            # matching this line's previous absolute-path behavior exactly
+            # on POSIX while adding a real Windows branch).
+            activate = _venv_activate_snippet()
             rst_path = rst_file if rst_file else "backend/tests/"
             cmd_s = f"{activate} && python -m pytest {rst_path} -k '{rst_kw}' {rst_vflag} --tb=short 2>&1 | head -100"
             return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 120)
@@ -1867,7 +1960,13 @@ class ChatAgent:
             cov_path = str(inp.get("path", "backend/tests/"))
             cov_source = str(inp.get("source", "backend/app/"))
             cov_min = inp.get("min_coverage")
-            activate = f"source {repo}/.venv/bin/activate 2>/dev/null || true"
+            # AUDIT_Q_BATCH01 §1 "Windows terminal support" — was hardcoded
+            # POSIX `source`, silently never activating the venv on Windows
+            # (relative path is safe here: _run_subprocess always passes
+            # cwd=repo, so the shell's starting directory is already repo,
+            # matching this line's previous absolute-path behavior exactly
+            # on POSIX while adding a real Windows branch).
+            activate = _venv_activate_snippet()
             cov_min_flag = f"--cov-fail-under={cov_min}" if cov_min else ""
             cmd_s = (
                 f"{activate} && python -m pytest {cov_path} "
@@ -1880,7 +1979,13 @@ class ChatAgent:
             tc_path = str(inp.get("path", ""))
             tc_strict = bool(inp.get("strict", False))
             tc_lang = str(inp.get("language", "both"))
-            activate = f"source {repo}/.venv/bin/activate 2>/dev/null || true"
+            # AUDIT_Q_BATCH01 §1 "Windows terminal support" — was hardcoded
+            # POSIX `source`, silently never activating the venv on Windows
+            # (relative path is safe here: _run_subprocess always passes
+            # cwd=repo, so the shell's starting directory is already repo,
+            # matching this line's previous absolute-path behavior exactly
+            # on POSIX while adding a real Windows branch).
+            activate = _venv_activate_snippet()
             tc_results: list[str] = []
             if tc_lang in ("python", "both"):
                 py_path = tc_path or "backend/"
@@ -2299,10 +2404,16 @@ class ChatAgent:
             rsym_d = str(inp.get("directory", ""))
             rsym_pat = str(inp.get("file_pattern", "*.py"))
             rsym_target = str(root / rsym_d) if rsym_d else repo
+            rsym_confirm = bool(inp.get("confirm_large_batch", False))
             if rsym_old == rsym_new:
                 return "[ERROR] old_name and new_name are the same"
             return await asyncio.to_thread(
-                _ast_engine.rename_symbol, rsym_old, rsym_new, rsym_target, rsym_pat
+                _ast_engine.rename_symbol,
+                rsym_old,
+                rsym_new,
+                rsym_target,
+                rsym_pat,
+                rsym_confirm,
             )
 
         # ========== BATCH 11 — Git extras ==========
@@ -2324,24 +2435,15 @@ class ChatAgent:
         # ========== BATCH 12 — Terminal extras ==========
 
         if tool_name == "read_output":
+            from app.fleet import process_manager as _pm
+
             ro_pid = int(inp["pid"])
             ro_max_lines = int(inp.get("lines", 50))
-            ro_proc = self._background_processes.get(ro_pid)
-            if ro_proc is None:
-                return f"[ERROR] No tracked background process with PID {ro_pid}"
-            if ro_proc.poll() is not None:
-                return f"Process {ro_pid} has exited (code {ro_proc.returncode})"
-            ro_lines: list[str] = []
-            for ro_stream in [ro_proc.stdout, ro_proc.stderr]:
-                if ro_stream is None:
-                    continue
-                ro_chunk = _read_stream_nonblocking(ro_stream)
-                if ro_chunk:
-                    ro_lines.extend(ro_chunk.splitlines())
-            return (
-                "\n".join(ro_lines[-ro_max_lines:])
-                if ro_lines
-                else f"(no output yet from PID {ro_pid})"
+            return _pm.read_output(
+                ro_pid,
+                ro_max_lines,
+                self._background_processes,
+                _read_stream_nonblocking,
             )
 
         if tool_name == "run_node":
@@ -2715,7 +2817,13 @@ class ChatAgent:
             )
             if not seeddb_confirmed:
                 return "[CANCELLED] seed_database cancelled by user"
-            activate = f"source {repo}/.venv/bin/activate 2>/dev/null || true"
+            # AUDIT_Q_BATCH01 §1 "Windows terminal support" — was hardcoded
+            # POSIX `source`, silently never activating the venv on Windows
+            # (relative path is safe here: _run_subprocess always passes
+            # cwd=repo, so the shell's starting directory is already repo,
+            # matching this line's previous absolute-path behavior exactly
+            # on POSIX while adding a real Windows branch).
+            activate = _venv_activate_snippet()
             seeddb_cmd = f"{activate} && python3 {str(seeddb_fp)} 2>&1"
             return await asyncio.to_thread(_run_subprocess, seeddb_cmd, repo, 120)
 

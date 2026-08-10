@@ -319,6 +319,15 @@ TOOL_MANIFEST: dict[str, ToolManifestEntry] = {
         verification_required=False,
         risk_level="low",
     ),
+    "sync_files": ToolManifestEntry(
+        purpose="Copy a source file's content to one or more target paths "
+        "where they differ (AUDIT_Q_BATCH01 §18 'Synchronize files')",
+        permissions=["write_repo"],
+        timeout_s=10,
+        retry_policy="none",
+        verification_required=True,
+        risk_level="medium",
+    ),
     "hash_file": ToolManifestEntry(
         purpose="Compute the hash of a file for integrity checks",
         permissions=["read_repo"],
@@ -916,7 +925,31 @@ TOOL_MANIFEST: dict[str, ToolManifestEntry] = {
         retry_policy="none",
         verification_required=False,
         risk_level="medium",
-        notes="Background processes are tracked per session.",
+        notes="Background processes are tracked per session. Optional "
+        "wait_for_pids expresses a dependency on other background jobs.",
+    ),
+    "list_background_processes": ToolManifestEntry(
+        purpose="List this session's own tracked background processes with "
+        "age and possibly-hung status",
+        permissions=["execute"],
+        timeout_s=5,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
+    "run_parallel_commands": ToolManifestEntry(
+        purpose="Run several independent shell commands concurrently (fan-out)",
+        permissions=["execute"],
+        timeout_s=60,
+        retry_policy="none",
+        verification_required=True,
+        risk_level="high",
+        notes="Each sub-command is policy-checked individually inside the "
+        "handler (the tool_input field is 'commands', a list, not the "
+        "generic single 'command' field _policy_check scans). Any "
+        "sub-command flagged dangerous is refused entirely — no "
+        "multi-command confirmation flow exists, so use bash individually "
+        "for those.",
     ),
     "kill_process": ToolManifestEntry(
         purpose="Kill a background process by handle",

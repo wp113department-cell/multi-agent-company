@@ -66,6 +66,22 @@ def unregister(pid: int) -> None:
             _write(path, entries)
 
 
+def snapshot() -> dict[str, Any]:
+    """Read-only copy of the durable registry (pid-string -> {command, cwd,
+    started_at}) — AUDIT_Q_BATCH01 §58 "Concurrent shell-session registry".
+    Used by app.fleet.process_manager to report age/possibly-hung status for
+    a caller's own tracked processes without exposing this module's
+    internal file-I/O helpers or lock."""
+    with _lock:
+        return dict(_read(_registry_path()))
+
+
+def hang_threshold_seconds() -> float:
+    from app.config import get_settings
+
+    return float(get_settings().bg_process_hang_threshold_seconds)
+
+
 def _read(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -185,6 +201,35 @@ def _sweep_dead_registry_entries() -> list[int]:
         return dead
 
 
+def _sweep_hung_registry_entries() -> list[tuple[int, float]]:
+    """AUDIT_Q_BATCH01 §17 'Detect hanging processes': the liveness sweep
+    above already detects a background process that *exited* on its own —
+    but a process that is still alive, just stuck (no natural exit, no
+    crash) was previously undetectable short of an operator manually
+    checking. This is advisory-only and non-destructive (returns ages, does
+    NOT remove or kill anything) — many legitimate background commands
+    (dev servers, watchers, `tail -f`) are supposed to run indefinitely, so
+    auto-killing on age alone would be a real functionality regression, not
+    a fix."""
+    threshold = hang_threshold_seconds()
+    now = time.time()
+    with _lock:
+        entries = _read(_registry_path())
+    hung: list[tuple[int, float]] = []
+    for pid_str, meta in entries.items():
+        try:
+            pid = int(pid_str)
+        except ValueError:
+            continue
+        started_at = meta.get("started_at")
+        if not started_at or not _is_alive(pid):
+            continue
+        age = now - started_at
+        if age > threshold:
+            hung.append((pid, age))
+    return hung
+
+
 async def start_bg_process_liveness_loop() -> None:
     """Background task: while the app keeps running (not just at the next
     startup), periodically checks every registered background-process PID
@@ -223,6 +268,33 @@ async def start_bg_process_liveness_loop() -> None:
                                 f"{len(dead)} background process(es) exited "
                                 "without cleanup (closed shell/crash while "
                                 "the app kept running)"
+                            ),
+                        )
+                    )
+                except Exception:
+                    pass
+
+            hung = await asyncio.to_thread(_sweep_hung_registry_entries)
+            if hung:
+                logger.warning(
+                    "Background-process liveness sweep: %d process(es) still "
+                    "alive past the %.0fs hang threshold (advisory only, not "
+                    "killed): %s",
+                    len(hung),
+                    hang_threshold_seconds(),
+                    hung,
+                )
+                try:
+                    from app.fleet.fleet_events import health_updated, publish
+
+                    publish(
+                        health_updated(
+                            "bg_process_registry",
+                            health="degraded",
+                            state=(
+                                f"{len(hung)} background process(es) still running "
+                                f"past {hang_threshold_seconds():.0f}s (possibly hung "
+                                "— not auto-killed)"
                             ),
                         )
                     )
