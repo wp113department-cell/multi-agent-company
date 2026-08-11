@@ -131,6 +131,15 @@ class DevTask(Base):
     # per-subtask granularity. final_summary is set once, at the real
     # success point (transition to ready_for_review).
     priority: Mapped[str] = mapped_column(String(20), default="medium")
+    # AUDIT_Q_BATCH16 §86 gap-closure (2026-08-11) — "Detect dependencies /
+    # optimize order": mirrors Subtask.depends_on's exact shape one level up
+    # — a list of OTHER dev_tasks.id values that must reach "completed"
+    # before this task may be started. Enforced at the one real place a
+    # task enters its pipeline (POST /{task_id}/run, api/tasks.py) rather
+    # than by a new background dispatcher — see that endpoint's own comment
+    # for why an automatic org-wide scheduler is a separate, larger
+    # decision this migration doesn't make.
+    depends_on: Mapped[Any] = mapped_column(ARRAY(BigInteger), nullable=True)
     assigned_agent: Mapped[str | None] = mapped_column(String(100), nullable=True)
     project: Mapped[str | None] = mapped_column(String(200), nullable=True)
     final_summary: Mapped[str | None] = mapped_column(Text, nullable=True)

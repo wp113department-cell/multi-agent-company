@@ -165,11 +165,20 @@ def build_call_graph(path: str, function_name: str = "") -> str:
     return header + "\n" + "\n".join(results)
 
 
-def detect_dead_code(directory: str) -> str:
-    """Heuristically find public Python functions that are never called in the directory."""
+def _find_dead_code(directory: str) -> dict[str, str] | None:
+    """Structured core of detect_dead_code() below — extracted (AUDIT_Q_
+    BATCH16 §91 gap-closure, 2026-08-11) so a real count is available to
+    app/fleet/architecture_drift.py without re-implementing this AST walk
+    or fragile-parsing detect_dead_code()'s own rendered text. Returns None
+    when the directory doesn't exist or has no .py files (the same two
+    "nothing to report" cases detect_dead_code() already special-cases);
+    an empty dict means "scanned, zero found" — a real, different signal
+    from None. detect_dead_code()'s own text output is unchanged by this
+    extraction — verified by this module's existing tests, which assert on
+    detect_dead_code()'s literal text."""
     d = Path(directory)
     if not d.exists():
-        return f"[ERROR] Directory not found: {directory}"
+        return None
 
     py_files = [
         fp
@@ -179,7 +188,7 @@ def detect_dead_code(directory: str) -> str:
         and ".venv" not in fp.parts
     ]
     if not py_files:
-        return "(no .py files found)"
+        return None
 
     defined: dict[str, str] = {}  # name → "file:line"
     called: set[str] = set()
@@ -201,7 +210,17 @@ def detect_dead_code(directory: str) -> str:
                 elif isinstance(node.func, ast.Attribute):
                     called.add(node.func.attr)
 
-    dead = {name: loc for name, loc in defined.items() if name not in called}
+    return {name: loc for name, loc in defined.items() if name not in called}
+
+
+def detect_dead_code(directory: str) -> str:
+    """Heuristically find public Python functions that are never called in the directory."""
+    if not Path(directory).exists():
+        return f"[ERROR] Directory not found: {directory}"
+
+    dead = _find_dead_code(directory)
+    if dead is None:
+        return "(no .py files found)"
     if not dead:
         return "✅ No obviously dead functions detected (heuristic scan)."
     lines = [
@@ -212,11 +231,19 @@ def detect_dead_code(directory: str) -> str:
     return "\n".join(lines)
 
 
-def detect_circular_imports(directory: str) -> str:
-    """Detect circular local import chains in a Python package."""
+def _find_circular_import_cycles(
+    directory: str,
+) -> tuple[list[str], int] | None:
+    """Structured core of detect_circular_imports() below — extracted
+    (AUDIT_Q_BATCH16 §91 gap-closure, 2026-08-11), same rationale as
+    _find_dead_code() above. Returns (unique_cycles, total_import_edges) or
+    None when there's nothing to scan. total_import_edges is the sum of
+    each module's real local-import dependency count — a real, cheap
+    "how big is the import graph right now" signal architecture_drift.py
+    also tracks, alongside the cycle count."""
     d = Path(directory)
     if not d.exists():
-        return f"[ERROR] Directory not found: {directory}"
+        return None
 
     py_files = [
         fp
@@ -226,7 +253,7 @@ def detect_circular_imports(directory: str) -> str:
         and ".venv" not in fp.parts
     ]
     if not py_files:
-        return "(no .py files found)"
+        return None
 
     # module name → set of local module deps
     graph: dict[str, set[str]] = {}
@@ -278,6 +305,19 @@ def detect_circular_imports(directory: str) -> str:
         _dfs(mod)
 
     unique_cycles = list(dict.fromkeys(cycles))
+    total_edges = sum(len(deps) for deps in graph.values())
+    return unique_cycles, total_edges
+
+
+def detect_circular_imports(directory: str) -> str:
+    """Detect circular local import chains in a Python package."""
+    if not Path(directory).exists():
+        return f"[ERROR] Directory not found: {directory}"
+
+    found = _find_circular_import_cycles(directory)
+    if found is None:
+        return "(no .py files found)"
+    unique_cycles, _total_edges = found
     if not unique_cycles:
         return "✅ No circular imports detected."
     lines = [f"⚠️  {len(unique_cycles)} circular import chain(s):"]

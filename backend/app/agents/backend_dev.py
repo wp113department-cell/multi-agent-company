@@ -85,11 +85,24 @@ _VERIFICATION_CFG = VerificationConfig(
 
 
 def _run_backend_checks(worktree_path: str) -> str | None:
-    """Run mypy + ruff in the backend directory. Returns error output or None on success."""
+    """Run mypy + ruff + black --check in the backend directory. Returns
+    error output or None on success.
+
+    AUDIT_Q_BATCH16 §90 gap-closure (2026-08-11) — "Formatting" was NO: no
+    black/formatter invocation anywhere in the mandatory Dev→QA→Review gate
+    path, despite black already being a real project dependency
+    (requirements-dev.txt) used by this exact same "python -m black
+    --check ." invocation in .github/workflows/ci.yml's own format-check
+    gate. Added as a third check in the SAME retry-gated static-check list
+    mypy/ruff already use — a formatting failure now triggers the same
+    self-correction retry loop (run_backend_dev's check_error feedback) as
+    a real type or lint error, not a new/separate gate.
+    """
     python = sys.executable
     checks = [
         [python, "-m", "mypy", ".", "--ignore-missing-imports", "--no-error-summary"],
         [python, "-m", "ruff", "check", "."],
+        [python, "-m", "black", "--check", "."],
     ]
     for cmd in checks:
         result = subprocess.run(

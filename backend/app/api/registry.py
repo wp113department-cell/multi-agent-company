@@ -98,12 +98,61 @@ async def get_agent(name: str, db: AsyncSession = Depends(get_db)) -> dict[str, 
     return _agent_to_response(agent)
 
 
+async def _compute_user_approval_rate(db: AsyncSession, name: str) -> float | None:
+    """AUDIT_Q_BATCH16 §87 gap-closure (2026-08-11) — "User approval rate":
+    there is no dedicated Approval model, but every real approve/reject
+    decision is already durably logged (task_logs.category in
+    ("approval", "rejection") — see api/tasks.py's approve_task/reject_task/
+    pipeline_approve/pipeline_reject, every one of which calls append_log
+    with exactly one of those two categories) and attributable to an agent
+    via DevTask.assigned_agent (the same column already surfaced on every
+    task response). Returns None (not 0.0) when this agent has no logged
+    approval decisions yet — "no data" and "0% approved" are different
+    claims, and only the former is honest here."""
+    from sqlalchemy import func
+
+    from app.db.models import DevTask, TaskLog
+
+    result = await db.execute(
+        select(TaskLog.category, func.count(TaskLog.id))
+        .join(DevTask, DevTask.id == TaskLog.task_id)
+        .where(
+            DevTask.assigned_agent == name,
+            TaskLog.category.in_(("approval", "rejection")),
+        )
+        .group_by(TaskLog.category)
+    )
+    counts: dict[str, int] = {category: int(n) for category, n in result.all()}
+    approvals = counts.get("approval", 0)
+    rejections = counts.get("rejection", 0)
+    total = approvals + rejections
+    if total == 0:
+        return None
+    return round(approvals / total, 4)
+
+
 @router.get("/{name}/metrics")
 async def get_agent_metrics(
     name: str,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Return live-computed metrics for the agent, then persist the snapshot."""
+    """Return live-computed metrics for the agent, then persist the snapshot.
+
+    AUDIT_Q_BATCH16 §87 gap-closure (2026-08-11) — "Avg execution time" and
+    "Tool usage" were real, correctly computed (MetricsCollector.
+    p50_latency_ms/p95_latency_ms/avg_tool_accuracy, Day 10) but only
+    reachable via the fleet_metrics_read agent tool (app/agents/tools.py),
+    not any HTTP route — a human operator had no way to query them without
+    going through an agent. Reuses the exact same collector methods that
+    tool already calls, exposed on this existing REST endpoint instead of a
+    new one. "Reliability score" (previously NO — no field existed under
+    that name) is a real, documented composite of two already-real,
+    already-computed numbers, not a new tracked metric or a fabricated one.
+    "User approval rate" (previously NO) is computed in
+    _compute_user_approval_rate() above.
+    """
+    from app.fleet.metrics import get_metrics_collector
+
     result = await db.execute(select(Agent).where(Agent.name == name))
     agent = result.scalar_one_or_none()
     if not agent:
@@ -124,6 +173,22 @@ async def get_agent_metrics(
         # use the agent table value (updated separately by manager)
         avg_retries = agent.avg_retries
 
+    collector = get_metrics_collector()
+    p50_latency_ms = collector.p50_latency_ms(name)
+    p95_latency_ms = collector.p95_latency_ms(name)
+    avg_tool_accuracy = collector.avg_tool_accuracy(name)
+
+    # Reliability score: a real, documented composite of success_rate and
+    # avg_tool_accuracy (equal weight when both are known; falls back to
+    # success_rate alone when there's no tool-call history yet to judge
+    # accuracy by — never a fabricated number when inputs are missing).
+    if avg_tool_accuracy is not None:
+        reliability_score = round(0.5 * success_rate + 0.5 * avg_tool_accuracy, 4)
+    else:
+        reliability_score = round(success_rate, 4)
+
+    user_approval_rate = await _compute_user_approval_rate(db, name)
+
     # Persist computed metrics back
     agent.success_rate = success_rate
     agent.last_computed_at = datetime.now(tz=timezone.utc)
@@ -135,6 +200,11 @@ async def get_agent_metrics(
         "successRate": success_rate,
         "avgRetries": avg_retries,
         "totalRuns": total_runs,
+        "p50LatencyMs": p50_latency_ms,
+        "p95LatencyMs": p95_latency_ms,
+        "avgToolAccuracy": avg_tool_accuracy,
+        "reliabilityScore": reliability_score,
+        "userApprovalRate": user_approval_rate,
         "lastComputedAt": agent.last_computed_at.isoformat(),
     }
 

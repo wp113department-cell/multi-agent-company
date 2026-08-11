@@ -288,6 +288,23 @@ class Settings(BaseSettings):
         description="Dispatch independent subtasks (no depends_on edge) concurrently in dependency-respecting waves instead of strictly sequentially",
     )
 
+    # AUDIT_Q_BATCH16 §90 gap-closure (2026-08-11) — "Quality Gates": only
+    # linting and tests were mandatory in the Dev→QA→Review pipeline;
+    # security_reviewer and architecture_reviewer are real, fully-built,
+    # independently-working agents (already used in the autonomous fleet
+    # scan loop) that simply had no call site in the pipeline deciding
+    # whether a normal task is "done" — a wiring gap, not a missing-
+    # capability gap. Wired as non-blocking/advisory (findings are logged
+    # and persisted, never flip subtask_status to "blocked") — same
+    # precedent as enable_subtask_fanout: a real capability, opt-in,
+    # defaulting False so no existing caller/test/cost-budget assumption
+    # changes without an operator explicitly choosing the extra 2 LLM
+    # calls per subtask this adds.
+    enable_security_architecture_gates: bool = Field(
+        default=False,
+        description="Run security_reviewer and architecture_reviewer as non-blocking advisory gates after each subtask's QA/review passes",
+    )
+
     # Phase 5 — DevOps Agent bash allowlist (comma-separated command prefixes)
     devops_bash_allowlist: str = Field(
         default="git status,git log,git diff,df -h,du -sh,ls,pwd,cat,echo,free -h,uptime",

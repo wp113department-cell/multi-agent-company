@@ -616,6 +616,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning("Fleet agent registry bootstrap failed (non-fatal): %s", exc)
 
+    # AUDIT_Q_BATCH16 §89 gap-closure (2026-08-11) — re-apply any agent's
+    # persisted "unhealthy" retirement from the previous process's real
+    # health-event history, right after every agent is freshly registered
+    # above (so there's something to re-seed onto) and before any real
+    # dispatch can occur.
+    try:
+        from app.fleet.agent_registry import reseed_health_from_events
+
+        async with get_session_factory()() as _health_seed_db:
+            await reseed_health_from_events(_health_seed_db)
+    except Exception as exc:
+        logger.warning("Agent health re-seed failed (non-fatal): %s", exc)
+
     # Gap-closure Day 23 (Stage 1.3, answers.md) — before any agent can
     # start a new background process this run, terminate anything left
     # over in the durable registry from a previous crash/restart: nothing

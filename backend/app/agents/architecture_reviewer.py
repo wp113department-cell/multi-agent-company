@@ -236,6 +236,31 @@ def run_architecture_reviewer_scan(trace_id: str = "") -> AgentResult:
     self-improvement agents' own scan functions."""
     settings = get_settings()
     repo = settings.fleet_self_repo_path
+
+    # AUDIT_Q_BATCH16 §91 gap-closure (2026-08-11) — "Architecture Drift
+    # Detection": each scan was previously stateless relative to earlier
+    # scans (no stored baseline), so "did technical debt increase since
+    # last time" could not be answered. Real, deterministic (never
+    # LLM-narrative) structural counts, diffed against the prior stored
+    # scan via the same current-vs-stored-baseline pattern
+    # benchmark_manager.compare_to_baseline() already uses for agent
+    # quality. Best-effort and independent of the LLM scan below — a
+    # drift-detection failure must never block the (separately valuable)
+    # LLM-driven enhancement-request scan that follows.
+    try:
+        from app.fleet.architecture_drift import check_architecture_drift
+
+        drift_report = check_architecture_drift(repo)
+        if drift_report is not None and drift_report.is_regression:
+            logger.warning(
+                "Architecture drift regression detected (score %.4f -> %.4f): %s",
+                drift_report.baseline_score or 0.0,
+                drift_report.current_score,
+                drift_report.per_objective_delta,
+            )
+    except Exception:
+        logger.warning("Architecture drift check failed (non-fatal)", exc_info=True)
+
     handlers = make_scan_handlers(repo, trace_id=trace_id)
     msg = (
         "Autonomous architecture health scan of this codebase. Use import_graph and "

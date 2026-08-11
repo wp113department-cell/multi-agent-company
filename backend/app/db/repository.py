@@ -38,6 +38,7 @@ async def create_task(
     repo_id: int | None = None,
     priority: str = "medium",
     project: str | None = None,
+    depends_on: list[int] | None = None,
 ) -> DevTask:
     task = DevTask(
         title=title,
@@ -46,6 +47,7 @@ async def create_task(
         repo_id=repo_id,
         priority=priority,
         project=project,
+        depends_on=depends_on,
     )
     db.add(task)
     await db.commit()

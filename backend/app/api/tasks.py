@@ -52,10 +52,17 @@ class CreateTaskRequest(BaseModel):
     # constraint for any write path that bypasses this endpoint.
     priority: Literal["low", "medium", "high"] = "medium"
     project: str | None = None
+    # AUDIT_Q_BATCH16 §86 gap-closure (2026-08-11) — real cross-task
+    # dependency IDs (other dev_tasks.id values); enforced by /run below.
+    depends_on: list[int] | None = None
 
 
 class TransitionRequest(BaseModel):
     status: str
+
+
+class PriorityRequest(BaseModel):
+    priority: Literal["low", "medium", "high"]
 
 
 class LogRequest(BaseModel):
@@ -99,6 +106,7 @@ def _task_to_dict(task: Any, logs: list[Any] | None = None) -> dict[str, Any]:
         "filesTouched": task.files_touched or [],
         "project": task.project,
         "priority": task.priority,
+        "dependsOn": list(task.depends_on or []),
         "assignedAgent": task.assigned_agent,
         "finalSummary": task.final_summary,
         "repoId": task.repo_id,
@@ -133,6 +141,7 @@ async def create(
         repo_id=body.repo_id,
         priority=body.priority,
         project=body.project,
+        depends_on=body.depends_on,
     )
     result = _task_to_dict(task)
     await store_response(db, request, "create_task", result)
@@ -178,6 +187,66 @@ async def patch_status(
     return _task_to_dict(task)
 
 
+@router.patch("/{task_id}/priority")
+async def patch_priority(
+    task_id: int,
+    body: PriorityRequest,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
+    """AUDIT_Q_BATCH16 §86 gap-closure (2026-08-11) — "Reorder": neither
+    queue adapter supports true in-place reordering of an already-enqueued
+    job (AsyncioQueueAdapter's asyncio.Queue is strict FIFO; RQ has no
+    built-in live-reprioritization primitive either), so a literal "move
+    this job ahead of that one in a live queue" API is not implementable
+    without replacing the queue's own data structure — a materially bigger,
+    separate architectural decision than this gap-closure pass, matching
+    this codebase's own established bar for what counts as "wiring" vs.
+    "new capability" (see queue_adapter.py's module docstring on the
+    BackgroundTasks-vs-RQ dispatch decision for the precedent).
+
+    What is real and implementable: DevTask.priority is the actual signal
+    both PrioritySemaphore (app/pipeline/concurrency.py) and RQQueueAdapter's
+    queue selection (gridiron-high vs gridiron-default) read at dispatch
+    time — changing it here changes where this task's *next* dispatch
+    (waiting subtask/agent-run slot acquisition, or a not-yet-enqueued RQ
+    job) lands relative to other tasks, which is the real, honest scope of
+    "reorder" for a priority-bucketed scheduler rather than a literal
+    linked-list queue. Refused once the task has reached a terminal status —
+    changing the priority of already-finished work has no real effect and
+    would be a silently-ignored no-op otherwise.
+    """
+    from app.db.models import VALID_TRANSITIONS, DevTask
+    from sqlalchemy import update
+
+    task = await get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    terminal_statuses = frozenset(
+        status for status, targets in VALID_TRANSITIONS.items() if not targets
+    )
+    if task.status in terminal_statuses:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Task {task_id} is {task.status!r} — priority can no "
+            "longer affect its dispatch order.",
+        )
+
+    await db.execute(
+        update(DevTask).where(DevTask.id == task_id).values(priority=body.priority)
+    )
+    await db.commit()
+    await append_log(
+        db,
+        task_id,
+        "priority",
+        f"Priority changed to {body.priority!r}",
+    )
+    task = await get_task(db, task_id)
+    return _task_to_dict(task)
+
+
 @router.post("/{task_id}/logs", status_code=201)
 async def add_log(
     task_id: int,
@@ -220,6 +289,29 @@ async def run_task(
             status_code=400, detail=f"Cannot start planning from status {task.status!r}"
         )
 
+    # AUDIT_Q_BATCH16 §86 gap-closure (2026-08-11) — "Detect dependencies /
+    # optimize order" (org-wide): the one real place a DevTask enters its
+    # pipeline, refusing to start until every declared dependency has
+    # actually reached "completed". Not a background scheduler that
+    # auto-dispatches once deps clear (a materially bigger, separate
+    # decision — see PriorityRequest's own docstring for the same framing
+    # on "Reorder") — a real, honest, human/caller-triggered dependency
+    # gate: the caller retries /run once the dependency finishes, exactly
+    # like the existing "blocked" status already requires a human/caller
+    # to re-trigger.
+    if task.depends_on:
+        unmet: list[int] = []
+        for dep_id in task.depends_on:
+            dep_task = await get_task(db, int(dep_id))
+            if dep_task is None or dep_task.status != "completed":
+                unmet.append(int(dep_id))
+        if unmet:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Task {task_id} depends on task(s) {unmet} which have "
+                "not reached 'completed' yet.",
+            )
+
     # Resolve which repo path agents should use for this task
     repo_path = resolve_task_repo_path(task)
 
@@ -237,6 +329,7 @@ async def run_task(
             str(task.title),
             str(task.description),
             repo_path,
+            priority=task.priority,
         )
     else:
         await dispatch_job(
@@ -246,6 +339,7 @@ async def run_task(
             str(task.title),
             str(task.description),
             repo_path,
+            priority=task.priority,
         )
 
     return {"triggered": True, "mode": mode}
@@ -315,6 +409,7 @@ async def restart_task(
         str(task.title),
         str(task.description),
         repo_path,
+        priority=task.priority,
     )
 
     return {"restarted": True, "taskId": task_id}
@@ -366,7 +461,14 @@ async def approve_task(
     task = await transition_task(db, task_id, "coding")
     await append_log(db, task_id, "approval", "Plan approved — coding agent starting")
 
-    await dispatch_job(background_tasks, launch_coder, task_id, plan, repo_path)
+    await dispatch_job(
+        background_tasks,
+        launch_coder,
+        task_id,
+        plan,
+        repo_path,
+        priority=task.priority,
+    )
     return {"approved": True, "task": _task_to_dict(task)}
 
 
@@ -438,7 +540,12 @@ async def pipeline_approve(
 
     await append_log(db, task_id, "approval", "Plan approved — resuming pipeline")
     await dispatch_job(
-        background_tasks, resume_planning_pipeline, task_id, True, repo_path
+        background_tasks,
+        resume_planning_pipeline,
+        task_id,
+        True,
+        repo_path,
+        priority=task.priority,
     )
     return {"approved": True}
 
@@ -465,7 +572,13 @@ async def pipeline_reject(
         )
 
     await append_log(db, task_id, "rejection", "Plan rejected — pipeline cancelled")
-    await dispatch_job(background_tasks, resume_planning_pipeline, task_id, False)
+    await dispatch_job(
+        background_tasks,
+        resume_planning_pipeline,
+        task_id,
+        False,
+        priority=task.priority,
+    )
     return {"rejected": True}
 
 
@@ -707,7 +820,13 @@ async def push_task(
             detail="Task has no branch to push — has coding completed yet?",
         )
 
-    await dispatch_job(background_tasks, dispatch_git_push_decision, task_id, True)
+    await dispatch_job(
+        background_tasks,
+        dispatch_git_push_decision,
+        task_id,
+        True,
+        priority=task.priority,
+    )
     result = {"triggered": True, "taskId": task_id}
     await store_response(db, request, "push_task", result)
     return result

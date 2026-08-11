@@ -41,11 +41,11 @@ JobFn = Callable[..., Coroutine[Any, Any, Any]]
 
 
 class QueueAdapter(ABC):
-    """Abstract queue — enqueue a coroutine function with kwargs."""
+    """Abstract queue — enqueue a coroutine function with args/kwargs."""
 
     @abstractmethod
-    async def enqueue(self, job_fn: JobFn, **kwargs: Any) -> str:
-        """Schedule job_fn(**kwargs) and return a job ID."""
+    async def enqueue(self, job_fn: JobFn, *args: Any, **kwargs: Any) -> str:
+        """Schedule job_fn(*args, **kwargs) and return a job ID."""
 
     @abstractmethod
     async def get_status(self, job_id: str) -> str:
@@ -60,7 +60,9 @@ class AsyncioQueueAdapter(QueueAdapter):
     """In-process asyncio queue — zero external dependencies."""
 
     def __init__(self, max_workers: int = 10) -> None:
-        self._queue: asyncio.Queue[tuple[str, JobFn, dict[str, Any]]] = asyncio.Queue()
+        self._queue: asyncio.Queue[
+            tuple[str, JobFn, tuple[Any, ...], dict[str, Any]]
+        ] = asyncio.Queue()
         self._statuses: dict[str, str] = {}
         self._max_workers = max_workers
         self._workers: list[asyncio.Task[None]] = []
@@ -76,7 +78,7 @@ class AsyncioQueueAdapter(QueueAdapter):
 
     async def _worker(self) -> None:
         while True:
-            job_id, fn, kwargs = await self._queue.get()
+            job_id, fn, args, kwargs = await self._queue.get()
             self._statuses[job_id] = "running"
             try:
                 # AUDIT_Q_BATCH08 §102 "Long-Running Jobs": bounded to the
@@ -85,23 +87,53 @@ class AsyncioQueueAdapter(QueueAdapter):
                 # on any caller that enqueues here directly.
                 from app.config import get_settings
 
-                await asyncio.wait_for(
-                    fn(**kwargs), timeout=get_settings().job_wall_clock_timeout_seconds
-                )
-                self._statuses[job_id] = "completed"
-            except Exception:
-                logger.exception("Job %s failed", job_id)
-                self._statuses[job_id] = "failed"
+                settings = get_settings()
+                # AUDIT_Q_BATCH16 §86 gap-closure (2026-08-11) — "Retry":
+                # the RQ path already gets real retries (RQQueueAdapter.
+                # enqueue's Retry(max=queue_job_retry_max)); this in-process
+                # path had zero retry logic at all — a transient failure
+                # (e.g. a momentary LLM API outage) was marked "failed"
+                # after exactly one attempt, unlike every other real
+                # dispatch path in this codebase (should_retry() already
+                # gates backend_dev/frontend_dev/qa/manager's own retry
+                # loops). Reuses the SAME config value RQ's own retry count
+                # comes from, so both backends share one operator-facing
+                # knob rather than two independently-tuned retry counts.
+                retry_max = max(settings.queue_job_retry_max, 0)
+                last_exc: BaseException | None = None
+                for attempt in range(retry_max + 1):
+                    try:
+                        await asyncio.wait_for(
+                            fn(*args, **kwargs),
+                            timeout=settings.job_wall_clock_timeout_seconds,
+                        )
+                        self._statuses[job_id] = "completed"
+                        last_exc = None
+                        break
+                    except Exception as exc:  # noqa: BLE001
+                        last_exc = exc
+                        if attempt < retry_max:
+                            logger.warning(
+                                "Job %s failed on attempt %d/%d — retrying: %s",
+                                job_id,
+                                attempt + 1,
+                                retry_max + 1,
+                                exc,
+                            )
+                            await asyncio.sleep(0.5 * (2**attempt))
+                if last_exc is not None:
+                    logger.exception("Job %s failed", job_id, exc_info=last_exc)
+                    self._statuses[job_id] = "failed"
             finally:
                 self._queue.task_done()
 
-    async def enqueue(self, job_fn: JobFn, **kwargs: Any) -> str:
+    async def enqueue(self, job_fn: JobFn, *args: Any, **kwargs: Any) -> str:
         await self._start()
         import uuid
 
         job_id = str(uuid.uuid4())
         self._statuses[job_id] = "pending"
-        await self._queue.put((job_id, job_fn, kwargs))
+        await self._queue.put((job_id, job_fn, args, kwargs))
         logger.debug("Enqueued job %s -> %s", job_id, job_fn.__name__)
         return job_id
 
@@ -116,14 +148,34 @@ class AsyncioQueueAdapter(QueueAdapter):
         self._started = False
 
 
-def _run_coroutine_job(job_fn: JobFn, kwargs: dict[str, Any]) -> Any:
+def _run_coroutine_job(
+    job_fn: JobFn, args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> Any:
     """RQ worker entrypoint. RQ workers run in separate processes and only
     know how to call plain sync functions by pickled reference — they cannot
     invoke an async job_fn directly (calling it would just return an
     un-awaited coroutine object). This module-level function is what RQ
-    actually pickles/dispatches; job_fn and kwargs travel as its arguments
-    and get awaited here, inside the worker, via asyncio.run()."""
-    return asyncio.run(job_fn(**kwargs))
+    actually pickles/dispatches; job_fn, args, and kwargs travel as its
+    arguments and get awaited here, inside the worker, via asyncio.run().
+
+    AUDIT_Q_BATCH16 §86 gap-closure (2026-08-11) — `args` was previously
+    silently dropped entirely: RQAdapterBridge.enqueue() only accepted
+    job_fn plus **kwargs (no *args parameter at all, confirmed by reading
+    its signature — `async def enqueue(self, job_fn, **kwargs)`), so any
+    real caller passing positional arguments (every real dispatch_job()
+    call site in api/tasks.py does — e.g. `dispatch_job(background_tasks,
+    launch_planning_pipeline, task_id, title, description, repo_path)`)
+    would raise TypeError the instant QUEUE_BACKEND=rq tried to bind those
+    extra positional arguments to a **kwargs-only signature. This was
+    unreachable in the default (asyncio) configuration — dispatch_job()'s
+    asyncio branch uses FastAPI's BackgroundTasks.add_task(), which already
+    handles *args correctly — so the bug was latent until an operator
+    actually switched QUEUE_BACKEND=rq, which every real task-launch
+    endpoint does by construction. Not covered by
+    test_enqueue_delegates_to_rq_adapter_and_returns_job_id (that test only
+    passes kwargs, never positional args), which is why this survived
+    undetected."""
+    return asyncio.run(job_fn(*args, **kwargs))
 
 
 class RQAdapterBridge(QueueAdapter):
@@ -152,9 +204,24 @@ class RQAdapterBridge(QueueAdapter):
 
         self._adapter = get_rq_adapter()
 
-    async def enqueue(self, job_fn: JobFn, **kwargs: Any) -> str:
+    async def enqueue(self, job_fn: JobFn, *args: Any, **kwargs: Any) -> str:
+        # AUDIT_Q_BATCH16 §86 gap-closure (2026-08-11) — `*args` now carried
+        # through to `_run_coroutine_job` (see that function's own docstring
+        # for the real TypeError this previously caused on every dispatch_job
+        # call site once QUEUE_BACKEND=rq was selected). `priority` is
+        # popped out of kwargs before the rest is treated as job_fn's own
+        # call kwargs — it's RQQueueAdapter.enqueue's real queue-selection
+        # parameter (gridiron-high vs gridiron-default), not part of the
+        # job's own payload, so it must never be forwarded into
+        # _run_coroutine_job's kwargs and passed straight through to job_fn.
+        priority = kwargs.pop("priority", "default")
         job = await asyncio.to_thread(
-            self._adapter.enqueue, _run_coroutine_job, job_fn, kwargs
+            self._adapter.enqueue,
+            _run_coroutine_job,
+            job_fn,
+            args,
+            kwargs,
+            priority=priority,
         )
         return str(job.id)
 
@@ -184,7 +251,7 @@ class BullMQQueueAdapter(QueueAdapter):
     Enable by setting QUEUE_BACKEND=bullmq in environment.
     """
 
-    async def enqueue(self, job_fn: JobFn, **kwargs: Any) -> str:
+    async def enqueue(self, job_fn: JobFn, *args: Any, **kwargs: Any) -> str:
         raise NotImplementedError(
             "BullMQQueueAdapter requires Redis. Set QUEUE_BACKEND=asyncio or "
             "install redis and implement this body with bullmq-python."
@@ -256,6 +323,7 @@ async def dispatch_job(
     background_tasks: Any,
     job_fn: JobFn,
     *args: Any,
+    priority: str = "default",
     **kwargs: Any,
 ) -> None:
     """Blocker 8 (audit_v1.md 4.7/4.8): the real fix for "every real
@@ -271,11 +339,24 @@ async def dispatch_job(
     own process via FastAPI's BackgroundTasks, now wrapped in the same
     wall-clock bound RQ already had (AUDIT_Q_BATCH08 §102) — otherwise
     unchanged pre-existing behavior for any job that finishes within it.
+
+    priority (AUDIT_Q_BATCH16 §86 gap-closure, 2026-08-11): every real
+    caller in api/tasks.py has a DevTask in scope with a real `priority`
+    column ("low"/"medium"/"high") that was already being read for
+    PrioritySemaphore ordering (app/pipeline/concurrency.py, Batch 2 audit
+    gap-closure) but never reached the RQ backend's own two named queues
+    (RQQueueAdapter.enqueue's `priority` kwarg) — every RQ job silently
+    landed on "gridiron-default" regardless of the dispatching task's
+    priority, confirmed by grepping every dispatch_job() call site before
+    this change: none passed `priority=`. A keyword-only parameter (not
+    folded into **kwargs) so it can never leak into job_fn's own call
+    signature on the asyncio path, where **kwargs is forwarded verbatim to
+    job_fn(**kwargs) — job_fn has no `priority` parameter of its own.
     """
     from app.config import get_settings
 
     if get_settings().queue_backend.lower() == "rq":
-        await queue().enqueue(job_fn, *args, **kwargs)
+        await queue().enqueue(job_fn, *args, priority=priority, **kwargs)
     else:
         wrapped = _with_wall_clock_timeout(
             job_fn, get_settings().job_wall_clock_timeout_seconds

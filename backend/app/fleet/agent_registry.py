@@ -16,12 +16,15 @@ Design decisions:
 
 from __future__ import annotations
 
+import logging
 import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class AgentState(str, Enum):
@@ -90,8 +93,23 @@ class AgentInstance:
         self.last_active = _now()
         self.error_count += 1
         self.metadata["last_error"] = reason
+        # AUDIT_Q_BATCH16 §88 gap-closure (2026-08-11) — "degraded" was a
+        # real value in FleetManager.select()'s own health_weight dict
+        # (fleet_manager.py: {"healthy": 1.0, "degraded": 0.5, "unhealthy":
+        # 0.0}) but this method — the only place health is ever assigned —
+        # only ever wrote "healthy" (the dataclass default) or "unhealthy"
+        # (the >=3 branch below), so health_weight's 0.5 middle tier could
+        # never actually be selected; confirmed by grepping every write to
+        # `self.health` in this file before this change. 1-2 consecutive
+        # errors is exactly the "3 consecutive errors" threshold's own
+        # implied middle state, so this is the minimal fix that makes the
+        # existing type/scoring system's own "degraded" tier reachable
+        # without changing the >=3 -> unhealthy exclusion threshold
+        # FleetManager.select()/is_available already rely on.
         if self.error_count >= 3:
             self.health = "unhealthy"
+        else:
+            self.health = "degraded"
 
     def sleep(self) -> None:
         self.state = AgentState.SLEEP
@@ -101,6 +119,37 @@ class AgentInstance:
         self.state = AgentState.SLEEP
         self.error_count = 0
         self.health = "healthy"
+
+
+def _notify_agent_retired(agent_name: str, reason: str) -> None:
+    """AUDIT_Q_BATCH16 §89 gap-closure (2026-08-11) — best-effort, never
+    raises. Reuses fleet_events.get_main_loop()'s already-captured FastAPI
+    main loop (the same cross-thread-safe dispatch FleetBus itself uses)
+    instead of re-implementing loop capture — fail_task() is called from
+    arbitrary contexts, including asyncio.to_thread worker threads with no
+    event loop of their own (base_graph.py's run_agent_graph exception
+    handler), so a plain `await` here isn't possible."""
+    try:
+        import asyncio
+
+        from app.fleet.fleet_events import get_main_loop
+        from app.services.alert import send_agent_alert
+
+        coro = send_agent_alert(agent_name, "unhealthy", reason)
+        loop = get_main_loop()
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, loop)
+            return
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            coro.close()
+            return
+        running.create_task(coro)
+    except Exception:
+        logger.debug(
+            "Could not send agent-retired alert for %s", agent_name, exc_info=True
+        )
 
 
 class AgentRegistry:
@@ -152,8 +201,41 @@ class AgentRegistry:
     def fail_task(self, name: str, reason: str) -> AgentInstance | None:
         with self._lock:
             instance = self._instances.get(name)
-            if instance:
-                instance.fail(reason)
+            if instance is None:
+                return None
+            was_unhealthy = instance.health == "unhealthy"
+            instance.fail(reason)
+            newly_unhealthy = instance.health == "unhealthy" and not was_unhealthy
+        if newly_unhealthy:
+            # AUDIT_Q_BATCH16 §89 gap-closure (2026-08-11) — "Notify a
+            # supervisor" was NO: FleetManager.select() already excludes an
+            # unhealthy agent (real, code-enforced), but nothing ever told
+            # a human it happened — only an internal metadata field
+            # changed. Fired outside the lock (never hold a threading.RLock
+            # across a call that may schedule cross-thread work) and
+            # best-effort — a notification failure must never affect the
+            # real exclusion decision this method's caller depends on.
+            _notify_agent_retired(name, reason)
+        return instance
+
+    def recover_task(self, name: str) -> AgentInstance | None:
+        """AUDIT_Q_BATCH16 §88 gap-closure (2026-08-11) — recover() existed
+        (agent_registry.py, since Phase F2) but had zero real callers
+        anywhere in the codebase (confirmed by grepping every call site
+        before this change): once an instance degraded/went unhealthy, it
+        stayed that way until the whole process restarted, which is a
+        different, accidental form of "recovery," not automatic. Real
+        caller: base_graph.py's run_agent_graph() finalization, gated on
+        final_state["submitted"] — a genuinely successful completion is the
+        correct recovery signal, not merely reaching this method (see that
+        call site's own comment for why it isn't folded into complete_task()
+        itself: complete_task() also runs right after a stall's escalate()
+        ->fail_task() within the SAME call, so an unconditional recover()
+        there would immediately erase the failure it just recorded)."""
+        with self._lock:
+            instance = self._instances.get(name)
+            if instance and instance.health != "healthy":
+                instance.recover()
             return instance
 
     def snapshot(self) -> list[dict[str, Any]]:
@@ -182,6 +264,57 @@ _agent_registry = AgentRegistry()
 
 def get_agent_registry() -> AgentRegistry:
     return _agent_registry
+
+
+async def reseed_health_from_events(db: Any) -> int:
+    """AUDIT_Q_BATCH16 §89 gap-closure (2026-08-11) — "Replace / permanently
+    disable" was NO: FleetManager.select()'s real, code-enforced unhealthy
+    exclusion lived only in this in-process AgentRegistry, so a process
+    restart silently cleared it — "closer to temporary in-process cooldown
+    than a governed lifecycle decision" per the audit's own framing. Now
+    that HEALTH_UPDATED events are actually persisted to the real `events`
+    table (see fleet_events.py's FLEET_TO_LEGACY gap-closure, same batch),
+    this reads the most recently persisted health per agent and re-applies
+    "unhealthy" before the fresh process starts dispatching — a genuinely
+    persistent retirement, not merely an accidental one-time reset. Called
+    once from FastAPI lifespan startup (app/main.py), on the same loop as
+    ensure_all_agents_registered(), before any real dispatch can occur.
+    Best-effort: never raises, never blocks startup on a query failure —
+    an agent whose health can't be determined starts healthy, the existing
+    pre-gap-closure behavior, not a new failure mode.
+    """
+    try:
+        from sqlalchemy import select
+
+        from app.db.models import Event
+
+        query = (
+            select(Event.emitted_by, Event.payload)
+            .where(Event.event_type == "agent.health_updated")
+            .order_by(Event.emitted_by, Event.created_at.desc())
+            .distinct(Event.emitted_by)
+        )
+        result = await db.execute(query)
+        seeded = 0
+        for agent_name, payload in result.all():
+            health = (payload or {}).get("health")
+            if health == "unhealthy" and agent_name:
+                instance = _agent_registry.register(agent_name)
+                instance.health = "unhealthy"
+                instance.error_count = 3
+                seeded += 1
+        if seeded:
+            logger.info(
+                "Re-seeded %d agent(s) as unhealthy from persisted health events",
+                seeded,
+            )
+        return seeded
+    except Exception:
+        logger.warning(
+            "Could not re-seed agent health from persisted events (non-fatal)",
+            exc_info=True,
+        )
+        return 0
 
 
 # ---------------------------------------------------------------------------

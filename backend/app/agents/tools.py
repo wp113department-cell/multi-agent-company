@@ -4040,6 +4040,26 @@ _SUBMIT_DEPENDENCY_REPORT_TOOL = {
                         },
                         "upgrade_recommended": {"type": "boolean"},
                         "breaking_changes": {"type": "string"},
+                        # AUDIT_Q_BATCH16 §92 gap-closure (2026-08-11) —
+                        # "Abandoned/unmaintained libraries": check_last_release
+                        # already existed as a real tool (distinguishes
+                        # "outdated but active" from "no release in a long
+                        # time") but was available-not-required — nothing in
+                        # this schema captured its result as a structured
+                        # claim, so the distinction it exists to make never
+                        # reached the report. Optional (only known when
+                        # check_last_release was actually called for this
+                        # dependency) rather than required — a package with
+                        # no version delta (already current) has no reason to
+                        # spend a registry call checking staleness.
+                        "abandoned": {
+                            "type": "boolean",
+                            "description": "True if check_last_release showed no release in a long time (not merely 'not the newest version') — only set when check_last_release was actually called for this package this run.",
+                        },
+                        "last_release_days_ago": {
+                            "type": "integer",
+                            "description": "Days since the latest published release, from this run's real check_last_release output.",
+                        },
                     },
                     "required": [
                         "name",

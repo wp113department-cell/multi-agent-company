@@ -284,6 +284,27 @@ def run_dependency_security_scan(trace_id: str = "") -> AgentResult:
     the other fleet self-improvement agents' own scan functions."""
     settings = get_settings()
     repo = settings.fleet_self_repo_path
+
+    # AUDIT_Q_BATCH16 §92 gap-closure (2026-08-11) — "Dependency conflicts":
+    # a real, independently-re-run `pip check` (never the LLM's own bash
+    # output) against this process's own installed environment — see
+    # app/fleet/dependency_conflict.py's module docstring for why that's
+    # the honest, buildable scope (not a SAT-solver-style resolver, which
+    # genuinely doesn't exist and would be new-capability work). Best-
+    # effort and independent of the LLM scan below.
+    try:
+        from app.fleet.dependency_conflict import run_pip_check
+
+        conflicts = run_pip_check()
+        if conflicts:
+            logger.warning(
+                "pip check found %d real dependency conflict(s): %s",
+                len(conflicts),
+                conflicts[:10],
+            )
+    except Exception:
+        logger.warning("pip check conflict scan failed (non-fatal)", exc_info=True)
+
     handlers = make_scan_handlers(repo, trace_id=trace_id)
     msg = (
         "Autonomous dependency security scan of this codebase. Read requirements.txt / "

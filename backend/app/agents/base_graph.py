@@ -3025,6 +3025,21 @@ def run_agent_graph(
                 _reg.complete_task(
                     role_name, confidence=final_state.get("confidence")
                 )  # → AgentState.SLEEP
+                # AUDIT_Q_BATCH16 §88 gap-closure (2026-08-11) — "Automatic
+                # recovery from unhealthy": recover_task() had zero real
+                # callers anywhere; wired here, gated on submitted=True
+                # (never unconditionally on every complete_task() call) —
+                # this same finalization block also runs right after a
+                # stall's escalate()->fail_task() a few lines above (n_stalls
+                # >= max_stalls sets status="blocked" and submitted stays
+                # False), so an ungated recover() here would immediately
+                # erase the degradation that stall just recorded on this
+                # exact same agent identity. A genuinely successful
+                # completion — the same final_state["submitted"] ground
+                # truth already trusted for AgentRun DB status below — is
+                # the correct, non-conflicting recovery signal.
+                if final_state.get("submitted"):
+                    _reg.recover_task(role_name)
             publish(task_completed(task_id=task_id, agent_name=role_name, trace_id=tid))
             publish(
                 health_updated(role_name, health="healthy", state="sleep", trace_id=tid)

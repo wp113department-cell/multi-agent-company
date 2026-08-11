@@ -748,6 +748,39 @@ async def _dispatch_one_subtask(
             break
         await asyncio.sleep(0.5 * (2**attempt))
 
+    # AUDIT_Q_BATCH16 §90 gap-closure (2026-08-11) — "Quality Gates":
+    # security_reviewer/architecture_reviewer wired as real, additional,
+    # non-blocking nodes in the Dev→QA→Review sequence, following the same
+    # pattern as the existing run_qa/run_reviewer calls above. Opt-in
+    # (enable_security_architecture_gates, default False) and strictly
+    # advisory: only runs once the subtask already reached "completed" via
+    # the mandatory QA+review gates, and its findings are logged/persisted
+    # but never flip subtask_status back to "blocked" — these two agents
+    # aren't currently tuned for blocking behavior (no retry-on-finding
+    # loop of their own, unlike qa/reviewer), so surfacing findings without
+    # gating completion is the honest scope for a first wiring pass.
+    if (
+        subtask_status == "completed"
+        and get_settings().enable_security_architecture_gates
+    ):
+        try:
+            gate_tokens_in, gate_tokens_out = await _run_advisory_quality_gates(
+                task_id=task_id,
+                subtask_id=subtask_id,
+                repo=repo,
+                epic_id=epic_id,
+                db=db,
+            )
+            local_tokens_in += gate_tokens_in
+            local_tokens_out += gate_tokens_out
+        except Exception:
+            logger.debug(
+                "Advisory security/architecture gates failed for subtask %d "
+                "(non-fatal, non-blocking)",
+                subtask_id,
+                exc_info=True,
+            )
+
     await _subtask_slot_cm.__aexit__(None, None, None)
 
     if db is not None and subtask_idx < len(db_subtask_rows):
@@ -779,6 +812,113 @@ async def _dispatch_one_subtask(
         "tokens_in": local_tokens_in,
         "tokens_out": local_tokens_out,
     }
+
+
+async def _run_advisory_quality_gates(
+    *,
+    task_id: int,
+    subtask_id: int,
+    repo: str,
+    epic_id: str | None,
+    db: AsyncSession | None,
+) -> tuple[int, int]:
+    """AUDIT_Q_BATCH16 §90 gap-closure (2026-08-11) — the real call site
+    `enable_security_architecture_gates` needed: security_reviewer and
+    architecture_reviewer are real, fully-built, independently-tested
+    agents (already the autonomous fleet scan loop's own security/
+    architecture checkers) that had zero callers anywhere in the pipeline
+    deciding whether a normal task is "done" before this. Runs both
+    concurrently (asyncio.gather — independent, read-only, non-blocking
+    reviews; no ordering dependency between them, unlike dev->QA->review's
+    own strict sequence). Never raises past this function — the caller
+    already wraps this in its own best-effort try/except, but this
+    function's own errors are caught per-agent so one agent's failure
+    doesn't lose the other's real findings.
+
+    Returns (tokens_in, tokens_out) so the caller's real epic-wide token
+    accounting (compute_actual_cost_usd) includes these two extra LLM
+    calls — an advisory gate that silently omitted its own real spend from
+    cost_actual_usd would make that number quietly wrong once an operator
+    opts in.
+    """
+    from app.agents.architecture_reviewer import run_arch_review
+    from app.agents.security_reviewer import run_security_review
+    from app.event_bus.bus import publish_event
+    from app.event_bus.models import GridironEvent
+
+    async def _run_security() -> Any:
+        try:
+            return await asyncio.to_thread(
+                run_security_review, task_id=task_id, repo_path=repo
+            )
+        except Exception as exc:
+            logger.warning(
+                "Advisory security_reviewer failed for subtask %d: %s",
+                subtask_id,
+                exc,
+            )
+            return None
+
+    async def _run_architecture() -> Any:
+        try:
+            return await asyncio.to_thread(
+                run_arch_review, task_id=task_id, repo_path=repo
+            )
+        except Exception as exc:
+            logger.warning(
+                "Advisory architecture_reviewer failed for subtask %d: %s",
+                subtask_id,
+                exc,
+            )
+            return None
+
+    security_result, arch_result = await asyncio.gather(
+        _run_security(), _run_architecture()
+    )
+
+    tokens_in = 0
+    tokens_out = 0
+    for label, result in (("security", security_result), ("architecture", arch_result)):
+        if result is None:
+            continue
+        tokens_in += result.tokens_in
+        tokens_out += result.tokens_out
+        await publish_event(
+            GridironEvent(
+                event_type="subtask.advisory_gate_completed",
+                task_id=str(task_id),
+                epic_id=epic_id,
+                payload={
+                    "subtask_id": subtask_id,
+                    "gate": label,
+                    "status": result.status,
+                    "finding_count": len(result.findings),
+                    "summary": result.summary[:500],
+                },
+                emitted_by=f"{label}_reviewer",
+            ),
+            db=db,
+        )
+        if result.findings and db is not None:
+            try:
+                from app.db.repository import append_log
+
+                await append_log(
+                    db,
+                    task_id,
+                    f"{label}_advisory",
+                    f"Subtask {subtask_id}: {len(result.findings)} {label} "
+                    f"finding(s) — {result.summary[:300]}",
+                )
+            except Exception:
+                logger.debug(
+                    "Could not persist %s advisory findings for subtask %d",
+                    label,
+                    subtask_id,
+                    exc_info=True,
+                )
+
+    return tokens_in, tokens_out
 
 
 async def run_manager(

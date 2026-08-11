@@ -126,6 +126,18 @@ class TestBidirectionalMapping:
     def test_translate_fleet_to_legacy_none_for_unmapped(self) -> None:
         assert translate_fleet_to_legacy(FleetEventType.LESSON_PUBLISHED) is None
 
+    def test_health_updated_maps_to_legacy(self) -> None:
+        """AUDIT_Q_BATCH16 §88 gap-closure (2026-08-11) — HEALTH_UPDATED was
+        previously absent from FLEET_TO_LEGACY entirely, so every
+        publish(health_updated(...)) call (escalate()'s "degraded" event
+        included) silently no-op'd inside FleetBus._publish_to_existing_bus
+        (translate_fleet_to_legacy() returned None -> early return) — a
+        HealthUpdated event never reached the real event_bus/events table."""
+        assert (
+            translate_fleet_to_legacy(FleetEventType.HEALTH_UPDATED)
+            == "agent.health_updated"
+        )
+
 
 class TestLegacyEventTypesPreserved:
     """Prove that CORE_EVENT_TYPES from the existing event bus are untouched."""

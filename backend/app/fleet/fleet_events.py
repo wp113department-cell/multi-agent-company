@@ -184,12 +184,27 @@ LEGACY_TO_FLEET: dict[str, FleetEventType] = {
 # Fleet OS event type → legacy event_type string to emit for backward compat
 # Purpose: When Fleet OS emits a typed event, also emit the legacy event so
 #          existing subscribers (e.g., SSE push, metrics handlers) still work.
+#
+# AUDIT_Q_BATCH16 §88 gap-closure (2026-08-11) — HEALTH_UPDATED was missing
+# from this table entirely, so every publish(health_updated(...)) call
+# (escalate()'s own "degraded" event included) silently no-op'd inside
+# FleetBus._publish_to_existing_bus (translate_fleet_to_legacy() returned
+# None -> early return, confirmed by reading that method before this
+# change) — a HealthUpdated event never reached the real event_bus, so it
+# was never persisted to the events table and no dashboard/history could
+# ever observe a "degraded" transition, even though the type system and
+# escalate() both already treated it as real. "agent.health_updated" is a
+# new legacy event_type string (does not collide with any existing one —
+# confirmed by grepping event_bus/models.py's own CORE_EVENT_TYPES-adjacent
+# constructors before adding it) rather than reusing an unrelated existing
+# string.
 FLEET_TO_LEGACY: dict[FleetEventType, str] = {
     FleetEventType.TASK_CREATED: "task.created",
     FleetEventType.TASK_STARTED: "task.planned",
     FleetEventType.TASK_COMPLETED: "epic.completed",
     FleetEventType.TASK_FAILED: "task.blocked",
     FleetEventType.REVIEW_REQUESTED: "review.completed",
+    FleetEventType.HEALTH_UPDATED: "agent.health_updated",
 }
 
 
@@ -237,6 +252,16 @@ def set_main_loop(loop: Any) -> None:
     startup, on that loop, before any agent run can publish an event."""
     global _main_loop
     _main_loop = loop
+
+
+def get_main_loop() -> Any:
+    """AUDIT_Q_BATCH16 §89 gap-closure (2026-08-11) — the captured main loop
+    was private to this module; app.services.alert's agent-retirement
+    notifier needs the exact same cross-thread-safe dispatch this module
+    already built for FleetBus (run_coroutine_threadsafe from a worker
+    thread with no loop of its own) rather than re-implementing loop
+    capture a second time."""
+    return _main_loop
 
 
 class FleetBus:

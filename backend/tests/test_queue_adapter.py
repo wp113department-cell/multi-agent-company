@@ -54,15 +54,81 @@ class TestAsyncioQueueAdapter:
         assert status == "unknown"
 
     async def test_job_failure_sets_status_failed(self) -> None:
+        # AUDIT_Q_BATCH16 §86 gap-closure: the worker now retries
+        # (queue_job_retry_max, default 3) before giving up — patch it to 0
+        # so this test still exercises the immediate terminal-failure path
+        # without waiting through exponential backoff.
+        with patch("app.config.get_settings") as mock_settings:
+            mock_settings.return_value.queue_job_retry_max = 0
+            mock_settings.return_value.job_wall_clock_timeout_seconds = 30
+
+            adapter = AsyncioQueueAdapter(max_workers=1)
+
+            async def failing_job() -> None:
+                raise RuntimeError("boom")
+
+            job_id = await adapter.enqueue(failing_job)
+            await asyncio.sleep(0.05)
+            status = await adapter.get_status(job_id)
+            assert status == "failed"
+            await adapter.shutdown()
+
+    async def test_job_retries_on_failure_then_succeeds(self) -> None:
+        # AUDIT_Q_BATCH16 §86 gap-closure — "Retry": the in-process asyncio
+        # backend previously had zero retry logic (unlike the RQ backend's
+        # real Retry(max=...)); a job that fails once and then succeeds
+        # should now end up "completed", not "failed" on the first error.
+        with patch("app.config.get_settings") as mock_settings:
+            mock_settings.return_value.queue_job_retry_max = 2
+            mock_settings.return_value.job_wall_clock_timeout_seconds = 30
+
+            adapter = AsyncioQueueAdapter(max_workers=1)
+            attempts: list[int] = []
+
+            async def flaky_job() -> None:
+                attempts.append(1)
+                if len(attempts) < 2:
+                    raise RuntimeError("transient")
+
+            job_id = await adapter.enqueue(flaky_job)
+            await asyncio.sleep(1.0)
+            status = await adapter.get_status(job_id)
+            assert status == "completed"
+            assert len(attempts) == 2
+            await adapter.shutdown()
+
+    async def test_job_exhausts_retries_and_fails(self) -> None:
+        with patch("app.config.get_settings") as mock_settings:
+            mock_settings.return_value.queue_job_retry_max = 1
+            mock_settings.return_value.job_wall_clock_timeout_seconds = 30
+
+            adapter = AsyncioQueueAdapter(max_workers=1)
+            attempts: list[int] = []
+
+            async def always_fails() -> None:
+                attempts.append(1)
+                raise RuntimeError("boom")
+
+            job_id = await adapter.enqueue(always_fails)
+            await asyncio.sleep(1.0)
+            status = await adapter.get_status(job_id)
+            assert status == "failed"
+            assert len(attempts) == 2  # initial attempt + 1 retry
+            await adapter.shutdown()
+
+    async def test_enqueue_forwards_positional_args(self) -> None:
+        # AUDIT_Q_BATCH16 §86 gap-closure — every real dispatch_job() call
+        # site passes positional args (task_id, plan, repo_path, ...); the
+        # interface must actually deliver them to job_fn.
         adapter = AsyncioQueueAdapter(max_workers=1)
+        received: list[tuple[int, str]] = []
 
-        async def failing_job() -> None:
-            raise RuntimeError("boom")
+        async def job(task_id: int, msg: str) -> None:
+            received.append((task_id, msg))
 
-        job_id = await adapter.enqueue(failing_job)
+        await adapter.enqueue(job, 42, msg="hello")
         await asyncio.sleep(0.05)
-        status = await adapter.get_status(job_id)
-        assert status == "failed"
+        assert received == [(42, "hello")]
         await adapter.shutdown()
 
     async def test_multiple_workers_run_concurrently(self) -> None:
@@ -116,7 +182,16 @@ class TestRunCoroutineJob:
         async def job(x: int, y: int) -> int:
             return x + y
 
-        result = _run_coroutine_job(job, {"x": 2, "y": 3})
+        result = _run_coroutine_job(job, (), {"x": 2, "y": 3})
+        assert result == 5
+
+    def test_awaits_the_coroutine_with_positional_args(self) -> None:
+        # AUDIT_Q_BATCH16 §86 gap-closure — positional args previously had
+        # nowhere to travel through this shim at all.
+        async def job(x: int, y: int) -> int:
+            return x + y
+
+        result = _run_coroutine_job(job, (2,), {"y": 3})
         assert result == 5
 
     def test_propagates_exceptions_from_the_coroutine(self) -> None:
@@ -124,7 +199,7 @@ class TestRunCoroutineJob:
             raise RuntimeError("boom")
 
         with pytest.raises(RuntimeError, match="boom"):
-            _run_coroutine_job(failing_job, {})
+            _run_coroutine_job(failing_job, (), {})
 
 
 class TestRQAdapterBridge:
@@ -150,10 +225,38 @@ class TestRQAdapterBridge:
         job_id = await bridge.enqueue(job_fn, task_id=42)
 
         assert job_id == "rq-job-123"
-        # The real async job_fn + its kwargs travel as arguments to the
+        # The real async job_fn + its args/kwargs travel as arguments to the
         # RQ-picklable shim — RQ never receives job_fn as its own `fn`.
+        # `priority` defaults to "default" and is passed as RQQueueAdapter's
+        # own real queue-selection kwarg, never folded into job_fn's kwargs.
         mock_rq_adapter.enqueue.assert_called_once_with(
-            _run_coroutine_job, job_fn, {"task_id": 42}
+            _run_coroutine_job, job_fn, (), {"task_id": 42}, priority="default"
+        )
+
+    async def test_enqueue_forwards_positional_args_and_priority(self) -> None:
+        # AUDIT_Q_BATCH16 §86 gap-closure — every real dispatch_job() call
+        # site passes positional args AND a real DevTask.priority; both
+        # previously either broke (TypeError on positional args) or were
+        # silently dropped (priority never reached RQQueueAdapter's own
+        # gridiron-high/gridiron-default queue selection).
+        mock_job = MagicMock()
+        mock_job.id = "rq-job-456"
+        mock_rq_adapter = MagicMock()
+        mock_rq_adapter.enqueue.return_value = mock_job
+        bridge = self._make_bridge(mock_rq_adapter)
+
+        async def job_fn(task_id: int, title: str) -> None:
+            pass
+
+        job_id = await bridge.enqueue(job_fn, 42, "some title", priority="high")
+
+        assert job_id == "rq-job-456"
+        mock_rq_adapter.enqueue.assert_called_once_with(
+            _run_coroutine_job,
+            job_fn,
+            (42, "some title"),
+            {},
+            priority="high",
         )
 
     async def test_get_status_maps_rq_statuses(self) -> None:

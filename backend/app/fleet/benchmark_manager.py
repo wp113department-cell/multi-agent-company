@@ -46,6 +46,56 @@ class RegressionReport:
     per_objective_delta: dict[str, float]
 
 
+def build_regression_report(
+    name: str,
+    current: BenchmarkResult,
+    baseline: BenchmarkResult | None,
+    regression_threshold: float,
+) -> RegressionReport:
+    """AUDIT_Q_BATCH16 §91 gap-closure (2026-08-11) — the current-vs-stored-
+    baseline diff math inside BenchmarkManager.compare_to_baseline() below
+    was tightly coupled to run_benchmark() (agent execution metrics from
+    MetricsCollector), so it couldn't be reused as-is for a different
+    "objectives" source. Factored out here (pure function — score in,
+    report out) so app/fleet/architecture_drift.py can reuse the exact same
+    "is_regression" / delta / per-objective-delta computation for a
+    structural-count baseline instead of duplicating it. Both a
+    "benchmark_score" going down (agent quality) and a "benchmark_score"
+    going down (architecture health composite) mean the same thing here:
+    fractional_drop past regression_threshold -> regression — the naming
+    ("benchmark_score") is kept generic on purpose so both callers can
+    share this one function unmodified."""
+    if baseline is None:
+        return RegressionReport(
+            agent_name=name,
+            is_regression=False,
+            current_score=current.objectives["benchmark_score"],
+            baseline_score=None,
+            delta=0.0,
+            per_objective_delta={},
+        )
+
+    current_score = current.objectives["benchmark_score"]
+    baseline_score = baseline.objectives["benchmark_score"]
+    delta = current_score - baseline_score
+    fractional_drop = (-delta / baseline_score) if baseline_score > 0 else 0.0
+    is_regression = fractional_drop > regression_threshold
+
+    per_objective_delta = {
+        key: current.objectives.get(key, 0.0) - baseline.objectives.get(key, 0.0)
+        for key in current.objectives
+    }
+
+    return RegressionReport(
+        agent_name=name,
+        is_regression=is_regression,
+        current_score=current_score,
+        baseline_score=baseline_score,
+        delta=delta,
+        per_objective_delta=per_objective_delta,
+    )
+
+
 def _new_isolated_db_engine() -> Any:
     """A throwaway async engine, never the shared app.db.session singleton —
     see feedback_asyncio_isolated_engine: reusing one engine across multiple
@@ -215,35 +265,8 @@ class BenchmarkManager:
         s = get_settings()
         current = self.run_benchmark(agent_name, n=n)
         baseline = self._get_baseline(agent_name)
-
-        if baseline is None:
-            return RegressionReport(
-                agent_name=agent_name,
-                is_regression=False,
-                current_score=current.objectives["benchmark_score"],
-                baseline_score=None,
-                delta=0.0,
-                per_objective_delta={},
-            )
-
-        current_score = current.objectives["benchmark_score"]
-        baseline_score = baseline.objectives["benchmark_score"]
-        delta = current_score - baseline_score
-        fractional_drop = (-delta / baseline_score) if baseline_score > 0 else 0.0
-        is_regression = fractional_drop > s.benchmark_regression_threshold
-
-        per_objective_delta = {
-            key: current.objectives.get(key, 0.0) - baseline.objectives.get(key, 0.0)
-            for key in current.objectives
-        }
-
-        return RegressionReport(
-            agent_name=agent_name,
-            is_regression=is_regression,
-            current_score=current_score,
-            baseline_score=baseline_score,
-            delta=delta,
-            per_objective_delta=per_objective_delta,
+        return build_regression_report(
+            agent_name, current, baseline, s.benchmark_regression_threshold
         )
 
 
