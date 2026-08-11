@@ -61,7 +61,9 @@ AGENT_CONTRACT: dict[str, Any] = {
     "side_effects": [],
     "permissions": ["read_repo"],
     "risk_level": "low",
-    "expected_verification": {},
+    "expected_verification": {
+        "read": "read_file, search_code, or search_symbols must run before submit_plan"
+    },
     "dependencies": [],
 }
 
@@ -91,11 +93,26 @@ _MIN_PLAN_LENGTH = 100
 # ---------------------------------------------------------------------------
 
 _VERIFICATION_CFG = VerificationConfig(
-    set_by={"submit_plan": "plan_submitted"},
+    set_by={
+        "submit_plan": "plan_submitted",
+        "read_file": "read",
+        "search_code": "read",
+        "search_symbols": "read",
+    },
     reset_by=(),
     reset_keys=(),
     enforce_in_result={"plan_submitted": "plan_submitted"},
-    initial={"plan_submitted": False},
+    initial={"plan_submitted": False, "read": False},
+    # AUDIT_Q_BATCH12 §29 gap-closure (2026-08-11) — the planner's own role
+    # prompt already says "Check before assuming" and search_code/
+    # search_symbols/read_file are available tools, but nothing enforced
+    # that they actually ran before submit_plan: a plan could previously be
+    # submitted from pure LLM reasoning about the fact-gathering step's own
+    # abstract output, with zero real repo lookups. Mirrors chat_agent.py's
+    # identical blocking_until pattern — submit_plan is refused with a real
+    # [POLICY DENIED] result (the plan is never accepted) until at least one
+    # real read_file/search_code/search_symbols call has happened first.
+    blocking_until={"submit_plan": "read"},
 )
 
 # ---------------------------------------------------------------------------

@@ -47,6 +47,14 @@ def test_blocked_can_restart():
     assert can_transition("blocked", "planning") is True
 
 
+def test_blocked_can_resume_into_coding():
+    """AUDIT_Q_BATCH12 §25/§29 (2026-08-11) — coder.py can now pause on
+    request_clarification the same way planner.py already could;
+    resume_coder_after_clarification needs a real transition back to
+    "coding" to re-dispatch launch_coder() with the human's answer."""
+    assert can_transition("blocked", "coding") is True
+
+
 def test_done_to_pending_blocked():
     assert can_transition("completed", "pending") is False
 

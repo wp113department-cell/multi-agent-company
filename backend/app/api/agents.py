@@ -646,6 +646,67 @@ async def launch_planner(
             )
 
 
+async def resume_planner_after_clarification(task_id: int, answer: str) -> None:
+    """AUDIT_Q_BATCH12 §27 gap-closure (2026-08-11) — request_clarification's
+    own tool description promises "a future run receives that answer in its
+    task context"; nothing previously implemented that promise. planner.py
+    returning a "[NEEDS_CLARIFICATION]"-prefixed error made launch_planner
+    treat it exactly like any other failure (task -> "blocked"), and the
+    separately-recorded "clarification" PendingApproval row had no dispatch
+    branch in api/approvals.py::_dispatch_decision — approving it only
+    flipped the row's DB status, nothing re-ran the planner.
+
+    Called from api/approvals.py when a human approves a "clarification"
+    action with an answer: folds the answer into a fresh planner dispatch,
+    mirroring resume_planning_pipeline's "decision recorded -> re-invoke the
+    owning flow" shape already used for the "plan_review" action in the same
+    file. The task's stored description is left untouched — the answer is
+    only folded into THIS run's initial_message/task_description, the same
+    way an ordinary re-run's title/description are read fresh from the task
+    each time, not persisted as a retroactive edit to the original request.
+    """
+    from app.db.models import can_transition
+    from app.db.repository import get_task, resolve_task_repo_path
+
+    factory = get_session_factory()
+    async with factory() as db:
+        task = await get_task(db, task_id)
+        if task is None:
+            logger.warning(
+                "resume_planner_after_clarification: task %d not found", task_id
+            )
+            return
+        if not can_transition(str(task.status), "planning"):
+            logger.warning(
+                "resume_planner_after_clarification: task %d in status %r "
+                "cannot resume planning — leaving as-is",
+                task_id,
+                task.status,
+            )
+            return
+
+        title = str(task.title)
+        description = str(task.description)
+        repo_path = resolve_task_repo_path(task)
+
+        await transition_task(db, task_id, "planning")
+        await append_log(
+            db,
+            task_id,
+            "pipeline",
+            f"Clarification answered — resuming planning. Answer: {answer[:500]}",
+        )
+
+    augmented_description = (
+        f"{description}\n\n"
+        "## Clarification\n"
+        "The planner previously paused this task to ask a human a question. "
+        f"Here is the human's answer — use it, do not ask the same question "
+        f"again:\n{answer}"
+    )
+    await launch_planner(task_id, title, augmented_description, repo_path)
+
+
 # ---- Coder Agent (simple mode: single coder after planner) ----
 
 
@@ -798,3 +859,61 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
                 await finish_agent_run(db2, run_id, "failed", error=str(e))
                 await transition_task(db2, task_id, "blocked")
                 await append_log(db2, task_id, "error", str(e))
+
+
+async def resume_coder_after_clarification(task_id: int, answer: str) -> None:
+    """AUDIT_Q_BATCH12 §25/§29 gap-closure (2026-08-11) — extends the same
+    real "clean stop, resume with a fresh run" pattern §27 already fixed for
+    planner.py to coder.py, the other flagship autonomous-authoring agent:
+    coder.py can now call request_clarification (app/agents/coder.py), and
+    run_coder() surfaces that as a "[NEEDS_CLARIFICATION]"-prefixed error
+    (same parseable-prefix convention as run_planner) instead of silently
+    reporting a false zero-files-changed success.
+
+    Called from api/approvals.py when a human approves a "clarification"
+    action whose agent_name is "coder": folds the answer into the task's
+    already-approved plan (read fresh from the DB, not mutated there) and
+    re-invokes launch_coder() — the exact same call POST /{task_id}/approve
+    makes, reusing create_worktree()'s existing idempotency (a still-valid
+    worktree for this task_id is reused as-is, so any partial progress from
+    before the pause is preserved, not discarded).
+    """
+    from app.db.models import can_transition
+    from app.db.repository import get_task, resolve_task_repo_path
+
+    factory = get_session_factory()
+    async with factory() as db:
+        task = await get_task(db, task_id)
+        if task is None:
+            logger.warning(
+                "resume_coder_after_clarification: task %d not found", task_id
+            )
+            return
+        if not can_transition(str(task.status), "coding"):
+            logger.warning(
+                "resume_coder_after_clarification: task %d in status %r "
+                "cannot resume coding — leaving as-is",
+                task_id,
+                task.status,
+            )
+            return
+
+        plan = str(task.plan or "")
+        repo_path = resolve_task_repo_path(task)
+
+        await transition_task(db, task_id, "coding")
+        await append_log(
+            db,
+            task_id,
+            "pipeline",
+            f"Clarification answered — resuming coding. Answer: {answer[:500]}",
+        )
+
+    augmented_plan = (
+        f"{plan}\n\n"
+        "## Clarification\n"
+        "You previously paused implementation to ask a human a question. "
+        f"Here is the human's answer — use it, do not ask the same question "
+        f"again:\n{answer}"
+    )
+    await launch_coder(task_id, augmented_plan, repo_path)

@@ -71,7 +71,17 @@ VALID_TRANSITIONS: dict[str, list[str]] = {
     "coding": ["testing", "blocked", "failed", "cancelled"],
     "testing": ["ready_for_review", "blocked", "failed", "cancelled"],
     "rejected": ["planning", "cancelled"],
-    "blocked": ["planning", "failed", "cancelled"],
+    # "coding" added (AUDIT_Q_BATCH12 §25/§29 gap-closure, 2026-08-11):
+    # coder.py can now pause on request_clarification the same way
+    # planner.py already could — launch_coder() lands the task in "blocked"
+    # from "coding" (its own generic error branch, unchanged), and
+    # resume_coder_after_clarification() needs a real transition back to
+    # "coding" to re-dispatch launch_coder() with the human's answer folded
+    # into the plan. "ready_for_review" is deliberately NOT added here: that
+    # would re-open a plan-approval step that already happened once, whereas
+    # resuming coding does not need a new approval — the plan itself is
+    # unchanged, only new information was added to it.
+    "blocked": ["planning", "coding", "failed", "cancelled"],
     "completed": [],
     "failed": [],
     "cancelled": [],

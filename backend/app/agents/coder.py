@@ -21,8 +21,10 @@ from typing import Any
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
     CODER_TOOLS,
+    REQUEST_CLARIFICATION_TOOL,
     make_coder_handlers,
     make_record_learning_handler,
+    make_request_clarification_handler,
 )
 from app.config import get_settings
 
@@ -58,6 +60,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "bash",
         "submit_patch",
         "record_learning",
+        "request_clarification",
     ],
     "input_types": ["task_id", "plan", "worktree_path", "repo_path"],
     "output_types": ["files_changed", "tokens_in", "tokens_out"],
@@ -73,11 +76,27 @@ AGENT_CONTRACT: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 _VERIFICATION_CFG = VerificationConfig(
-    set_by={"bash": "checks_run", "git_diff": "diff_checked"},
+    set_by={
+        "bash": "checks_run",
+        "git_diff": "diff_checked",
+        "read_file": "read",
+        "search_code": "read",
+    },
     reset_by=("edit_file", "write_file"),
     reset_keys=("checks_run",),
     enforce_in_result={"checks_run": "checks_run"},
-    initial={"checks_run": False, "diff_checked": False},
+    initial={"checks_run": False, "diff_checked": False, "read": False},
+    # AUDIT_Q_BATCH12 §30 gap-closure (2026-08-11) — coder.py is the
+    # flagship code-implementation agent in the main pipeline but, unlike
+    # chat_agent.py and dependency_security_agent.py, had no code-enforced
+    # "read before write" requirement: AGENT_CONTRACT's own
+    # expected_verification ("checks_run: bash mypy/ruff executed before
+    # submit") said nothing about reading first, and roles/coder.md's
+    # "Files To Inspect" step was advisory prompt text only. Mirrors
+    # chat_agent.py's identical blocking_until pattern exactly — write_file/
+    # edit_file are refused with a real [POLICY DENIED] result (the handler
+    # never runs) until read_file or search_code has run at least once.
+    blocking_until={"write_file": "read", "edit_file": "read"},
 )
 
 # ---------------------------------------------------------------------------
@@ -133,6 +152,15 @@ def run_coder(
     for attempt in range(max_retries):
         handlers = make_coder_handlers(worktree_path, repo, extra_env=extra_env)
         handlers["record_learning"] = make_record_learning_handler("coder")
+        # AUDIT_Q_BATCH12 §25/§29 gap-closure (2026-08-11) — extends the same
+        # real "clean stop, resume with a fresh run" pattern already proven
+        # for planner.py to coder.py, the other flagship autonomous-authoring
+        # agent in the main pipeline. Scoped to coder specifically (not the
+        # shared CODER_TOOLS constant, which frontend_dev.py/backend_dev.py
+        # also use) so this doesn't silently change those agents' tool sets.
+        handlers["request_clarification"] = make_request_clarification_handler(
+            "coder", str(task_id)
+        )
 
         base_msg = (
             f"Task ID: {task_id}\n\n"
@@ -150,7 +178,7 @@ def run_coder(
             final_state = run_agent_graph(
                 role_name="coder",
                 model=settings.model_coder,
-                tools=CODER_TOOLS,
+                tools=CODER_TOOLS + [REQUEST_CLARIFICATION_TOOL],
                 tool_handlers=handlers,
                 verification_cfg=_VERIFICATION_CFG,
                 initial_message=base_msg,
@@ -181,6 +209,31 @@ def run_coder(
             )
             total_in += final_state.get("tokens_in", 0)
             total_out += final_state.get("tokens_out", 0)
+
+            # AUDIT_Q_BATCH12 §25/§29 gap-closure (2026-08-11) — without this
+            # check, a request_clarification call would fall straight into
+            # the check-loop below: submit_patch was never called, so
+            # files_changed is [], but _run_checks() would still run against
+            # the (unmodified-by-this-attempt) worktree and likely pass,
+            # returning ([], None, ...) — a silent, false "success with zero
+            # files changed" instead of surfacing the pause. Mirrors
+            # planner.py::run_planner's identical "[NEEDS_CLARIFICATION]"-
+            # prefixed error-slot signal (same parseable-prefix convention,
+            # so launch_coder() needs no new return shape to handle it).
+            result = final_state.get("result", {})
+            if result.get("status") == "needs_clarification":
+                question = str(result.get("question", "")).strip()
+                logger.info(
+                    "Coder requested clarification (task %d): %s",
+                    task_id,
+                    question,
+                )
+                return (
+                    [],
+                    f"[NEEDS_CLARIFICATION] {question}",
+                    total_in,
+                    total_out,
+                )
         except Exception as exc:
             patch_result_check = handlers.get("_patch_result", {})
             if patch_result_check.get("files_changed"):

@@ -3281,6 +3281,16 @@ class ChatAgent:
         # separate from roles/chat.md's own prompt-level frustration
         # guidance. Computed before the new message is appended to history,
         # so "recent prior messages" genuinely excludes the current one.
+        # AUDIT_Q_BATCH12 §26/§63 gap-closure (2026-08-11) — this signal used
+        # to be telemetry-only: computed, pushed as an SSE user_sentiment
+        # event for the frontend, and never read again. It never reached the
+        # system prompt, so the LLM call that immediately follows had no way
+        # to know frustration/repetition had been detected unless it happened
+        # to notice from the raw conversation itself (roles/chat.md's own
+        # prompt-level guidance). frustration_directive closes that loop —
+        # a short, honest instruction folded into THIS turn's system prompt,
+        # not a new detector.
+        frustration_directive = ""
         try:
             from app.agents.user_sentiment import detect_user_frustration
 
@@ -3298,6 +3308,22 @@ class ChatAgent:
                         "signals": signal.signals,
                     }
                 )
+                repeated = any(
+                    s.startswith("repeated_message:") for s in signal.signals
+                )
+                frustration_directive = (
+                    "\n\n[Signal: the user's latest message shows signs of "
+                    "frustration"
+                    + (
+                        ", including repeating a point they already made"
+                        if repeated
+                        else ""
+                    )
+                    + ". Prioritize a concrete, direct next step over lengthy "
+                    "re-explanation, acknowledge the frustration briefly "
+                    "rather than ignoring it, and avoid repeating an approach "
+                    "that hasn't worked so far.]"
+                )
         except Exception:
             logger.debug(
                 "user frustration detection skipped (non-fatal)", exc_info=True
@@ -3307,7 +3333,7 @@ class ChatAgent:
         memory_block = await self._memory_read_context(user_message)
         system_prompt = (
             f"{self._system}\n\n{memory_block}" if memory_block else self._system
-        )
+        ) + frustration_directive
 
         config = {"configurable": {"thread_id": self.session.session_id}}
         initial_state: ChatGraphState = {

@@ -15,6 +15,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from pydantic import BaseModel
 
 from app.fleet.approval_gate import (
     PendingApprovalRecord,
@@ -27,6 +28,17 @@ from app.middleware.rbac import require_approver, require_authenticated
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/approvals", tags=["approvals"])
+
+
+class ApprovalDecisionBody(BaseModel):
+    """Optional request body for POST /{thread_id}/approve.
+
+    answer: only meaningful for action="clarification" rows — the human's
+    answer to the question the agent asked. Ignored for other action types
+    (plan_review/git_push are plain yes/no decisions with nothing to answer).
+    """
+
+    answer: str | None = None
 
 
 def _serialize(row: PendingApprovalRecord) -> dict[str, Any]:
@@ -64,10 +76,15 @@ async def get_approval(
     return _serialize(row)
 
 
-async def _dispatch_decision(row: PendingApprovalRecord, approved: bool) -> None:
+async def _dispatch_decision(
+    row: PendingApprovalRecord, approved: bool, answer: str | None = None
+) -> None:
     """Route a decision to whichever flow actually owns this thread's
     interrupt() call. plan_review -> pipeline/graph.py (Day 13). git_push ->
-    the actual push+PR creation (Day 14)."""
+    the actual push+PR creation (Day 14). clarification -> re-dispatch the
+    planner with the human's answer (AUDIT_Q_BATCH12 §27 gap-closure,
+    2026-08-11) — previously the only action with no branch here at all, so
+    approving one only flipped the row's own status and nothing else."""
     if row.action == "plan_review" and row.task_id is not None:
         from app.api.agents import resume_planning_pipeline
         from app.db.repository import get_task, resolve_task_repo_path
@@ -92,6 +109,36 @@ async def _dispatch_decision(row: PendingApprovalRecord, approved: bool) -> None
         )
     elif row.action == "git_push" and row.task_id is not None:
         await dispatch_git_push_decision(row.task_id, approved)
+    elif row.action == "clarification" and row.task_id is not None:
+        # Rejecting a clarification request has nothing to resume — the
+        # human declined to answer, so the task stays "blocked" (a real,
+        # valid, recoverable status the human can still act on later, e.g.
+        # via a manual /run retry). Approving with no answer text can't be
+        # silently guessed at either — logged so it's diagnosable, not
+        # dispatched.
+        if approved and answer:
+            # AUDIT_Q_BATCH12 §25/§29 gap-closure (2026-08-11) — request_
+            # clarification is now wired into coder.py as well as
+            # planner.py, each with its own resume shape (coder resumes
+            # into "coding" with the approved plan; planner resumes into
+            # "planning" with title/description). row.agent_name (set by
+            # make_request_clarification_handler's own agent_name param at
+            # the call site in each agent) is the real, existing signal for
+            # which one owns this row — not a new column.
+            if row.agent_name == "coder":
+                from app.api.agents import resume_coder_after_clarification
+
+                await resume_coder_after_clarification(row.task_id, answer)
+            else:
+                from app.api.agents import resume_planner_after_clarification
+
+                await resume_planner_after_clarification(row.task_id, answer)
+        elif approved and not answer:
+            logger.warning(
+                "Clarification approval for task %s had no answer text — "
+                "task remains blocked (nothing to resume with)",
+                row.task_id,
+            )
 
 
 async def dispatch_git_push_decision(task_id: int, approved: bool) -> None:
@@ -214,10 +261,12 @@ async def _decide_or_409(thread_id: str, approved: bool) -> PendingApprovalRecor
 async def approve_approval(
     thread_id: str,
     background_tasks: BackgroundTasks,
+    body: ApprovalDecisionBody | None = None,
     _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
     row = await _decide_or_409(thread_id, True)
-    background_tasks.add_task(_dispatch_decision, row, True)
+    answer = body.answer if body is not None else None
+    background_tasks.add_task(_dispatch_decision, row, True, answer)
     return {"approved": True, "threadId": thread_id}
 
 
