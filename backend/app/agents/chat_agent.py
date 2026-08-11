@@ -644,6 +644,11 @@ class ChatAgent:
         # uuid4() would differ between the paused and resumed pass of the
         # same node, since node bodies re-run from the top on resume).
         self._current_tool_use_id: str = ""
+        # AUDIT_Q_BATCH07 §39 gap-closure (2026-08-11) — the stable key
+        # _confirm() checks against session.remembered_confirmations for
+        # "don't ask again this session". Set alongside
+        # _current_tool_use_id below for the same replay-safety reason.
+        self._current_tool_name: str = ""
         self._graph = self._build_chat_graph()
         # Gap-closure Stage 1.5 (answers.md) — chat_agent.py had ZERO
         # token-budget tracking before this (confirmed by grep: no
@@ -709,9 +714,46 @@ class ChatAgent:
         from _execute_tool_node() — i.e. always from within exactly one
         tool call's own graph node, and always as the first side-effecting-
         adjacent thing that node does (verified true for every real call
-        site — see this module's docstring)."""
+        site — see this module's docstring).
+
+        AUDIT_Q_BATCH07 §39 gap-closure (2026-08-11) — "'Don't ask again
+        this session': NO — not found." If the human previously approved
+        this exact tool with remember=True earlier in this session, skip
+        the pause entirely and auto-approve — but only for this pause
+        itself; it can never bypass a hard, confirmation-independent block
+        (e.g. production migrations), since those checks run in the
+        caller, before _confirm() is ever invoked. Still recorded in the
+        audit trail and pushed to the client, just without blocking."""
         action_id = self._current_tool_use_id or str(uuid.uuid4())
         thread_id = f"chat-{self.session.session_id}-{action_id}"
+
+        if (
+            self._current_tool_name
+            and self._current_tool_name in self.session.remembered_confirmations
+        ):
+            try:
+                from app.fleet.approval_gate import arecord_decision
+
+                await arecord_decision(
+                    thread_id=thread_id,
+                    approved=True,
+                    decided_by="user (remembered this session)",
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to record remembered chat confirmation for session %s",
+                    self.session.session_id,
+                    exc_info=True,
+                )
+            await self.session.push(
+                {
+                    "type": "confirmation_auto_approved",
+                    "actionId": action_id,
+                    "description": description,
+                    "details": details,
+                }
+            )
+            return True
 
         try:
             from app.fleet.approval_gate import arequest_human_input
@@ -748,6 +790,13 @@ class ChatAgent:
             if isinstance(decision, dict)
             else bool(decision)
         )
+        remember = (
+            bool(decision.get("remember", False))
+            if isinstance(decision, dict)
+            else False
+        )
+        if approved and remember and self._current_tool_name:
+            self.session.remembered_confirmations.add(self._current_tool_name)
 
         try:
             from app.fleet.approval_gate import arecord_decision
@@ -763,6 +812,95 @@ class ChatAgent:
             )
 
         return approved
+
+    async def _confirm_with_options(
+        self,
+        description: str,
+        options: list[dict[str, str]],
+        recommended: str | None = None,
+    ) -> str | None:
+        """AUDIT_Q_BATCH07 §13 gap-closure (2026-08-11) — "Present options
+        (multi-choice): NO — Confirmation payload is binary approve/deny
+        only" / "Recommend choices: PARTIAL — no structured recommendation
+        field." A genuinely different decision shape from _confirm()'s
+        Y/N pause (which stays completely untouched — every existing
+        dangerous-operation gate keeps behaving exactly as before): here
+        the human picks one of several named options rather than approving
+        or denying a single proposed action. Reuses the exact same real
+        interrupt()/Command(resume=...) pause primitive as _confirm() —
+        same thread, same checkpointer, same resume() method (now extended
+        with an optional `selected` param) — not a second pause mechanism.
+
+        Returns the selected option's id, or None if the human declined to
+        choose (resumed with approved=False and no selection)."""
+        action_id = self._current_tool_use_id or str(uuid.uuid4())
+        thread_id = f"chat-{self.session.session_id}-{action_id}"
+        valid_ids = {str(o["id"]) for o in options}
+
+        try:
+            from app.fleet.approval_gate import arequest_human_input
+
+            await arequest_human_input(
+                kind="chat_confirmation",
+                details={
+                    "description": description,
+                    "options": options,
+                    "recommended": recommended,
+                },
+                agent_name="chat_agent",
+                thread_id=thread_id,
+                blocking=True,
+                description=description,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to record chat multi-choice request for session %s",
+                self.session.session_id,
+                exc_info=True,
+            )
+
+        await self.session.push(
+            {
+                "type": "confirmation_required",
+                "actionId": action_id,
+                "description": description,
+                "options": options,
+                "recommended": recommended,
+            }
+        )
+
+        decision = interrupt(
+            {
+                "action_id": action_id,
+                "description": description,
+                "options": options,
+                "recommended": recommended,
+            }
+        )
+        selected: str | None = None
+        approved = False
+        if isinstance(decision, dict):
+            approved = bool(decision.get("approved", False))
+            raw_selected = decision.get("selected")
+            if raw_selected is not None and str(raw_selected) in valid_ids:
+                selected = str(raw_selected)
+
+        try:
+            from app.fleet.approval_gate import arecord_decision
+
+            await arecord_decision(
+                thread_id=thread_id,
+                approved=approved and selected is not None,
+                decided_by="user",
+            )
+        except Exception:
+            logger.warning(
+                "Failed to record chat multi-choice decision for session %s",
+                self.session.session_id,
+                exc_info=True,
+            )
+
+        return selected
 
     # ------------------------------------------------------------------
     # Unified memory read/write — MASTER_AGENT_v2.md Phase 1.1/3.3.
@@ -2850,6 +2988,37 @@ class ChatAgent:
             )
             return await asyncio.to_thread(_run_subprocess, rmig_cmd, rmig_backend, 120)
 
+        # ========== AUDIT_Q_BATCH07 §13 — Human interaction ==========
+
+        if tool_name == "ask_human_to_choose":
+            ahtc_question = str(inp["question"]).strip()
+            ahtc_options = inp.get("options")
+            if not ahtc_question:
+                return "[ERROR] question is required."
+            if not isinstance(ahtc_options, list) or len(ahtc_options) < 2:
+                return "[ERROR] options must be a list of at least 2 choices."
+            ahtc_clean: list[dict[str, str]] = []
+            for opt in ahtc_options:
+                if not isinstance(opt, dict) or "id" not in opt or "label" not in opt:
+                    return "[ERROR] each option needs at least 'id' and 'label'."
+                ahtc_clean.append(
+                    {
+                        "id": str(opt["id"]),
+                        "label": str(opt["label"]),
+                        "description": str(opt.get("description", "")),
+                    }
+                )
+            ahtc_recommended = inp.get("recommended_option")
+            selected = await self._confirm_with_options(
+                description=ahtc_question,
+                options=ahtc_clean,
+                recommended=str(ahtc_recommended) if ahtc_recommended else None,
+            )
+            if selected is None:
+                return "[CANCELLED] Human did not select an option."
+            chosen = next(o for o in ahtc_clean if o["id"] == selected)
+            return f"Human selected: {chosen['id']} ({chosen['label']})"
+
         if tool_name == "seed_database":
             seeddb_script = str(inp.get("script", ""))
             if not seeddb_script:
@@ -3113,6 +3282,7 @@ class ChatAgent:
         # module's docstring for why it must be the Anthropic tool_use_id,
         # not a freshly generated uuid4().
         self._current_tool_use_id = tu["id"]
+        self._current_tool_name = str(tu["name"])
 
         await self.session.push(
             {
@@ -3393,12 +3563,28 @@ class ChatAgent:
                 )
                 self._current_trace_id = ""
 
-    async def resume(self, action_id: str, approved: bool) -> bool:
+    async def resume(
+        self,
+        action_id: str,
+        approved: bool,
+        selected: str | None = None,
+        remember: bool = False,
+    ) -> bool:
         """Resume a turn paused at a real interrupt() after a human
         answered a confirmation. Returns False (a safe no-op — nothing is
         re-run) if action_id doesn't match the currently pending
         confirmation, e.g. a stale or duplicate confirm call; True if a
-        real resume happened."""
+        real resume happened.
+
+        `selected` is AUDIT_Q_BATCH07 §13 gap-closure (2026-08-11) —
+        carries the chosen option's id back to a paused
+        _confirm_with_options() call; ignored (and harmless) for every
+        plain _confirm() call site, which only ever reads `approved`.
+
+        `remember` is AUDIT_Q_BATCH07 §39 gap-closure (2026-08-11) — when
+        True on an approved confirmation, _confirm() adds the paused tool
+        name to session.remembered_confirmations so the same tool
+        auto-approves without pausing for the rest of this session."""
         config = {"configurable": {"thread_id": self.session.session_id}}
         snapshot = await self._graph.aget_state(config)
 
@@ -3422,8 +3608,14 @@ class ChatAgent:
         with run_span("chat_agent", task_id=self.session.session_id) as _metrics:
             self._current_trace_id = _metrics.trace_id
             try:
+                resume_payload: dict[str, Any] = {
+                    "approved": approved,
+                    "remember": remember,
+                }
+                if selected is not None:
+                    resume_payload["selected"] = selected
                 await self._graph.ainvoke(
-                    Command(resume={"approved": approved}), config=config
+                    Command(resume=resume_payload), config=config
                 )
             finally:
                 _metrics.record_tokens(

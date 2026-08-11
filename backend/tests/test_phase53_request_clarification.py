@@ -35,7 +35,12 @@ def test_handler_records_a_real_pending_approval_row() -> None:
     request_human_input() entry point rather than calling record_pending()
     directly, so the recorded row picks up an extra 'blocking': False in
     details (this call is the non-blocking "clean stop" kind of HITL pause —
-    see approval_gate.py's own HumanInputKind design note)."""
+    see approval_gate.py's own HumanInputKind design note).
+
+    AUDIT_Q_BATCH07 §13 gap-closure (2026-08-11) — details also now carries
+    'options'/'recommended_option' (None when the caller doesn't pass them,
+    as here) — additive, structured fields for a human/upstream-agent
+    reviewer, see REQUEST_CLARIFICATION_TOOL's schema."""
     handler = make_request_clarification_handler("planner", "42")
     with patch("app.fleet.approval_gate.record_pending") as mock_record:
         mock_record.return_value = SimpleNamespace(id=1)
@@ -50,6 +55,8 @@ def test_handler_records_a_real_pending_approval_row() -> None:
         details={
             "question": "Which auth provider?",
             "context": "found 2 candidates",
+            "options": None,
+            "recommended_option": None,
             "blocking": False,
         },
         agent_name="planner",

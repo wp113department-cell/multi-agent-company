@@ -92,6 +92,55 @@ class TestListRequests:
         assert resp.json() == []
 
 
+class TestAutoApplicableSurfacing:
+    """AUDIT_Q_BATCH07 §12/§64 gap-closure (2026-08-11) — "an approval that
+    silently does nothing": _serialize() must expose whether a request's
+    agent actually has an apply function, computed fresh from the same
+    dispatch dict _run_apply_phase() itself uses."""
+
+    def test_list_marks_apply_capable_agent_true(self) -> None:
+        db = AsyncMock()
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = [_make_row(agent_name="agent_debugger")]
+        mock_result = MagicMock()
+        mock_result.scalars.return_value = mock_scalars
+        db.execute = AsyncMock(return_value=mock_result)
+
+        app = _make_test_app(db)
+        with TestClient(app) as client:
+            resp = client.get("/api/fleet/requests")
+
+        assert resp.json()[0]["autoApplicable"] is True
+
+    def test_list_marks_scan_only_agent_false(self) -> None:
+        db = AsyncMock()
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = [
+            _make_row(agent_name="architecture_reviewer"),
+            _make_row(id=2, agent_name="dependency_security_agent"),
+            _make_row(id=3, agent_name="agent_advisor"),
+        ]
+        mock_result = MagicMock()
+        mock_result.scalars.return_value = mock_scalars
+        db.execute = AsyncMock(return_value=mock_result)
+
+        app = _make_test_app(db)
+        with TestClient(app) as client:
+            resp = client.get("/api/fleet/requests")
+
+        assert [r["autoApplicable"] for r in resp.json()] == [False, False, False]
+
+    def test_get_request_includes_auto_applicable(self) -> None:
+        db = AsyncMock()
+        db.get = AsyncMock(return_value=_make_row(agent_name="architecture_reviewer"))
+        app = _make_test_app(db)
+
+        with TestClient(app) as client:
+            resp = client.get("/api/fleet/requests/1")
+
+        assert resp.json()["autoApplicable"] is False
+
+
 class TestGetRequest:
     def test_found(self) -> None:
         db = AsyncMock()

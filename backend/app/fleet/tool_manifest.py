@@ -996,6 +996,9 @@ TOOL_MANIFEST: dict[str, ToolManifestEntry] = {
         retry_policy="once",
         verification_required=True,
         risk_level="medium",
+        notes="AUDIT_Q_BATCH07 §39 gap-closure (2026-08-11): requires user "
+        "confirmation via session.request_confirmation() when run from an "
+        "interactive session; blocked outright otherwise.",
     ),
     "pip_list": ToolManifestEntry(
         purpose="List installed Python packages",
@@ -1029,6 +1032,9 @@ TOOL_MANIFEST: dict[str, ToolManifestEntry] = {
         retry_policy="once",
         verification_required=True,
         risk_level="medium",
+        notes="AUDIT_Q_BATCH07 §39 gap-closure (2026-08-11): requires user "
+        "confirmation via session.request_confirmation() when run from an "
+        "interactive session; blocked outright otherwise.",
     ),
     "npm_run": ToolManifestEntry(
         purpose="Run an npm script",

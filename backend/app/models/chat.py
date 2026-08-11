@@ -42,6 +42,16 @@ class ChatSession:
     history: list[dict[str, Any]] = field(default_factory=list)
     _queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
     active: bool = False
+    # AUDIT_Q_BATCH07 §39 gap-closure (2026-08-11) — "'Don't ask again this
+    # session': NO — not found | every gated action re-prompts every time."
+    # Tool names the human has explicitly opted (via ConfirmActionRequest.
+    # remember=True on a specific confirmation) to auto-approve for the rest
+    # of THIS in-memory session only — cleared on server restart / session
+    # deletion, same lifetime as every other ChatSession field. Never
+    # consulted for the hard, confirmation-independent blocks (production
+    # migrations, etc.) — those run before ChatAgent._confirm() is ever
+    # called, so this can't weaken them.
+    remembered_confirmations: set[str] = field(default_factory=set)
 
     async def push(self, event: dict[str, Any]) -> None:
         await self._queue.put(event)

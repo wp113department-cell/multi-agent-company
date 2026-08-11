@@ -51,6 +51,15 @@ class SendMessageRequest(BaseModel):
 class ConfirmActionRequest(BaseModel):
     action_id: str
     approved: bool
+    # AUDIT_Q_BATCH07 §13 gap-closure (2026-08-11) — carries the chosen
+    # option's id back for a paused ask_human_to_choose call; None (the
+    # default) for every plain approve/deny confirmation, unchanged.
+    selected: str | None = None
+    # AUDIT_Q_BATCH07 §39 gap-closure (2026-08-11) — "'Don't ask again this
+    # session': NO — not found." Explicit opt-in per confirmation; defaults
+    # to False so every existing client that doesn't send this field keeps
+    # behaving exactly as before.
+    remember: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -245,14 +254,22 @@ async def _run_agent(
 
 
 async def _resume_agent(
-    agent: Any, action_id: str, approved: bool, session: ChatSession, db_factory: Any
+    agent: Any,
+    action_id: str,
+    approved: bool,
+    session: ChatSession,
+    db_factory: Any,
+    selected: str | None = None,
+    remember: bool = False,
 ) -> None:
     """Background task: resume a paused turn after a confirmation decision,
     then persist any messages the continuation produced. Mirrors
     _run_agent()'s error handling exactly (MASTER_AGENT_v2.md Phase 5.2)."""
     history_len_before = len(session.history)
     try:
-        resumed = await agent.resume(action_id, approved)
+        resumed = await agent.resume(
+            action_id, approved, selected=selected, remember=remember
+        )
         if not resumed:
             # Stale/mismatched confirm — nothing ran, nothing to persist,
             # and the turn is still genuinely paused: leave session.active
@@ -292,7 +309,15 @@ async def confirm_action(
     agent = get_or_create_chat_agent(session)
     factory = get_session_factory()
     asyncio.create_task(
-        _resume_agent(agent, body.action_id, body.approved, session, factory)
+        _resume_agent(
+            agent,
+            body.action_id,
+            body.approved,
+            session,
+            factory,
+            body.selected,
+            body.remember,
+        )
     )
     return {"status": "ok"}
 

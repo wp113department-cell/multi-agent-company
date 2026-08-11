@@ -620,6 +620,30 @@ REQUEST_CLARIFICATION_TOOL: dict[str, Any] = {
                 "type": "string",
                 "description": "What you already tried/considered, so the answer doesn't have to re-derive it.",
             },
+            # AUDIT_Q_BATCH07 §13 gap-closure (2026-08-11) — "Present options
+            # (multi-choice): NO" / "Recommend choices: PARTIAL — no
+            # structured recommendation field." Optional and additive: a
+            # human/upstream-agent reviewer answering via
+            # app.fleet.approval_gate's existing PendingApproval row now
+            # sees these as structured fields (not just prose buried in
+            # `context`), without changing this tool's "ends the run, a
+            # future run receives the answer" scope at all.
+            "options": {
+                "type": "array",
+                "description": "Optional: 2-5 distinct choices, if the blocker is genuinely 'pick one of these'.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "label": {"type": "string"},
+                    },
+                    "required": ["id", "label"],
+                },
+            },
+            "recommended_option": {
+                "type": "string",
+                "description": "Optional: id of the option you'd recommend, if any.",
+            },
         },
         "required": ["question"],
     },
@@ -638,13 +662,20 @@ def make_request_clarification_handler(
         if not question:
             return "[ERROR] question is required."
         context = str(inp.get("context", "")).strip()
+        options = inp.get("options") or None
+        recommended_option = inp.get("recommended_option") or None
 
         from app.fleet.approval_gate import request_human_input
 
         try:
             request_human_input(
                 kind="clarification",
-                details={"question": question, "context": context},
+                details={
+                    "question": question,
+                    "context": context,
+                    "options": options,
+                    "recommended_option": recommended_option,
+                },
                 agent_name=agent_name,
                 thread_id=f"clarify-{task_id or 'notask'}-{agent_name}",
                 task_id=int(task_id) if str(task_id).isdigit() else None,
@@ -7508,6 +7539,55 @@ _TEMPLATE_RENDER_TOOL: dict[str, Any] = {
     },
 }
 
+# AUDIT_Q_BATCH07 §13 gap-closure (2026-08-11) — "Present options (multi-
+# choice): NO — not found | Confirmation payload is binary approve/deny
+# only." / "Recommend choices: PARTIAL | free-text ... no structured
+# recommendation field." _confirm()'s binary approve/deny interrupt() stays
+# untouched (every existing dangerous-operation gate keeps working exactly
+# as before) — this is a genuinely different decision shape: not "should I
+# do this Y/N" but "which of these N valid paths should I take", so it's a
+# new tool (ChatAgent._confirm_with_options(), same real interrupt()/
+# Command(resume=...) pause primitive as _confirm(), see chat_agent.py) not
+# a change to the existing one.
+_ASK_HUMAN_TO_CHOOSE_TOOL: dict[str, Any] = {
+    "name": "ask_human_to_choose",
+    "description": (
+        "Use when there are multiple genuinely valid ways to proceed and a human should "
+        "pick one — not for a plain yes/no decision (dangerous actions like delete/git push "
+        "already pause for approval automatically; don't call this for those). Pauses this "
+        "turn until the human selects one option; their choice is returned as this tool's "
+        "result so you can act on it."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "question": {
+                "type": "string",
+                "description": "The specific decision the human needs to make.",
+            },
+            "options": {
+                "type": "array",
+                "description": "2-5 distinct choices, each with a stable id.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "label": {"type": "string"},
+                        "description": {"type": "string"},
+                    },
+                    "required": ["id", "label"],
+                },
+                "minItems": 2,
+            },
+            "recommended_option": {
+                "type": "string",
+                "description": "id of the option you'd recommend, if any — the human sees this but still decides.",
+            },
+        },
+        "required": ["question", "options"],
+    },
+}
+
 CHAT_TOOLS = READ_ONLY_TOOLS + [
     _EDIT_FILE_TOOL_SPEC,
     _WRITE_FILE_TOOL_SPEC,
@@ -7700,6 +7780,8 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _HTTP_REQUEST_TOOL,
     _BASE64_ENCODE_TOOL,
     _TEMPLATE_RENDER_TOOL,
+    # AUDIT_Q_BATCH07 §13 — Human interaction
+    _ASK_HUMAN_TO_CHOOSE_TOOL,
 ]
 
 
@@ -11898,10 +11980,52 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] loc_stats: {e}"
 
     def npm_install_h(inp: dict[str, Any]) -> str:
+        import asyncio
+        import uuid as _uuid
+
+        # AUDIT_Q_BATCH07 §39 gap-closure (2026-08-11) — "Dependency upgrades:
+        # NO — confirmed gap ... npm_install_h/pip_install_h run subprocess.run
+        # directly with zero confirmation and zero policy check." Same
+        # session-gated confirmation pattern already proven by
+        # run_migration_h/seed_database_h above — not a new mechanism.
+        if session is None:
+            return "[BLOCKED] npm_install requires interactive session for safety confirmation"
+
         directory = str(inp.get("directory", "."))
         package = str(inp.get("package", ""))
         target_dir = str(root / directory)
         cmd = ["npm", "install"] + ([package] if package else [])
+        cmd_preview = " ".join(cmd)
+        action_id = str(_uuid.uuid4())
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                fut = asyncio.run_coroutine_threadsafe(
+                    session.request_confirmation(
+                        action_id=action_id,
+                        description=f"Run npm install in {directory}"
+                        + (f" (package: {package})" if package else ""),
+                        details=cmd_preview,
+                    ),
+                    loop,
+                )
+                approved = fut.result(timeout=300)
+            else:
+                approved = loop.run_until_complete(
+                    session.request_confirmation(
+                        action_id=action_id,
+                        description=f"Run npm install in {directory}"
+                        + (f" (package: {package})" if package else ""),
+                        details=cmd_preview,
+                    )
+                )
+        except Exception as exc:
+            return f"[ERROR] Confirmation failed: {exc}"
+
+        if not approved:
+            return f"[DENIED] User declined npm_install ({cmd_preview})"
+
         try:
             r = subprocess.run(
                 cmd, capture_output=True, text=True, cwd=target_dir, timeout=120
@@ -11927,7 +12051,44 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] npm_run: {e}"
 
     def pip_install_h(inp: dict[str, Any]) -> str:
+        import asyncio
+        import uuid as _uuid
+
+        # AUDIT_Q_BATCH07 §39 gap-closure (2026-08-11) — same session-gated
+        # confirmation pattern as npm_install_h above / run_migration_h.
+        if session is None:
+            return "[BLOCKED] pip_install requires interactive session for safety confirmation"
+
         package = str(inp["package"])
+        cmd_preview = f"pip install {package}"
+        action_id = str(_uuid.uuid4())
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                fut = asyncio.run_coroutine_threadsafe(
+                    session.request_confirmation(
+                        action_id=action_id,
+                        description=f"Install Python package: {package}",
+                        details=cmd_preview,
+                    ),
+                    loop,
+                )
+                approved = fut.result(timeout=300)
+            else:
+                approved = loop.run_until_complete(
+                    session.request_confirmation(
+                        action_id=action_id,
+                        description=f"Install Python package: {package}",
+                        details=cmd_preview,
+                    )
+                )
+        except Exception as exc:
+            return f"[ERROR] Confirmation failed: {exc}"
+
+        if not approved:
+            return f"[DENIED] User declined pip_install ({cmd_preview})"
+
         try:
             r = subprocess.run(
                 [sys.executable, "-m", "pip", "install", package],

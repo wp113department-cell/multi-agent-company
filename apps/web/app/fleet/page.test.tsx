@@ -94,3 +94,90 @@ describe("FleetDashboardPage — Q119 real active-agent health wiring", () => {
     expect(screen.queryByText("network down")).not.toBeInTheDocument();
   });
 });
+
+describe("FleetDashboardPage — AUDIT_Q_BATCH07 §12/§64 autoApplicable surfacing", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.stubGlobal("EventSource", FakeEventSource);
+    vi.spyOn(auth, "authHeaders").mockReturnValue({});
+    vi.spyOn(auth, "isApprover").mockReturnValue(true);
+  });
+
+  const baseRequest = {
+    id: 1,
+    agentName: "architecture_reviewer",
+    title: "Dead code found in app/foo.py",
+    description: "Unused function bar()",
+    category: "architecture",
+    priority: "low" as const,
+    evidence: {},
+    filesTouched: [],
+    commitSha: null,
+    restartRequired: false,
+    error: null,
+    traceId: null,
+    createdAt: new Date().toISOString(),
+    decidedAt: null,
+    decidedBy: null,
+    completedAt: null,
+  };
+
+  function stubRequests(requests: unknown[]): void {
+    const fetchMock = vi.fn((url: string) => {
+      if (url === "/api/fleet/requests") {
+        return Promise.resolve(
+          new Response(JSON.stringify(requests), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        );
+      }
+      if (url === "/api/fleet/reports/health") {
+        return Promise.resolve(EMPTY_REQUESTS_RESPONSE.clone());
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+  }
+
+  it('shows a "Recommendation only" badge on a pending request from an agent with no apply phase', async () => {
+    stubRequests([{ ...baseRequest, status: "pending", autoApplicable: false }]);
+
+    render(<FleetDashboardPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Recommendation only")).toBeInTheDocument();
+    });
+  });
+
+  it("does not show the badge for a pending request from an agent with a real apply phase", async () => {
+    stubRequests([
+      { ...baseRequest, agentName: "agent_debugger", status: "pending", autoApplicable: true },
+    ]);
+
+    render(<FleetDashboardPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(baseRequest.title)).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Recommendation only")).not.toBeInTheDocument();
+  });
+
+  it("explains a completed no-apply-phase request instead of implying code changed", async () => {
+    stubRequests([
+      {
+        ...baseRequest,
+        status: "completed",
+        autoApplicable: false,
+        decidedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+      },
+    ]);
+
+    render(<FleetDashboardPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/no automated apply phase, so no code was changed/i)).toBeInTheDocument();
+    });
+  });
+});

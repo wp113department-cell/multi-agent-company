@@ -49,7 +49,7 @@ def _push_dashboard_event(event_type: str, payload: dict[str, Any]) -> None:
     stream.push({"type": event_type, **payload})
 
 
-def _serialize(row: EnhancementRequest) -> dict[str, Any]:
+def _serialize(row: EnhancementRequest, auto_applicable_agents: set[str]) -> dict[str, Any]:
     return {
         "id": row.id,
         "agentName": row.agent_name,
@@ -64,6 +64,16 @@ def _serialize(row: EnhancementRequest) -> dict[str, Any]:
         "restartRequired": row.restart_required,
         "error": row.error,
         "traceId": row.trace_id,
+        # AUDIT_Q_BATCH07 §12/§64 gap-closure (2026-08-11) — "an approval
+        # that silently does nothing": architecture_reviewer/
+        # dependency_security_agent (and agent_advisor, scan-only by design
+        # — see _apply_dispatch()'s own comment) have no apply function, so
+        # approving one of their requests previously looked identical in
+        # the UI to a real code-changing approval. Computed fresh from the
+        # same dispatch dict _run_apply_phase() itself uses — never a
+        # stored/stale flag — so it can never drift from what approval
+        # would actually do.
+        "autoApplicable": row.agent_name in auto_applicable_agents,
         "createdAt": row.created_at.isoformat() if row.created_at else None,
         "decidedAt": row.decided_at.isoformat() if row.decided_at else None,
         "decidedBy": row.decided_by,
@@ -87,7 +97,8 @@ async def list_requests(
         q = q.where(EnhancementRequest.priority == priority)
     result = await db.execute(q.limit(200))
     rows = result.scalars().all()
-    return [_serialize(r) for r in rows]
+    auto_applicable_agents = set(_apply_dispatch())
+    return [_serialize(r, auto_applicable_agents) for r in rows]
 
 
 @router.get("/requests/{request_id}")
@@ -99,7 +110,7 @@ async def get_request(
         raise HTTPException(
             status_code=404, detail=f"No enhancement request #{request_id}"
         )
-    return _serialize(row)
+    return _serialize(row, set(_apply_dispatch()))
 
 
 # ---------------------------------------------------------------------------
@@ -318,9 +329,17 @@ def _apply_dispatch() -> dict[str, Callable[[int, str, str], Any]]:
         "agent_debugger": run_agent_debugger_apply,
         "knowledge_curator": run_knowledge_curator_apply,
         "quality_auditor": run_quality_auditor_apply,
-        # agent_advisor is scan-only by design (see docs/DAY9_PLAN.md) — approving one
-        # of its requests is a no-op signal that a human has acted on the advice; there
-        # is no code for it to apply itself.
+        # agent_advisor, architecture_reviewer, dependency_security_agent, and
+        # monitoring_agent are scan-only by design — approving one of their
+        # requests is a no-op signal that a human has acted on the
+        # recommendation; there is no code for any of them to apply
+        # themselves. AUDIT_Q_BATCH07 §12/§64 gap-closure (2026-08-11): this
+        # was previously a real UX gap ("an approval that silently does
+        # nothing") for the latter three specifically — _serialize()'s
+        # `autoApplicable` field (computed from this exact dict) now
+        # surfaces that distinction to the dashboard UI before a human even
+        # clicks approve, and _run_apply_phase() below still completes the
+        # row cleanly either way.
     }
 
 

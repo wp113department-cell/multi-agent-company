@@ -138,9 +138,11 @@ async def _fleet_agents_scan_loop() -> None:
 
     5 agents from Day 9 (agent_performance_reviewer, agent_debugger, agent_advisor,
     knowledge_curator, quality_auditor) plus architecture_reviewer (Day 48) and
-    dependency_security_agent (Day 49), both added gap-closure Days 48-50 (Stage 2) —
-    their real analysis tools (dead_code_detect/circular_dep_detect/import_graph;
-    pip-audit/npm audit) existed but were only ever task-triggered, never autonomous.
+    dependency_security_agent (Day 49), both added gap-closure Days 48-50 (Stage 2),
+    plus monitoring_agent (AUDIT_Q_BATCH07 §12/§64 gap-closure, 2026-08-11) — each
+    added agent's real analysis tools (dead_code_detect/circular_dep_detect/
+    import_graph; pip-audit/npm audit; cpu/memory/disk/health_check/docker_ps/
+    git_status) existed but were only ever task-triggered, never autonomous.
 
     Runs sequentially (not parallel — real LLM calls, avoid a runaway-cost loop).
     Each agent's own scan function is fully autonomous and read-only; it only ever
@@ -183,6 +185,18 @@ async def _fleet_agents_scan_loop() -> None:
             "dependency_security_agent",
             "app.agents.dependency_security_agent",
             "run_dependency_security_scan",
+        ),
+        # AUDIT_Q_BATCH07 §12/§64 gap-closure (2026-08-11) — "Docker
+        # monitoring: NO — not autonomous" / "Git monitoring: NO — not
+        # found" / monitoring_agent.py's own cpu/memory/disk/health checks
+        # were task-triggered only. 8th fleet self-improvement scan —
+        # monitoring_agent's real resource/health/Docker/git checks, wired
+        # into this loop the same way Days 48-50 wired in
+        # architecture_reviewer/dependency_security_agent above.
+        (
+            "monitoring_agent",
+            "app.agents.monitoring_agent",
+            "run_monitoring_agent_scan",
         ),
     ]
 

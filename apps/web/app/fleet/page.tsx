@@ -1,13 +1,16 @@
 "use client";
 
 /**
- * Fleet Enhancement Dashboard (Day 9).
+ * Fleet Enhancement Dashboard (Day 9, extended by gap-closure Days 48-50
+ * and AUDIT_Q_BATCH07 §12/§64).
  *
- * Shows what the 5 self-improvement agents (agent_performance_reviewer,
- * agent_debugger, agent_advisor, knowledge_curator, quality_auditor) found
+ * Shows what the fleet self-improvement agents (agent_performance_reviewer,
+ * agent_debugger, agent_advisor, knowledge_curator, quality_auditor,
+ * architecture_reviewer, dependency_security_agent, monitoring_agent) found
  * during their autonomous background scans. Nothing happens to your project
  * until you approve a specific request here — approve kicks off that agent's
- * write-capable APPLY phase, streamed live at /stream/[taskId]; reject is final.
+ * write-capable APPLY phase (when it has one — see the "Recommendation only"
+ * badge), streamed live at /stream/[taskId]; reject is final.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -34,6 +37,7 @@ interface EnhancementRequest {
   filesTouched: string[];
   commitSha: string | null;
   restartRequired: boolean;
+  autoApplicable: boolean;
   error: string | null;
   traceId: string | null;
   createdAt: string;
@@ -48,6 +52,9 @@ const AGENT_LABELS: Record<string, string> = {
   agent_advisor: "Advisor",
   knowledge_curator: "Knowledge Curator",
   quality_auditor: "Quality Auditor",
+  architecture_reviewer: "Architecture Reviewer",
+  dependency_security_agent: "Dependency Security",
+  monitoring_agent: "Infrastructure Monitor",
 };
 
 const PRIORITY_ORDER: Record<string, number> = { emergency: 0, medium: 1, low: 2 };
@@ -112,6 +119,14 @@ function RequestCard({
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-400">
               {req.category}
             </span>
+            {!req.autoApplicable && (
+              <span
+                className="rounded-full border border-slate-300 px-2 py-0.5 text-xs text-slate-500 dark:border-slate-600 dark:text-slate-400"
+                title="This agent has no automated apply phase — approving files it as acknowledged, but no code changes will be made."
+              >
+                Recommendation only
+              </span>
+            )}
           </div>
           <h3 className="mt-1.5 text-base font-semibold text-slate-900 dark:text-slate-100">{req.title}</h3>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{req.description}</p>
@@ -166,6 +181,13 @@ function RequestCard({
       {req.status === "completed" && req.restartRequired && (
         <div className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300">
           Restart the backend/frontend to see this change take effect.
+        </div>
+      )}
+
+      {req.status === "completed" && !req.autoApplicable && (
+        <div className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+          Acknowledged — {AGENT_LABELS[req.agentName] ?? req.agentName} has no automated
+          apply phase, so no code was changed. Act on this recommendation manually if needed.
         </div>
       )}
     </div>
@@ -257,8 +279,9 @@ export default function FleetDashboardPage() {
       <div>
         <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Fleet Dashboard</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          5 self-improvement agents scan this project in the background. Nothing changes on
-          disk until you approve a specific request below.
+          Self-improvement agents scan this project in the background. Nothing changes on
+          disk until you approve a specific request below — some agents (marked
+          &quot;Recommendation only&quot;) never write code at all.
         </p>
       </div>
 
