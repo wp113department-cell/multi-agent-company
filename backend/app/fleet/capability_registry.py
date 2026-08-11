@@ -56,6 +56,27 @@ class CapabilityRegistry:
         with self._lock:
             self._entries[entry.name] = entry
 
+    def update_success_rate(self, name: str, success_rate: float) -> bool:
+        """AUDIT_Q_BATCH15 §37 gap-closure (2026-08-11) — this module's own
+        docstring claimed a DB merge happens "at query time"; no such merge
+        code existed, so fleet_manager.select()'s routing score always read
+        the static, registration-time success_rate (e.g. literally 0.95,
+        0.82), never updated from real outcomes. This is the real mutation
+        path a scheduled job (main.py's _fleet_success_rate_sync_loop) calls
+        after computing success_rate from real AgentRun outcomes — the same
+        AgentCapability instance already held by _entries is mutated in
+        place (write-once-per-name registration already established that
+        entries are looked up by reference, not copied), so every existing
+        holder of a `cap = registry.get(name)` reference sees the update
+        too. Returns False (no-op) if name isn't registered yet — a scan
+        racing agent registration at startup must never raise."""
+        with self._lock:
+            entry = self._entries.get(name)
+            if entry is None:
+                return False
+            entry.success_rate = success_rate
+            return True
+
     def get(self, name: str) -> AgentCapability | None:
         with self._lock:
             return self._entries.get(name)

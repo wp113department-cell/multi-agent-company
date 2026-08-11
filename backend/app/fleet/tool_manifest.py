@@ -456,6 +456,17 @@ TOOL_MANIFEST: dict[str, ToolManifestEntry] = {
         verification_required=False,
         risk_level="low",
     ),
+    "capability_gap_scan": ToolManifestEntry(
+        purpose=(
+            "AUDIT_Q_BATCH15 §76 gap-closure — deterministically cluster real "
+            "AgentRun history by agent to surface repeated-failure capability gaps"
+        ),
+        permissions=["read_db"],
+        timeout_s=15,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+    ),
     # ----------------------------------------------------------------
     # GIT READ (low risk)
     # ----------------------------------------------------------------
@@ -1333,6 +1344,20 @@ TOOL_MANIFEST: dict[str, ToolManifestEntry] = {
             "Record a non-obvious finding for future agents working on similar "
             "tasks (MASTER_AGENT_v2.md Phase 1.4) — writes to memory_embeddings' "
             "learning category via embed_learning_signal_sync."
+        ),
+        permissions=["write_memory"],
+        timeout_s=5,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="low",
+        notes="Never raises — a broken memory backend returns an [ERROR] string, not an exception.",
+    ),
+    "record_preference": ToolManifestEntry(
+        purpose=(
+            "Record a stated human preference (style, naming, testing, tooling, "
+            "workflow) for future work in this project — AUDIT_Q_BATCH15 §74/§113 "
+            "gap-closure. Writes to memory_embeddings' preference category via "
+            "embed_preference_sync."
         ),
         permissions=["write_memory"],
         timeout_s=5,

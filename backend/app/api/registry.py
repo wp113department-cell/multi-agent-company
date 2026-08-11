@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.db.models import Agent, AgentRun
+from app.db.models import Agent
 from app.middleware.rbac import require_approver
 
 router = APIRouter(prefix="/api/agents", tags=["registry"])
@@ -158,20 +158,18 @@ async def get_agent_metrics(
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{name}' not found")
 
-    # Count runs from agent_runs for this agent type
-    runs_result = await db.execute(select(AgentRun).where(AgentRun.agent_type == name))
-    runs = list(runs_result.scalars().all())
-    total_runs = len(runs)
+    # AUDIT_Q_BATCH15 §37 gap-closure (2026-08-11) — this computation moved to
+    # app.fleet.agent_registry.compute_live_success_rate so
+    # main.py's _fleet_success_rate_sync_loop can share it instead of
+    # duplicating the same AgentRun aggregation.
+    from app.fleet.agent_registry import compute_live_success_rate
 
-    if total_runs == 0:
-        success_rate = agent.success_rate
-        avg_retries = agent.avg_retries
-    else:
-        successes = sum(1 for r in runs if r.status == "completed")
-        success_rate = successes / total_runs
-        # avg_retries: approximated from tokens — real retry count not stored per-run
-        # use the agent table value (updated separately by manager)
-        avg_retries = agent.avg_retries
+    success_rate, total_runs = await compute_live_success_rate(
+        db, name, fallback=agent.success_rate
+    )
+    # avg_retries: approximated from tokens — real retry count not stored per-run
+    # use the agent table value (updated separately by manager)
+    avg_retries = agent.avg_retries
 
     collector = get_metrics_collector()
     p50_latency_ms = collector.p50_latency_ms(name)

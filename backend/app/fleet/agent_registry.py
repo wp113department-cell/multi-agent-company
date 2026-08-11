@@ -317,6 +317,36 @@ async def reseed_health_from_events(db: Any) -> int:
         return 0
 
 
+async def compute_live_success_rate(
+    db: Any, agent_type: str, fallback: float
+) -> tuple[float, int]:
+    """The one real place success_rate is computed from actual AgentRun
+    outcomes — AUDIT_Q_BATCH15 §37 gap-closure (2026-08-11) factored this out
+    of api/registry.py's get_agent_metrics() (its only prior caller) so
+    main.py's new _fleet_success_rate_sync_loop can reuse the exact same
+    computation instead of duplicating it. AgentRun.agent_type is a plain
+    string column (no FK to the `agents` table — confirmed in
+    app/db/models.py), so this reads real run history directly and needs no
+    Agent row to exist for agent_type.
+
+    Returns (success_rate, total_runs). fallback is returned unchanged when
+    total_runs == 0 — "no runs yet" must never be silently scored as either
+    0% or 100%, matching every other real-signal-not-fabricated convention
+    in this codebase (e.g. app/memory/store.py's zero-vector skip).
+    """
+    from sqlalchemy import select
+
+    from app.db.models import AgentRun
+
+    result = await db.execute(select(AgentRun).where(AgentRun.agent_type == agent_type))
+    runs = list(result.scalars().all())
+    total = len(runs)
+    if total == 0:
+        return fallback, 0
+    successes = sum(1 for r in runs if r.status == "completed")
+    return successes / total, total
+
+
 # ---------------------------------------------------------------------------
 # Pre-register the 3 reference agents so they appear in Sleep state at startup
 # ---------------------------------------------------------------------------

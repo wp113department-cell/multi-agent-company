@@ -521,6 +521,69 @@ def make_record_learning_handler(agent_name: str) -> Callable[[dict[str, Any]], 
 
 
 # ---------------------------------------------------------------------------
+# record_preference — AUDIT_Q_BATCH15 §74/§113 gap-closure (2026-08-11). A
+# human-stated coding-style/naming/tooling/testing preference had no
+# dedicated write path anywhere — it would have been shoehorned into
+# record_learning above (whose embed_learning_signal target is documented as
+# a *fleet self-improvement* signal, not a per-project human preference) or
+# lost entirely. Chat is the direct human-facing conversational surface
+# where a preference is naturally stated ("always use f-strings", "prefer
+# pytest fixtures"), so this is wired into CHAT_TOOLS; retrieval
+# (memory_hook_node) applies to every agent regardless of which surface
+# wrote the preference.
+# ---------------------------------------------------------------------------
+
+RECORD_PREFERENCE_TOOL: dict[str, Any] = {
+    "name": "record_preference",
+    "description": (
+        "Record a stated human preference (coding style, naming convention, "
+        "testing approach, tooling choice, workflow) so future work in this "
+        "project applies it without being re-told. Use this only for a real "
+        "preference the user actually expressed, not an inferred guess."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "preference": {
+                "type": "string",
+                "description": "The preference itself, in the user's own terms.",
+            },
+            "scope": {
+                "type": "string",
+                "description": "Short label for what this preference governs, e.g. "
+                "'style', 'naming', 'testing', 'tooling', 'workflow'.",
+            },
+        },
+        "required": ["preference"],
+    },
+}
+
+
+def make_record_preference_handler(
+    task_id: str = "chat",
+) -> Callable[[dict[str, Any]], str]:
+    """Build the sync tool handler for record_preference. task_id defaults
+    to a synthetic "chat" marker (mirrors record_learning's "fleet-{agent}"
+    synthetic task_id convention) since a stated preference isn't tied to
+    one specific DevTask."""
+
+    def _handler(inp: dict[str, Any]) -> str:
+        preference = str(inp.get("preference", "")).strip()
+        if not preference:
+            return "[ERROR] preference is required."
+        scope = str(inp.get("scope", "")).strip() or "general"
+
+        from app.memory.store import embed_preference_sync
+
+        stored = embed_preference_sync(
+            task_id=task_id, preference=preference, scope=scope
+        )
+        return "Recorded." if stored else "[ERROR] failed to record preference."
+
+    return _handler
+
+
+# ---------------------------------------------------------------------------
 # request_clarification — MASTER_AGENT_v2.md Phase 5.3. Real, but scoped to
 # what base_graph.py (the graph every worker agent besides pm/architect/
 # decomposer runs on) can actually support today: it has no checkpointer or
@@ -7564,6 +7627,8 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _TASK_HISTORY_QUERY_TOOL,
     _KNOWN_ISSUES_READ_TOOL,
     _KNOWN_ISSUES_WRITE_TOOL,
+    # AUDIT_Q_BATCH15 §74/§113 gap-closure — preference memory
+    RECORD_PREFERENCE_TOOL,
     # Day 3C — Planning + docs tools
     _ESTIMATE_COMPLEXITY_TOOL,
     _SUMMARIZE_FOLDER_TOOL,
@@ -10603,17 +10668,34 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
         issue = str(inp["issue"])
         severity = str(inp.get("severity", "medium")).upper()
-        line = (
-            f"\n## [{severity}] {_dt.datetime.utcnow().strftime('%Y-%m-%d')}\n{issue}\n"
-        )
+        now = _dt.datetime.utcnow()
+        line = f"\n## [{severity}] {now.strftime('%Y-%m-%d')}\n{issue}\n"
         try:
             with open(_mem_issues_path, "a", encoding="utf-8") as _fh:
                 _mem_lock(_fh)
                 _fh.write(line)
                 _mem_unlock(_fh)
-            return f"Known issue appended (severity: {severity})"
         except Exception as e:
             return f"[ERROR] {e}"
+
+        # AUDIT_Q_BATCH15 §75/§105/§112 gap-closure (2026-08-11) — the flat
+        # KNOWN_ISSUES.md-style append above is kept unchanged (nothing that
+        # reads that file today breaks); this additionally makes the same
+        # known issue searchable/retrievable via memory_hook_node, which the
+        # flat file alone never was. Best-effort — a memory-backend failure
+        # must not turn a successful known-issue write into an error.
+        try:
+            from app.memory.store import embed_bug_sync
+
+            embed_bug_sync(
+                task_id=f"known-issue-{now.strftime('%Y%m%dT%H%M%S%f')}",
+                issue=issue,
+                severity=severity.lower(),
+            )
+        except Exception:
+            pass
+
+        return f"Known issue appended (severity: {severity})"
 
     handlers["memory_read"] = memory_read_h
     handlers["memory_write"] = memory_write_h
@@ -10621,6 +10703,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["task_history_query"] = task_history_query_h
     handlers["known_issues_read"] = known_issues_read_h
     handlers["known_issues_write"] = known_issues_write_h
+    # AUDIT_Q_BATCH15 §74/§113 gap-closure (2026-08-11).
+    handlers["record_preference"] = make_record_preference_handler(
+        task_id=f"chat-{session.session_id}" if session is not None else "chat"
+    )
 
     # =========================================================================
     # DAY 3C — Planning + docs tools
@@ -12124,6 +12210,76 @@ def audit_log_read(inp: dict[str, Any]) -> str:
         for e in entries
     ]
     return "\n".join(lines)
+
+
+_CAPABILITY_GAP_SCAN_TOOL: dict[str, Any] = {
+    "name": "capability_gap_scan",
+    "description": (
+        "AUDIT_Q_BATCH15 §76 gap-closure — deterministically cluster real AgentRun "
+        "history by agent_type and surface any agent whose real failure count/rate "
+        "over the scan window crosses a real threshold, with real sample error text "
+        "from those failed runs. Use this instead of trying to eyeball a capability "
+        "gap from raw task_history_query output — the clustering itself is already "
+        "computed for you here, not something to infer."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "window_days": {
+                "type": "integer",
+                "description": "Lookback window in days (default 14).",
+            },
+            "min_failures": {
+                "type": "integer",
+                "description": "Minimum failed-run count for an agent to be reported (default 3).",
+            },
+            "min_failure_rate": {
+                "type": "number",
+                "description": "Minimum failure rate (0.0-1.0) for an agent to be reported (default 0.3).",
+            },
+        },
+        "required": [],
+    },
+}
+
+
+def capability_gap_scan(inp: dict[str, Any]) -> str:
+    """Sync tool handler — bridges to the async DB query the same way every
+    other DB-backed sync tool handler in this module does (new isolated
+    engine + asyncio.run(), never the shared app.db.session engine — see
+    feedback_asyncio_isolated_engine)."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+    from app.fleet.capability_gap import (
+        format_capability_gap_report,
+        scan_capability_gaps,
+    )
+
+    window_days = int(inp.get("window_days", 14))
+    min_failures = int(inp.get("min_failures", 3))
+    min_failure_rate = float(inp.get("min_failure_rate", 0.3))
+
+    async def _run() -> str:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                clusters = await scan_capability_gaps(
+                    db,
+                    window_days=window_days,
+                    min_failures=min_failures,
+                    min_failure_rate=min_failure_rate,
+                )
+                return format_capability_gap_report(clusters)
+        finally:
+            await engine.dispose()
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        return f"[ERROR] capability_gap_scan failed: {exc}"
 
 
 _SUBMIT_ENHANCEMENT_REQUEST_TOOL: dict[str, Any] = {

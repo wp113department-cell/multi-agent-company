@@ -899,6 +899,44 @@ class ArchitectureScore(Base):
     )
 
 
+class AgentsScore(Base):
+    """AUDIT_Q_BATCH15 §117 gap-closure (2026-08-11, app/fleet/agents_score.py).
+
+    quality_score.py's own aggregator listed "agents" as a real, working
+    producer (benchmark_manager.py/agent_benchmarks) blocked-by-design-
+    decision, not blocked-by-missing-data: agent_benchmarks is scoped by
+    agent_name, not repo_id, since one agent runs across many repos. The
+    design decision made here: for a given repo_id, resolve the real set of
+    agent_names that have actually run against that repo (a real join
+    through agent_runs.task_id -> dev_tasks.repo_id — the same repo-scoping
+    source of truth ADR 006/Cluster O established for every other score
+    table), then average those agents' own already-real, already-persisted
+    baseline benchmark_score (agent_benchmarks.is_baseline=True) — never a
+    fabricated per-repo number, and never counting an agent that has no
+    real activity against this repo. Mirrors ArchitectureScore/
+    SecurityScore/TestScore's exact shape (one row per computation, repo_id
+    nullable for the same "not every task resolves to a repo" reason).
+    """
+
+    __tablename__ = "agents_scores"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("repos.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    agent_names: Mapped[Any] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    per_agent_scores: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    agents_score: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class SecurityScore(Base):
     """Stage 4 Cluster Q — Security slice (2026-08-05,
     app/fleet/security_score.py).

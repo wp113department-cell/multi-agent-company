@@ -82,10 +82,16 @@ def _default_importance(category: str, outcome: str) -> float:
     single number carry all the signal."""
     if category == "failure":
         return 0.8
+    if category == "bug":
+        return (
+            0.8  # a diagnosed, reusable known-issue is as valuable as a failure record
+        )
     if category == "architecture":
         return 0.7
     if category == "learning":
         return 0.6
+    if category == "preference":
+        return 0.6  # a stated human preference should outrank a routine task log
     return 0.5  # "task"/"procedure" and any future category
 
 
@@ -422,10 +428,12 @@ async def query_memory_context(
     top_k: int | None = None,
     repo_id: int | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Fetch similar tasks, past failures, fleet learning signals, and past
-    repair procedures for a single query text in one call. Returns
-    {"tasks": [...], "failures": [...], "learnings": [...], "procedures": [...]}
-    — each list uses the same shape its own query_* function already returns.
+    """Fetch similar tasks, past failures, fleet learning signals, past
+    repair procedures, stated preferences, and known bugs for a single query
+    text in one call. Returns {"tasks": [...], "failures": [...],
+    "learnings": [...], "procedures": [...], "preferences": [...],
+    "bugs": [...]} — each list uses the same shape its own query_* function
+    already returns.
 
     repo_id (gap-closure Day 3): threaded through to every sub-query unchanged
     — see query_similar_tasks's docstring for the exact filtering semantics.
@@ -435,11 +443,16 @@ async def query_memory_context(
     failures = await query_failures(description, db, top_k=k, repo_id=repo_id)
     learnings = await query_learning_signals(description, db, top_k=k, repo_id=repo_id)
     procedures = await query_procedures(description, db, top_k=k, repo_id=repo_id)
+    # AUDIT_Q_BATCH15 §74/§113/§75/§105/§112 gap-closure (2026-08-11).
+    preferences = await query_preferences(description, db, top_k=k, repo_id=repo_id)
+    bugs = await query_bugs(description, db, top_k=k, repo_id=repo_id)
     return {
         "tasks": tasks,
         "failures": failures,
         "learnings": learnings,
         "procedures": procedures,
+        "preferences": preferences,
+        "bugs": bugs,
     }
 
 
@@ -481,7 +494,14 @@ def query_memory_context_sync(
         return asyncio.run(_run())
     except Exception as exc:
         logger.warning("query_memory_context_sync failed: %s", exc)
-        return {"tasks": [], "failures": [], "learnings": [], "procedures": []}
+        return {
+            "tasks": [],
+            "failures": [],
+            "learnings": [],
+            "procedures": [],
+            "preferences": [],
+            "bugs": [],
+        }
 
 
 def format_full_memory_context(
@@ -489,12 +509,17 @@ def format_full_memory_context(
     failures: list[dict[str, Any]],
     learnings: list[dict[str, Any]],
     procedures: list[dict[str, Any]] | None = None,
+    preferences: list[dict[str, Any]] | None = None,
+    bugs: list[dict[str, Any]] | None = None,
 ) -> str:
-    """Format tasks + failures + learnings + procedures into one
-    prompt-injection block. Each section is omitted when empty, so a query
-    with no failure history doesn't print an empty '## Past failures'
-    heading. procedures defaults to None (not []) so existing callers that
-    only pass the original three lists keep working unchanged.
+    """Format tasks + failures + learnings + procedures + preferences + bugs
+    into one prompt-injection block. Each section is omitted when empty, so
+    a query with no failure history doesn't print an empty '## Past
+    failures' heading. procedures/preferences/bugs default to None (not [])
+    so existing callers that only pass the original three lists keep
+    working unchanged (AUDIT_Q_BATCH15 §74/§113/§75/§105/§112 gap-closure,
+    2026-08-11, added preferences/bugs the same additive way procedures was
+    added before them).
     """
     sections: list[str] = []
 
@@ -528,6 +553,22 @@ def format_full_memory_context(
                 f"**Steps taken / resolution:**\n{str(p['steps_and_resolution'])[:800]}"
             )
             lines.append(f"**Similarity:** {p['similarity']:.3f}\n")
+        sections.append("\n".join(lines))
+
+    if preferences:
+        lines = ["## Stated preferences (engineering memory)\n"]
+        for i, pref in enumerate(preferences, 1):
+            lines.append(f"### {i}. {pref['scope']}")
+            lines.append(f"**Preference:** {str(pref['preference'])[:300]}")
+            lines.append(f"**Similarity:** {pref['similarity']:.3f}\n")
+        sections.append("\n".join(lines))
+
+    if bugs:
+        lines = ["## Known bugs (engineering memory)\n"]
+        for i, b in enumerate(bugs, 1):
+            lines.append(f"### {i}. [{b['severity']}] Task {b['task_id']}")
+            lines.append(f"**Issue:** {str(b['issue'])[:300]}")
+            lines.append(f"**Similarity:** {b['similarity']:.3f}\n")
         sections.append("\n".join(lines))
 
     return "\n".join(sections)
@@ -1222,4 +1263,376 @@ async def query_procedures(
         ]
     except Exception as exc:
         logger.warning("Memory: procedure query failed: %s", exc)
+        return []
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Preference memory — AUDIT_Q_BATCH15 §74/§113 gap-closure (2026-08-11). A
+# coding-style/naming/tooling preference a human states ("always use f-strings",
+# "prefer pytest fixtures over setUp") had no dedicated category, tagging, or
+# retrieval path — it would have been shoehorned into the generic "learning"
+# bucket (embed_learning_signal, meant for fleet self-improvement signals, not
+# per-project human preferences) and competed for retrieval ranking with every
+# other kind of learning signal instead of being reliably surfaced when
+# relevant. Same shape as embed_procedure/query_procedures above: one write
+# path, one query path, category="preference" on the same memory_embeddings
+# table — no new table, no placeholder, real embeddings and real composite
+# ranking exactly like every other category here.
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+async def embed_preference(
+    task_id: str,
+    preference: str,
+    scope: str,
+    db: AsyncSession,
+    epic_id: str | None = None,
+    repo_id: int | None = None,
+) -> MemoryEmbedding | None:
+    """Store a stated human preference (coding style, naming, tooling,
+    testing, workflow) so future agents apply it without being re-told.
+
+    scope is a short free-text label (e.g. "style", "naming", "testing",
+    "tooling") — not an enum, since the space of real preferences is open-
+    ended; stored in summary for display, not used to filter retrieval
+    (retrieval is by semantic similarity of the preference text itself,
+    same as every other category).
+    """
+    settings = get_settings()
+    if not settings.memory_enabled:
+        return None
+
+    content = f"Preference ({scope}): {preference}"
+    vector = await _embed(content)
+
+    duplicate = await _find_near_duplicate(vector, "preference", repo_id, db)
+    if duplicate is not None:
+        await record_memory_access([duplicate.id], db)
+        logger.info(
+            "Memory: preference for %s is a near-duplicate of existing row %s — reused, not re-inserted",
+            task_id,
+            duplicate.id,
+        )
+        return duplicate
+
+    try:
+        row = MemoryEmbedding(
+            task_id=task_id,
+            epic_id=epic_id,
+            repo_id=repo_id,
+            outcome="preference",
+            category="preference",
+            description=preference[:500],
+            summary=f"scope={scope}"[:300],
+            files_changed=[],
+            embedding=vector,
+            importance=_default_importance("preference", "preference"),
+            verified=_default_verified("preference"),
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+        logger.info("Memory: stored preference (scope=%s) for %s", scope, task_id)
+        return row
+    except Exception as exc:
+        logger.warning("Memory: failed to store preference for %s: %s", task_id, exc)
+        await db.rollback()
+        return None
+
+
+def embed_preference_sync(
+    task_id: str,
+    preference: str,
+    scope: str = "general",
+    epic_id: str | None = None,
+    repo_id: int | None = None,
+) -> bool:
+    """Sync bridge for embed_preference — same new_isolated_async_engine()
+    pattern as embed_learning_signal_sync, for the record_preference tool's
+    plain sync LangGraph tool handler (app/agents/tools.py). Returns True on
+    a real write, False on any failure — never raises.
+    """
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> bool:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                row = await embed_preference(
+                    task_id=task_id,
+                    preference=preference,
+                    scope=scope,
+                    db=session,
+                    epic_id=epic_id,
+                    repo_id=repo_id,
+                )
+                return row is not None
+        finally:
+            await engine.dispose()
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        logger.warning("embed_preference_sync failed for %s: %s", task_id, exc)
+        return False
+
+
+async def query_preferences(
+    description: str,
+    db: AsyncSession,
+    top_k: int = 3,
+    repo_id: int | None = None,
+) -> list[dict[str, Any]]:
+    """Find past stated preferences relevant to the given query text — the
+    retrieval half of preference memory. repo_id: see query_similar_tasks's
+    docstring for the exact filtering semantics."""
+    settings = get_settings()
+    if not settings.memory_enabled:
+        return []
+
+    vector = await _embed(description)
+    if vector == _ZERO_VECTOR_1536:
+        return []
+
+    try:
+        # Two-stage retrieval — see query_similar_tasks's own comment above
+        # for the full reasoning (audit_v1.md 4.4 #1).
+        sql = text(f"""
+            WITH candidates AS (
+                SELECT id, task_id, epic_id, description, summary, embedding,
+                       created_at, reuse_count, importance, verified
+                FROM memory_embeddings
+                WHERE category = 'preference'
+                  AND embedding IS NOT NULL
+                  AND vector_norm(embedding) > 0
+                  AND archived = false
+                  AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+                ORDER BY embedding <=> CAST(:vec AS vector)
+                LIMIT :candidate_limit
+            )
+            SELECT
+                id,
+                task_id,
+                epic_id,
+                description,
+                summary,
+                1 - (embedding <=> CAST(:vec AS vector)) AS similarity,
+                {_COMPOSITE_SCORE_EXPR} AS composite_score
+            FROM candidates
+            ORDER BY {_COMPOSITE_SCORE_EXPR} DESC
+            LIMIT :k
+        """)
+        vec_str = "[" + ",".join(str(v) for v in vector) + "]"
+        params = {
+            "vec": vec_str,
+            "k": top_k,
+            "candidate_limit": top_k * settings.memory_candidate_overfetch_factor,
+            "repo_id": repo_id,
+            **_composite_score_params(settings),
+        }
+        _t0 = time.monotonic()
+        result = await db.execute(sql, params)
+        rows = result.fetchall()
+        record_retrieval_time("query_preferences", (time.monotonic() - _t0) * 1000)
+        await record_memory_access([row.id for row in rows], db)
+        return [
+            {
+                "id": row.id,
+                "task_id": row.task_id,
+                "epic_id": row.epic_id,
+                "preference": row.description,
+                "scope": str(row.summary).removeprefix("scope="),
+                "similarity": float(row.similarity),
+                "composite_score": float(row.composite_score),
+            }
+            for row in rows
+        ]
+    except Exception as exc:
+        logger.warning("Memory: preference query failed: %s", exc)
+        return []
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Bug memory — AUDIT_Q_BATCH15 §75/§105/§112 gap-closure (2026-08-11). Known
+# bugs previously had no dedicated, searchable category distinct from generic
+# "failure" — the only real write path (known_issues_write, app/agents/
+# tools.py) appended to a flat KNOWN_ISSUES.md-style file, completely
+# disconnected from memory_hook_node's semantic retrieval, so a future agent
+# working on similar code never saw a previously-logged known issue unless it
+# happened to read that file directly. Same shape as every other category:
+# one write path, one query path, category="bug" on memory_embeddings.
+# known_issues_write's flat-file append is kept unchanged (100% backward
+# compatible — nothing that reads that file today breaks); this adds real
+# semantic search/retrieval alongside it, not instead of it.
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+async def embed_bug(
+    task_id: str,
+    issue: str,
+    severity: str,
+    db: AsyncSession,
+    epic_id: str | None = None,
+    repo_id: int | None = None,
+) -> MemoryEmbedding | None:
+    """Store a known bug/issue as searchable organizational knowledge,
+    distinct from a one-off task's own outcome="failure" record — this is
+    for issues meant to be looked up again by a *different* future task
+    working on related code, the same "known bugs" org-knowledge type
+    embed_procedure already covers for resolved-with-full-steps issues."""
+    settings = get_settings()
+    if not settings.memory_enabled:
+        return None
+
+    content = f"Known issue ({severity}): {issue}"
+    vector = await _embed(content)
+
+    duplicate = await _find_near_duplicate(vector, "bug", repo_id, db)
+    if duplicate is not None:
+        await record_memory_access([duplicate.id], db)
+        logger.info(
+            "Memory: bug for %s is a near-duplicate of existing row %s — reused, not re-inserted",
+            task_id,
+            duplicate.id,
+        )
+        return duplicate
+
+    try:
+        row = MemoryEmbedding(
+            task_id=task_id,
+            epic_id=epic_id,
+            repo_id=repo_id,
+            outcome="bug",
+            category="bug",
+            description=issue[:500],
+            summary=f"severity={severity}"[:300],
+            files_changed=[],
+            embedding=vector,
+            importance=_default_importance("bug", "bug"),
+            verified=_default_verified("bug"),
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+        logger.info("Memory: stored known bug (severity=%s) for %s", severity, task_id)
+        return row
+    except Exception as exc:
+        logger.warning("Memory: failed to store bug for %s: %s", task_id, exc)
+        await db.rollback()
+        return None
+
+
+def embed_bug_sync(
+    task_id: str,
+    issue: str,
+    severity: str = "medium",
+    epic_id: str | None = None,
+    repo_id: int | None = None,
+) -> bool:
+    """Sync bridge for embed_bug, same pattern as every other embed_*_sync
+    in this module. Returns True on a real write, False on any failure —
+    never raises (known_issues_write_h's own contract is "never raises";
+    this must not change that)."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> bool:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                row = await embed_bug(
+                    task_id=task_id,
+                    issue=issue,
+                    severity=severity,
+                    db=session,
+                    epic_id=epic_id,
+                    repo_id=repo_id,
+                )
+                return row is not None
+        finally:
+            await engine.dispose()
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        logger.warning("embed_bug_sync failed for %s: %s", task_id, exc)
+        return False
+
+
+async def query_bugs(
+    description: str,
+    db: AsyncSession,
+    top_k: int = 3,
+    repo_id: int | None = None,
+) -> list[dict[str, Any]]:
+    """Find known bugs relevant to the given query text — the retrieval half
+    of bug memory. repo_id: see query_similar_tasks's docstring."""
+    settings = get_settings()
+    if not settings.memory_enabled:
+        return []
+
+    vector = await _embed(description)
+    if vector == _ZERO_VECTOR_1536:
+        return []
+
+    try:
+        sql = text(f"""
+            WITH candidates AS (
+                SELECT id, task_id, epic_id, description, summary, embedding,
+                       created_at, reuse_count, importance, verified
+                FROM memory_embeddings
+                WHERE category = 'bug'
+                  AND embedding IS NOT NULL
+                  AND vector_norm(embedding) > 0
+                  AND archived = false
+                  AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+                ORDER BY embedding <=> CAST(:vec AS vector)
+                LIMIT :candidate_limit
+            )
+            SELECT
+                id,
+                task_id,
+                epic_id,
+                description,
+                summary,
+                1 - (embedding <=> CAST(:vec AS vector)) AS similarity,
+                {_COMPOSITE_SCORE_EXPR} AS composite_score
+            FROM candidates
+            ORDER BY {_COMPOSITE_SCORE_EXPR} DESC
+            LIMIT :k
+        """)
+        vec_str = "[" + ",".join(str(v) for v in vector) + "]"
+        params = {
+            "vec": vec_str,
+            "k": top_k,
+            "candidate_limit": top_k * settings.memory_candidate_overfetch_factor,
+            "repo_id": repo_id,
+            **_composite_score_params(settings),
+        }
+        _t0 = time.monotonic()
+        result = await db.execute(sql, params)
+        rows = result.fetchall()
+        record_retrieval_time("query_bugs", (time.monotonic() - _t0) * 1000)
+        await record_memory_access([row.id for row in rows], db)
+        return [
+            {
+                "id": row.id,
+                "task_id": row.task_id,
+                "epic_id": row.epic_id,
+                "issue": row.description,
+                "severity": str(row.summary).removeprefix("severity="),
+                "similarity": float(row.similarity),
+                "composite_score": float(row.composite_score),
+            }
+            for row in rows
+        ]
+    except Exception as exc:
+        logger.warning("Memory: bug query failed: %s", exc)
         return []

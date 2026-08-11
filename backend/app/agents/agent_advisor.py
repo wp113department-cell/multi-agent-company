@@ -16,7 +16,9 @@ from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
     READ_ONLY_TOOLS,
     RECORD_LEARNING_TOOL,
+    _CAPABILITY_GAP_SCAN_TOOL,
     audit_log_read,
+    capability_gap_scan,
     fleet_metrics_read,
     make_read_only_handlers,
     make_record_learning_handler,
@@ -115,6 +117,10 @@ SCAN_TOOLS = [
     _TASK_HISTORY_QUERY_TOOL_SPEC,
     _FLEET_METRICS_TOOL_SPEC,
     _AUDIT_LOG_READ_TOOL_SPEC,
+    # AUDIT_Q_BATCH15 §76 gap-closure — real, deterministic repeated-failure
+    # clustering, distinct from this agent's own orchestration-correctness
+    # review.
+    _CAPABILITY_GAP_SCAN_TOOL,
     _SUBMIT_ENHANCEMENT_TOOL_SPEC,
 ]
 
@@ -133,6 +139,7 @@ def make_scan_handlers(repo_path: str, trace_id: str = "") -> dict[str, Any]:
     handlers["task_history_query"] = task_history_query
     handlers["fleet_metrics_read"] = fleet_metrics_read
     handlers["audit_log_read"] = audit_log_read
+    handlers["capability_gap_scan"] = capability_gap_scan
     handlers["submit_enhancement_request"] = make_submit_enhancement_request_handler(
         "agent_advisor", trace_id=trace_id
     )
@@ -153,10 +160,18 @@ def run_agent_advisor_scan(trace_id: str = "") -> AgentResult:
         "(an agent ran that had nothing relevant to do), or under-provisioned (a task needed "
         "a capability/tool no agent in the chain had). Use task_history_query and "
         "audit_log_read to see what actually ran; use fleet_metrics_read to check individual "
-        "agent behavior. If you find a real orchestration issue with concrete evidence, file "
-        "submit_enhancement_request with category=orchestration, describing what should "
-        "change (e.g. 'skip qa_node when task_type=docs_only') in plain language. If "
-        "orchestration looks correct, that's a normal outcome — don't invent an issue."
+        "agent behavior. Always also call capability_gap_scan — it deterministically "
+        "clusters real AgentRun history by agent and surfaces any agent whose real failure "
+        "count/rate crossed a real threshold, with real sample error text; treat a non-empty "
+        "cluster report as strong evidence of a genuine capability gap, not something to "
+        "re-derive yourself from raw history. If you find a real orchestration issue or a "
+        "real capability gap with concrete evidence, file submit_enhancement_request "
+        "(category=orchestration for dispatch/routing problems, category=quality for a "
+        "capability_gap_scan cluster), describing what should change (e.g. 'skip qa_node "
+        "when task_type=docs_only', or 'bug_fix keeps failing on database migration tasks — "
+        "consider adding a dedicated migration capability') in plain language. If "
+        "orchestration looks correct and no cluster is reported, that's a normal outcome — "
+        "don't invent an issue."
     )
 
     final_state = run_agent_graph(

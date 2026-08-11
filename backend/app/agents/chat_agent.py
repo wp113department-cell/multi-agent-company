@@ -805,6 +805,8 @@ class ChatAgent:
                 mem["failures"],
                 mem["learnings"],
                 mem.get("procedures", []),
+                mem.get("preferences", []),
+                mem.get("bugs", []),
             )
         except Exception:
             logger.debug("ChatAgent memory read skipped (non-fatal)", exc_info=True)

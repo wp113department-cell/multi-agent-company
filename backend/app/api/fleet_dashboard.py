@@ -203,6 +203,103 @@ async def rollback_checkpoint(
 
 
 # ---------------------------------------------------------------------------
+# Prompt Registry — history / rollback (AUDIT_Q_BATCH15 §110/§111 gap-closure,
+# 2026-08-11). app.fleet.prompt_registry.PromptRegistry.deploy() has a real
+# production caller (app/agents/tools.py's _propose_and_deploy_role_prompt,
+# triggered whenever an apply-capable fleet agent writes roles/*.md) and is
+# gated by regression_detector.gate_deploy() before it ever touches disk —
+# but PromptRegistry.rollback() itself had zero callers anywhere, unlike its
+# exact sibling for lessons (VersionedMemoryStore.rollback(), reachable via
+# POST /api/memory/lessons/{id}/rollback below). These two endpoints mirror
+# that same list-then-rollback shape for role prompts: GET history so an
+# operator can see what's deployed/superseded, POST rollback to restore the
+# most recently superseded version (skips the approval gate — it was already
+# approved and deployed once, same reasoning as the lesson-rollback route).
+# PromptRegistry's methods are sync wrappers around asyncio.run() (see that
+# module's own _new_isolated_db_engine docstring for why) — this route
+# handler already runs inside a live event loop, so calls are dispatched via
+# asyncio.to_thread(), the same safe pattern api/memory.py's lesson-rollback
+# route and main.py's background loops already use.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/prompts/{role_name}/history")
+async def prompt_history(
+    role_name: str,
+    _approver: str = Depends(require_approver),
+) -> list[dict[str, Any]]:
+    """List every proposed/deployed/superseded version of a role's prompt —
+    the real prerequisite for an operator to decide whether a rollback is
+    warranted."""
+    from app.fleet.prompt_registry import get_prompt_registry
+
+    versions = await asyncio.to_thread(get_prompt_registry().get_history, role_name)
+    return [
+        {
+            "id": v.id,
+            "roleName": v.role_name,
+            "versionNumber": v.version_number,
+            "status": v.status,
+            "parentVersionId": v.parent_version_id,
+            "proposedBy": v.proposed_by,
+            "approvedBy": v.approved_by,
+            "createdAt": v.created_at,
+            "deployedAt": v.deployed_at,
+        }
+        for v in versions
+    ]
+
+
+@router.post("/prompts/{role_name}/rollback")
+async def rollback_prompt(
+    role_name: str,
+    user_id: str = Depends(require_approver),
+) -> dict[str, Any]:
+    """Restore role_name's most recently superseded prompt version — the
+    first real trigger for PromptRegistry.rollback(), which was fully built
+    and tested (Day 11) but unreachable from any production path before this
+    (AUDIT_Q_BATCH15 §110/§111). Writes the restored content back to
+    backend/roles/{role_name}.md immediately (same as deploy()) since
+    app.agents.base.load_role() reads that file fresh on every agent call —
+    no process restart required for the rollback to take effect."""
+    from app.fleet.prompt_registry import get_prompt_registry
+
+    try:
+        record = await asyncio.to_thread(get_prompt_registry().rollback, role_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    logger.warning(
+        "Operator-invoked prompt rollback: role=%s -> version=%d by %s",
+        role_name,
+        record.version_number,
+        user_id,
+    )
+    try:
+        from app.fleet.fleet_events import health_updated, publish
+
+        publish(
+            health_updated(
+                role_name,
+                health="degraded",
+                state=(
+                    f"operator rolled back prompt to version {record.version_number}"
+                ),
+            )
+        )
+    except Exception:
+        pass
+
+    return {
+        "roleName": record.role_name,
+        "versionNumber": record.version_number,
+        "status": record.status,
+        "deployedAt": record.deployed_at,
+        "rolledBackBy": user_id,
+    }
+
+
+# ---------------------------------------------------------------------------
 # APPLY-phase dispatch — lazy-imported so a broken/missing agent module never
 # breaks the whole router at import time.
 # ---------------------------------------------------------------------------

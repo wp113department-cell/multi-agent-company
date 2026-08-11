@@ -75,7 +75,14 @@ def test_query_memory_context_sync_returns_empty_on_failure() -> None:
     ):
         result = query_memory_context_sync("fix auth bug")
 
-    assert result == {"tasks": [], "failures": [], "learnings": [], "procedures": []}
+    assert result == {
+        "tasks": [],
+        "failures": [],
+        "learnings": [],
+        "procedures": [],
+        "preferences": [],
+        "bugs": [],
+    }
 
 
 # ---------------------------------------------------------------------------

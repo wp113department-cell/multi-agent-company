@@ -948,6 +948,8 @@ def _make_memory_hook_node(
                 mem["failures"],
                 mem["learnings"],
                 mem.get("procedures", []),
+                mem.get("preferences", []),
+                mem.get("bugs", []),
             )
             if db_block:
                 context_blocks.append(db_block)

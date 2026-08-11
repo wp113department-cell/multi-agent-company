@@ -954,6 +954,36 @@ class Settings(BaseSettings):
         default=6,
         description="Hours between checks for whether target_repo_path's local `main` HEAD has moved since changelog_agent/release_notes_agent last ran, auto-dispatching each when it has. 0 disables. Gap-closure Day 52, answers.md Q41.",
     )
+    fleet_success_rate_sync_interval_hours: float = Field(
+        default=1.0,
+        description="AUDIT_Q_BATCH15 §37 gap-closure — hours between syncing "
+        "AgentCapability.success_rate (fleet_manager.select()'s routing "
+        "input) from real AgentRun outcomes, so routing scores reflect "
+        "actual agent performance instead of a static registration-time "
+        "constant. 0 disables.",
+    )
+    prompt_auto_rollback_interval_hours: float = Field(
+        default=4.0,
+        description="AUDIT_Q_BATCH15 §118 gap-closure — hours between checking "
+        "every deployed role prompt for a real regression against its stored "
+        "benchmark baseline (regression_detector.check_fleet()) and "
+        "auto-rolling back any that has one (prompt_registry.rollback()). "
+        "0 disables.",
+    )
+    prompt_auto_rollback_cooldown_hours: float = Field(
+        default=24.0,
+        description="AUDIT_Q_BATCH15 §118 gap-closure — minimum hours between "
+        "two automatic rollbacks of the same role's prompt, so a still-warming "
+        "metrics ring buffer right after a rollback can't immediately trigger "
+        "another one (oscillation guard).",
+    )
+    agents_score_compute_interval_hours: float = Field(
+        default=24.0,
+        description="AUDIT_Q_BATCH15 §117 gap-closure — hours between computing "
+        "and persisting each active repo's agents_score (mean baseline "
+        "benchmark_score of agents that actually ran against that repo). "
+        "0 disables.",
+    )
     leader_election_enabled: bool = Field(
         default=True,
         description="Blocker (audit_v1.md 4.8 #5): 'No leader election / "

@@ -1,17 +1,18 @@
 """Stage 4 Cluster Q — cross-category aggregation layer (2026-08-05,
-STAGE4_BACKLOG.md).
+STAGE4_BACKLOG.md; agents category added AUDIT_Q_BATCH15 §117 gap-closure,
+2026-08-11).
 
-Combines the 3 production-verified category score producers (Tests,
-Architecture, Security) into a single, extensible aggregation. Per user
-instruction:
+Combines the production-verified category score producers (Tests,
+Architecture, Security, Memory, Agents) into a single, extensible
+aggregation. Per user instruction:
   - Use only persisted structured score records — never recompute a
     category score during aggregation (tested explicitly below by
     patching each category's compute_*_score() and asserting it is never
     called during get_quality_score()).
-  - Aggregate only categories that are production verified (tests,
-    architecture, security) — the other 6 (documentation, performance,
-    memory, tools, agents, prompts) report status="unavailable",
-    reason="not_implemented", never a placeholder score.
+  - Aggregate only categories that are production verified — the other 4
+    (documentation, performance, tools, prompts) report
+    status="unavailable", reason="not_implemented", never a placeholder
+    score.
   - A category that IS implemented but has no persisted row yet for a
     given repo also reports "unavailable" — reason="no_data", distinct
     from "not_implemented".
@@ -47,7 +48,6 @@ _NOT_YET_IMPLEMENTED = {
     "documentation",
     "performance",
     "tools",
-    "agents",
     "prompts",
 }
 
@@ -109,7 +109,7 @@ def test_all_categories_unavailable_for_a_fresh_repo_with_no_scores() -> None:
         assert result.total_category_count == 9
 
         by_name = {c.name: c for c in result.categories}
-        for name in ("tests", "architecture", "security", "memory"):
+        for name in ("tests", "architecture", "security", "memory", "agents"):
             assert by_name[name].status == "unavailable"
             assert by_name[name].reason == "no_data"
             assert by_name[name].score is None
@@ -122,7 +122,7 @@ def test_all_categories_unavailable_for_a_fresh_repo_with_no_scores() -> None:
 
 
 def test_not_yet_implemented_categories_never_change_regardless_of_data() -> None:
-    """Regression guard: the 6 not-yet-implemented categories must always
+    """Regression guard: the not-yet-implemented categories must always
     report not_implemented, never accidentally treated as no_data (which
     would misleadingly imply a real producer exists but hasn't run yet)."""
     suffix = uuid.uuid4().hex[:8]

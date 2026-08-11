@@ -333,6 +333,232 @@ async def _benchmark_baseline_loop() -> None:
             logger.warning("Benchmark baseline loop iteration failed: %s", exc)
 
 
+async def _fleet_success_rate_sync_loop() -> None:
+    """AUDIT_Q_BATCH15 §37 gap-closure (2026-08-11) — "Learning System": two
+    different success_rate fields existed. Agent.success_rate (Postgres) was
+    genuinely computed from real AgentRun outcomes, but only when a human
+    happened to hit GET /api/agents/{name}/metrics — nothing scheduled it.
+    AgentCapability.success_rate (in-process capability_registry, the field
+    FleetManager.select()'s routing score actually reads) was a static value
+    set at agent-registration time, never updated from real outcomes,
+    despite capability_registry.py's own module docstring claiming a DB
+    merge happens "at query time" — no such merge code existed. This closes
+    that gap the way the audit's own Production Enhancement Plan describes:
+    a scheduled job, matching the already-proven _fleet_agents_scan_loop/
+    _benchmark_baseline_loop pattern, computing live success_rate from real
+    AgentRun history (agent_registry.compute_live_success_rate — the same
+    function GET /api/agents/{name}/metrics now also calls, so there is one
+    real computation, not two) and writing it into the exact in-process
+    field routing reads. Skips any capability with zero real runs yet (its
+    registration-time constant is the correct, honest value until real data
+    exists — never overwritten with a fabricated 0.0). Set
+    FLEET_SUCCESS_RATE_SYNC_INTERVAL_HOURS=0 to disable.
+    """
+    interval_hours = get_settings().fleet_success_rate_sync_interval_hours
+    if interval_hours <= 0:
+        logger.info(
+            "Fleet success-rate sync loop disabled "
+            "(FLEET_SUCCESS_RATE_SYNC_INTERVAL_HOURS=0)"
+        )
+        return
+
+    while True:
+        await asyncio.sleep(interval_hours * 60 * 60)
+        try:
+            from app.db.session import get_session_factory
+            from app.fleet.agent_registry import compute_live_success_rate
+            from app.fleet.capability_registry import get_capability_registry
+
+            registry = get_capability_registry()
+            factory = get_session_factory()
+            updated = 0
+            async with factory() as db:
+                for cap in registry.all():
+                    try:
+                        rate, total_runs = await compute_live_success_rate(
+                            db, cap.name, fallback=cap.success_rate
+                        )
+                        if total_runs == 0:
+                            continue  # nothing real to learn from yet
+                        if registry.update_success_rate(cap.name, rate):
+                            updated += 1
+                    except Exception as exc:
+                        logger.warning(
+                            "Success-rate sync failed for %s: %s", cap.name, exc
+                        )
+            if updated:
+                logger.info(
+                    "Fleet success-rate sync: updated %d agent(s) from real "
+                    "AgentRun outcomes",
+                    updated,
+                )
+        except Exception as exc:
+            logger.warning("Fleet success-rate sync loop iteration failed: %s", exc)
+
+
+async def _prompt_auto_rollback_loop() -> None:
+    """AUDIT_Q_BATCH15 §118 gap-closure (2026-08-11) — "Safe Self-Improvement
+    Lifecycle" step 8, "Rollback if quality declines": the rollback function
+    (prompt_registry.rollback()) existed but was dead code (zero callers,
+    closed by §110/111 above with a human-operated dashboard route), and the
+    regression-detection machinery to know WHEN to roll back already existed
+    too (regression_detector.check_fleet() — real, tested, just never run on
+    a schedule against already-deployed prompts). This is the missing
+    automatic trigger connecting the two: periodically re-checks every
+    registered agent's live benchmark against its stored baseline, and for
+    any agent whose role has a real deployed prompt version AND is currently
+    regressed, calls prompt_registry.rollback() automatically — no human
+    approval gate, matching this step's own definition ("automatic," not
+    "operator-invoked" — that path is the dashboard route above).
+
+    Oscillation guard: a rollback right after deployment leaves
+    MetricsCollector's ring buffer still full of the regressed prompt's
+    recent (bad) runs for a while, which could otherwise trip this same
+    check again next iteration and roll back a SECOND time before the good
+    prompt has accumulated enough fresh runs to out-vote the stale ones.
+    A per-role cooldown (SystemSetting-backed, same keyed-per-agent pattern
+    _doc_agent_auto_trigger_loop already uses for
+    'doc_agent_last_sha:{agent_name}') blocks a repeat rollback for the same
+    role within PROMPT_AUTO_ROLLBACK_COOLDOWN_HOURS. Set
+    PROMPT_AUTO_ROLLBACK_INTERVAL_HOURS=0 to disable.
+    """
+    settings = get_settings()
+    interval_hours = settings.prompt_auto_rollback_interval_hours
+    if interval_hours <= 0:
+        logger.info(
+            "Prompt auto-rollback loop disabled (PROMPT_AUTO_ROLLBACK_INTERVAL_HOURS=0)"
+        )
+        return
+
+    while True:
+        await asyncio.sleep(interval_hours * 60 * 60)
+        try:
+            await _run_prompt_auto_rollback_once()
+        except Exception as exc:
+            logger.warning("Prompt auto-rollback loop iteration failed: %s", exc)
+
+
+async def _run_prompt_auto_rollback_once() -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from app.db.repository import get_setting, set_setting
+    from app.db.session import get_session_factory
+    from app.fleet.prompt_registry import get_prompt_registry
+    from app.fleet.regression_detector import get_regression_detector
+
+    settings = get_settings()
+    cooldown = timedelta(hours=settings.prompt_auto_rollback_cooldown_hours)
+    registry = get_prompt_registry()
+    factory = get_session_factory()
+
+    gates = await asyncio.to_thread(get_regression_detector().check_fleet)
+    for gate in gates:
+        if not gate.blocked or gate.report.baseline_score is None:
+            continue  # no regression, or no baseline yet to have regressed against
+
+        role_name = gate.agent_name
+        deployed = await asyncio.to_thread(registry.get_deployed, role_name)
+        if deployed is None:
+            continue  # this role's prompt was never versioned through prompt_registry
+
+        setting_key = f"prompt_auto_rollback_last_at:{role_name}"
+        async with factory() as db:
+            last_at_raw = await get_setting(db, setting_key)
+            if last_at_raw:
+                try:
+                    last_at = datetime.fromisoformat(last_at_raw)
+                    if datetime.now(timezone.utc) - last_at < cooldown:
+                        continue  # still cooling down from a recent auto-rollback
+                except ValueError:
+                    pass
+
+            try:
+                restored = await asyncio.to_thread(registry.rollback, role_name)
+            except ValueError:
+                continue  # nothing superseded to roll back to
+
+            await set_setting(db, setting_key, datetime.now(timezone.utc).isoformat())
+            logger.warning(
+                "Prompt auto-rollback: role=%s regressed %.3f vs baseline %.3f — "
+                "rolled back to version=%d",
+                role_name,
+                gate.report.current_score,
+                gate.report.baseline_score,
+                restored.version_number,
+            )
+            try:
+                from app.fleet.fleet_events import health_updated, publish
+
+                publish(
+                    health_updated(
+                        role_name,
+                        health="degraded",
+                        state=(
+                            f"auto-rolled-back prompt to version "
+                            f"{restored.version_number} (benchmark_score "
+                            f"regressed {gate.report.delta:+.3f})"
+                        ),
+                    )
+                )
+            except Exception:
+                pass
+
+
+async def _agents_score_compute_loop() -> None:
+    """AUDIT_Q_BATCH15 §117 gap-closure (2026-08-11) — quality_score.py's
+    "agents" category needs a real, persisted, repo-scoped score row to
+    read (see app/fleet/agents_score.py's own module docstring for the
+    real design decision: a repo-derived join through agent_runs/
+    dev_tasks). This is that producer, matching every other score
+    category's own shape (architecture_score/security_score/test_score are
+    all written at their own real trigger point — this one has no natural
+    single trigger event since it's a cross-agent aggregate, so it's
+    computed periodically instead, same as _benchmark_baseline_loop it
+    directly depends on). Set AGENTS_SCORE_COMPUTE_INTERVAL_HOURS=0 to
+    disable.
+    """
+    interval_hours = get_settings().agents_score_compute_interval_hours
+    if interval_hours <= 0:
+        logger.info(
+            "Agents-score compute loop disabled (AGENTS_SCORE_COMPUTE_INTERVAL_HOURS=0)"
+        )
+        return
+
+    while True:
+        await asyncio.sleep(interval_hours * 60 * 60)
+        try:
+            from sqlalchemy import select
+
+            from app.db.models import Repo
+            from app.db.session import get_session_factory
+            from app.fleet.agents_score import compute_agents_score, store_agents_score
+
+            factory = get_session_factory()
+            computed = 0
+            async with factory() as db:
+                result = await db.execute(select(Repo).where(Repo.status == "ready"))
+                repos = list(result.scalars().all())
+                for repo in repos:
+                    try:
+                        score = await compute_agents_score(repo.id, db)
+                        if score is None:
+                            continue  # no relevant agent has a baseline yet
+                        await asyncio.to_thread(store_agents_score, repo.id, score)
+                        computed += 1
+                    except Exception as exc:
+                        logger.warning(
+                            "Agents-score compute failed for repo %s: %s",
+                            repo.id,
+                            exc,
+                        )
+            if computed:
+                logger.info(
+                    "Agents-score compute: persisted %d repo score(s)", computed
+                )
+        except Exception as exc:
+            logger.warning("Agents-score compute loop iteration failed: %s", exc)
+
+
 async def _doc_agent_auto_trigger_loop() -> None:
     """Gap-closure Day 52 (Stage 2, answers.md Q41 "Auto-trigger 'when code
     changes': NO for all of the above. All four real doc agents are
@@ -464,6 +690,48 @@ async def _run_doc_agent_auto_trigger_once() -> None:
                 )
         except Exception as exc:
             logger.warning("Doc-agent auto-trigger failed for %s: %s", agent_name, exc)
+
+    # AUDIT_Q_BATCH15 §115 gap-closure (2026-08-11) — "Zero code ties a
+    # 'what went well/what failed' report to any release or deployment
+    # event." Reuses the exact same real-event trigger (main HEAD movement)
+    # this loop already uses for changelog_agent/release_notes_agent,
+    # tracked under its own SystemSetting key so it advances independently
+    # of them. Deliberately NOT an LLM agent (unlike the two above) — every
+    # number in a retrospective is a real DB count and every sample is real
+    # stored text, so a deterministic aggregator has zero hallucination
+    # surface where an LLM narrating "what went well" would have one.
+    try:
+        retro_key = "doc_agent_last_sha:release_retrospective"
+        async with factory() as db:
+            last_retro_sha = await get_setting(db, retro_key)
+            if last_retro_sha != current_sha:
+                from app.db.repository import resolve_repo_id_from_path
+                from app.fleet.release_retrospective import (
+                    generate_release_retrospective,
+                    write_retrospective_report,
+                )
+
+                repo_id = await resolve_repo_id_from_path(db, repo_path)
+                retro = await generate_release_retrospective(
+                    db,
+                    repo_path=repo_path,
+                    repo_id=repo_id,
+                    from_sha=last_retro_sha,
+                    to_sha=current_sha,
+                )
+                report_path = await asyncio.to_thread(write_retrospective_report, retro)
+                await set_setting(db, retro_key, current_sha)
+                logger.info(
+                    "Release retrospective generated for main@%s -> %s "
+                    "(completed=%d failed=%d blocked=%d)",
+                    current_sha[:12],
+                    report_path,
+                    retro.tasks_completed,
+                    retro.tasks_failed,
+                    retro.tasks_blocked,
+                )
+    except Exception as exc:
+        logger.warning("Release retrospective generation failed: %s", exc)
 
 
 def _make_leader_election_engine(settings: Any, pool_size: int) -> Any:
@@ -745,6 +1013,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "loop:doc_agent_auto_trigger",
         "loop:failed_rq_job_sweep",
         "loop:redis_streams_drain",
+        "loop:fleet_success_rate_sync",
+        "loop:prompt_auto_rollback",
+        "loop:agents_score_compute",
     )
     _leader_election_engine = (
         _make_leader_election_engine(settings, pool_size=len(_leader_loop_names))
@@ -802,6 +1073,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             _leader_election_engine,
         )
     )
+    fleet_success_rate_sync_task = asyncio.create_task(
+        _run_as_leader(
+            "loop:fleet_success_rate_sync",
+            _fleet_success_rate_sync_loop,
+            _leader_election_engine,
+        )
+    )
+    prompt_auto_rollback_task = asyncio.create_task(
+        _run_as_leader(
+            "loop:prompt_auto_rollback",
+            _prompt_auto_rollback_loop,
+            _leader_election_engine,
+        )
+    )
+    agents_score_compute_task = asyncio.create_task(
+        _run_as_leader(
+            "loop:agents_score_compute",
+            _agents_score_compute_loop,
+            _leader_election_engine,
+        )
+    )
 
     yield
 
@@ -814,6 +1106,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     doc_agent_auto_trigger_task.cancel()
     failed_rq_job_sweep_task.cancel()
     redis_streams_drain_task.cancel()
+    fleet_success_rate_sync_task.cancel()
+    prompt_auto_rollback_task.cancel()
+    agents_score_compute_task.cancel()
     bg_process_liveness_task.cancel()
     for task in (
         reindex_task,
@@ -825,6 +1120,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         doc_agent_auto_trigger_task,
         failed_rq_job_sweep_task,
         redis_streams_drain_task,
+        fleet_success_rate_sync_task,
+        prompt_auto_rollback_task,
+        agents_score_compute_task,
         bg_process_liveness_task,
     ):
         try:

@@ -21,7 +21,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
 
-_VALID_CATEGORIES = {"task", "architecture", "failure", "learning"}
+_VALID_CATEGORIES = {
+    "task",
+    "architecture",
+    "failure",
+    "learning",
+    # AUDIT_Q_BATCH15 §74/§113/§75/§105/§112 gap-closure (2026-08-11) —
+    # "procedure" was already a real, written de-facto category
+    # (app/memory/store.py::embed_procedure) but was never exposed in this
+    # read-API's own filter set; "preference"/"bug" are the two new
+    # dedicated categories added alongside it in the same gap-closure.
+    "procedure",
+    "preference",
+    "bug",
+}
 
 
 @router.get("/patterns")
@@ -29,7 +42,7 @@ async def get_memory_patterns(
     db: AsyncSession = Depends(get_db),
     category: str | None = Query(
         default=None,
-        description="Filter by category: task | architecture | failure | learning",
+        description="Filter by category: task | architecture | failure | learning | procedure | preference | bug",
     ),
 ) -> dict[str, Any]:
     """Aggregate view of engineering memory: outcome distribution and recent embeddings.
