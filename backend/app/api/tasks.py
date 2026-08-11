@@ -81,6 +81,8 @@ def _log_to_dict(log: Any) -> dict[str, Any]:
         "category": log.category,
         "message": log.message,
         "extraData": log.extra_data,
+        # AUDIT_Q_BATCH13 §44 gap-closure (2026-08-11) — surface task_logs.rationale
+        "rationale": log.rationale,
         "createdAt": log.created_at.isoformat() if log.created_at else None,
     }
 
@@ -502,6 +504,99 @@ async def get_pipeline(
         "architectPlan": ps.architect_plan,
         "subtasks": ps.subtasks_json,
         "approved": ps.approved,
+    }
+
+
+def _synthesize_explanation(
+    task: Any,
+    goals: list[str] | None,
+    technical_approach: str | None,
+    risk_level: str | None,
+    dispatch_rationales: list[str],
+) -> str:
+    """AUDIT_Q_BATCH13 §44 gap-closure (2026-08-11) — "explain why this
+    approach / these agents / these tools were chosen". Assembles real,
+    already-persisted data (PM brief goals, architect_plan's technical
+    approach, and FleetManager.select()'s own DispatchPlan.reason strings,
+    now stored via task_logs.rationale) into one coherent, plain-language
+    explanation, instead of requiring a user to reconstruct it from raw
+    activity_stream events themselves. Never invents content: a section is
+    omitted, not guessed, when the underlying data doesn't exist yet."""
+    parts = [f"Task {task.id} ({task.status}): {task.title}."]
+    if goals:
+        parts.append("Goals identified by the PM agent: " + "; ".join(goals[:5]) + ".")
+    if technical_approach:
+        approach_line = (
+            f"Technical approach chosen by the architect agent: {technical_approach}"
+        )
+        if risk_level:
+            approach_line += f" (risk level: {risk_level})"
+        parts.append(approach_line + ".")
+    if dispatch_rationales:
+        parts.append(
+            "Agent selection: " + " ".join(f"{r}." for r in dispatch_rationales)
+        )
+    if len(parts) == 1:
+        parts.append(
+            "No structured planning or agent-dispatch rationale has been "
+            "recorded for this task yet."
+        )
+    return " ".join(parts)
+
+
+@router.get("/{task_id}/explain")
+async def explain_task(
+    task_id: int, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Synthesized, human-readable explanation of why this task's plan and
+    agent dispatch decisions were made — see _synthesize_explanation()."""
+    task = await get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    logs = await list_logs(db, task_id)
+    ps = await get_pipeline_state(db, task_id)
+
+    pm_brief = ps.pm_brief if ps and ps.pm_brief else {}
+    architect_plan = ps.architect_plan if ps and ps.architect_plan else {}
+    goals = pm_brief.get("goals") if isinstance(pm_brief, dict) else None
+    plan_confidence = pm_brief.get("confidence") if isinstance(pm_brief, dict) else None
+    technical_approach = (
+        architect_plan.get("technical_approach")
+        if isinstance(architect_plan, dict)
+        else None
+    )
+    risk_level = (
+        architect_plan.get("risk_level") if isinstance(architect_plan, dict) else None
+    )
+
+    dispatch_decisions = [
+        {
+            "message": lg.message,
+            "rationale": lg.rationale,
+            "createdAt": lg.created_at.isoformat() if lg.created_at else None,
+        }
+        for lg in logs
+        if lg.rationale
+    ]
+
+    explanation = _synthesize_explanation(
+        task,
+        goals if isinstance(goals, list) else None,
+        technical_approach,
+        risk_level,
+        [d["rationale"] for d in dispatch_decisions if d["rationale"]],
+    )
+
+    return {
+        "taskId": task_id,
+        "status": task.status,
+        "goals": goals,
+        "planConfidence": plan_confidence,
+        "technicalApproach": technical_approach,
+        "riskLevel": risk_level,
+        "agentDispatchDecisions": dispatch_decisions,
+        "explanation": explanation,
     }
 
 

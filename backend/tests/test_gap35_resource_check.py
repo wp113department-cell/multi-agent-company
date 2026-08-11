@@ -45,11 +45,20 @@ def test_real_host_probe_returns_populated_result() -> None:
 def test_default_thresholds_are_satisfied_on_this_dev_machine() -> None:
     """Default thresholds (1 GB RAM / 2 GB disk / 1 CPU) are deliberately
     conservative so Stage-2 "should fix soon" pre-flight doesn't start
-    blocking real work on ordinary dev/CI machines by default."""
+    blocking real work on ordinary dev/CI machines by default.
+
+    AUDIT_Q_BATCH13 §101 gap-closure (2026-08-11): `recommendations` can now
+    legitimately be non-empty even when `sufficient` is True — the new
+    CPU-oversubscription advisory (max_concurrent_agent_runs vs real
+    cpu_count) is informational-only by design (see resource_check.py's
+    field docstring) and does not gate `sufficient`/`reasons`. This dev
+    machine's real core count is below the default max_concurrent_agent_runs
+    (20), so the advisory legitimately fires here.
+    """
     result = run_resource_check()
     assert result.sufficient is True
     assert result.reasons == []
-    assert result.recommendations == []
+    assert all("max_concurrent_agent_runs" in rec for rec in result.recommendations)
 
 
 def test_insufficient_ram_produces_reason_and_recommendation(

@@ -208,7 +208,17 @@ def pm_node(state: PipelineState) -> PipelineState:
                 return {**state, "stage": "blocked", "error": last_error}
             continue
 
-        return {**state, "pm_brief": brief_result, "stage": "architect"}
+        # AUDIT_Q_BATCH13 §43 gap-closure (2026-08-11) — surface the shared
+        # planner's already-computed final_state["confidence"] on the brief
+        # itself. pm_brief is a free-form JSONB dict (models.py PipelineState.
+        # pm_brief), already exposed via save_artifact_async and the
+        # "pmBrief" API field (app/api/tasks.py), so this key reaches the
+        # same real exposure surface without new plumbing.
+        brief_with_confidence = {
+            **brief_result,
+            "confidence": final_state.get("confidence", 0.8),
+        }
+        return {**state, "pm_brief": brief_with_confidence, "stage": "architect"}
 
     return {
         **state,

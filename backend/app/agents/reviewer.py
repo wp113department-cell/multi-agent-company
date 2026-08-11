@@ -96,6 +96,11 @@ class ReviewResult:
     # previously computed for a log line and then discarded.
     tokens_in: int = 0
     tokens_out: int = 0
+    # AUDIT_Q_BATCH13 §43 gap-closure (2026-08-11) — same fix as QAResult:
+    # surface the shared planner's already-computed final_state["confidence"]
+    # instead of discarding it. 0.0 means the agent never actually ran
+    # (e.g. slot-timeout fallback or an unhandled exception).
+    confidence: float = 0.0
 
     @property
     def blocking_count(self) -> int:
@@ -215,6 +220,7 @@ def run_reviewer(
         summary=str(raw.get("summary", "")),
         tokens_in=int(final_state.get("tokens_in", 0)),
         tokens_out=int(final_state.get("tokens_out", 0)),
+        confidence=float(final_state.get("confidence", 0.8)),
     )
 
 

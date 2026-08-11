@@ -1012,14 +1012,24 @@ def _make_call_llm_node(
     # own example list already shows going stale: 9 named vs. 17 real opus
     # agents today). Computed once at graph-build time, not per turn.
     _thinking_budget: dict[str, Any] | None = None
+    # AUDIT_Q_BATCH13 §65 gap-closure (2026-08-11) — "check against the
+    # model's real context limit (not just cost budget)". TIER_CONTEXT_WINDOWS/
+    # context_window_for() (app/fleet/model_router.py) already compute this
+    # real per-tier ceiling but had zero production callers — context
+    # condensation only ever checked against the much smaller, app-internal
+    # context_token_budget setting. Resolved once at graph-build time, same
+    # pattern as _thinking_budget above.
+    _real_context_window = 200_000
     try:
         from app.fleet.model_router import get_model_router as _get_router
 
-        if _get_router().route(role_name).tier == "opus":
+        _route = _get_router().route(role_name)
+        if _route.tier == "opus":
             _thinking_budget = {
                 "type": "enabled",
                 "budget_tokens": get_settings().thinking_budget_opus,
             }
+        _real_context_window = _route.context_window
     except Exception:
         _thinking_budget = None
 
@@ -1108,6 +1118,42 @@ def _make_call_llm_node(
                         )
             except Exception:
                 pass
+
+        # AUDIT_Q_BATCH13 §65 gap-closure (2026-08-11) — safety net against
+        # the model's *real* context ceiling, independent of whatever
+        # context_token_budget is configured to. Condensation above already
+        # targets context_token_budget (default 8000, far below any real
+        # tier's window), so this only fires if that setting is ever
+        # misconfigured above the real limit, or a single turn's messages
+        # still exceed it after condensing — catching it here, before the
+        # API call, rather than letting the request fail against Anthropic.
+        if tokens_in_so_far >= _real_context_window:
+            logger.warning(
+                "Preventive context-window stop for %s: %d tokens >= real "
+                "model context window %d (tier ceiling, independent of "
+                "context_token_budget=%d)",
+                role_name,
+                tokens_in_so_far,
+                _real_context_window,
+                context_token_budget,
+            )
+            if task_id:
+                try:
+                    from app.fleet.fleet_events import health_updated, publish
+
+                    publish(
+                        health_updated(
+                            role_name,
+                            health="context_window_exceeded",
+                            state=(
+                                f"tokens {tokens_in_so_far} >= real context window "
+                                f"{_real_context_window} — stopped before another LLM call"
+                            ),
+                        )
+                    )
+                except Exception:
+                    pass
+            return {"submitted": True, "status": "blocked"}
 
         # Enrich system prompt with plan + memory context
         full_system = system_prompt

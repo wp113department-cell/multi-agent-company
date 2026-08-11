@@ -65,6 +65,29 @@ class CostEstimate:
     historical_avg_tokens_in: int | None  # None when no history available
     estimated_duration_seconds: float
     duration_source: str  # "historical" | "config_fallback"
+    # AUDIT_Q_BATCH13 §42 gap-closure (2026-08-11) — "recommend cheaper
+    # approaches" checkpoint. All 4 real dispatched agents (backend_dev/
+    # frontend_dev/qa/reviewer) are pinned sonnet-tier in agent_models.json
+    # (see this module's own docstring above) — there is no cheaper *model*
+    # to switch to for a real subtask today, so a tier-downgrade suggestion
+    # would be advisory-only fiction. A *scope* reduction is the one
+    # genuinely actionable lever available at this estimate: cost scales
+    # linearly with subtask_count, so a human approver can see exactly how
+    # many subtasks would fit under the threshold.
+    cost_per_subtask_usd: float
+    max_subtasks_within_threshold: int | None  # None when cost_per_subtask_usd == 0
+
+
+def _cheaper_scope_fields(
+    cost: float, subtask_count: int, settings: Any
+) -> tuple[float, int | None]:
+    cost_per_subtask = round(cost / subtask_count, 6) if subtask_count else 0.0
+    max_subtasks = (
+        int(settings.cost_approval_threshold // cost_per_subtask)
+        if cost_per_subtask > 0
+        else None
+    )
+    return cost_per_subtask, max_subtasks
 
 
 async def _historical_avg_tokens(db: AsyncSession) -> tuple[int | None, int | None]:
@@ -135,6 +158,9 @@ async def estimate_epic_cost(
         6,
     )
 
+    cost_per_subtask_usd, max_subtasks_within_threshold = _cheaper_scope_fields(
+        cost, subtask_count, settings
+    )
     return CostEstimate(
         subtask_count=subtask_count,
         estimated_tokens_in=total_in,
@@ -144,6 +170,8 @@ async def estimate_epic_cost(
         historical_avg_tokens_in=hist_in,
         estimated_duration_seconds=estimated_duration_seconds,
         duration_source=duration_source,
+        cost_per_subtask_usd=cost_per_subtask_usd,
+        max_subtasks_within_threshold=max_subtasks_within_threshold,
     )
 
 
@@ -178,6 +206,9 @@ def estimate_epic_cost_sync(
         6,
     )
 
+    cost_per_subtask_usd, max_subtasks_within_threshold = _cheaper_scope_fields(
+        cost, subtask_count, settings
+    )
     return CostEstimate(
         subtask_count=subtask_count,
         estimated_tokens_in=total_in,
@@ -188,4 +219,6 @@ def estimate_epic_cost_sync(
         estimated_duration_seconds=settings.size_processing_seconds_fallback_per_subtask
         * subtask_count,
         duration_source="config_fallback",
+        cost_per_subtask_usd=cost_per_subtask_usd,
+        max_subtasks_within_threshold=max_subtasks_within_threshold,
     )

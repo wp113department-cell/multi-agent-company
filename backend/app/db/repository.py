@@ -387,9 +387,14 @@ async def append_log(
     category: str,
     message: str,
     extra_data: dict[str, Any] | None = None,
+    rationale: str | None = None,
 ) -> TaskLog:
     log = TaskLog(
-        task_id=task_id, category=category, message=message, extra_data=extra_data
+        task_id=task_id,
+        category=category,
+        message=message,
+        extra_data=extra_data,
+        rationale=rationale,
     )
     db.add(log)
     await db.commit()

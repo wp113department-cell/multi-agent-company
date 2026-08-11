@@ -40,12 +40,17 @@ attempt — a freshly generated id would itself have differed between the
 paused and resumed pass, silently orphaning the pending_approvals row and
 mismatching the id the client already has.
 
-Checkpointer: `MemorySaver` (in-process), matching `ChatSession`'s own
-documented "always held in-memory" design — this doesn't reduce durability
-versus the mechanism it replaces, and keeps `Popen` handles for background
-processes (`self._background_processes`) trivially checkpoint-compatible
-without a serialization story. One `ChatAgent` instance is kept alive per
-session (`get_or_create_chat_agent()`) and reused across the initial
+Checkpointer: PostgreSQL-backed (`init_chat_checkpointer()`/
+`close_chat_checkpointer()` below, wired into FastAPI's lifespan in
+app/main.py) so chat sessions survive a server restart — AUDIT_Q_BATCH08
+§14 migrated this off the in-process `MemorySaver` this docstring used to
+describe. `MemorySaver` is kept only as the module-level default and as an
+automatic fallback if the Postgres checkpointer fails to initialize (see
+`init_chat_checkpointer()`'s except-branch). Keeps `Popen` handles for
+background processes (`self._background_processes`) trivially
+checkpoint-compatible without a serialization story regardless of which
+checkpointer backs a given session. One `ChatAgent` instance is kept alive
+per session (`get_or_create_chat_agent()`) and reused across the initial
 `run()` call and any later `resume()` calls for the same session, so
 `thread_id=session_id` always resolves to the same checkpointer state.
 
@@ -2949,6 +2954,31 @@ class ChatAgent:
                             "pct": round(pct, 3),
                         }
                     )
+
+        # AUDIT_Q_BATCH13 §65 gap-closure (2026-08-11) — same real-context-
+        # window safety net as base_graph.py::call_llm, applied here too
+        # (§52 already confirmed condensation itself is genuinely shared
+        # between both paths; this check was missing from both). Chat calls
+        # settings.model_coder directly rather than routing by agent name,
+        # but that is exactly the model registered under "coder" in
+        # agent_models.json, so context_window_for("coder") is the real
+        # ceiling for this call, not a guess.
+        _real_context_window = 200_000
+        try:
+            from app.fleet.model_router import get_model_router as _get_router
+
+            _real_context_window = _get_router().context_window_for("coder")
+        except Exception:
+            pass
+        if effective_tokens_in >= _real_context_window:
+            msg = (
+                f"Conversation too long: {effective_tokens_in} tokens >= real "
+                f"model context window {_real_context_window} "
+                f"(context_token_budget={context_token_budget})"
+            )
+            logger.warning(msg)
+            await self.session.push({"type": "error", "message": msg})
+            return {"stop": True, "last_error": msg}
 
         # Cast our dict-based messages/tools to what the SDK expects
         sdk_messages = cast(list[MessageParam], self.session.history)

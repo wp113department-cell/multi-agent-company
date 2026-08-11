@@ -356,6 +356,29 @@ async def _dispatch_one_subtask(
             "backend_dev",
         ):
             selected_agent_name = dispatch_plan.agent_name
+            # AUDIT_Q_BATCH13 §44 gap-closure (2026-08-11) — DispatchPlan.reason
+            # is a real, already-computed rationale (capability/score/health)
+            # that was previously discarded once it decided selected_agent_name.
+            # Persisted to the new task_logs.rationale column so "why was this
+            # agent chosen" is answerable from real stored data, not just live
+            # logs. Best-effort: never blocks dispatch on a logging failure.
+            if db is not None:
+                try:
+                    from app.db.repository import append_log
+
+                    await append_log(
+                        db,
+                        task_id,
+                        "agent_dispatch",
+                        f"Subtask {subtask_id} dispatched to {selected_agent_name}",
+                        rationale=dispatch_plan.reason,
+                    )
+                except Exception:
+                    logger.debug(
+                        "Could not persist dispatch rationale for subtask %d",
+                        subtask_id,
+                        exc_info=True,
+                    )
         elif dispatch_plan is None:
             fleet_refusal_reason = (
                 f"FleetManager refused dispatch for capability "
@@ -618,7 +641,11 @@ async def _dispatch_one_subtask(
                     event_type="qa.failed",
                     task_id=str(task_id),
                     epic_id=epic_id,
-                    payload={"subtask_id": subtask_id, "errors": qa_errors[:3]},
+                    payload={
+                        "subtask_id": subtask_id,
+                        "errors": qa_errors[:3],
+                        "confidence": qa_result.confidence,
+                    },
                     emitted_by="qa",
                 ),
                 db=db,
@@ -634,7 +661,7 @@ async def _dispatch_one_subtask(
                 event_type="qa.passed",
                 task_id=str(task_id),
                 epic_id=epic_id,
-                payload={"subtask_id": subtask_id},
+                payload={"subtask_id": subtask_id, "confidence": qa_result.confidence},
                 emitted_by="qa",
             ),
             db=db,
@@ -696,6 +723,7 @@ async def _dispatch_one_subtask(
                     "subtask_id": subtask_id,
                     "verdict": review_result.verdict,
                     "blocking_count": review_result.blocking_count,
+                    "confidence": review_result.confidence,
                 },
                 emitted_by="reviewer",
             ),
@@ -1216,6 +1244,19 @@ async def _resource_check_node(state: EpicManagerState) -> dict[str, Any]:
             ),
         }
 
+    # AUDIT_Q_BATCH13 §101 gap-closure (2026-08-11) — the CPU-oversubscription
+    # advisory (resource_check.py's recommendations list) is deliberately
+    # non-halting, so it would otherwise be computed and silently discarded
+    # on every epic that passes the resource check (the common case) — only
+    # surfaced when the epic also halts for an unrelated reason. Logging it
+    # here is the minimal honest exposure for a purely advisory signal.
+    if recommendations and sufficient:
+        logger.info(
+            "Epic %s resource pre-flight advisory (non-blocking): %s",
+            epic_id,
+            " ".join(recommendations),
+        )
+
     return {"stage": ""}
 
 
@@ -1250,10 +1291,32 @@ async def _cost_estimate_node(state: EpicManagerState) -> dict[str, Any]:
     await db.commit()
 
     if estimate.requires_approval:
+        # AUDIT_Q_BATCH13 §42 gap-closure (2026-08-11) — "recommend cheaper
+        # approaches". No dev agent runs below sonnet-tier today (see
+        # cost_controller.py's module docstring), so a real recommendation
+        # is scope-based, not tier-based: tell the approver how many
+        # subtasks would fit under the threshold at the same per-subtask
+        # rate. Previously this branch never set Epic.halt_reason at all
+        # (unlike the resource-check/conflict-check halt paths below), so
+        # even the generic "exceeds threshold" reason never reached the
+        # human-facing GET /epics/batch-review endpoint's haltReason field.
+        halt_reason = (
+            f"Cost estimate (${estimate.estimated_cost_usd:.2f}) exceeds the "
+            f"${settings.cost_approval_threshold:.2f} approval threshold "
+            f"(~${estimate.cost_per_subtask_usd:.4f}/subtask). "
+        )
+        if estimate.max_subtasks_within_threshold is not None:
+            halt_reason += (
+                f"Reducing scope to ~{estimate.max_subtasks_within_threshold} "
+                "subtask(s) would fit within the threshold without approval, "
+                "or approve to proceed at the current scope."
+            )
+        else:
+            halt_reason += "Approve to proceed at the current scope."
         await db.execute(
             sa_update(Epic)
             .where(Epic.epic_id == epic_id)
-            .values(status="pending_cost_approval")
+            .values(status="pending_cost_approval", halt_reason=halt_reason)
         )
         await db.commit()
         await publish_event(
@@ -1263,6 +1326,9 @@ async def _cost_estimate_node(state: EpicManagerState) -> dict[str, Any]:
                 payload={
                     "estimated_cost_usd": estimate.estimated_cost_usd,
                     "threshold": settings.cost_approval_threshold,
+                    "cost_per_subtask_usd": estimate.cost_per_subtask_usd,
+                    "max_subtasks_within_threshold": estimate.max_subtasks_within_threshold,
+                    "halt_reason": halt_reason,
                 },
                 emitted_by="manager",
             ),
@@ -1281,7 +1347,7 @@ async def _cost_estimate_node(state: EpicManagerState) -> dict[str, Any]:
                 all_qa_summaries=[],
                 all_review_findings=[],
                 cost_actual_usd=0.0,
-                halt_reason="Cost estimate exceeds approval threshold",
+                halt_reason=halt_reason,
             ),
         }
 

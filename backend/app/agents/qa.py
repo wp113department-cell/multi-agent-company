@@ -97,6 +97,13 @@ class QAResult:
     # being surfaced to the caller.
     tokens_in: int = 0
     tokens_out: int = 0
+    # AUDIT_Q_BATCH13 §43 gap-closure (2026-08-11) — the shared planner
+    # (base_graph.py::_gather_facts_and_plan) already computes a real
+    # confidence score for this run and puts it in final_state["confidence"];
+    # it was being discarded here instead of surfaced on the result, the
+    # exact "computed but not propagated" pattern flagged by the audit.
+    # 0.0 means no agent run actually completed (e.g. slot-timeout fallback).
+    confidence: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +231,7 @@ def run_qa(
                     tokens_out=total_out,
                     errors=list(raw.get("errors", [])) or [last_error],
                     summary=str(raw.get("summary", "")) or last_error,
+                    confidence=float(final_state.get("confidence", 0.8)),
                 )
             continue
 
@@ -245,6 +253,7 @@ def run_qa(
             tokens_out=total_out,
             errors=list(raw.get("errors", [])),
             summary=str(raw.get("summary", "")),
+            confidence=float(final_state.get("confidence", 0.8)),
         )
 
     return QAResult(

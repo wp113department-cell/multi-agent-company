@@ -169,6 +169,14 @@ class TaskLog(Base):
     category: Mapped[str] = mapped_column(String(100))
     message: Mapped[str] = mapped_column(Text)
     extra_data: Mapped[Any] = mapped_column(JSONB, nullable=True)
+    # AUDIT_Q_BATCH13 §44 gap-closure (2026-08-11) — "structured decision-
+    # log/rationale field in DB": previously no model anywhere had a typed
+    # rationale/reasoning column (extra_data is generic, untyped JSONB used
+    # for many unrelated purposes across ~30+ call sites). Nullable — only
+    # log entries that carry a real, computed decision rationale (e.g.
+    # FleetManager.select()'s DispatchPlan.reason) set it; every existing
+    # append_log() caller is unaffected.
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

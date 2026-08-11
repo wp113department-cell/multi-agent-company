@@ -497,7 +497,11 @@ class TestPmNodeBehavior:
         }
         result = pm_node(state)  # type: ignore[arg-type]
         assert result["stage"] == "architect"
-        assert result["pm_brief"] == _BRIEF
+        # AUDIT_Q_BATCH13 §43 gap-closure (2026-08-11) — pm_node now merges
+        # the shared planner's final_state["confidence"] onto the brief;
+        # _make_final_state's mocked state has no "confidence" key, so
+        # pm_node falls back to its own documented default of 0.8.
+        assert result["pm_brief"] == {**_BRIEF, "confidence": 0.8}
 
     @patch("app.agents.pm.run_agent_graph")
     @patch("app.agents.pm.make_read_only_handlers")

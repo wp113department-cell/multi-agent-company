@@ -45,6 +45,21 @@ class ResourceCheckResult:
     sufficient: bool = True
     reasons: list[str] = field(default_factory=list)
     recommendations: list[str] = field(default_factory=list)
+    # AUDIT_Q_BATCH13 §101 gap-closure (2026-08-11) — "compute requirements"
+    # dimension was RAM-only (real projected-vs-available check); CPU had
+    # only this static presence/count probe, no projection for the specific
+    # concurrent load this app can actually configure itself to run.
+    # projected_concurrent_cpu_demand mirrors size_estimate.py's disk/memory
+    # projection shape (a real config value compared against a real host
+    # probe) using max_concurrent_agent_runs — the one setting that actually
+    # controls how many agent runs (each capable of CPU-bound bash/test
+    # execution) this app will let run at once. Informational only (feeds
+    # `recommendations`, never `reasons`/`sufficient`): unlike RAM/disk,
+    # oversubscribed CPU degrades throughput rather than causing a hard
+    # failure, and max_concurrent_agent_runs's default (20) exceeds typical
+    # dev-machine core counts, so gating epic start on it would be a real
+    # regression risk, not a genuine safety net.
+    projected_concurrent_cpu_demand: int = 0
 
 
 def _run_probe(
@@ -200,6 +215,21 @@ def run_resource_check(
             "larger machine."
         )
 
+    # AUDIT_Q_BATCH13 §101 gap-closure (2026-08-11) — real projected compute
+    # load: does the fleet's configured max concurrency actually fit on this
+    # host's real CPU count? Advisory only (see field docstring above) —
+    # does not affect `sufficient`.
+    projected_concurrent_cpu_demand = settings.max_concurrent_agent_runs
+    if cpu_count < projected_concurrent_cpu_demand:
+        recommendations.append(
+            f"Configured concurrency (max_concurrent_agent_runs="
+            f"{projected_concurrent_cpu_demand}) exceeds available logical "
+            f"CPUs ({cpu_count}); current CPU utilization is "
+            f"{cpu_percent:.0f}%. Consider lowering max_concurrent_agent_runs "
+            "to reduce CPU contention if agent runs are CPU-bound "
+            "(bash/test execution) rather than mostly I/O-bound (LLM calls)."
+        )
+
     if not python_version_sufficient:
         reasons.append(
             f"Running Python {python_version}; this project requires >= "
@@ -243,4 +273,5 @@ def run_resource_check(
         sufficient=not reasons,
         reasons=reasons,
         recommendations=recommendations,
+        projected_concurrent_cpu_demand=projected_concurrent_cpu_demand,
     )

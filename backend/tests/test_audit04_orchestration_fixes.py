@@ -622,7 +622,10 @@ class TestOrch04_009_ConcurrencySlots:
         reset_for_testing(max_epics=1, max_agent_runs=5, max_subtasks_per_epic=5)
 
         fake_estimate = SimpleNamespace(
-            estimated_cost_usd=999.0, requires_approval=True
+            estimated_cost_usd=999.0,
+            requires_approval=True,
+            cost_per_subtask_usd=199.8,
+            max_subtasks_within_threshold=0,
         )
 
         with patch(
