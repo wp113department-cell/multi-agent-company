@@ -1391,6 +1391,7 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
         rf_offset = max(0, int(inp.get("offset", 0)))
         paths = all_paths[rf_offset : rf_offset + 20]
         parts: list[str] = []
+        settings = get_settings()
         for rel in paths:
             policy = check_path_in_worktree(rel, repo_path)
             if not policy.allowed:
@@ -1402,9 +1403,42 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
             else:
                 try:
                     content = p.read_text(encoding="utf-8")
-                    parts.append(f"=== {rel} ===\n{content}")
                 except Exception as e:
                     parts.append(f"=== {rel} ===\n[ERROR] {e}")
+                    continue
+                # AUDIT_Q_BATCH09 §15 gap-closure — read_files (plural) used to
+                # return every file's full content unfolded, inconsistent with
+                # read_file (singular) which already folds/truncates large
+                # files. A batch call including a 9,000-line file silently
+                # blew past the same context budget read_file protects
+                # against. Reuse read_file's exact folding logic so both
+                # paths behave identically.
+                line_count = content.count("\n") + 1
+                if (
+                    settings.file_fold_enabled
+                    and line_count > settings.file_fold_line_threshold
+                ):
+                    from app.repo_tools.file_folding import fold_file_content
+
+                    folded = fold_file_content(p, settings.file_fold_max_chars)
+                    if folded is not None:
+                        parts.append(
+                            f"=== {rel} ===\n[NOTE] {rel} is {line_count} lines "
+                            "— showing structure only (functions/classes + "
+                            "line ranges) instead of full content to avoid an "
+                            "oversized context. Read a specific line range if "
+                            f"you need implementation detail.\n\n{folded}"
+                        )
+                        continue
+                    if len(content) > settings.file_fold_fallback_max_chars:
+                        cap = settings.file_fold_fallback_max_chars
+                        parts.append(
+                            f"=== {rel} ===\n{content[:cap]}\n... [TRUNCATED: "
+                            f"{rel} is {line_count} lines; showing the first "
+                            f"{cap} characters]"
+                        )
+                        continue
+                parts.append(f"=== {rel} ===\n{content}")
         if not parts:
             return (
                 "[ERROR] No paths provided"
@@ -7243,28 +7277,45 @@ _JSON_QUERY_TOOL: dict[str, Any] = {
 }
 _YAML_VALIDATE_TOOL: dict[str, Any] = {
     "name": "yaml_validate",
-    "description": "Validate a YAML file for syntax errors. Returns 'valid' or the parse error with line number.",
+    "description": (
+        "Validate a YAML file for syntax errors. Returns 'valid' or the parse "
+        "error with line number. If schema_path (a JSON Schema file, itself "
+        "JSON or YAML) is given, also validates the parsed document against "
+        "that JSON Schema."
+    ),
     "input_schema": {
         "type": "object",
         "properties": {
             "path": {
                 "type": "string",
                 "description": "YAML file path (relative to repo root)",
-            }
+            },
+            "schema_path": {
+                "type": "string",
+                "description": "Optional: path to a JSON Schema file (.json or .yaml) to validate the document against",
+            },
         },
         "required": ["path"],
     },
 }
 _JSON_VALIDATE_TOOL: dict[str, Any] = {
     "name": "json_validate",
-    "description": "Validate a JSON file for syntax errors. Returns 'valid' or the parse error with position.",
+    "description": (
+        "Validate a JSON file for syntax errors. Returns 'valid' or the parse "
+        "error with position. If schema_path (a JSON Schema file) is given, "
+        "also validates the document against that JSON Schema."
+    ),
     "input_schema": {
         "type": "object",
         "properties": {
             "path": {
                 "type": "string",
                 "description": "JSON file path (relative to repo root)",
-            }
+            },
+            "schema_path": {
+                "type": "string",
+                "description": "Optional: path to a JSON Schema file (.json or .yaml) to validate the document against",
+            },
         },
         "required": ["path"],
     },
@@ -7283,6 +7334,101 @@ _CSV_PREVIEW_TOOL: dict[str, Any] = {
                 "type": "integer",
                 "description": "Number of rows to preview (default: 5)",
             },
+        },
+        "required": ["path"],
+    },
+}
+# AUDIT_Q_BATCH09 §16/§79/§80 gap-closure — real, working handlers for file
+# types/inspection capabilities that had zero support before, each following
+# the exact pattern of the existing PDF/image/CSV/YAML tools above: stdlib or
+# already-pinned dependencies only, single self-contained handler, registered
+# alongside the tools it extends.
+_XML_VALIDATE_TOOL: dict[str, Any] = {
+    "name": "xml_validate",
+    "description": "Validate an XML file for well-formedness. Returns 'valid' or the parse error with line number.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "XML file path (relative to repo root)",
+            }
+        },
+        "required": ["path"],
+    },
+}
+_READ_NOTEBOOK_TOOL: dict[str, Any] = {
+    "name": "read_notebook",
+    "description": "Read a Jupyter notebook (.ipynb), returning each cell's type, source, and any text/error output — code and markdown cells in execution order.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Notebook file path (relative to repo root)",
+            },
+            "max_cells": {
+                "type": "integer",
+                "description": "Maximum number of cells to include (default: 100)",
+            },
+        },
+        "required": ["path"],
+    },
+}
+_PARSE_DOCKERFILE_TOOL: dict[str, Any] = {
+    "name": "parse_dockerfile",
+    "description": "Parse a Dockerfile into its structural instructions: build stages, base images (FROM), exposed ports, and each instruction with its line number.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Dockerfile path (relative to repo root, default: Dockerfile)",
+            }
+        },
+        "required": [],
+    },
+}
+_PARSE_DOCKER_COMPOSE_TOOL: dict[str, Any] = {
+    "name": "parse_docker_compose",
+    "description": "Parse a docker-compose YAML file into a structural summary: each service's image/build context, exposed ports, volumes, and dependencies.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "docker-compose file path (relative to repo root, default: docker-compose.yml)",
+            }
+        },
+        "required": [],
+    },
+}
+_GITHUB_INSPECT_REPO_TOOL: dict[str, Any] = {
+    "name": "github_inspect_repo",
+    "description": "Inspect an arbitrary external GitHub repository (not the local checkout) via the public GitHub REST API: metadata (description, default branch, stars, language) and top-level file listing. Works for any public repo; unauthenticated (rate-limited).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "owner": {"type": "string", "description": "Repository owner/org"},
+            "repo": {"type": "string", "description": "Repository name"},
+            "path": {
+                "type": "string",
+                "description": "Optional subdirectory to list within the repo (default: repo root)",
+            },
+        },
+        "required": ["owner", "repo"],
+    },
+}
+_OPENAPI_INSPECT_TOOL: dict[str, Any] = {
+    "name": "openapi_inspect",
+    "description": "Parse a local OpenAPI/Swagger spec (JSON or YAML) and summarize its API surface: title/version, and every path with its HTTP methods, summary, and parameter count.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "OpenAPI/Swagger spec file path (relative to repo root)",
+            }
         },
         "required": ["path"],
     },
@@ -7763,6 +7909,13 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _YAML_VALIDATE_TOOL,
     _JSON_VALIDATE_TOOL,
     _CSV_PREVIEW_TOOL,
+    # AUDIT_Q_BATCH09 §16/§79/§80 — file type + inspection gap-closure
+    _XML_VALIDATE_TOOL,
+    _READ_NOTEBOOK_TOOL,
+    _PARSE_DOCKERFILE_TOOL,
+    _PARSE_DOCKER_COMPOSE_TOOL,
+    _GITHUB_INSPECT_REPO_TOOL,
+    _OPENAPI_INSPECT_TOOL,
     # Code / Docs
     _GENERATE_DIAGRAM_TOOL,
     _EXPORT_MARKDOWN_TOOL,
@@ -9673,6 +9826,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["run_python_snippet"] = run_python_snippet
     handlers["run_make"] = run_make
     handlers["fetch_url"] = fetch_url
+    # AUDIT_Q_BATCH09 §79/80 gap-closure — web_search is standalone (see its
+    # own docstring: "so any agent can reuse it, not just the research
+    # agent"), but was only ever wired into make_research_handlers. Any
+    # agent built on make_chat_handlers (e.g. spike_agent) can now declare
+    # it in allowed_tools and get a real handler, matching fetch_url above.
+    handlers["web_search"] = web_search
     # Batch 3
     handlers["git_merge"] = git_merge
     handlers["parse_merge_conflicts"] = parse_merge_conflicts
@@ -9886,7 +10045,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             rscr_interp = (
                 "python3"
                 if ext == ".py"
-                else "node" if ext in (".js", ".mjs", ".cjs") else "bash"
+                else "node"
+                if ext in (".js", ".mjs", ".cjs")
+                else "bash"
             )
         try:
             r = subprocess.run(
@@ -11232,7 +11393,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 from_ref = (
                     tag_list[1]
                     if len(tag_list) >= 2
-                    else tag_list[0] if tag_list else ""
+                    else tag_list[0]
+                    if tag_list
+                    else ""
                 )
             ref_range = f"{from_ref}..{to_ref}" if from_ref else to_ref
             log = subprocess.run(
@@ -11816,32 +11979,73 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] json_query: {e}"
 
+    def _load_schema_doc(schema_rel: str) -> Any:
+        """Load a JSON Schema from a .json or .yaml/.yml file at schema_rel."""
+        import json as _json
+
+        import yaml as _yaml
+
+        schema_path = root / schema_rel
+        text = schema_path.read_text(encoding="utf-8")
+        if schema_path.suffix in (".yaml", ".yml"):
+            return _yaml.safe_load(text)
+        return _json.loads(text)
+
+    def _validate_against_schema(rel: str, doc: Any, schema_rel: str) -> str | None:
+        """Returns an error string if the schema check fails/errors, else None."""
+        import jsonschema
+
+        try:
+            schema = _load_schema_doc(schema_rel)
+        except Exception as e:
+            return f"[ERROR] Cannot load schema {schema_rel}: {e}"
+        try:
+            jsonschema.validate(instance=doc, schema=schema)
+        except jsonschema.ValidationError as e:
+            return f"[SCHEMA VIOLATION] {rel} does not match {schema_rel}: {e.message} (at {'/'.join(str(p) for p in e.absolute_path) or '<root>'})"
+        except jsonschema.SchemaError as e:
+            return f"[ERROR] {schema_rel} is not a valid JSON Schema: {e.message}"
+        return None
+
     def yaml_validate_h(inp: dict[str, Any]) -> str:
+        # AUDIT_Q_BATCH09 §16 gap-closure — this used to be syntax-only despite
+        # jsonschema already being a pinned, production-used dependency
+        # (app/agents/base_graph.py's tool-submission validation). schema_path
+        # is optional and backward compatible: omitting it preserves the
+        # original syntax-only behavior exactly.
         fpath = root / str(inp["path"])
         try:
             import yaml as _yaml
 
             with open(fpath, encoding="utf-8") as f:
-                _yaml.safe_load(f)
-            return f"✅ {inp['path']} is valid YAML"
+                doc = _yaml.safe_load(f)
         except ImportError:
-            subprocess.run(
-                ["python", "-c", f"import yaml; yaml.safe_load(open('{fpath}'))"],
-                capture_output=True,
-            )
             return "(pyyaml not available in this environment)"
         except Exception as e:
             return f"[INVALID YAML] {inp['path']}: {e}"
+        schema_rel = inp.get("schema_path")
+        if schema_rel:
+            err = _validate_against_schema(str(inp["path"]), doc, str(schema_rel))
+            if err:
+                return err
+            return f"✅ {inp['path']} is valid YAML and matches schema {schema_rel}"
+        return f"✅ {inp['path']} is valid YAML"
 
     def json_validate_h(inp: dict[str, Any]) -> str:
         import json as _json
 
         fpath = root / str(inp["path"])
         try:
-            _json.loads(fpath.read_text(encoding="utf-8"))
-            return f"✅ {inp['path']} is valid JSON"
+            doc = _json.loads(fpath.read_text(encoding="utf-8"))
         except Exception as e:
             return f"[INVALID JSON] {inp['path']}: {e}"
+        schema_rel = inp.get("schema_path")
+        if schema_rel:
+            err = _validate_against_schema(str(inp["path"]), doc, str(schema_rel))
+            if err:
+                return err
+            return f"✅ {inp['path']} is valid JSON and matches schema {schema_rel}"
+        return f"✅ {inp['path']} is valid JSON"
 
     def csv_preview_h(inp: dict[str, Any]) -> str:
         import csv as _csv
@@ -11865,6 +12069,239 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return "\n".join(out)
         except Exception as e:
             return f"[ERROR] csv_preview: {e}"
+
+    def xml_validate_h(inp: dict[str, Any]) -> str:
+        import xml.etree.ElementTree as _ET
+
+        fpath = root / str(inp["path"])
+        try:
+            _ET.parse(str(fpath))
+            return f"✅ {inp['path']} is well-formed XML"
+        except _ET.ParseError as e:
+            return f"[INVALID XML] {inp['path']}: {e}"
+        except Exception as e:
+            return f"[ERROR] xml_validate: {e}"
+
+    def read_notebook_h(inp: dict[str, Any]) -> str:
+        import json as _json
+
+        fpath = root / str(inp["path"])
+        max_cells = int(inp.get("max_cells", 100))
+        try:
+            nb = _json.loads(fpath.read_text(encoding="utf-8"))
+        except Exception as e:
+            return f"[ERROR] read_notebook: {e}"
+        cells = nb.get("cells", []) if isinstance(nb, dict) else []
+        if not isinstance(cells, list) or not cells:
+            return f"[ERROR] {inp['path']} has no readable 'cells' array (not a valid .ipynb?)"
+        parts: list[str] = []
+        for i, cell in enumerate(cells[:max_cells]):
+            ctype = cell.get("cell_type", "unknown")
+            source = cell.get("source", "")
+            if isinstance(source, list):
+                source = "".join(source)
+            block = [f"--- Cell {i} ({ctype}) ---", str(source).rstrip()]
+            for out_item in cell.get("outputs", []) or []:
+                otype = out_item.get("output_type")
+                if otype == "stream":
+                    text = out_item.get("text", "")
+                    if isinstance(text, list):
+                        text = "".join(text)
+                    block.append(f"[output] {str(text).rstrip()}")
+                elif otype == "error":
+                    block.append(
+                        f"[error] {out_item.get('ename', '')}: {out_item.get('evalue', '')}"
+                    )
+                elif otype in ("execute_result", "display_data"):
+                    text_out = out_item.get("data", {}).get("text/plain", "")
+                    if isinstance(text_out, list):
+                        text_out = "".join(text_out)
+                    if text_out:
+                        block.append(f"[result] {str(text_out).rstrip()}")
+            parts.append("\n".join(block))
+        remaining = len(cells) - min(len(cells), max_cells)
+        result = f"Notebook: {inp['path']} ({len(cells)} cells)\n\n" + "\n\n".join(
+            parts
+        )
+        if remaining > 0:
+            result += f"\n\n[NOTICE] {remaining} additional cell(s) not shown (max_cells={max_cells})"
+        return result
+
+    def parse_dockerfile_h(inp: dict[str, Any]) -> str:
+        path = str(inp.get("path", "Dockerfile"))
+        fpath = root / path
+        if not fpath.exists():
+            return f"[ERROR] File not found: {path}"
+        try:
+            lines = fpath.read_text(encoding="utf-8").splitlines()
+        except Exception as e:
+            return f"[ERROR] parse_dockerfile: {e}"
+        stages: list[str] = []
+        exposed_ports: list[str] = []
+        instructions: list[str] = []
+        pending = ""
+        for lineno, raw_line in enumerate(lines, start=1):
+            line = raw_line.strip()
+            if pending:
+                line = f"{pending} {line}"
+                pending = ""
+            if not line or line.startswith("#"):
+                continue
+            if line.endswith("\\"):
+                pending = line[:-1].strip()
+                continue
+            head, _, rest = line.partition(" ")
+            instr = head.upper()
+            rest = rest.strip()
+            instructions.append(f"{lineno}: {instr} {rest}".rstrip())
+            if instr == "FROM":
+                stages.append(rest)
+            elif instr == "EXPOSE":
+                exposed_ports.append(rest)
+        if not instructions:
+            return f"(empty or unparseable Dockerfile: {path})"
+        out = [
+            f"Dockerfile: {path}",
+            f"Stages/base images: {', '.join(stages) or '(none)'}",
+            f"Exposed ports: {', '.join(exposed_ports) or '(none)'}",
+            "",
+            "Instructions:",
+            *instructions,
+        ]
+        return "\n".join(out)
+
+    def parse_docker_compose_h(inp: dict[str, Any]) -> str:
+        path = str(inp.get("path", "docker-compose.yml"))
+        fpath = root / path
+        if not fpath.exists():
+            return f"[ERROR] File not found: {path}"
+        try:
+            import yaml as _yaml
+
+            doc = _yaml.safe_load(fpath.read_text(encoding="utf-8"))
+        except Exception as e:
+            return f"[ERROR] parse_docker_compose: {e}"
+        if not isinstance(doc, dict):
+            return f"(empty or invalid compose file: {path})"
+        services = doc.get("services", {})
+        if not isinstance(services, dict) or not services:
+            return f"(no services found in {path})"
+        out = [f"docker-compose: {path} ({len(services)} service(s))"]
+        for name, svc in services.items():
+            if not isinstance(svc, dict):
+                continue
+            out.append(f"\n- {name}:")
+            for key in ("image", "build", "ports", "volumes", "depends_on"):
+                val = svc.get(key)
+                if val:
+                    out.append(f"    {key}: {val}")
+        return "\n".join(out)
+
+    def github_inspect_repo_h(inp: dict[str, Any]) -> str:
+        import json as _json
+        import re as _re
+        import urllib.error as _urlerr
+        import urllib.request as _req
+
+        owner = str(inp["owner"])
+        repo_name = str(inp["repo"])
+        sub_path = str(inp.get("path", "")).strip("/")
+        valid = _re.compile(r"^[A-Za-z0-9._-]+$")
+        if not valid.match(owner) or not valid.match(repo_name):
+            return "[ERROR] owner/repo must contain only letters, digits, '.', '_', '-'"
+        sub_segments = [seg for seg in sub_path.split("/") if seg]
+        if sub_path and (
+            not all(valid.match(seg) for seg in sub_segments)
+            or any(seg in (".", "..") for seg in sub_segments)
+        ):
+            return (
+                "[ERROR] path segments must contain only letters, digits, "
+                "'.', '_', '-' and must not be '.' or '..'"
+            )
+
+        def _get(url: str) -> Any:
+            req = _req.Request(
+                url,
+                headers={
+                    "User-Agent": "Gridiron-Agent/1.0",
+                    "Accept": "application/vnd.github+json",
+                },
+            )
+            with _req.urlopen(req, timeout=15) as resp:
+                return _json.loads(resp.read().decode("utf-8"))
+
+        try:
+            meta = _get(f"https://api.github.com/repos/{owner}/{repo_name}")
+        except _urlerr.HTTPError as e:
+            return f"[ERROR] GitHub API {e.code}: {owner}/{repo_name} — {e.reason}"
+        except Exception as e:
+            return f"[ERROR] github_inspect_repo: {e}"
+
+        lines = [
+            str(meta.get("full_name", f"{owner}/{repo_name}")),
+            f"Description: {meta.get('description') or '(none)'}",
+            f"Default branch: {meta.get('default_branch', '?')}",
+            f"Language: {meta.get('language') or '?'} | Stars: {meta.get('stargazers_count', 0)} | Forks: {meta.get('forks_count', 0)}",
+            f"URL: {meta.get('html_url', '')}",
+        ]
+        try:
+            contents = _get(
+                f"https://api.github.com/repos/{owner}/{repo_name}/contents/{sub_path}"
+            )
+            if isinstance(contents, list):
+                lines.append(
+                    f"\nFiles at /{sub_path}:" if sub_path else "\nFiles at repo root:"
+                )
+                for item in contents[:100]:
+                    lines.append(f"  [{item.get('type', '?')}] {item.get('name', '?')}")
+        except Exception as e:
+            lines.append(f"\n[WARN] Could not list contents: {e}")
+        return "\n".join(lines)
+
+    def openapi_inspect_h(inp: dict[str, Any]) -> str:
+        import json as _json
+
+        import yaml as _yaml
+
+        fpath = root / str(inp["path"])
+        if not fpath.exists():
+            return f"[ERROR] File not found: {inp['path']}"
+        try:
+            text = fpath.read_text(encoding="utf-8")
+            spec = (
+                _yaml.safe_load(text)
+                if fpath.suffix in (".yaml", ".yml")
+                else _json.loads(text)
+            )
+        except Exception as e:
+            return f"[ERROR] openapi_inspect: {e}"
+        if not isinstance(spec, dict) or (
+            "openapi" not in spec and "swagger" not in spec
+        ):
+            return (
+                f"[ERROR] {inp['path']} does not look like an OpenAPI/Swagger spec "
+                "(missing 'openapi'/'swagger' key)"
+            )
+        info = spec.get("info", {}) if isinstance(spec.get("info"), dict) else {}
+        version = spec.get("openapi") or spec.get("swagger")
+        paths = spec.get("paths", {}) if isinstance(spec.get("paths"), dict) else {}
+        out = [
+            f"{info.get('title', '(untitled)')} — API version {info.get('version', '?')} (OpenAPI {version})",
+            f"{len(paths)} path(s):",
+        ]
+        http_methods = {"get", "post", "put", "patch", "delete", "options", "head"}
+        for p, methods in paths.items():
+            if not isinstance(methods, dict):
+                continue
+            for method, op in methods.items():
+                if method.lower() not in http_methods:
+                    continue
+                summary = op.get("summary", "") if isinstance(op, dict) else ""
+                params = op.get("parameters", []) if isinstance(op, dict) else []
+                out.append(
+                    f"  {method.upper():6} {p}  {summary}  ({len(params)} param(s))"
+                )
+        return "\n".join(out)
 
     def generate_diagram_h(inp: dict[str, Any]) -> str:
         description = str(inp["description"])
@@ -12222,6 +12659,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["yaml_validate"] = yaml_validate_h
     handlers["json_validate"] = json_validate_h
     handlers["csv_preview"] = csv_preview_h
+    handlers["xml_validate"] = xml_validate_h
+    handlers["read_notebook"] = read_notebook_h
+    handlers["parse_dockerfile"] = parse_dockerfile_h
+    handlers["parse_docker_compose"] = parse_docker_compose_h
+    handlers["github_inspect_repo"] = github_inspect_repo_h
+    handlers["openapi_inspect"] = openapi_inspect_h
     handlers["generate_diagram"] = generate_diagram_h
     handlers["export_markdown"] = export_markdown_h
     handlers["find_unused_imports"] = find_unused_imports_h

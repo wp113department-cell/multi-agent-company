@@ -8,8 +8,10 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
+    _FETCH_URL_TOOL,
     _LIST_FUNCTIONS_TOOL,
     _PARSE_AST_TOOL,
+    _WEB_SEARCH_TOOL,
     READ_ONLY_TOOLS,
     RECORD_LEARNING_TOOL,
     make_chat_handlers,
@@ -21,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 AGENT_CONTRACT: dict[str, Any] = {
     "name": "spike_agent",
-    "description": "Conducts a time-boxed research spike: investigates a specific technical question, reads relevant code and packages, and returns a concrete recommendation — not a survey of all options.",
+    "description": "Conducts a time-boxed research spike: investigates a specific technical question, reads relevant code and packages, searches the web and fetches external documentation when local context isn't enough, and returns a concrete recommendation — not a survey of all options.",
     "allowed_tools": [
         "read_file",
         "list_files",
@@ -38,6 +40,8 @@ AGENT_CONTRACT: dict[str, Any] = {
         "find_todos",
         "search_imports",
         "write_file",
+        "web_search",
+        "fetch_url",
         "submit_spike_agent",
         "record_learning",
     ],
@@ -80,6 +84,8 @@ _TOOLS = READ_ONLY_TOOLS + [
     RECORD_LEARNING_TOOL,
     _LIST_FUNCTIONS_TOOL,
     _PARSE_AST_TOOL,
+    _WEB_SEARCH_TOOL,
+    _FETCH_URL_TOOL,
 ]
 
 _CFG = VerificationConfig(
@@ -102,6 +108,11 @@ def make_spike_agent_handlers(repo_path: str) -> dict[str, Any]:
     base["submit_spike_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
+    # AUDIT_Q_BATCH09 §79/80 gap-closure — spike_agent is the agent closest to
+    # a "research an unfamiliar technology" role but previously had no way to
+    # reach anything outside the local repo. Both web_search and fetch_url
+    # are now real handlers in make_chat_handlers() itself (see tools.py),
+    # so no extra wiring is needed here beyond declaring them in allowed_tools.
     return base
 
 
@@ -122,6 +133,9 @@ def run_spike_agent(
         "RESEARCH SPIKE — state the specific question this spike must answer before starting:\n"
         "1. Identify the precise question: what decision does this spike enable?\n"
         "2. Read relevant code files, requirements, and installed package versions.\n"
+        "   If the question involves a library, API, or technology you cannot verify from "
+        "the repo alone, use web_search and fetch_url to check current, external "
+        "documentation rather than relying on training data.\n"
         "3. Every finding must trace to something read in this session — never from training data alone.\n"
         "4. End with ONE concrete recommendation, not a survey of all options.\n"
         "5. State your recommendation first, then the supporting evidence.\n"

@@ -11,7 +11,10 @@ task_id, description, repo_path.
 
 ## Process
 1. Use read_file and search_code to understand the codebase relevant to this task.
-2. Complete the task described using available tools.
+2. Complete the task described using available tools. If the question involves a
+   library, API, or technology you cannot verify from the repo alone, use
+   web_search and fetch_url to check current, external documentation rather
+   than relying on training data.
 3. Use write_file to save any output files (reports, specs, scripts, docs).
 4. Call submit_spike_agent with summary, findings, and recommendations when complete.
 
@@ -25,7 +28,7 @@ task_id, description, repo_path.
 - Configuration values come from config files read in this session.
 
 ## Tools
-read_file, list_files, search_code, get_file_tree, search_symbols, find_references, list_functions, parse_ast, analyze_file, read_files, file_exists, file_info, find_todos, search_imports, write_file, submit_spike_agent, record_learning.
+read_file, list_files, search_code, get_file_tree, search_symbols, find_references, list_functions, parse_ast, analyze_file, read_files, file_exists, file_info, find_todos, search_imports, write_file, web_search, fetch_url, submit_spike_agent, record_learning.
 
 
 ## Karpathy Analysis Principles

@@ -87,8 +87,10 @@ def test_manifest_retry_policy_is_real_metadata_confirmed_before_this_fix() -> N
     invented for this test."""
     non_none = [n for n, e in TOOL_MANIFEST.items() if e.retry_policy != "none"]
     assert (
-        len(non_none) == 19
-    )  # 3 backoff + 16 once, confirmed live before writing the fix
+        len(non_none) == 20
+    )  # 4 backoff (fetch_url, http_request, web_search, github_inspect_repo)
+    # + 16 once — AUDIT_Q_BATCH09 added github_inspect_repo (real outbound
+    # network call) to the original 3 backoff tools, confirmed live
 
 
 def test_network_only_tool_retries_once_on_error_then_succeeds() -> None:
