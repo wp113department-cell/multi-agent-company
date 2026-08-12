@@ -163,6 +163,11 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         "app.agents.migration_guide_doc_agent",
         "run_migration_guide_doc_agent",
     ),
+    # AUDIT_Q_BATCH10 §19 gap-closure — real deployment-guide generator
+    "deployment_guide_doc_agent": (
+        "app.agents.deployment_guide_doc_agent",
+        "run_deployment_guide_doc_agent",
+    ),
 }
 
 SUPPORTED_AGENTS = sorted(_REGISTRY.keys())

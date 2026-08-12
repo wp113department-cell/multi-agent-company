@@ -13,6 +13,16 @@ Uses the same "let asyncio.sleep fire once then cancel" technique as
 test_benchmark_baseline_loop.py for the loop-wrapper test, and calls
 _run_doc_agent_auto_trigger_once() directly (the real per-tick body) for
 the substantive real-git/real-DB coverage.
+
+AUDIT_Q_BATCH10 §41 gap-closure — _DOC_AUTO_TRIGGER_AGENTS now covers every
+real doc agent (readme_agent, api_docs_agent, architecture_doc_agent,
+agent_roster_doc_agent, tool_catalog_doc_agent, migration_guide_doc_agent,
+deployment_guide_doc_agent), not just changelog_agent/release_notes_agent.
+Every test below iterates app.main._DOC_AUTO_TRIGGER_AGENTS directly rather
+than hardcoding just the original two, so an unmocked new agent can never
+silently fall through to a real, unmocked run_agent_graph() call (real
+network calls, real DB rows, real wall-clock cost) the way it would if this
+file's mocks/cleanup stayed pinned to the original two agents.
 """
 
 from __future__ import annotations
@@ -21,13 +31,18 @@ import asyncio
 import inspect
 import subprocess
 import uuid
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from app.agents.agent_result import AgentResult
-from app.main import _doc_agent_auto_trigger_loop, _run_doc_agent_auto_trigger_once
+from app.main import (
+    _DOC_AUTO_TRIGGER_AGENTS,
+    _doc_agent_auto_trigger_loop,
+    _run_doc_agent_auto_trigger_once,
+)
 
 
 def _run(cmd: list[str], cwd: str) -> None:
@@ -127,12 +142,26 @@ def _fake_result() -> AgentResult:
     )
 
 
-def test_run_once_dispatches_both_agents_on_first_run(tmp_path: Path) -> None:
+def _all_setting_keys() -> list[str]:
+    return [f"doc_agent_last_sha:{name}" for name, _, _, _ in _DOC_AUTO_TRIGGER_AGENTS]
+
+
+def _all_titles() -> list[str]:
+    return [title for _, _, _, title in _DOC_AUTO_TRIGGER_AGENTS]
+
+
+def test_run_once_dispatches_all_agents_on_first_run(tmp_path: Path) -> None:
+    """Every real doc agent in _DOC_AUTO_TRIGGER_AGENTS — not just the
+    original changelog_agent/release_notes_agent — must be dispatched on
+    the first tick after main moves. Mocks every one of them so an agent
+    accidentally missing a mock here fails loudly (AssertionError on an
+    un-mocked real network call) instead of silently making a real,
+    unmocked run_agent_graph() call."""
     suffix = uuid.uuid4().hex[:8]
     repo_dir = tmp_path / f"repo-{suffix}"
     sha = _init_real_repo_with_one_commit(repo_dir)
-    changelog_key = "doc_agent_last_sha:changelog_agent"
-    release_notes_key = "doc_agent_last_sha:release_notes_agent"
+    keys = _all_setting_keys()
+    titles = _all_titles()
 
     settings = None
     try:
@@ -142,41 +171,64 @@ def test_run_once_dispatches_both_agents_on_first_run(tmp_path: Path) -> None:
         original_repo_path = settings.target_repo_path
         settings.target_repo_path = str(repo_dir)
 
-        asyncio.run(_delete_setting(changelog_key))
-        asyncio.run(_delete_setting(release_notes_key))
+        for key in keys:
+            asyncio.run(_delete_setting(key))
 
-        with patch(
-            "app.agents.changelog_agent.run_changelog_agent",
-            return_value=_fake_result(),
-        ) as mock_changelog, patch(
-            "app.agents.release_notes_agent.run_release_notes_agent",
-            return_value=_fake_result(),
-        ) as mock_release, patch(
-            "app.memory.hooks.record_agent_run_outcome", new_callable=AsyncMock
-        ):
+        with ExitStack() as stack:
+            # autospec=True: _run_doc_agent_auto_trigger_once() calls
+            # _agent_call_kwargs(run_fn, ...), which does
+            # inspect.signature(run_fn) to resolve the real 2nd param name
+            # (description vs doc_request) — a bare MagicMock's signature is
+            # a generic (*args, **kwargs) and would resolve to the wrong
+            # key, so the mock must carry the real function's signature.
+            mocks = {
+                agent_name: stack.enter_context(
+                    patch(
+                        f"{module_path}.{fn_name}",
+                        autospec=True,
+                        return_value=_fake_result(),
+                    )
+                )
+                for agent_name, module_path, fn_name, _title in _DOC_AUTO_TRIGGER_AGENTS
+            }
+            stack.enter_context(
+                patch(
+                    "app.memory.hooks.record_agent_run_outcome",
+                    new_callable=AsyncMock,
+                )
+            )
             asyncio.run(_run_doc_agent_auto_trigger_once())
 
-        mock_changelog.assert_called_once()
-        mock_release.assert_called_once()
-        assert mock_changelog.call_args.kwargs["repo_path"] == str(repo_dir)
+        for agent_name, mock in mocks.items():
+            mock.assert_called_once()
+            assert mock.call_args.kwargs["repo_path"] == str(repo_dir), agent_name
+            assert mock.call_args.kwargs["task_id"] is not None, agent_name
+            # Agents disagree on the 2nd param's name (description vs
+            # doc_request) — _agent_call_kwargs() resolves it generically,
+            # so exactly one of the two keys must be present with real text.
+            second_arg = mock.call_args.kwargs.get(
+                "description"
+            ) or mock.call_args.kwargs.get("doc_request")
+            assert second_arg, agent_name
 
-        assert asyncio.run(_get_setting(changelog_key)) == sha
-        assert asyncio.run(_get_setting(release_notes_key)) == sha
+        for key in keys:
+            assert asyncio.run(_get_setting(key)) == sha
     finally:
         if settings is not None:
             settings.target_repo_path = original_repo_path
-        asyncio.run(_delete_setting(changelog_key))
-        asyncio.run(_delete_setting(release_notes_key))
-        asyncio.run(_delete_tasks_titled("Auto-update CHANGELOG.md"))
-        asyncio.run(_delete_tasks_titled("Auto-generate release notes"))
+        for key in keys:
+            asyncio.run(_delete_setting(key))
+        for title in titles:
+            asyncio.run(_delete_tasks_titled(title))
 
 
 def test_run_once_skips_agent_whose_sha_is_unchanged(tmp_path: Path) -> None:
     suffix = uuid.uuid4().hex[:8]
     repo_dir = tmp_path / f"repo-{suffix}"
     sha = _init_real_repo_with_one_commit(repo_dir)
-    changelog_key = "doc_agent_last_sha:changelog_agent"
     release_notes_key = "doc_agent_last_sha:release_notes_agent"
+    keys = _all_setting_keys()
+    titles = _all_titles()
 
     settings = None
     try:
@@ -186,28 +238,53 @@ def test_run_once_skips_agent_whose_sha_is_unchanged(tmp_path: Path) -> None:
         original_repo_path = settings.target_repo_path
         settings.target_repo_path = str(repo_dir)
 
-        asyncio.run(_set_setting(changelog_key, sha))  # already up to date
-        asyncio.run(_delete_setting(release_notes_key))  # never run
+        # Every agent already up to date except release_notes_agent, which
+        # has never run — isolates the skip-vs-run assertion to exactly one
+        # agent on each side without dispatching (and needing to mock) the
+        # other 7 real agents unnecessarily.
+        for key in keys:
+            if key == release_notes_key:
+                asyncio.run(_delete_setting(key))
+            else:
+                asyncio.run(_set_setting(key, sha))
 
-        with patch(
-            "app.agents.changelog_agent.run_changelog_agent",
-            return_value=_fake_result(),
-        ) as mock_changelog, patch(
-            "app.agents.release_notes_agent.run_release_notes_agent",
-            return_value=_fake_result(),
-        ) as mock_release, patch(
-            "app.memory.hooks.record_agent_run_outcome", new_callable=AsyncMock
-        ):
+        with ExitStack() as stack:
+            # autospec=True: _run_doc_agent_auto_trigger_once() calls
+            # _agent_call_kwargs(run_fn, ...), which does
+            # inspect.signature(run_fn) to resolve the real 2nd param name
+            # (description vs doc_request) — a bare MagicMock's signature is
+            # a generic (*args, **kwargs) and would resolve to the wrong
+            # key, so the mock must carry the real function's signature.
+            mocks = {
+                agent_name: stack.enter_context(
+                    patch(
+                        f"{module_path}.{fn_name}",
+                        autospec=True,
+                        return_value=_fake_result(),
+                    )
+                )
+                for agent_name, module_path, fn_name, _title in _DOC_AUTO_TRIGGER_AGENTS
+            }
+            stack.enter_context(
+                patch(
+                    "app.memory.hooks.record_agent_run_outcome",
+                    new_callable=AsyncMock,
+                )
+            )
             asyncio.run(_run_doc_agent_auto_trigger_once())
 
-        mock_changelog.assert_not_called()
-        mock_release.assert_called_once()
+        mocks["changelog_agent"].assert_not_called()
+        mocks["release_notes_agent"].assert_called_once()
+        for agent_name, mock in mocks.items():
+            if agent_name != "release_notes_agent":
+                mock.assert_not_called()
     finally:
         if settings is not None:
             settings.target_repo_path = original_repo_path
-        asyncio.run(_delete_setting(changelog_key))
-        asyncio.run(_delete_setting(release_notes_key))
-        asyncio.run(_delete_tasks_titled("Auto-generate release notes"))
+        for key in keys:
+            asyncio.run(_delete_setting(key))
+        for title in titles:
+            asyncio.run(_delete_tasks_titled(title))
 
 
 def test_run_once_returns_silently_when_no_main_branch(tmp_path: Path) -> None:

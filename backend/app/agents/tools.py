@@ -190,6 +190,150 @@ def _summarize_docker_log_patterns(raw_log: str) -> str:
     return "\n".join(parts)
 
 
+# ---------------------------------------------------------------------------
+# AUDIT_Q_BATCH10 §19/§20/§40 — shared LLM-generation helper for tool-level
+# "generate X" capabilities (commit messages, PR descriptions, diff reviews,
+# conflict explanations, URL summaries, deployment diagnosis). Every prior
+# instance of these ("generate_commit_msg" etc.) only returned raw git/log
+# data and left the actual generation implicit — delegated to whichever
+# agent happened to call the tool next turn, per the audit's own finding.
+# This gives each of those tools a REAL, independently-testable generation
+# step, reusing the same client/circuit-breaker path run_agent_graph()
+# itself uses (_make_client/_call_anthropic in base_graph.py) rather than
+# constructing a second, unprotected Anthropic client — matching the
+# `_merge_via_llm` pattern already established in app/fleet/versioned_memory.py.
+# Every call site treats "" as "generation unavailable" and falls back to
+# its own pre-existing, non-LLM behavior — never a fake/invented result.
+# ---------------------------------------------------------------------------
+
+
+def _llm_generate_text(
+    prompt: str, *, max_tokens: int = 600, model: str | None = None
+) -> str:
+    """One-shot LLM text generation. Never raises — returns "" on any failure
+    (missing/invalid API key, network error, rate limit) so every caller can
+    degrade gracefully instead of crashing the tool call."""
+    try:
+        from app.agents.base_graph import (
+            _call_anthropic,
+            _make_client,
+            _serialize_content,
+            _text_from_content,
+        )
+
+        client = _make_client()
+        r = _call_anthropic(
+            client,
+            model=model or get_settings().model_router,
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return _text_from_content(_serialize_content(r.content)).strip()
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "_llm_generate_text: generation call failed", exc_info=True
+        )
+        return ""
+
+
+def _llm_generate_commit_message(stat: str, diff: str) -> str:
+    prompt = (
+        "Write a git commit message for the real staged changes below. "
+        "Respond with ONLY the commit message text — no preamble, no markdown "
+        "code fences, no labels.\n\n"
+        "Format: <type>(<scope>): <description>\n"
+        "Types: feat, fix, docs, refactor, test, chore, style, perf. Add a body "
+        "only if the change needs more than one line of explanation, grounded "
+        "strictly in the diff below — never invent changes not shown.\n\n"
+        f"=== Changed files ===\n{stat}\n\n=== Diff (truncated) ===\n{diff}"
+    )
+    return _llm_generate_text(prompt, max_tokens=300)
+
+
+def _llm_generate_pr_description(
+    stat: str, diff: str, branch: str, base: str
+) -> tuple[str, str]:
+    prompt = (
+        f"Write a GitHub pull request title and description for branch "
+        f"'{branch}' being merged into '{base}', grounded strictly in the real "
+        "diff below — never invent changes not shown. Respond in EXACTLY this "
+        "format, no other text:\n"
+        "TITLE: <one-line title>\n"
+        "BODY:\n<markdown body: summary, key changes, testing notes>\n\n"
+        f"=== Changed files ===\n{stat}\n\n=== Diff (truncated) ===\n{diff}"
+    )
+    text = _llm_generate_text(prompt, max_tokens=700)
+    if not text or "TITLE:" not in text:
+        return "", ""
+    after_title = text.split("TITLE:", 1)[1]
+    if "BODY:" in after_title:
+        title, body = after_title.split("BODY:", 1)
+        return title.strip(), body.strip()
+    return after_title.strip(), ""
+
+
+def _llm_review_diff(stat: str, diff: str) -> str:
+    prompt = (
+        "Review the real git diff below. Produce a concise, structured review "
+        "with exactly these sections:\n"
+        "1. Summary — what changed, in plain English (2-4 sentences).\n"
+        "2. Risk callouts — anything that looks unsafe, untested, or likely to "
+        "break something. Only real, specific observations grounded in the "
+        "diff below — never an invented issue.\n"
+        "3. Notable omissions — e.g. missing tests for new logic, if evident "
+        "from the diff alone.\n"
+        "Cite actual file names and describe the actual change, not generic "
+        "advice.\n\n"
+        f"=== Changed files ===\n{stat}\n\n=== Diff ===\n{diff}"
+    )
+    return _llm_generate_text(prompt, max_tokens=900)
+
+
+def _llm_explain_conflict_hunks(path: str, hunks: list[dict[str, Any]]) -> str:
+    import json as _json
+
+    prompt = (
+        f"The file {path} has real, unresolved git merge conflicts. Below is "
+        "structured hunk data (ours/theirs text, line ranges) already parsed "
+        "from the real conflict markers. Explain, in plain English, what each "
+        "hunk's conflict actually is — what 'ours' changed vs what 'theirs' "
+        "changed, and why they conflict — grounded strictly in the hunk "
+        "content below. Do not recommend a resolution; only explain.\n\n"
+        f"{_json.dumps(hunks, indent=2)}"
+    )
+    result = _llm_generate_text(prompt, max_tokens=700)
+    return result or f"[ERROR] Could not generate an explanation for {path}."
+
+
+def _llm_summarize_url_content(url: str, content: str) -> str:
+    prompt = (
+        f"Summarize the real page content fetched from {url} below. Focus on "
+        "what the page is about and any concrete facts, APIs, or instructions "
+        "it contains — 3-6 sentences, grounded strictly in the text below, "
+        "never invented.\n\n"
+        f"{content[:10000]}"
+    )
+    return _llm_generate_text(prompt, max_tokens=400)
+
+
+def _llm_diagnose_deployment_failure(context: str) -> str:
+    prompt = (
+        "You are diagnosing a real deployment/container failure. Below is "
+        "real gathered state (docker ps / docker logs / docker inspect). "
+        "Identify:\n"
+        "1. What actually failed — cite the exact error line(s).\n"
+        "2. The most likely root cause, grounded only in the evidence below.\n"
+        "3. A concrete next diagnostic step or fix to try.\n"
+        "If the evidence is insufficient to reach a conclusion, say so "
+        "explicitly rather than guessing.\n\n"
+        f"{context}"
+    )
+    result = _llm_generate_text(prompt, max_tokens=700)
+    return result or "[ERROR] Diagnosis generation failed — see raw state above."
+
+
 # --- Tool specs (Anthropic input_schema format) ---
 
 READ_ONLY_TOOLS = [
@@ -2114,6 +2258,308 @@ def list_migrations(inp: dict[str, Any]) -> str:
     return _json.dumps(results, indent=2)
 
 
+# ---------------------------------------------------------------------------
+# AUDIT_Q_BATCH10 §19 "Generate deployment guides for THIS project: NO — no
+# deployment_guide_agent.py or equivalent exists". list_deploy_artifacts is
+# the real grounding-data tool deployment_guide_doc_agent uses instead of
+# guessing which deploy files exist: a real filesystem check against
+# repo_path's own actual deployment files (Dockerfiles, compose files, CI
+# workflows, systemd units, k8s/terraform if present) — never invented, and
+# never a full recursive tree walk (would hit node_modules/.venv/repos/).
+# Bound to repo_path via a closure factory, matching this file's own
+# established convention (_make_write_file_handler(root) above) rather than
+# module-level like list_migrations, because unlike Alembic migrations
+# (always this app's own backend/migrations/), deploy artifacts live in
+# whichever repo_path the calling agent is scoped to.
+# ---------------------------------------------------------------------------
+
+_LIST_DEPLOY_ARTIFACTS_TOOL = {
+    "name": "list_deploy_artifacts",
+    "description": "Real filesystem discovery of this project's actual deployment-relevant files: Dockerfiles, docker-compose files, Procfile, .github/workflows/*.yml, scripts/systemd/*.service|.timer, and k8s/terraform manifests if present. Read each with read_file before writing a deployment guide — never invent a deploy mechanism this project doesn't actually have.",
+    "input_schema": {"type": "object", "properties": {}, "required": []},
+}
+
+_DEPLOY_ARTIFACT_GLOBS: tuple[str, ...] = (
+    "Dockerfile",
+    "*/Dockerfile",
+    "*/*/Dockerfile",
+    "Dockerfile.*",
+    "docker-compose*.yml",
+    "docker-compose*.yaml",
+    "Procfile",
+    ".github/workflows/*.yml",
+    ".github/workflows/*.yaml",
+    "scripts/systemd/*.service",
+    "scripts/systemd/*.timer",
+    "k8s/*.yaml",
+    "k8s/*.yml",
+    "kubernetes/*.yaml",
+    "kubernetes/*.yml",
+    "terraform/*.tf",
+    "Vagrantfile",
+)
+
+
+def make_list_deploy_artifacts_handler(
+    repo_path: str,
+) -> Callable[[dict[str, Any]], str]:
+    root = Path(repo_path)
+
+    def list_deploy_artifacts(inp: dict[str, Any]) -> str:
+        import json as _json
+
+        found: list[str] = []
+        seen: set[str] = set()
+        for pattern in _DEPLOY_ARTIFACT_GLOBS:
+            for p in sorted(root.glob(pattern)):
+                if not p.is_file():
+                    continue
+                rel = str(p.relative_to(root))
+                if rel not in seen:
+                    seen.add(rel)
+                    found.append(rel)
+        return _json.dumps({"deploy_artifacts": found}, indent=2)
+
+    return list_deploy_artifacts
+
+
+# ---------------------------------------------------------------------------
+# AUDIT_Q_BATCH10 §20 "Inspect external GitHub repos: NO — all GitHub tooling
+# operates on the local repo's own remote via `gh` CLI, not arbitrary
+# external repos". inspect_github_repo is the real gap-fill: real,
+# read-only GitHub REST data (via `gh api`, GET only — never a write
+# endpoint) for any owner/repo, not just this project's own remote. No
+# repo_path needed, so this is a standalone function like list_migrations
+# above, not a repo_path-bound closure.
+# ---------------------------------------------------------------------------
+
+_INSPECT_GITHUB_REPO_TOOL = {
+    "name": "inspect_github_repo",
+    "description": "Real, read-only inspection of an arbitrary external GitHub repository via the GitHub REST API (never a write endpoint) — distinct from create_pr/github_* tools, which only operate on this project's own remote. action='info' returns real repo metadata (description, language, stars, default branch, topics); 'list_files' lists real directory contents at path; 'read_file' returns a real file's decoded content.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "owner": {"type": "string", "description": "Repository owner/org"},
+            "repo": {"type": "string", "description": "Repository name"},
+            "action": {
+                "type": "string",
+                "enum": ["info", "list_files", "read_file"],
+                "description": "What to inspect (default: info)",
+            },
+            "path": {
+                "type": "string",
+                "description": "Path within the repo (for list_files/read_file; default: repo root)",
+            },
+        },
+        "required": ["owner", "repo"],
+    },
+}
+
+
+def inspect_github_repo(inp: dict[str, Any]) -> str:
+    import json as _json
+    import re as _re
+
+    owner = str(inp.get("owner", "")).strip()
+    repo_name = str(inp.get("repo", "")).strip()
+    action = str(inp.get("action", "info")).strip()
+    path = str(inp.get("path", "")).strip()
+    ident_re = _re.compile(r"^[A-Za-z0-9._-]+$")
+    if not owner or not repo_name:
+        return "[ERROR] owner and repo are required"
+    if not ident_re.match(owner) or not ident_re.match(repo_name):
+        return "[ERROR] owner/repo must be simple GitHub identifiers (letters, digits, '.', '_', '-')"
+
+    if action == "info":
+        endpoint = f"repos/{owner}/{repo_name}"
+    elif action in ("list_files", "read_file"):
+        clean_path = path.lstrip("/")
+        if ".." in clean_path.split("/"):
+            return "[ERROR] path may not contain '..'"
+        endpoint = f"repos/{owner}/{repo_name}/contents/{clean_path}"
+    else:
+        return (
+            f"[ERROR] Unknown action: {action!r}. Use info, list_files, or read_file."
+        )
+
+    try:
+        r = subprocess.run(
+            ["gh", "api", endpoint], capture_output=True, text=True, timeout=20
+        )
+    except FileNotFoundError:
+        return "[ERROR] gh CLI not found — install with: sudo apt install gh"
+    except subprocess.TimeoutExpired:
+        return "[ERROR] GitHub API request timed out"
+    except Exception as e:
+        return f"[ERROR] {e}"
+    if r.returncode != 0:
+        return f"[ERROR] gh api {endpoint} failed: {(r.stderr or r.stdout)[:500]}"
+
+    try:
+        data = _json.loads(r.stdout)
+    except _json.JSONDecodeError:
+        return r.stdout[:5000]
+
+    if action == "info":
+        summary = {
+            "full_name": data.get("full_name"),
+            "description": data.get("description"),
+            "default_branch": data.get("default_branch"),
+            "language": data.get("language"),
+            "stargazers_count": data.get("stargazers_count"),
+            "open_issues_count": data.get("open_issues_count"),
+            "topics": data.get("topics"),
+            "license": (data.get("license") or {}).get("name"),
+            "homepage": data.get("homepage"),
+            "archived": data.get("archived"),
+        }
+        return _json.dumps(summary, indent=2)
+    if action == "list_files":
+        if isinstance(data, list):
+            files = [
+                {"name": e.get("name"), "type": e.get("type"), "path": e.get("path")}
+                for e in data
+            ]
+            return _json.dumps(files, indent=2)
+        return _json.dumps(data, indent=2)
+    # action == "read_file"
+    if (
+        isinstance(data, dict)
+        and data.get("encoding") == "base64"
+        and data.get("content")
+    ):
+        import base64 as _b64
+
+        try:
+            content = _b64.b64decode(data["content"]).decode("utf-8", errors="replace")
+        except Exception as e:
+            return f"[ERROR] Could not decode file content: {e}"
+        return content[:20000]
+    return "[ERROR] Path is not a readable file (it may be a directory)"
+
+
+# ---------------------------------------------------------------------------
+# AUDIT_Q_BATCH10 §20 "Inspect APIs (OpenAPI/Swagger): NO — zero references".
+# Real JSON/YAML structural parsing of an OpenAPI/Swagger document (never
+# regex/text scraping) — either fetched from a URL (reusing fetch_url's own
+# SSRF guard) or supplied directly as spec_text (e.g. already read from a
+# local file via read_file, keeping this standalone rather than repo_path-
+# bound). Lists real endpoints/methods/schemas from the parsed structure.
+# ---------------------------------------------------------------------------
+
+_INSPECT_OPENAPI_SPEC_TOOL = {
+    "name": "inspect_openapi_spec",
+    "description": "Parse a real OpenAPI/Swagger spec (JSON or YAML) and summarize its endpoints (method, path, summary, operationId, parameters) and schema names — real structural parsing, never text/regex scraping. Provide url to fetch a published spec (SSRF-guarded), or spec_text with content already read (e.g. via read_file for a local spec file).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "url": {
+                "type": "string",
+                "description": "URL of a published OpenAPI/Swagger spec to fetch",
+            },
+            "spec_text": {
+                "type": "string",
+                "description": "Raw JSON or YAML spec content (alternative to url)",
+            },
+        },
+        "required": [],
+    },
+}
+
+
+def inspect_openapi_spec(inp: dict[str, Any]) -> str:
+    import json as _json
+
+    url = str(inp.get("url", "")).strip()
+    spec_text = str(inp.get("spec_text", "")).strip()
+    if not url and not spec_text:
+        return (
+            "[ERROR] Provide either url (to fetch a published spec) or "
+            "spec_text (raw JSON/YAML content, e.g. already read via read_file)"
+        )
+    if url:
+        ssrf_reason = _ssrf_denial_reason(url)
+        if ssrf_reason:
+            return f"[POLICY DENIED] {ssrf_reason}"
+        try:
+            r = subprocess.run(
+                [
+                    "curl",
+                    "-s",
+                    "-L",
+                    "--max-time",
+                    "15",
+                    "--user-agent",
+                    "Gridiron-Agent/1.0",
+                    url,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            spec_text = r.stdout
+        except Exception as e:
+            return f"[ERROR] {e}"
+        if not spec_text:
+            return "[ERROR] Empty response fetching spec"
+
+    spec: Any = None
+    try:
+        spec = _json.loads(spec_text)
+    except _json.JSONDecodeError:
+        try:
+            import yaml as _yaml
+
+            spec = _yaml.safe_load(spec_text)
+        except Exception as e:
+            return f"[ERROR] Could not parse as JSON or YAML: {e}"
+    if not isinstance(spec, dict):
+        return "[ERROR] Parsed content is not a valid OpenAPI/Swagger object"
+
+    version = spec.get("openapi") or spec.get("swagger")
+    if not version:
+        return (
+            "[ERROR] No 'openapi' or 'swagger' version field found — not a "
+            "recognized OpenAPI/Swagger spec"
+        )
+    info = spec.get("info") or {}
+    paths = spec.get("paths") or {}
+    _http_methods = ("get", "post", "put", "patch", "delete", "options", "head")
+    endpoints: list[dict[str, Any]] = []
+    for path, methods in paths.items():
+        if not isinstance(methods, dict):
+            continue
+        for method, op in methods.items():
+            if method.lower() not in _http_methods or not isinstance(op, dict):
+                continue
+            endpoints.append(
+                {
+                    "method": method.upper(),
+                    "path": path,
+                    "summary": op.get("summary", ""),
+                    "operationId": op.get("operationId", ""),
+                    "parameters": [
+                        p.get("name")
+                        for p in (op.get("parameters") or [])
+                        if isinstance(p, dict)
+                    ],
+                }
+            )
+    if str(version).startswith("3"):
+        schemas = list(((spec.get("components") or {}).get("schemas") or {}).keys())
+    else:
+        schemas = list((spec.get("definitions") or {}).keys())
+    result = {
+        "openapi_version": version,
+        "title": info.get("title", ""),
+        "api_version": info.get("version", ""),
+        "endpoint_count": len(endpoints),
+        "endpoints": endpoints[:100],
+        "schemas": schemas[:100],
+    }
+    return _json.dumps(result, indent=2)
+
+
 def make_doc_generator_handlers(repo_path: str) -> dict[str, Any]:
     """Shared base for the 4 gap-closure Day 53 doc-generator agents
     (architecture_doc_agent, agent_roster_doc_agent, tool_catalog_doc_agent,
@@ -2905,7 +3351,7 @@ _RUN_MAKE_TOOL = {
 
 _FETCH_URL_TOOL = {
     "name": "fetch_url",
-    "description": "Fetch content from a URL (HTTP GET). Useful for reading documentation or checking API endpoints.",
+    "description": "Fetch content from a URL (HTTP GET). Useful for reading documentation or checking API endpoints. Set summarize=true to also get an LLM-generated summary of the fetched content ahead of the raw text.",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -2913,6 +3359,10 @@ _FETCH_URL_TOOL = {
             "timeout": {
                 "type": "integer",
                 "description": "Timeout in seconds (default: 15)",
+            },
+            "summarize": {
+                "type": "boolean",
+                "description": "If true, prepend an LLM-generated summary of the fetched content (default: false)",
             },
         },
         "required": ["url"],
@@ -2969,6 +3419,21 @@ _GIT_MERGE_TOOL = {
 _PARSE_MERGE_CONFLICTS_TOOL = {
     "name": "parse_merge_conflicts",
     "description": "Parse a file's real <<<<<<</=======/>>>>>>> conflict markers into structured hunks (ours/theirs text, labels, line ranges) — read this before deciding how to resolve a conflicted file, never guess resolution from raw marker text.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Conflicted file, relative to repo root",
+            },
+        },
+        "required": ["path"],
+    },
+}
+
+_EXPLAIN_MERGE_CONFLICT_TOOL = {
+    "name": "explain_merge_conflict",
+    "description": "Parse a file's real conflict markers (like parse_merge_conflicts) and generate a plain-English explanation of what 'ours' vs 'theirs' actually changed in each hunk and why they conflict. Does not resolve anything — read before deciding, or use standalone to understand a conflict.",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -3063,12 +3528,18 @@ _GIT_WORKTREE_TOOL = {
 
 _CREATE_PR_TOOL = {
     "name": "create_pr",
-    "description": "Create a GitHub Pull Request using the gh CLI. Requires gh to be authenticated.",
+    "description": "Create a GitHub Pull Request using the gh CLI. Requires gh to be authenticated. If title and/or body are omitted, they are auto-generated by an LLM from the real diff of this branch vs base — an explicit title/body you do supply is always used as-is.",
     "input_schema": {
         "type": "object",
         "properties": {
-            "title": {"type": "string", "description": "PR title"},
-            "body": {"type": "string", "description": "PR description/body"},
+            "title": {
+                "type": "string",
+                "description": "PR title (omit to auto-generate from the real diff)",
+            },
+            "body": {
+                "type": "string",
+                "description": "PR description/body (omit to auto-generate from the real diff)",
+            },
             "base": {
                 "type": "string",
                 "description": "Base branch to merge into (default: main)",
@@ -3078,19 +3549,38 @@ _CREATE_PR_TOOL = {
                 "description": "Create as draft PR (default: false)",
             },
         },
-        "required": ["title"],
+        "required": [],
     },
 }
 
 _GENERATE_COMMIT_MSG_TOOL = {
     "name": "generate_commit_msg",
-    "description": "Show current staged diff summary to help you write a conventional commit message.",
+    "description": "Generate a conventional commit message via LLM from the real staged diff, plus the raw diff summary it was grounded in. Falls back to just the raw diff summary if generation is unavailable.",
     "input_schema": {
         "type": "object",
         "properties": {
             "staged_only": {
                 "type": "boolean",
                 "description": "Use only staged changes (default: true)",
+            },
+        },
+        "required": [],
+    },
+}
+
+_REVIEW_DIFF_TOOL = {
+    "name": "review_diff",
+    "description": "LLM-generated structured review of a real git diff — summary, risk callouts, and notable omissions grounded strictly in the diff content. Distinct from git_diff, which returns only raw stdout.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "staged_only": {
+                "type": "boolean",
+                "description": "Review only staged changes (default: true)",
+            },
+            "base": {
+                "type": "string",
+                "description": "If set, review the diff against this ref/branch instead of staged/unstaged working-tree changes",
             },
         },
         "required": [],
@@ -3376,6 +3866,25 @@ _DOCKER_COMPOSE_TOOL = {
             },
         },
         "required": ["action"],
+    },
+}
+
+_DIAGNOSE_DEPLOYMENT_FAILURE_TOOL = {
+    "name": "diagnose_deployment_failure",
+    "description": "Diagnose a real deployment/container failure: gathers real docker ps -a state, docker logs, and docker inspect (exit code, OOMKilled, restart count, error) for the given container — or just the overall container state if none is given — then adds an LLM root-cause diagnosis grounded strictly in that gathered evidence. Distinct from docker_logs, which only returns raw/pattern-flagged log text with no diagnosis.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "container": {
+                "type": "string",
+                "description": "Container name or ID to diagnose (omit to just diagnose overall docker ps -a state)",
+            },
+            "lines": {
+                "type": "integer",
+                "description": "Number of log lines to gather when container is given (default: 100)",
+            },
+        },
+        "required": [],
     },
 }
 
@@ -4331,6 +4840,7 @@ DOCKER_AGENT_TOOLS = READ_ONLY_TOOLS + [
     _DOCKER_COMPOSE_TOOL,
     _DOCKER_BUILD_TOOL,
     _DOCKER_RESTART_TOOL,
+    _DIAGNOSE_DEPLOYMENT_FAILURE_TOOL,
     _WRITE_FILE_TOOL_SPEC,
     _SUBMIT_DOCKER_REPORT_TOOL,
 ]
@@ -4916,6 +5426,83 @@ def make_docker_agent_handlers(repo_path: str) -> dict[str, Any]:
         )
         return (r.stdout + r.stderr).strip() or f"Restarted {dr_container}"
 
+    def dk_diagnose_deployment_failure(inp: dict[str, Any]) -> str:
+        # AUDIT_Q_BATCH10 §19 "Diagnose deployment failures: NO — no
+        # dedicated failure-analysis tool/agent beyond the log pattern
+        # summarizer". Gathers real docker state (ps -a, logs, inspect
+        # State) — never guessed — then adds a real LLM diagnosis layer on
+        # top of it, distinct from _summarize_docker_log_patterns's
+        # keyword-only detection.
+        dd_container = str(inp.get("container", "")).strip()
+        dd_lines = int(inp.get("lines", 100))
+        parts: list[str] = []
+        ps_r = subprocess.run(
+            [
+                "docker",
+                "ps",
+                "-a",
+                "--format",
+                "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Names}}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        parts.append(
+            "=== docker ps -a ===\n" + (ps_r.stdout or ps_r.stderr or "(no containers)")
+        )
+        if dd_container:
+            logs_r = subprocess.run(
+                ["docker", "logs", "--tail", str(dd_lines), dd_container],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            raw_logs = (logs_r.stdout + logs_r.stderr)[:6000]
+            parts.append(
+                f"=== docker logs --tail {dd_lines} {dd_container} ===\n"
+                + (
+                    _summarize_docker_log_patterns(raw_logs) + raw_logs
+                    if raw_logs
+                    else "(no logs)"
+                )
+            )
+            inspect_r = subprocess.run(
+                ["docker", "inspect", dd_container],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if inspect_r.returncode == 0:
+                import json as _json
+
+                try:
+                    data = _json.loads(inspect_r.stdout)
+                    state = (data[0] if data else {}).get("State", {})
+                    inspect_summary = {
+                        "Status": state.get("Status"),
+                        "ExitCode": state.get("ExitCode"),
+                        "Error": state.get("Error"),
+                        "OOMKilled": state.get("OOMKilled"),
+                        "RestartCount": (data[0] if data else {}).get("RestartCount"),
+                        "StartedAt": state.get("StartedAt"),
+                        "FinishedAt": state.get("FinishedAt"),
+                    }
+                    parts.append(
+                        "=== docker inspect (State) ===\n"
+                        + _json.dumps(inspect_summary, indent=2)
+                    )
+                except Exception:
+                    parts.append("=== docker inspect ===\n" + inspect_r.stdout[:2000])
+            else:
+                parts.append(
+                    f"[ERROR] docker inspect {dd_container} failed: "
+                    f"{(inspect_r.stderr or '')[:500]}"
+                )
+        context = "\n\n".join(parts)
+        diagnosis = _llm_diagnose_deployment_failure(context)
+        return f"{context}\n\n=== Diagnosis ===\n{diagnosis}"
+
     def dk_submit(inp: dict[str, Any]) -> str:
         docker_result.update(inp)
         return "Docker report submitted"
@@ -4924,6 +5511,7 @@ def make_docker_agent_handlers(repo_path: str) -> dict[str, Any]:
     handlers["docker_logs"] = dk_docker_logs
     handlers["docker_exec"] = dk_docker_exec
     handlers["docker_compose"] = dk_docker_compose
+    handlers["diagnose_deployment_failure"] = dk_diagnose_deployment_failure
     handlers["docker_build"] = dk_docker_build
     handlers["docker_restart"] = dk_docker_restart
     handlers["write_file"] = _make_write_file_handler(root)
@@ -7776,11 +8364,15 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     # Batch 3 — Git extras
     _GIT_MERGE_TOOL,
     _PARSE_MERGE_CONFLICTS_TOOL,
+    _EXPLAIN_MERGE_CONFLICT_TOOL,
     _RESOLVE_MERGE_CONFLICT_TOOL,
     _GIT_RESET_TOOL,
     _GIT_WORKTREE_TOOL,
     _CREATE_PR_TOOL,
     _GENERATE_COMMIT_MSG_TOOL,
+    _REVIEW_DIFF_TOOL,
+    _INSPECT_GITHUB_REPO_TOOL,
+    _INSPECT_OPENAPI_SPEC_TOOL,
     # Batch 4 — Testing extras
     _RUN_SINGLE_TEST_TOOL,
     _COVERAGE_REPORT_TOOL,
@@ -7800,6 +8392,7 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _DOCKER_LOGS_TOOL,
     _DOCKER_EXEC_TOOL,
     _DOCKER_COMPOSE_TOOL,
+    _DIAGNOSE_DEPLOYMENT_FAILURE_TOOL,
     # Batch 9 — Security
     _SECRETS_SCAN_TOOL,
     # Batch 10 — AST Engine
@@ -9024,6 +9617,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def fetch_url(inp: dict[str, Any]) -> str:
         fu_url = str(inp["url"])
         fu_timeout = int(inp.get("timeout", 15))
+        fu_summarize = bool(inp.get("summarize", False))
         _ssrf_reason = _ssrf_denial_reason(fu_url)
         if _ssrf_reason:
             return f"[POLICY DENIED] {_ssrf_reason}"
@@ -9043,7 +9637,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 text=True,
                 timeout=fu_timeout + 5,
             )
-            return r.stdout[:10000] or r.stderr or "[empty response]"
+            raw = r.stdout[:10000] or r.stderr or "[empty response]"
+            if fu_summarize and r.stdout:
+                summary = _llm_summarize_url_content(fu_url, r.stdout)
+                if summary:
+                    return f"=== Summary ===\n{summary}\n\n=== Raw content ===\n{raw}"
+            return raw
         except subprocess.TimeoutExpired:
             return f"[ERROR] Request timed out after {fu_timeout}s"
         except FileNotFoundError:
@@ -9115,6 +9714,20 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         import json as _json
 
         return _json.dumps({"path": rel, "hunks": hunks}, indent=2)
+
+    def explain_merge_conflict(inp: dict[str, Any]) -> str:
+        rel = str(inp["path"])
+        result = check_path(rel)
+        if not result.allowed:
+            return f"[POLICY DENIED] {rel}: {result.reason}"
+        target = Path(repo_path) / rel
+        if not target.exists():
+            return f"[ERROR] File not found: {rel}"
+        text = target.read_text(encoding="utf-8")
+        hunks = _parse_conflict_markers(text)
+        if not hunks:
+            return f"No conflict markers found in {rel}."
+        return _llm_explain_conflict_hunks(rel, hunks)
 
     def resolve_merge_conflict(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
@@ -9200,10 +9813,45 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] {e}"
 
     def create_pr(inp: dict[str, Any]) -> str:
-        pr_title = str(inp["title"])
-        pr_body = str(inp.get("body", ""))
+        pr_title = str(inp.get("title", "")).strip()
+        pr_body = str(inp.get("body", "")).strip()
         pr_base = str(inp.get("base", "main"))
         pr_draft = bool(inp.get("draft", False))
+        if not pr_title or not pr_body:
+            # AUDIT_Q_BATCH10 §40 "Generate PR descriptions: NO — not
+            # auto-generated" — real diff of this branch vs pr_base, LLM-
+            # generated to fill in whichever of title/body the caller didn't
+            # supply. Explicit caller values always win — this only fills
+            # gaps, never overrides an explicit title/body.
+            r_stat = subprocess.run(
+                ["git", "diff", f"{pr_base}...HEAD", "--stat"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+            )
+            r_diff = subprocess.run(
+                ["git", "diff", f"{pr_base}...HEAD"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+            )
+            r_branch = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+            )
+            branch = r_branch.stdout.strip() or "HEAD"
+            stat = r_stat.stdout.strip()
+            diff = r_diff.stdout[:6000]
+            if stat:
+                gen_title, gen_body = _llm_generate_pr_description(
+                    stat, diff, branch, pr_base
+                )
+                pr_title = pr_title or gen_title
+                pr_body = pr_body or gen_body
+        if not pr_title:
+            return "[ERROR] title is required (auto-generation failed — supply one explicitly)"
         pr_cmd = ["gh", "pr", "create", "--title", pr_title, "--base", pr_base]
         if pr_body:
             pr_cmd += ["--body", pr_body]
@@ -9233,12 +9881,49 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         diff = r_diff.stdout[:3000]
         if not stat:
             return "[ERROR] No staged changes. Stage files with git_commit or git add first."
+        generated = _llm_generate_commit_message(stat, diff)
+        if generated:
+            return (
+                f"=== Generated commit message ===\n{generated}\n\n"
+                f"=== Changed files ===\n{stat}\n\n"
+                f"=== Diff (truncated to 3000 chars) ===\n{diff}"
+            )
         return (
             f"=== Changed files ===\n{stat}\n\n"
             f"=== Diff (truncated to 3000 chars) ===\n{diff}\n\n"
             "Analyze the diff above and write a conventional commit message:\n"
             "Format: <type>(<scope>): <description>\n"
             "Types: feat, fix, docs, refactor, test, chore, style, perf"
+        )
+
+    def review_diff(inp: dict[str, Any]) -> str:
+        rd_staged = bool(inp.get("staged_only", True))
+        rd_base = str(inp.get("base", "")).strip()
+        if rd_base:
+            diff_args = ["diff", f"{rd_base}...HEAD"]
+        elif rd_staged:
+            diff_args = ["diff", "--cached"]
+        else:
+            diff_args = ["diff"]
+        r_stat = subprocess.run(
+            ["git"] + diff_args + ["--stat"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+        )
+        r_diff = subprocess.run(
+            ["git"] + diff_args, cwd=repo_path, capture_output=True, text=True
+        )
+        stat = r_stat.stdout.strip()
+        diff = r_diff.stdout[:6000]
+        if not stat:
+            return "[ERROR] No changes to review for the given scope."
+        review = _llm_review_diff(stat, diff)
+        if review:
+            return f"=== Changed files ===\n{stat}\n\n=== Review ===\n{review}"
+        return (
+            f"[ERROR] Review generation unavailable — raw diff below.\n\n"
+            f"=== Changed files ===\n{stat}\n\n=== Diff ===\n{diff}"
         )
 
     # =========================================================================
@@ -9774,6 +10459,77 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    def diagnose_deployment_failure(inp: dict[str, Any]) -> str:
+        dd_container = str(inp.get("container", "")).strip()
+        dd_lines = int(inp.get("lines", 100))
+        parts: list[str] = []
+        ps_r = subprocess.run(
+            [
+                "docker",
+                "ps",
+                "-a",
+                "--format",
+                "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Names}}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        parts.append(
+            "=== docker ps -a ===\n" + (ps_r.stdout or ps_r.stderr or "(no containers)")
+        )
+        if dd_container:
+            logs_r = subprocess.run(
+                ["docker", "logs", "--tail", str(dd_lines), dd_container],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            raw_logs = (logs_r.stdout + logs_r.stderr)[:6000]
+            parts.append(
+                f"=== docker logs --tail {dd_lines} {dd_container} ===\n"
+                + (
+                    _summarize_docker_log_patterns(raw_logs) + raw_logs
+                    if raw_logs
+                    else "(no logs)"
+                )
+            )
+            inspect_r = subprocess.run(
+                ["docker", "inspect", dd_container],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if inspect_r.returncode == 0:
+                import json as _json
+
+                try:
+                    data = _json.loads(inspect_r.stdout)
+                    state = (data[0] if data else {}).get("State", {})
+                    inspect_summary = {
+                        "Status": state.get("Status"),
+                        "ExitCode": state.get("ExitCode"),
+                        "Error": state.get("Error"),
+                        "OOMKilled": state.get("OOMKilled"),
+                        "RestartCount": (data[0] if data else {}).get("RestartCount"),
+                        "StartedAt": state.get("StartedAt"),
+                        "FinishedAt": state.get("FinishedAt"),
+                    }
+                    parts.append(
+                        "=== docker inspect (State) ===\n"
+                        + _json.dumps(inspect_summary, indent=2)
+                    )
+                except Exception:
+                    parts.append("=== docker inspect ===\n" + inspect_r.stdout[:2000])
+            else:
+                parts.append(
+                    f"[ERROR] docker inspect {dd_container} failed: "
+                    f"{(inspect_r.stderr or '')[:500]}"
+                )
+        context = "\n\n".join(parts)
+        diagnosis = _llm_diagnose_deployment_failure(context)
+        return f"{context}\n\n=== Diagnosis ===\n{diagnosis}"
+
     # =========================================================================
     # BATCH 9 — Security tools
     # =========================================================================
@@ -9835,11 +10591,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # Batch 3
     handlers["git_merge"] = git_merge
     handlers["parse_merge_conflicts"] = parse_merge_conflicts
+    handlers["explain_merge_conflict"] = explain_merge_conflict
     handlers["resolve_merge_conflict"] = resolve_merge_conflict
     handlers["git_reset"] = git_reset
     handlers["git_worktree"] = git_worktree
     handlers["create_pr"] = create_pr
     handlers["generate_commit_msg"] = generate_commit_msg
+    handlers["review_diff"] = review_diff
+    handlers["inspect_github_repo"] = inspect_github_repo
+    handlers["inspect_openapi_spec"] = inspect_openapi_spec
     # Batch 4
     handlers["run_single_test"] = run_single_test
     handlers["coverage_report"] = coverage_report
@@ -9859,6 +10619,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["docker_logs"] = docker_logs
     handlers["docker_exec"] = docker_exec
     handlers["docker_compose"] = docker_compose
+    handlers["diagnose_deployment_failure"] = diagnose_deployment_failure
     # Batch 9
     handlers["secrets_scan"] = secrets_scan
     handlers["_chat_result"] = chat_result
@@ -10045,9 +10806,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             rscr_interp = (
                 "python3"
                 if ext == ".py"
-                else "node"
-                if ext in (".js", ".mjs", ".cjs")
-                else "bash"
+                else "node" if ext in (".js", ".mjs", ".cjs") else "bash"
             )
         try:
             r = subprocess.run(
@@ -11393,9 +12152,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 from_ref = (
                     tag_list[1]
                     if len(tag_list) >= 2
-                    else tag_list[0]
-                    if tag_list
-                    else ""
+                    else tag_list[0] if tag_list else ""
                 )
             ref_range = f"{from_ref}..{to_ref}" if from_ref else to_ref
             log = subprocess.run(

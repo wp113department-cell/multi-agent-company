@@ -98,11 +98,22 @@ from app.agents.output_parsers import parse_diagnostic_summary, parse_pytest_sum
 from app.agents.tools import (
     CHAT_TOOLS,
     _MAX_PARALLEL_COMMANDS,
+    _apply_conflict_resolutions,
     _is_dangerous_command,
     _is_protected_path,
+    _llm_diagnose_deployment_failure,
+    _llm_explain_conflict_hunks,
+    _llm_generate_commit_message,
+    _llm_generate_pr_description,
+    _llm_review_diff,
+    _llm_summarize_url_content,
+    _parse_conflict_markers,
     _redact_secrets_in_text,
     _run_bash_command,
+    _ssrf_denial_reason,
     _venv_activate_snippet,
+    inspect_github_repo as _inspect_github_repo,
+    inspect_openapi_spec as _inspect_openapi_spec,
 )
 from app.config import get_settings
 from app.models.chat import ChatSession
@@ -2036,8 +2047,23 @@ class ChatAgent:
         if tool_name == "fetch_url":
             fu_url = str(inp["url"])
             fu_timeout = int(inp.get("timeout", 15))
-            cmd_s = f"curl -s -L --max-time {fu_timeout} --user-agent 'Gridiron-Agent/1.0' {fu_url} 2>&1"
-            return await asyncio.to_thread(_run_subprocess, cmd_s, repo, fu_timeout + 5)
+            fu_summarize = bool(inp.get("summarize", False))
+            fu_ssrf_reason = _ssrf_denial_reason(fu_url)
+            if fu_ssrf_reason:
+                return f"[POLICY DENIED] {fu_ssrf_reason}"
+            import shlex as _shlex_fu
+
+            cmd_s = f"curl -s -L --max-time {fu_timeout} --user-agent 'Gridiron-Agent/1.0' {_shlex_fu.quote(fu_url)} 2>&1"
+            fu_raw = await asyncio.to_thread(
+                _run_subprocess, cmd_s, repo, fu_timeout + 5
+            )
+            if fu_summarize and fu_raw and not fu_raw.startswith("[ERROR]"):
+                fu_summary = await asyncio.to_thread(
+                    _llm_summarize_url_content, fu_url, fu_raw
+                )
+                if fu_summary:
+                    return f"=== Summary ===\n{fu_summary}\n\n=== Raw content (first 10000 chars) ===\n{fu_raw[:10000]}"
+            return fu_raw
 
         # ========== BATCH 3 — Git extras ==========
 
@@ -2054,7 +2080,80 @@ class ChatAgent:
             if gm_msg:
                 gm_args += ["-m", gm_msg]
             gm_args.append(gm_branch)
-            return _git(gm_args, repo)
+            gm_output = _git(gm_args, repo)
+            if gm_output.startswith("[ERROR]") or "CONFLICT" in gm_output:
+                gm_conflicted = _git(["diff", "--name-only", "--diff-filter=U"], repo)
+                gm_files = [f for f in gm_conflicted.strip().split("\n") if f]
+                if gm_files:
+                    return (
+                        f"[CONFLICT] Merge of {gm_branch} has real conflicts in "
+                        f"{len(gm_files)} file(s): {', '.join(gm_files)}. Use "
+                        f"parse_merge_conflicts on each, then resolve_merge_conflict "
+                        f"to resolve, then git_commit to finish the merge.\n{gm_output}"
+                    )
+            return gm_output
+
+        if tool_name == "parse_merge_conflicts":
+            pmc_rel = str(inp["path"])
+            if _is_protected_path(pmc_rel):
+                return f"[POLICY DENIED] Protected path: {pmc_rel}"
+            pmc_target = root / pmc_rel
+            if not pmc_target.exists():
+                return f"[ERROR] File not found: {pmc_rel}"
+            pmc_text = pmc_target.read_text(encoding="utf-8")
+            pmc_hunks = _parse_conflict_markers(pmc_text)
+            if not pmc_hunks:
+                return f"No conflict markers found in {pmc_rel}."
+            import json as _json
+
+            return _json.dumps({"path": pmc_rel, "hunks": pmc_hunks}, indent=2)
+
+        if tool_name == "resolve_merge_conflict":
+            rmc_rel = str(inp["path"])
+            if _is_protected_path(rmc_rel):
+                return f"[POLICY DENIED] Protected path: {rmc_rel}"
+            rmc_target = root / rmc_rel
+            if not rmc_target.exists():
+                return f"[ERROR] File not found: {rmc_rel}"
+            rmc_raw_resolutions = inp.get("resolutions") or []
+            if not rmc_raw_resolutions:
+                return "[ERROR] resolutions is required — at least one {index, choice}"
+            rmc_resolutions: dict[int, dict[str, Any]] = {}
+            for entry in rmc_raw_resolutions:
+                rmc_idx = int(entry["index"])
+                rmc_choice = str(entry.get("choice", ""))
+                if rmc_choice == "custom" and "custom_content" not in entry:
+                    return (
+                        f"[ERROR] hunk {rmc_idx}: choice='custom' requires "
+                        "custom_content"
+                    )
+                rmc_resolutions[rmc_idx] = entry
+            rmc_text = rmc_target.read_text(encoding="utf-8")
+            rmc_new_text, rmc_applied, rmc_unresolved = _apply_conflict_resolutions(
+                rmc_text, rmc_resolutions
+            )
+            rmc_target.write_text(rmc_new_text, encoding="utf-8")
+            if rmc_unresolved:
+                return (
+                    f"Resolved {len(rmc_applied)} hunk(s) in {rmc_rel}. "
+                    f"Still unresolved (markers left intact): {rmc_unresolved}"
+                )
+            return f"Resolved all {len(rmc_applied)} conflict hunk(s) in {rmc_rel}."
+
+        if tool_name == "explain_merge_conflict":
+            emc_rel = str(inp["path"])
+            if _is_protected_path(emc_rel):
+                return f"[POLICY DENIED] Protected path: {emc_rel}"
+            emc_target = root / emc_rel
+            if not emc_target.exists():
+                return f"[ERROR] File not found: {emc_rel}"
+            emc_text = emc_target.read_text(encoding="utf-8")
+            emc_hunks = _parse_conflict_markers(emc_text)
+            if not emc_hunks:
+                return f"No conflict markers found in {emc_rel}."
+            return await asyncio.to_thread(
+                _llm_explain_conflict_hunks, emc_rel, emc_hunks
+            )
 
         if tool_name == "git_reset":
             gr_ref = str(inp.get("ref", "HEAD"))
@@ -2087,10 +2186,26 @@ class ChatAgent:
             return f"[ERROR] Unknown action: {gw_action}"
 
         if tool_name == "create_pr":
-            pr_title = str(inp["title"])
-            pr_body = str(inp.get("body", ""))
+            pr_title = str(inp.get("title", "")).strip()
+            pr_body = str(inp.get("body", "")).strip()
             pr_base = str(inp.get("base", "main"))
             pr_draft = bool(inp.get("draft", False))
+            if not pr_title or not pr_body:
+                pr_stat = _git(["diff", f"{pr_base}...HEAD", "--stat"], repo)
+                pr_diff = _git(["diff", f"{pr_base}...HEAD"], repo)[:6000]
+                pr_branch = _git(["rev-parse", "--abbrev-ref", "HEAD"], repo)
+                if pr_stat and not pr_stat.startswith("[ERROR]"):
+                    gen_title, gen_body = await asyncio.to_thread(
+                        _llm_generate_pr_description,
+                        pr_stat,
+                        pr_diff,
+                        pr_branch,
+                        pr_base,
+                    )
+                    pr_title = pr_title or gen_title
+                    pr_body = pr_body or gen_body
+            if not pr_title:
+                return "[ERROR] title is required (auto-generation failed — supply one explicitly)"
             pr_cmd_parts = [
                 "gh",
                 "pr",
@@ -2114,6 +2229,15 @@ class ChatAgent:
             gcm_diff = _git(gcm_diff_args, repo)[:3000]
             if not gcm_stat.strip():
                 return "[ERROR] No staged changes. Stage files first."
+            gcm_generated = await asyncio.to_thread(
+                _llm_generate_commit_message, gcm_stat, gcm_diff
+            )
+            if gcm_generated:
+                return (
+                    f"=== Generated commit message ===\n{gcm_generated}\n\n"
+                    f"=== Changed files ===\n{gcm_stat}\n\n"
+                    f"=== Diff (truncated) ===\n{gcm_diff}"
+                )
             return (
                 f"=== Changed files ===\n{gcm_stat}\n\n"
                 f"=== Diff (truncated) ===\n{gcm_diff}\n\n"
@@ -2121,6 +2245,35 @@ class ChatAgent:
                 "Format: <type>(<scope>): <description>\n"
                 "Types: feat, fix, docs, refactor, test, chore, style, perf"
             )
+
+        if tool_name == "review_diff":
+            rd_staged = bool(inp.get("staged_only", True))
+            rd_base = str(inp.get("base", "")).strip()
+            if rd_base:
+                rd_diff_args = ["diff", f"{rd_base}...HEAD"]
+            elif rd_staged:
+                rd_diff_args = ["diff", "--cached"]
+            else:
+                rd_diff_args = ["diff"]
+            rd_stat = _git(rd_diff_args + ["--stat"], repo)
+            rd_diff = _git(rd_diff_args, repo)[:6000]
+            if not rd_stat.strip() or rd_stat.startswith("[ERROR]"):
+                return "[ERROR] No changes to review for the given scope."
+            rd_review = await asyncio.to_thread(_llm_review_diff, rd_stat, rd_diff)
+            if rd_review:
+                return (
+                    f"=== Changed files ===\n{rd_stat}\n\n=== Review ===\n{rd_review}"
+                )
+            return (
+                f"[ERROR] Review generation unavailable — raw diff below.\n\n"
+                f"=== Changed files ===\n{rd_stat}\n\n=== Diff ===\n{rd_diff}"
+            )
+
+        if tool_name == "inspect_github_repo":
+            return await asyncio.to_thread(_inspect_github_repo, inp)
+
+        if tool_name == "inspect_openapi_spec":
+            return await asyncio.to_thread(_inspect_openapi_spec, inp)
 
         # ========== BATCH 4 — Testing extras ==========
 
@@ -2509,6 +2662,60 @@ class ChatAgent:
             else:
                 return f"[ERROR] Unknown action: {dc_action}"
             return await asyncio.to_thread(_run_subprocess, dc_cmd.strip(), repo, 120)
+
+        if tool_name == "diagnose_deployment_failure":
+            dd_container = str(inp.get("container", "")).strip()
+            dd_lines = int(inp.get("lines", 100))
+            dd_ps = await asyncio.to_thread(
+                _run_subprocess,
+                "docker ps -a --format 'table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Names}}'",
+                repo,
+                10,
+            )
+            dd_parts = [f"=== docker ps -a ===\n{dd_ps}"]
+            if dd_container:
+                dd_logs = await asyncio.to_thread(
+                    _run_subprocess,
+                    f"docker logs --tail {dd_lines} {dd_container} 2>&1",
+                    repo,
+                    15,
+                )
+                dd_parts.append(
+                    f"=== docker logs --tail {dd_lines} {dd_container} ===\n{dd_logs or '(no logs)'}"
+                )
+                dd_inspect = await asyncio.to_thread(
+                    _run_subprocess,
+                    f"docker inspect {dd_container} 2>&1",
+                    repo,
+                    15,
+                )
+                import json as _json_dd
+
+                try:
+                    dd_data = _json_dd.loads(dd_inspect)
+                    dd_state = (dd_data[0] if dd_data else {}).get("State", {})
+                    dd_summary = {
+                        "Status": dd_state.get("Status"),
+                        "ExitCode": dd_state.get("ExitCode"),
+                        "Error": dd_state.get("Error"),
+                        "OOMKilled": dd_state.get("OOMKilled"),
+                        "RestartCount": (dd_data[0] if dd_data else {}).get(
+                            "RestartCount"
+                        ),
+                        "StartedAt": dd_state.get("StartedAt"),
+                        "FinishedAt": dd_state.get("FinishedAt"),
+                    }
+                    dd_parts.append(
+                        "=== docker inspect (State) ===\n"
+                        + _json_dd.dumps(dd_summary, indent=2)
+                    )
+                except Exception:
+                    dd_parts.append("=== docker inspect ===\n" + dd_inspect[:2000])
+            dd_context = "\n\n".join(dd_parts)
+            dd_diagnosis = await asyncio.to_thread(
+                _llm_diagnose_deployment_failure, dd_context
+            )
+            return f"{dd_context}\n\n=== Diagnosis ===\n{dd_diagnosis}"
 
         # ========== BATCH 9 — Security ==========
 
@@ -3614,9 +3821,7 @@ class ChatAgent:
                 }
                 if selected is not None:
                     resume_payload["selected"] = selected
-                await self._graph.ainvoke(
-                    Command(resume=resume_payload), config=config
-                )
+                await self._graph.ainvoke(Command(resume=resume_payload), config=config)
             finally:
                 _metrics.record_tokens(
                     self._tokens_in - tokens_in_before,

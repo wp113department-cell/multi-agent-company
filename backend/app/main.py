@@ -590,13 +590,20 @@ async def _doc_agent_auto_trigger_loop() -> None:
     local repo every other real git operation here already operates on —
     not a remote fetch, which would add a network dependency this loop
     doesn't otherwise have) and, when it has moved since the last recorded
-    run for that agent (SystemSetting-backed, keyed per agent so
-    changelog_agent and release_notes_agent track independently), creates a
+    run for that agent (SystemSetting-backed, keyed per agent so every
+    agent in _DOC_AUTO_TRIGGER_AGENTS tracks independently), creates a
     real DevTask and dispatches the agent against it — the exact same
     task-based execution path POST /api/specialized-agents/{name}/run
-    already uses (create_task + run_changelog_agent/run_release_notes_agent
-    + record_agent_run_outcome), not a new bypass mechanism. Set
-    DOC_AGENT_AUTO_TRIGGER_INTERVAL_HOURS=0 to disable.
+    already uses (create_task + run_<agent> + record_agent_run_outcome),
+    not a new bypass mechanism. Set DOC_AGENT_AUTO_TRIGGER_INTERVAL_HOURS=0
+    to disable.
+
+    AUDIT_Q_BATCH10 §41 gap-closure — _DOC_AUTO_TRIGGER_AGENTS originally
+    covered only changelog_agent/release_notes_agent, leaving the other
+    real doc agents (readme_agent, api_docs_agent, architecture_doc_agent,
+    agent_roster_doc_agent, tool_catalog_doc_agent, migration_guide_doc_agent)
+    manual-invocation-only, plus the newly-added deployment_guide_doc_agent
+    (§19). All of them now go through this same loop.
     """
     interval_hours = get_settings().doc_agent_auto_trigger_interval_hours
     if interval_hours <= 0:
@@ -626,6 +633,59 @@ _DOC_AUTO_TRIGGER_AGENTS: tuple[tuple[str, str, str, str], ...] = (
         "app.agents.release_notes_agent",
         "run_release_notes_agent",
         "Auto-generate release notes",
+    ),
+    # AUDIT_Q_BATCH10 §41 "Auto-update when code changes: PARTIAL — wired to
+    # only 2 of the 6+ doc agents [...] the other 4-5 (including all 3
+    # agents with missing role files) remain strictly manual-invocation-only".
+    # The 3 role-file-missing agents this cited were already fixed by the
+    # earlier Batch 2 remediation pass (backend/roles/*.md now exist for
+    # all of them, verified via load_role() in this same batch's audit
+    # pass); wiring the remaining real doc agents in here is the actual
+    # fix for the auto-update gap itself. Same real-event trigger (main
+    # HEAD movement), same per-agent SystemSetting SHA tracking as
+    # changelog_agent/release_notes_agent above — each agent only reruns
+    # once per real HEAD movement, not on every loop tick.
+    (
+        "readme_agent",
+        "app.agents.readme_agent",
+        "run_readme_agent",
+        "Auto-update README.md",
+    ),
+    (
+        "api_docs_agent",
+        "app.agents.api_docs_agent",
+        "run_api_docs_agent",
+        "Auto-update API docs",
+    ),
+    (
+        "architecture_doc_agent",
+        "app.agents.architecture_doc_agent",
+        "run_architecture_doc_agent",
+        "Auto-update ARCHITECTURE.md",
+    ),
+    (
+        "agent_roster_doc_agent",
+        "app.agents.agent_roster_doc_agent",
+        "run_agent_roster_doc_agent",
+        "Auto-update agent roster docs",
+    ),
+    (
+        "tool_catalog_doc_agent",
+        "app.agents.tool_catalog_doc_agent",
+        "run_tool_catalog_doc_agent",
+        "Auto-update tool catalog docs",
+    ),
+    (
+        "migration_guide_doc_agent",
+        "app.agents.migration_guide_doc_agent",
+        "run_migration_guide_doc_agent",
+        "Auto-update migration guide",
+    ),
+    (
+        "deployment_guide_doc_agent",
+        "app.agents.deployment_guide_doc_agent",
+        "run_deployment_guide_doc_agent",
+        "Auto-update deployment guide",
     ),
 )
 
@@ -677,11 +737,21 @@ async def _run_doc_agent_auto_trigger_once() -> None:
                 )
                 module = importlib.import_module(module_path)
                 run_fn = getattr(module, fn_name)
+                # AUDIT_Q_BATCH10 §41 — changelog_agent/release_notes_agent
+                # name their 2nd param `description`, but readme_agent/
+                # architecture_doc_agent/agent_roster_doc_agent/
+                # tool_catalog_doc_agent/migration_guide_doc_agent/
+                # deployment_guide_doc_agent name it `doc_request` — a plain
+                # description=... keyword call would TypeError for exactly
+                # half this tuple. Reuses the same generic, signature-
+                # introspecting fix specialized_agents.py's own dispatch
+                # endpoint already established for this exact problem
+                # (Day 53 gap-closure) rather than a second, parallel fix.
+                from app.api.specialized_agents import _agent_call_kwargs
+
                 result = await asyncio.to_thread(
                     run_fn,
-                    task_id=task.id,
-                    description=task.description,
-                    repo_path=repo_path,
+                    **_agent_call_kwargs(run_fn, task.id, task.description, repo_path),
                 )
                 await record_agent_run_outcome(
                     agent_name=agent_name,

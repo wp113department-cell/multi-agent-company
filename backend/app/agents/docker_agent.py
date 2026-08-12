@@ -48,6 +48,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "docker_compose",
         "docker_build",
         "docker_restart",
+        "diagnose_deployment_failure",
         "edit_file",
         "write_file",
         "submit_docker_report",
@@ -92,7 +93,9 @@ def run_docker_agent(
         "Process:\n"
         "1. Use read_file to inspect existing Dockerfile/docker-compose files.\n"
         "2. Use search_code to find the actual entrypoint, ports, env vars used.\n"
-        "3. Use docker_ps / docker_logs to understand the current container state.\n"
+        "3. Use docker_ps / docker_logs to understand the current container state. If a "
+        "   container is failing or exited unexpectedly, use diagnose_deployment_failure "
+        "   for a grounded root-cause diagnosis instead of guessing from docker_logs alone.\n"
         "4. Draft the minimal change — base image versions must come from the existing file "
         "   or the running container, never assumed from memory.\n"
         "5. After writing files, run docker_build to verify it actually builds.\n"
