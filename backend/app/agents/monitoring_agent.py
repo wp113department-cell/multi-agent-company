@@ -235,7 +235,9 @@ def run_monitoring_agent_scan(trace_id: str = "") -> AgentResult:
 
         docker_issues = check_docker_containers()
         if docker_issues:
-            logger.warning("Docker container health issue(s) detected: %s", docker_issues)
+            logger.warning(
+                "Docker container health issue(s) detected: %s", docker_issues
+            )
     except Exception:
         logger.warning("Docker health pre-check failed (non-fatal)", exc_info=True)
 
@@ -246,7 +248,9 @@ def run_monitoring_agent_scan(trace_id: str = "") -> AgentResult:
         if git_issues:
             logger.warning("Git worktree health issue(s) detected: %s", git_issues)
     except Exception:
-        logger.warning("Git worktree health pre-check failed (non-fatal)", exc_info=True)
+        logger.warning(
+            "Git worktree health pre-check failed (non-fatal)", exc_info=True
+        )
 
     handlers = make_scan_handlers(repo, trace_id=trace_id)
     msg = (

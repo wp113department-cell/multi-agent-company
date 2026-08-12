@@ -41,7 +41,9 @@ def _init_git_repo(path: Path) -> None:
     subprocess.run(
         ["git", "config", "user.email", "t@t.com"], cwd=str(path), capture_output=True
     )
-    subprocess.run(["git", "config", "user.name", "T"], cwd=str(path), capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.name", "T"], cwd=str(path), capture_output=True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -88,9 +90,9 @@ class TestPackageInstallConfirmationGate:
         handlers = make_chat_handlers(str(tmp_path), session=session)
 
         fake_proc = MagicMock(stdout="added 1 package", stderr="")
-        with patch("app.agents.tools.subprocess.run", return_value=fake_proc) as mock_run, patch(
-            "asyncio.get_event_loop", return_value=_FakeLoop()
-        ):
+        with patch(
+            "app.agents.tools.subprocess.run", return_value=fake_proc
+        ) as mock_run, patch("asyncio.get_event_loop", return_value=_FakeLoop()):
             result = handlers["npm_install"]({"directory": "."})
 
         session.request_confirmation.assert_awaited_once()
@@ -232,7 +234,9 @@ class TestMonitoringAgentScan:
         assert "docker_build" not in names
         assert "write_file" not in names
 
-    def test_make_scan_handlers_includes_required_handlers(self, tmp_path: Path) -> None:
+    def test_make_scan_handlers_includes_required_handlers(
+        self, tmp_path: Path
+    ) -> None:
         from app.agents.monitoring_agent import make_scan_handlers
 
         handlers = make_scan_handlers(str(tmp_path), trace_id="test-trace")
@@ -286,7 +290,9 @@ class TestMonitoringAgentScan:
         async def _verify_and_cleanup() -> EnhancementRequest:
             engine = _engine()
             try:
-                async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                async with async_sessionmaker(
+                    engine, expire_on_commit=False
+                )() as session:
                     row = (
                         await session.execute(
                             select(EnhancementRequest).where(
@@ -549,7 +555,9 @@ class TestAskHumanToChoose:
 
         with p1, p2, p3:
             await agent.run("where should this deploy?")
-            resumed = await agent.resume("toolu_choose3", True, selected="not-a-real-option")
+            resumed = await agent.resume(
+                "toolu_choose3", True, selected="not-a-real-option"
+            )
             assert resumed is True
 
         tool_result_texts = [
@@ -663,9 +671,7 @@ class TestRememberConfirmationChoice:
         session.remembered_confirmations.add("git_push")
 
         responses = [
-            _FakeToolUseStream(
-                "delete_file", {"path": "foo.txt"}, tool_id="toolu_r3"
-            ),
+            _FakeToolUseStream("delete_file", {"path": "foo.txt"}, tool_id="toolu_r3"),
             _FakeTextStream("Deleted."),
         ]
         p1, p2, p3 = _patched_agent(agent, responses)

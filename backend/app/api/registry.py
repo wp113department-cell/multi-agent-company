@@ -52,9 +52,7 @@ class MetricsResponse(BaseModel):
 
 
 class LifecycleRequest(BaseModel):
-    action: str = Field(
-        ..., description="One of: disable | retire | reactivate"
-    )
+    action: str = Field(..., description="One of: disable | retire | reactivate")
     reason: str = Field(
         default="", description="Required for disable/retire; ignored for reactivate"
     )

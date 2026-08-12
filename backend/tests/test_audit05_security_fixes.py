@@ -550,8 +550,9 @@ class TestChangePasswordEndpoint:
                 role="approver",
             )
             user = CurrentUser(username="alice", role="approver", is_authenticated=True)
-            with patch("app.api.auth.get_user", new=AsyncMock(return_value=fake_user)), \
-                 patch("app.api.auth.verify_password", return_value=True):
+            with patch(
+                "app.api.auth.get_user", new=AsyncMock(return_value=fake_user)
+            ), patch("app.api.auth.verify_password", return_value=True):
                 with pytest.raises(HTTPException) as exc_info:
                     await change_password(
                         body=ChangePasswordRequest(

@@ -49,7 +49,9 @@ def _push_dashboard_event(event_type: str, payload: dict[str, Any]) -> None:
     stream.push({"type": event_type, **payload})
 
 
-def _serialize(row: EnhancementRequest, auto_applicable_agents: set[str]) -> dict[str, Any]:
+def _serialize(
+    row: EnhancementRequest, auto_applicable_agents: set[str]
+) -> dict[str, Any]:
     return {
         "id": row.id,
         "agentName": row.agent_name,

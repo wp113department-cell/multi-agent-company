@@ -119,13 +119,21 @@ class TestFleetDispatchClosesLifecycleLoop:
             async def _session():
                 yield fake_db
 
-            with patch.object(sa, "_load_agent_fn", return_value=lambda **kw: fake_result), \
-                 patch("app.db.session.get_session_factory", return_value=_session), \
-                 patch.object(sa, "append_log", new=AsyncMock()), \
-                 patch("app.artifacts.store.save_artifact_async", new=AsyncMock()), \
-                 patch("app.memory.hooks.record_agent_run_outcome", new=AsyncMock()), \
-                 patch("app.db.repository.get_task_repo_id", new=AsyncMock(return_value=None)), \
-                 patch("app.api.repo.get_active_repo_path", return_value="."):
+            with patch.object(
+                sa, "_load_agent_fn", return_value=lambda **kw: fake_result
+            ), patch(
+                "app.db.session.get_session_factory", return_value=_session
+            ), patch.object(
+                sa, "append_log", new=AsyncMock()
+            ), patch(
+                "app.artifacts.store.save_artifact_async", new=AsyncMock()
+            ), patch(
+                "app.memory.hooks.record_agent_run_outcome", new=AsyncMock()
+            ), patch(
+                "app.db.repository.get_task_repo_id", new=AsyncMock(return_value=None)
+            ), patch(
+                "app.api.repo.get_active_repo_path", return_value="."
+            ):
                 await sa._run_specialized_agent_bg(
                     agent_name=agent_name,
                     task_id=999999,
@@ -228,7 +236,9 @@ class TestBatch14RBACRouteCoverage:
                 routes_by_path.setdefault(path, []).append(r)
 
         missing = set(_NEWLY_PROTECTED_ROUTES) - routes_by_path.keys()
-        assert not missing, f"Expected route(s) not found — path/prefix changed? {missing}"
+        assert (
+            not missing
+        ), f"Expected route(s) not found — path/prefix changed? {missing}"
 
         still_open: list[str] = []
         for path, routes in routes_by_path.items():
@@ -379,20 +389,30 @@ class TestRepoIdFkThreading:
                         )
 
                         files = (
-                            await db.execute(
-                                select(IndexedFile).where(
-                                    IndexedFile.repo_path == repo_path
+                            (
+                                await db.execute(
+                                    select(IndexedFile).where(
+                                        IndexedFile.repo_path == repo_path
+                                    )
                                 )
                             )
-                        ).scalars().all()
+                            .scalars()
+                            .all()
+                        )
                         assert files, "expected at least one indexed file"
                         assert all(f.repo_id == real_repo_id for f in files)
 
                         edges = (
-                            await db.execute(
-                                select(CallEdge).where(CallEdge.repo_path == repo_path)
+                            (
+                                await db.execute(
+                                    select(CallEdge).where(
+                                        CallEdge.repo_path == repo_path
+                                    )
+                                )
                             )
-                        ).scalars().all()
+                            .scalars()
+                            .all()
+                        )
                         assert edges, "expected at least one call edge"
                         assert all(e.repo_id == real_repo_id for e in edges)
                     finally:
@@ -434,12 +454,16 @@ class TestRepoIdFkThreading:
                     await persist_repo_index(repo_path, idx, graph, db)
 
                     files = (
-                        await db.execute(
-                            select(IndexedFile).where(
-                                IndexedFile.repo_path == repo_path
+                        (
+                            await db.execute(
+                                select(IndexedFile).where(
+                                    IndexedFile.repo_path == repo_path
+                                )
                             )
                         )
-                    ).scalars().all()
+                        .scalars()
+                        .all()
+                    )
                     assert files and all(f.repo_id is None for f in files)
 
                     await db.execute(
@@ -466,7 +490,10 @@ class TestCredentialVaultRepoScoping:
         return create_async_engine(get_settings().database_url, pool_pre_ping=True)
 
     def test_repo_scoped_credential_wins_over_global(self) -> None:
-        from app.security.credential_vault import ProjectCredentials, get_credential_vault
+        from app.security.credential_vault import (
+            ProjectCredentials,
+            get_credential_vault,
+        )
         from app.db.repository import delete_setting
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -485,15 +512,21 @@ class TestCredentialVaultRepoScoping:
                     )
 
                     loaded_repo7 = await vault.load(db, repo_id=7)
-                    assert loaded_repo7.github_token.get_secret_value() == "repo-7-token"
+                    assert (
+                        loaded_repo7.github_token.get_secret_value() == "repo-7-token"
+                    )
 
                     # A different repo with no scoped credential falls back
                     # to global, unchanged.
                     loaded_repo8 = await vault.load(db, repo_id=8)
-                    assert loaded_repo8.github_token.get_secret_value() == "global-token"
+                    assert (
+                        loaded_repo8.github_token.get_secret_value() == "global-token"
+                    )
 
                     loaded_global = await vault.load(db)
-                    assert loaded_global.github_token.get_secret_value() == "global-token"
+                    assert (
+                        loaded_global.github_token.get_secret_value() == "global-token"
+                    )
 
                     await delete_setting(db, "github_token")
                     await delete_setting(db, "repo:7:github_token")
@@ -503,7 +536,10 @@ class TestCredentialVaultRepoScoping:
         asyncio.run(_run())
 
     def test_repo_scoped_custom_secret_does_not_leak_into_global_listing(self) -> None:
-        from app.security.credential_vault import ProjectCredentials, get_credential_vault
+        from app.security.credential_vault import (
+            ProjectCredentials,
+            get_credential_vault,
+        )
         from app.db.repository import delete_setting, list_setting_keys
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -557,7 +593,9 @@ class TestVersionAwarenessToolWiring:
         assert "git_tag" in AGENT_CONTRACT["allowed_tools"]
         assert "semver_bump" in AGENT_CONTRACT["allowed_tools"]
 
-    def test_version_manager_handlers_include_real_git_tag_semver_handlers(self) -> None:
+    def test_version_manager_handlers_include_real_git_tag_semver_handlers(
+        self,
+    ) -> None:
         from app.agents.version_manager_agent import make_version_manager_agent_handlers
 
         handlers = make_version_manager_agent_handlers(".")
@@ -580,7 +618,11 @@ class TestRealDiagramGeneration:
         )
         handlers = make_chat_handlers(str(tmp_path))
         out = handlers["generate_diagram"](
-            {"description": "shape hierarchy", "kind": "classDiagram", "path": "shapes.py"}
+            {
+                "description": "shape hierarchy",
+                "kind": "classDiagram",
+                "path": "shapes.py",
+            }
         )
         assert "classDiagram" in out
         assert "Shape <|-- Circle" in out
@@ -603,11 +645,15 @@ class TestRealDiagramGeneration:
         from app.agents.tools import make_chat_handlers
 
         handlers = make_chat_handlers(str(tmp_path))
-        out = handlers["generate_diagram"]({"description": "generic", "kind": "flowchart"})
+        out = handlers["generate_diagram"](
+            {"description": "generic", "kind": "flowchart"}
+        )
         assert "A[Start]" in out
         assert "derive this from actual code" in out
 
-    def test_class_diagram_falls_back_when_file_has_no_classes(self, tmp_path: Path) -> None:
+    def test_class_diagram_falls_back_when_file_has_no_classes(
+        self, tmp_path: Path
+    ) -> None:
         from app.agents.tools import make_chat_handlers
 
         (tmp_path / "empty.py").write_text("x = 1\n")

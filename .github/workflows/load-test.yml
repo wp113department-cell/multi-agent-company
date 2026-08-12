@@ -66,6 +66,21 @@ jobs:
       REDIS_STREAMS_ENABLED: "false"
       ARTIFACT_BACKEND: "db"
       RBAC_ENABLED: "false"
+      # k6 load-test gap-closure (2026-08-13) — GET /api/agents, /api/metrics,
+      # /api/tasks have no per-route @limiter.limit override, so they fall
+      # through to the blanket rate_limit_default (200/minute, keyed by
+      # remote IP — see app/rate_limit.py). All k6 VUs run from this one CI
+      # runner IP: at 10 VUs the load profile alone generates ~1,800 req/min
+      # against those 3 endpoints combined, ~9x over that per-IP limit,
+      # so the majority get 429'd — a real, reproducible finding (confirmed
+      # against app/rate_limit.py's own _find_route_handler_recursive fix
+      # comment, which documents this exact class of k6 failure), not a
+      # database or startup-readiness issue. Disabled here for the same
+      # reason RBAC_ENABLED is already false in this job: 10 VUs from one
+      # IP is not representative of real distributed traffic, and rate
+      # limiting itself is a distinct concern from this job's actual
+      # purpose (measuring the app's own throughput/latency under load).
+      RATE_LIMIT_ENABLED: "false"
 
     steps:
       - uses: actions/checkout@v7

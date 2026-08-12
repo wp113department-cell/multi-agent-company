@@ -27,7 +27,9 @@ _DIRTY_FILE_ALERT_THRESHOLD = 15
 
 
 def check_git_worktree(
-    repo_path: str, dirty_threshold: int = _DIRTY_FILE_ALERT_THRESHOLD, timeout: int = 10
+    repo_path: str,
+    dirty_threshold: int = _DIRTY_FILE_ALERT_THRESHOLD,
+    timeout: int = 10,
 ) -> list[str] | None:
     """Real `git status --short --branch` against repo_path's working tree.
 
@@ -61,7 +63,9 @@ def check_git_worktree(
 
     issues: list[str] = []
     if "diverged" in branch_line.lower():
-        issues.append(f"Branch has diverged from its upstream: {branch_line.lstrip('# ')}")
+        issues.append(
+            f"Branch has diverged from its upstream: {branch_line.lstrip('# ')}"
+        )
     else:
         behind_match = re.search(r"behind (\d+)", branch_line)
         if behind_match:

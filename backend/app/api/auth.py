@@ -237,6 +237,8 @@ async def change_password(
             status_code=400, detail="New password must be at least 8 characters"
         )
 
-    await update_user_password(db, current_user.username, hash_password(body.new_password))
+    await update_user_password(
+        db, current_user.username, hash_password(body.new_password)
+    )
     logger.info("Password changed for user: %s", current_user.username)
     return {"status": "changed", "username": current_user.username}

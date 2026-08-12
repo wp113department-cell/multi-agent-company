@@ -228,7 +228,9 @@ class CredentialVault:
             + list(creds.custom_secrets.keys()),
         )
 
-    async def inject_into_env(self, db: Any, repo_id: int | None = None) -> dict[str, str]:
+    async def inject_into_env(
+        self, db: Any, repo_id: int | None = None
+    ) -> dict[str, str]:
         creds = await self.load(db, repo_id=repo_id)
         return creds.get_env_vars()
 
