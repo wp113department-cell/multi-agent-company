@@ -81,7 +81,10 @@ def generate_embeddings(index: RepoIndex) -> list[dict[str, object]]:
 
 
 async def persist_code_embeddings(
-    repo_path: str, embeddings: list[dict[str, object]], db: Any
+    repo_path: str,
+    embeddings: list[dict[str, object]],
+    db: Any,
+    repo_id: int | None = None,
 ) -> int:
     """Upsert generate_embeddings()'s output into code_embeddings — real
     persistence for a table that previously had none. Keyed on
@@ -92,6 +95,11 @@ async def persist_code_embeddings(
     `db` is an AsyncSession — caller-provided so this composes with an
     already-open session (e.g. _do_reindex's own `async with
     get_async_session() as db` block) rather than opening a second one.
+
+    AUDIT_Q_BATCH14 §77/§94 gap-closure — repo_id (new, optional) populates
+    the additive FK column (migration 043); repo_path stays the unique-
+    constraint key and every existing query's filter, unchanged. Omitted by
+    any existing caller, this keeps the pre-existing NULL behavior exactly.
     """
     if not embeddings:
         return 0
@@ -111,6 +119,7 @@ async def persist_code_embeddings(
             pg_insert(CodeEmbedding)
             .values(
                 repo_path=repo_path,
+                repo_id=repo_id,
                 file_path=str(emb["file_path"]),
                 chunk_index=0,
                 content=str(emb.get("content", "")),
@@ -120,6 +129,7 @@ async def persist_code_embeddings(
             .on_conflict_do_update(
                 constraint="code_embeddings_repo_path_file_path_chunk_index_key",
                 set_={
+                    "repo_id": repo_id,
                     "content": str(emb.get("content", "")),
                     "embedding": vec,
                     "content_hash": str(emb.get("content_hash", "")),

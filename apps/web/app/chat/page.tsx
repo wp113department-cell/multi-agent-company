@@ -606,10 +606,14 @@ export default function ChatPage() {
 
             {repos.length > 0 && (
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
+                <label
+                  htmlFor="chat-repo-select"
+                  className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400"
+                >
                   Repository
                 </label>
                 <select
+                  id="chat-repo-select"
                   value={selectedRepo}
                   onChange={(e) => setSelectedRepo(e.target.value)}
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-700"

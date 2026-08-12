@@ -236,7 +236,10 @@ def _extract_name(url: str) -> str:
 
 
 @router.get("")
-async def list_repos(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def list_repos(
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
     """List all cloned repos and identify the active one."""
     result = await db.execute(select(Repo).order_by(Repo.created_at.desc()))
     repos = result.scalars().all()
@@ -395,7 +398,16 @@ async def _do_reindex() -> None:
         # duration.
         graph_result = await asyncio.to_thread(build_cross_file_graph, full_index)
         async with get_async_session() as db:
-            await persist_repo_index(repo_path, full_index, graph_result, db)
+            # AUDIT_Q_BATCH14 §77/§94 gap-closure — resolve_repo_id_from_path
+            # is this codebase's own sanctioned exception to never reverse-
+            # resolving repo_id from a path (app/db/repository.py's own
+            # docstring); repo_path stays the actual delete/reinsert key.
+            from app.db.repository import resolve_repo_id_from_path
+
+            resolved_repo_id = await resolve_repo_id_from_path(db, repo_path)
+            await persist_repo_index(
+                repo_path, full_index, graph_result, db, repo_id=resolved_repo_id
+            )
     except Exception:
         logger.exception("Failed to persist repo index for %s", repo_path)
 
@@ -416,8 +428,11 @@ async def _do_reindex() -> None:
             code_embeddings = await asyncio.to_thread(generate_embeddings, full_index)
             if code_embeddings:
                 async with get_async_session() as db:
+                    from app.db.repository import resolve_repo_id_from_path
+
+                    resolved_repo_id = await resolve_repo_id_from_path(db, repo_path)
                     written = await persist_code_embeddings(
-                        repo_path, code_embeddings, db
+                        repo_path, code_embeddings, db, repo_id=resolved_repo_id
                     )
                 logger.info(
                     "Code embeddings: persisted %d row(s) for %s", written, repo_path
@@ -438,12 +453,17 @@ async def trigger_reindex(
 
 
 @router.get("/reindex")
-async def reindex_status() -> dict[str, object]:
+async def reindex_status(
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, object]:
     return {"lastIndexedAt": _indexed_at, "fileCount": _file_count}
 
 
 @router.get("/context")
-async def get_context(task_description: str) -> dict[str, object]:
+async def get_context(
+    task_description: str,
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, object]:
     from app.repo_tools.context_builder import build_context
 
     repo_path = get_active_repo_path()
@@ -474,7 +494,9 @@ async def get_context(task_description: str) -> dict[str, object]:
 
 
 @router.get("/architecture")
-async def get_architecture() -> dict[str, object]:
+async def get_architecture(
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, object]:
     """Gap-closure (2026-07-23): LLM-prompt-driven architecture summary —
     see app/repo_tools/architecture_mapper.py's module docstring for why
     this is a prompt-driven approach rather than a novel static-analysis
@@ -498,7 +520,9 @@ async def get_architecture() -> dict[str, object]:
 
 
 @router.get("/class-graph")
-async def get_class_graph() -> dict[str, object]:
+async def get_class_graph(
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, object]:
     """Phase 6.4 — class/inheritance graph, resolved by the same
     identifier-name-matching technique as the cross-file call graph. Uses
     the maintained full index (same fallback-to-fresh-scan convention as
@@ -530,7 +554,9 @@ async def get_class_graph() -> dict[str, object]:
 
 
 @router.get("/package-graph")
-async def get_package_graph() -> dict[str, object]:
+async def get_package_graph(
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, object]:
     """Phase 6.4 — package/module-level dependency graph: scanner.py's
     existing file-level import edges aggregated up to directory
     granularity. Pure aggregation over already-collected data."""

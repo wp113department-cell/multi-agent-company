@@ -22,6 +22,7 @@ from app.db.models import (
     SystemSetting,
     TaskImage,
     TaskLog,
+    User,
 )
 
 logger = logging.getLogger(__name__)
@@ -723,3 +724,62 @@ async def list_setting_keys(db: AsyncSession, prefix: str) -> list[str]:
         select(SystemSetting.key).where(SystemSetting.key.like(f"{prefix}%"))
     )
     return list(result.scalars().all())
+
+
+# ---------------------------------------------------------------------------
+# Users — AUDIT_Q_BATCH14 §48 gap-closure (migration 044). Real callers:
+# app/api/auth.py (login/setup_first_user/change_password), app/main.py
+# (startup admin-seed), app/api/privacy.py (GDPR export/erasure).
+# ---------------------------------------------------------------------------
+
+
+async def get_user(db: AsyncSession, username: str) -> User | None:
+    result = await db.execute(select(User).where(User.username == username))
+    return result.scalar_one_or_none()
+
+
+async def count_users(db: AsyncSession) -> int:
+    from sqlalchemy import func as sa_func
+
+    result = await db.execute(select(sa_func.count()).select_from(User))
+    return int(result.scalar_one())
+
+
+async def create_user(
+    db: AsyncSession,
+    username: str,
+    hashed_password: str,
+    role: str = "viewer",
+    must_change_password: bool = False,
+) -> User:
+    user = User(
+        username=username,
+        hashed_password=hashed_password,
+        role=role,
+        must_change_password=must_change_password,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def update_user_password(
+    db: AsyncSession, username: str, hashed_password: str
+) -> None:
+    """Clears must_change_password — matches change_password's pre-existing
+    behavior (a durable password change always clears the forced-change
+    flag)."""
+    await db.execute(
+        update(User)
+        .where(User.username == username)
+        .values(hashed_password=hashed_password, must_change_password=False)
+    )
+    await db.commit()
+
+
+async def delete_user(db: AsyncSession, username: str) -> bool:
+    result = await db.execute(delete(User).where(User.username == username))
+    await db.commit()
+    count: int = getattr(result, "rowcount", 0)
+    return count > 0

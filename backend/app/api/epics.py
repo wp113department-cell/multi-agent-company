@@ -133,7 +133,10 @@ async def create_epic(
 
 
 @router.get("")
-async def list_epics(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+async def list_epics(
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> list[dict[str, Any]]:
     """List all epics, newest first."""
     result = await db.execute(select(Epic).order_by(Epic.created_at.desc()))
     epics = list(result.scalars().all())
@@ -153,7 +156,11 @@ async def list_epics(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]
 
 
 @router.get("/{epic_id}")
-async def get_epic(epic_id: str, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def get_epic(
+    epic_id: str,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
     """Get an epic with all child tasks."""
     result = await db.execute(select(Epic).where(Epic.epic_id == epic_id))
     epic = result.scalar_one_or_none()
@@ -295,7 +302,10 @@ async def record_policy_approval(
 
 
 @router.get("/batch-review", summary="List epics and tasks awaiting review in bulk")
-async def batch_review(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def batch_review(
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
     """Return all epics + tasks that are ready for human review, grouped for batch approval.
 
     Returns epics in 'ready_for_review', 'pending_cost_approval', and tasks in

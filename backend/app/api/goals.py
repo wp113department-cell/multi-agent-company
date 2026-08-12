@@ -57,6 +57,7 @@ async def create_goal(
 @router.get("", response_model=list[GoalResponse])
 async def list_goals(
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> Any:
     result = await db.execute(select(Goal).order_by(Goal.created_at.desc()))
     return result.scalars().all()
@@ -66,6 +67,7 @@ async def list_goals(
 async def get_goal(
     goal_id: str,
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> Any:
     row = await db.get(Goal, goal_id)
     if row is None:

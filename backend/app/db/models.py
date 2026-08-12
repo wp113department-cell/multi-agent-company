@@ -317,6 +317,17 @@ class IndexedFile(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     repo_path: Mapped[str] = mapped_column(Text)
+    # AUDIT_Q_BATCH14 §77/§94 gap-closure (migration 043) — additive,
+    # nullable FK alongside the pre-existing repo_path string (same
+    # "NULL = unscoped/legacy" convention as MemoryEmbedding.repo_id /
+    # VersionedLesson.repo_id). repo_path remains every existing query's
+    # source of truth unchanged; repo_id is populated opportunistically by
+    # persist_repo_index() going forward via resolve_repo_id_from_path()
+    # (app/db/repository.py), the codebase's own sanctioned exception to
+    # never reverse-resolving repo_id from a path elsewhere.
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("repos.id", ondelete="SET NULL"), nullable=True
+    )
     file_path: Mapped[str] = mapped_column(Text)
     language: Mapped[str | None] = mapped_column(String(50), nullable=True)
     content_hash: Mapped[str] = mapped_column(String(64))
@@ -349,6 +360,11 @@ class CallEdge(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     repo_path: Mapped[str] = mapped_column(Text)
+    # AUDIT_Q_BATCH14 §77/§94 gap-closure — see IndexedFile.repo_id's
+    # comment; identical additive convention.
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("repos.id", ondelete="SET NULL"), nullable=True
+    )
     caller_file: Mapped[str] = mapped_column(Text)
     caller_symbol: Mapped[str | None] = mapped_column(String(500), nullable=True)
     callee_file: Mapped[str] = mapped_column(Text)
@@ -489,6 +505,33 @@ class PolicyApproval(Base):
     )
 
     policy: Mapped[Policy] = relationship(back_populates="approvals")
+
+
+class User(Base):
+    """AUDIT_Q_BATCH14 §48 gap-closure (2026-08-12) — normalized login
+    credentials table. Replaces the Phase-1 shortcut (documented in
+    app/api/auth.py's own module docstring) of storing every user as a JSON
+    array inside a single system_settings row keyed 'auth_users'. Migration
+    044 backfills any existing auth_users rows into this table; every real
+    caller (app/api/auth.py's login/setup_first_user/change_password,
+    app/main.py's startup admin-seed, app/api/privacy.py's GDPR export/
+    erasure) reads/writes this table exclusively now — no dual-write path,
+    matching this table's own one-time cutover.
+
+    username is the primary key (not a surrogate id) to match the identity
+    shape already used throughout this codebase for a human actor —
+    UserRole.user_id, audit_log.agent_name/approved_by, TaskLog actors are
+    all plain username strings, never a numeric user id."""
+
+    __tablename__ = "users"
+
+    username: Mapped[str] = mapped_column(String(100), primary_key=True)
+    hashed_password: Mapped[str] = mapped_column(Text)
+    role: Mapped[str] = mapped_column(String(50), default="viewer")
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class UserRole(Base):
@@ -1066,6 +1109,14 @@ class CodeEmbedding(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     repo_path: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    # AUDIT_Q_BATCH14 §77/§94 gap-closure — see IndexedFile.repo_id's
+    # comment; identical additive convention. This table's own docstring
+    # above ("predates the Repo model's introduction") is why repo_path
+    # stays the unique-constraint key and query filter — this column only
+    # adds real FK-scoping metadata, it does not replace repo_path.
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("repos.id", ondelete="SET NULL"), nullable=True
+    )
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
     chunk_index: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     content: Mapped[str] = mapped_column(Text, nullable=False)

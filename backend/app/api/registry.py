@@ -7,13 +7,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.db.models import Agent
-from app.middleware.rbac import require_approver
+from app.middleware.rbac import require_approver, require_authenticated
 
 router = APIRouter(prefix="/api/agents", tags=["registry"])
 
@@ -51,6 +51,15 @@ class MetricsResponse(BaseModel):
     last_computed_at: str
 
 
+class LifecycleRequest(BaseModel):
+    action: str = Field(
+        ..., description="One of: disable | retire | reactivate"
+    )
+    reason: str = Field(
+        default="", description="Required for disable/retire; ignored for reactivate"
+    )
+
+
 # ---- Helpers ----
 
 
@@ -76,6 +85,7 @@ def _agent_to_response(a: Agent) -> dict[str, Any]:
 async def list_agents(
     tag: str | None = None,
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> list[dict[str, Any]]:
     """List all registered agents. Optional ?tag= filter by capability tag."""
     stmt = select(Agent).order_by(Agent.name)
@@ -89,7 +99,11 @@ async def list_agents(
 
 
 @router.get("/{name}")
-async def get_agent(name: str, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def get_agent(
+    name: str,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
     """Get a single agent by name."""
     result = await db.execute(select(Agent).where(Agent.name == name))
     agent = result.scalar_one_or_none()
@@ -135,6 +149,7 @@ async def _compute_user_approval_rate(db: AsyncSession, name: str) -> float | No
 async def get_agent_metrics(
     name: str,
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     """Return live-computed metrics for the agent, then persist the snapshot.
 
@@ -238,3 +253,48 @@ async def register_agent(
     await db.commit()
     await db.refresh(agent)
     return {**_agent_to_response(agent), "updated": False}
+
+
+@router.post("/{name}/lifecycle")
+async def change_agent_lifecycle(
+    name: str,
+    body: LifecycleRequest,
+    _approver: str = Depends(require_approver),
+) -> dict[str, Any]:
+    """AUDIT_Q_BATCH14 §77/§94 gap-closure — "Agent lifecycle (hire/retire/
+    replace/promote)" was NO: there was no way for an operator to
+    deliberately pull an agent out of dispatch rotation, distinct from the
+    agent degrading on its own (fail_task()'s health-driven path). disable
+    is reversible (reactivate); retire is a deliberate, permanent-until-
+    replaced governance decision — see AgentInstance.retire()'s own
+    docstring. Approver-gated: this changes what FleetManager.select() can
+    dispatch fleet-wide, the same authority tier as /api/agents POST above.
+    """
+    from app.fleet.agent_registry import get_agent_registry
+
+    registry = get_agent_registry()
+    if body.action == "disable":
+        if not body.reason:
+            raise HTTPException(status_code=422, detail="reason is required to disable")
+        instance = registry.disable(name, body.reason)
+    elif body.action == "retire":
+        if not body.reason:
+            raise HTTPException(status_code=422, detail="reason is required to retire")
+        instance = registry.retire(name, body.reason)
+    elif body.action == "reactivate":
+        instance = registry.reactivate(name)
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown action '{body.action}'. Expected disable|retire|reactivate",
+        )
+
+    if instance is None:
+        raise HTTPException(status_code=404, detail=f"Agent '{name}' not found")
+
+    return {
+        "name": name,
+        "state": instance.state.value,
+        "isAvailable": instance.is_available,
+        "metadata": instance.metadata,
+    }

@@ -1039,38 +1039,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # flow (see app/api/auth.py) can surface a forced-change prompt.
     if settings.jwt_secret_key:
         try:
-            import json
-            from sqlalchemy import text
             from app.auth.jwt import hash_password
+            from app.db.repository import create_user, get_user
 
             factory = get_session_factory()
             async with factory() as db:
-                row = await db.execute(
-                    text("SELECT value FROM system_settings WHERE key = 'auth_users'")
-                )
-                existing: list[dict[str, str]] = json.loads(
-                    row.scalar_one_or_none() or "[]"
-                )
-                admin_user = next(
-                    (u for u in existing if u.get("username") == "admin"), None
-                )
+                admin_user = await get_user(db, "admin")
                 if admin_user is None:
-                    admin = {
-                        "username": "admin",
-                        "hashed_password": hash_password(
-                            settings.default_admin_password
-                        ),
-                        "role": "approver",
-                        "must_change_password": True,
-                    }
-                    await db.execute(
-                        text(
-                            "INSERT INTO system_settings (key, value) VALUES ('auth_users', :v) "
-                            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
-                        ),
-                        {"v": json.dumps([admin] + existing)},
+                    await create_user(
+                        db,
+                        "admin",
+                        hash_password(settings.default_admin_password),
+                        role="approver",
+                        must_change_password=True,
                     )
-                    await db.commit()
                     logger.info(
                         "Admin user seeded (username=admin, must_change_password=True) "
                         "— this only happens once, on first-ever startup"

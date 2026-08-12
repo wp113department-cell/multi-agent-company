@@ -8,11 +8,10 @@ on their behalf) actually retrieve or erase the data this system holds
 about a specific identity. This is that mechanism, built against the real
 data model, not a placeholder:
 
-  - Identity data: system_settings.key='auth_users' (username, role,
-    must_change_password — password hash intentionally excluded from
-    exports) and the `user_roles` table (see app/api/auth.py's own module
-    docstring for why credentials live in system_settings rather than a
-    dedicated users table).
+  - Identity data: the `users` table (username, role, must_change_password —
+    password hash intentionally excluded from exports; AUDIT_Q_BATCH14 §48
+    gap-closure, migration 044 — see app/db/models.py's User model
+    docstring) and the separate `user_roles` table.
   - Attributable activity: audit_log rows where this identity is either the
     acting agent_name or the human recorded as approved_by (AuditLog.
     by_actor_async, app/fleet/audit_log.py).
@@ -36,17 +35,17 @@ approval-authority-gated actions.
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import CurrentUser, get_current_user
 from app.db import get_db
 from app.db.models import UserRole
+from app.db.repository import delete_user, get_user
 from app.fleet.audit_log import AuditEntry, get_audit_log
 from app.middleware.rbac import require_approver
 
@@ -59,24 +58,14 @@ def _serialize_audit_entry(entry: AuditEntry) -> dict[str, Any]:
     return entry.to_dict()
 
 
-async def _load_auth_users(db: AsyncSession) -> list[dict[str, Any]]:
-    row = await db.execute(
-        text("SELECT value FROM system_settings WHERE key = 'auth_users'")
-    )
-    result = row.scalar_one_or_none()
-    users: list[dict[str, Any]] = json.loads(result) if result else []
-    return users
-
-
 async def _export_for_username(username: str, db: AsyncSession) -> dict[str, Any]:
-    users = await _load_auth_users(db)
-    auth_entry = next((u for u in users if u.get("username") == username), None)
+    user = await get_user(db, username)
     identity: dict[str, Any] | None = None
-    if auth_entry is not None:
+    if user is not None:
         identity = {
-            "username": auth_entry.get("username"),
-            "role": auth_entry.get("role"),
-            "mustChangePassword": bool(auth_entry.get("must_change_password", False)),
+            "username": user.username,
+            "role": user.role,
+            "mustChangePassword": user.must_change_password,
         }
 
     role_row = (
@@ -151,17 +140,7 @@ async def delete_user_data(
     attributable to them — see this module's docstring for why that's a
     deliberate, legally-grounded scope boundary, not a partial
     implementation."""
-    users = await _load_auth_users(db)
-    remaining_users = [u for u in users if u.get("username") != username]
-    identity_removed = len(remaining_users) != len(users)
-    if identity_removed:
-        await db.execute(
-            text(
-                "INSERT INTO system_settings (key, value) VALUES ('auth_users', :v) "
-                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
-            ),
-            {"v": json.dumps(remaining_users)},
-        )
+    identity_removed = await delete_user(db, username)
 
     role_delete_result = await db.execute(
         delete(UserRole).where(UserRole.user_id == username)
@@ -173,7 +152,7 @@ async def delete_user_data(
     if not identity_removed and not role_removed:
         raise HTTPException(
             status_code=404,
-            detail=f"No auth_users entry or user_roles row found for {username!r}.",
+            detail=f"No users entry or user_roles row found for {username!r}.",
         )
 
     audit_count = len(await get_audit_log().by_actor_async(username, limit=1))

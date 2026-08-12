@@ -1,6 +1,16 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+
+function useEscapeKey(onEscape: () => void) {
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      if (e.key === "Escape") onEscape();
+    }
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onEscape]);
+}
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { listRepos, cloneRepo, activateRepo, deleteRepo, type RepoRecord } from "../../lib/api";
 import { authHeaders } from "../../lib/auth";
@@ -49,6 +59,8 @@ function DirPickerModal({ onSelect, onClose }: { onSelect: (path: string) => voi
   const [newFolderName, setNewFolderName] = useState("");
   const [creating, setCreating] = useState(false);
 
+  useEscapeKey(onClose);
+
   const navigate = useCallback(async (path: string) => {
     setLoading(true);
     setError("");
@@ -89,10 +101,15 @@ function DirPickerModal({ onSelect, onClose }: { onSelect: (path: string) => voi
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="mx-4 w-full max-w-md rounded-xl bg-white shadow-2xl dark:bg-slate-900">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dir-picker-modal-title"
+        className="mx-4 w-full max-w-md rounded-xl bg-white shadow-2xl dark:bg-slate-900"
+      >
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Select Folder</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">✕</button>
+          <h3 id="dir-picker-modal-title" className="text-sm font-semibold text-slate-900 dark:text-slate-100">Select Folder</h3>
+          <button onClick={onClose} aria-label="Close dialog" className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">✕</button>
         </div>
         <div className="flex items-center gap-1 bg-slate-50 px-4 py-2 font-mono text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
           <span className="truncate">{currentPath}</span>
@@ -215,10 +232,14 @@ function CloneForm({
       <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
         {repoType === "private" && (
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
+            <label
+              htmlFor="repo-github-token"
+              className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300"
+            >
               GitHub Personal Access Token
             </label>
             <input
+              id="repo-github-token"
               type="password"
               value={token}
               onChange={(e) => setToken(e.target.value)}
@@ -232,10 +253,14 @@ function CloneForm({
         )}
 
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
+          <label
+            htmlFor="repo-url"
+            className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300"
+          >
             Repository URL
           </label>
           <input
+            id="repo-url"
             type="url"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
@@ -245,11 +270,15 @@ function CloneForm({
         </div>
 
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
+          <label
+            htmlFor="repo-clone-folder"
+            className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300"
+          >
             Clone into folder
           </label>
           <div className="flex gap-2">
             <input
+              id="repo-clone-folder"
               type="text"
               value={folder}
               onChange={(e) => setFolder(e.target.value)}
@@ -270,10 +299,14 @@ function CloneForm({
         </div>
 
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
+          <label
+            htmlFor="repo-branch"
+            className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300"
+          >
             Branch (optional)
           </label>
           <input
+            id="repo-branch"
             type="text"
             value={branch}
             onChange={(e) => setBranch(e.target.value)}
@@ -327,18 +360,26 @@ function CloneForm({
 // ---------------------------------------------------------------------------
 
 function AddRepoModal({ onClose }: { onClose: () => void }) {
+  useEscapeKey(onClose);
+
   return (
     <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/50 px-4 py-12">
-      <div className="w-full max-w-xl rounded-2xl bg-slate-50 p-6 shadow-2xl dark:bg-slate-950">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-repo-modal-title"
+        className="w-full max-w-xl rounded-2xl bg-slate-50 p-6 shadow-2xl dark:bg-slate-950"
+      >
         <div className="mb-5 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Add Repository</h2>
+            <h2 id="add-repo-modal-title" className="text-lg font-bold text-slate-900 dark:text-slate-100">Add Repository</h2>
             <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
               Connect the codebase you want the agents to work on.
             </p>
           </div>
           <button
             onClick={onClose}
+            aria-label="Close dialog"
             className="rounded-md p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
           >
             ✕

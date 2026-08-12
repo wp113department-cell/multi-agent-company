@@ -8,8 +8,10 @@ from typing import Any
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
+    _GIT_TAG_TOOL,
     _LIST_FUNCTIONS_TOOL,
     _PARSE_AST_TOOL,
+    _SEMVER_BUMP_TOOL,
     READ_ONLY_TOOLS,
     RECORD_LEARNING_TOOL,
     make_chat_handlers,
@@ -40,6 +42,8 @@ AGENT_CONTRACT: dict[str, Any] = {
         "write_file",
         "submit_version_manager_agent",
         "record_learning",
+        "git_tag",
+        "semver_bump",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -80,6 +84,16 @@ _TOOLS = READ_ONLY_TOOLS + [
     RECORD_LEARNING_TOOL,
     _LIST_FUNCTIONS_TOOL,
     _PARSE_AST_TOOL,
+    # AUDIT_Q_BATCH14 §98 gap-closure (2026-08-12) — git_tag/semver_bump
+    # were real tools (app/agents/tools.py) with real handlers already
+    # returned by make_chat_handlers() (used below), but wired into only
+    # the interactive chat agent's tool list — no worker agent could ever
+    # see or call them. version_manager_agent is this codebase's actual
+    # versioning specialist, so it's the natural first real caller; no new
+    # handler code needed, only exposing the existing tool specs to the
+    # model here.
+    _GIT_TAG_TOOL,
+    _SEMVER_BUMP_TOOL,
 ]
 
 _CFG = VerificationConfig(
@@ -125,7 +139,9 @@ def run_version_manager_agent(
         "4. Recommend the minimum set of upgrades — don't upgrade the whole tree for a single fix.\n"
         "5. Each recommendation must include a verification step: 'run pytest after bump to confirm'.\n"
         "6. Write the upgrade report with write_file if requested.\n"
-        "7. Call submit_version_manager_agent with summary, findings, and recommendations."
+        "7. If the task explicitly asks for a version bump or a release tag, use "
+        "semver_bump and/or git_tag — otherwise leave versioning/tagging alone.\n"
+        "8. Call submit_version_manager_agent with summary, findings, and recommendations."
     )
 
     final_state = run_agent_graph(

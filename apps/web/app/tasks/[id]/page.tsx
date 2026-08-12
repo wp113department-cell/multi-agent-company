@@ -286,7 +286,7 @@ export default function TaskDetailPage() {
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={`/api/tasks/${params.id}/images/${img.id}`}
-                  alt={`Reference image ${img.id}`}
+                  alt={`Reference ${img.id}`}
                   className="h-28 w-28 rounded border border-slate-200 object-cover"
                 />
               </li>

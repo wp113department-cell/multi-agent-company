@@ -116,8 +116,17 @@ def build_import_graph(path: str) -> str:
     return "\n".join(lines)
 
 
-def build_call_graph(path: str, function_name: str = "") -> str:
-    """Return what each function calls in a .py file. Optionally limit to one function."""
+def get_call_edges(path: str, function_name: str = "") -> list[dict[str, Any]] | str:
+    """Structured core of build_call_graph() below — extracted (AUDIT_Q_
+    BATCH14 §99 gap-closure, 2026-08-12) so real caller/callee data is
+    available to generate_diagram_h (app/agents/tools.py) without
+    re-implementing this AST walk or fragile-parsing build_call_graph()'s
+    own formatted text output, matching this module's own
+    _find_dead_code()/detect_dead_code() extraction precedent above.
+    build_call_graph()'s formatted text is unchanged by this extraction.
+    Returns a `[ERROR] ...` string (not a list) on the same failure cases
+    build_call_graph() already special-cases, so callers can check
+    `isinstance(result, str)` the same way."""
     p = Path(path)
     if not p.exists():
         return f"[ERROR] File not found: {path}"
@@ -144,22 +153,42 @@ def build_call_graph(path: str, function_name: str = "") -> str:
                         found.append(f"<expr>.{child.func.attr}")
         return found
 
-    results: list[str] = []
+    edges: list[dict[str, Any]] = []
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if function_name and node.name != function_name:
                 continue
-            calls = sorted(set(_collect_calls(node)))
-            async_prefix = "async " if isinstance(node, ast.AsyncFunctionDef) else ""
-            results.append(
-                f"  {async_prefix}{node.name} (L{node.lineno}): "
-                + (", ".join(calls) if calls else "(no calls)")
+            edges.append(
+                {
+                    "caller": node.name,
+                    "line": node.lineno,
+                    "is_async": isinstance(node, ast.AsyncFunctionDef),
+                    "calls": sorted(set(_collect_calls(node))),
+                }
             )
 
-    if not results:
-        if function_name:
-            return f"[ERROR] Function '{function_name}' not found in {path}"
+    if not edges and function_name:
+        return f"[ERROR] Function '{function_name}' not found in {path}"
+    return edges
+
+
+def build_call_graph(path: str, function_name: str = "") -> str:
+    """Return what each function calls in a .py file. Optionally limit to one function."""
+    p = Path(path)
+    edges = get_call_edges(path, function_name)
+    if isinstance(edges, str):
+        return edges
+    if not edges:
         return f"(no functions in {p.name})"
+
+    results: list[str] = []
+    for edge in edges:
+        async_prefix = "async " if edge["is_async"] else ""
+        calls = edge["calls"]
+        results.append(
+            f"  {async_prefix}{edge['caller']} (L{edge['line']}): "
+            + (", ".join(calls) if calls else "(no calls)")
+        )
 
     header = f"Call graph — {p.name}" + (f" / {function_name}" if function_name else "")
     return header + "\n" + "\n".join(results)

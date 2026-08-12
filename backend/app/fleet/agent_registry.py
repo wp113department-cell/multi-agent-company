@@ -32,6 +32,16 @@ class AgentState(str, Enum):
     SLEEP = "sleep"
     RUNNING = "running"
     ERROR = "error"
+    # AUDIT_Q_BATCH14 §77/§94 gap-closure (2026-08-12) — "Agent lifecycle
+    # (hire/retire/replace/promote)" was NO: this enum had no state an
+    # operator could put an agent into deliberately, distinct from the
+    # health-driven "unhealthy" tier (which is a symptom the agent itself
+    # produced via repeated failures, not a governance decision a human/
+    # policy made about it). DISABLED is reversible (reactivate());
+    # RETIRED is a deliberate, permanent-until-replaced governance decision
+    # — matching AgentRegistry.disable/retire/reactivate below.
+    DISABLED = "disabled"
+    RETIRED = "retired"
 
 
 def _now() -> datetime:
@@ -119,6 +129,55 @@ class AgentInstance:
         self.state = AgentState.SLEEP
         self.error_count = 0
         self.health = "healthy"
+
+    def disable(self, reason: str) -> None:
+        """Reversible administrative pause — is_available becomes False
+        immediately (same exclusion FleetManager.select() already applies
+        to RUNNING/ERROR), current work is left alone (a running task isn't
+        interrupted), but no *new* dispatch will select this agent until
+        reactivate()."""
+        self.state = AgentState.DISABLED
+        self.metadata["disabled_reason"] = reason
+        self.metadata["disabled_at"] = _now().isoformat()
+
+    def retire(self, reason: str) -> None:
+        """Permanent-until-replaced governance decision — distinct from the
+        health-driven ERROR/'unhealthy' tier: a human or policy is choosing
+        to stop using this agent, not the agent failing on its own. Not
+        reversible via reactivate() (register a replacement agent instead —
+        matches the audit's own "replace/promote" framing)."""
+        self.state = AgentState.RETIRED
+        self.metadata["retired_reason"] = reason
+        self.metadata["retired_at"] = _now().isoformat()
+
+    def reactivate(self) -> None:
+        """Undo disable() only. A RETIRED agent stays retired — see
+        retire()'s own docstring for why that's deliberate."""
+        if self.state == AgentState.DISABLED:
+            self.state = AgentState.SLEEP
+            self.metadata.pop("disabled_reason", None)
+            self.metadata.pop("disabled_at", None)
+
+
+def _publish_lifecycle_event(agent_name: str, instance: AgentInstance) -> None:
+    """AUDIT_Q_BATCH14 §77/§94 gap-closure — persists a disable/retire/
+    reactivate transition via the existing agent.health_updated event
+    (health_updated()'s payload already carries `state`, which
+    reseed_health_from_events previously wrote but never read back). Best
+    effort, never raises — an event-publish failure must not affect the
+    real in-memory state change the caller already applied."""
+    try:
+        from app.fleet.fleet_events import health_updated, publish
+
+        publish(
+            health_updated(
+                agent_name, health=instance.health, state=instance.state.value
+            )
+        )
+    except Exception:
+        logger.debug(
+            "Could not publish lifecycle event for %s", agent_name, exc_info=True
+        )
 
 
 def _notify_agent_retired(agent_name: str, reason: str) -> None:
@@ -218,6 +277,36 @@ class AgentRegistry:
             _notify_agent_retired(name, reason)
         return instance
 
+    def disable(self, name: str, reason: str) -> AgentInstance | None:
+        """AUDIT_Q_BATCH14 §77/§94 gap-closure — real caller: POST
+        /api/registry/{name}/lifecycle (app/api/registry.py). Persists via
+        the same agent.health_updated event `reseed_health_from_events`
+        already reads on startup (payload's `state` field, previously
+        written but never re-read) — new AgentState values, not a new
+        event type or persistence path."""
+        with self._lock:
+            instance = self._instances.setdefault(name, AgentInstance(name=name))
+            instance.disable(reason)
+        _publish_lifecycle_event(name, instance)
+        return instance
+
+    def retire(self, name: str, reason: str) -> AgentInstance | None:
+        with self._lock:
+            instance = self._instances.setdefault(name, AgentInstance(name=name))
+            instance.retire(reason)
+        _publish_lifecycle_event(name, instance)
+        _notify_agent_retired(name, reason)
+        return instance
+
+    def reactivate(self, name: str) -> AgentInstance | None:
+        with self._lock:
+            instance = self._instances.get(name)
+            if instance is None:
+                return None
+            instance.reactivate()
+        _publish_lifecycle_event(name, instance)
+        return instance
+
     def recover_task(self, name: str) -> AgentInstance | None:
         """AUDIT_Q_BATCH16 §88 gap-closure (2026-08-11) — recover() existed
         (agent_registry.py, since Phase F2) but had zero real callers
@@ -297,15 +386,35 @@ async def reseed_health_from_events(db: Any) -> int:
         result = await db.execute(query)
         seeded = 0
         for agent_name, payload in result.all():
-            health = (payload or {}).get("health")
-            if health == "unhealthy" and agent_name:
+            if not agent_name:
+                continue
+            data = payload or {}
+            health = data.get("health")
+            # AUDIT_Q_BATCH14 §77/§94 gap-closure (2026-08-12) — the payload's
+            # `state` field was already written by every health_updated()
+            # call (including disable()/retire() below) but never read back
+            # here, so a DISABLED/RETIRED governance decision — unlike
+            # "unhealthy" — was silently lost on every restart despite being
+            # persisted. Re-apply it the same way "unhealthy" already is.
+            state = data.get("state")
+            if state == AgentState.RETIRED.value:
+                instance = _agent_registry.register(agent_name)
+                instance.state = AgentState.RETIRED
+                instance.metadata["retired_reason"] = "re-seeded from persisted event"
+                seeded += 1
+            elif state == AgentState.DISABLED.value:
+                instance = _agent_registry.register(agent_name)
+                instance.state = AgentState.DISABLED
+                instance.metadata["disabled_reason"] = "re-seeded from persisted event"
+                seeded += 1
+            elif health == "unhealthy":
                 instance = _agent_registry.register(agent_name)
                 instance.health = "unhealthy"
                 instance.error_count = 3
                 seeded += 1
         if seeded:
             logger.info(
-                "Re-seeded %d agent(s) as unhealthy from persisted health events",
+                "Re-seeded %d agent(s) from persisted health/lifecycle events",
                 seeded,
             )
         return seeded

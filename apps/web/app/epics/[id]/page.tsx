@@ -136,8 +136,9 @@ export default function EpicDetailPage() {
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Actions</h2>
 
         <div className="flex items-center gap-3">
-          <label className="text-xs text-gray-500 dark:text-gray-400 shrink-0">Your User ID:</label>
+          <label htmlFor="epic-user-id" className="text-xs text-gray-500 dark:text-gray-400 shrink-0">Your User ID:</label>
           <input
+            id="epic-user-id"
             className="rounded border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs w-40 dark:bg-gray-700 dark:text-gray-100"
             value={userId}
             onChange={(e) => setUserId(e.target.value)}

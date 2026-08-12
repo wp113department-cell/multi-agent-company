@@ -21,7 +21,6 @@ it entirely rather than trying to share a loop with TestClient.
 from __future__ import annotations
 
 import asyncio
-import json
 import uuid
 from typing import Any
 
@@ -62,26 +61,12 @@ async def _seed(username: str, audit_entry: AuditEntry) -> None:
     engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
     try:
         async with engine.begin() as conn:
-            row = await conn.execute(
-                text("SELECT value FROM system_settings WHERE key = 'auth_users'")
-            )
-            existing_raw = row.scalar_one_or_none()
-            existing = json.loads(existing_raw) if existing_raw else []
-            existing.append(
-                {
-                    "username": username,
-                    "hashed_password": "not-a-real-hash",
-                    "role": "viewer",
-                    "must_change_password": True,
-                }
-            )
             await conn.execute(
                 text(
-                    "INSERT INTO system_settings (key, value) VALUES "
-                    "('auth_users', :v) ON CONFLICT (key) DO UPDATE SET "
-                    "value = EXCLUDED.value"
+                    "INSERT INTO users (username, hashed_password, role, "
+                    "must_change_password) VALUES (:u, :h, 'viewer', true)"
                 ),
-                {"v": json.dumps(existing)},
+                {"u": username, "h": "not-a-real-hash"},
             )
             await conn.execute(
                 text("INSERT INTO user_roles (user_id, role) VALUES (:u, 'viewer')"),
@@ -98,11 +83,12 @@ async def _verify_erased(username: str, audit_entry_id: str) -> tuple[bool, bool
     engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
     try:
         async with engine.connect() as conn:
-            row = await conn.execute(
-                text("SELECT value FROM system_settings WHERE key = 'auth_users'")
-            )
-            remaining = json.loads(row.scalar_one_or_none() or "[]")
-            identity_gone = all(u.get("username") != username for u in remaining)
+            user_row = (
+                await conn.execute(
+                    text("SELECT 1 FROM users WHERE username = :u"), {"u": username}
+                )
+            ).scalar_one_or_none()
+            identity_gone = user_row is None
 
             role_row = (
                 await conn.execute(
@@ -127,22 +113,9 @@ async def _cleanup(username: str) -> None:
     engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
     try:
         async with engine.begin() as conn:
-            row = await conn.execute(
-                text("SELECT value FROM system_settings WHERE key = 'auth_users'")
+            await conn.execute(
+                text("DELETE FROM users WHERE username = :u"), {"u": username}
             )
-            existing_raw = row.scalar_one_or_none()
-            if existing_raw:
-                cleaned = [
-                    u for u in json.loads(existing_raw) if u.get("username") != username
-                ]
-                await conn.execute(
-                    text(
-                        "INSERT INTO system_settings (key, value) VALUES "
-                        "('auth_users', :v) ON CONFLICT (key) DO UPDATE SET "
-                        "value = EXCLUDED.value"
-                    ),
-                    {"v": json.dumps(cleaned)},
-                )
             await conn.execute(
                 text("DELETE FROM user_roles WHERE user_id = :u"), {"u": username}
             )

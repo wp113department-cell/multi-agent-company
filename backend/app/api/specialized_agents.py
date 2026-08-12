@@ -172,16 +172,94 @@ _REGISTRY: dict[str, tuple[str, str]] = {
 
 SUPPORTED_AGENTS = sorted(_REGISTRY.keys())
 
+# ──────────────────────────────────────────────────────────────────────────────
+# AUDIT_Q_BATCH14 §47 gap-closure — dynamic fallback for agents NOT in the
+# static _REGISTRY above. Every real agent module already declares an
+# AGENT_CONTRACT (app/fleet/capability_registry.py's ensure_all_agents_registered
+# relies on this same convention) and, per a full repo scan, AGENT_CONTRACT["name"]
+# always equals the module's own stem — so `app.agents.<agent_name>` resolves
+# unambiguously for any capability-registered agent. The one real ambiguity
+# found in this repo is the self-improvement `_scan`/`_apply` function pairs
+# (e.g. quality_auditor.py's run_quality_auditor_scan/run_quality_auditor_apply)
+# — those are excluded by name and stay reachable only via their existing
+# explicit wiring in app/main.py's self-improvement loop, never guessed here.
+# This makes a brand-new worker agent (AGENT_CONTRACT + single canonical
+# run_* entrypoint + role file) dispatchable through this router with zero
+# edits to this file — the _REGISTRY dict above is preserved untouched for
+# 100% backward compatibility with every existing short-alias name
+# (e.g. "arch_reviewer" for architecture_reviewer.py's run_arch_review).
+# ──────────────────────────────────────────────────────────────────────────────
+
+_RESERVED_RUN_SUFFIXES = ("_scan", "_apply")
+_DISCOVERY_CACHE: dict[str, Callable[..., Any] | None] = {}
+
+
+def _discover_agent_fn(agent_name: str) -> Callable[..., Any] | None:
+    """Resolve an agent not present in the static _REGISTRY purely from its
+    module + AGENT_CONTRACT. Never guesses: returns None (not a fabricated
+    match) whenever the module isn't a real agent, or declares more than one
+    non-reserved `run_*` candidate."""
+    if agent_name in _DISCOVERY_CACHE:
+        return _DISCOVERY_CACHE[agent_name]
+
+    fn: Callable[..., Any] | None = None
+    try:
+        module = importlib.import_module(f"app.agents.{agent_name}")
+    except ImportError:
+        module = None
+
+    if module is not None and hasattr(module, "AGENT_CONTRACT"):
+        candidates = [
+            obj
+            for name, obj in inspect.getmembers(module, inspect.isfunction)
+            if obj.__module__ == module.__name__
+            and name.startswith("run_")
+            and not name.endswith(_RESERVED_RUN_SUFFIXES)
+        ]
+        if len(candidates) == 1:
+            fn = candidates[0]
+
+    _DISCOVERY_CACHE[agent_name] = fn
+    return fn
+
+
+def _discoverable_agent_names() -> list[str]:
+    """Agent module stems beyond _REGISTRY that resolve via the same
+    AGENT_CONTRACT convention — used only to make GET /agents accurately
+    advertise everything actually dispatchable."""
+    from pathlib import Path
+
+    from app.fleet.capability_registry import _NON_AGENT_MODULES
+
+    agents_dir = Path(__file__).resolve().parent.parent / "agents"
+    names = []
+    for path in sorted(agents_dir.glob("*.py")):
+        stem = path.stem
+        if stem in _NON_AGENT_MODULES or stem in _REGISTRY:
+            continue
+        if _discover_agent_fn(stem) is not None:
+            names.append(stem)
+    return names
+
+
+def _agent_is_dispatchable(agent_name: str) -> bool:
+    return agent_name in _REGISTRY or _discover_agent_fn(agent_name) is not None
+
 
 def _load_agent_fn(agent_name: str) -> Callable[..., Any]:
     """Import and return the agent runner function. Raises ValueError for unknown agents."""
     entry = _REGISTRY.get(agent_name)
-    if entry is None:
-        raise ValueError(f"Unknown agent '{agent_name}'. Supported: {SUPPORTED_AGENTS}")
-    module_path, fn_name = entry
-    module = importlib.import_module(module_path)
-    fn: Callable[..., Any] = getattr(module, fn_name)
-    return fn
+    if entry is not None:
+        module_path, fn_name = entry
+        module = importlib.import_module(module_path)
+        fn: Callable[..., Any] = getattr(module, fn_name)
+        return fn
+
+    discovered = _discover_agent_fn(agent_name)
+    if discovered is not None:
+        return discovered
+
+    raise ValueError(f"Unknown agent '{agent_name}'. Supported: {SUPPORTED_AGENTS}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -209,6 +287,20 @@ class RunAgentResponse(BaseModel):
     tokens_in: int
     tokens_out: int
     files_touched: list[str]
+
+
+class DispatchAgentRequest(BaseModel):
+    required_capability: str = Field(
+        ..., description="Capability tag to match against the live capability registry"
+    )
+    task_id: int = Field(..., description="ID of the DevTask this agent is working on")
+    description: str = Field(
+        ..., description="Detailed description / instructions for the agent"
+    )
+    repo_path: str | None = Field(
+        default=None,
+        description="Absolute path to the repo. Falls back to active repo if omitted.",
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -244,11 +336,25 @@ async def _run_specialized_agent_bg(
     from app.db.session import get_session_factory
     from app.services.alert import send_task_alert
     from app.api.repo import get_active_repo_path
+    from app.fleet.agent_registry import get_agent_registry
+    from app.fleet.fleet_manager import get_fleet_manager
 
     factory = get_session_factory()
+    fleet_manager = get_fleet_manager()
 
     async with factory() as db:
         await append_log(db, task_id, "agent_dispatch", f"Starting {agent_name} …")
+
+        # AUDIT_Q_BATCH14 §47 gap-closure — FleetManager.dispatch()'s own
+        # docstring says invoking the agent and closing out its running state
+        # is "the caller's responsibility"; this endpoint is the real
+        # production caller that now fulfills it for every specialized-agent
+        # run (not just capability-based /dispatch below), so
+        # FleetManager.select()'s availability scoring reflects reality for
+        # any AGENT_CONTRACT-registered agent. Safe no-op for agent names
+        # with no live registry entry (agent_registry.*_task methods already
+        # tolerate an unregistered name).
+        get_agent_registry().start_task(agent_name, str(task_id))
 
         try:
             fn = _load_agent_fn(agent_name)
@@ -258,6 +364,7 @@ async def _run_specialized_agent_bg(
                 fn,
                 **_agent_call_kwargs(fn, task_id, description, effective_repo),
             )
+            fleet_manager.complete(agent_name)
 
             # Phase 1.1 (MASTER_AGENT_v2.md) — write to shared memory. Before this,
             # only manager-driven epics ever called embed_task_outcome/embed_failure;
@@ -317,6 +424,7 @@ async def _run_specialized_agent_bg(
                 )
 
         except Exception as exc:
+            fleet_manager.fail(agent_name, str(exc)[:300])
             logger.exception(
                 "Specialized agent %s failed for task %d", agent_name, task_id
             )
@@ -338,7 +446,71 @@ async def _run_specialized_agent_bg(
 
 @router.get("/agents", summary="List all supported specialized agents")
 async def list_specialized_agents() -> dict[str, Any]:
-    return {"agents": SUPPORTED_AGENTS, "count": len(SUPPORTED_AGENTS)}
+    # AUDIT_Q_BATCH14 §47 gap-closure — also advertise agents dispatchable
+    # only via the dynamic-discovery fallback, so this listing reflects
+    # everything actually runnable, not just the static _REGISTRY.
+    all_agents = sorted(set(SUPPORTED_AGENTS) | set(_discoverable_agent_names()))
+    return {"agents": all_agents, "count": len(all_agents)}
+
+
+@router.post("/dispatch", response_model=dict[str, str])
+@limiter.limit(get_settings().rate_limit_agents)
+async def dispatch_specialized_agent(
+    request: Request,
+    body: DispatchAgentRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, str]:
+    """Capability-based dispatch: FleetManager selects the best-scoring
+    available agent for `required_capability` from the live capability
+    registry, and this endpoint is the real production caller that fulfills
+    FleetManager.dispatch()'s own documented contract ("does NOT actually
+    call the agent — that is the caller's responsibility") — AUDIT_Q_BATCH14
+    §47's second finding was that no real caller did this. Any agent
+    registered via AGENT_CONTRACT with a matching capability becomes
+    dispatchable through here with zero orchestration code change, resolved
+    via the same dynamic-discovery fallback `_load_agent_fn` uses.
+    """
+    from app.fleet.fleet_manager import get_fleet_manager
+
+    plan = get_fleet_manager().dispatch(
+        required_capability=body.required_capability,
+        task_id=str(body.task_id),
+        task_payload={"description": body.description},
+    )
+    if plan["status"] != "dispatched":
+        raise HTTPException(
+            status_code=503,
+            detail=f"No agent available for capability '{body.required_capability}'",
+        )
+    agent_name: str = plan["agent_name"]
+
+    await append_log(
+        db,
+        body.task_id,
+        "dispatch",
+        f"Capability '{body.required_capability}' dispatched to {agent_name} "
+        f"on task {body.task_id}",
+    )
+
+    repo_path = body.repo_path
+    if repo_path is None:
+        from app.db.repository import get_task, resolve_task_repo_path
+
+        task = await get_task(db, body.task_id)
+        if task is not None:
+            repo_path = resolve_task_repo_path(task)
+
+    background_tasks.add_task(
+        _run_specialized_agent_bg,
+        agent_name=agent_name,
+        task_id=body.task_id,
+        description=body.description,
+        repo_path=repo_path,
+    )
+
+    return {"status": "queued", "agent": agent_name, "task_id": str(body.task_id)}
 
 
 @router.post("/{agent_name}/run", response_model=dict[str, str])
@@ -356,7 +528,7 @@ async def run_specialized_agent(
     Returns immediately with {status: "queued"}.
     Check task logs or artifacts for results.
     """
-    if agent_name not in _REGISTRY:
+    if not _agent_is_dispatchable(agent_name):
         raise HTTPException(
             status_code=422,
             detail=f"Unknown agent '{agent_name}'. Supported: {SUPPORTED_AGENTS}",
@@ -408,7 +580,7 @@ async def run_specialized_agent_sync(
     from app.api.repo import get_active_repo_path
     from app.artifacts.store import save_artifact_async
 
-    if agent_name not in _REGISTRY:
+    if not _agent_is_dispatchable(agent_name):
         raise HTTPException(
             status_code=422,
             detail=f"Unknown agent '{agent_name}'. Supported: {SUPPORTED_AGENTS}",

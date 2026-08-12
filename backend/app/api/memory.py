@@ -14,7 +14,7 @@ from app.db import get_db
 from app.db.models import MemoryEmbedding, VersionedLesson
 from app.memory.analytics import compute_memory_analytics
 from app.memory.store import query_similar_tasks
-from app.middleware.rbac import require_approver
+from app.middleware.rbac import require_approver, require_authenticated
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,7 @@ async def get_memory_patterns(
         default=None,
         description="Filter by category: task | architecture | failure | learning | procedure | preference | bug",
     ),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     """Aggregate view of engineering memory: outcome distribution and recent embeddings.
 
@@ -104,7 +105,10 @@ async def get_memory_patterns(
 
 
 @router.get("/analytics")
-async def get_memory_analytics(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def get_memory_analytics(
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
     """Gap-closure Day 43 (Stage 2, answers.md Q120 "Memory Analytics" — total
     memory size, average retrieval time, memory growth, duplicate memories, and
     unused memories were all NO/PARTIAL with zero instrumentation before this).
@@ -146,6 +150,7 @@ async def search_memory(
         "they're searching, not have it silently narrowed.",
     ),
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> list[dict[str, Any]]:
     """Search engineering memory for similar past tasks by description."""
     results = await query_similar_tasks(
@@ -162,6 +167,7 @@ async def list_versioned_lessons(
     ),
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> list[dict[str, Any]]:
     """List versioned lessons (Day 11 durable lesson lifecycle).
 

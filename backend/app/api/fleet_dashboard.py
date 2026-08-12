@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.db.models import AgentRun, EnhancementRequest, MemoryEmbedding
-from app.middleware.rbac import require_approver
+from app.middleware.rbac import require_approver, require_authenticated
 from app.services.activity_stream import get_activity_registry
 
 logger = logging.getLogger(__name__)
@@ -87,6 +87,7 @@ async def list_requests(
     status: str | None = Query(default=None),
     priority: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> list[dict[str, Any]]:
     q = select(EnhancementRequest).order_by(EnhancementRequest.created_at.desc())
     if agent:
@@ -103,7 +104,9 @@ async def list_requests(
 
 @router.get("/requests/{request_id}")
 async def get_request(
-    request_id: int, db: AsyncSession = Depends(get_db)
+    request_id: int,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     row = await db.get(EnhancementRequest, request_id)
     if row is None:
@@ -495,6 +498,7 @@ async def reject_request(
 async def cost_report(
     days: int = Query(default=30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     """Cost per agent/day, plus a per-model-tier rollup. Tier is resolved via
     ModelRouter (agent_models.json is the one live source of truth for tier —
@@ -548,7 +552,10 @@ async def cost_report(
 
 
 @router.get("/reports/health")
-async def health_report(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+async def health_report(
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> list[dict[str, Any]]:
     """Failure rate, active-run count, and average heartbeat staleness (for
     currently-running runs) per agent — all real agent_runs aggregates, no
     synthetic/estimated fields.
@@ -606,6 +613,7 @@ async def health_report(db: AsyncSession = Depends(get_db)) -> list[dict[str, An
 async def repair_patterns_report(
     limit: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> list[dict[str, Any]]:
     """Most commonly recorded repair patterns — Phase 1.5's procedural
     memory (`embed_failure()` writes MemoryEmbedding rows with
@@ -636,7 +644,9 @@ async def repair_patterns_report(
 
 
 @router.get("/requests/stream")
-async def stream_dashboard_events() -> StreamingResponse:
+async def stream_dashboard_events(
+    _actor: str = Depends(require_authenticated),
+) -> StreamingResponse:
     """SSE: new-request / status-change events for the in-app notification badge and
     live-updating list. Distinct from GET /api/tasks/{trace_id}/stream, which streams one
     specific approved request's execution."""

@@ -5,9 +5,11 @@ Routes:
   GET  /api/auth/me        → return the current user's identity from their token
   POST /api/auth/refresh   → renew an already-valid session's JWT and cookie
 
-For Phase 1, credentials are stored in the system_settings table
-(key="auth_users", value=JSON list of {username, hashed_password, role}).
-This avoids adding a users table before full RBAC is needed.
+AUDIT_Q_BATCH14 §48 gap-closure (2026-08-12) — credentials are now stored in
+a real, normalized `users` table (migration 044), replacing the Phase-1
+shortcut this module's docstring used to describe (a JSON array inside a
+single system_settings row). See app/db/models.py's User model docstring
+for the cutover details.
 
 When JWT_AUTH_ENABLED=false, login still works but the token is optional
 for all other endpoints (backward compat with X-User-Role header).
@@ -20,9 +22,7 @@ force / credential stuffing.
 
 from __future__ import annotations
 
-import json
 import logging
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
@@ -32,6 +32,7 @@ from app.auth.dependencies import CurrentUser, get_current_user
 from app.auth.jwt import create_access_token, verify_password
 from app.config import get_settings
 from app.db import get_db
+from app.db.repository import count_users, create_user, get_user, update_user_password
 from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
@@ -72,8 +73,7 @@ async def login(
 ) -> LoginResponse:
     """Exchange username + password for a signed JWT access token.
 
-    Credentials are stored in system_settings.key='auth_users' as a JSON array:
-    [{"username": "alice", "hashed_password": "<bcrypt>", "role": "approver"}, ...]
+    Credentials are stored in the real `users` table (migration 044).
 
     Create the first user via: POST /api/auth/setup (see below).
     """
@@ -84,27 +84,16 @@ async def login(
             detail="JWT auth is not configured. Set JWT_SECRET_KEY and JWT_AUTH_ENABLED=true.",
         )
 
-    # Load credentials from DB settings table
     try:
-        from sqlalchemy import text
-
-        row = await db.execute(
-            text("SELECT value FROM system_settings WHERE key = 'auth_users'")
-        )
-        result = row.scalar_one_or_none()
-        users: list[dict[str, str]] = json.loads(result) if result else []
+        user = await get_user(db, body.username)
     except Exception as exc:
-        logger.exception("Failed to load auth_users from system_settings")
+        logger.exception("Failed to load user %s from users table", body.username)
         raise HTTPException(status_code=500, detail="Auth configuration error") from exc
 
-    # Find matching user
-    user = next((u for u in users if u.get("username") == body.username), None)
-    if user is None or not verify_password(
-        body.password, user.get("hashed_password", "")
-    ):
+    if user is None or not verify_password(body.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
-    role = user.get("role", "viewer")
+    role = user.role
     token = create_access_token({"sub": body.username, "role": role})
     response.set_cookie(
         key="gridiron_token",
@@ -118,7 +107,7 @@ async def login(
     return LoginResponse(
         role=role,
         username=body.username,
-        must_change_password=bool(user.get("must_change_password", False)),
+        must_change_password=user.must_change_password,
     )
 
 
@@ -175,7 +164,7 @@ async def setup_first_user(
     role: str = "approver",
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
-    """Create the first admin user when auth_users list is empty.
+    """Create the first admin user when the users table is empty.
 
     Once any user exists, this endpoint returns 409. Use the DB directly to manage
     additional users.
@@ -189,16 +178,8 @@ async def setup_first_user(
         )
 
     from app.auth.jwt import hash_password
-    from sqlalchemy import text
 
-    # Load existing users
-    row = await db.execute(
-        text("SELECT value FROM system_settings WHERE key = 'auth_users'")
-    )
-    result = row.scalar_one_or_none()
-    existing: list[dict[str, str]] = json.loads(result) if result else []
-
-    if existing:
+    if await count_users(db) > 0:
         raise HTTPException(
             status_code=409,
             detail="Auth users already configured. Use the DB to manage users.",
@@ -209,21 +190,7 @@ async def setup_first_user(
             status_code=400, detail="role must be viewer | approver | admin"
         )
 
-    new_user = {
-        "username": body.username,
-        "hashed_password": hash_password(body.password),
-        "role": role,
-    }
-    users_json = json.dumps([new_user])
-
-    await db.execute(
-        text(
-            "INSERT INTO system_settings (key, value) VALUES ('auth_users', :v) "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
-        ),
-        {"v": users_json},
-    )
-    await db.commit()
+    await create_user(db, body.username, hash_password(body.password), role=role)
     logger.info("First auth user created: %s (role=%s)", body.username, role)
     return {"status": "created", "username": body.username, "role": role}
 
@@ -257,24 +224,12 @@ async def change_password(
         )
 
     from app.auth.jwt import hash_password
-    from sqlalchemy import text
 
-    row = await db.execute(
-        text("SELECT value FROM system_settings WHERE key = 'auth_users'")
-    )
-    result = row.scalar_one_or_none()
-    users: list[dict[str, Any]] = json.loads(result) if result else []
-
-    idx = next(
-        (i for i, u in enumerate(users) if u.get("username") == current_user.username),
-        None,
-    )
-    if idx is None:
+    user = await get_user(db, current_user.username)
+    if user is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if not verify_password(
-        body.current_password, users[idx].get("hashed_password", "")
-    ):
+    if not verify_password(body.current_password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Current password is incorrect")
 
     if not body.new_password or len(body.new_password) < 8:
@@ -282,16 +237,6 @@ async def change_password(
             status_code=400, detail="New password must be at least 8 characters"
         )
 
-    users[idx]["hashed_password"] = hash_password(body.new_password)
-    users[idx]["must_change_password"] = False
-
-    await db.execute(
-        text(
-            "INSERT INTO system_settings (key, value) VALUES ('auth_users', :v) "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
-        ),
-        {"v": json.dumps(users)},
-    )
-    await db.commit()
+    await update_user_password(db, current_user.username, hash_password(body.new_password))
     logger.info("Password changed for user: %s", current_user.username)
     return {"status": "changed", "username": current_user.username}

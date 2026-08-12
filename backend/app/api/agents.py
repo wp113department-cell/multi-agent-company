@@ -477,9 +477,16 @@ async def launch_manager(
 
             # Day 17 — Credential Vault. Custom secrets, if any, injected
             # into the coding agents' bash tool env.
+            # AUDIT_Q_BATCH14 §95 gap-closure — resolve this task's repo_id
+            # so a repo-scoped credential (if one was ever stored) wins over
+            # the global fallback; task_id is already in scope here.
+            from app.db.repository import get_task_repo_id
             from app.security.credential_vault import get_credential_vault
 
-            custom_secrets_env = (await get_credential_vault().load(db)).get_env_vars()
+            _repo_id = await get_task_repo_id(db, task_id)
+            custom_secrets_env = (
+                await get_credential_vault().load(db, repo_id=_repo_id)
+            ).get_env_vars()
             custom_secrets_env.pop("GITHUB_TOKEN", None)
             custom_secrets_env.pop("ANTHROPIC_API_KEY", None)
 
@@ -768,9 +775,15 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
                 _spawn_tracked(heartbeat_agent_run(db, run_id))
 
             # Day 17 — Credential Vault. Custom secrets, if any.
+            # AUDIT_Q_BATCH14 §95 gap-closure — same repo-scoped-with-
+            # global-fallback lookup as launch_manager above.
+            from app.db.repository import get_task_repo_id
             from app.security.credential_vault import get_credential_vault
 
-            custom_secrets_env = (await get_credential_vault().load(db)).get_env_vars()
+            _repo_id = await get_task_repo_id(db, task_id)
+            custom_secrets_env = (
+                await get_credential_vault().load(db, repo_id=_repo_id)
+            ).get_env_vars()
             custom_secrets_env.pop("GITHUB_TOKEN", None)
             custom_secrets_env.pop("ANTHROPIC_API_KEY", None)
 

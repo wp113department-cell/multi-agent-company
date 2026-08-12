@@ -32,18 +32,26 @@ async def persist_repo_index(
     index: RepoIndex,
     graph_result: CrossFileGraphResult,
     db: AsyncSession,
+    repo_id: int | None = None,
 ) -> None:
     """Replace this repo_path's indexed_files/symbols/call_edges rows with
     the current index + resolved cross-file call graph. import edges (file-
     level, from scanner.build_call_graph()) and call edges (function-level,
     from cross_file_graph.build_cross_file_graph()) are both persisted, with
-    edge_type distinguishing the two."""
+    edge_type distinguishing the two.
+
+    AUDIT_Q_BATCH14 §77/§94 gap-closure — repo_id (new, optional) populates
+    the additive FK column (migration 043) alongside repo_path, which
+    remains the delete/reinsert key and every existing query's filter,
+    unchanged. Every existing caller that omits repo_id keeps identical
+    behavior (NULL, same as before this column existed)."""
     await db.execute(delete(IndexedFile).where(IndexedFile.repo_path == repo_path))
     await db.execute(delete(CallEdge).where(CallEdge.repo_path == repo_path))
 
     for rel_path, fi in index.files.items():
         file_row = IndexedFile(
             repo_path=repo_path,
+            repo_id=repo_id,
             file_path=rel_path,
             language=fi.language,
             content_hash=fi.content_hash,
@@ -68,6 +76,7 @@ async def persist_repo_index(
             db.add(
                 CallEdge(
                     repo_path=repo_path,
+                    repo_id=repo_id,
                     caller_file=caller_file,
                     callee_file=callee_file,
                     edge_type="import",
@@ -78,6 +87,7 @@ async def persist_repo_index(
         db.add(
             CallEdge(
                 repo_path=repo_path,
+                repo_id=repo_id,
                 caller_file=edge.caller_file,
                 caller_symbol=edge.caller_symbol,
                 callee_file=edge.callee_file,
@@ -95,6 +105,7 @@ async def persist_repo_index(
         db.add(
             CallEdge(
                 repo_path=repo_path,
+                repo_id=repo_id,
                 caller_file=cedge.subclass_file,
                 caller_symbol=cedge.subclass_symbol,
                 callee_file=cedge.superclass_file,

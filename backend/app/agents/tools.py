@@ -8025,7 +8025,14 @@ _OPENAPI_INSPECT_TOOL: dict[str, Any] = {
 # -- Code / Docs tools --
 _GENERATE_DIAGRAM_TOOL: dict[str, Any] = {
     "name": "generate_diagram",
-    "description": "Generate a Mermaid diagram definition (flowchart, sequence, ER) from a text description. Returns the mermaid code block.",
+    "description": (
+        "Generate a Mermaid diagram. For kind='classDiagram' or 'flowchart', pass "
+        "`path` (a real .py file relative to repo root) to get a diagram built from "
+        "that file's actual classes/bases (classDiagram) or function call edges "
+        "(flowchart) via AST analysis — not a placeholder. Without `path` (or for "
+        "kind='sequence'/'erDiagram', which aren't derivable from static analysis "
+        "alone), returns a labeled starter template instead."
+    ),
     "input_schema": {
         "type": "object",
         "properties": {
@@ -8038,8 +8045,38 @@ _GENERATE_DIAGRAM_TOOL: dict[str, Any] = {
                 "enum": ["flowchart", "sequence", "erDiagram", "classDiagram"],
                 "description": "Diagram type (default: flowchart)",
             },
+            "path": {
+                "type": "string",
+                "description": (
+                    "Real .py file (relative to repo root) to derive the diagram "
+                    "from via AST analysis. Only used by classDiagram/flowchart."
+                ),
+            },
         },
         "required": ["description"],
+    },
+}
+_SUMMARIZE_OUTPUT_TOOL: dict[str, Any] = {
+    "name": "summarize_output",
+    "description": (
+        "Condense a long piece of text (e.g. a command/log/tool result you just "
+        "received) into a short LLM-generated summary — real summarization, "
+        "distinct from just truncating the text. Use this instead of pasting a "
+        "huge result verbatim into your own next message."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "text": {
+                "type": "string",
+                "description": "The long text to summarize",
+            },
+            "focus": {
+                "type": "string",
+                "description": "Optional: what to focus the summary on (e.g. 'errors only', 'files changed')",
+            },
+        },
+        "required": ["text"],
     },
 }
 _EXPORT_MARKDOWN_TOOL: dict[str, Any] = {
@@ -8511,6 +8548,7 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _OPENAPI_INSPECT_TOOL,
     # Code / Docs
     _GENERATE_DIAGRAM_TOOL,
+    _SUMMARIZE_OUTPUT_TOOL,
     _EXPORT_MARKDOWN_TOOL,
     _FIND_UNUSED_IMPORTS_TOOL,
     _DEPS_OUTDATED_TOOL,
@@ -13060,9 +13098,109 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 )
         return "\n".join(out)
 
+    def summarize_output_h(inp: dict[str, Any]) -> str:
+        """AUDIT_Q_BATCH14 §99 gap-closure — real LLM-generated output
+        summarization, distinct from the hard char/line truncation used
+        elsewhere in this file (e.g. result.stdout[:8000]). Reuses
+        _llm_generate_text (the same one-shot, circuit-breaker-protected,
+        never-raises LLM call already used by generate_commit_msg and
+        every other "generate X" tool in this module — see that function's
+        own docstring) rather than building a second Anthropic call path."""
+        text = str(inp["text"])
+        focus = str(inp.get("focus", "")).strip()
+        if not text.strip():
+            return "(nothing to summarize — empty text)"
+
+        focus_line = f" Focus specifically on: {focus}." if focus else ""
+        prompt = (
+            "Summarize the following text concisely, in 3-8 concrete bullet "
+            "points. Preserve specifics (file paths, error messages, numbers, "
+            f"conclusions) — do not write vague generalities.{focus_line}\n\n"
+            f"Text to summarize:\n{text[:20000]}"
+        )
+        summary = _llm_generate_text(prompt, max_tokens=500)
+        if not summary:
+            return (
+                "[summarization unavailable — LLM call failed] "
+                f"Original text was {len(text)} chars; here is a truncated excerpt:\n"
+                f"{text[:2000]}"
+            )
+        return summary
+
+    def _real_class_diagram(file_path: str) -> str | None:
+        """AUDIT_Q_BATCH14 §99 gap-closure — real classes/bases from
+        parse_file_ast (app/repo_tools/ast_engine.py), not a fake
+        MyClass/method() skeleton. Returns None (never a guess) when the
+        file can't be parsed or declares no classes, so the caller falls
+        back to the labeled template instead of fabricating content."""
+        import json
+
+        from app.repo_tools.ast_engine import parse_file_ast
+
+        raw = parse_file_ast(str(root / file_path))
+        if raw.startswith("[ERROR]"):
+            return None
+        classes = json.loads(raw).get("classes", [])
+        if not classes:
+            return None
+
+        lines = ["classDiagram"]
+        for cls in classes:
+            name = cls["name"]
+            for method in cls["methods"][:15]:
+                lines.append(f"    {name} : +{method}()")
+            for base in cls["bases"]:
+                # Mermaid inheritance arrow: subclass --|> superclass.
+                # ast.unparse() can return a dotted expr (e.g. "abc.ABC") —
+                # Mermaid class names can't contain '.', so the last
+                # component is used, matching build_class_graph's own
+                # identifier-name-matching convention (cross_file_graph.py).
+                base_name = base.rsplit(".", 1)[-1]
+                lines.append(f"    {base_name} <|-- {name}")
+        return "\n".join(lines)
+
+    def _real_call_flowchart(file_path: str, description: str) -> str | None:
+        """AUDIT_Q_BATCH14 §99 gap-closure — real function call edges from
+        get_call_edges (app/repo_tools/ast_engine.py), not a fake
+        Start/Process/Decision/End skeleton. Returns None when the file has
+        no functions or can't be parsed."""
+        from app.repo_tools.ast_engine import get_call_edges
+
+        edges = get_call_edges(str(root / file_path))
+        if isinstance(edges, str) or not edges:
+            return None
+
+        known_functions = {e["caller"] for e in edges}
+        lines = [f"flowchart TD\n    %% {description}"]
+        seen_edges: set[tuple[str, str]] = set()
+        for edge in edges:
+            caller = edge["caller"]
+            # Only draw edges to functions actually defined in this same
+            # file — an edge to an unknown external call would be a real
+            # name but a misleading, unverifiable diagram node.
+            for callee in edge["calls"]:
+                target = callee.rsplit(".", 1)[-1]
+                if target in known_functions and (caller, target) not in seen_edges:
+                    lines.append(f"    {caller} --> {target}")
+                    seen_edges.add((caller, target))
+        if len(lines) == 1:
+            return None
+        return "\n".join(lines)
+
     def generate_diagram_h(inp: dict[str, Any]) -> str:
         description = str(inp["description"])
         kind = str(inp.get("kind", "flowchart"))
+        path_in = inp.get("path")
+
+        if path_in:
+            real: str | None = None
+            if kind == "classDiagram":
+                real = _real_class_diagram(str(path_in))
+            elif kind == "flowchart":
+                real = _real_call_flowchart(str(path_in), description)
+            if real is not None:
+                return f"```mermaid\n{real}\n```"
+
         templates = {
             "flowchart": f"flowchart TD\n    %% {description}\n    A[Start] --> B[Process]\n    B --> C{{Decision}}\n    C -->|Yes| D[End]\n    C -->|No| B",
             "sequence": f"sequenceDiagram\n    %% {description}\n    participant A\n    participant B\n    A->>B: Request\n    B-->>A: Response",
@@ -13070,7 +13208,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             "classDiagram": f"classDiagram\n    %% {description}\n    class MyClass {{\n        +String name\n        +method()\n    }}",
         }
         mermaid = templates.get(kind, templates["flowchart"])
-        return f"```mermaid\n{mermaid}\n```\n\nNote: Customize the template above to match your actual {kind} structure."
+        note = (
+            f"Note: pass `path` (a real .py file) with kind='{kind}' to derive this "
+            f"from actual code instead."
+            if kind in ("classDiagram", "flowchart")
+            else f"Note: customize the template above to match your actual {kind} structure "
+            "— sequence/ER diagrams aren't derivable from static analysis alone."
+        )
+        return f"```mermaid\n{mermaid}\n```\n\n{note}"
 
     def export_markdown_h(inp: dict[str, Any]) -> str:
         fpath = root / str(inp["path"])
@@ -13423,6 +13568,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["github_inspect_repo"] = github_inspect_repo_h
     handlers["openapi_inspect"] = openapi_inspect_h
     handlers["generate_diagram"] = generate_diagram_h
+    handlers["summarize_output"] = summarize_output_h
     handlers["export_markdown"] = export_markdown_h
     handlers["find_unused_imports"] = find_unused_imports_h
     handlers["deps_outdated"] = deps_outdated_h

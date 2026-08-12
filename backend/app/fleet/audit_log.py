@@ -75,7 +75,7 @@ class AuditEntry:
         approved_by: str | None = None,
         trace_id: str | None = None,
         entry_id: str | None = None,
-        timestamp: str | None = None,
+        timestamp: datetime | str | None = None,
     ) -> None:
         # entry_id/timestamp are normally auto-generated (real append()
         # calls never pass them) — the two optional overrides exist only
@@ -257,6 +257,7 @@ class AuditLog:
         trace_id: str | None = None,
         task_id: str | None = None,
         requires_human_approval: bool | None = None,
+        before: datetime | None = None,
         limit: int,
     ) -> list[AuditEntry]:
         from sqlalchemy import text
@@ -274,6 +275,14 @@ class AuditLog:
         if requires_human_approval is not None:
             conditions.append("requires_human_approval = :requires_human_approval")
             params["requires_human_approval"] = requires_human_approval
+        if before is not None:
+            # AUDIT_Q_BATCH14 §48 gap-closure — real cursor pagination over
+            # the already-unbounded DB-backed query (the 2000-entry cap only
+            # ever applied to the in-memory ring-buffer fallback used when
+            # the DB is unreachable). Strict `<` so the cursor's own entry
+            # isn't repeated on the next page.
+            conditions.append("timestamp < :before")
+            params["before"] = before
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
         async with get_session_factory()() as session:
@@ -290,11 +299,14 @@ class AuditLog:
             rows = result.mappings().all()
         return [self._row_to_entry(row) for row in rows]
 
-    async def recent_async(self, n: int = 50) -> list[AuditEntry]:
+    async def recent_async(
+        self, n: int = 50, *, before: datetime | None = None
+    ) -> list[AuditEntry]:
         """DB-backed, authoritative version of recent() — survives restarts
-        and isn't capped at the ring buffer's 2000 entries."""
+        and isn't capped at the ring buffer's 2000 entries. `before` (new,
+        optional) enables real cursor pagination past a single page."""
         try:
-            return await self._query_db(limit=n)
+            return await self._query_db(limit=n, before=before)
         except Exception:
             logger.warning(
                 "AuditLog.recent_async DB query failed — falling back to the "
@@ -304,11 +316,11 @@ class AuditLog:
             return self.recent(n)
 
     async def by_trace_async(
-        self, trace_id: str, *, limit: int = 500
+        self, trace_id: str, *, limit: int = 500, before: datetime | None = None
     ) -> list[AuditEntry]:
         """DB-backed, authoritative version of by_trace()."""
         try:
-            return await self._query_db(trace_id=trace_id, limit=limit)
+            return await self._query_db(trace_id=trace_id, limit=limit, before=before)
         except Exception:
             logger.warning(
                 "AuditLog.by_trace_async DB query failed — falling back to "
@@ -318,11 +330,11 @@ class AuditLog:
             return self.by_trace(trace_id)
 
     async def by_task_async(
-        self, task_id: str, *, limit: int = 500
+        self, task_id: str, *, limit: int = 500, before: datetime | None = None
     ) -> list[AuditEntry]:
         """DB-backed, authoritative version of by_task()."""
         try:
-            return await self._query_db(task_id=task_id, limit=limit)
+            return await self._query_db(task_id=task_id, limit=limit, before=before)
         except Exception:
             logger.warning(
                 "AuditLog.by_task_async DB query failed — falling back to "
@@ -370,10 +382,14 @@ class AuditLog:
                     if e.agent_name == actor or e.approved_by == actor
                 ][-limit:]
 
-    async def approvals_async(self, *, limit: int = 100) -> list[AuditEntry]:
+    async def approvals_async(
+        self, *, limit: int = 100, before: datetime | None = None
+    ) -> list[AuditEntry]:
         """DB-backed, authoritative version of approvals()."""
         try:
-            return await self._query_db(requires_human_approval=True, limit=limit)
+            return await self._query_db(
+                requires_human_approval=True, limit=limit, before=before
+            )
         except Exception:
             logger.warning(
                 "AuditLog.approvals_async DB query failed — falling back to "

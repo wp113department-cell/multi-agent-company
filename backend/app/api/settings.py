@@ -185,6 +185,65 @@ async def delete_github_token(
 
 
 # ---------------------------------------------------------------------------
+# AUDIT_Q_BATCH14 §95 gap-closure (2026-08-12) — repo-scoped GitHub token.
+# GitHub tokens are the one credential type genuinely likely to differ per
+# repo (distinct write scopes/orgs/forks), unlike the installation-wide
+# Anthropic/OpenAI keys above. Checked first by CredentialVault.load()
+# (app/security/credential_vault.py) — app/api/agents.py's env-injection
+# call sites already resolve the task's repo_id and pass it through; unset
+# for a given repo, this falls back to the global token above unchanged.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/repos/{repo_id}/github-token")
+async def get_repo_github_token(
+    repo_id: int,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
+    from app.security.credential_vault import scoped_credential_key
+
+    token = await get_setting(db, scoped_credential_key(_GITHUB_TOKEN_KEY, repo_id))
+    return {
+        "repoId": repo_id,
+        "configured": bool(token),
+        "masked": _mask(token) if token else None,
+    }
+
+
+@router.post("/repos/{repo_id}/github-token")
+async def save_repo_github_token(
+    repo_id: int,
+    body: ApiKeyRequest,
+    db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
+) -> dict[str, Any]:
+    """Save/override this repo's own GitHub token."""
+    from app.security.credential_vault import scoped_credential_key
+
+    token = body.api_key.strip()
+    if len(token) < 10:
+        raise HTTPException(
+            status_code=400, detail="GitHub token looks too short to be valid"
+        )
+    await set_setting(db, scoped_credential_key(_GITHUB_TOKEN_KEY, repo_id), token)
+    return {"saved": True, "provider": "github", "repoId": repo_id}
+
+
+@router.delete("/repos/{repo_id}/github-token")
+async def delete_repo_github_token(
+    repo_id: int,
+    db: AsyncSession = Depends(get_db),
+    _approver: str = Depends(require_approver),
+) -> dict[str, Any]:
+    """Remove this repo's override — reverts it to the global GitHub token."""
+    from app.security.credential_vault import scoped_credential_key
+
+    await delete_setting(db, scoped_credential_key(_GITHUB_TOKEN_KEY, repo_id))
+    return {"deleted": True, "provider": "github", "repoId": repo_id}
+
+
+# ---------------------------------------------------------------------------
 # Custom secrets (Day 17 — Credential Vault). Arbitrary named secrets an
 # agent's bash tool calls may need (e.g. a third-party API key a task's code
 # integrates with) — never database/deploy credentials, see

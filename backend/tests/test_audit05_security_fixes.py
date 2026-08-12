@@ -541,17 +541,17 @@ class TestChangePasswordEndpoint:
         from app.auth.dependencies import CurrentUser
 
         async def _run() -> None:
+            from app.db.models import User
+
             db = AsyncMock()
-            db.execute = AsyncMock(
-                return_value=MagicMock(
-                    scalar_one_or_none=lambda: (
-                        '[{"username": "alice", "hashed_password": '
-                        '"$2b$12$placeholderplaceholderplaceholderplaceholderpl"}]'
-                    )
-                )
+            fake_user = User(
+                username="alice",
+                hashed_password="$2b$12$placeholderplaceholderplaceholderplaceholderpl",
+                role="approver",
             )
             user = CurrentUser(username="alice", role="approver", is_authenticated=True)
-            with patch("app.api.auth.verify_password", return_value=True):
+            with patch("app.api.auth.get_user", new=AsyncMock(return_value=fake_user)), \
+                 patch("app.api.auth.verify_password", return_value=True):
                 with pytest.raises(HTTPException) as exc_info:
                     await change_password(
                         body=ChangePasswordRequest(

@@ -155,6 +155,7 @@ async def list_all(
     cursor: int | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     tasks, next_cursor = await list_tasks(
         db, status=status, repo_id=repo_id, cursor=cursor, limit=limit
@@ -163,7 +164,11 @@ async def list_all(
 
 
 @router.get("/{task_id}")
-async def get_one(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def get_one(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
     task = await get_task(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -263,6 +268,7 @@ async def get_logs(
     task_id: int,
     include_archived: bool = Query(False),
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     logs = await list_logs(db, task_id, include_archived=include_archived)
     return {"logs": [_log_to_dict(lg) for lg in logs]}
@@ -584,7 +590,9 @@ async def pipeline_reject(
 
 @router.get("/{task_id}/subtasks")
 async def get_subtasks(
-    task_id: int, db: AsyncSession = Depends(get_db)
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     subtasks = await list_subtasks(db, task_id)
     return {
@@ -605,7 +613,9 @@ async def get_subtasks(
 
 @router.get("/{task_id}/pipeline")
 async def get_pipeline(
-    task_id: int, db: AsyncSession = Depends(get_db)
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     ps = await get_pipeline_state(db, task_id)
     if ps is None:
@@ -659,7 +669,9 @@ def _synthesize_explanation(
 
 @router.get("/{task_id}/explain")
 async def explain_task(
-    task_id: int, db: AsyncSession = Depends(get_db)
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     """Synthesized, human-readable explanation of why this task's plan and
     agent dispatch decisions were made — see _synthesize_explanation()."""
@@ -714,7 +726,11 @@ async def explain_task(
 
 
 @router.get("/{task_id}/diff")
-async def get_diff(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def get_diff(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
     task = await get_task(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -771,7 +787,11 @@ async def complete_task(
 
 
 @router.get("/{task_id}/pr")
-async def get_pr(task_id: int, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def get_pr(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
     """Day 14 — Git Push Workflow."""
     task = await get_task(db, task_id)
     if not task:
@@ -986,7 +1006,9 @@ async def upload_task_images(
 
 @router.get("/{task_id}/images")
 async def get_task_images(
-    task_id: int, db: AsyncSession = Depends(get_db)
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, Any]:
     """Metadata only (id/mimeType/order) — never the base64 blob, to keep this
     poll-friendly. Use GET /{task_id}/images/{image_id} for the raw bytes."""
@@ -1010,7 +1032,10 @@ async def get_task_images(
 
 @router.get("/{task_id}/images/{image_id}")
 async def get_task_image_bytes(
-    task_id: int, image_id: int, db: AsyncSession = Depends(get_db)
+    task_id: int,
+    image_id: int,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> Response:
     """Raw image bytes with the correct Content-Type — for <img src=...>."""
     import base64

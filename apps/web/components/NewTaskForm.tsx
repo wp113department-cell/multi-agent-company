@@ -154,6 +154,7 @@ export function NewTaskForm() {
 
       {/* Title */}
       <input
+        aria-label="Task title"
         className="w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
         placeholder="Title — e.g. Add a new endpoint that shows worker queue status"
         value={title}
@@ -164,6 +165,7 @@ export function NewTaskForm() {
       {/* Description — large textarea */}
       <div>
         <textarea
+          aria-label="Task description"
           className="w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
           placeholder="Describe the task in as much detail as you like. Paste a full spec, code snippets, error messages, or any context the agents need. No fixed limit — the more detail, the better the output."
           rows={expanded ? 16 : 4}
@@ -297,6 +299,7 @@ export function NewTaskForm() {
       {/* Controls row */}
       <div className="flex flex-wrap items-center gap-2">
         <select
+          aria-label="Task priority"
           className="rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
           value={priority}
           onChange={(e) => setPriority(e.target.value as typeof priority)}
@@ -308,6 +311,7 @@ export function NewTaskForm() {
 
         {readyRepos.length > 0 && (
           <select
+            aria-label="Target repository"
             className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
             value={repoId ?? ""}
             onChange={(e) => setRepoId(e.target.value ? Number(e.target.value) : null)}

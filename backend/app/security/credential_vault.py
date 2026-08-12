@@ -1,10 +1,10 @@
 """Credential Vault — Day 17.
 
-Global-scoped (this project has no "project" entity — see docs/DAY17_PLAN.md
-for why the plan's per-project pseudocode was adapted). Wraps the one real
-choke point for credential storage that already existed since Days 9/14
-(app.db.repository.get_setting()/set_setting(), backed by the SystemSetting
-table) with:
+Global-scoped by default (this project originally had no "project" entity —
+see docs/DAY17_PLAN.md for why the plan's per-project pseudocode was
+adapted). Wraps the one real choke point for credential storage that
+already existed since Days 9/14 (app.db.repository.get_setting()/
+set_setting(), backed by the SystemSetting table) with:
   1. Encryption at rest (encrypt_value()/decrypt_value(), Fernet, optional —
      falls back to plaintext with a one-time startup warning when
      CREDENTIAL_ENCRYPTION_KEY is unset, never a silently hardcoded key).
@@ -15,7 +15,13 @@ table) with:
      existing app.fleet.audit_log — Day 13 already established this as the
      mechanism for security-relevant events).
 
-database_url is deliberately NOT a vault-manageable credential — see
+AUDIT_Q_BATCH14 §95 gap-closure (2026-08-12) — "Credentials scoped per-repo/
+project" was NO: a real `Repo` model exists now (it didn't at Day 17), so
+load()/store()/inject_into_env() accept an optional `repo_id`. A repo-scoped
+key is checked first and falls back to the pre-existing global key when
+absent — every existing caller that omits repo_id (settings.py's UI CRUD
+endpoints) keeps its exact current global-only behavior; database_url
+remains deliberately NOT a vault-manageable credential either way — see
 docs/DAY17_PLAN.md's plan/reality correction #2 (CLAUDE.md's own Permanent
 Safety Rule: "No agent ever gets deploy credentials").
 """
@@ -31,8 +37,20 @@ logger = logging.getLogger(__name__)
 
 _ENC_PREFIX = "enc:v1:"
 _CUSTOM_SECRET_PREFIX = "custom_secret:"
+_REPO_CUSTOM_SECRET_PREFIX = "repo_custom_secret:"
 
 _warned_plaintext = False
+
+
+def scoped_credential_key(base_key: str, repo_id: int | None) -> str:
+    """§95 gap-closure — a distinct, non-colliding prefix
+    (f"repo:{repo_id}:...") so list_setting_keys(_CUSTOM_SECRET_PREFIX)
+    keeps returning only global custom secrets, unchanged."""
+    return f"repo:{repo_id}:{base_key}" if repo_id is not None else base_key
+
+
+def _repo_custom_secret_prefix(repo_id: int) -> str:
+    return f"{_REPO_CUSTOM_SECRET_PREFIX}{repo_id}:"
 
 
 # ---------------------------------------------------------------------------
@@ -151,12 +169,21 @@ class CredentialVault:
     """Global-scoped (see module docstring). Every load/store is audit-logged
     (key name only, never the value) via the existing app.fleet.audit_log."""
 
-    async def load(self, db: Any) -> ProjectCredentials:
+    async def load(self, db: Any, repo_id: int | None = None) -> ProjectCredentials:
+        """§95 gap-closure — when repo_id is given, a repo-scoped value
+        (set via store(..., repo_id=...)) wins; an unset repo-scoped slot
+        falls back to the pre-existing global key, so a repo with no
+        credentials of its own still works exactly as before repo scoping
+        existed."""
         from app.db.repository import get_setting
 
-        github_token = await get_setting(db, "github_token")
-        anthropic_api_key = await get_setting(db, "anthropic_api_key")
-        custom_secrets = await self._load_custom_secrets(db)
+        github_token = await get_setting(
+            db, scoped_credential_key("github_token", repo_id)
+        ) or await get_setting(db, "github_token")
+        anthropic_api_key = await get_setting(
+            db, scoped_credential_key("anthropic_api_key", repo_id)
+        ) or await get_setting(db, "anthropic_api_key")
+        custom_secrets = await self._load_custom_secrets(db, repo_id)
 
         self._audit(
             "load", list(custom_secrets.keys()) + ["github_token", "anthropic_api_key"]
@@ -170,19 +197,30 @@ class CredentialVault:
             custom_secrets={k: SecretStr(v) for k, v in custom_secrets.items()},
         )
 
-    async def store(self, db: Any, creds: ProjectCredentials) -> None:
+    async def store(
+        self, db: Any, creds: ProjectCredentials, repo_id: int | None = None
+    ) -> None:
         from app.db.repository import set_setting
 
         if creds.github_token is not None:
-            await set_setting(db, "github_token", creds.github_token.get_secret_value())
+            await set_setting(
+                db,
+                scoped_credential_key("github_token", repo_id),
+                creds.github_token.get_secret_value(),
+            )
         if creds.anthropic_api_key is not None:
             await set_setting(
-                db, "anthropic_api_key", creds.anthropic_api_key.get_secret_value()
+                db,
+                scoped_credential_key("anthropic_api_key", repo_id),
+                creds.anthropic_api_key.get_secret_value(),
             )
+        custom_prefix = (
+            _repo_custom_secret_prefix(repo_id)
+            if repo_id is not None
+            else _CUSTOM_SECRET_PREFIX
+        )
         for name, secret in creds.custom_secrets.items():
-            await set_setting(
-                db, _CUSTOM_SECRET_PREFIX + name, secret.get_secret_value()
-            )
+            await set_setting(db, custom_prefix + name, secret.get_secret_value())
 
         self._audit(
             "store",
@@ -190,19 +228,32 @@ class CredentialVault:
             + list(creds.custom_secrets.keys()),
         )
 
-    async def inject_into_env(self, db: Any) -> dict[str, str]:
-        creds = await self.load(db)
+    async def inject_into_env(self, db: Any, repo_id: int | None = None) -> dict[str, str]:
+        creds = await self.load(db, repo_id=repo_id)
         return creds.get_env_vars()
 
-    async def _load_custom_secrets(self, db: Any) -> dict[str, str]:
+    async def _load_custom_secrets(
+        self, db: Any, repo_id: int | None = None
+    ) -> dict[str, str]:
         from app.db.repository import get_setting, list_setting_keys
 
-        names = await list_setting_keys(db, _CUSTOM_SECRET_PREFIX)
         result: dict[str, str] = {}
-        for full_key in names:
+        global_names = await list_setting_keys(db, _CUSTOM_SECRET_PREFIX)
+        for full_key in global_names:
             value = await get_setting(db, full_key)
             if value:
                 result[full_key[len(_CUSTOM_SECRET_PREFIX) :]] = value
+
+        if repo_id is not None:
+            repo_prefix = _repo_custom_secret_prefix(repo_id)
+            repo_names = await list_setting_keys(db, repo_prefix)
+            for full_key in repo_names:
+                value = await get_setting(db, full_key)
+                if value:
+                    # Repo-scoped secret of the same name overrides the
+                    # global fallback loaded above.
+                    result[full_key[len(repo_prefix) :]] = value
+
         return result
 
     def _audit(self, action: str, key_names: list[str]) -> None:
