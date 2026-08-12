@@ -3582,6 +3582,25 @@ class ChatAgent:
                     pass
 
             if not result.startswith("[ERROR]") and not result.startswith("[POLICY"):
+                # AUDIT_Q_BATCH18 §54/55/56 gap-closure — this file's own
+                # existing _redact_secrets_in_text call (further down, on
+                # full_text) only scans the MODEL's synthesized reply, never
+                # the raw tool result feeding into it. A secret surfaced via
+                # this chat's read_file/bash/git_show/etc tools and never
+                # re-quoted verbatim by the model (only paraphrased, or left
+                # sitting in `result[:3000]`'s pushed SSE event/history
+                # below) sailed through unredacted. Same chokepoint base_
+                # graph.py's execute_tools node was just given the identical
+                # fix at, applied before flag/wrap so the redaction marker
+                # lands inside the untrusted-data delimiter, not outside it.
+                result, _secret_found = _redact_secrets_in_text(result)
+                if _secret_found:
+                    logger.warning(
+                        "Redacted apparent secret(s) from %s's raw tool "
+                        "result (session=%s)",
+                        tu["name"],
+                        self.session.session_id,
+                    )
                 # AUDIT_Q_BATCH11 §21 — base_graph.py's execute_tools node
                 # already flags+wraps tool output at its own chokepoint, but
                 # this chat graph runs its own separate _execute_tool_node

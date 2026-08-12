@@ -208,7 +208,7 @@ def make_scan_handlers(repo_path: str, trace_id: str = "") -> dict[str, Any]:
     handlers["docker_logs"] = docker_handlers["docker_logs"]
     handlers["record_learning"] = make_record_learning_handler("monitoring_agent")
     handlers["submit_enhancement_request"] = make_submit_enhancement_request_handler(
-        "monitoring_agent", trace_id=trace_id
+        "monitoring_agent", trace_id=trace_id, repo_path=repo_path
     )
     return handlers
 

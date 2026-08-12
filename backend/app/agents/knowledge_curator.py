@@ -199,7 +199,7 @@ def make_scan_handlers(repo_path: str, trace_id: str = "") -> dict[str, Any]:
     handlers["memory_curate_read"] = memory_curate_read
     handlers["memory_list_draft_lessons"] = memory_list_draft_lessons
     handlers["submit_enhancement_request"] = make_submit_enhancement_request_handler(
-        "knowledge_curator", trace_id=trace_id
+        "knowledge_curator", trace_id=trace_id, repo_path=repo_path
     )
     return handlers
 
@@ -314,6 +314,13 @@ def run_knowledge_curator_apply(
         trace_id=trace_id,
     )
 
+    raw = final_state.get("result", {})
+    from app.fleet.enhancement_rollback import capture_commit_sha_if_verified
+
+    commit_sha = capture_commit_sha_if_verified(repo, final_state)
+    if commit_sha:
+        raw["commit_sha"] = commit_sha
+
     return AgentResult(
         summary=f"Applied curation #{request_id}",
         findings=[],
@@ -323,7 +330,7 @@ def run_knowledge_curator_apply(
         tokens_in=final_state["tokens_in"],
         tokens_out=final_state["tokens_out"],
         status="completed" if final_state["verification"].get("curated") else "blocked",
-        raw=final_state.get("result", {}),
+        raw=raw,
     )
 
 

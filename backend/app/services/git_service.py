@@ -237,6 +237,58 @@ async def git_commit(
     }
 
 
+async def git_revert(
+    repo_path: str, commit_sha: str, author_name: str = "", author_email: str = ""
+) -> dict[str, Any]:
+    """AUDIT_Q_BATCH18 §69 gap-closure (2026-08-12) — real primitive
+    app.fleet.enhancement_rollback needs: `git revert --no-edit <sha>`
+    creates a new commit undoing exactly `commit_sha`'s changes, keeping
+    full history (unlike reset/force-push) — the same non-destructive
+    rationale every other mutating git_service function here already
+    follows. --no-edit accepts git's own auto-generated "Revert ..."
+    message so this is safe to call from an unattended scheduled loop with
+    no interactive editor available.
+    """
+    _validate_workspace(repo_path)
+    if not commit_sha.strip():
+        raise ValueError("commit_sha cannot be empty.")
+    env = dict(os.environ)
+    if author_name:
+        env["GIT_AUTHOR_NAME"] = author_name
+        env["GIT_COMMITTER_NAME"] = author_name
+    if author_email:
+        env["GIT_AUTHOR_EMAIL"] = author_email
+        env["GIT_COMMITTER_EMAIL"] = author_email
+    proc = await asyncio.create_subprocess_exec(
+        "git",
+        "revert",
+        "--no-edit",
+        commit_sha,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=repo_path,
+        env=env,
+    )
+    stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=60.0)
+    rc = proc.returncode or 0
+    if rc != 0:
+        # A conflicting/failed revert must never leave the worktree in a
+        # half-reverted state for whatever runs next in this repo —
+        # `git revert --abort` is a no-op (safe) if there's nothing to abort.
+        await _run_git(["revert", "--abort"], cwd=repo_path)
+    new_sha = ""
+    if rc == 0:
+        rc_sha, sha_out, _ = await _run_git(["rev-parse", "HEAD"], cwd=repo_path)
+        if rc_sha == 0:
+            new_sha = sha_out.strip()
+    return {
+        "ok": rc == 0,
+        "stdout": stdout_b.decode(errors="replace"),
+        "stderr": stderr_b.decode(errors="replace"),
+        "revertCommitSha": new_sha,
+    }
+
+
 async def git_push(
     repo_path: str, remote: str = "origin", branch: str = ""
 ) -> dict[str, Any]:

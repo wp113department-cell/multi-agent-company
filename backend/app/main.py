@@ -518,6 +518,111 @@ async def _run_prompt_auto_rollback_once() -> None:
                 pass
 
 
+async def _enhancement_quality_monitor_loop() -> None:
+    """AUDIT_Q_BATCH18 §69 gap-closure (2026-08-12) — the CODE-commit
+    sibling of _prompt_auto_rollback_loop above: periodically checks every
+    completed, commit_sha-bearing EnhancementRequest whose
+    quality_check_status is still "monitoring" for a real, AgentRun-
+    history-backed success-rate decline since it was applied, and — same
+    fully-automatic, no-human-approval-gate posture as the prompt sibling
+    — reverts it via `git revert` if a genuine decline is found. Set
+    ENHANCEMENT_QUALITY_MONITOR_INTERVAL_HOURS=0 to disable.
+    """
+    interval_hours = get_settings().enhancement_quality_monitor_interval_hours
+    if interval_hours <= 0:
+        logger.info(
+            "Enhancement quality-monitor loop disabled "
+            "(ENHANCEMENT_QUALITY_MONITOR_INTERVAL_HOURS=0)"
+        )
+        return
+
+    while True:
+        await asyncio.sleep(interval_hours * 60 * 60)
+        try:
+            await _run_enhancement_quality_monitor_once()
+        except Exception as exc:
+            logger.warning("Enhancement quality-monitor loop iteration failed: %s", exc)
+
+
+async def _run_enhancement_quality_monitor_once() -> None:
+    from sqlalchemy import select
+
+    from app.db.models import EnhancementRequest
+    from app.db.session import get_session_factory
+    from app.fleet.enhancement_rollback import check_and_handle_quality_decline
+
+    settings = get_settings()
+    repo_path = str(settings.fleet_self_repo_path)
+    factory = get_session_factory()
+
+    async with factory() as db:
+        result = await db.execute(
+            select(EnhancementRequest).where(
+                EnhancementRequest.status == "completed",
+                EnhancementRequest.commit_sha.isnot(None),
+                EnhancementRequest.quality_check_status == "monitoring",
+            )
+        )
+        pending = list(result.scalars().all())
+
+    for request in pending:
+        try:
+            async with factory() as db:
+                row = await db.get(EnhancementRequest, request.id)
+                if row is None or row.quality_check_status != "monitoring":
+                    continue  # already handled by a prior iteration/instance
+                outcome = await check_and_handle_quality_decline(
+                    db,
+                    row,
+                    repo_path=repo_path,
+                    pre_window_hours=settings.enhancement_quality_monitor_pre_window_hours,
+                    min_post_window_hours=settings.enhancement_quality_monitor_min_post_window_hours,
+                    min_runs=settings.enhancement_quality_monitor_min_runs,
+                    decline_threshold=settings.enhancement_quality_decline_threshold,
+                )
+                logger.debug(
+                    "Enhancement quality-monitor: request #%s -> %s",
+                    request.id,
+                    outcome.get("action"),
+                )
+        except Exception:
+            logger.warning(
+                "Enhancement quality-monitor failed for request #%s",
+                request.id,
+                exc_info=True,
+            )
+
+
+async def _lesson_store_refresh_loop() -> None:
+    """AUDIT_Q_BATCH18 Bonus-table row 2 gap-closure (2026-08-12) — real
+    cross-process visibility for LessonStore (app.agents.base_graph),
+    previously purely in-process. Deliberately runs on EVERY backend
+    instance independently (not gated behind _run_as_leader like the
+    scheduled WRITE loops elsewhere in this file) — this is a per-process
+    cache refresh, not a shared job, so every instance needs its own copy
+    running, not just one leader. Set LESSON_STORE_REFRESH_INTERVAL_
+    SECONDS=0 to disable.
+    """
+    interval_seconds = get_settings().lesson_store_refresh_interval_seconds
+    if interval_seconds <= 0:
+        logger.info(
+            "Lesson store refresh loop disabled "
+            "(LESSON_STORE_REFRESH_INTERVAL_SECONDS=0)"
+        )
+        return
+
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            from app.agents.base_graph import get_lesson_store
+
+            merged = await get_lesson_store().refresh_from_db()
+            if merged:
+                logger.debug("Lesson store refreshed %d lesson(s) from DB", merged)
+        except Exception as exc:
+            logger.warning("Lesson store refresh loop iteration failed: %s", exc)
+
+
 async def _agents_score_compute_loop() -> None:
     """AUDIT_Q_BATCH15 §117 gap-closure (2026-08-11) — quality_score.py's
     "agents" category needs a real, persisted, repo-scoped score row to
@@ -1008,6 +1113,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # docstring for why (a local-filesystem, per-instance concern, not a
     # cluster-wide one).
     bg_process_liveness_task = asyncio.create_task(start_bg_process_liveness_loop())
+    # AUDIT_Q_BATCH18 Bonus-table row 2 gap-closure — see
+    # _lesson_store_refresh_loop's own docstring for why this, too, is
+    # deliberately not leader-gated (per-process cache refresh, not a
+    # cluster-wide job).
+    lesson_store_refresh_task = asyncio.create_task(_lesson_store_refresh_loop())
 
     await init_active_repo()
     await init_checkpointer(settings.database_url)
@@ -1082,6 +1192,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "loop:fleet_success_rate_sync",
         "loop:prompt_auto_rollback",
         "loop:agents_score_compute",
+        "loop:enhancement_quality_monitor",
     )
     _leader_election_engine = (
         _make_leader_election_engine(settings, pool_size=len(_leader_loop_names))
@@ -1160,6 +1271,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             _leader_election_engine,
         )
     )
+    enhancement_quality_monitor_task = asyncio.create_task(
+        _run_as_leader(
+            "loop:enhancement_quality_monitor",
+            _enhancement_quality_monitor_loop,
+            _leader_election_engine,
+        )
+    )
 
     yield
 
@@ -1175,7 +1293,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     fleet_success_rate_sync_task.cancel()
     prompt_auto_rollback_task.cancel()
     agents_score_compute_task.cancel()
+    enhancement_quality_monitor_task.cancel()
     bg_process_liveness_task.cancel()
+    lesson_store_refresh_task.cancel()
     for task in (
         reindex_task,
         retention_task,
@@ -1189,7 +1309,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         fleet_success_rate_sync_task,
         prompt_auto_rollback_task,
         agents_score_compute_task,
+        enhancement_quality_monitor_task,
         bg_process_liveness_task,
+        lesson_store_refresh_task,
     ):
         try:
             await task

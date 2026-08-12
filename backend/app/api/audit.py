@@ -94,3 +94,23 @@ async def get_approval_entries(
 ) -> dict[str, Any]:
     entries = await get_audit_log().approvals_async(limit=limit, before=before)
     return _paginated(entries, limit)
+
+
+@router.get("/verify")
+async def verify_audit_chain(
+    since_seq: int = Query(default=1, ge=1),
+    max_rows: int = Query(default=200_000, ge=1, le=1_000_000),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
+    """AUDIT_Q_BATCH18 Bonus-table row 7 gap-closure — the one real call
+    site AuditLog.verify_chain() needed: migration 036 already gives
+    audit_log a genuine DB-enforced hash chain and append-only triggers,
+    but nothing ever exposed a way to actually check the chain is intact.
+    `since_seq` (default: from the very beginning) enables a cheap
+    incremental check — pass the `seq` returned by a prior call's last
+    checked entry to only re-verify what's been written since.
+    `intact: null` (not true/false) means the check itself failed (DB
+    unreachable, or a pre-migration-036 table) — distinct from a
+    confirmed-broken chain, so a caller never mistakes "couldn't verify"
+    for "verified clean"."""
+    return await get_audit_log().verify_chain(since_seq=since_seq, max_rows=max_rows)

@@ -27,6 +27,7 @@ from app.db.repository import (
     list_subtasks,
     list_task_images,
     list_tasks,
+    repeat_task,
     transition_task,
     get_or_create_pipeline_state,
     resolve_task_repo_path,
@@ -81,6 +82,16 @@ class RunRequest(BaseModel):
     )
 
 
+class RepeatTaskRequest(BaseModel):
+    # AUDIT_Q_BATCH18 §51 gap-closure — all optional: an unmodified repeat
+    # clones title/description/priority from the source task exactly (the
+    # deterministic "the same one as yesterday" case the audit named).
+    title: str | None = None
+    description: str | None = None
+    priority: Literal["low", "medium", "high"] | None = None
+    mode: str | None = None  # same "full" | "simple" override as RunRequest
+
+
 def _log_to_dict(log: Any) -> dict[str, Any]:
     return {
         "logId": log.id,
@@ -111,6 +122,7 @@ def _task_to_dict(task: Any, logs: list[Any] | None = None) -> dict[str, Any]:
         "finalSummary": task.final_summary,
         "repoId": task.repo_id,
         "repoName": repo.name if repo else None,
+        "repeatedFromTaskId": task.repeated_from_task_id,
         "createdAt": task.created_at.isoformat() if task.created_at else None,
         "updatedAt": task.updated_at.isoformat() if task.updated_at else None,
         "logs": [_log_to_dict(lg) for lg in (logs or [])],
@@ -419,6 +431,83 @@ async def restart_task(
     )
 
     return {"restarted": True, "taskId": task_id}
+
+
+@router.post("/{task_id}/repeat", status_code=201)
+@limiter.limit(get_settings().rate_limit_tasks)
+async def repeat(
+    request: Request,
+    task_id: int,
+    body: RepeatTaskRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
+    """AUDIT_Q_BATCH18 §51 gap-closure (2026-08-12) — "Repeat Task &
+    Historical Context" was PARTIAL: the only recall mechanism was
+    memory_hook_node's implicit semantic-similarity retrieval, with no way
+    to say "the same one as yesterday" and have it resolved
+    deterministically. This is that deterministic path: clones `task_id`
+    (any status — a completed/closed task is the normal case, "run this
+    again", but nothing requires it) into a brand-new DevTask via
+    repeat_task() (repeated_from_task_id set to the real source id, not a
+    similarity guess) and immediately dispatches it through the exact same
+    planning-pipeline path POST /{task_id}/run uses — a repeat that only
+    created a DB row without actually running would be "clone", not
+    "repeat".
+    """
+    from app.api.agents import launch_planning_pipeline, launch_planner
+
+    source = await get_task(db, task_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    new_task = await repeat_task(
+        db,
+        source,
+        title=body.title,
+        description=body.description,
+        priority=body.priority,
+    )
+
+    repo_path = resolve_task_repo_path(new_task)
+    await transition_task(db, new_task.id, "planning")
+    await append_log(
+        db,
+        new_task.id,
+        "pipeline",
+        f"Task repeated from #{task_id} — planning pipeline triggered",
+    )
+
+    settings = get_settings()
+    mode = body.mode or settings.pipeline_mode
+    if mode == "full":
+        await dispatch_job(
+            background_tasks,
+            launch_planning_pipeline,
+            new_task.id,
+            str(new_task.title),
+            str(new_task.description),
+            repo_path,
+            priority=new_task.priority,
+        )
+    else:
+        await dispatch_job(
+            background_tasks,
+            launch_planner,
+            new_task.id,
+            str(new_task.title),
+            str(new_task.description),
+            repo_path,
+            priority=new_task.priority,
+        )
+
+    return {
+        "repeated": True,
+        "sourceTaskId": task_id,
+        "taskId": new_task.id,
+        "task": _task_to_dict(new_task),
+    }
 
 
 @router.post("/{task_id}/approve")

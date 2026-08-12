@@ -749,30 +749,50 @@ async def _dispatch_one_subtask(
         await asyncio.sleep(0.5 * (2**attempt))
 
     # AUDIT_Q_BATCH16 §90 gap-closure (2026-08-11) — "Quality Gates":
-    # security_reviewer/architecture_reviewer wired as real, additional,
-    # non-blocking nodes in the Dev→QA→Review sequence, following the same
-    # pattern as the existing run_qa/run_reviewer calls above. Opt-in
-    # (enable_security_architecture_gates, default False) and strictly
-    # advisory: only runs once the subtask already reached "completed" via
-    # the mandatory QA+review gates, and its findings are logged/persisted
-    # but never flip subtask_status back to "blocked" — these two agents
-    # aren't currently tuned for blocking behavior (no retry-on-finding
-    # loop of their own, unlike qa/reviewer), so surfacing findings without
-    # gating completion is the honest scope for a first wiring pass.
+    # security_reviewer/architecture_reviewer wired as real, additional
+    # nodes in the Dev→QA→Review sequence, following the same pattern as
+    # the existing run_qa/run_reviewer calls above. Opt-in
+    # (enable_security_architecture_gates, default False): only runs once
+    # the subtask already reached "completed" via the mandatory QA+review
+    # gates.
+    #
+    # AUDIT_Q_BATCH18 §24 High-priority #7 gap-closure (2026-08-12) — the
+    # above wiring made these gates *run*, but their findings were
+    # unconditionally advisory-only (logged, never blocking) and
+    # dependency_security_agent had no call site here at all, leaving only
+    # 2 of 8 real quality-gate types (lint, tests) actually mandatory
+    # despite all the others already existing as real, working agents.
+    # Both gaps close together: dependency_security_agent now runs
+    # alongside the other two (asyncio.gather, same independent-read-only-
+    # review rationale), and subtask_status is flipped to "blocked" — the
+    # exact same pre-existing blocked-subtask path every other gate in this
+    # pipeline already escalates through (task.blocked event, epic halt
+    # after MANAGER_MAX_EPIC_FAILURES blocked subtasks) — whenever a
+    # finding's severity is in security_architecture_gates_block_severities.
     if (
         subtask_status == "completed"
         and get_settings().enable_security_architecture_gates
     ):
         try:
-            gate_tokens_in, gate_tokens_out = await _run_advisory_quality_gates(
-                task_id=task_id,
-                subtask_id=subtask_id,
-                repo=repo,
-                epic_id=epic_id,
-                db=db,
+            gate_tokens_in, gate_tokens_out, gate_blocked_reason = (
+                await _run_advisory_quality_gates(
+                    task_id=task_id,
+                    subtask_id=subtask_id,
+                    repo=repo,
+                    epic_id=epic_id,
+                    db=db,
+                )
             )
             local_tokens_in += gate_tokens_in
             local_tokens_out += gate_tokens_out
+            if gate_blocked_reason:
+                subtask_status = "blocked"
+                logger.warning(
+                    "Subtask %d blocked by security/architecture/dependency "
+                    "gate: %s",
+                    subtask_id,
+                    gate_blocked_reason,
+                )
         except Exception:
             logger.debug(
                 "Advisory security/architecture gates failed for subtask %d "
@@ -814,6 +834,51 @@ async def _dispatch_one_subtask(
     }
 
 
+def _gate_block_reason(
+    label: str, result: Any, block_severities: frozenset[str]
+) -> str | None:
+    """AUDIT_Q_BATCH18 §24 High-priority #7 gap-closure — real severity
+    extraction per gate, matching each agent's own actual, verified
+    result shape (never the model's narrative `findings` text alone):
+    - security: a single report-level `severity` field
+      (submit_security_report's own schema — see security_reviewer.py).
+    - architecture: per-risk `severity` (submit_arch_review's `risks[]`
+      schema — see architecture_reviewer.py, result.findings IS risks).
+    - dependency: no severity field exists anywhere in this agent's
+      output shape (verified directly against pip-audit's own JSON schema
+      — see security_score.py's module docstring for why); gates instead
+      on the real, deterministic `vulnerable_package_count` this session
+      just started exposing on AgentResult.raw, and only on a verified
+      (audited=True) run — an unverified claim is never load-bearing here,
+      same invariant AgentResult.verified already enforces elsewhere.
+    Returns a human-readable block reason, or None if this gate doesn't
+    block."""
+    if label == "security":
+        severity = str(result.raw.get("severity", "")).lower()
+        if severity in block_severities:
+            return f"security_reviewer reported {severity}-severity finding(s)"
+        return None
+    if label == "architecture":
+        hit = [
+            r
+            for r in result.findings
+            if isinstance(r, dict)
+            and str(r.get("severity", "")).lower() in block_severities
+        ]
+        if hit:
+            sev = str(hit[0].get("severity", "")).lower()
+            return f"architecture_reviewer reported {len(hit)} {sev}-severity risk(s)"
+        return None
+    if label == "dependency":
+        if not result.verified:
+            return None
+        vuln_count = int(result.raw.get("vulnerable_package_count", 0) or 0)
+        if vuln_count > 0:
+            return f"dependency_security_agent found {vuln_count} vulnerable package(s) (pip-audit-verified)"
+        return None
+    return None
+
+
 async def _run_advisory_quality_gates(
     *,
     task_id: int,
@@ -821,27 +886,40 @@ async def _run_advisory_quality_gates(
     repo: str,
     epic_id: str | None,
     db: AsyncSession | None,
-) -> tuple[int, int]:
+) -> tuple[int, int, str | None]:
     """AUDIT_Q_BATCH16 §90 gap-closure (2026-08-11) — the real call site
     `enable_security_architecture_gates` needed: security_reviewer and
     architecture_reviewer are real, fully-built, independently-tested
     agents (already the autonomous fleet scan loop's own security/
     architecture checkers) that had zero callers anywhere in the pipeline
-    deciding whether a normal task is "done" before this. Runs both
-    concurrently (asyncio.gather — independent, read-only, non-blocking
-    reviews; no ordering dependency between them, unlike dev->QA->review's
-    own strict sequence). Never raises past this function — the caller
-    already wraps this in its own best-effort try/except, but this
-    function's own errors are caught per-agent so one agent's failure
-    doesn't lose the other's real findings.
+    deciding whether a normal task is "done" before this. Runs all three
+    concurrently (asyncio.gather — independent, read-only reviews; no
+    ordering dependency between them, unlike dev->QA->review's own strict
+    sequence). Never raises past this function — the caller already wraps
+    this in its own best-effort try/except, but this function's own errors
+    are caught per-agent so one agent's failure doesn't lose the others'
+    real findings.
 
-    Returns (tokens_in, tokens_out) so the caller's real epic-wide token
-    accounting (compute_actual_cost_usd) includes these two extra LLM
-    calls — an advisory gate that silently omitted its own real spend from
-    cost_actual_usd would make that number quietly wrong once an operator
-    opts in.
+    AUDIT_Q_BATCH18 §24 High-priority #7 gap-closure (2026-08-12) — adds
+    dependency_security_agent as a third concurrent gate (previously had
+    zero call sites in the normal-task pipeline at all) and real
+    severity-based blocking via `_gate_block_reason` — the honest
+    completion of what "wired as a quality gate" should have meant from
+    the start: findings that are logged and never acted on don't function
+    as a gate, they function as a log line.
+
+    Returns (tokens_in, tokens_out, block_reason) — block_reason is None
+    unless a gate's finding severity is in
+    settings.security_architecture_gates_block_severities, in which case
+    it's the human-readable reason the caller flips subtask_status to
+    "blocked" over. tokens_in/out cover all three extra LLM calls so the
+    caller's real epic-wide token accounting (compute_actual_cost_usd)
+    stays correct — an advisory gate that silently omitted its own real
+    spend from cost_actual_usd would make that number quietly wrong once
+    an operator opts in.
     """
     from app.agents.architecture_reviewer import run_arch_review
+    from app.agents.dependency_security_agent import run_dependency_security_agent
     from app.agents.security_reviewer import run_security_review
     from app.event_bus.bus import publish_event
     from app.event_bus.models import GridironEvent
@@ -872,20 +950,55 @@ async def _run_advisory_quality_gates(
             )
             return None
 
-    security_result, arch_result = await asyncio.gather(
-        _run_security(), _run_architecture()
+    async def _run_dependency() -> Any:
+        try:
+            return await asyncio.to_thread(
+                run_dependency_security_agent,
+                task_id=task_id,
+                description=f"Dependency security gate for subtask {subtask_id}",
+                repo_path=repo,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Advisory dependency_security_agent failed for subtask %d: %s",
+                subtask_id,
+                exc,
+            )
+            return None
+
+    security_result, arch_result, dependency_result = await asyncio.gather(
+        _run_security(), _run_architecture(), _run_dependency()
     )
 
+    block_severities = frozenset(
+        s.lower() for s in get_settings().security_architecture_gates_block_severities
+    )
     tokens_in = 0
     tokens_out = 0
-    for label, result in (("security", security_result), ("architecture", arch_result)):
+    block_reason: str | None = None
+    for label, result in (
+        ("security", security_result),
+        ("architecture", arch_result),
+        ("dependency", dependency_result),
+    ):
         if result is None:
             continue
         tokens_in += result.tokens_in
         tokens_out += result.tokens_out
+        this_block_reason = (
+            _gate_block_reason(label, result, block_severities)
+            if block_severities
+            else None
+        )
+        if this_block_reason and block_reason is None:
+            block_reason = this_block_reason
         await publish_event(
             GridironEvent(
-                event_type="subtask.advisory_gate_completed",
+                event_type=(
+                    "subtask.advisory_gate_blocked"
+                    if this_block_reason
+                    else "subtask.advisory_gate_completed"
+                ),
                 task_id=str(task_id),
                 epic_id=epic_id,
                 payload={
@@ -894,8 +1007,13 @@ async def _run_advisory_quality_gates(
                     "status": result.status,
                     "finding_count": len(result.findings),
                     "summary": result.summary[:500],
+                    "block_reason": this_block_reason,
                 },
-                emitted_by=f"{label}_reviewer",
+                emitted_by=(
+                    f"{label}_reviewer"
+                    if label != "dependency"
+                    else "dependency_security_agent"
+                ),
             ),
             db=db,
         )
@@ -908,7 +1026,10 @@ async def _run_advisory_quality_gates(
                     task_id,
                     f"{label}_advisory",
                     f"Subtask {subtask_id}: {len(result.findings)} {label} "
-                    f"finding(s) — {result.summary[:300]}",
+                    f"finding(s) — {result.summary[:300]}"
+                    + (
+                        f" [BLOCKING: {this_block_reason}]" if this_block_reason else ""
+                    ),
                 )
             except Exception:
                 logger.debug(
@@ -918,7 +1039,7 @@ async def _run_advisory_quality_gates(
                     exc_info=True,
                 )
 
-    return tokens_in, tokens_out
+    return tokens_in, tokens_out, block_reason
 
 
 async def run_manager(

@@ -11,6 +11,7 @@ sites and app.agents.chat_agent's own direct
 
 from __future__ import annotations
 
+import re
 import subprocess
 from typing import Any
 
@@ -438,3 +439,106 @@ def _docker_container_risk_reason(container: str) -> str | None:
             )
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# AUDIT_Q_BATCH18 §54/55/56 gap-closure (2026-08-12) — "Refuse to invent
+# APIs/files/functions/classes" was scored NO, not PARTIAL: every real
+# no-hallucination mechanism this audit found (VerificationConfig.
+# blocking_until, _quality_gate, the model-context-limit gate, ...)
+# constrains what an agent may DO, none of them checks what an agent's own
+# final CLAIM says — several of this codebase's own agent role prompts
+# already demand a citation discipline ("each finding must cite file:line
+# read this run", security_reviewer.py; "each with file:line evidence",
+# architecture_reviewer.py) but nothing ever verified a submitted citation
+# against the real repo. A citation regex is a legitimate first pass here
+# (same class of extraction _scan_content_for_secrets already uses) — the
+# actual verification is a real filesystem check (file exists, line number
+# is within the file's real line count), never another regex pretending to
+# confirm correctness.
+_FILE_LINE_CITATION_RE = re.compile(
+    r"([A-Za-z0-9_][A-Za-z0-9_./-]*\."
+    r"(?:py|ts|tsx|js|jsx|go|rs|java|kt|rb|php|c|cpp|h|hpp|cs|"
+    r"md|yml|yaml|json|toml|txt|sql|sh|html|css))"
+    r":(\d+)(?:-\d+)?"
+)
+
+
+def _extract_file_line_citations(text: str) -> list[tuple[str, int]]:
+    return [
+        (m.group(1), int(m.group(2))) for m in _FILE_LINE_CITATION_RE.finditer(text)
+    ]
+
+
+def _collect_strings(value: Any) -> list[str]:
+    """Recursively pulls every string leaf out of a submit_* tool's raw
+    input dict (which may nest lists of dicts — e.g. architecture_reviewer's
+    risks[].evidence) so citation extraction doesn't need one traversal
+    written per agent's own result schema."""
+    strings: list[str] = []
+    if isinstance(value, str):
+        strings.append(value)
+    elif isinstance(value, dict):
+        for v in value.values():
+            strings.extend(_collect_strings(v))
+    elif isinstance(value, list):
+        for v in value:
+            strings.extend(_collect_strings(v))
+    return strings
+
+
+def verify_file_line_citations(
+    repo_root: str, raw_result: dict[str, Any]
+) -> dict[str, Any]:
+    """Extracts every `path/to/file.ext:NNN` citation from a submit_*
+    result's string fields and checks each against the real repo: does the
+    file exist, and is the line number within that file's actual line
+    count. Returns {checked, unverified} — `unverified` holds human-
+    readable reasons, capped at 20 entries so a result with many bad
+    citations doesn't blow up the response size.
+
+    Deliberately non-blocking (flags, doesn't reject) — same "a false
+    positive here should be visible, not lose real content" rationale
+    _flag_suspicious_tool_output already applies to injection-pattern
+    detection: a citation-shaped string that isn't really a file
+    reference (a ratio, a timestamp, a version string) is a real risk this
+    regex can't fully rule out, so silently blocking a real submission on
+    one would be worse than the gap this closes. Never raises: a repo_root
+    that doesn't exist, or an unreadable file, becomes an "unverified"
+    entry, not an exception.
+    """
+    import os
+
+    if not repo_root or not os.path.isdir(repo_root):
+        return {"checked": 0, "unverified": []}
+
+    strings = _collect_strings(raw_result)
+    seen: set[tuple[str, int]] = set()
+    unverified: list[str] = []
+    checked = 0
+    for text in strings:
+        for rel_path, line in _extract_file_line_citations(text):
+            key = (rel_path, line)
+            if key in seen:
+                continue
+            seen.add(key)
+            checked += 1
+            abs_path = os.path.join(repo_root, rel_path)
+            if not os.path.isfile(abs_path):
+                if len(unverified) < 20:
+                    unverified.append(f"{rel_path}:{line} — file not found in repo")
+                continue
+            try:
+                with open(abs_path, encoding="utf-8", errors="replace") as f:
+                    total_lines = sum(1 for _ in f)
+            except OSError:
+                if len(unverified) < 20:
+                    unverified.append(f"{rel_path}:{line} — could not read file")
+                continue
+            if line < 1 or line > max(total_lines, 1):
+                if len(unverified) < 20:
+                    unverified.append(
+                        f"{rel_path}:{line} — file has only {total_lines} line(s)"
+                    )
+
+    return {"checked": checked, "unverified": unverified}

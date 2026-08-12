@@ -57,6 +57,44 @@ async def create_task(
     return created
 
 
+async def repeat_task(
+    db: AsyncSession,
+    source: DevTask,
+    *,
+    title: str | None = None,
+    description: str | None = None,
+    priority: str | None = None,
+) -> DevTask:
+    """AUDIT_Q_BATCH18 §51 gap-closure (2026-08-12) — creates a genuinely
+    new DevTask cloning `source`'s title/description/repo_id/project/
+    priority (any of which the caller may override), with
+    repeated_from_task_id set to `source.id` — the real, deterministic
+    "do that again" primitive the audit found missing (only implicit
+    semantic-similarity recall existed before this).
+
+    Deliberately a NEW row, not a reset of `source` in place (that's what
+    POST /{task_id}/restart already does, for a still-relevant failed/
+    blocked run) — "repeat" is for a task whose own history (diff, subtask
+    results, agent runs) should stay intact as its own historical record,
+    exactly like "yesterday's task" implies a completed, closed record you
+    want to run again, not overwrite.
+    """
+    task = DevTask(
+        title=title if title is not None else source.title,
+        description=description if description is not None else source.description,
+        status="pending",
+        repo_id=source.repo_id,
+        priority=priority if priority is not None else source.priority,
+        project=source.project,
+        repeated_from_task_id=source.id,
+    )
+    db.add(task)
+    await db.commit()
+    created = await get_task(db, task.id)
+    assert created is not None
+    return created
+
+
 async def get_task(db: AsyncSession, task_id: int) -> DevTask | None:
     result = await db.execute(
         select(DevTask).options(selectinload(DevTask.repo)).where(DevTask.id == task_id)

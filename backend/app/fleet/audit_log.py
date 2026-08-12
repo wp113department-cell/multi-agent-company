@@ -399,6 +399,116 @@ class AuditLog:
             return self.approvals(limit=limit)
 
     # ------------------------------------------------------------------
+    # Chain integrity verification — AUDIT_Q_BATCH18 Bonus-table row 7
+    # gap-closure (2026-08-12)
+    # ------------------------------------------------------------------
+    #
+    # Migration 036 (AUDIT_Q_BATCH11 §96) already gave audit_log a real,
+    # DB-enforced hash chain (BEFORE INSERT trigger computing
+    # entry_hash = sha256(prev_hash || every other column)) plus triggers
+    # rejecting UPDATE/DELETE outright — genuinely stronger tamper
+    # resistance than an application-level check could provide on its own.
+    # But nothing anywhere ever READ entry_hash/prev_hash back to confirm
+    # the chain is actually intact (grepped: zero references outside the
+    # migration itself before this) — a row could still be altered by
+    # anything that bypasses the trigger layer (a direct write under
+    # `SET LOCAL audit_log.allow_mutation = true`, a restored backup with a
+    # gap, manual DB surgery by a superuser) and nothing would ever notice.
+    # This is that missing read-back: it recomputes the exact same
+    # sha256(prev_hash || ...) expression the trigger uses, entirely in
+    # SQL (never re-serializing `details` in Python — Postgres's own
+    # `jsonb::text` cast is what the trigger hashed, and re-implementing
+    # that byte-for-byte in Python would risk spurious mismatches from
+    # whitespace/ordering differences, not real tampering), so a mismatch
+    # here is never a false positive from a serialization difference.
+
+    async def verify_chain(
+        self, *, since_seq: int = 1, max_rows: int = 200_000
+    ) -> dict[str, Any]:
+        """Recomputes and checks the hash chain for seq >= since_seq
+        (default: the whole table, from seq=1), bounded by max_rows as a
+        safety cap. `since_seq` enables a real incremental/windowed check
+        (e.g. "verify everything written since the last verification run")
+        without the classic hash-chain-window bug: the row immediately
+        BEFORE since_seq is fetched as an anchor so the first row in the
+        window is still checked against its true expected prev_hash rather
+        than an assumed-empty one — since_seq=1 naturally degrades to the
+        same '' bootstrap value migration 036's own trigger uses for the
+        very first row ever, so the two code paths are one query, not two.
+
+        Returns {checked, intact, first_break, breaks} — breaks is capped
+        at 50 entries so a badly-corrupted table doesn't return an
+        unbounded response.
+
+        Never raises: an unreachable DB or a table that predates migration
+        036 (no entry_hash column) both return intact=None (distinct from
+        True/False) with an `error` key — "could not verify" must never be
+        reported as "verified intact", the same false-success class of bug
+        this whole audit exists to catch.
+        """
+        try:
+            from sqlalchemy import text
+
+            from app.db.session import get_session_factory
+
+            async with get_session_factory()() as session:
+                result = await session.execute(
+                    text(
+                        "WITH windowed AS ("
+                        "  SELECT seq, entry_id, timestamp, prev_hash, entry_hash, "
+                        "         action_type, agent_name, task_id, description, "
+                        "         details, outcome, requires_human_approval, approved_by "
+                        "  FROM audit_log WHERE seq >= :since_seq "
+                        "  ORDER BY seq LIMIT :max_rows"
+                        "), anchor AS ("
+                        "  SELECT COALESCE(("
+                        "    SELECT entry_hash FROM audit_log "
+                        "    WHERE seq < :since_seq ORDER BY seq DESC LIMIT 1"
+                        "  ), '') AS anchor_hash"
+                        ") "
+                        "SELECT w.seq, w.entry_id, w.timestamp, "
+                        "w.entry_hash = encode(digest("
+                        "  w.prev_hash || w.entry_id || w.timestamp || w.action_type || "
+                        "  w.agent_name || COALESCE(w.task_id, '') || w.description || "
+                        "  COALESCE(w.details::text, '') || w.outcome || "
+                        "  w.requires_human_approval::text || COALESCE(w.approved_by, ''), "
+                        "  'sha256'), 'hex') AS content_hash_valid, "
+                        "w.prev_hash = COALESCE(LAG(w.entry_hash) OVER (ORDER BY w.seq), "
+                        "  a.anchor_hash) AS chain_link_valid "
+                        "FROM windowed w CROSS JOIN anchor a "
+                        "ORDER BY w.seq"
+                    ),
+                    {"since_seq": since_seq, "max_rows": max_rows},
+                )
+                rows = result.mappings().all()
+        except Exception as exc:
+            logger.warning("AuditLog.verify_chain could not query DB: %s", exc)
+            return {
+                "checked": 0,
+                "intact": None,
+                "breaks": [],
+                "error": str(exc),
+            }
+
+        breaks = [
+            {
+                "seq": r["seq"],
+                "entry_id": r["entry_id"],
+                "timestamp": r["timestamp"],
+                "content_hash_valid": r["content_hash_valid"],
+                "chain_link_valid": r["chain_link_valid"],
+            }
+            for r in rows
+            if not r["content_hash_valid"] or not r["chain_link_valid"]
+        ]
+        return {
+            "checked": len(rows),
+            "intact": not breaks,
+            "first_break": breaks[0] if breaks else None,
+            "breaks": breaks[:50],
+        }
+
+    # ------------------------------------------------------------------
     # Async persistence (fire-and-forget; no DB required)
     # ------------------------------------------------------------------
 

@@ -143,6 +143,17 @@ class DevTask(Base):
     assigned_agent: Mapped[str | None] = mapped_column(String(100), nullable=True)
     project: Mapped[str | None] = mapped_column(String(200), nullable=True)
     final_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # AUDIT_Q_BATCH18 §51 gap-closure (2026-08-12) — "Repeat Task &
+    # Historical Context": real, deterministic reference to the specific
+    # prior dev_tasks.id this task is a repeat of (set by POST
+    # /api/tasks/{task_id}/repeat and the chat `repeat_task` tool), distinct
+    # from memory_hook_node's implicit semantic-similarity recall — see
+    # migration 045 for the FK/ondelete rationale.
+    repeated_from_task_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("dev_tasks.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -712,6 +723,23 @@ class EnhancementRequest(Base):
     )
     decided_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # AUDIT_Q_BATCH18 §69 gap-closure (2026-08-12) — "Autonomous Quality
+    # Improvement" step-by-step lifecycle gaps: pre-change impact
+    # simulation (computed at SCAN/submission time, before any human
+    # decision — see app.fleet.enhancement_impact) and automatic
+    # rollback-on-quality-decline (see app.fleet.enhancement_rollback,
+    # mirroring the already-real _prompt_auto_rollback_loop pattern for
+    # prompt versions, extended to EnhancementRequest-driven code commits).
+    impact_simulation: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, nullable=True
+    )
+    quality_check_status: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # None|monitoring|stable|rolled_back|rollback_failed
+    rollback_commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    rollback_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 

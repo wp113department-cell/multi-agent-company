@@ -146,7 +146,7 @@ def make_scan_handlers(repo_path: str, trace_id: str = "") -> dict[str, Any]:
     handlers["fleet_metrics_read"] = fleet_metrics_read
     handlers["web_search"] = web_search
     handlers["submit_enhancement_request"] = make_submit_enhancement_request_handler(
-        "agent_performance_reviewer", trace_id=trace_id
+        "agent_performance_reviewer", trace_id=trace_id, repo_path=repo_path
     )
     return handlers
 
@@ -244,6 +244,13 @@ def run_agent_performance_reviewer_apply(
         trace_id=trace_id,
     )
 
+    raw = final_state.get("result", {})
+    from app.fleet.enhancement_rollback import capture_commit_sha_if_verified
+
+    commit_sha = capture_commit_sha_if_verified(repo, final_state)
+    if commit_sha:
+        raw["commit_sha"] = commit_sha
+
     return AgentResult(
         summary=f"Applied enhancement #{request_id}",
         findings=[],
@@ -255,7 +262,7 @@ def run_agent_performance_reviewer_apply(
         status=(
             "completed" if final_state["verification"].get("committed") else "blocked"
         ),
-        raw=final_state.get("result", {}),
+        raw=raw,
     )
 
 

@@ -13832,9 +13832,27 @@ _SUBMIT_ENHANCEMENT_REQUEST_TOOL: dict[str, Any] = {
 }
 
 
-def make_submit_enhancement_request_handler(agent_name: str, trace_id: str = "") -> Any:
+def make_submit_enhancement_request_handler(
+    agent_name: str, trace_id: str = "", repo_path: str = ""
+) -> Any:
     def submit_enhancement_request(inp: dict[str, Any]) -> str:
         import asyncio
+
+        # AUDIT_Q_BATCH18 §69 gap-closure (2026-08-12) — pre-change impact
+        # simulation, computed here (SCAN/submission time, before ANY human
+        # decision) so it's visible on the row the human actually reviews,
+        # not bolted on after approval. Best-effort: a simulation failure
+        # must never block filing the request itself — see this function's
+        # own docstring for why an empty report is the honest fallback, not
+        # a fabricated one.
+        try:
+            from app.fleet.enhancement_impact import simulate_enhancement_impact
+
+            impact = simulate_enhancement_impact(
+                repo_path, str(inp["description"]), dict(inp.get("evidence") or {})
+            )
+        except Exception:
+            impact = None
 
         async def _write() -> int:
             from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -13855,6 +13873,7 @@ def make_submit_enhancement_request_handler(agent_name: str, trace_id: str = "")
                         evidence=dict(inp.get("evidence") or {}),
                         status="pending",
                         trace_id=trace_id or None,
+                        impact_simulation=impact,
                     )
                     session.add(row)
                     await session.commit()

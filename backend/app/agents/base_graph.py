@@ -39,7 +39,7 @@ import jsonschema
 
 from app.agents.base import get_effective_api_key, load_role
 from app.agents.guardrails import check_command, check_path
-from app.agents.tool_security import _redact_secrets_in_text
+from app.agents.tool_security import _redact_secrets_in_text, verify_file_line_citations
 from app.config import get_settings
 from app.fleet.circuit_breaker import get_anthropic_breaker
 from app.fleet.tool_manifest import TOOL_MANIFEST
@@ -287,6 +287,66 @@ class Lesson:
         return f"- [{self.category}] {self.lesson}"
 
 
+def _persist_lesson_async(lesson: Lesson) -> None:
+    """AUDIT_Q_BATCH18 Bonus-table row 2 gap-closure (2026-08-12) — best-
+    effort, non-blocking DB write for LessonStore.add(), called from
+    whatever thread/context the real caller (lesson_node, inside
+    run_agent_graph) happens to be running in. run_agent_graph is
+    dispatched via asyncio.to_thread by nearly every real caller (every
+    run_*_review/run_*_apply-style function in app/agents/), so "no
+    running event loop in this thread" is the COMMON case here, not an
+    edge case — a plain `asyncio.create_task` (audit_log.py's own
+    _persist_async pattern) would silently no-op almost every time.
+    Reuses fleet_events.get_main_loop()'s already-captured FastAPI main
+    loop (the same cross-thread-safe dispatch AgentRegistry.
+    _notify_agent_retired already uses) so the write actually runs, on the
+    loop that owns the shared app.db.session engine, without blocking the
+    calling thread on a fresh per-call asyncio.run()."""
+    try:
+        import asyncio
+
+        from app.fleet.fleet_events import get_main_loop
+
+        async def _write() -> None:
+            try:
+                from sqlalchemy import text
+
+                from app.db.session import get_session_factory
+
+                async with get_session_factory()() as session:
+                    await session.execute(
+                        text(
+                            "INSERT INTO lessons "
+                            "(agent_name, lesson, pattern, category, reusable) "
+                            "VALUES (:agent_name, :lesson, :pattern, :category, :reusable)"
+                        ),
+                        {
+                            "agent_name": lesson.agent_name,
+                            "lesson": lesson.lesson,
+                            "pattern": lesson.pattern,
+                            "category": lesson.category,
+                            "reusable": lesson.reusable,
+                        },
+                    )
+                    await session.commit()
+            except Exception:
+                logger.debug(
+                    "Could not persist lesson to DB (non-fatal)", exc_info=True
+                )
+
+        loop = get_main_loop()
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(_write(), loop)
+            return
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        running.create_task(_write())
+    except Exception:
+        logger.debug("Could not schedule lesson persistence", exc_info=True)
+
+
 class LessonStore:
     """Thread-safe in-process lesson registry shared across all agent runs.
 
@@ -298,6 +358,12 @@ class LessonStore:
         self._lessons: list[Lesson] = []
         self._capacity = capacity
         self._lock = Lock()
+        # AUDIT_Q_BATCH18 Bonus-table row 2 gap-closure (2026-08-12) —
+        # tracks how far this process's cache has caught up with the
+        # `lessons` DB table (see refresh_from_db below); 0 = "nothing
+        # synced yet", matching every other real-signal-not-fabricated
+        # zero-state convention in this codebase.
+        self._last_synced_id = 0
 
     @staticmethod
     def _tokens(lesson: Lesson) -> set[str]:
@@ -313,7 +379,7 @@ class LessonStore:
             return 0.0
         return len(a & b) / len(union)
 
-    def add(self, lesson: Lesson) -> None:
+    def add(self, lesson: Lesson, *, _persist: bool = True) -> None:
         """Gap-closure Day 46 (Stage 2, answers.md Q120 "Session Memory" —
         "Compresses repeated information: NO — LessonStore.add() is pure
         append, no dedup check against existing lessons"). Mirrors
@@ -323,7 +389,17 @@ class LessonStore:
         reuses retrieve()'s own Jaccard token-overlap metric rather than
         forcing a cosine-similarity fit where no embedding exists. A
         near-duplicate (same category, overlap >= threshold) is replaced,
-        not accumulated — the newer occurrence's phrasing wins."""
+        not accumulated — the newer occurrence's phrasing wins.
+
+        AUDIT_Q_BATCH18 Bonus-table row 2 gap-closure (2026-08-12) —
+        `_persist` (internal-only, real callers never pass it) is False
+        exactly once: from refresh_from_db(), which calls this same method
+        to reuse its dedup logic when merging rows that ALREADY came from
+        the DB — persisting those again would write every other process's
+        lesson back to the table on every refresh cycle, growing it
+        unboundedly for zero benefit. Every real external caller keeps
+        today's exact behavior (in-process add, now also durably persisted
+        best-effort)."""
         from app.config import get_settings
 
         settings = get_settings()
@@ -342,6 +418,57 @@ class LessonStore:
             if len(self._lessons) >= self._capacity:
                 self._lessons.pop(0)
             self._lessons.append(lesson)
+        if _persist:
+            _persist_lesson_async(lesson)
+
+    async def refresh_from_db(self) -> int:
+        """Pulls lessons written (by this or any other process, including
+        this process's own earlier best-effort writes) since this
+        process's own last refresh and merges them into its local cache
+        via add()'s existing dedup logic. Returns the number of rows
+        merged. The real cross-process visibility fix for LessonStore's
+        otherwise purely in-process design — safe to call independently
+        from every backend process (each tracks its own _last_synced_id;
+        this is a read-refresh, not a write, so no coordination/leader-
+        election is needed, unlike the scheduled WRITE jobs elsewhere in
+        this codebase that do need it). Never raises: a DB outage just
+        means this cycle's refresh is a no-op, not a crash.
+        """
+        try:
+            from sqlalchemy import text
+
+            from app.db.session import get_session_factory
+
+            async with get_session_factory()() as session:
+                result = await session.execute(
+                    text(
+                        "SELECT id, agent_name, lesson, pattern, category, reusable "
+                        "FROM lessons WHERE id > :last_id ORDER BY id ASC LIMIT 500"
+                    ),
+                    {"last_id": self._last_synced_id},
+                )
+                rows = result.mappings().all()
+        except Exception:
+            logger.debug(
+                "LessonStore.refresh_from_db query failed (non-fatal)", exc_info=True
+            )
+            return 0
+
+        merged = 0
+        for row in rows:
+            self.add(
+                Lesson(
+                    agent_name=row["agent_name"],
+                    lesson=row["lesson"],
+                    pattern=row["pattern"],
+                    category=row["category"],
+                    reusable=bool(row["reusable"]),
+                ),
+                _persist=False,
+            )
+            self._last_synced_id = max(self._last_synced_id, int(row["id"]))
+            merged += 1
+        return merged
 
     def retrieve(self, query: str, top_k: int = 3) -> list[Lesson]:
         query_tokens = set(query.lower().split())
@@ -1723,6 +1850,7 @@ def _make_execute_tools_node(
     quality_gate_min_confidence: float = 0.0,
     run_id: str = "",
     agent_name: str = "",
+    repo_path: str = "",
 ) -> Callable[[AgentRunState], dict[str, Any]]:
     """Runs tool calls, enforces verification contract, resets stall counter.
     Pushes tool_call / tool_result / file_edit / terminal events to ActivityStream.
@@ -1904,6 +2032,31 @@ def _make_execute_tools_node(
                 if not result_content.startswith(
                     "[ERROR]"
                 ) and not result_content.startswith("[POLICY"):
+                    # AUDIT_Q_BATCH18 §54/55/56 gap-closure — the only 2
+                    # existing _redact_secrets_in_text call sites (this
+                    # module's call_llm and chat_agent.py) both only scanned
+                    # the MODEL's own synthesized text, never the raw tool
+                    # result itself. A secret surfaced via read_file/bash/
+                    # git_show/env-var tools and never re-quoted by the model
+                    # (e.g. only referenced in a submit_* summary, or simply
+                    # left in context for a later turn/log/activity-stream
+                    # event) sailed through unredacted. Applied here — the
+                    # one real chokepoint every tool result passes through
+                    # for all ~76 run_agent_graph-based agents, same
+                    # structural rationale as the untrusted-content
+                    # wrap/flag calls immediately below — before those calls
+                    # so the redaction marker lands inside the untrusted-data
+                    # delimiter, not outside it.
+                    result_content, _secret_found = _redact_secrets_in_text(
+                        result_content
+                    )
+                    if _secret_found:
+                        logger.warning(
+                            "Redacted apparent secret(s) from %s's raw tool "
+                            "result (task_id=%s)",
+                            tu_name,
+                            task_id or "-",
+                        )
                     # Phase 6.3 — flag first (checks the real handler
                     # output), then wrap: the delimiter must enclose
                     # the warning too, so both stay inside the
@@ -1973,6 +2126,30 @@ def _make_execute_tools_node(
                                 actual,
                             )
                         raw_result[result_field] = actual
+
+                    # AUDIT_Q_BATCH18 §54/55/56 gap-closure — "refuse to
+                    # invent files/functions/classes" had no code-level
+                    # check anywhere (only prompt instruction) despite
+                    # several agents' own role prompts already demanding a
+                    # file:line citation discipline. Applied at this exact
+                    # chokepoint (every submit_* call, all ~76 agents) for
+                    # the same reason the schema validation right above it
+                    # is here: one real place, not per-handler discipline.
+                    # Non-blocking (flags via _citation_check, doesn't fail
+                    # the gate) — see verify_file_line_citations' own
+                    # docstring for why a regex-detected citation shouldn't
+                    # silently reject a real submission.
+                    citation_check = verify_file_line_citations(repo_path, raw_result)
+                    if citation_check["unverified"]:
+                        raw_result["_citation_check"] = citation_check
+                        logger.warning(
+                            "%s's %s cited %d file:line reference(s) that "
+                            "don't check out against the real repo: %s",
+                            agent_name or "agent",
+                            tu_name,
+                            len(citation_check["unverified"]),
+                            citation_check["unverified"],
+                        )
 
                     gate = _run_quality_gate(
                         state,
@@ -2407,6 +2584,7 @@ def build_agent_graph(
         quality_gate_min_confidence=quality_gate_min_confidence,
         run_id=run_id,
         agent_name=role_name,
+        repo_path=repo_path,
     )
     router = _make_router(max_turns, max_stalls, enable_reflection)
 

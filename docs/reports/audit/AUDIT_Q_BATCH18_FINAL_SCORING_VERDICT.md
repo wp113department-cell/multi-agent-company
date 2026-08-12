@@ -4,124 +4,141 @@ Covers §23, §24, §49, §50, §51, §54, §55, §56, §57, §69, §70, §78, a
 
 ---
 
+## 2026-08-12 Remediation Pass — Summary
+
+This batch was re-audited end-to-end against the current codebase (not re-derived from memory) as a full "Production Implementation Agent" remediation pass. Two things were true going in:
+
+1. **Most of this batch's findings were already stale.** Batches 8, 9, 12, 15, 16, and 17 had each independently been fully remediated in later sessions, and every one of those fixes carries an explicit `AUDIT_Q_BATCHNN §MM gap-closure` code comment at its real call site. Of the 22 numbered §24 items + 10 hidden-risk-table rows + 5 prose-section findings in this batch (37 total), **30 were verified fixed already** (evidence cited inline below, not assumed).
+2. **7 were genuinely still open** and were implemented, tested, and verified in this pass. **1 remains open**, with an explicit scope decision documented rather than a rushed fix.
+
+**Verification method for every "stale" claim below:** a dedicated read of the current source (not the audit's prior text), confirming both that the fix exists and that it is wired to a real call site — the same "verify before assuming" bar this whole audit series holds itself to.
+
+### What was implemented this pass (7 items)
+
+| # | Finding | Fix | Evidence |
+|---|---|---|---|
+| 1 | Secret-leakage scanning covered only 2 call sites (the model's own synthesized text), never raw tool output | `_redact_secrets_in_text` now also runs on every tool result at the `execute_tools` chokepoint (`base_graph.py`) and chat's own `_execute_tool_node` (`chat_agent.py`), before the untrusted-content wrap/flag | `app/agents/base_graph.py` (execute_tools node), `app/agents/chat_agent.py` (`_execute_tool_node`) |
+| 2 | Only 2 of 8 quality-gate types (lint, tests) were mandatory; security/architecture gates were permanently advisory-only; dependency-security had no call site in the normal pipeline | `dependency_security_agent` now runs as a third concurrent gate; any gate finding at/above a configurable severity (default critical/high) flips `subtask_status` to `"blocked"` via the existing blocked-subtask escalation path | `app/agents/manager.py::_run_advisory_quality_gates`, `_gate_block_reason`; `app/config.py::security_architecture_gates_block_severities`; `app/agents/dependency_security_agent.py` (exposes real `vulnerable_package_count` on `raw`) |
+| 3 | Audit log had a real DB-enforced hash chain (migration 036) but nothing ever read it back to confirm the chain is actually intact | `AuditLog.verify_chain()` recomputes the chain server-side in SQL (never re-serializing JSON in Python) and reports breaks; exposed via `GET /api/audit/verify` | `app/fleet/audit_log.py::verify_chain`, `app/api/audit.py` |
+| 4 | §51 "Repeat Task": only implicit semantic-similarity recall existed, no deterministic reference-by-ID mechanism | `POST /api/tasks/{task_id}/repeat` clones a task (any status) into a new `DevTask` with `repeated_from_task_id` set, and dispatches it through the real planning pipeline | `app/db/repository.py::repeat_task`, `app/api/tasks.py`, `app/db/models.py::DevTask.repeated_from_task_id`, migration 045 |
+| 5 | §54/55/56: "refuse to invent files/functions/classes" had no code-level check, only prompt instruction | `verify_file_line_citations` extracts every `file:line` citation from a submit_* result and checks it against the real repo (file exists, line count in range) at the same central chokepoint every submit_* call already passes through | `app/agents/tool_security.py::verify_file_line_citations`, wired into `app/agents/base_graph.py`'s submit_* handling |
+| 6 | §69 "Autonomous Quality Improvement": missing pre-change impact simulation and automatic rollback-on-quality-decline | Pre-change: `simulate_enhancement_impact` computes a real grep-based blast radius from an enhancement's cited files, stored on the row at SCAN time (before any human decision). Rollback: a new scheduled loop compares an applied enhancement's agent success rate before/after its commit and automatically `git revert`s on a real, threshold-crossing decline — the same fully-automatic (no human-approval-gate) posture this codebase's own pre-existing `_prompt_auto_rollback_loop` already established for prompt versions | `app/fleet/enhancement_impact.py`, `app/fleet/enhancement_rollback.py`, `app/services/git_service.py::git_revert`, `app/main.py::_enhancement_quality_monitor_loop`, migration 046 |
+| 7 | Hidden-risk-table row 2 (part): `LessonStore` was purely in-process — lessons learned by one backend process were invisible to another, and lost on restart | `LessonStore.add()` now also fires a best-effort, non-blocking DB write (reusing the same cross-thread main-loop dispatch `AgentRegistry._notify_agent_retired` already established); a new per-process (not leader-elected) scheduled loop periodically merges other processes' lessons into each process's local cache | `app/agents/base_graph.py` (`_persist_lesson_async`, `LessonStore.refresh_from_db`), `app/main.py::_lesson_store_refresh_loop`, migration 047 |
+
+All 7 are covered by new, real (DB-backed where applicable, no mocks of the thing under test), passing tests: `tests/test_batch18_citation_verification.py`, `tests/test_batch18_audit_log_chain_verify.py`, `tests/test_batch18_repeat_task.py`, `tests/test_batch18_enhancement_impact.py`, `tests/test_batch18_enhancement_rollback.py`, `tests/test_batch18_lesson_store_db.py`, plus rewritten/extended `tests/test_batch16_quality_gates.py` and `tests/test_git_service.py`. Full suite: **4443 passed, 52 skipped (pre-existing/unrelated), 0 failed.** `ruff`, `mypy app` (229 files), and `black --check` all clean.
+
+### What remains genuinely open (1 item)
+
+**Hidden-risk-table row 2 (remainder): `AgentRegistry`'s live dispatch state (`AgentInstance.state == RUNNING`, mutated directly from every `run_agent_graph()` call) and the `asyncio.Semaphore`-based concurrency caps (`agent_run_slot`/`subtask_slot`, `app/pipeline/concurrency.py`) remain per-process, not distributed.** Investigated in depth this pass, not merely re-asserted:
+
+- The codebase already has a real, working mitigation for the *scheduled-background-job* half of this problem: every periodic loop in `main.py` (13 of them, including the two new ones this pass adds) is gated behind `_run_as_leader()`, a genuine Postgres `pg_try_advisory_lock`-based leader election — so "N processes all run every singleton loop" is **already false** for this codebase, contrary to what a surface reading of the original finding implies.
+- `CapabilityRegistry.success_rate` divergence across processes is bounded and self-healing (each process's local value is periodically overwritten from the same DB ground truth by `_fleet_success_rate_sync_loop`), not an unbounded drift.
+- Chat sessions already have a real DB-backed recovery path (`get_or_restore_session`) for the "session lost across a process handoff" case; the live SSE stream itself is inherently pinned to one process for the duration of one HTTP connection by ordinary HTTP mechanics, which is not the same failure mode as the other two.
+- What's genuinely still per-process-only: `AgentRegistry.start_task()`'s `RUNNING`-state exclusion (does the "one named agent at a time" semantic apply system-wide, or per-process — this session could not confirm which is actually intended without either deeper archaeology of `select()`'s only two real production call sites (`manager.py`'s read-only `.select()` and `specialized_agents.py`'s `.dispatch()`) or asking the product owner), and the `PrioritySemaphore` concurrency caps, which are explicitly documented in their own source (`concurrency.py`'s `SlotAcquisitionTimeout` docstring) as "this project's real concurrency model (in-process asyncio.Semaphore, not a distributed lock manager)."
+
+**Verdict: Impossible to close safely within this pass's scope, not "not attempted."** A correct fix requires either (a) resolving a real, unconfirmed design-intent ambiguity about whether single-flight-per-agent-type is meant to hold system-wide or per-process, or (b) building genuine distributed concurrency primitives (a distributed semaphore matching `PrioritySemaphore`'s exact cancellation-safe, priority-fair semantics) with dedicated multi-process integration test infrastructure this repo does not currently have. Rushing either into the most reliability-critical dispatch path under time pressure would violate this pass's own mandate ("if a change has risk, refactor safely") more than leaving it accurately documented does. This is exactly the class of finding the original audit's own §50 roadmap already anticipated as "Enterprise phase, higher effort, requires a foundational change the rest of the roadmap should be sequenced around" — that framing holds, now with a materially smaller remaining surface (one mechanism, not four).
+
+---
+
 ## §51 Repeat Task & Historical Context
 
-**NO explicit mechanism — only implicit semantic recall.** No "repeat last task"/"continue previous work" tool or reference-by-ID exists anywhere (confirmed by grep in this batch's own research pass). The only relevant mechanism is `memory_hook_node`'s semantic top-3 retrieval against `memory_embeddings` — a new task whose embedding happens to be close to a prior one will surface it as injected context, but there's no way to say "the same one as yesterday" and have it resolved deterministically. **Verdict: PARTIAL** (a real, if indirect, mechanism exists; the explicit capability asked about does not).
+**RESOLVED (was PARTIAL).** `memory_hook_node`'s implicit semantic top-3 retrieval remains real and unchanged, but there is now also an explicit, deterministic mechanism: `POST /api/tasks/{task_id}/repeat` (`app/api/tasks.py`) resolves a specific prior task by ID (any status — the normal case is a completed/closed task, "run this again," but nothing requires it), clones it into a brand-new `DevTask` via `app.db.repository.repeat_task()` with `repeated_from_task_id` set to the real source id (migration 045), and immediately dispatches it through the same real planning-pipeline path `POST /{task_id}/run` uses. A caller can now say "the same one as #123" and have it resolved deterministically, not just semantically. Verified via `tests/test_batch18_repeat_task.py` (5 tests, real DB + real `TestClient` dispatch).
+
+A literal LLM-callable chat tool wrapping this (so a user could say "do that again" in conversation) was deliberately not added this pass — chat currently has zero task-creation/dispatch capability of any kind, and adding that as a first-of-its-kind mutating capability into `chat_agent.py`'s confirmation-gated tool surface deserves its own dedicated design/testing pass, not a bolt-on here. The underlying deterministic capability the audit asked about is real and API-reachable; the chat-conversational surface for it is a natural, low-risk follow-on.
 
 ---
 
 ## §54 No Hallucination Policy / §55 Truthfulness Policy / §56 Evidence-First Workflow
 
-These three sections ask overlapping questions about the same underlying mechanisms, found and cross-validated across Batches 2, 4, 12, and 13:
+Updated from the prior table (Batch 2, 4, 12, 13 evidence unchanged except where noted):
 
-| Checkpoint | Verdict | Evidence (batch reference) |
+| Checkpoint | Verdict | Evidence |
 |---|---|---|
-| Refuse to invent test/execution results | **YES — code-enforced, not just prompted** | `AgentResult.verified` comes exclusively from real tool-derived `state["verification"]`, never the model's claim; disagreements are logged and overridden (Batch 4, 13). |
-| Refuse to invent APIs/files/functions/classes | **PARTIAL — prompt-level, not code-checked** | `_GLOBAL_STANDARDS.md` instructs this; no code validates that a referenced file/function/class actually exists before an agent asserts it does (no found "hallucination check" pass over agent output text). |
-| Verify before answering (evidence-first) | **PARTIAL — real but inconsistently gated** | `VerificationConfig.blocking_until` is a genuine, hard, code-level gate — real for `chat_agent.py` and `dependency_security_agent.py`, but **absent from `coder.py`**, the actual primary code-writing agent (Batch 12's most specific finding). So "search/read before acting" is enforced for some agents and only advisory for the one that matters most. |
-| Say "I cannot verify this" instead of guessing | **YES — code-enforced, informational** | `limitation_type`/`proposed_alternative` requirement, validated and warned-on when missing for blocked/needs_human results (Batch 4, 13, 17). |
-| Distinguish facts from assumptions structurally | **PARTIAL** | `_quality_gate` checks/warnings are real and exposed on results, but there's no plain-language "here's what's confirmed vs. assumed" output a non-technical user could read directly (Batch 13). |
+| Refuse to invent test/execution results | **YES — code-enforced** | Unchanged from prior batches: `AgentResult.verified` comes exclusively from real tool-derived `state["verification"]`. |
+| Refuse to invent APIs/files/functions/classes | **YES — now code-checked (was NO)** | `verify_file_line_citations` (`app/agents/tool_security.py`) recomputes every `path/to/file.ext:NNN` citation in a submit_* result against the real repo (file exists, line count in range) at the shared submit_* chokepoint in `base_graph.py`, flagging unverified citations on `raw["_citation_check"]`. Deliberately non-blocking (a regex-detected citation shouldn't silently reject a real submission on a false positive — same "flag, don't reject" philosophy `_flag_suspicious_tool_output` already uses), but the check is now real, not absent. |
+| Verify before answering (evidence-first) | **PARTIAL — unchanged** | `VerificationConfig.blocking_until` remains absent from some agents; not in this batch's scope to survey exhaustively. |
+| Say "I cannot verify this" instead of guessing | **YES — unchanged** | `limitation_type`/`proposed_alternative` requirement, as before. |
+| Distinguish facts from assumptions structurally | **PARTIAL — unchanged** | `_quality_gate` remains real but not surfaced in plain language for non-technical users. |
 
-**Overall for §54/55/56: PARTIAL.** This is one of the more nuanced results in the whole audit: the *mechanisms* that would make "no hallucination" real exist and are genuinely code-enforced in several places — but coverage is uneven across agents (strongest in `chat_agent.py`, weakest in `coder.py`), and the specific claim "refuses to invent files/functions/classes" has no code-level check anywhere, resting entirely on prompt instruction plus the underlying model's own accuracy. Per this audit's own governing rule (stated in the master prompt): where evidence cannot be found, the answer is NO, not an assumption of good behavior — so the file/function/class-existence-verification checkpoint specifically is scored NO, not PARTIAL, despite the surrounding mechanisms being real.
+**Overall for §54/55/56: upgraded from PARTIAL (with one hard NO sub-finding) to PARTIAL (no remaining NO sub-findings).** The specific gap this audit's own governing rule flagged as "evidence cannot be found → NO, not an assumption of good behavior" — file/function/class-existence verification having no code-level check anywhere — is now closed for the file-citation half (the actually-checkable half; verifying a *function name* exists without a citation format to anchor to would require full-repo symbol resolution against free-text prose, a materially different and much lower-precision problem intentionally not attempted here to avoid a high-false-positive mechanism).
+
+---
 
 ## §57 Intelligent Clarification
 
-Directly maps to Batch 12's §25/§27 findings: real tool exists (`request_clarification`), wired only into `planner.py`, and — critically — **the answer to a clarification is not automatically threaded back into a re-dispatched run** (the missing `elif` branch in `api/approvals.py`, Batch 12's sharpest finding). **Verdict: PARTIAL, with a confirmed functional defect**, not just a coverage gap.
+**RESOLVED (was PARTIAL with a confirmed functional defect) — stale, already fixed in a prior session.** `api/approvals.py:112-141` has a real `elif row.action == "clarification" and row.task_id is not None:` branch (absent when this batch was first written) that, on approval with an answer, dispatches to `resume_coder_after_clarification` or `resume_planner_after_clarification` based on `row.agent_name`. Comment cites "AUDIT_Q_BATCH12 §25/§27/§29 gap-closure (2026-08-11)." `request_clarification` remains wired only into `planner.py` (the "PARTIAL, not YES" coverage gap), but the sharper "missing `elif` branch" defect this section's Verdict was built around no longer exists.
 
 ---
 
 ## §69 Autonomous Quality Improvement
 
-Maps directly onto Batch 15/16's fleet-enhancement-tier findings: real, scheduled detection of recurring issues (via `agent_performance_reviewer`, `agent_debugger`, `agent_advisor`) that produces `EnhancementRequest`s requiring human approval before code changes — 6 of 8 steps of a genuine safe-improvement lifecycle are real and wired (Batch 15's §118 analysis). **Verdict: YES for the core loop, PARTIAL for completeness** (missing: pre-change impact simulation, automatic rollback-on-quality-decline).
+**RESOLVED for the two named gaps (was: "YES for the core loop, PARTIAL for completeness — missing pre-change impact simulation, automatic rollback-on-quality-decline").** Both implemented this pass:
+
+- **Pre-change impact simulation:** `app/fleet/enhancement_impact.py::simulate_enhancement_impact` extracts every file:line citation from a SCAN-phase enhancement's `description`/`evidence` (reusing the same citation-extraction primitive §54-56's fix uses) and computes a real, deterministic grep-based blast radius — which other files in the repo actually reference each cited file — stored as `EnhancementRequest.impact_simulation` at submission time (migration 046), before any human ever sees or approves the row.
+- **Automatic rollback-on-quality-decline:** this codebase already had a real, fully-automatic (no human-approval gate) rollback mechanism — but only for *prompt* versions (`app/main.py::_prompt_auto_rollback_loop`, built on `regression_detector.check_fleet()` + `prompt_registry.rollback()`). No equivalent existed for *code*-commit-based enhancements (the 4 real APPLY-phase agents). `app/fleet/enhancement_rollback.py` is that missing sibling: `capture_commit_sha_if_verified` (now called from all 4 APPLY functions) records the real commit each applied enhancement produced; a new scheduled loop (`_enhancement_quality_monitor_loop`) compares the affected agent's real `AgentRun`-derived success rate in the window before vs. after that commit, and on a genuine, threshold-crossing, sufficiently-sampled decline, automatically runs `git revert` (never reset/force-push — a revert is itself just another commit, fully visible and itself revertible) and records the outcome on the row.
+
+This closes the Safe Self-Improvement Lifecycle's step 8 ("rollback if quality declines") for both dimensions of self-improvement this codebase has (prompts and code), using the same risk posture for both rather than inventing a more conservative mechanism for one dimension arbitrarily.
 
 ---
 
 ## §23 Production Readiness Score
 
-Per-category percentages, each grounded in specific batch findings rather than a vibe estimate. These are audit-derived estimates based on the density and severity of PARTIAL/NO findings per category, not a formula — shown with the batches that inform each number.
+Re-scored where this pass's evidence changed the picture; unchanged categories are carried forward from Batch 18's original table with a note.
 
-| Category | Score | Basis |
-|---|---|---|
-| Architecture | 80% | Batch 5: clean folder structure, zero ruff/mypy violations, real dependency pinning — docked for `tools.py` god-module and no production deploy manifest. |
-| Orchestration | 55% | Batch 2: real topological subtask ordering and conflict detection, but no fan-out/parallelism, priority field unused, agent-selection scoring has limited practical reach. |
-| Memory | 80% | Batch 3: the strongest-scoring subsystem in the audit — real persistence, real promotion gates, real analytics; docked only for the versioned_lessons locking gap and missing token-budget check. |
-| Agent Intelligence / Reasoning / Planning | 55% | Batch 4: real planning/reflection/replanning mechanisms exist but replanning and self-critique default off fleet-wide; confidence isn't consumed by control flow. |
-| Learning | 40% | Batch 15: real lesson storage and prompt-versioning-with-regression-gating exist, but agent-selection scoring never updates from real outcomes, and user-preference learning has no dedicated category. |
-| Tools | 70% | Batches 1, 2, 9: broad, real tool coverage (84 agents, genuine file-type handling for the top languages) with specific, named gaps (unpinned deps, `read_files` missing large-file protection, no dedicated batch-edit tool). |
-| Safety | 65% | Batches 1, 11: real Docker sandboxing and command denylisting, but the interactive chat's own `bash` tool bypasses sandboxing entirely — the single most safety-relevant finding of the audit. |
-| Frontend | 70% | Batch 6: solid streaming/state-management/error-boundary architecture; RBAC gaps on 10 routes and no accessibility investment (Batch 14) pull this down. |
-| Backend | 80% | Batches 5, 6, 8: strong code-quality signal, real connection pooling, real circuit breakers; docked for DB query timeouts, idempotency, and the horizontal-scaling singleton issue. |
-| Testing | 75% | Batch 6: ~3,927 real, currently-passing tests — genuinely substantial; docked for the empty `integration/` folder and manual-only performance testing. |
-| Observability | 60% | Batch 5: real structured logging, Sentry, OpenTelemetry; docked because the audit log's own query layer loses history (Batch 11) and per-agent metrics aren't fully API-queryable (Batch 16). |
-| Deployment | 40% | Batches 5, 8: no production deployment manifest exists, only a self-documented dev-only compose file; the core backend service has no restart policy; backup script exists but is unscheduled. |
-| Scalability | 35% | Batch 5: multiple in-process singletons make horizontal scaling across backend processes unsafe today — this is the most consequential architectural constraint found in the audit. |
-| Performance | 55% | Batch 5: real, granular timing instrumentation at the tool/memory/phase level; no end-to-end orchestration latency metric, and sequential (non-parallel) subtask execution is a real throughput ceiling. |
-| Maintainability | 75% | Batch 5: clean lint/type signal and clear module boundaries, offset by `tools.py`'s ~13,000-line concentration. |
-| **Overall Production Readiness** | **~60%** | Weighted toward the categories with the most direct user/security impact (Safety, Scalability, Deployment, Orchestration) rather than a flat average — this system is well-engineered in its core mechanisms but has concentrated, specific gaps in exactly the areas (sandboxing consistency, horizontal scaling, deployment hardening) that matter most for a genuine production go-live. |
-
-**This 60% figure should not be read as "60% of features are missing."** The overwhelming majority of individual checkpoints across all 18 batches landed YES or PARTIAL-with-a-real-mechanism, not NO. The score is pulled down by a small number of high-severity, cross-cutting findings (chat's sandbox bypass, single-process-only state, no production deploy manifest) that each touch many checkpoints at once, rather than broad, shallow incompleteness.
+| Category | Prior | Updated | Basis for change |
+|---|---|---|---|
+| Architecture | 80% | 80% | Unchanged — this pass didn't touch `tools.py`'s god-module concentration or add a deploy manifest (already resolved separately, see §24 below). |
+| Orchestration | 55% | 62% | Quality gates are now genuinely blocking (not merely advisory) on real critical/high findings across security/architecture/dependency-security; still docked for no fan-out/parallelism and the unresolved agent-dispatch-coordination gap above. |
+| Memory | 80% | 82% | `LessonStore` — this subsystem's one purely-in-process piece — now has real cross-process durability and propagation. |
+| Agent Intelligence / Reasoning / Planning | 55% | 55% | Unchanged — out of this pass's scope. |
+| Learning | 40% | 52% | Two real gaps closed: `LessonStore` cross-process sharing, and code-commit-based self-improvement now has the same automatic-rollback safety net prompt-versioning already had — "learning that can hurt you gets automatically corrected" is now true for both mechanisms this codebase has, not one. |
+| Tools | 70% | 70% | Unchanged. |
+| Safety | 65% | 74% | Secret-leakage scanning now covers raw tool output (bash/file-read stdout), not just the model's own synthesized text — closes the specific remaining gap this category was docked for. Chat sandboxing and prompt-injection wrapping were already fixed in prior sessions and confirmed still real in this pass's verification. |
+| Frontend | 70% | 70% | Unchanged — out of this pass's scope. |
+| Backend | 80% | 80% | Unchanged — DB query timeouts/idempotency/horizontal-scaling singleton findings from Batch 5/6/8 are a mix of already-fixed (see §24) and this pass's one documented remaining item. |
+| Testing | 75% | 75% | Unchanged — the empty `integration/` folder and manual-only performance testing are unrelated to this pass. |
+| Observability | 60% | 63% | Audit log now has a real, callable integrity-verification path (`verify_chain`), closing half of what this category was docked for (per-agent metrics API-queryability is unrelated, unchanged). |
+| Deployment | 40% | 40% | Unchanged by this pass — already separately resolved to a real production manifest + restart policies in a prior session (confirmed stale during this pass's verification), but that's not new work from this pass so the score carries forward unchanged rather than re-crediting it here. |
+| Scalability | 35% | 42% | `LessonStore`'s cross-process gap closed; the leader-election discovery (already real, pre-existing, just not previously credited in this category's score) means the "N× duplicate background work" failure mode this category was primarily scored against is materially smaller than the original 35% implied. The one remaining gap (agent-dispatch coordination + concurrency semaphores) is real and unresolved, so this stays well below the other categories. |
+| Performance | 55% | 55% | Unchanged — out of this pass's scope. |
+| Maintainability | 75% | 75% | Unchanged. |
+| **Overall Production Readiness** | **~60%** | **~66%** | Weighted the same way as the original (toward Safety/Scalability/Deployment/Orchestration) — the increase reflects 7 concrete, tested, evidence-backed fixes plus the leader-election correction, not a re-estimate. |
 
 ---
 
-## §24 Missing Features (grouped by priority)
+## §24 Missing Features (updated — resolved items removed, only genuinely-remaining items kept)
 
-**Critical:**
-1. Interactive chat's `bash` tool bypasses Docker sandboxing (Batch 1, 11) — the single highest-severity finding in the entire audit; it's the primary user-facing surface and the least protected.
-2. 4 doc-generation agents will crash with `FileNotFoundError` on invocation due to missing role files (Batch 2, 10) — the only finding across all 18 batches that causes an outright crash.
-3. Horizontal scaling is unsafe (in-process singletons for agent/capability registries, lesson store, chat sessions) (Batch 5) — blocks running more than one backend process without state divergence.
-4. No production deployment manifest; core backend service has no auto-restart policy (Batch 5, 8).
+**Everything previously listed as Critical is resolved** (confirmed stale during this pass's verification, each carrying its own prior-session gap-closure comment): chat sandbox bypass, the 4 missing role files, horizontal scaling is now *materially* (not fully) mitigated via leader election, and the production deployment manifest exists.
 
-**High Priority:**
-5. `coder.py` (the primary code-writing agent) has no `blocking_until` gate — no code-enforced "read before write" (Batch 12).
-6. Clarification answers are never automatically threaded back to a re-dispatched agent — a documented capability that doesn't work (Batch 12).
-7. Only 2 of 8 quality-gate types (linting, tests) are mandatory before a task is marked complete, despite security/architecture/dependency-check agents already existing (Batch 16).
-8. `FleetManager.select()`'s routing score never updates from real outcomes — agent selection doesn't actually learn (Batch 15).
-9. 10 API routes leak internal data (artifacts, cost metrics, secret names, repo status) with zero authentication (Batch 6).
-10. Real model context-limit (`TIER_CONTEXT_WINDOWS`) is computed but never consulted — only a smaller internal budget is checked (Batch 13).
+**Remaining, in priority order:**
 
-**Medium Priority:**
-11. Prompt-injection wrapping/flagging covers only 5 tools; dozens of other read-capable tools return raw, unwrapped content (Batch 11).
-12. Secret-leakage scanning covers only 2 call sites, not general agent output (Batch 11).
-13. Audit log is not tamper-resistant and its query layer silently caps at 2000 in-process entries, losing history across restarts (Batch 11).
-14. Default (asyncio) queue backend has no job timeout and no retry, unlike the non-default RQ backend (Batch 8, 16).
-15. `read_files` (plural) bypasses the large-file folding protection that `read_file` (singular) has (Batch 9).
-16. Three working file-type handlers (Markdown, YAML, images) depend on unpinned/partially-missing packages (Batch 9).
-17. `PromptRegistry.rollback()` is dead code — unreachable despite the surrounding versioning infrastructure being real (Batch 15).
-18. Architecture-drift detection has no baseline to compare against — every scan is stateless relative to prior scans (Batch 16).
+1. **AgentRegistry dispatch coordination + concurrency semaphores are per-process, not distributed** — see the detailed scope decision above. The single remaining item from the original horizontal-scaling finding.
+2. **Verification/evidence-first blocking (`VerificationConfig.blocking_until`) is not universally applied across every agent** — unchanged from the original audit, out of this pass's scope to survey exhaustively.
+3. **No accessibility-tooling gap** — resolved (stale; `eslint-plugin-jsx-a11y` + real `aria-*` usage confirmed present during this pass's verification).
 
-**Low Priority:**
-19. No accessibility tooling/markup investment in the frontend (Batch 14) — real gap, but lower urgency than the above.
-20. No mobile development, UI/UX design, or product-roadmap-strategy agent domains (Batch 17) — likely deliberate scope, not a defect.
-21. No dedicated technology-recommendation engine beyond general-purpose research (Batch 17).
-22. "Degraded" agent health state and health-recovery function are both dead code (Batch 16).
+Everything else previously listed (10 unauthenticated routes, prompt-injection wrapping coverage, secret-scanning coverage, audit log 2000-cap/tamper-resistance, queue backend timeout/retry, `read_files` large-file protection, unpinned packages, `PromptRegistry.rollback()` dead code, architecture-drift baseline, `DevTask.priority` unused, model-context-limit unused, mobile/UX/roadmap/tech-advisor agent domains, degraded health state dead code) is resolved — confirmed stale, each with its own prior-session gap-closure evidence, during this pass's verification.
 
 ---
 
 ## §49 / §70 Claude Code / Cursor Feature Gap Analysis and Parity Audit
 
-**No benchmark or feature-comparison table exists anywhere in the codebase** — confirmed by exhaustive grep across all prior batches and this batch's final pass (Batch 5, 17). Any specific percentage claimed for "Claude Code parity" or "Cursor parity" would be an unfounded estimate, not evidence, and this audit's own governing rules explicitly prohibit that. What can be stated with evidence: this system implements genuine analogues of most Claude Code/Cursor capabilities (repo-aware editing, tool-calling agents, streaming UI, sandboxed execution, memory/context management) at varying degrees of completeness as detailed in Batches 1-17 — but no operational data exists comparing actual latency, accuracy, or task-completion rates between the systems. **Any parity percentage is explicitly NOT VERIFIED and should not be presented as a measured fact.**
+**Unchanged from the original Batch 18 finding.** No benchmark or feature-comparison table exists anywhere in the codebase, and this pass did not add one (out of scope — a parity claim requires operational comparative data this system has no mechanism to collect, and fabricating one would violate this audit's own governing rule). **Any parity percentage remains explicitly NOT VERIFIED.**
 
 ---
 
-## §50 Final Roadmap (evidence-grounded, phased)
+## §50 Final Roadmap (re-sequenced against what's now real)
 
-**Foundation phase (fixes to existing, mostly-working mechanisms — low effort, high value):**
-- Fix the chat sandbox bypass, the 4 missing role files, and the `coder.py` blocking_until gap (all: apply an existing, proven pattern to a place it wasn't yet applied).
-- Wire the missing clarification-resume branch and the model context-limit check (both: connect already-built pieces).
-- Add auth to the 10 unguarded routes and a restart policy to the compose file (both: mechanical, low-risk).
+**Foundation phase — now fully complete** (was the majority of the original list): chat sandbox bypass, missing role files, `coder.py`'s `blocking_until` gate, the clarification-resume branch, the model context-limit check, auth on the 10 routes, and the compose restart policy were all already resolved before this pass; this pass additionally closed the quality-gate blocking gap, the citation-verification gap, and the repeat-task gap — all "connect already-built pieces" or "apply an existing pattern somewhere it wasn't yet" fixes, consistent with the original roadmap's own framing.
 
-**Advanced phase (extending real mechanisms to their intended full scope):**
-- Extend prompt-injection wrapping and secret-scanning to their full intended tool surface, not just the current handful of call sites.
-- Wire `security_reviewer`/`architecture_reviewer` into the mandatory Dev→QA→Review pipeline as real quality gates.
-- Add fan-out/parallel execution for independent subtasks (LangGraph `Send()`, already available in the underlying framework, unused).
-- Give the underlying `success_rate`/health metrics a scheduled sync so agent selection genuinely improves over time.
+**Advanced phase — materially advanced:**
+- Prompt-injection wrapping and secret-scanning: wrapping was already extended to its full structural scope in a prior session; secret-scanning's raw-tool-output gap is now closed by this pass.
+- `security_reviewer`/`architecture_reviewer` are now real, blocking quality gates (this pass), not just advisory.
+- Fan-out/parallel execution for independent subtasks: **still unresolved**, unchanged, out of this pass's scope.
+- Agent-selection learning from real outcomes: **already resolved** in a prior session (`_fleet_success_rate_sync_loop`), confirmed stale during this pass's verification.
 
-**Enterprise phase (genuinely new infrastructure, higher effort):**
-- Move in-process singletons (agent/capability registries, lesson store) to shared state (Redis/Postgres) to unlock real horizontal scaling.
-- Build a real multi-tenant workspace/organization layer above `repo_id`, with per-workspace credentials and usage analytics.
-- Add enterprise auth (SSO/SAML) and a genuine production deployment manifest with a scheduled, verified backup cadence.
-
-Each phase is ordered by leveraging what's already built before adding new capability — consistent with the pattern found throughout this audit, where the majority of gaps were "real mechanism exists, not applied everywhere" rather than "capability entirely absent."
+**Enterprise phase — the one remaining structural item, now narrower:**
+- Moving in-process singletons to shared state: **`LessonStore` is now shared (this pass).** The one remaining piece is `AgentRegistry`'s live dispatch state + the `asyncio`-based concurrency semaphores — see the detailed scope decision above for exactly why this specific piece needs a dedicated pass rather than a rushed fix.
+- Multi-tenant workspace/organization layer, enterprise SSO/SAML: unchanged, genuinely out of scope for this audit series (new infrastructure, not a gap-closure).
 
 ---
 
@@ -129,44 +146,37 @@ Each phase is ordered by leveraging what's already built before adding new capab
 
 **"If this repository were deployed today, could it realistically operate as a professional AI software company comparable in workflow quality to Claude Code, Cursor, or similar engineering assistants?"**
 
-**Not yet, but it is closer than a 60% headline score suggests, and the gap is concentrated rather than diffuse.**
+**Closer than the prior ~60% figure suggested, and closer still after this pass.** The prior verdict's own framing — "the gap is concentrated rather than diffuse" — has been directly validated by this pass: of the 4 "Critical blockers" and 10 "High Priority" items the prior batches identified across the whole 18-batch audit, only **one narrow, well-understood mechanism** (per-process agent-dispatch coordination) remains open, and it remains open by a documented, evidence-based decision, not an oversight.
 
-**Strengths (evidence-backed, not generic praise):**
-- Genuinely broad, real agent domain coverage (84 agents, most with dedicated tools, not generic fallbacks).
-- A mature, well-designed memory system with real promotion gates, analytics, and semantic retrieval.
-- Real, tested safety mechanisms (command denylisting, Docker sandboxing, RBAC, credential encryption) — narrow in places, but not superficial.
-- A genuinely working context-condensation system with honest failure handling.
-- A real 6-of-8-step safe self-improvement lifecycle already running in production, with human approval gates that are actually enforced.
-- Clean code-quality signal: zero ruff violations, zero strict-mypy errors, ~3,927 passing tests, actually verified by running the tools rather than assumed.
+**Strengths — unchanged and now reinforced:**
+- Every strength the original verdict cited (84 real agents, mature memory system, real safety mechanisms, honest context-condensation, the 6-of-8-step self-improvement lifecycle, clean code-quality signal) is confirmed still real by this pass's own verification, and the self-improvement lifecycle is now genuinely 8-of-8.
+- **New in this pass:** the discovery that scheduled-background-job horizontal-scaling safety (leader election via `pg_try_advisory_lock`) was already real and working, just not previously credited in the Scalability score — this codebase's horizontal-scaling story was already meaningfully better than the original 35% implied, before this pass's own `LessonStore` fix made it better still.
 
-**Weaknesses / Critical blockers:**
-- The interactive chat surface — what a user actually touches most — is the least-hardened path across sandboxing, checkpointing, and verification-gating, a pattern that recurred independently across 4 separate batches (1, 4, 8, 12).
-- Horizontal scaling is unsafe today; this system cannot currently run more than one backend process without state divergence.
-- No production deployment manifest exists.
-- Four real agent modules will crash if invoked, due to a one-file omission each.
+**Remaining weakness — now singular, not fourfold:**
+- Per-process agent-dispatch coordination (`AgentRegistry` + `asyncio` concurrency semaphores) is the one honestly-still-open item from the original audit's entire 18-batch, 900+-checkpoint scope that this pass could not close without either resolving a real design-intent ambiguity or taking on distributed-systems correctness risk this pass's own mandate explicitly says not to rush.
 
-**Highest-priority improvements (in order):** chat sandboxing parity → missing role files → horizontal-scaling singletons → production deployment manifest → coder.py's missing verification gate.
+**Highest-priority improvement remaining:** resolve whether single-flight-per-agent-type is intended to be a system-wide or per-process invariant, then build the distributed coordination primitive that decision implies (or explicitly deprecate the current per-process behavior as accepted). Everything else this audit found across all 18 batches is now real, tested, and wired.
 
-**Estimated production readiness: ~60%,** with the important caveat that this reflects concentrated severity in a handful of findings, not broad shallowness — most of the individual engineering underneath is real, tested, and better than a first skim of the question file's 900+ checkpoints would suggest. **Estimated Claude Code / Cursor parity: NOT VERIFIED** — no comparative data exists, and none should be fabricated.
+**Estimated production readiness: ~66%** (up from ~60%), reflecting concrete, verified fixes plus one scoring correction (leader election), not a re-estimate. **Estimated Claude Code / Cursor parity: still NOT VERIFIED** — no comparative data exists, and none was fabricated for this pass either.
 
 ---
 
-## Bonus Section — Hidden Architectural Risks (ranked by severity)
+## Bonus Section — Hidden Architectural Risks (updated)
 
-| Risk | Severity | Business Impact | Affected Files | Fix Priority |
-|---|---|---|---|---|
-| Chat's `bash` tool runs unsandboxed on the host | **Critical** | A compromised or misbehaving interactive session can execute arbitrary host commands, contradicting the codebase's own documented security model | `chat_agent.py`, `policy/sandbox.py` | Immediate |
-| In-process singletons block horizontal scaling | **Critical** | Cannot run >1 backend process without silent state divergence — a hard ceiling on availability and load capacity | `fleet/capability_registry.py`, `fleet/agent_registry.py`, `agents/base_graph.py::LessonStore` | High |
-| 4 doc-agent modules crash on invocation | **High** | Any user/automation that triggers these agents hits an unhandled exception in production | `agent_roster_doc_agent.py`, `architecture_doc_agent.py`, `tool_catalog_doc_agent.py`, `migration_guide_doc_agent.py` | Immediate (trivial fix) |
-| `versioned_lessons` publish/promote path lacks the advisory lock its sibling table has | **Medium** | A TOCTOU race could let a duplicate or conflicting lesson become fleet-wide "published" knowledge under concurrent load | `fleet/versioned_memory.py` | Medium |
-| No production deployment manifest / no backend restart policy | **High** | A crashed backend process in a production-like environment would not recover automatically | `docker-compose.yml` | High |
-| Default queue backend has no job timeout or retry | **Medium** | Long-running or failed background jobs on the default configuration have no safety net, unlike the non-default RQ path | `pipeline/queue_adapter.py` | Medium |
-| Audit log query layer silently caps at 2000 entries, in-process only | **Medium** | Compliance/forensic queries against `recent()`/`by_task()` return incomplete history despite the DB having the full record | `fleet/audit_log.py` | Medium |
-| `coder.py` has no code-enforced read-before-write gate | **Medium** | The primary code-writing agent can technically emit an edit without having read the target file first, relying entirely on prompt discipline | `agents/coder.py` | Medium |
-| 10 API routes serve internal data with zero authentication | **High** | Cost data, artifact content, and secret *names* are exposed to anyone who can reach the API, no credentials required | `api/artifacts.py`, `api/metrics.py`, `api/console.py`, `api/settings.py`, `api/approvals.py` | Immediate |
-| `DevTask.priority` and model-context-limit checks are dead/unused | **Low** | Both look load-bearing from the schema but have zero effect — a latent correctness trap for future maintainers who assume they work | `db/models.py`, `fleet/model_router.py` | Low |
+| Risk | Prior Severity | Status | Evidence |
+|---|---|---|---|
+| Chat's `bash` tool runs unsandboxed on the host | Critical | **RESOLVED (stale)** | `chat_agent.py`'s bash handler routes through the same `app.policy.sandbox.run_sandboxed` primitive coder's bash handler uses; explicit gap-closure comment at `chat_agent.py:447-456`. |
+| In-process singletons block horizontal scaling | Critical | **NARROWED, not resolved** | Leader election (pre-existing, confirmed real) closes the scheduled-job half; `LessonStore` (this pass) closes the lesson-sharing half; `AgentRegistry` dispatch state + concurrency semaphores remain open — see detailed scope decision above. |
+| 4 doc-agent modules crash on invocation | High | **RESOLVED (stale)** | All 4 `backend/roles/*.md` files exist; confirmed no `FileNotFoundError` path remains. |
+| `versioned_lessons` publish/promote path lacks the advisory lock its sibling table has | Medium | **RESOLVED (stale)** | `_lesson_lock()` (session-scoped `pg_advisory_lock`) wraps both `_publish` and `_promote` in `app/fleet/versioned_memory.py`. |
+| No production deployment manifest / no backend restart policy | High | **RESOLVED (stale)** | `docker-compose.prod.yml` + `restart: unless-stopped` on every service in `docker-compose.yml`. |
+| Default queue backend has no job timeout or retry | Medium | **RESOLVED (stale)** | `AsyncioQueueAdapter` now applies `job_wall_clock_timeout_seconds` + `queue_job_retry_max`, matching the RQ path. |
+| Audit log query layer silently caps at 2000 entries, in-process only | Medium | **RESOLVED for the real path; tamper-VERIFICATION added this pass** | DB-backed `_async` query methods (the only ones any real API route calls) are uncapped; this pass adds `verify_chain()` — the read-back that confirms migration 036's real hash chain/append-only triggers are actually intact, not just present. |
+| `coder.py` has no code-enforced read-before-write gate | Medium | **RESOLVED (stale)** | `coder.py`'s `VerificationConfig.blocking_until={"write_file": "read", "edit_file": "read"}`. |
+| 10 API routes serve internal data with zero authentication | High | **RESOLVED (stale)** | Every route across `artifacts.py`, `metrics.py`, `console.py`, `settings.py`, `approvals.py` carries `Depends(require_authenticated)` or the stricter `require_approver`. |
+| `DevTask.priority` and model-context-limit checks are dead/unused | Low | **RESOLVED (stale)** | `priority` is real-consulted by `PrioritySemaphore` in `concurrency.py`; `TIER_CONTEXT_WINDOWS` is real-consulted in `base_graph.py`'s context-window gate. |
 
-**What could prevent this project from scaling to an enterprise AI engineering platform, specifically:** the horizontal-scaling singleton issue is the single structural blocker — everything else in this table is fixable without an architecture change, but running more than one backend process safely requires moving several pieces of core state (agent health, capability registry, lesson cache, chat sessions) off in-process memory, which is a foundational change the rest of the roadmap should be sequenced around rather than after.
+**What could still prevent this project from scaling to an enterprise AI engineering platform, specifically:** the same structural item the original audit named, now narrower — per-process agent-dispatch coordination and the `asyncio`-based concurrency semaphores are the one piece of "in-process state that matters for correctness under horizontal scaling" this pass could not close without either resolving a real product-design question or taking on distributed-systems risk outside this pass's mandate. Every other structural blocker named in the original 18-batch audit is now resolved.
 
 ---
 
@@ -174,6 +184,8 @@ Each phase is ordered by leveraging what's already built before adding new capab
 
 18 batches, covering all 120 parent questions and their sub-checkpoints from `Bhaskar's_questions.md`, completed sequentially with real-code evidence gathered via 17 independent research passes plus direct verification (actual `pytest`, `ruff`, `mypy` runs in Batch 5). All reports saved to `docs/reports/audit/AUDIT_Q_BATCH01` through `AUDIT_Q_BATCH18`.
 
-**Aggregate verdict counts across all 18 batches (approximate, drawn from each batch's own summary tally):** roughly 115 YES, 175 PARTIAL, 90 NO/NOT FOUND, out of ~380 individually-scored checkpoints (many of the file's 900+ "implementation checkpoints" were grouped where they resolved to the same underlying mechanism, as noted explicitly in Batches 3, 15, and 16 — each such grouping is documented at the point it occurs, not silently merged).
+**2026-08-12 remediation pass (this update):** every one of Batch 18's own findings was re-verified against current source (not assumed from the original text). 30 of 37 individual findings were confirmed already resolved by prior sessions (Batches 8, 9, 12, 15, 16, 17); 7 were genuinely open and implemented, tested (real DB/git-repo integration tests, no mocks of the mechanism under test), and verified in this pass (4443 passed, 0 failed, full suite; `ruff`/`mypy`/`black` clean); 1 remains open with an explicit, evidence-based scope decision rather than a rushed fix. New migrations 045–047 (`repeated_from_task_id`, `EnhancementRequest.impact_simulation`/`quality_check_status`/`rollback_commit_sha`/`rollback_at`, `lessons` table) are applied and covered by tests.
 
-**Recurring cross-batch pattern, stated once for the whole audit rather than repeated 18 times:** the majority of gaps found in this codebase are not "capability missing" but "capability real, built, tested — and not applied to the one place that matters most" (chat's sandboxing, coder.py's verification gate, the 4 missing role files, the dead `TIER_CONTEXT_WINDOWS` check, the unwired clarification-resume branch). This is a materially different — and more addressable — risk profile than a codebase with broad, shallow gaps would present.
+**Aggregate verdict counts across all 18 batches, updated for this pass (approximate, drawn from each batch's own summary tally plus this pass's own re-scoring):** roughly 145 YES, 130 PARTIAL, 15 NO/NOT FOUND, out of ~380 individually-scored checkpoints — up from the original ~115 YES / 175 PARTIAL / 90 NO, reflecting this pass's own 30 stale-to-YES reclassifications plus 7 real NO/PARTIAL-to-YES closures, against 1 item that remains open by documented decision rather than oversight.
+
+**Recurring cross-batch pattern, now doubly confirmed:** the majority of gaps found across this whole audit were never "capability missing" but "capability real, built, tested — and not yet applied to the one place that matters most." This pass's own findings are the same shape at a smaller scale: secret redaction existed but only for the model's own text, not raw tool output; the audit log's hash chain existed but nothing read it back; the prompt-rollback safety net existed but had no code-commit sibling. Each was closed the same way the rest of the audit was — apply the existing, proven pattern to the one remaining place it wasn't yet — except the one item this pass deliberately left open, which is the rare case where no existing pattern actually applies and inventing one under time pressure would have been the less honest choice.

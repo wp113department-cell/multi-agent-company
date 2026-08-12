@@ -305,6 +305,33 @@ class Settings(BaseSettings):
         description="Run security_reviewer and architecture_reviewer as non-blocking advisory gates after each subtask's QA/review passes",
     )
 
+    # AUDIT_Q_BATCH18 §24 High-priority #7 gap-closure ("Only 2 of 8 quality-
+    # gate types (linting, tests) are mandatory ... despite security/
+    # architecture/dependency-check agents already existing") — the prior
+    # fix (above) wired security_reviewer/architecture_reviewer into the
+    # pipeline but kept them permanently advisory-only, and
+    # dependency_security_agent had no call site in the normal-task
+    # pipeline at all. Both closed here: dependency_security_agent now runs
+    # alongside the other two gates, and any gate producing a critical/high-
+    # severity finding on a *verified* run flips subtask_status to
+    # "blocked" — the same real, pre-existing blocked-subtask escalation
+    # path (task.blocked event, epic-halt-after-N-blocked-subtasks) every
+    # other blocking gate in this pipeline already uses, not a new
+    # mechanism. Only takes effect when enable_security_architecture_gates
+    # is also True (itself still opt-in, defaulting False) — an operator
+    # who hasn't opted into running these gates at all sees zero behavior
+    # change. An operator who HAS opted in gets this as the honest, intended
+    # next step (surfacing findings that are never acted on is a materially
+    # weaker gate than what "quality gate" implies) — defaulting non-empty
+    # rather than empty, since a silently-inert blocking severity set would
+    # just reproduce the exact advisory-only gap this setting exists to
+    # close for anyone who opts into enable_security_architecture_gates
+    # going forward without also having to discover and set a second flag.
+    security_architecture_gates_block_severities: list[str] = Field(
+        default=["critical", "high"],
+        description="Severities from security_reviewer/architecture_reviewer findings (and any dependency_security_agent finding on a verified/audited run) that flip subtask_status to 'blocked' instead of merely logging advisory findings. Empty list restores pure advisory-only behavior. Only consulted when enable_security_architecture_gates=True.",
+    )
+
     # Phase 5 — DevOps Agent bash allowlist (comma-separated command prefixes)
     devops_bash_allowlist: str = Field(
         default="git status,git log,git diff,df -h,du -sh,ls,pwd,cat,echo,free -h,uptime",
@@ -983,6 +1010,57 @@ class Settings(BaseSettings):
         "and persisting each active repo's agents_score (mean baseline "
         "benchmark_score of agents that actually ran against that repo). "
         "0 disables.",
+    )
+    # AUDIT_Q_BATCH18 §69 gap-closure (2026-08-12) — "Autonomous Quality
+    # Improvement" / "rollback if quality declines": real and automatic for
+    # PROMPT versions (prompt_auto_rollback_* above) but not for
+    # EnhancementRequest-driven CODE commits until this. Same fully-
+    # automatic (no human-approval gate) risk posture as its prompt
+    # sibling — see app.fleet.enhancement_rollback's module docstring for
+    # why that's the honest, consistent choice rather than a more
+    # conservative one invented just for this dimension.
+    enhancement_quality_monitor_interval_hours: float = Field(
+        default=6.0,
+        description="How often the scheduled loop checks completed, "
+        "commit_sha-bearing EnhancementRequests for a post-apply success-rate "
+        "decline. 0 disables.",
+    )
+    enhancement_quality_monitor_pre_window_hours: float = Field(
+        default=168.0,
+        description="Hours of AgentRun history BEFORE an enhancement's "
+        "completed_at used as its 'before' baseline success rate (default: 7 days).",
+    )
+    enhancement_quality_monitor_min_post_window_hours: float = Field(
+        default=48.0,
+        description="Minimum hours that must have elapsed since an enhancement's "
+        "completed_at before its post-apply success rate is judged — avoids "
+        "reacting to a handful of runs in the first few minutes/hours.",
+    )
+    enhancement_quality_monitor_min_runs: int = Field(
+        default=5,
+        description="Minimum real AgentRun count required in BOTH the pre- and "
+        "post-apply windows before a decline verdict is reached — insufficient "
+        "data in either window means 'not yet evaluable', never a fabricated verdict.",
+    )
+    enhancement_quality_decline_threshold: float = Field(
+        default=0.15,
+        description="Minimum success-rate drop (pre - post, as a fraction, e.g. "
+        "0.15 = 15 percentage points) that counts as a real decline triggering "
+        "an automatic `git revert` of the enhancement's commit_sha.",
+    )
+    # AUDIT_Q_BATCH18 Bonus-table row 2 gap-closure (2026-08-12) — "In-
+    # process singletons block horizontal scaling": LessonStore was purely
+    # in-process, so lessons learned by one backend process's agents were
+    # invisible to another's. Unlike the WRITE-side scheduled loops above
+    # (which need leader election so only one instance runs the job), this
+    # is a per-process READ-refresh — every backend process runs its own
+    # copy independently, no coordination needed, so it is deliberately
+    # NOT added to main.py's leader-election loop list.
+    lesson_store_refresh_interval_seconds: float = Field(
+        default=60.0,
+        description="How often each backend process refreshes its own in-process "
+        "LessonStore cache from the shared `lessons` DB table (merging lessons "
+        "written by other processes since this process's last refresh). 0 disables.",
     )
     leader_election_enabled: bool = Field(
         default=True,

@@ -199,6 +199,19 @@ def run_dependency_security_agent(
                 store_security_score(
                     str(task_id), get_task_repo_id_sync(task_id), score_result
                 )
+                # AUDIT_Q_BATCH18 §24 High-priority #7 gap-closure — exposes
+                # the real, deterministic pip-audit-derived vulnerability
+                # count on AgentResult.raw so a caller (manager.py's
+                # advisory-quality-gate wiring) can decide whether to block
+                # a subtask on it without re-running pip-audit itself or
+                # falling back to parsing this agent's own narrative
+                # `findings` strings — this module's own docstring already
+                # explains why that narrative has no structured severity to
+                # key off of, so the real vuln count is the only honest
+                # signal to gate on.
+                raw["vulnerable_package_count"] = score_result.vulnerable_package_count
+                raw["total_vuln_count"] = score_result.total_vuln_count
+                raw["security_score"] = score_result.security_score
         except Exception as exc:
             logger.warning(
                 "Stage 4 Cluster Q: failed to compute/persist security_score "
@@ -273,7 +286,7 @@ def make_scan_handlers(repo_path: str, trace_id: str = "") -> dict[str, Any]:
     handlers["bash"] = make_dependency_audit_bash_handler(repo_path)
     handlers["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
     handlers["submit_enhancement_request"] = make_submit_enhancement_request_handler(
-        AGENT_CONTRACT["name"], trace_id=trace_id
+        AGENT_CONTRACT["name"], trace_id=trace_id, repo_path=repo_path
     )
     return handlers
 

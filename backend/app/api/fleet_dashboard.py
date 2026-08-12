@@ -376,6 +376,15 @@ async def _run_apply_phase(
     try:
         result = await asyncio.to_thread(apply_fn, request_id, description, trace_id)
         status = "completed" if result.status == "completed" else "failed"
+        # AUDIT_Q_BATCH18 §69 gap-closure (2026-08-12) — commit_sha existed
+        # on the model but had zero writers anywhere (grepped) until each
+        # APPLY function's own capture_commit_sha_if_verified call; this is
+        # that real write, and quality_check_status="monitoring" (only on a
+        # genuinely completed+committed apply) is what makes this row
+        # eligible for app.fleet.enhancement_rollback's scheduled check.
+        commit_sha = (
+            (result.raw or {}).get("commit_sha") if status == "completed" else None
+        )
         await _mark(
             status=status,
             files_touched=list(result.files_touched or []),
@@ -386,6 +395,8 @@ async def _run_apply_phase(
                 if status == "completed"
                 else "Apply phase did not verify successfully"
             ),
+            commit_sha=commit_sha,
+            quality_check_status="monitoring" if commit_sha else None,
         )
         if status == "completed":
             # Gap-closure (2026-07-23): a human-approved, data-driven fleet
