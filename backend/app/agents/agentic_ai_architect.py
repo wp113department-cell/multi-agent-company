@@ -1,0 +1,225 @@
+"""agentic_ai_architect — designs agentic AI / multi-agent / LangGraph systems
+FOR THE USER's own project, as opposed to Gridiron's own internal use of
+LangGraph as infrastructure.
+
+AUDIT_Q_BATCH17 §71 gap-closure (2026-08-12) — "Agentic AI / LangGraph (as a
+domain the user gets help *with*, not the infra Gridiron itself runs on):
+NO — The fleet's own LangGraph usage is infrastructure, not a user-facing
+capability. No dedicated agent helps a user design *their own* agentic
+system distinct from ai_engineer." ai_engineer.py covers training/inference/
+eval/embeddings; rag_engineer_agent.py covers RAG pipelines specifically.
+Neither owns "help me design a multi-agent orchestration graph, tool-calling
+loop, or state machine for MY app" — this agent does, and nothing else in
+the fleet does.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from app.agents.agent_result import AgentResult
+from app.agents.base_graph import VerificationConfig, run_agent_graph
+from app.agents.tools import (
+    _FETCH_URL_TOOL,
+    _PARSE_AST_TOOL,
+    _WEB_SEARCH_TOOL,
+    READ_ONLY_TOOLS,
+    RECORD_LEARNING_TOOL,
+    make_chat_handlers,
+    make_record_learning_handler,
+)
+from app.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+AGENT_CONTRACT: dict[str, Any] = {
+    "name": "agentic_ai_architect",
+    "description": (
+        "Designs agentic AI systems for the user's own project — multi-agent "
+        "orchestration graphs, tool-calling loops, state machines, agent "
+        "handoff/routing patterns — distinct from Gridiron's own internal "
+        "LangGraph infrastructure and from ai_engineer's model training/"
+        "inference scope."
+    ),
+    "allowed_tools": [
+        "read_file",
+        "list_files",
+        "search_code",
+        "get_file_tree",
+        "search_symbols",
+        "find_references",
+        "analyze_file",
+        "parse_ast",
+        "read_files",
+        "file_exists",
+        "file_info",
+        "find_todos",
+        "search_imports",
+        "write_file",
+        "web_search",
+        "fetch_url",
+        "submit_agentic_ai_architect",
+        "record_learning",
+    ],
+    "input_types": ["task_id", "description", "repo_path"],
+    "output_types": ["AgentResult"],
+    "side_effects": ["writes agentic system design docs"],
+    "permissions": ["read_repo", "write_docs"],
+    "risk_level": "low",
+    "expected_verification": {
+        "read": "read_file or search_code must run against the target project before design"
+    },
+    "dependencies": [],
+}
+
+_SUBMIT = {
+    "name": "submit_agentic_ai_architect",
+    "description": "Submit agentic_ai_architect result.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "findings": {"type": "array", "items": {"type": "string"}},
+            "recommendations": {"type": "array", "items": {"type": "string"}},
+            "graph_design": {
+                "type": "string",
+                "description": (
+                    "The proposed agent/graph topology: nodes, edges, state "
+                    "schema, and tool ownership per node."
+                ),
+            },
+        },
+        "required": ["summary"],
+    },
+}
+_WRITE = {
+    "name": "write_file",
+    "description": "Write the agentic system design document.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+        "required": ["path", "content"],
+    },
+}
+_TOOLS = READ_ONLY_TOOLS + [
+    _WRITE,
+    _SUBMIT,
+    RECORD_LEARNING_TOOL,
+    _PARSE_AST_TOOL,
+    _WEB_SEARCH_TOOL,
+    _FETCH_URL_TOOL,
+]
+
+_CFG = VerificationConfig(
+    set_by={"read_file": "read", "search_code": "read", "analyze_file": "read"},
+    reset_by=(),
+    reset_keys=(),
+    enforce_in_result={"read": "read"},
+    initial={"read": False},
+)
+
+
+def make_agentic_ai_architect_handlers(repo_path: str) -> dict[str, Any]:
+    base = make_chat_handlers(repo_path)
+    result: dict[str, Any] = {}
+
+    def submit_h(inp: dict[str, Any]) -> str:
+        result.update(inp)
+        return "Submitted."
+
+    base["submit_agentic_ai_architect"] = submit_h
+    base["_result"] = result
+    base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
+    return base
+
+
+def run_agentic_ai_architect(
+    task_id: int,
+    description: str,
+    repo_path: str | None = None,
+    on_heartbeat: Any = None,
+    on_tool_call: Any = None,
+) -> AgentResult:
+    settings = get_settings()
+    repo = repo_path or str(settings.target_repo_path)
+    handlers = make_agentic_ai_architect_handlers(repo)
+    result = handlers["_result"]
+
+    msg = (
+        f"Task #{task_id} — {description}\n\n"
+        "You design agentic AI systems for the USER's own project — NOT for "
+        "Gridiron itself.\n"
+        "1. Read the target project's actual code to understand what exists "
+        "today (existing agents, tools, orchestration, if any) before "
+        "proposing anything new.\n"
+        "2. If the design depends on a specific framework's current "
+        "capabilities (LangGraph, AutoGen, CrewAI, raw tool-calling loops, "
+        "etc.) and you're not certain from training data alone, use "
+        "web_search/fetch_url to confirm current behavior rather than "
+        "guessing.\n"
+        "3. Propose a concrete graph/state-machine topology: nodes, edges, "
+        "conditional routing, state schema, which tools each node owns, and "
+        "the failure/retry/human-approval points.\n"
+        "4. Do not just describe agent-framework concepts in the abstract — "
+        "the design must be specific to this project's actual code and use case.\n"
+        "5. Write the design doc with write_file if requested.\n"
+        "6. Call submit_agentic_ai_architect with summary, findings, "
+        "graph_design, and recommendations."
+    )
+
+    final_state = run_agent_graph(
+        task_id=str(task_id),
+        role_name="agentic_ai_architect",
+        model=settings.model_planner,
+        tools=_TOOLS,
+        tool_handlers=handlers,
+        verification_cfg=_CFG,
+        initial_message=msg,
+        task_description=description[:120],
+        repo_path=repo,
+        model_haiku=settings.model_router,
+        enable_planning=True,
+        enable_memory=True,
+        enable_reflection=True,
+        enable_lesson=True,
+        max_turns=20,
+    )
+
+    raw = final_state["result"] if final_state["result"] else result
+    return AgentResult(
+        summary=str(raw.get("summary", description[:100])),
+        findings=list(raw.get("findings", [])),
+        files_touched=[],
+        verified=bool(final_state["verification"].get("read")),
+        requires_human_approval=False,
+        tokens_in=final_state["tokens_in"],
+        tokens_out=final_state["tokens_out"],
+        status="completed" if final_state["submitted"] else "blocked",
+        raw=raw,
+    )
+
+
+def _register() -> None:
+    try:
+        from app.fleet.capability_registry import AgentCapability, register
+        from app.fleet.agent_registry import get_agent_registry
+
+        register(
+            AgentCapability(
+                name=AGENT_CONTRACT["name"],
+                description=AGENT_CONTRACT["description"],
+                tools=AGENT_CONTRACT["allowed_tools"],
+                input_types=AGENT_CONTRACT["input_types"],
+                output_types=AGENT_CONTRACT["output_types"],
+                capabilities=["agentic_system_design"],
+                risk_level=AGENT_CONTRACT["risk_level"],
+                dependencies=AGENT_CONTRACT["dependencies"],
+            )
+        )
+        get_agent_registry().register(AGENT_CONTRACT["name"])
+    except Exception as exc:
+        logger.debug("Fleet registry unavailable: %s", exc)
+
+
+_register()

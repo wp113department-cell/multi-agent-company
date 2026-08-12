@@ -3738,11 +3738,36 @@ class ChatAgent:
                 "user frustration detection skipped (non-fatal)", exc_info=True
             )
 
+        # AUDIT_Q_BATCH17 §73 gap-closure (2026-08-11) — "Adaptive Expertise:
+        # NO — nothing detects which [domain] a conversational user
+        # implicitly needs, or adapts tone/terminology to a detected role."
+        # Same additive-directive shape as frustration_directive above: a
+        # real, code-computed signal folded into THIS turn's system prompt,
+        # never a new graph routing edge — _route_after_llm/_route_after_tool
+        # (the actual tool_use/stop decision) are untouched. Classified once
+        # per session and cached on self.session (a professional role rarely
+        # changes mid-conversation), not on every turn.
+        if not self.session.role_detected:
+            try:
+                from app.agents.role_detection import detect_professional_role
+
+                role_signal = detect_professional_role(
+                    user_message, self._haiku_model()
+                )
+                self.session.role_directive = role_signal.directive
+            except Exception:
+                logger.debug("role detection skipped (non-fatal)", exc_info=True)
+            finally:
+                self.session.role_detected = True
+        role_directive = self.session.role_directive
+
         self.session.history.append({"role": "user", "content": user_message})
         memory_block = await self._memory_read_context(user_message)
         system_prompt = (
-            f"{self._system}\n\n{memory_block}" if memory_block else self._system
-        ) + frustration_directive
+            (f"{self._system}\n\n{memory_block}" if memory_block else self._system)
+            + frustration_directive
+            + role_directive
+        )
 
         config = {"configurable": {"thread_id": self.session.session_id}}
         initial_state: ChatGraphState = {

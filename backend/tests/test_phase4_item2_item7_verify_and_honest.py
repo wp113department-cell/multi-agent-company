@@ -61,22 +61,25 @@ def test_every_real_agent_has_a_verification_config() -> None:
 
 
 def test_boilerplate_role_files_all_scope_the_claim_with_the_hedge_clause() -> None:
-    """The 14 files matching the generic Quality Gates phrase are not
+    """The 15 files matching the generic Quality Gates phrase are not
     dishonest boilerplate: every one immediately qualifies it with "(as
     applicable)" — "tests / typecheck / lint as applicable" — scoping the
     claim to only whichever checks the agent can actually run (zero, for an
     agent with no bash/test tool, is a vacuously satisfied gate, not a false
-    promise). Two of the 14 (docker_agent, sql_agent) additionally have
+    promise). Two of the 15 (docker_agent, sql_agent) additionally have
     real, role-specific verification tools (docker_build/docker_exec;
     run_sql/explain_query) instead of generic bash — confirmed directly,
-    not assumed."""
+    not assumed. AUDIT_Q_BATCH17 gap-closure (2026-08-12) added the 15th:
+    mobile_dev, a coder-tier agent whose real check is one of
+    flutter analyze/gradlew lint/xcodebuild/tsc depending on the detected
+    toolchain — same "as applicable" scoping, just a wider real-check set."""
     boilerplate_files = [
         p.stem
         for p in pathlib.Path("roles").glob("*.md")
         if "All role-relevant checks pass with 0 errors"
         in p.read_text(encoding="utf-8")
     ]
-    assert len(boilerplate_files) == 14
+    assert len(boilerplate_files) == 15
 
     for name in boilerplate_files:
         text = pathlib.Path(f"roles/{name}.md").read_text(encoding="utf-8")

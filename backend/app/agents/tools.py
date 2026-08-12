@@ -6103,7 +6103,8 @@ def make_monitoring_agent_handlers(repo_path: str) -> dict[str, Any]:
 
 
 # ===========================================================================
-# Day 3 — Browser, Memory, Planning, MCP tool specs + Agent tool lists + Factories
+# Day 3 — Browser, Memory, Planning, External Integration tool specs + Agent
+# tool lists + Factories
 # ===========================================================================
 
 # --- Day 3A: Browser tool specs ---
@@ -6562,7 +6563,11 @@ _GITHUB_CREATE_PR_TOOL: dict[str, Any] = {
     },
 }
 
-# --- Day 3G: MCP / External integration tool specs ---
+# --- Day 3G: External integration tool specs (GitHub CLI / Linear / Slack
+# webhooks — plain REST/CLI wrappers, NOT the Model Context Protocol. See
+# AUDIT_Q_BATCH17 §71 gap-closure: this label previously said "MCP", which
+# was a naming mismatch — real MCP-protocol-building help now lives in the
+# dedicated mcp_developer_agent.py instead. ---
 
 _GITHUB_CREATE_ISSUE_TOOL: dict[str, Any] = {
     "name": "github_create_issue",
@@ -8490,7 +8495,7 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _SUMMARIZE_FOLDER_TOOL,
     _GENERATE_API_DOCS_TEXT_TOOL,
     _MERMAID_FROM_SCHEMA_TOOL,
-    # Day 3G — MCP / External integrations
+    # Day 3G — External integrations (GitHub/Linear/Slack — not MCP protocol)
     _GITHUB_CREATE_ISSUE_TOOL,
     _GITHUB_LIST_PRS_TOOL,
     _GITHUB_COMMENT_TOOL,
@@ -11883,7 +11888,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["mermaid_from_schema"] = mermaid_from_schema_h
 
     # =========================================================================
-    # DAY 3G — MCP / External integrations
+    # DAY 3G — External integrations (GitHub/Linear/Slack — not MCP protocol)
     # =========================================================================
 
     import subprocess as _sp_mcp

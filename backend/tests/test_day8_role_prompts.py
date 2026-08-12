@@ -53,7 +53,7 @@ _REQUIRED_ROLE_SPECIFIC_SECTIONS = (
 )
 
 
-def test_role_file_count_is_77() -> None:
+def test_role_file_count_is_84() -> None:
     # 67 from Day 0-8 (68 agent_models.json entries minus groq_adapter, which has no role
     # file) + 5 Day 9 fleet-enhancement agents (agent_performance_reviewer, agent_debugger,
     # agent_advisor, knowledge_curator, quality_auditor) = 72.
@@ -64,8 +64,13 @@ def test_role_file_count_is_77() -> None:
     # by adding the 4 missing files, not by removing the callers. = 76.
     # + 1 (AUDIT_Q_BATCH10 §19 gap-closure): deployment_guide_doc_agent — a new
     # doc-generator agent with a real caller from the moment it was added, so
-    # its role file was created in the same change, never left dangling.
-    assert len(_ROLE_NAMES) == 77, f"expected 77 role files, found {len(_ROLE_NAMES)}"
+    # its role file was created in the same change, never left dangling. = 77.
+    # + 7 (AUDIT_Q_BATCH17 §71/§83 gap-closure, 2026-08-12): mobile_dev,
+    # agentic_ai_architect, mcp_developer_agent, prompt_engineer_agent,
+    # roadmap_agent, ux_design_agent, tech_advisor_agent — each new agent's
+    # role file created in the same change as its AGENT_CONTRACT, never left
+    # dangling. = 84.
+    assert len(_ROLE_NAMES) == 84, f"expected 84 role files, found {len(_ROLE_NAMES)}"
 
 
 def test_global_standards_file_exists() -> None:

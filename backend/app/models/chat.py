@@ -52,6 +52,16 @@ class ChatSession:
     # migrations, etc.) — those run before ChatAgent._confirm() is ever
     # called, so this can't weaken them.
     remembered_confirmations: set[str] = field(default_factory=set)
+    # AUDIT_Q_BATCH17 §73 gap-closure (2026-08-12) — "Adaptive Expertise: NO
+    # — nothing detects which [domain] a conversational user implicitly
+    # needs, or adapts tone/terminology to a detected role." Classified once
+    # per session (not every turn) via app.agents.role_detection — a
+    # professional role rarely changes mid-conversation, and caching bounds
+    # the extra classification call to once per session instead of once per
+    # turn. Empty string directive = no confident match; still "detected"
+    # so later turns don't re-classify.
+    role_directive: str = ""
+    role_detected: bool = False
 
     async def push(self, event: dict[str, Any]) -> None:
         await self._queue.put(event)
