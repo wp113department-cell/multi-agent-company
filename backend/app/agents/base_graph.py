@@ -347,6 +347,56 @@ def _persist_lesson_async(lesson: Lesson) -> None:
         logger.debug("Could not schedule lesson persistence", exc_info=True)
 
 
+_LESSON_COMPRESSION_PROMPT = (
+    "The following are {n} related lessons learned by AI coding agents, all in "
+    "category '{category}'. Merge them into ONE consolidated lesson that "
+    "preserves every distinct concrete fact, pattern, and constraint from all "
+    "of them — do not drop information, only remove repetition. Respond with "
+    "ONLY the merged lesson text (2-5 sentences), no preamble, no bullet list, "
+    "no restating the category.\n\nLessons:\n{bullets}"
+)
+
+
+def _group_compressible_lessons(
+    lessons: list["Lesson"], min_group_size: int, jaccard_threshold: float
+) -> list["Lesson"] | None:
+    """plan14 Day 2 Task 3 — greedy single-pass clustering by category, then
+    Jaccard token overlap within each category (LessonStore has no
+    embeddings by design — see its own docstring — so grouping reuses its
+    existing keyword-overlap metric rather than forcing an embedding fit).
+    Returns the single largest qualifying group (>= min_group_size), or None
+    if no group reaches that size. Pure/cheap (no I/O) — safe to call while
+    holding LessonStore's own lock, though the real caller (add()) calls it
+    on a snapshot taken outside the lock so the LLM call that follows never
+    blocks other threads."""
+    by_category: dict[str, list[Lesson]] = {}
+    for ls in lessons:
+        by_category.setdefault(ls.category, []).append(ls)
+
+    best_group: list[Lesson] = []
+    for category_lessons in by_category.values():
+        remaining = list(category_lessons)
+        while remaining:
+            seed = remaining[0]
+            seed_tokens = LessonStore._tokens(seed)
+            group = [seed]
+            rest = []
+            for other in remaining[1:]:
+                if (
+                    LessonStore._jaccard(seed_tokens, LessonStore._tokens(other))
+                    >= jaccard_threshold
+                ):
+                    group.append(other)
+                else:
+                    rest.append(other)
+            if len(group) > len(best_group):
+                best_group = group
+            remaining = rest
+    if len(best_group) >= min_group_size:
+        return best_group
+    return None
+
+
 class LessonStore:
     """Thread-safe in-process lesson registry shared across all agent runs.
 
@@ -399,7 +449,22 @@ class LessonStore:
         lesson back to the table on every refresh cycle, growing it
         unboundedly for zero benefit. Every real external caller keeps
         today's exact behavior (in-process add, now also durably persisted
-        best-effort)."""
+        best-effort).
+
+        plan14 Day 2 Task 3 (Session Memory Compression) — when at capacity,
+        tries an LLM-based compression of the largest related-lesson group
+        first (see _compress_group), falling back to the pre-existing plain
+        FIFO pop(0) exactly as before when compression is disabled, finds no
+        qualifying group, or fails. The LLM call itself deliberately runs
+        OUTSIDE self._lock (grouping reads a snapshot taken under the lock,
+        then the network call happens unlocked, then a second short lock
+        re-applies the result) — this is a thread-safe in-process registry
+        shared across every concurrently running agent in the fleet; holding
+        the lock for a multi-second network call would stall every other
+        agent's own add()/retrieve() for that whole time. Group membership
+        is re-checked with `in self._lessons` before removal in the second
+        lock, so a member concurrently removed/replaced by another thread's
+        own add() in between is simply skipped, not an error."""
         from app.config import get_settings
 
         settings = get_settings()
@@ -415,11 +480,89 @@ class LessonStore:
                     ):
                         self._lessons.remove(existing)
                         break
-            if len(self._lessons) >= self._capacity:
-                self._lessons.pop(0)
+            at_capacity = len(self._lessons) >= self._capacity
+            snapshot = list(self._lessons) if at_capacity else None
+
+        compacted: Lesson | None = None
+        group: list[Lesson] = []
+        if at_capacity and snapshot is not None and settings.lesson_compression_enabled:
+            group = (
+                _group_compressible_lessons(
+                    snapshot,
+                    settings.lesson_compression_min_group_size,
+                    settings.lesson_compression_jaccard_threshold,
+                )
+                or []
+            )
+            if group:
+                compacted = self._compress_group(group)
+
+        with self._lock:
+            if at_capacity:
+                if compacted is not None and group:
+                    for member in group:
+                        if member in self._lessons:
+                            self._lessons.remove(member)
+                    self._lessons.append(compacted)
+                elif len(self._lessons) >= self._capacity:
+                    # Compression unavailable/disabled/found-nothing/failed,
+                    # or capacity is still exceeded even after another
+                    # thread's own eviction in the meantime — today's exact
+                    # pre-existing fallback.
+                    self._lessons.pop(0)
             self._lessons.append(lesson)
         if _persist:
             _persist_lesson_async(lesson)
+
+    def _compress_group(self, group: list[Lesson]) -> Lesson | None:
+        """LLM-merges `group` (same category, Jaccard-related) into one
+        consolidated Lesson. Returns None on any failure — the caller's
+        pre-existing FIFO-eviction fallback then applies, so a compression
+        failure never blocks or loses the lesson currently being added.
+
+        Deliberately uses its own short-timeout, zero-retry client instead
+        of _make_client()/_call_anthropic()'s shared circuit breaker: this
+        runs on LessonStore.add()'s hot path (after every one of ~76 agents'
+        submissions) as a best-effort background optimization, not a
+        critical-path call. Routing it through the shared breaker would let
+        a run of failed/unreachable background compression attempts trip
+        the same breaker real, critical agent submissions depend on —
+        exactly the cross-contamination this codebase's own
+        reset_circuit_breakers test fixture documents as a real hazard
+        class elsewhere. A short, isolated timeout also bounds worst-case
+        added latency on that hot path to seconds, not
+        llm_call_timeout_seconds's 300s (+ retries)."""
+        bullets = "\n".join(f"- {ls.lesson} (pattern: {ls.pattern})" for ls in group)
+        prompt = _LESSON_COMPRESSION_PROMPT.format(
+            n=len(group), category=group[0].category, bullets=bullets
+        )
+        try:
+            from app.config import get_settings
+
+            settings = get_settings()
+            client = anthropic.Anthropic(
+                api_key=get_effective_api_key(),
+                timeout=settings.lesson_compression_llm_timeout_seconds,
+                max_retries=0,
+            )
+            r = client.messages.create(
+                model=settings.model_router,
+                max_tokens=400,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            merged_text = _text_from_content(_serialize_content(r.content)).strip()
+        except Exception as exc:
+            logger.warning("Lesson compression LLM call failed: %s", exc)
+            return None
+        if not merged_text:
+            return None
+        return Lesson(
+            agent_name="lesson_compression",
+            lesson=merged_text,
+            pattern=group[0].pattern,
+            category=group[0].category,
+            reusable=True,
+        )
 
     async def refresh_from_db(self) -> int:
         """Pulls lessons written (by this or any other process, including
@@ -916,24 +1059,55 @@ def _make_planner_node(
 # ---------------------------------------------------------------------------
 
 
-def _should_replan(state: AgentRunState, max_replans: int) -> tuple[bool, str]:
+def _should_replan(
+    state: AgentRunState,
+    max_replans: int,
+    verification_cfg: "VerificationConfig | None" = None,
+) -> tuple[bool, str]:
     """Real, evidence-grounded trigger check — never a fabricated heuristic.
-    Returns (should_replan, human-readable reason citing the actual state)."""
+    Returns (should_replan, human-readable reason citing the actual state).
+
+    plan14 Day 5 Task 10 (Adaptive Runtime Replanning) — extends the
+    original single "failure" trigger (unchanged below) with two more real,
+    already-tracked-state-grounded triggers, each genuinely distinct from a
+    failure that's already happened:
+    - "new information": the planner's own confidence in the CURRENT plan
+      is low — evidence gathered at planning time already suggested
+      uncertainty, before any execution failure occurred.
+    - "blocked/dependency": N+ turns in, a verification requirement this
+      agent's own contract cares about (VerificationConfig.enforce_in_result)
+      still isn't satisfied — the environment/dependencies aren't
+      cooperating the way the original plan assumed. Only checked for
+      agents that actually declare enforce_in_result requirements (most
+      agents' VerificationConfig has an empty dict, so this is a no-op for
+      them, same "zero blast radius unless real evidence exists" property
+      the original trigger already had).
+    All thresholds are config-driven (replanning_*_threshold in
+    app/config.py) rather than hardcoded, per the governing spec's own
+    "use configurable thresholds/policies" instruction — defaults preserve
+    the original hardcoded behavior exactly for the failure trigger.
+    """
     if state.get("replan_count", 0) >= max_replans:
         return False, ""
 
+    settings = get_settings()
+
     unsatisfied = state.get("reflection_unsatisfied_count", 0)
-    if unsatisfied >= 2:
+    if unsatisfied >= settings.replanning_reflection_failure_threshold:
         return True, (
             f"Self-review has judged your own tool output unsatisfactory "
             f"{unsatisfied} times in a row — the current plan may not be working."
         )
 
-    # critique_retries reaching 2 means critique_node has sent work back for
-    # improvement at least twice — i.e. the SAME evaluation cycle failed more
-    # than once, not merely once (a single failure is expected and handled by
-    # critique_node's own retry, not a replanning signal).
-    if state.get("critique_retries", 0) >= 2:
+    # critique_retries reaching the threshold means critique_node has sent
+    # work back for improvement at least that many times — i.e. the SAME
+    # evaluation cycle failed more than once, not merely once (a single
+    # failure is expected and handled by critique_node's own retry, not a
+    # replanning signal).
+    if (
+        state.get("critique_retries", 0)
+        >= settings.replanning_critique_failure_threshold
+    ):
         critique_result = state.get("critique_result") or {}
         unmet = [
             str(c.get("criterion", "?"))
@@ -946,14 +1120,43 @@ def _should_replan(state: AgentRunState, max_replans: int) -> tuple[bool, str]:
                 f"criteria across retries: {', '.join(unmet)}."
             )
 
+    confidence = state.get("confidence", 1.0)
+    if confidence < settings.replanning_confidence_threshold:
+        return True, (
+            f"Planner confidence ({confidence:.2f}) is below the "
+            f"{settings.replanning_confidence_threshold:.2f} threshold — "
+            "the current plan was built on uncertain footing."
+        )
+
+    if verification_cfg is not None and verification_cfg.enforce_in_result:
+        turns = state.get("turns", 0)
+        if turns >= settings.replanning_blocked_turn_threshold:
+            verification = state.get("verification", {})
+            unmet_keys = sorted(
+                {
+                    verif_key
+                    for verif_key in verification_cfg.enforce_in_result.values()
+                    if not verification.get(verif_key, False)
+                }
+            )
+            if unmet_keys:
+                return True, (
+                    f"{turns} turns in, still missing required verification "
+                    f"{', '.join(unmet_keys)} — the plan may be blocked by "
+                    "something the original plan didn't anticipate."
+                )
+
     return False, ""
 
 
 def _make_replan_node(
-    model_haiku: str, task_description: str, max_replans: int
+    model_haiku: str,
+    task_description: str,
+    max_replans: int,
+    verification_cfg: "VerificationConfig | None" = None,
 ) -> Callable[[AgentRunState], dict[str, Any]]:
     def replan_node(state: AgentRunState) -> dict[str, Any]:
-        should, reason = _should_replan(state, max_replans)
+        should, reason = _should_replan(state, max_replans, verification_cfg)
         if not should:
             return {}
 
@@ -986,6 +1189,116 @@ def _make_replan_node(
     return replan_node
 
 
+_MEMORY_SECTION_BOUNDARY_RE = re.compile(r"\n\n(?=## )")
+
+
+def _split_memory_context_sections(memory_context: str) -> list[str]:
+    """Splits an already-formatted memory_context string back into its
+    ordered, priority-ranked sections without changing how
+    format_full_memory_context/LessonStore.format_for_injection build their
+    output: every section either function produces starts with a "## "
+    heading, and format_full_memory_context's own sections (as well as the
+    lesson_block + db_block pair memory_hook_node joins) are all combined
+    with "\n\n" — so "\n\n" immediately followed by "## " reliably marks a
+    section boundary, and the resulting list is in the same
+    highest-to-lowest priority order the blocks/sections were built in
+    (lessons -> tasks -> failures -> learnings -> procedures -> preferences
+    -> bugs).
+
+    Known limitation: if a task/failure/etc. description's own free-text
+    content happens to contain the literal sequence "\n\n## " (unlikely —
+    those fields are pre-truncated to 300-800 chars of retrieved data, not
+    arbitrary user markdown), this would split mid-entry rather than at a
+    real section boundary. Same class of imprecision the previous
+    hard-character-slice already had (it could cut mid-sentence/mid-word
+    anywhere); this is not a regression, and doesn't change how the fields
+    are formatted, only how this function re-derives boundaries from them.
+    """
+    return _MEMORY_SECTION_BOUNDARY_RE.split(memory_context)
+
+
+def _compress_section_to_budget(section: str, remaining_chars: int) -> str | None:
+    """Extractive compression for one section that doesn't fully fit:
+    keeps the heading and as many leading entries as fit — retrieval
+    already orders entries best-similarity-first, so keeping the leading
+    ones keeps the most relevant — instead of an abrupt mid-sentence
+    character slice. Entries within a format_full_memory_context section
+    are separated by a blank line (each entry's own last line carries a
+    trailing "\n", then the section list is "\n".joined — the same
+    "\n\n(?=## )" section splitter above but between the section's own
+    entries has no anchor to require, so a flat "\n\n" split is correct
+    here). LessonStore's block has no such internal entry separation (one
+    line per lesson) — it degrades to whole-heading-with-no-entries or
+    None, never a partial line.
+
+    Returns None if not even the heading fits — the caller drops the whole
+    section rather than emit a truncated heading fragment.
+    """
+    heading, _, body = section.partition("\n")
+    if len(heading) > remaining_chars:
+        return None
+    entries = body.split("\n\n") if body else []
+    kept_entries: list[str] = []
+    used = len(heading)
+    dropped = 0
+    for entry in entries:
+        candidate_len = used + 2 + len(entry)
+        if candidate_len <= remaining_chars:
+            kept_entries.append(entry)
+            used = candidate_len
+        else:
+            dropped += 1
+    result = heading
+    if kept_entries:
+        result += "\n" + "\n\n".join(kept_entries)
+    if dropped:
+        plural = "y" if dropped == 1 else "ies"
+        notice = (
+            f"\n[...{dropped} lower-relevance entr{plural} omitted to fit "
+            "token budget...]"
+        )
+        # The notice itself must respect remaining_chars too — omitting it
+        # when it doesn't fit (rather than appending unconditionally) is
+        # what keeps this function's real output length bounded by its
+        # remaining_chars contract in every case, including when entries
+        # were dropped but the notice text alone would push past budget.
+        if len(result) + len(notice) <= remaining_chars:
+            result += notice
+    return result
+
+
+def _compress_memory_context_to_budget(
+    memory_context: str, max_chars: int
+) -> tuple[str, bool]:
+    """Priority-preserving compression: keeps highest-priority sections
+    whole, extractively compresses the section that first exceeds budget
+    (dropping its lowest-relevance entries, not slicing mid-sentence), and
+    drops any lower-priority sections entirely once budget is exhausted —
+    rather than a single hard character slice across the whole combined
+    block, which could cut a high-priority section's opening line just as
+    easily as a low-priority one's trailing filler. Returns (compressed
+    text, whether anything was actually dropped/compressed)."""
+    sections = _split_memory_context_sections(memory_context)
+    kept: list[str] = []
+    used = 0
+    changed = False
+    for section in sections:
+        separator_len = 2 if kept else 0
+        if used + separator_len + len(section) <= max_chars:
+            kept.append(section)
+            used += separator_len + len(section)
+            continue
+        changed = True
+        remaining = max_chars - used - separator_len
+        if remaining <= 0:
+            continue
+        compressed = _compress_section_to_budget(section, remaining)
+        if compressed is not None:
+            kept.append(compressed)
+            used += separator_len + len(compressed)
+    return "\n\n".join(kept), changed
+
+
 def _cap_memory_context_tokens(memory_context: str, *, trace_id: str) -> str:
     """AUDIT_Q_BATCH03 §120 'Context Window Management' — format_full_memory_
     context/LessonStore.format_for_injection already truncate individual
@@ -996,7 +1309,25 @@ def _cap_memory_context_tokens(memory_context: str, *, trace_id: str) -> str:
     ~4 chars/token is the same rough, no-API-call heuristic
     app.agents.chat_agent._estimate_tokens already uses to gate its own
     condense decision — not exact, only precise enough to gate a truncation
-    decision here too."""
+    decision here too.
+
+    plan14 follow-on #7 (General Context Compression) — over-budget content
+    used to be handled by a single hard `memory_context[:max_chars]` slice,
+    which could cut anywhere: mid-word, mid-sentence, or straight through a
+    high-priority section just because a low-priority one happened to push
+    the combined block over budget first. Now priority-preserving
+    (_compress_memory_context_to_budget): sections are kept in their
+    existing priority order (lessons -> tasks -> failures -> learnings ->
+    procedures -> preferences -> bugs, the order memory_hook_node/
+    format_full_memory_context already build them in), the first section
+    that doesn't fully fit is extractively compressed (drops its
+    lowest-similarity-ranked entries, keeps the heading and the
+    highest-ranked ones), and only sections after that are dropped
+    entirely — deterministic, zero added LLM calls/latency/cost on this
+    hot path (memory_hook_node runs on every agent turn's entry, unlike
+    Day 2 Task 3's lesson compression, which only fires on rare
+    capacity-eviction events and can afford an LLM call).
+    """
     budget = get_settings().memory_injection_token_budget
     if budget <= 0:
         return memory_context
@@ -1006,15 +1337,16 @@ def _cap_memory_context_tokens(memory_context: str, *, trace_id: str) -> str:
     max_chars = budget * 4
     logger.warning(
         "memory_hook_node: memory_context for trace=%s estimated at ~%d tokens, "
-        "exceeding memory_injection_token_budget=%d — truncating to ~%d chars.",
+        "exceeding memory_injection_token_budget=%d — compressing to ~%d chars.",
         trace_id or "-",
         estimated_tokens,
         budget,
         max_chars,
     )
+    compressed, _changed = _compress_memory_context_to_budget(memory_context, max_chars)
     return (
-        memory_context[:max_chars]
-        + "\n\n[...memory context truncated to fit token budget...]"
+        compressed + "\n\n[...memory context compressed to fit token budget — "
+        "lowest-priority section(s)/entries trimmed first...]"
     )
 
 
@@ -2173,6 +2505,65 @@ def _make_execute_tools_node(
                     raw_result["_requires_human_approval"] = (
                         human_approval_required or not gate.passed
                     )
+
+                    # plan14 Day 1 Task 2 (Confidence-Gated Control Flow) — the
+                    # gate above already computes confidence:threshold and
+                    # flags _requires_human_approval, but neither was ever
+                    # observable outside this function: AgentResult.
+                    # requires_human_approval is hardcoded False at most of
+                    # the ~76 agent call sites (verified by repo search) and
+                    # manager.py's dispatch loop never reads that field at
+                    # all — a threshold with no real consumer. approval_gate.
+                    # py's PendingApproval table IS the one real, generic,
+                    # already-wired HITL mechanism in this codebase (GET
+                    # /api/approvals/pending already reads it), so route
+                    # through it instead of adding a second signal path.
+                    # Non-blocking (blocking=False) — matches request_
+                    # clarification's own precedent immediately below in
+                    # tools.py: base_graph.py-based agents have no interrupt
+                    # ()/resume machinery, so this records a reviewable flag,
+                    # not a real pause. Only fires when a caller explicitly
+                    # opted into a nonzero floor (quality_gate_min_confidence
+                    # > 0) AND the confidence check specifically is what
+                    # failed — the default 0.0 threshold, and gate failures
+                    # from other checks (schema/critique/escalation), stay
+                    # exactly as inert as before this change.
+                    if (
+                        not gate.passed
+                        and gate.checks.get("confidence:threshold") is False
+                        and quality_gate_min_confidence > 0
+                    ):
+                        try:
+                            from app.fleet.approval_gate import request_human_input
+
+                            request_human_input(
+                                kind="low_confidence_submission",
+                                details={
+                                    "tool": tu_name,
+                                    "confidence": gate.confidence,
+                                    "min_confidence": quality_gate_min_confidence,
+                                    "warnings": gate.warnings,
+                                },
+                                agent_name=agent_name,
+                                thread_id=(
+                                    f"low-confidence-{trace_id or run_id or task_id or 'notask'}"
+                                ),
+                                task_id=int(task_id)
+                                if str(task_id).isdigit()
+                                else None,
+                                blocking=False,
+                                description=(
+                                    f"{agent_name or 'agent'} submitted {tu_name} with "
+                                    f"confidence {gate.confidence:.2f} below the "
+                                    f"configured floor {quality_gate_min_confidence:.2f}"
+                                ),
+                            )
+                        except Exception:
+                            logger.debug(
+                                "request_human_input failed for low-confidence "
+                                "submission (non-fatal)",
+                                exc_info=True,
+                            )
                     new_result.update(raw_result)
                 elif tu_name == "request_clarification":
                     # MASTER_AGENT_v2.md Phase 5.3 — ends the run cleanly
@@ -2608,7 +2999,7 @@ def build_agent_graph(
     if enable_replanning:
         g.add_node(  # type: ignore[call-overload]
             "replan_node",
-            _make_replan_node(haiku, task_description, max_replans),
+            _make_replan_node(haiku, task_description, max_replans, verification_cfg),
         )
 
     # --- Entry point ---
@@ -2785,6 +3176,25 @@ def run_agent_graph(
         logger.debug("ModelRouter: %s → %s (tier=%s)", role_name, model, _rc.tier)
     except Exception:
         pass  # Keep caller-provided model as fallback
+
+    # plan14 Day 1 Task 1 — Dynamic Tool Selection. Narrows `tools` to what can
+    # actually run for this agent right now: a live handler in tool_handlers,
+    # and (for high-risk tools only) declaration in the agent's own
+    # capability_registry contract. Never adds a tool. Applied once here so it
+    # covers both call sites below (Groq bypass and the normal LangGraph
+    # path), same as the ModelRouter override immediately above it. Non-fatal
+    # by construction — falls back to the untouched, caller-provided list.
+    try:
+        from app.config import get_settings as _gs_dts
+
+        if _gs_dts().dynamic_tool_selection_enabled:
+            from app.fleet.tool_discovery import (
+                filter_runtime_tools as _filter_runtime_tools,
+            )
+
+            tools = _filter_runtime_tools(role_name, tools, tool_handlers)
+    except Exception:
+        pass  # Keep caller-provided tools list as fallback
 
     # Wire settings-based defaults when not explicitly provided (Day 0)
     if not model_haiku:

@@ -120,8 +120,16 @@ def _seed_completed_outcome_sync(task_id: str, repo_id: int, marker: str) -> Non
                         # legitimately merges into one row, which would silently
                         # undercount total_count here if every seed used the
                         # same text.
-                        description=f"did the thing {marker}",
-                        summary=f"done {marker}",
+                        #
+                        # plan14 Day 2 Task 4 note: also long/specific enough
+                        # to clear the new memory quality gate's publish floor
+                        # (>=40 chars, >=6 distinct tokens) — this helper is
+                        # testing the real verified=True/importance=0.5
+                        # defaults for a "completed" outcome, not quality-gate
+                        # draft dampening, so it must land at full "publish"
+                        # tier like it always did before that gate existed.
+                        description=f"the task successfully completed the requested work item {marker}",
+                        summary=f"work completed successfully for marker {marker}",
                         outcome="completed",
                         files_changed=[],
                         db=session,

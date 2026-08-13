@@ -146,7 +146,12 @@ def run_security_review(
                 # fleet-flip opt-in as coder.py/qa.py: security_reviewer.md
                 # has a real Quality Gates section.
                 enable_critique=True,
-                enable_replanning=True,
+                # plan14 Day 5 Task 10 — config-driven, not hardcoded; default
+                # (config.py's replanning_enabled_agents) is True for
+                # "security_reviewer", preserving this exact behavior.
+                enable_replanning=settings.replanning_enabled_agents.get(
+                    "security_reviewer", False
+                ),
                 max_turns=20,
             )
         except Exception as exc:

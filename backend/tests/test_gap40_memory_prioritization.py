@@ -81,10 +81,15 @@ async def test_embed_task_outcome_completed_is_verified_with_real_default_import
     task_id = f"td-gap40-verified-{suffix}"
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            # plan14 Day 2 Task 4 note: long/specific enough to clear the
+            # memory quality gate's publish floor (>=40 chars, >=6 distinct
+            # tokens) — this test checks the real, undampened
+            # verified/importance defaults for a "completed" outcome, not
+            # quality-gate draft dampening.
             row = await embed_task_outcome(
                 task_id=task_id,
-                description=f"gap40 verified-default marker {suffix}",
-                summary="s",
+                description=f"gap40 real default importance and verified flag marker {suffix}",
+                summary="a longer summary sentence for the same marker",
                 outcome="completed",
                 files_changed=[],
                 db=session,
@@ -113,10 +118,13 @@ async def test_embed_failure_is_not_verified_and_has_higher_default_importance(
     task_id = f"td-gap40-failure-{suffix}"
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            # plan14 Day 2 Task 4 note: same "clear the publish floor" reason
+            # as the completed-outcome test above — this checks the real,
+            # undampened importance default for a failure record.
             row = await embed_failure(
                 task_id=task_id,
-                error_description=f"boom {suffix}",
-                root_cause="root",
+                error_description=f"boom something broke unexpectedly {suffix}",
+                root_cause="root cause was a null pointer in the handler",
                 db=session,
             )
             assert row is not None

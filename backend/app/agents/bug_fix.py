@@ -16,6 +16,7 @@ from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
     BUG_FIX_TOOLS,
     make_bug_fix_handlers,
+    make_delegate_to_agent_handler,
     make_record_learning_handler,
 )
 from app.config import get_settings
@@ -51,6 +52,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "bash",
         "submit_patch",
         "record_learning",
+        "delegate_to_agent",
     ],
     "input_types": ["task_id", "error_description", "repo_path"],
     "output_types": ["AgentResult"],
@@ -84,6 +86,19 @@ def run_bug_fix(
     repo = repo_path or str(settings.target_repo_path)
     handlers = make_bug_fix_handlers(repo)
     handlers["record_learning"] = make_record_learning_handler("bug_fix")
+    # plan14 Day 4 (#1 Agent-to-Agent Delegation) — bug_fix is one of the
+    # pilot source agents in config.py's delegation_allowed_matrix
+    # (currently: security_review only). ancestry starts as just this
+    # agent's own name — bug_fix is always the first link in a chain it
+    # initiates.
+    handlers["delegate_to_agent"] = make_delegate_to_agent_handler(
+        source_agent="bug_fix",
+        task_id=str(task_id),
+        repo_path=repo,
+        ancestry=("bug_fix",),
+        delegation_depth=0,
+        budget_remaining_usd=settings.delegation_default_budget_usd,
+    )
 
     message = (
         f"Task #{task_id} — Bug Report\n\n"

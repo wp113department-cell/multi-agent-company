@@ -326,6 +326,20 @@ class MetricsCollector:
             return None
         return sum(accuracies) / len(accuracies)
 
+    def avg_cost_usd(self, agent_name: str) -> float | None:
+        """plan14 Day 3 Task 6 (Performance-Aware Runtime Decisions) — mean
+        RunMetrics.cost_estimate_usd across this agent's recent runs
+        (already computed per-run by RunMetrics._recompute_cost() from real
+        token counts, not a fabricated number). None when there's no run
+        history yet, matching p50_latency_ms/avg_tool_accuracy's own
+        no-data-yet convention — FleetManager.select() treats None as
+        neutral (no cost penalty) rather than 0.0 (which would read as
+        "confirmed free")."""
+        runs = self.by_agent(agent_name)
+        if not runs:
+            return None
+        return sum(m.cost_estimate_usd for m in runs) / len(runs)
+
     def tool_latency_stats(
         self, tool_names: str | tuple[str, ...]
     ) -> dict[str, float | int] | None:

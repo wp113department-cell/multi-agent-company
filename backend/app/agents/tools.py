@@ -10849,7 +10849,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             rscr_interp = (
                 "python3"
                 if ext == ".py"
-                else "node" if ext in (".js", ".mjs", ".cjs") else "bash"
+                else "node"
+                if ext in (".js", ".mjs", ".cjs")
+                else "bash"
             )
         try:
             r = subprocess.run(
@@ -12195,7 +12197,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 from_ref = (
                     tag_list[1]
                     if len(tag_list) >= 2
-                    else tag_list[0] if tag_list else ""
+                    else tag_list[0]
+                    if tag_list
+                    else ""
                 )
             ref_range = f"{from_ref}..{to_ref}" if from_ref else to_ref
             log = subprocess.run(
@@ -14196,6 +14200,123 @@ def memory_promote_lesson(inp: dict[str, Any]) -> str:
     except Exception as exc:
         return f"[ERROR] memory_promote_lesson failed: {exc}"
     return f"Lesson {lesson_id!r} (row #{record.id}) promoted to published."
+
+
+# ---------------------------------------------------------------------------
+# delegate_to_agent — plan14 Day 4 (#1 Agent-to-Agent Delegation). Real
+# invocation, real safety guards (depth/cycle/policy/budget/timeout) — see
+# app/agents/delegation.py's own module docstring for the full design.
+# ---------------------------------------------------------------------------
+
+_DELEGATE_TO_AGENT_TOOL: dict[str, Any] = {
+    "name": "delegate_to_agent",
+    "description": (
+        "Delegate a specific, well-scoped sub-task to another agent by "
+        "CAPABILITY (e.g. 'security_review', 'research_spike', "
+        "'code_explanation', 'bug_fix') — never by agent name; the fleet "
+        "resolves the concrete agent. Use only for genuinely separate work "
+        "outside your own role (e.g. asking for a security review of code "
+        "you just wrote), never to avoid doing your own task. Runs "
+        "synchronously to completion or timeout; you get back a structured "
+        "summary. Subject to a real depth limit, cycle detection, an "
+        "explicit allowed-capability policy, and a shared budget — a "
+        "denied or failed delegation returns an explanation, not an error "
+        "you need to guess about."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "target_capability": {
+                "type": "string",
+                "description": "The capability to delegate to, e.g. 'security_review'.",
+            },
+            "objective": {
+                "type": "string",
+                "description": "A specific, well-scoped objective for the delegate.",
+            },
+            "context": {
+                "type": "string",
+                "description": "Relevant context the delegate needs (optional).",
+            },
+        },
+        "required": ["target_capability", "objective"],
+    },
+}
+
+
+def make_delegate_to_agent_handler(
+    *,
+    source_agent: str,
+    task_id: str,
+    repo_path: str,
+    trace_id: str = "",
+    ancestry: tuple[str, ...] = (),
+    delegation_depth: int = 0,
+    budget_remaining_usd: float | None = None,
+) -> Callable[[dict[str, Any]], str]:
+    """Build the sync tool handler for delegate_to_agent, closing over the
+    calling agent's own real delegation context — ancestry/depth/budget —
+    so cycle detection and the depth/budget limits in app.agents.delegation
+    are enforced against the actual chain this specific call is part of,
+    never a freshly-reset one. ancestry defaults to (source_agent,) — the
+    calling agent is always the first link in its own chain."""
+    real_ancestry = ancestry or (source_agent,)
+
+    def _handler(inp: dict[str, Any]) -> str:
+        target_capability = str(inp.get("target_capability", "")).strip()
+        objective = str(inp.get("objective", "")).strip()
+        context = str(inp.get("context", "")).strip()
+        if not target_capability or not objective:
+            return "[ERROR] target_capability and objective are required."
+
+        from app.agents.delegation import DelegationError, DelegationRequest, delegate
+        from app.config import get_settings
+
+        budget = (
+            budget_remaining_usd
+            if budget_remaining_usd is not None
+            else get_settings().delegation_default_budget_usd
+        )
+        request = DelegationRequest(
+            source_agent=source_agent,
+            target_capability=target_capability,
+            objective=objective,
+            context=context,
+            ancestry=real_ancestry,
+            delegation_depth=delegation_depth,
+            budget_remaining_usd=budget,
+            task_id=task_id,
+            repo_path=repo_path,
+            trace_id=trace_id,
+        )
+        try:
+            outcome = delegate(request)
+        except DelegationError as exc:
+            return f"[POLICY DENIED] {exc}"
+
+        if not outcome.success:
+            return (
+                f"[ERROR] Delegation to "
+                f"{outcome.target_agent or target_capability} failed: {outcome.error}"
+            )
+
+        result = outcome.result
+        assert result is not None
+        return (
+            f"Delegation to {outcome.target_agent} completed "
+            f"(status={result.status}, verified={result.verified}, "
+            f"cost=${outcome.cost_usd:.4f}).\nSummary: {result.summary}"
+        )
+
+    return _handler
+
+
+# Appended (not inserted into the list literal above) because BUG_FIX_TOOLS
+# is defined earlier in this file, before _DELEGATE_TO_AGENT_TOOL exists —
+# module-level code runs top-to-bottom once, so mutating the already-built
+# list here takes effect for every importer exactly the same as if it had
+# been in the original literal.
+BUG_FIX_TOOLS.append(_DELEGATE_TO_AGENT_TOOL)
 
 
 _GIT_COMMIT_CHANGE_TOOL: dict[str, Any] = {

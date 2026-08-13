@@ -17,6 +17,7 @@ SUPERSEDED / MERGED_INTO -> ARCHIVED.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -25,6 +26,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -297,15 +300,257 @@ async def _sync_to_memory_embeddings(topic: str, content: str, agent_name: str) 
                 db=session,
             )
     except Exception:
-        import logging
-
-        logging.getLogger(__name__).warning(
+        logger.warning(
             "versioned_memory: sync to memory_embeddings failed for topic=%s",
             topic,
             exc_info=True,
         )
     finally:
         await engine.dispose()
+
+
+async def _sweep_and_merge_similar_published(
+    promoted_row_id: int, vector: list[float], threshold: float, max_merge: int
+) -> list[int]:
+    """plan14 Day 3 Task 5 (Memory Consolidation) — N-way generalization of
+    publish()'s own pairwise merge-at-draft-time check, applied at promote()
+    instead: publish()'s _find_most_similar_published only ever compares a
+    NEW draft against the single most-similar EXISTING published lesson at
+    the moment that draft is first written, so two lessons that later drift
+    into overlapping topics (each published independently, neither one's
+    draft-time check ever saw the other) never get compared again after
+    that. This runs the same cosine-similarity check, but at promote() — the
+    one real moment a lesson actually becomes live/queryable — against every
+    OTHER currently-published lesson, not just the one seen at draft time.
+
+    Every match gets flipped to state='merged_into' (the schema's own
+    documented lifecycle value — see VersionedLesson's docstring: "DRAFT ->
+    PUBLISHED -> SUPERSEDED / MERGED_INTO -> ARCHIVED" — previously declared
+    but never actually written by any code path). Never deletes: a merged
+    row stays in the table, excluded from state='published' queries exactly
+    like a superseded row, until lesson_retention_days eventually archives
+    it via the existing archive_expired() job — same reversible-through-the-
+    existing-lifecycle property every other state transition in this module
+    already has.
+
+    Bounded (LIMIT max_merge) and idempotent by construction: a row already
+    flipped to merged_into/superseded is no longer state='published', so a
+    second sweep (or the proactive consolidate_published_lessons() pass)
+    will never re-select it."""
+    from sqlalchemy import text as sa_text, update
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.models import VersionedLesson
+    from app.memory.store import _ZERO_VECTOR_1536
+
+    if vector == _ZERO_VECTOR_1536:
+        return []
+
+    engine = _new_isolated_db_engine()
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            vec_str = "[" + ",".join(str(v) for v in vector) + "]"
+            sql = sa_text("""
+                SELECT id FROM versioned_lessons
+                WHERE state = 'published' AND embedding IS NOT NULL AND id != :self_id
+                  AND 1 - (embedding <=> CAST(:vec AS vector)) >= :threshold
+                LIMIT :max_merge
+            """)
+            rows = (
+                await session.execute(
+                    sql,
+                    {
+                        "self_id": promoted_row_id,
+                        "vec": vec_str,
+                        "threshold": threshold,
+                        "max_merge": max_merge,
+                    },
+                )
+            ).fetchall()
+            ids = [r.id for r in rows]
+            if not ids:
+                return []
+            await session.execute(
+                update(VersionedLesson)
+                .where(VersionedLesson.id.in_(ids))
+                .values(state="merged_into")
+            )
+            await session.commit()
+            return ids
+    finally:
+        await engine.dispose()
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    import numpy as np
+
+    va, vb = np.array(a), np.array(b)
+    denom = float(np.linalg.norm(va) * np.linalg.norm(vb))
+    if denom == 0.0:
+        return 0.0
+    return float(np.dot(va, vb) / denom)
+
+
+def _cluster_by_similarity(
+    candidates: list[tuple[int, str, str, list[float]]], threshold: float
+) -> list[list[tuple[int, str, str, list[float]]]]:
+    """plan14 Day 3 Task 5 — pure, in-memory greedy single-pass clustering
+    over a bounded candidate set (see consolidate_published_lessons' own
+    LIMIT), same shape as base_graph.py's _group_compressible_lessons but
+    using real cosine similarity over embeddings instead of Jaccard token
+    overlap, since these rows have real embeddings (unlike LessonStore's
+    keyword-only in-process design). Returns every cluster of size >= 2 —
+    the caller decides its own minimum size policy."""
+    remaining = list(candidates)
+    clusters: list[list[tuple[int, str, str, list[float]]]] = []
+    while remaining:
+        seed = remaining[0]
+        group = [seed]
+        rest = []
+        for other in remaining[1:]:
+            if _cosine_similarity(seed[3], other[3]) >= threshold:
+                group.append(other)
+            else:
+                rest.append(other)
+        if len(group) >= 2:
+            clusters.append(group)
+        remaining = rest
+    return clusters
+
+
+async def _merge_via_llm_n(contents: list[str], model: str) -> str:
+    """N-way generalization of _merge_via_llm below, for the proactive
+    consolidation pass (consolidate_published_lessons) where a cluster can
+    have more than 2 members. Runs from a periodic background loop (see
+    app/main.py's _versioned_lesson_consolidation_loop), never inside a live
+    agent's own turn — unlike _merge_via_llm (called synchronously from
+    publish(), itself called from a live agent's record_learning tool call),
+    so this deliberately keeps the same plain client construction (SDK
+    default timeout, explicit max_retries) rather than needing the isolated
+    short-timeout treatment plan14 Day 2 Task 3's LessonStore compression
+    required for its own hot-path LLM call."""
+    import anthropic
+
+    from app.agents.base import get_effective_api_key
+    from app.agents.base_graph import _serialize_content, _text_from_content
+
+    numbered = "\n\n".join(f"Version {i + 1}:\n{c}" for i, c in enumerate(contents))
+    prompt = (
+        f"The following are {len(contents)} versions of related lessons/insights "
+        "learned by AI coding agents, judged similar enough to consolidate. Merge "
+        "them into a single, best-of-all lesson: keep everything useful and "
+        "distinct from each, remove redundancy, and where they conflict prefer "
+        "the more specific or more recently learned guidance.\n\n"
+        f"{numbered}\n\n"
+        "Respond with ONLY the merged lesson text — no preamble, no JSON, no labels."
+    )
+    client = anthropic.Anthropic(
+        api_key=get_effective_api_key(),
+        max_retries=get_settings().llm_call_max_retries,
+    )
+    r = client.messages.create(
+        model=model, max_tokens=768, messages=[{"role": "user", "content": prompt}]
+    )
+    merged = _text_from_content(_serialize_content(r.content)).strip()
+    return merged or max(contents, key=len)  # never publish an empty merge result
+
+
+async def _fetch_published_candidates(
+    max_candidates: int,
+) -> list[tuple[int, str, str, list[float]]]:
+    """Deliberately an ORM select(), not a raw text() query: pgvector's
+    SQLAlchemy Vector type only applies its own result-decoding (wire format
+    -> numpy.ndarray) to ORM-mapped column reads. A raw text() SELECT on the
+    same column comes back as a plain string (e.g. "[0.1,0.2,...]") with no
+    type adapter applied — caught by a real test failure (numpy.linalg.norm
+    raising "could not convert string to float" on the literal '[' character
+    when the unconverted string was iterated as if it were already a list of
+    floats), not assumed correct in advance."""
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.models import VersionedLesson
+
+    engine = _new_isolated_db_engine()
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(VersionedLesson)
+                        .where(
+                            VersionedLesson.state == "published",
+                            VersionedLesson.embedding.is_not(None),
+                        )
+                        .order_by(VersionedLesson.created_at.desc())
+                        .limit(max_candidates)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return [(r.id, r.topic, r.content, list(r.embedding)) for r in rows]
+    finally:
+        await engine.dispose()
+
+
+async def _consolidate_published_lessons(
+    max_candidates: int, min_cluster_size: int, threshold: float, model: str
+) -> list[VersionedLessonRecord]:
+    """plan14 Day 3 Task 5 — proactive consolidation pass: scans up to
+    `max_candidates` most-recent published lessons, clusters them by real
+    cosine similarity, and for each qualifying cluster LLM-merges the
+    members into ONE new DRAFT (never auto-published — a human reviews and
+    calls the existing memory_promote_lesson tool exactly like any other
+    draft; when they do, _sweep_and_merge_similar_published above
+    transparently flips the original cluster members to merged_into, since
+    the new draft's merged content is embedding-similar to all of them by
+    construction — no separate bookkeeping of cluster membership needed).
+
+    Bounded (LIMIT max_candidates keeps the O(n^2) pairwise clustering pass
+    cost-bounded), idempotent (a cluster member already merged_into/
+    superseded is no longer state='published', so it won't be selected by a
+    later run), auditable (each created draft is logged with its source
+    cluster size)."""
+    from app.memory.store import _embed
+
+    candidates = await _fetch_published_candidates(max_candidates)
+    clusters = [
+        c
+        for c in _cluster_by_similarity(candidates, threshold)
+        if len(c) >= min_cluster_size
+    ]
+
+    created: list[VersionedLessonRecord] = []
+    for cluster in clusters:
+        contents = [c[2] for c in cluster]
+        merged_content = await _merge_via_llm_n(contents, model)
+        merged_vector = await _embed(merged_content)
+        # Primary lineage anchor: the most-recently-published member (first
+        # in `candidates`' own DESC-by-created_at order that appears in this
+        # cluster) — mirrors publish()'s own single-supersedes_id mechanism,
+        # unchanged, rather than inventing a multi-parent lineage scheme.
+        primary_id = cluster[0][0]
+        topic = cluster[0][1]
+        row = await _insert(
+            lesson_id=str(uuid.uuid4()),
+            topic=topic,
+            content=merged_content,
+            embedding=merged_vector,
+            version=1,
+            state="draft",
+            supersedes_id=primary_id,
+        )
+        logger.info(
+            "versioned_memory: proactive consolidation proposed draft "
+            "lesson_id=%s (row #%s) merging %d published lessons: %s",
+            row.lesson_id,
+            row.id,
+            len(cluster),
+            [c[0] for c in cluster],
+        )
+        created.append(_to_record(row))
+    return created
 
 
 async def _merge_via_llm(old_content: str, new_content: str, model: str) -> str:
@@ -427,6 +672,42 @@ class VersionedMemoryStore:
                 await _set_state(row.supersedes_id, "superseded")
             await _set_state(row.id, "published")
 
+        # plan14 Day 3 Task 5 (Memory Consolidation) — N-way sweep for any
+        # OTHER currently-published lesson similar enough to merge, run
+        # outside the per-lesson lock above (it spans potentially many other
+        # lesson_ids) and serialized against concurrent sweeps via its own
+        # dedicated lock key, reusing _lesson_lock's own hashtext-keyed
+        # mechanism with a fixed string rather than a topic/lesson_id.
+        settings = get_settings()
+        if settings.memory_consolidation_enabled:
+            try:
+                async with _lesson_lock("__consolidation_sweep__"):
+                    merged_ids = await _sweep_and_merge_similar_published(
+                        row.id,
+                        list(row.embedding) if row.embedding is not None else [],
+                        settings.memory_merge_similarity_threshold,
+                        settings.memory_consolidation_max_merge_per_promote,
+                    )
+                if merged_ids:
+                    logger.info(
+                        "versioned_memory: promoting lesson_id=%s (row #%s) also "
+                        "merged %d other similar published lesson(s): %s",
+                        lesson_id,
+                        row.id,
+                        len(merged_ids),
+                        merged_ids,
+                    )
+            except Exception:
+                # Best-effort — a sweep failure must never break the actual
+                # promotion the caller is waiting on.
+                logger.warning(
+                    "versioned_memory: consolidation sweep failed for "
+                    "lesson_id=%s (row #%s) — promotion itself still succeeded",
+                    lesson_id,
+                    row.id,
+                    exc_info=True,
+                )
+
         # Non-fatal sync to memory_embeddings — deliberately outside the lock,
         # since it doesn't read or write versioned_lessons state and holding
         # the lock across it would only add unnecessary contention.
@@ -435,6 +716,23 @@ class VersionedMemoryStore:
         record = _to_record(row)
         record.state = "published"
         return record
+
+    def consolidate_published_lessons(self) -> list[VersionedLessonRecord]:
+        """plan14 Day 3 Task 5 — proactive consolidation pass. Scans currently
+        published lessons and proposes merged DRAFTs for qualifying clusters
+        (never auto-published — see _consolidate_published_lessons' own
+        docstring). Real production wiring: app/main.py's
+        _versioned_lesson_consolidation_loop, mirroring archive_expired's own
+        existing daily-background-loop pattern exactly."""
+        settings = get_settings()
+        return asyncio.run(
+            _consolidate_published_lessons(
+                max_candidates=settings.memory_consolidation_max_candidates,
+                min_cluster_size=settings.memory_consolidation_min_cluster_size,
+                threshold=settings.memory_merge_similarity_threshold,
+                model=settings.model_router,
+            )
+        )
 
     def rollback(self, lesson_id: str) -> VersionedLessonRecord:
         return asyncio.run(self._rollback_locked(lesson_id))

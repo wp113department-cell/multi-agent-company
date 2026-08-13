@@ -33,6 +33,7 @@ from app.fleet.capability_registry import (
     CapabilityRegistry,
     get_capability_registry,
 )
+from app.fleet.metrics import MetricsCollector, get_metrics_collector
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +63,14 @@ class FleetManager:
         self,
         capability_registry: CapabilityRegistry | None = None,
         agent_registry: AgentRegistry | None = None,
+        metrics_collector: MetricsCollector | None = None,
     ) -> None:
         self._caps = capability_registry or get_capability_registry()
         self._agents = agent_registry or get_agent_registry()
+        # plan14 Day 3 Task 6 — same DI pattern as capability_registry/
+        # agent_registry above, so tests can inject a fresh MetricsCollector
+        # instead of polluting/reading the real process-wide singleton.
+        self._metrics = metrics_collector or get_metrics_collector()
 
     def select(
         self,
@@ -104,6 +110,46 @@ class FleetManager:
         candidates once real run history exists, and even then the tenure
         bonus is capped small enough that a genuinely unhealthy/low-success
         agent can never outscore a healthy one on tenure alone.
+
+        plan14 Day 3 Task 6 (Performance-Aware Runtime Decisions) — two more
+        multiplicative terms, same "neutral (1.0) until real history exists"
+        property as tenure/confidence above:
+        - cost_factor = 1 - min(avg_cost_usd * fleet_select_cost_penalty_weight, fleet_select_max_cost_penalty)
+        - latency_factor = 1 - min((p50_latency_ms / 1000) * fleet_select_latency_penalty_weight, fleet_select_max_latency_penalty)
+        Both read from MetricsCollector (real per-run cost/latency, not
+        fabricated) and default to 1.0 when an agent has no run history yet.
+        Performance is a ranking signal only — it's applied AFTER the
+        capability/availability/side-effect filtering above, never replaces
+        it. Deliberately a CAPPED linear penalty (same shape as
+        tenure_factor's own capped bonus above), not an unbounded curve — a
+        real regression test caught an earlier unbounded design letting an
+        extreme cost/latency outlier flip a large real success_rate gap,
+        which the "Performance MUST NOT override capability/health/
+        security... is a ranking signal, not an authorization signal"
+        instruction argues against. With both penalties at their default
+        0.3 cap simultaneously, the worst case is a 0.7*0.7=0.49x
+        reduction — enough to break a close tie, never enough to flip a
+        multi-times success_rate gap.
+
+        plan14 follow-on #3 (Memory-Aware Agent Selection) — one more term,
+        the durable complement to confidence_factor above (which is
+        in-process/AgentInstance-only and resets on restart):
+        - memory_performance_factor, read from
+          app.fleet.agent_historical_performance's in-process cache (itself
+          refreshed by a scheduled rollup over memory_embeddings.agent_name
+          — deliberately NOT a live join on this hot path, per the audit
+          backing this plan). Neutral (1.0) whenever no rollup row exists
+          yet for this agent, the row has fewer than
+          fleet_select_memory_performance_min_samples real outcomes, or the
+          feature is disabled (agent_historical_performance_enabled=False).
+          Otherwise: ((success_rate - 0.5) * 2) scaled by
+          fleet_select_memory_performance_weight and capped at
+          +/-fleet_select_max_memory_performance_penalty — the same
+          symmetric-around-neutral shape confidence_factor already has
+          (0.5 = no signal either way), and the same capped-linear
+          ranking-only shape cost_factor/latency_factor use, deliberately
+          smaller (default cap 0.2 vs 0.3) since this is an hours-old
+          rollup, not a live per-run metric.
         """
         candidates = self._caps.find_by_capability(required_capability)
         if not candidates:
@@ -114,6 +160,11 @@ class FleetManager:
 
         side_effects = requested_side_effects or []
         scored: list[tuple[float, AgentCapability, AgentInstance]] = []
+
+        from app.config import get_settings
+
+        settings = get_settings()
+        collector = self._metrics
 
         for cap in candidates:
             if prefer_low_risk and cap.risk_level == "high":
@@ -164,12 +215,60 @@ class FleetManager:
             confidence_factor = (
                 instance.avg_confidence if instance.avg_confidence is not None else 1.0
             )
+
+            avg_cost = collector.avg_cost_usd(cap.name)
+            cost_factor = (
+                1.0
+                - min(
+                    avg_cost * settings.fleet_select_cost_penalty_weight,
+                    settings.fleet_select_max_cost_penalty,
+                )
+                if avg_cost is not None
+                else 1.0
+            )
+            p50_ms = collector.p50_latency_ms(cap.name)
+            latency_factor = (
+                1.0
+                - min(
+                    (p50_ms / 1000.0) * settings.fleet_select_latency_penalty_weight,
+                    settings.fleet_select_max_latency_penalty,
+                )
+                if p50_ms is not None
+                else 1.0
+            )
+
+            memory_performance_factor = 1.0
+            if settings.agent_historical_performance_enabled:
+                from app.fleet.agent_historical_performance import (
+                    get_cached_performance,
+                )
+
+                mem_perf = get_cached_performance(cap.name, category="task")
+                if (
+                    mem_perf is not None
+                    and mem_perf.success_rate is not None
+                    and mem_perf.sample_size
+                    >= settings.fleet_select_memory_performance_min_samples
+                ):
+                    deviation = (mem_perf.success_rate - 0.5) * 2.0
+                    capped_deviation = max(
+                        -settings.fleet_select_max_memory_performance_penalty,
+                        min(
+                            settings.fleet_select_max_memory_performance_penalty,
+                            deviation * settings.fleet_select_memory_performance_weight,
+                        ),
+                    )
+                    memory_performance_factor = 1.0 + capped_deviation
+
             score = (
                 health_weight
                 * cap.success_rate
                 * (1.0 / (1.0 + instance.error_count))
                 * tenure_factor
                 * confidence_factor
+                * cost_factor
+                * latency_factor
+                * memory_performance_factor
             )
             scored.append((score, cap, instance))
 

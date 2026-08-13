@@ -17,6 +17,8 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.agents.base_graph import (
     AgentRunState,
     VerificationConfig,
@@ -24,6 +26,7 @@ from app.agents.base_graph import (
     _should_replan,
     run_agent_graph,
 )
+from app.config import get_settings
 
 
 def _base_state(**overrides: Any) -> AgentRunState:
@@ -117,6 +120,145 @@ def test_should_replan_false_once_budget_exhausted() -> None:
 
 
 # ---------------------------------------------------------------------------
+# plan14 Day 5 Task 10 — "new information" trigger: low planner confidence
+# ---------------------------------------------------------------------------
+
+
+def test_should_replan_true_on_low_planner_confidence() -> None:
+    should, reason = _should_replan(_base_state(confidence=0.2), max_replans=1)
+    assert should is True
+    assert "confidence" in reason.lower()
+
+
+def test_should_replan_false_on_confidence_at_threshold() -> None:
+    """confidence exactly AT the threshold is not "below" it — boundary is
+    exclusive, matching every other >= / < comparison in this function."""
+    should, _reason = _should_replan(
+        _base_state(confidence=get_settings().replanning_confidence_threshold),
+        max_replans=1,
+    )
+    assert should is False
+
+
+def test_should_replan_false_on_high_confidence() -> None:
+    should, _reason = _should_replan(_base_state(confidence=0.9), max_replans=1)
+    assert should is False
+
+
+def test_should_replan_confidence_trigger_is_config_driven(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "replanning_confidence_threshold", 0.9)
+    should, reason = _should_replan(_base_state(confidence=0.8), max_replans=1)
+    assert should is True
+    assert "0.90" in reason
+
+
+# ---------------------------------------------------------------------------
+# plan14 Day 5 Task 10 — "blocked/dependency" trigger: N+ turns in, a
+# verification requirement the agent's own contract cares about is still
+# unmet.
+# ---------------------------------------------------------------------------
+
+_BLOCKING_VERIFICATION_CFG = VerificationConfig(
+    initial={"checks_run": False},
+    set_by={"bash": "checks_run"},
+    reset_by=(),
+    reset_keys=(),
+    enforce_in_result={"checks_run": "checks_run"},
+)
+
+
+def test_should_replan_true_when_blocked_past_turn_threshold() -> None:
+    threshold = get_settings().replanning_blocked_turn_threshold
+    should, reason = _should_replan(
+        _base_state(turns=threshold, verification={"checks_run": False}),
+        max_replans=1,
+        verification_cfg=_BLOCKING_VERIFICATION_CFG,
+    )
+    assert should is True
+    assert "checks_run" in reason
+
+
+def test_should_replan_false_when_blocked_before_turn_threshold() -> None:
+    threshold = get_settings().replanning_blocked_turn_threshold
+    should, _reason = _should_replan(
+        _base_state(turns=threshold - 1, verification={"checks_run": False}),
+        max_replans=1,
+        verification_cfg=_BLOCKING_VERIFICATION_CFG,
+    )
+    assert should is False
+
+
+def test_should_replan_false_when_verification_requirement_is_satisfied() -> None:
+    threshold = get_settings().replanning_blocked_turn_threshold
+    should, _reason = _should_replan(
+        _base_state(turns=threshold + 5, verification={"checks_run": True}),
+        max_replans=1,
+        verification_cfg=_BLOCKING_VERIFICATION_CFG,
+    )
+    assert should is False
+
+
+def test_should_replan_false_when_no_verification_cfg_supplied() -> None:
+    """verification_cfg defaults to None (e.g. call sites that pre-date Day
+    5) — the blocked/dependency trigger must be a complete no-op, not raise."""
+    threshold = get_settings().replanning_blocked_turn_threshold
+    should, _reason = _should_replan(
+        _base_state(turns=threshold + 5, verification={"checks_run": False}),
+        max_replans=1,
+        verification_cfg=None,
+    )
+    assert should is False
+
+
+def test_should_replan_false_when_agent_declares_no_verification_requirements() -> None:
+    """Most agents' VerificationConfig.enforce_in_result is an empty dict —
+    the blocked/dependency trigger must stay inert for them, same
+    zero-blast-radius property the original failure trigger already had."""
+    empty_cfg = VerificationConfig(
+        initial={}, set_by={}, reset_by=(), reset_keys=(), enforce_in_result={}
+    )
+    threshold = get_settings().replanning_blocked_turn_threshold
+    should, _reason = _should_replan(
+        _base_state(turns=threshold + 5, verification={}),
+        max_replans=1,
+        verification_cfg=empty_cfg,
+    )
+    assert should is False
+
+
+def test_should_replan_blocked_trigger_is_config_driven(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "replanning_blocked_turn_threshold", 1)
+    should, reason = _should_replan(
+        _base_state(turns=1, verification={"checks_run": False}),
+        max_replans=1,
+        verification_cfg=_BLOCKING_VERIFICATION_CFG,
+    )
+    assert should is True
+    assert "checks_run" in reason
+
+
+def test_should_replan_thresholds_are_config_driven_for_failure_trigger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lowering the reflection threshold to 1 should make a single
+    dissatisfaction fire replanning, unlike the hardcoded-2 default tested
+    above (test_should_replan_false_on_single_reflection_dissatisfaction)."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "replanning_reflection_failure_threshold", 1)
+    should, reason = _should_replan(
+        _base_state(reflection_unsatisfied_count=1), max_replans=1
+    )
+    assert should is True
+    assert "unsatisfactory" in reason
+
+
+# ---------------------------------------------------------------------------
 # _make_replan_node — direct unit tests
 # ---------------------------------------------------------------------------
 
@@ -160,6 +302,55 @@ def test_replan_node_revises_plan_and_injects_message() -> None:
     last_message = result["messages"][-1]
     assert "[Replan]" in str(last_message["content"])
     assert "unsatisfactory" in str(last_message["content"])
+
+
+def test_replan_node_threads_verification_cfg_into_blocked_trigger() -> None:
+    """_make_replan_node's new verification_cfg parameter must actually
+    reach _should_replan — proven by triggering the blocked/dependency
+    trigger (which is otherwise a no-op with verification_cfg=None) through
+    the node itself, not by calling _should_replan directly."""
+    node = _make_replan_node(
+        "haiku-model",
+        "some task",
+        max_replans=1,
+        verification_cfg=_BLOCKING_VERIFICATION_CFG,
+    )
+    threshold = get_settings().replanning_blocked_turn_threshold
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = [
+        SimpleNamespace(
+            content=[
+                SimpleNamespace(
+                    type="text", text=json.dumps({"given": [], "to_look_up": []})
+                )
+            ],
+            usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+        ),
+        SimpleNamespace(
+            content=[
+                SimpleNamespace(
+                    type="text",
+                    text=json.dumps({"steps": ["revised step"], "confidence": 0.7}),
+                )
+            ],
+            usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+        ),
+    ]
+    with patch("app.agents.base_graph._make_client", return_value=mock_client):
+        result = node(_base_state(turns=threshold, verification={"checks_run": False}))
+
+    assert result["replan_count"] == 1
+    last_message = result["messages"][-1]
+    assert "checks_run" in str(last_message["content"])
+
+
+def test_replan_node_no_op_on_blocked_trigger_without_verification_cfg() -> None:
+    node = _make_replan_node("haiku-model", "some task", max_replans=1)
+    threshold = get_settings().replanning_blocked_turn_threshold
+    with patch("app.agents.base_graph._make_client") as mock_make_client:
+        result = node(_base_state(turns=threshold, verification={"checks_run": False}))
+    mock_make_client.assert_not_called()
+    assert result == {}
 
 
 # ---------------------------------------------------------------------------
@@ -259,9 +450,10 @@ def test_graph_replan_triggers_after_repeated_reflection_dissatisfaction() -> No
     is finally allowed to submit."""
     llm = _ReplanGraphLLM(satisfied_after=3)
 
-    with patch("app.agents.base_graph.load_role", return_value="# Test Agent\n"), patch(
-        "anthropic.Anthropic"
-    ) as mock_anthropic_cls:
+    with (
+        patch("app.agents.base_graph.load_role", return_value="# Test Agent\n"),
+        patch("anthropic.Anthropic") as mock_anthropic_cls,
+    ):
         mock_client = MagicMock()
         mock_client.messages.create.side_effect = llm
         mock_anthropic_cls.return_value = mock_client
@@ -310,9 +502,10 @@ def test_graph_replanning_bounded_by_max_turns_even_with_generous_max_replans() 
     max_turns, not max_replans, is what actually stops the graph."""
     llm = _ReplanGraphLLM(satisfied_after=9999)
 
-    with patch("app.agents.base_graph.load_role", return_value="# Test Agent\n"), patch(
-        "anthropic.Anthropic"
-    ) as mock_anthropic_cls:
+    with (
+        patch("app.agents.base_graph.load_role", return_value="# Test Agent\n"),
+        patch("anthropic.Anthropic") as mock_anthropic_cls,
+    ):
         mock_client = MagicMock()
         mock_client.messages.create.side_effect = llm
         mock_anthropic_cls.return_value = mock_client
@@ -353,9 +546,10 @@ def test_graph_replanning_bounded_by_max_turns_even_with_generous_max_replans() 
 def test_graph_replanning_disabled_by_default_never_calls_replan_logic() -> None:
     llm = _ReplanGraphLLM(satisfied_after=3)
 
-    with patch("app.agents.base_graph.load_role", return_value="# Test Agent\n"), patch(
-        "anthropic.Anthropic"
-    ) as mock_anthropic_cls:
+    with (
+        patch("app.agents.base_graph.load_role", return_value="# Test Agent\n"),
+        patch("anthropic.Anthropic") as mock_anthropic_cls,
+    ):
         mock_client = MagicMock()
         mock_client.messages.create.side_effect = llm
         mock_anthropic_cls.return_value = mock_client

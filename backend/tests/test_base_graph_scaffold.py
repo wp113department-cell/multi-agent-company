@@ -22,6 +22,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 from app.agents.base_graph import (
     AgentRunState,
@@ -36,6 +37,7 @@ from app.agents.base_graph import (
     build_agent_graph,
     get_lesson_store,
 )
+from app.config import reset_settings_cache
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -221,11 +223,23 @@ class TestLessonStore:
         assert "Relevant past insights" in result
         assert "testing" in result
 
-    def test_capacity_evicts_oldest(self) -> None:
-        store = LessonStore(capacity=3)
-        for i in range(5):
-            store.add(Lesson("coder", f"lesson {i}", f"pattern-{i}", "general"))
-        assert store.total == 3
+    def test_capacity_evicts_oldest(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """plan14 Day 2 Task 3 note: these lessons share enough vocabulary
+        ("lesson", "general") to cluster under the newer LLM-compression
+        grouping (Jaccard >= lesson_compression_jaccard_threshold) —
+        compression is disabled here so this stays a no-real-LLM-call test
+        of the plain FIFO fallback, matching this file's own module
+        docstring contract. Compression itself is covered by
+        tests/test_lesson_compression.py."""
+        monkeypatch.setenv("LESSON_COMPRESSION_ENABLED", "false")
+        reset_settings_cache()
+        try:
+            store = LessonStore(capacity=3)
+            for i in range(5):
+                store.add(Lesson("coder", f"lesson {i}", f"pattern-{i}", "general"))
+            assert store.total == 3
+        finally:
+            reset_settings_cache()
 
     def test_retrieve_scores_by_keyword_overlap(self) -> None:
         store = LessonStore()
@@ -570,9 +584,9 @@ class TestRunAgentGraphSignature:
         }
         actual_params = set(sig.parameters.keys())
         for param in new_params:
-            assert (
-                param in actual_params
-            ), f"New param {param!r} missing from build_agent_graph"
+            assert param in actual_params, (
+                f"New param {param!r} missing from build_agent_graph"
+            )
 
     def test_run_agent_graph_has_enable_lesson_param(
         self, mock_key: Any, mock_load: Any

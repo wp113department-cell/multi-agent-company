@@ -85,6 +85,7 @@ async def record_agent_run_outcome(
             db=db,
             epic_id=epic_id,
             repo_id=repo_id,
+            agent_name=agent_name,
         )
     except Exception:
         logger.warning(
@@ -104,6 +105,7 @@ async def record_agent_run_outcome(
                 db=db,
                 epic_id=epic_id,
                 repo_id=repo_id,
+                agent_name=agent_name,
             )
         except Exception:
             logger.warning(

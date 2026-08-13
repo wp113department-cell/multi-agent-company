@@ -159,6 +159,13 @@ def run_spike_agent(
         enable_reflection=True,
         enable_lesson=True,
         max_turns=20,
+        # plan14 Day 1 Task 2 pilot agent — config-driven, staged rollout of
+        # the confidence-gated control flow (see config.py's
+        # quality_gate_min_confidence_by_agent docstring). Absent from the
+        # dict falls back to 0.0, today's unchanged inert default.
+        quality_gate_min_confidence=settings.quality_gate_min_confidence_by_agent.get(
+            AGENT_CONTRACT["name"], 0.0
+        ),
     )
 
     # MASTER_AGENT_v2.md Phase 3.4 gap-closure (2026-07-28) - final_state["result"]

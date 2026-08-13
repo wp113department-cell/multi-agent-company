@@ -144,6 +144,20 @@ class TestMetricsCollector:
         assert avg is not None
         assert 0.5 < avg < 1.0
 
+    def test_avg_cost_usd_computable(self) -> None:
+        """plan14 Day 3 Task 6 (Performance-Aware Runtime Decisions)."""
+        c = MetricsCollector()
+        m1 = c.start_run("bug_fix")
+        m1.cost_estimate_usd = 0.10
+        m2 = c.start_run("bug_fix")
+        m2.cost_estimate_usd = 0.20
+        avg = c.avg_cost_usd("bug_fix")
+        assert avg == pytest.approx(0.15)
+
+    def test_avg_cost_usd_none_with_no_run_history(self) -> None:
+        c = MetricsCollector()
+        assert c.avg_cost_usd("never_ran") is None
+
     def test_custom_trace_id_is_preserved(self) -> None:
         c = MetricsCollector()
         m = c.start_run("qa", trace_id="my-custom-trace")
@@ -264,9 +278,9 @@ def test_seven_measurable_objectives_computable() -> None:
 
     # 4. verification_coverage (verification_pct on any run)
     runs = c.by_agent("bug_fix")
-    assert any(
-        r.verification_pct > 0 for r in runs
-    ), "verification_coverage not measurable"
+    assert any(r.verification_pct > 0 for r in runs), (
+        "verification_coverage not measurable"
+    )
 
     # 5. tokens consumed (proxy for cost)
     total_tokens = sum(r.tokens_in + r.tokens_out for r in runs)

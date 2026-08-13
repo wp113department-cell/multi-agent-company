@@ -116,28 +116,48 @@ def test_dedup_disabled_accumulates_duplicates(
         reset_settings_cache()
 
 
-def test_capacity_still_enforced_with_dedup_enabled() -> None:
+def test_capacity_still_enforced_with_dedup_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Dedup must not disable the pre-existing FIFO eviction guarantee —
-    distinct lessons beyond capacity still evict the oldest."""
-    store = LessonStore(capacity=3)
-    for i in range(5):
-        store.add(
-            Lesson(
-                agent_name="coder",
-                lesson=f"distinct unrelated lesson number {i} about topic {i}",
-                pattern=f"pattern_{i}",
-                category="best_practice",
+    distinct lessons beyond capacity still evict the oldest.
+
+    plan14 Day 2 Task 3 note: this test's synthetic lessons share enough
+    template vocabulary ("distinct unrelated lesson number N about topic N")
+    to cluster under the new LLM-compression grouping (Jaccard ~0.6+, well
+    above lesson_compression_jaccard_threshold's 0.3) — compression is
+    disabled here so this test keeps verifying the plain FIFO fallback path
+    specifically, without making a real (unmocked) LLM call. Compression
+    itself is covered by tests/test_lesson_compression.py."""
+    monkeypatch.setenv("LESSON_COMPRESSION_ENABLED", "false")
+    reset_settings_cache()
+    try:
+        store = LessonStore(capacity=3)
+        for i in range(5):
+            store.add(
+                Lesson(
+                    agent_name="coder",
+                    lesson=f"distinct unrelated lesson number {i} about topic {i}",
+                    pattern=f"pattern_{i}",
+                    category="best_practice",
+                )
             )
-        )
-    assert store.total == 3
+        assert store.total == 3
+    finally:
+        reset_settings_cache()
 
 
 def test_lesson_store_capacity_is_config_driven(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """plan14 Day 2 Task 3 note: compression disabled for the same reason as
+    test_capacity_still_enforced_with_dedup_enabled above — this test
+    verifies capacity is config-driven via plain FIFO eviction, not
+    compression's own grouping behavior."""
     import app.agents.base_graph as base_graph_module
 
     monkeypatch.setenv("LESSON_STORE_CAPACITY", "2")
+    monkeypatch.setenv("LESSON_COMPRESSION_ENABLED", "false")
     reset_settings_cache()
     original_store = base_graph_module._lesson_store
     base_graph_module._lesson_store = None

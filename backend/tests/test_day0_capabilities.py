@@ -328,8 +328,10 @@ class TestMemoryHookNodeFires:
         """AUDIT_Q_BATCH03 §120 'Context Window Management' — nothing
         previously capped the combined memory_context block before it's
         injected into the system prompt. A DB block far over the configured
-        memory_injection_token_budget must be truncated, not passed through
-        whole."""
+        memory_injection_token_budget must be bounded, not passed through
+        whole. plan14 follow-on #7: bounding is now priority-preserving
+        compression, not a hard character slice — see
+        _compress_memory_context_to_budget's own docstring."""
         from app.agents.base_graph import (
             Lesson,
             _make_memory_hook_node,
@@ -370,9 +372,10 @@ class TestMemoryHookNodeFires:
         out = hook(state)
         assert "memory_context" in out
         assert len(out["memory_context"]) <= 10 * 4 + len(
-            "\n\n[...memory context truncated to fit token budget...]"
+            "\n\n[...memory context compressed to fit token budget — "
+            "lowest-priority section(s)/entries trimmed first...]"
         )
-        assert "truncated to fit token budget" in out["memory_context"]
+        assert "compressed to fit token budget" in out["memory_context"]
 
     def test_cap_memory_context_tokens_disabled_when_budget_zero(
         self, monkeypatch: pytest.MonkeyPatch

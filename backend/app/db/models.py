@@ -680,6 +680,52 @@ class MemoryEmbedding(Base):
     last_accessed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # plan14 follow-on #3 (Memory-Aware Agent Selection) — the agent that
+    # produced this row, as a real column instead of the pre-existing
+    # per-category convention of prepending "Agent: {name}" into description/
+    # summary free text (embed_architecture_note/embed_procedure) or encoding
+    # it into task_id ("fleet-{agent_name}", embed_learning_signal). NULL for
+    # every pre-migration row where the writer had no single-agent concept
+    # (epic-level embed_task_outcome calls in manager.py, embed_preference,
+    # embed_bug) — never backfilled with a guess, only with a real recovered
+    # value (see migrations/versions/048_memory_agent_name_and_historical_performance.py).
+    agent_name: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, index=True
+    )
+
+
+class AgentHistoricalPerformance(Base):
+    """plan14 follow-on #3 (Memory-Aware Agent Selection) — a scheduled
+    rollup (app.fleet.agent_historical_performance), NOT a live join, over
+    memory_embeddings.agent_name: per (agent_name, category), how often that
+    agent's task-category work actually completed vs. was blocked, plus the
+    memory-quality signals already tracked per row (importance, verified).
+
+    Deliberately does not include an "avg_confidence" column: no durable,
+    per-run confidence value is persisted anywhere in this schema today
+    (AgentInstance.avg_confidence, read by FleetManager.select() as
+    confidence_factor, is in-process-only and resets on restart) — adding
+    one here would be a fabricated number, not a real aggregation. importance
+    (an existing, already-used memory-quality proxy — see store.py's
+    _default_importance) and verified_rate are the real substitutes.
+    success_rate is only meaningful, and only ever computed, for
+    category='task' (the only category whose `outcome` values are a genuine
+    completed/blocked binary) — every other category's row has
+    success_rate=NULL, not a fabricated 1.0/0.0.
+    """
+
+    __tablename__ = "agent_historical_performance"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    agent_name: Mapped[str] = mapped_column(String(100), index=True)
+    category: Mapped[str] = mapped_column(String(50), index=True)
+    sample_size: Mapped[int] = mapped_column(Integer, default=0)
+    success_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_importance: Mapped[float | None] = mapped_column(Float, nullable=True)
+    verified_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class EnhancementRequest(Base):

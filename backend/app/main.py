@@ -236,6 +236,64 @@ async def _versioned_lesson_archive_loop() -> None:
             logger.warning("Versioned lesson archive loop failed: %s", exc)
 
 
+async def _versioned_lesson_consolidation_loop() -> None:
+    """plan14 Day 3 Task 5 (Memory Consolidation) — proactive background
+    pass over published versioned_lessons, mirroring
+    _versioned_lesson_archive_loop's own pattern exactly (interval-driven,
+    non-fatal per-cycle try/except). Set MEMORY_CONSOLIDATION_ENABLED=false
+    to disable (consolidate_published_lessons itself still runs if called
+    directly — this loop is the real production caller, not the only
+    possible one, same relationship archive_expired has to its own loop)."""
+    from app.config import get_settings
+
+    while True:
+        await asyncio.sleep(get_settings().memory_consolidation_interval_hours * 3600)
+        try:
+            if not get_settings().memory_consolidation_enabled:
+                continue
+            from app.fleet.versioned_memory import get_versioned_memory_store
+
+            created = await asyncio.to_thread(
+                get_versioned_memory_store().consolidate_published_lessons
+            )
+            if created:
+                logger.info(
+                    "Versioned lesson consolidation: %d draft(s) proposed",
+                    len(created),
+                )
+        except Exception as exc:
+            logger.warning("Versioned lesson consolidation loop failed: %s", exc)
+
+
+async def _agent_historical_performance_rollup_loop() -> None:
+    """plan14 follow-on #3 (Memory-Aware Agent Selection) — periodic
+    recomputation of agent_historical_performance from memory_embeddings.
+    agent_name, same interval-driven/non-fatal-per-cycle shape as
+    _versioned_lesson_consolidation_loop immediately above. Deliberately a
+    scheduled rollup, not a live join on FleetManager.select()'s hot path —
+    see app.fleet.agent_historical_performance's own module docstring. Set
+    AGENT_HISTORICAL_PERFORMANCE_ENABLED=false to disable (this is also the
+    master switch FleetManager.select() checks before reading the cache
+    this loop populates)."""
+    from app.config import get_settings
+
+    while True:
+        await asyncio.sleep(
+            get_settings().agent_historical_performance_rollup_interval_hours * 3600
+        )
+        try:
+            if not get_settings().agent_historical_performance_enabled:
+                continue
+            from app.db.session import get_session_factory
+            from app.fleet.agent_historical_performance import compute_and_upsert_all
+
+            factory = get_session_factory()
+            async with factory() as db:
+                await compute_and_upsert_all(db)
+        except Exception as exc:
+            logger.warning("Agent historical performance rollup loop failed: %s", exc)
+
+
 async def _failed_rq_job_sweep_loop() -> None:
     """Blocker 8 (audit_v1.md 4.7 #2): "A failed job goes into RQ's own
     registry with no automatic retry and no application code ever reads
@@ -1199,6 +1257,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if settings.leader_election_enabled
         else None
     )
+    # plan14 follow-on #3 (Memory-Aware Agent Selection) — one-time,
+    # non-leader-gated read (every process can safely do this concurrently,
+    # unlike the write-side rollup below) so a freshly restarted process's
+    # in-process cache reflects the durable DB table immediately, instead of
+    # running neutral for up to a full agent_historical_performance_rollup_
+    # interval_hours before its first scheduled rollup.
+    if settings.agent_historical_performance_enabled:
+        try:
+            from app.fleet.agent_historical_performance import load_cache_from_db
+
+            async with get_session_factory()() as _ahp_db:
+                await load_cache_from_db(_ahp_db)
+        except Exception as exc:
+            logger.warning(
+                "Agent historical performance startup cache load failed: %s", exc
+            )
+
     reindex_task = asyncio.create_task(
         _run_as_leader(
             "loop:weekly_reindex", _weekly_reindex_loop, _leader_election_engine
@@ -1216,6 +1291,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         _run_as_leader(
             "loop:versioned_lesson_archive",
             _versioned_lesson_archive_loop,
+            _leader_election_engine,
+        )
+    )
+    lesson_consolidation_task = asyncio.create_task(
+        _run_as_leader(
+            "loop:versioned_lesson_consolidation",
+            _versioned_lesson_consolidation_loop,
+            _leader_election_engine,
+        )
+    )
+    agent_historical_performance_rollup_task = asyncio.create_task(
+        _run_as_leader(
+            "loop:agent_historical_performance_rollup",
+            _agent_historical_performance_rollup_loop,
             _leader_election_engine,
         )
     )
@@ -1285,6 +1374,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     retention_task.cancel()
     fleet_scan_task.cancel()
     lesson_archive_task.cancel()
+    lesson_consolidation_task.cancel()
     benchmark_baseline_task.cancel()
     orphan_recovery_task.cancel()
     doc_agent_auto_trigger_task.cancel()
@@ -1296,11 +1386,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     enhancement_quality_monitor_task.cancel()
     bg_process_liveness_task.cancel()
     lesson_store_refresh_task.cancel()
+    agent_historical_performance_rollup_task.cancel()
     for task in (
         reindex_task,
         retention_task,
         fleet_scan_task,
         lesson_archive_task,
+        lesson_consolidation_task,
         benchmark_baseline_task,
         orphan_recovery_task,
         doc_agent_auto_trigger_task,
@@ -1312,6 +1404,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         enhancement_quality_monitor_task,
         bg_process_liveness_task,
         lesson_store_refresh_task,
+        agent_historical_performance_rollup_task,
     ):
         try:
             await task

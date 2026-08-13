@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
+from typing import Any
 
 from app.fleet.capability_registry import get_capability_registry
 from app.fleet.tool_manifest import TOOL_MANIFEST, is_high_risk
@@ -114,6 +115,49 @@ class ToolDiscovery:
             return overlay_spec.permission_level == "high"
         return is_high_risk(tool_name)
 
+    def filter_runtime_tools(
+        self,
+        agent_name: str,
+        static_tools: list[dict[str, Any]],
+        tool_handlers: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Narrow `static_tools` to what can actually run for `agent_name` right now.
+
+        Two independent checks; a tool is kept only if both pass:
+
+        1. Availability — `tool["name"]` is a real key in `tool_handlers`. This
+           is the zero-false-negative signal: every real caller of
+           run_agent_graph() builds `tool_handlers` to include every tool it
+           passes, including each agent's own locally-defined `submit_*`
+           closure (those are never in TOOL_MANIFEST or top-level
+           app.agents.tools callables, so check_availability() would wrongly
+           drop them — do not use it here).
+        2. Contract drift — if the tool is high-risk (tool_manifest.is_high_risk),
+           it must also appear in this agent's own registered
+           `AgentCapability.tools`. Non-high-risk tools, and agents with no
+           registered capability entry (unregistered agent_name), are not
+           narrowed by this check — it only catches a high-risk tool that
+           slipped into an agent's static list without being declared in its
+           capability contract.
+
+        Never adds a tool absent from `static_tools`. Preserves input order.
+        """
+        cap = get_capability_registry().get(agent_name)
+        declared = set(cap.tools) if cap is not None else None
+        kept: list[dict[str, Any]] = []
+        for tool in static_tools:
+            name = tool.get("name", "")
+            if name not in tool_handlers:
+                continue
+            if (
+                self.is_high_risk(name)
+                and declared is not None
+                and name not in declared
+            ):
+                continue
+            kept.append(tool)
+        return kept
+
 
 _discovery_singleton: ToolDiscovery | None = None
 _singleton_lock = threading.Lock()
@@ -141,3 +185,13 @@ def check_availability(tool_name: str) -> bool:
 
 def register_tool(spec: ToolSpec) -> None:
     get_tool_discovery().register_tool(spec)
+
+
+def filter_runtime_tools(
+    agent_name: str,
+    static_tools: list[dict[str, Any]],
+    tool_handlers: dict[str, Any],
+) -> list[dict[str, Any]]:
+    return get_tool_discovery().filter_runtime_tools(
+        agent_name, static_tools, tool_handlers
+    )

@@ -1,0 +1,451 @@
+==============================================================================
+GRIDIRON PROJECT — PARTIAL & NO IMPLEMENTATION PLAN (one by one)
+Total items to implement: 75  (NO: 14  PARTIAL: 61)
+Work these top to bottom. Each has: the question, its current status,
+which section it's from, and a concrete implementation plan.
+==============================================================================
+
+PRIORITY ORDER SUGGESTION:
+1. Do all 'NO' items first (nothing built yet = biggest real gaps).
+2. Then do PARTIAL items that are pure config/rollout flips (cheap,
+   already-built mechanisms just need a default flipped on) — these
+   are marked [QUICK WIN] below.
+3. Then do the remaining PARTIAL items that need real new code.
+4. Leave the ones marked [DEPENDENT] until their prerequisite item
+   above is done — building them first would be wasted work.
+
+==============================================================================
+
+1. QUESTION (#3, §1 Repository Execution): Always uses 'the repository's terminal' (real PTY/interactive terminal)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Build a real PTY-based interactive terminal session (not just a request/response bash tool). Backend: use Python's `pty`/`ptyprocess` to spawn a real shell inside the sandbox container, keep a `PtySession` object per session in `process_manager.py`, and stream raw bytes over a new WebSocket or chunked-SSE endpoint. Frontend: add an `xterm.js` component in the chat/task UI that connects to that stream and sends keystrokes back. Reuse the existing Docker sandbox boundary (`policy/sandbox.py`) so the PTY itself still runs inside the same locked-down container, not on the host.
+
+2. QUESTION (#5, §1 Repository Execution): Multiple terminals simultaneously (true parallel interactive shells)
+   STATUS: PARTIAL  [DEPENDENT - see related item]
+   IMPLEMENTATION PLAN: Depends on item #3 (PTY session) being built first. Once `PtySession` exists, extend `process_manager.py`'s registry to track multiple concurrent PTY sessions per task/user (keyed by session_id), each independently spawn/kill/list-able, and add a simple tab UI on the frontend so a user can open/close multiple terminal tabs against the same worktree.
+
+3. QUESTION (#6, §1 Repository Execution): Windows terminal support
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Set up a real Windows CI runner (GitHub Actions `windows-latest` job) to actually execute the backend test suite on Windows — right now Windows support is only reasoned about, never tested. Audit the ~11 already-'cross-platform-aware' call sites (`tools.py:92-107` area) under that real CI job, fix whatever fails, and add regression tests that only run on the Windows job.
+
+4. QUESTION (#12, §17 Terminal Intelligence): Monitor streaming output (live, mid-command)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Convert the sandboxed command execution primitive (`policy/sandbox.py::run_sandboxed()`) from a buffer-then-return `subprocess.run(capture_output=True)` model to a streaming `docker run` + incremental-read model (read stdout/stderr in a loop as it's produced, not after exit). Push each chunk out immediately as a new `terminal_output` SSE event instead of waiting for the whole command to finish. This is a security-relevant code path — change it behind a feature flag first and keep the old buffered path as fallback until it's proven stable.
+
+5. QUESTION (#38, §59 Multi-File Operations): Preserve architecture consistency across multi-file edits
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Extend the circular-import check that `rename_symbol` already runs after itself to the other multi-file write tools (`sync_files`, `apply_patch`, batch-edit tool once #257 is built). After any tool that touches more than one Python file in one call, run `detect_circular_imports()` (already exists, reused from `architecture_reviewer`) and append an `[ARCHITECTURE CHECK]` warning block to the result, exactly like `rename_symbol` already does.
+
+6. QUESTION (#43, §2 Complete Orchestration): Multiple agents work simultaneously (fan-out)
+   STATUS: PARTIAL  [QUICK WIN]
+   IMPLEMENTATION PLAN: Fan-out (`enable_subtask_fanout`) is already built and tested — it's just off by default. Run it in production for a few weeks in a low-risk repo/task class first, watch cost/latency and the git-commit-lock contention on real multi-subtask epics, then flip the default in `manager.py` from `False` to `True` and retire the pinning test that asserts sequential-only behavior.
+
+7. QUESTION (#44, §2 Complete Orchestration): Agents create subtasks dynamically
+   STATUS: NO
+   IMPLEMENTATION PLAN: Design and build a `propose_subtask` tool: (1) new tool schema an in-progress worker agent can call with a subtask description; (2) a validated write path from inside that agent's own tool-call loop into the `Subtask` DB table (with the same conflict/dependency checks `decomposer_node` already applies); (3) make `run_manager()`'s wave-dispatch loop re-poll for newly-added subtasks mid-epic instead of only reading the subtask list once at start.
+
+8. QUESTION (#45, §2 Complete Orchestration): Agents request help from other agents
+   STATUS: NO
+   IMPLEMENTATION PLAN: Design and build a `delegate_to` tool: (1) an explicit allow-list per agent role of which other agents it may invoke (a security boundary, not open-ended); (2) a delegation-depth cap to prevent infinite agent-calling-agent loops; (3) cost/budget propagation so a delegated sub-run counts against the same epic's token/cost budget instead of being free/invisible.
+
+9. QUESTION (#47, §2 Complete Orchestration): Orchestration changes dynamically mid-execution (replanning)
+   STATUS: PARTIAL  [QUICK WIN]
+   IMPLEMENTATION PLAN: `enable_replanning` already exists and is tested — same rollout plan as #43 (fan-out): pick a couple of pilot agents, monitor the extra LLM calls' cost/latency impact for a period, then flip the fleet-wide default in `build_agent_graph()`/`run_agent_graph()` from `False` to `True`, and retire the test that pins default-off behavior.
+
+10. QUESTION (#58, §3 Agent Selection): Considers memory (past outcomes) in selection
+   STATUS: NO
+   IMPLEMENTATION PLAN: Add `agent_name` attribution to `memory_embeddings` task-outcome rows (currently an outcome only links to `task_id`/`epic_id`, which can span multiple dispatched agents). This needs a migration + updating `embed_task_outcome()`'s callers to pass which specific agent produced the outcome. Once that exists, `FleetManager.select()` can read a real per-agent historical-outcome signal from memory instead of relying only on `total_runs`/`error_count`/`avg_confidence`.
+
+11. QUESTION (#65, §62 Runtime Decision Making): Switch strategies (replanning) live
+   STATUS: PARTIAL  [QUICK WIN]
+   IMPLEMENTATION PLAN: Same as #47 — this is the same replanning capability, just viewed from the 'runtime decision making' angle. No separate work needed beyond the fleet-wide default flip described in #47.
+
+12. QUESTION (#66, §62 Runtime Decision Making): Switch tools mid-run
+   STATUS: NO
+   IMPLEMENTATION PLAN: Before writing any code, define the concrete trigger conditions for when an agent's tool list should expand mid-run (e.g., 'a reviewer-flagged security issue unlocks a specialized `security_scan` tool'). This is a product decision first. Once defined, implement it as a conditional branch in the graph that adds tool specs to the LLM call based on a real state signal, not a blanket 'anything goes' expansion.
+
+13. QUESTION (#67, §62 Runtime Decision Making): Call additional agents mid-run
+   STATUS: NO
+   IMPLEMENTATION PLAN: Same underlying capability as #45 (`delegate_to` tool) — 'call additional agents mid-run' and 'agents request help from other agents' are the same gap. Build the one `delegate_to` tool with its allow-list/depth-cap/budget design and both checkpoints close together.
+
+14. QUESTION (#71, §62 Runtime Decision Making): Rollback (automatic)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Rollback is intentionally manual today (a judgment call, same class of decision as `approval_gate.py`). If you want automatic rollback, reuse the pattern already built and proven for prompt versions and code-commit enhancements (`_prompt_auto_rollback_loop`, `enhancement_rollback.py`): define a real, threshold-crossing regression check (before/after success-rate comparison) and wire a scheduled loop that calls `failure_ladder.rollback()` automatically when it fires — don't build a second, different mechanism.
+
+15. QUESTION (#88, §120 Intelligent Memory Management): Session memory retains/compresses/summarizes
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Build an LLM-summarization trigger for the ephemeral `LessonStore`: when the store nears its FIFO eviction cap, instead of just dropping the oldest entry, batch a cluster of related old entries and call the same summarization helper `_summarize_dropped_messages()` already uses (Haiku call with a 'preserve specifics' instruction), replacing many entries with one condensed one.
+
+16. QUESTION (#90, §120 Intelligent Memory Management): Context Compression (general purpose)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Design a general-purpose memory-content compressor: decide what triggers it (e.g. combined memory block still over budget after the existing truncation cap) and what it's allowed to drop. Implement `compress_memory_context()` reusing the same LLM-call pattern `_merge_via_llm()` already uses for near-duplicate lessons, but applied to summarizing a whole block rather than merging two texts.
+
+17. QUESTION (#98, §120 Intelligent Memory Management): Memory Quality Control (accuracy validation)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Add a real accuracy/usefulness validation pass beyond the existing similarity-gate and the coarse `verified = outcome=="completed"` boolean. Simplest real version: attach a thumbs-up/down (or 'this lesson helped / didn't help') signal to lesson usage in the UI, and feed that back into the composite memory score instead of only similarity + recency + reuse_count.
+
+18. QUESTION (#100, §120 Intelligent Memory Management): Memory Evolution (active shrink/consolidate over time)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Build a periodic, leader-gated background job (same pattern as the existing scan loops in `main.py`) that re-clusters related old memory rows and re-merges them using the existing `_merge_via_llm()` helper — actively shrinking/consolidating over time, not just archiving on a timer like the current retention loop does.
+
+19. QUESTION (#106, §6 Agent Specification Audit (per-agent scaffold)): Planning Engine
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Chat correctly has no planning engine by design (interactive, not task-oriented) — no fix needed there. For the remaining worker agents beyond the 4 already sampled/fixed, roll out `enable_replanning=True` fleet-wide following the same rollout plan as #47.
+
+20. QUESTION (#117, §7 Capability Audit (from implementation)): Smart Planning (fleet-wide default)
+   STATUS: PARTIAL  [QUICK WIN]
+   IMPLEMENTATION PLAN: Same fleet-wide default flip as #47/#65 — roll `enable_replanning=True` out to all ~76 agents after a monitored pilot period, not just the 4 already sampled.
+
+21. QUESTION (#123, §7 Capability Audit (from implementation)): Verification Before Reply (fleet-wide default)
+   STATUS: PARTIAL  [QUICK WIN]
+   IMPLEMENTATION PLAN: Roll `enable_critique=True` out fleet-wide the same way: every role file already has a real Quality Gates/Success Criteria section (confirmed via grep in the audit), so the mechanism is ready — pilot on a few more agents, monitor extra LLM-call cost/latency, then flip the default in `build_agent_graph()`.
+
+22. QUESTION (#126, §7 Capability Audit (from implementation)): Step-by-Step Guidance (dedicated renderer)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Build a dedicated step-by-step guidance renderer: parse a role file's advisory step list into a structured, numbered format (not just prose in the system prompt), add a `guidance_steps` field to `AgentResult`, and render it as a real checklist in the frontend instead of leaving it buried in text.
+
+23. QUESTION (#129, §7 Capability Audit (from implementation)): Performance Awareness (behavior changes from timing data)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Wire the already-recorded `phase_timings`/`p50_latency_ms`/`p95_latency_ms` data into an actual behavior decision — e.g. have `FleetManager.select()` mildly deprioritize an agent that's consistently much slower than its peers for the same capability, or have the planner surface a 'this step is usually slow' warning before dispatch.
+
+24. QUESTION (#130, §7 Capability Audit (from implementation)): Confidence Evaluation (feeds control flow)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Build the missing approval-surfacing consumer: (1) add a `requires_human_approval`-carrying field to `QAResult` and `PipelineState` (currently missing on 2 of 4 sampled agents); (2) make `specialized_agents.py`'s dispatch handler actually read `AgentResult.requires_human_approval` instead of discarding it; (3) set a real non-zero `quality_gate_min_confidence` floor per-agent; (4) surface flagged results in a pending-approvals view so a human can act on low-confidence results.
+
+25. QUESTION (#146, §72 Universal Skill Coverage): Step-by-Step Guidance (skill)
+   STATUS: PARTIAL  [QUICK WIN]
+   IMPLEMENTATION PLAN: Same as #126 — this is the same 'Step-by-Step Guidance' gap viewed from the skill-coverage angle. Building the dedicated renderer in #126 closes both.
+
+26. QUESTION (#147, §72 Universal Skill Coverage): Performance Analysis (acted upon)
+   STATUS: PARTIAL  [DEPENDENT - see related item]
+   IMPLEMENTATION PLAN: Same as #129 — building real behavior off the timing data closes both checkpoints together.
+
+27. QUESTION (#149, §72 Universal Skill Coverage): Reliability Engineering / Maintainability (beyond lint gates)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Add a dedicated reliability-review capability beyond the existing lint/test gates: e.g. a real check that flags agent code paths missing retry/circuit-breaker coverage, or missing error handling around external calls. Could be a new tool for `architecture_reviewer` or a standalone `reliability_reviewer` agent, reusing the existing AST/import-graph tooling.
+
+28. QUESTION (#150, §72 Universal Skill Coverage): Communication/Collaboration/Decision Making/Critical Thinking as dedicated skill
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Low priority — these remain prompt-level guidance in role files by design (no dedicated agent module exists for 'communication' or 'critical thinking' as such). If you want this measurable, formalize specific, checkable criteria in role files (e.g. 'summary must be under N sentences', 'must state assumptions explicitly') and have the existing critique node score against them — don't build a vague new agent for it.
+
+29. QUESTION (#162, §10 Project Architecture Audit): Modularity (god-module tools.py fully split)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: `tools.py` is still ~12,500 lines. Continue the extraction pattern already proven safe (`tool_security.py`, `conflict_resolution.py` were already pulled out cleanly with zero behavior change and full backward-compatible re-exports). Map the remaining `make_*_handlers()` factory clusters by their actual dependencies, extract one cluster at a time into its own module, re-export from `tools.py`, and re-run the full test/lint/type-check suite after each single extraction — never do it all in one giant diff.
+
+30. QUESTION (#169, §46 Scalability): In-memory single-process-only registries (fully distributed)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Move `AgentRegistry`/`CapabilityRegistry` live dispatch state off in-process singletons and onto the already-existing DB-backed `Agent` table (`api/registry.py`), with an in-process read-through cache in front of it (invalidated on writes — register/health-check/metrics-update — not on a timer) so `FleetManager.select()`'s hot-path latency doesn't regress to a DB round-trip on every dispatch. Separately, move `chat_agent.py`'s `_chat_agents` dict to Redis (already a dependency via the RQ queue) or require sticky-session routing at the load balancer.
+
+31. QUESTION (#171, §46 Scalability): Horizontal scaling (multiple backend instances, live dispatch state)
+   STATUS: NO
+   IMPLEMENTATION PLAN: Same root cause and same fix as #169 above, plus resolve the one remaining design question first: is 'one agent-type running at a time' meant to be a system-wide invariant or a per-process one? That decision determines whether you need a full distributed semaphore (matching `PrioritySemaphore`'s exact cancellation-safe, priority-fair behavior) or whether per-process behavior is actually fine. Don't build the distributed lock before that question is answered — it's genuine wasted engineering effort either direction if the answer turns out to be 'per-process was fine.'
+
+32. QUESTION (#196, §12 Autonomous Guardian/Ranger Agents (§12/§64)): Separate tools for guardian tier
+   STATUS: PARTIAL  [DEPENDENT - see related item]
+   IMPLEMENTATION PLAN: This is intentional, not a real gap — the 8 fleet self-improvement agents deliberately share the same tool infrastructure as every other agent (reuse over duplication). No action needed unless you specifically want a separate, isolated tool registry for this subset, which the audits explicitly recommend against.
+
+33. QUESTION (#198, §12 Autonomous Guardian/Ranger Agents (§12/§64)): Codebase monitoring
+   STATUS: PARTIAL  [DEPENDENT - see related item]
+   IMPLEMENTATION PLAN: Also intentional — codebase monitoring is folded into each scan agent's own individual logic rather than centralized into one 'codebase monitor' module. No action needed unless you want to refactor for organizational clarity only (no functional gain).
+
+34. QUESTION (#212, §13 Human Interaction): Pause/resume execution for plain worker agents
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Build a per-agent-type graph-rebuild registry: a factory that maps `agent_type` (coder, backend_dev, qa, ...) to the correct `tool_handlers`/`verification_cfg` combination for that agent, since each of the ~76-83 worker-agent files currently builds these inline rather than from a shared registry. Once that factory exists, add real `interrupt()`/`Command(resume=...)` points to `base_graph.py` (mirroring what `chat_agent.py` already does per-tool-call) so a paused worker-agent run can actually resume mid-graph instead of only supporting the 'end the run, re-dispatch later' pattern.
+
+35. QUESTION (#213, §13 Human Interaction): Understand follow-up replies / continue prior context (worker agents)
+   STATUS: PARTIAL  [DEPENDENT - see related item]
+   IMPLEMENTATION PLAN: Direct consequence of #212 — once worker agents can genuinely pause/resume mid-graph, the resumed run naturally continues from prior context instead of needing a fresh dispatch. No separate work beyond #212.
+
+36. QUESTION (#227, §103 Human Override): Take over a task / edit plan / reject one step and resume exactly there
+   STATUS: NO
+   IMPLEMENTATION PLAN: Build a plan data model with individually addressable steps (currently `resume_pipeline(task_id, approved: bool)` is all-or-nothing at the whole-plan level). Add a step-addressable API surface for editing/rejecting one step, and make the pipeline graph resumable from a specific mid-plan checkpoint instead of only the single compiled-in `human_review` interrupt point. This is a graph-topology change to `pipeline/graph.py`, not a small endpoint addition — plan it as its own project.
+
+37. QUESTION (#234, §14 Execution Control): Recovery after crash (full state)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Persist per-run control-flow flags (abort/resume state) to the DB on every mutation instead of only holding them as in-process `threading.Event`/flags, so a real process crash doesn't lose them. Also make the background-process registry's PID tracking DB-backed rather than a local JSON file, so it survives a crash on the same host.
+
+38. QUESTION (#235, §14 Execution Control): Recovery after reboot (auto-resume worker runs)
+   STATUS: PARTIAL  [DEPENDENT - see related item]
+   IMPLEMENTATION PLAN: Once #212's per-agent-type graph-rebuild factory exists, `reconcile_orphaned_runs()` can call it instead of just marking a stuck run `failed` — the factory rebuilds the correct tool_handlers/verification_cfg for whatever `agent_type` the orphaned run belongs to, and resumes it from its Postgres checkpoint (the checkpoint + `trace_id` linkage already exist from a prior fix) automatically on reboot instead of requiring a manual re-trigger.
+
+39. QUESTION (#236, §14 Execution Control): Continue from checkpoint if interrupted (all agent types)
+   STATUS: PARTIAL  [DEPENDENT - see related item]
+   IMPLEMENTATION PLAN: Same dependency as #235 — 'continue from checkpoint if interrupted' for plain worker agents needs the same per-agent-type graph-rebuild factory. Pipeline and chat already have this; extending it to all worker agents is the #212/#235 work.
+
+40. QUESTION (#238, §38 Failure Recovery): Python backend crashes - full state recovery
+   STATUS: PARTIAL  [DEPENDENT - see related item]
+   IMPLEMENTATION PLAN: Combination of #234 (persist control-flow flags to DB) and #212/#235 (per-agent-type resume factory) — together these close the 'full state survives a real process crash' gap for worker-agent runs.
+
+41. QUESTION (#246, §102 Long-Running Jobs): Checkpointing / Resumability (all agent types)
+   STATUS: PARTIAL  [DEPENDENT - see related item]
+   IMPLEMENTATION PLAN: Same underlying fix as #235/#236 — build the per-agent-type resume factory once, and checkpointing/resumability becomes real for every agent type, not just pipeline and chat.
+
+42. QUESTION (#255, §15 Large Project Handling): Edit very large files safely (streaming I/O)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Convert `edit_file`/`write_file`/`apply_patch`'s write path in `tools.py` from full-file-in-memory to real streaming I/O (chunked read/write). This touches every write-capable tool and their per-agent variants, so plan it as its own initiative: start with the single most-used write tool, prove the streaming approach with real large-file tests, then roll the same pattern out to the rest one at a time — never all at once given the blast radius.
+
+43. QUESTION (#257, §15 Large Project Handling): Modify 100+ files (dedicated batch-edit tool)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Build a new dedicated batch-edit tool with its own conflict/atomicity semantics for 100+-file changes: transactional apply across N files (all-or-nothing), a dry-run preview mode (reuse the pattern `rename_symbol_max_files` already established — count matches first, preview before writing), and a real cap with an explicit override flag for confirmed large batches.
+
+44. QUESTION (#259, §15 Large Project Handling): Repository-wide refactoring (AST-aware, all languages)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Extend the AST-aware rename that already exists for Python (`ast_engine.py::_rename_in_python_source`, tokenize-based) to TypeScript/JavaScript. You already have real tree-sitter parsing for TS/JS from the file-understanding work (§16) — reuse that same parser's symbol/identifier extraction to find real NAME-token spans for TS/JS files instead of falling back to the regex-based rename for those file types.
+
+45. QUESTION (#291, §19 Deployment Intelligence): AWS (deploy-execution tooling)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: AWS deploy-*execution* is intentionally out of scope per this project's own 'deploy is a human action forever' rule — building execution tooling here would violate a deliberate safety boundary, so don't do it. If you specifically need more AWS support, only extend the already-built diagnosis/guide-generation tools (`diagnose_deployment_failure`, `deployment_guide_doc_agent`) to have richer AWS-specific config introspection — never add an actual `aws deploy`-style execution tool.
+
+46. QUESTION (#297, §20 External Knowledge): Use documentation while coding automatically (no explicit call)
+   STATUS: NO
+   IMPLEMENTATION PLAN: Deliberately not built due to fragile-heuristic risk — no reliable non-regex signal exists for 'this code needs docs looked up'. If you still want it, define a narrow, high-confidence trigger first (e.g. only fire when an import fails to resolve or a package version is unrecognized), and treat it as an opt-in suggestion the agent surfaces, not a silent automatic fetch — a false trigger burns tokens and can inject irrelevant content into context.
+
+47. QUESTION (#300, §40 Git Intelligence): Resolve merge conflicts (auto, no human judgment)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Intentional by design — blind automatic merge-conflict resolution without human judgment would be a real safety regression, not an improvement. Leave as-is. The one real bug in this area (unreachable in chat mode) was already fixed; no further action needed unless you specifically want to relax this safety boundary, which is not recommended.
+
+48. QUESTION (#329, §85 Governance & Policy Engine): Central governance system beyond security policy engine
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: This needs an organizational decision before any code: define concrete, checkable coding standards (a specific linter config, specific naming regexes, an explicit approved-framework list beyond backend/frontend). Once those rules exist as real, agreed-upon ground truth, wire them into the same `_policy_check` chokepoint the one existing governance rule (framework-boundary enforcement) already uses — don't invent arbitrary rules without that decision first, since a fabricated rule set is worse than an honest gap.
+
+49. QUESTION (#361, §45 Multi-Session Continuity): Branch-context tracking after switching git branches
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Add a 'currently active branch' concept to the main repo model (distinct from `DevTask.branch_name`, which only tracks the per-task isolation worktree branch). Add a DB field on the `Repo` model tracking the last-known checked-out branch, update it whenever a branch-switch tool is called, and surface it to `context_builder` so agents know which branch context they're actually working in.
+
+50. QUESTION (#377, §48 Enterprise Readiness): Concurrent sessions (per-tenant isolation of singletons)
+   STATUS: PARTIAL  [DEPENDENT - see related item]
+   IMPLEMENTATION PLAN: Blocked on true multi-tenancy (workspaces/organizations) not existing yet — this is a dependent item, not independently fixable. Once a real `Workspace`/`Organization` entity exists (a separate, larger initiative — see the 'Multiple projects/workspaces' skip item), replace the in-process singletons (`agent_registry`, `capability_registry`, `LessonStore`) with per-tenant-scoped instances or per-request dependency injection.
+
+51. QUESTION (#381, §48 Enterprise Readiness): Usage analytics (full per-user cost/token attribution)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Add an `actor`/`user_id` column to `AgentRun` (a migration) and thread the authenticated caller's identity through task-creation and every orchestration call site that creates an `AgentRun` row (`base_graph.py`, `manager.py`, `specialized_agents.py`). Once that's real, build a per-user cost/token rollup endpoint on top of it (the per-user *activity* view already exists via `AuditLog.by_actor_async` — this extends it to cost/token specifically).
+
+52. QUESTION (#383, §77 Company-Scale Readiness / Multi-Project Management (§77/§94)): Full cross-repo isolation (every table)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Add a nullable `repo_id` FK to the remaining unscoped tables — `Artifact`, `Event`, `PendingApproval`, `EpicScratchpad` — mirroring the exact migration pattern already used for `IndexedFile`/`CallEdge`/`CodeEmbedding` (NULL = unscoped convention, populated going forward, existing `task_id`/`epic_id` filters stay as the real query key). Purely additive, low risk, same pattern proven once already.
+
+53. QUESTION (#405, §75 Organizational Knowledge Sharing / Company Brain (§75/§105/§112)): Covers approved prompts/MCPs/tools as a distinct knowledge type
+   STATUS: NO
+   IMPLEMENTATION PLAN: Fold `PromptVersion` diffs into `memory_hook_node`'s embedding-based retrieval as searchable text: add a new `embed_prompt_change()` function mirroring the existing `embed_bug`/`embed_preference` category pattern, so approved prompt/tool changes become a distinct, semantically-searchable organizational-knowledge category instead of living only in the separate governed `PromptRegistry` system.
+
+54. QUESTION (#407, §76 Continuous Improvement / Performance & Architecture Review / Capability Gap Detection (§76/106/108/109/116)): Per-agent performance metrics aggregated over time (persisted, not just ring buffer)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Add a persistence layer for `MetricsCollector`'s ring buffer (currently 1000 entries, lost on process restart). Either write periodic snapshots to a new DB table on a schedule, or persist each `RunMetrics` object to the DB at run-completion time (simplest, most durable option) instead of only keeping it in the in-process ring buffer.
+
+55. QUESTION (#414, §117 Quality Score): Aggregate quality score across all categories (9/9)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Build real structured-data producers for the 4 remaining quality-score categories (documentation, performance, tools, prompts) — each needs its own real metric source: e.g. doc-coverage percentage for documentation, aggregate benchmark pass rate for performance, tool test-pass-rate for tools, prompt-regression score (already computed by `regression_detector`) for prompts. Wire each into `quality_score.py`'s `_category_registry()` the same way the `agents` category was closed in Batch 15.
+
+56. QUESTION (#427, §86 Organization-Wide Task Scheduler): Reorder (true in-place queue reordering)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Accept the priority-bucketed model (`PATCH /tasks/{id}/priority`, already shipped) as the real, correct scope for 'reorder' — true in-place queue reordering would require redesigning the queue backend's own data structure (`asyncio.Queue` is strict FIFO; RQ has no live-reprioritization primitive), which is a much bigger, lower-value change. Only pursue this if you have a concrete case where priority-bucketing genuinely isn't enough.
+
+57. QUESTION (#428, §86 Organization-Wide Task Scheduler): Detect blocked tasks (dependency-driven, not just failure-driven)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Extend the `DevTask.depends_on` gate (already built for the org-wide dependency check) to set a distinct task status/flag — 'blocked-on-dependency' — separate from the existing failure-driven `blocked` status, and surface it distinctly in the dashboard so an operator can tell the two apart at a glance.
+
+58. QUESTION (#429, §86 Organization-Wide Task Scheduler): Detect dependencies / optimize order org-wide (auto-dispatch)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Build a background auto-dispatcher: a scheduled loop (leader-gated, same pattern as the other 13 loops in `main.py`) that watches for `DevTask.depends_on` completions and automatically calls `/run` on newly-unblocked tasks, instead of requiring a human/caller to manually retry.
+
+59. QUESTION (#437, §87 Agent Performance Metrics): Retry count (real per-run persisted value)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Fix the persistence pipeline so the real per-run `RunMetrics.retries` value (already computed correctly per-run) is what actually gets saved to `Agent.avg_retries`, instead of the current token-based approximation that was only ever a stand-in.
+
+60. QUESTION (#439, §87 Agent Performance Metrics): User satisfaction (real, not proxy)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Build a real per-agent user-satisfaction signal: add a simple thumbs-up/down or star rating after a chat session or task completion, store it against the responsible agent, and aggregate it — replacing the current regex-based frustration-detector proxy, which the codebase itself already honestly labels as 'not a claim of real NLP accuracy.'
+
+61. QUESTION (#443, §88 Agent Health Monitoring): Detect hallucinating agents / memory leaks / sync failures
+   STATUS: NO
+   IMPLEMENTATION PLAN: Genuinely missing capability, lowest priority of the NO items — this needs new detection subsystems that don't exist anywhere in the codebase today: for hallucination, something like an LLM self-consistency check (ask the model to re-verify its own claim against retrieved evidence); for memory leaks/sync failures, real runtime profiling of the *target* repo's processes (this platform edits/reviews code, it doesn't run target apps under sustained load, so there's no existing hook to build on). Treat as a separate research/infrastructure initiative, not a quick fix.
+
+62. QUESTION (#453, §90 Quality Gates): Security checks (mandatory pipeline gate)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Flip `enable_security_architecture_gates` from opt-in to default-on, but first build a retry-on-finding loop for `security_reviewer` (it currently only logs a finding advisory-style — it has no self-correction attempt of its own the way `coder.py`'s static-check retry does). Once a blocking finding can trigger one real self-correction attempt instead of just halting, it's safe to make this gate mandatory.
+
+63. QUESTION (#454, §90 Quality Gates): Dependency checks (mandatory pipeline gate)
+   STATUS: NO
+   IMPLEMENTATION PLAN: Wire `dependency_agent`/`dependency_security_agent` into the per-subtask pipeline using the exact same call-site pattern already proven for `security_reviewer`/`architecture_reviewer` in `manager.py::_run_advisory_quality_gates()` — same opt-in flag pattern, same non-blocking-then-later-mandatory rollout. This is the lowest-effort of the remaining quality-gate gaps since the pattern is already built and proven twice.
+
+64. QUESTION (#455, §90 Quality Gates): Architecture checks (mandatory pipeline gate)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Same rollout plan as #453 for `architecture_reviewer` specifically — build its own retry-on-finding self-correction loop, then flip its gate from opt-in to mandatory.
+
+65. QUESTION (#456, §90 Quality Gates): Performance checks (broad, not just role-prompt deploys)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Extend the real regression gate (currently only wired into role-prompt deploys) to also run against subtask-level code changes, reusing `benchmark_manager`'s existing baseline-comparison logic rather than building a second mechanism.
+
+66. QUESTION (#457, §90 Quality Gates): Documentation checks (mandatory pre-completion gate)
+   STATUS: NO
+   IMPLEMENTATION PLAN: Build a new, smaller, scoped-diff doc-check (not the existing full repo-wide doc-generation loop, which is too slow/expensive to run per-subtask): a check that only validates whether docs exist/are updated for the specific files touched by that subtask's diff, and use that as the mandatory pre-completion gate.
+
+67. QUESTION (#462, §92 Dependency Intelligence): Abandoned/unmaintained libraries (structured, enforced)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Add hard `VerificationConfig` enforcement (`blocking_until`) requiring `check_last_release` to actually have been called for every outdated dependency before `submit_dependency_report` is accepted — currently this depends on the LLM following a prompt instruction with no code-level check backing it, the same class of fix already applied elsewhere in this codebase (planner.py, coder.py).
+
+68. QUESTION (#463, §92 Dependency Intelligence): Dependency conflicts (real solver, not just pip check)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Integrate a real dependency-resolution library (e.g. `resolvelib`, the same engine `pip`'s own resolver is built on, or `pip-tools`) to do genuine SAT-solver-style version-constraint conflict detection, replacing/augmenting the current `pip check`-based lightweight scan. This is genuinely new capability, not a wiring fix — budget it as its own small project.
+
+69. QUESTION (#494, §24 Missing Features): AgentRegistry dispatch coordination + concurrency semaphores distributed across processes
+   STATUS: NO
+   IMPLEMENTATION PLAN: Resolve the design-intent question first (same as #171): is single-flight-per-agent-type meant to be system-wide or per-process? Then build the distributed coordination primitive that decision implies — either a distributed semaphore matching `PrioritySemaphore`'s exact semantics with its own dedicated multi-process integration test infrastructure, or explicitly document/accept the current per-process behavior as correct and close this out without new code.
+
+70. QUESTION (#495, §24 Missing Features): Verification/evidence-first blocking (blocking_until) applied to every agent
+   STATUS: PARTIAL  [QUICK WIN]
+   IMPLEMENTATION PLAN: Audit all ~76-83 agents not yet covered and add a `blocking_until` verification config to each (mapping their primary write tool — `write_file`/`edit_file`/`submit_*` — to require a prior `read_file`/`search_code` call), following the exact pattern already proven on `planner.py`, `coder.py`, `chat_agent.py`, and `dependency_security_agent.py`. This is a mechanical rollout of an already-built mechanism, not new engineering — the fastest of the remaining PARTIAL items to close.
+
+71. QUESTION (#500, §51 Repeat Task & Historical Context): Chat-conversational 'do that again' surface
+   STATUS: NO
+   IMPLEMENTATION PLAN: Wrap the existing `POST /api/tasks/{task_id}/repeat` endpoint as a new LLM-callable chat tool, with its own confirmation-gated design (chat currently has zero task-creation/dispatch capability of any kind, so this is a first-of-its-kind addition to `chat_agent.py`'s tool surface and deserves its own dedicated design/testing pass rather than a quick bolt-on).
+
+72. QUESTION (#503, §54 No-Hallucination / Truthfulness / Evidence-First (§54/§55/§56)): Verify before answering (evidence-first) universally enforced
+   STATUS: PARTIAL  [DEPENDENT - see related item]
+   IMPLEMENTATION PLAN: Same rollout as #495 — 'evidence-first blocking applied to every agent' and 'verify before answering universally enforced' are the same gap. Closing #495 closes this too.
+
+73. QUESTION (#505, §54 No-Hallucination / Truthfulness / Evidence-First (§54/§55/§56)): Distinguish facts from assumptions structurally (plain-language, all agents)
+   STATUS: PARTIAL
+   IMPLEMENTATION PLAN: Add a plain-language, non-technical summary field alongside the existing structured `_quality_gate` JSON output (checks/warnings/passed), so a non-technical user can actually see 'this was verified' vs 'this is an assumption' in the UI instead of only structured data a developer would read.
+
+74. QUESTION (#509, §78 Final Verdict): Could this run today as a professional AI software company at Claude-Code/Cursor-comparable quality
+   STATUS: PARTIAL  [DEPENDENT - see related item]
+   IMPLEMENTATION PLAN: This is the aggregate final verdict, not an independent item — it improves automatically as the real underlying gaps above (especially #494/#171, the AgentRegistry distributed-dispatch coordination) get closed. Track it as a rollup metric, not something to fix directly.
+
+75. QUESTION (#511, §BONUS Hidden Architectural Risks): In-process singletons blocking true horizontal scaling — fully resolved
+   STATUS: PARTIAL  [DEPENDENT - see related item]
+   IMPLEMENTATION PLAN: Same fix as #169/#171 above — this is the same 'in-process singletons block horizontal scaling' finding referenced a second time in the Hidden Architectural Risks section. Closing #169/#171 closes this too.
+
+
+NO — 14 questions
+44 — Agents create subtasks dynamically
+45 — Agents request help from other agents
+58 — Agent selection considers memory/past outcomes
+66 — Switch tools mid-run
+67 — Call additional agents mid-run
+171 — Horizontal scaling across multiple backend instances with live dispatch state
+227 — Take over a task, edit its plan, reject a step, and resume exactly there
+297 — Automatically use documentation while coding without an explicit call
+405 — Store approved prompts/MCPs/tools as a distinct organizational knowledge type
+443 — Detect hallucinating agents, memory leaks, and synchronization failures
+454 — Dependency checks as a mandatory pipeline gate
+457 — Documentation checks as a mandatory pre-completion gate
+494 — Distributed AgentRegistry dispatch coordination + concurrency semaphores
+500 — Conversational “do that again” surface
+PARTIAL — 61 questions
+3 — Always uses the repository's terminal / real PTY
+5 — Multiple terminals simultaneously
+6 — Windows terminal support
+12 — Live streaming output monitoring
+38 — Architecture consistency across multi-file edits
+43 — Multiple agents work simultaneously / fan-out
+47 — Dynamic orchestration / replanning during execution
+65 — Switch strategies live
+71 — Automatic rollback
+88 — Session memory retention/compression/summarization
+90 — General-purpose context compression
+98 — Memory quality/accuracy validation
+100 — Memory evolution / active consolidation
+106 — Per-agent planning engine
+117 — Smart planning as fleet-wide default
+123 — Verification before reply as fleet-wide default
+126 — Step-by-step guidance renderer
+129 — Performance awareness affecting behavior
+130 — Confidence evaluation feeding control flow
+146 — Step-by-step guidance skill
+147 — Performance analysis acted upon
+149 — Reliability engineering / maintainability beyond lint gates
+150 — Communication/collaboration/decision-making/critical-thinking skill
+162 — Full modularization of tools.py
+169 — Distributed registries instead of single-process in-memory registries
+196 — Separate tools for guardian tier
+198 — Codebase monitoring
+212 — Pause/resume for plain worker agents
+213 — Worker agents understand follow-up replies / prior context
+234 — Full state recovery after crash
+235 — Automatic worker-run resume after reboot
+236 — Continue from checkpoint for all agent types
+238 — Full Python backend crash recovery
+246 — Checkpointing/resumability for all agent types
+255 — Safe streaming edits of very large files
+257 — Dedicated batch editing of 100+ files
+259 — AST-aware repository-wide refactoring across languages
+291 — AWS deployment-execution tooling
+300 — Automatic merge-conflict resolution
+329 — Central governance system beyond security policy
+361 — Branch-context tracking after Git branch switching
+377 — Concurrent-session isolation of singletons
+381 — Full per-user cost/token usage attribution
+383 — Complete cross-repository isolation across every table
+407 — Persisted long-term per-agent performance metrics
+414 — Aggregate 9/9 quality score
+427 — True in-place task queue reordering
+428 — Dependency-driven blocked-task detection
+429 — Automatic organization-wide dependency/order optimization
+437 — Persisted real retry count per run
+439 — Real user-satisfaction measurement
+453 — Security checks as mandatory pipeline gate
+455 — Architecture checks as mandatory pipeline gate
+456 — Broad performance checks as mandatory quality gate
+462 — Structured enforcement for abandoned/unmaintained libraries
+463 — Real dependency-conflict solver
+495 — Evidence-first blocking (blocking_until) for every agent
+503 — Universal verify-before-answer enforcement
+505 — Structural distinction between facts and assumptions
+509 — Claude-Code/Cursor-comparable professional quality
+511 — Fully resolving in-process singletons blocking horizontal scaling
+SKIP — 50 questions
+42 — LLM-based routing
+64 — Intelligent/hardcoded adaptive tool-list selection
+148 — Deployment execution as a universal skill
+158 — Real Claude Code/Cursor performance benchmark
+159 — Sequential fan-out bottleneck
+175 — WebSocket support
+194 — Separate 5-agent supervisory tier
+195 — Separate guardian memory subsystem
+205 — Unprompted autonomous multi-step planning
+223 — Deployment approval gate
+262 — HTML/CSS structural parsing
+263 — PHP support
+271 — Audio/video understanding
+274 — Excel support
+275 — Word/PowerPoint support
+278 — LLM-in-tool-loop web summarization
+282 — Automatic external-doc injection into coding context
+286 — Vercel execution
+288 — Railway execution
+289 — Render execution
+290 — Kubernetes execution
+292 — Azure/GCP deployment execution
+321 — Code-level harmful-code classifier
+332 — Structural vague-request completeness gate
+333 — Hidden-intent/conflicting-requirement detection
+336 — Separating multiple tasks from one prompt
+337 — Intent-type detection
+340 — Contradictory/changing-instruction detection
+341 — Abusive/mixed-language/poor-English handling
+343 — Asking only necessary clarification questions
+344 — Temporary planning while waiting for clarification
+346 — Breaking huge specs into milestones
+347 — Detecting impossible/duplicate requirements and suggesting architecture
+348 — Producing an execution roadmap
+351 — Code-enforced risk explanation/backward compatibility
+365 — Multiple repositories/documents in one context
+376 — True multi-tenant workspaces
+378 — Enterprise SSO/SAML/OAuth
+388 — Beginner/expert confusion detection
+393 — Internationalization
+394 — Provenance-aware external-code review
+395 — Phased delivery/milestone gating
+398 — Target-repo memory-leak detection
+399 — Target-app runtime performance regression detection
+411 — Hot-swapping executable tools
+418 — Sandboxed impact simulation before applying changes
+436 — LLM-judge reasoning-quality grading
+461 — Breaking-change detection
+478 — Kubernetes live execution
+497 — Real Claude Code/Cursor feature-parity benchmark
+
+
+
+

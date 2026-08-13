@@ -5,19 +5,33 @@ Key assertion: fleet_manager selects agents via registry lookup, NOT by hardcode
 
 from __future__ import annotations
 
+import pytest
 
 from app.fleet.agent_registry import AgentRegistry, AgentState
 from app.fleet.capability_registry import AgentCapability, CapabilityRegistry
 from app.fleet.fleet_manager import FleetManager
+from app.fleet.metrics import MetricsCollector
 
 
-def _setup(capabilities: list[AgentCapability]) -> FleetManager:
+def _setup(
+    capabilities: list[AgentCapability], metrics: MetricsCollector | None = None
+) -> FleetManager:
     caps = CapabilityRegistry()
     agents = AgentRegistry()
     for cap in capabilities:
         caps.register(cap)
         agents.register(cap.name)
-    return FleetManager(capability_registry=caps, agent_registry=agents)
+    return FleetManager(
+        capability_registry=caps,
+        agent_registry=agents,
+        # plan14 Day 3 Task 6 — a fresh MetricsCollector() when the caller
+        # doesn't pass one, so every pre-existing test in this file (none of
+        # which care about cost/latency) keeps seeing "no run history yet"
+        # (cost_factor/latency_factor both 1.0, neutral) instead of
+        # accidentally reading whatever real data happens to be in the
+        # process-wide singleton.
+        metrics_collector=metrics if metrics is not None else MetricsCollector(),
+    )
 
 
 def _cap(
@@ -166,6 +180,120 @@ class TestTenureAndConfidenceScoring:
         plan = fm.select("coding")
         assert plan is not None
         assert plan.agent_name == "healthy_newcomer"
+
+
+class TestCostAndLatencyScoring:
+    """plan14 Day 3 Task 6 (Performance-Aware Runtime Decisions) —
+    cost_factor/latency_factor, same "neutral (1.0) for no history, real
+    MetricsCollector-tracked signal once history exists" property as
+    TestTenureAndConfidenceScoring above. A fresh MetricsCollector() is
+    injected per test (see _setup) so these are fully isolated from the
+    real process-wide singleton and from each other.
+    """
+
+    def test_fresh_agents_score_identically_regardless_of_cost_latency_fields_existing(
+        self,
+    ) -> None:
+        """Same shape as the tenure/confidence equivalent: with no run
+        history for either agent, cost_factor/latency_factor are both 1.0
+        for both — success_rate alone still decides the winner."""
+        fm = _setup(
+            [
+                _cap("good", ["coding"], success_rate=0.95),
+                _cap("bad", ["coding"], success_rate=0.50),
+            ]
+        )
+        plan = fm.select("coding")
+        assert plan is not None
+        assert plan.agent_name == "good"
+
+    def test_cheaper_agent_wins_a_tie(self) -> None:
+        metrics = MetricsCollector()
+        fm = _setup(
+            [
+                _cap("frugal", ["coding"], success_rate=0.9),
+                _cap("expensive", ["coding"], success_rate=0.9),
+            ],
+            metrics=metrics,
+        )
+        m1 = metrics.start_run("frugal")
+        m1.cost_estimate_usd = 0.01
+        m2 = metrics.start_run("expensive")
+        m2.cost_estimate_usd = 5.0
+
+        plan = fm.select("coding")
+        assert plan is not None
+        assert plan.agent_name == "frugal"
+
+    def test_faster_agent_wins_a_tie(self) -> None:
+        metrics = MetricsCollector()
+        fm = _setup(
+            [
+                _cap("fast", ["coding"], success_rate=0.9),
+                _cap("slow", ["coding"], success_rate=0.9),
+            ],
+            metrics=metrics,
+        )
+        m1 = metrics.start_run("fast")
+        m1.execution_time_ms = 200.0
+        m2 = metrics.start_run("slow")
+        m2.execution_time_ms = 60_000.0
+
+        plan = fm.select("coding")
+        assert plan is not None
+        assert plan.agent_name == "fast"
+
+    def test_cost_penalty_cannot_overcome_a_real_health_gap(self) -> None:
+        """Same invariant as the tenure test above, for the new factors:
+        cost/latency must never let an unhealthy/low-success agent outrank
+        a healthy one — the 1/(1+x) curve is bounded, never zero."""
+        metrics = MetricsCollector()
+        fm = _setup(
+            [
+                _cap("healthy_expensive", ["coding"], success_rate=0.95),
+                _cap("degraded_cheap", ["coding"], success_rate=0.3),
+            ],
+            metrics=metrics,
+        )
+        m1 = metrics.start_run("healthy_expensive")
+        m1.cost_estimate_usd = 5.0
+        m1.execution_time_ms = 60_000.0
+        m2 = metrics.start_run("degraded_cheap")
+        m2.cost_estimate_usd = 0.001
+        m2.execution_time_ms = 50.0
+
+        plan = fm.select("coding")
+        assert plan is not None
+        assert plan.agent_name == "healthy_expensive"
+
+    def test_cost_penalty_weight_zero_disables_cost_factor(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """weight=0 must make cost_factor always 1.0 regardless of actual
+        cost — proven by comparing the SAME agent's own resulting score
+        across two otherwise-identical single-candidate selections that
+        differ only in recorded cost."""
+        from app.config import get_settings
+
+        monkeypatch.setattr(get_settings(), "fleet_select_cost_penalty_weight", 0.0)
+
+        metrics_cheap = MetricsCollector()
+        fm_cheap = _setup(
+            [_cap("solo", ["coding"], success_rate=0.9)], metrics=metrics_cheap
+        )
+        metrics_cheap.start_run("solo").cost_estimate_usd = 0.01
+        plan_cheap = fm_cheap.select("coding")
+
+        metrics_expensive = MetricsCollector()
+        fm_expensive = _setup(
+            [_cap("solo", ["coding"], success_rate=0.9)], metrics=metrics_expensive
+        )
+        metrics_expensive.start_run("solo").cost_estimate_usd = 5.0
+        plan_expensive = fm_expensive.select("coding")
+
+        assert plan_cheap is not None
+        assert plan_expensive is not None
+        assert plan_cheap.score == pytest.approx(plan_expensive.score)
 
 
 class TestAgentInstanceConfidenceTracking:

@@ -28,6 +28,18 @@ class GridironEvent(BaseModel):
     emitted_by: str = ""
     created_at: datetime = Field(default_factory=_now_utc)
 
+    # plan14 Day 4 (#12 Agent Communication) — extends this existing,
+    # already-universal envelope for delegation-relevant routing/tracing
+    # instead of building a second, competing message schema (AutoGen's
+    # separate AgentId/envelope system was considered and rejected for
+    # exactly that reason — see app/agents/delegation.py's own module
+    # docstring). All optional, defaulted None — every existing event
+    # construction call site (task_created, qa_passed, ...) is unaffected.
+    receiver: str | None = None
+    message_type: str | None = None
+    trace_id: str | None = None
+    parent_run_id: str | None = None
+
     model_config = {"frozen": True}
 
 
@@ -51,8 +63,103 @@ CORE_EVENT_TYPES = frozenset(
         "epic.halted",
         "epic.approved",
         "epic.rejected",
+        # plan14 Day 4 (#1/#13/#12) — delegation lifecycle
+        "delegation.requested",
+        "delegation.started",
+        "delegation.completed",
+        "delegation.failed",
     }
 )
+
+
+def delegation_requested(
+    *,
+    source_agent: str,
+    target_capability: str,
+    trace_id: str,
+    parent_run_id: str,
+    task_id: str | None = None,
+) -> GridironEvent:
+    return GridironEvent(
+        event_type="delegation.requested",
+        task_id=task_id,
+        payload={"source_agent": source_agent, "target_capability": target_capability},
+        emitted_by=source_agent,
+        receiver=target_capability,
+        message_type="delegation_requested",
+        trace_id=trace_id,
+        parent_run_id=parent_run_id,
+    )
+
+
+def delegation_started(
+    *,
+    source_agent: str,
+    target_agent: str,
+    trace_id: str,
+    parent_run_id: str,
+    task_id: str | None = None,
+) -> GridironEvent:
+    return GridironEvent(
+        event_type="delegation.started",
+        task_id=task_id,
+        payload={"source_agent": source_agent, "target_agent": target_agent},
+        emitted_by=source_agent,
+        receiver=target_agent,
+        message_type="delegation_started",
+        trace_id=trace_id,
+        parent_run_id=parent_run_id,
+    )
+
+
+def delegation_completed(
+    *,
+    source_agent: str,
+    target_agent: str,
+    trace_id: str,
+    parent_run_id: str,
+    cost_usd: float,
+    task_id: str | None = None,
+) -> GridironEvent:
+    return GridironEvent(
+        event_type="delegation.completed",
+        task_id=task_id,
+        payload={
+            "source_agent": source_agent,
+            "target_agent": target_agent,
+            "cost_usd": cost_usd,
+        },
+        emitted_by=target_agent,
+        receiver=source_agent,
+        message_type="delegation_completed",
+        trace_id=trace_id,
+        parent_run_id=parent_run_id,
+    )
+
+
+def delegation_failed(
+    *,
+    source_agent: str,
+    target_agent: str | None,
+    trace_id: str,
+    parent_run_id: str,
+    reason: str,
+    task_id: str | None = None,
+) -> GridironEvent:
+    return GridironEvent(
+        event_type="delegation.failed",
+        task_id=task_id,
+        payload={
+            "source_agent": source_agent,
+            "target_agent": target_agent,
+            "reason": reason,
+        },
+        emitted_by=target_agent or source_agent,
+        receiver=source_agent,
+        message_type="delegation_failed",
+        trace_id=trace_id,
+        parent_run_id=parent_run_id,
+    )
 
 
 def task_created(

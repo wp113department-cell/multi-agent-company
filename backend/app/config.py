@@ -439,6 +439,89 @@ class Settings(BaseSettings):
         description="Cosine similarity above which a new memory write is treated as a near-duplicate of an existing row (same category/repo scope) rather than a genuinely new memory",
     )
 
+    # plan14 Day 1 Task 1 (Dynamic Tool Selection) — narrows each agent's static
+    # tool list at runtime to what can actually execute (handler present) and,
+    # for high-risk tools, what the agent's own registered AgentCapability.tools
+    # contract declares. Never adds a tool. Default True; a caller-side failure
+    # in the filter itself is non-fatal and falls back to the untouched list, so
+    # this flag exists to allow disabling the narrowing behavior itself if a
+    # false-positive drop is ever suspected in production.
+    # plan14 Day 2 Task 4 (Memory Quality Gate) — deterministic (no LLM, no
+    # regex) pre-store gate for memory_embeddings writes specifically: the
+    # "routine memory" tier of the wider quality-tiering design. The
+    # separate lessons/versioned_lessons system (LLM/HITL-tiered) is
+    # unaffected by these settings. 'reject' skips the DB insert entirely
+    # (near-empty/placeholder candidates only). 'draft' still inserts the
+    # row (content is never silently discarded except at the reject tier),
+    # marked verified=False and with importance dampened by
+    # memory_quality_draft_importance_factor — deliberately NOT the
+    # archived column: archived/archived_at are app/services/retention.py's
+    # own hard exclusion filter (`WHERE archived = false` — every query_*
+    # AND the retention job's own re-archival query), and a real
+    # regression run proved a quality-gated row pre-set to archived=True at
+    # write time makes the retention job's own cutoff query find zero
+    # candidates for it forever (tests/test_memory_archived_filter.py::
+    # test_real_retention_job_output_is_actually_excluded_end_to_end failed
+    # this way before this was caught and fixed) — two independent lifecycle
+    # concerns collapsed onto one hard-filter boolean. verified/importance
+    # are confirmed soft ranking-only signals (grepped: never used in a hard
+    # WHERE filter anywhere), so a draft row stays genuinely findable — just
+    # ranked low by the existing composite score formula — with zero
+    # collision risk against retention or any other archived-based logic.
+    # Deliberately low reject/draft floors — a stated preference like "use
+    # tabs not spaces" is legitimately short and must not be rejected
+    # outright, only drafted at most.
+    memory_quality_gate_enabled: bool = Field(
+        default=True,
+        description="If true, embed_*() write functions run a deterministic length/specificity check before inserting: reject near-empty candidates outright, mark borderline ones as an unverified/low-importance draft, publish the rest normally",
+    )
+    memory_quality_reject_min_length_chars: int = Field(
+        default=15,
+        description="Combined description+summary text shorter than this is rejected outright (never inserted) — catches empty/placeholder writes like '', 'done', 'ok'. Length-only, deliberately not also gated on distinct-token-count (see evaluate_memory_quality's own docstring for why a token floor at the reject tier proved too aggressive against real short-but-legitimate content)",
+    )
+    memory_quality_draft_min_length_chars: int = Field(
+        default=40,
+        description="Combined text shorter than this (but at/above the reject floor) is inserted as a draft (verified=False, dampened importance) rather than published at full weight",
+    )
+    memory_quality_draft_min_distinct_tokens: int = Field(
+        default=6,
+        description="Fewer distinct tokens than this (but at/above the reject floor) is inserted as a draft rather than published at full weight",
+    )
+    memory_quality_draft_importance_factor: float = Field(
+        default=0.3,
+        description="Multiplier applied to the category's normal _default_importance() score for draft-tier rows — pushes them toward the bottom of the composite ranking without hiding them from retrieval entirely",
+    )
+
+    dynamic_tool_selection_enabled: bool = Field(
+        default=True,
+        description="If true, run_agent_graph() narrows each agent's static tool list to tools with a live handler, and further narrows high-risk tools to those declared in the agent's own capability_registry contract",
+    )
+
+    # plan14 Day 1 Task 2 (Confidence-Gated Control Flow) — run_agent_graph()
+    # already has a working quality_gate_min_confidence mechanism
+    # (base_graph.py::_run_quality_gate), proven end to end by
+    # tests/test_phase37_quality_gate.py, but every one of the ~76 real
+    # callers left it at the implicit 0.0 default, which can never fail the
+    # confidence check — inert in production despite being fully built. This
+    # dict is the config-driven, per-agent staged-rollout mechanism: a caller
+    # looks up its own role_name here (falling back to 0.0 — today's
+    # unchanged, inert behavior — when absent) instead of a hardcoded
+    # threshold in code. Only "spike_agent" is seeded below — the plan's own
+    # "1-2 low-risk agents first" pilot scope (spike_agent: risk_level="low"
+    # per its own AGENT_CONTRACT, and already produces a real per-run
+    # confidence score via enable_planning=True). Expanding to more agents is
+    # a config-only change (add another key here), never a code change.
+    quality_gate_min_confidence_by_agent: dict[str, float] = Field(
+        default_factory=lambda: {"spike_agent": 0.5},
+        description="Per-agent quality_gate_min_confidence override, keyed by "
+        "role_name/AGENT_CONTRACT['name']. An agent's own run_agent_graph() call "
+        "site looks itself up here; absent keys fall back to 0.0 (today's "
+        "unchanged, inert default). 0.5 for spike_agent is a conservative floor "
+        "— below-coinflip planner confidence is flagged for review, not merely "
+        "below-perfect confidence — chosen for the pilot rollout, adjustable "
+        "here without a code change.",
+    )
+
     # AUDIT_Q_BATCH03 §120 "Context Window Management" — NO/not found:
     # format_full_memory_context truncates individual fields ([:500]/[:300]/
     # [:800]) but nothing capped the combined memory_context block itself
@@ -548,6 +631,29 @@ class Settings(BaseSettings):
     lesson_dedup_similarity_threshold: float = Field(
         default=0.8,
         description="Jaccard token-overlap ratio (same-category lessons only) above which a new lesson is treated as a near-duplicate of an existing one",
+    )
+
+    # plan14 Day 2 Task 3 (Session Memory Compression) — LessonStore.add()'s
+    # existing capacity-exceeded fallback (self._lessons.pop(0), blind FIFO
+    # eviction of the oldest lesson regardless of content) stays the fallback
+    # here — these settings only control the LLM-based compression LessonStore
+    # now tries FIRST, per the governing 5-day spec's "extend the existing
+    # LessonStore, do not build a second session-memory system" instruction.
+    lesson_compression_enabled: bool = Field(
+        default=True,
+        description="If true, LessonStore.add() tries to LLM-compress the largest same-category group of related (Jaccard-overlapping) lessons into one, before falling back to FIFO eviction, when at capacity",
+    )
+    lesson_compression_min_group_size: int = Field(
+        default=3,
+        description="Minimum number of related same-category lessons required before compression is attempted; smaller groups fall through to plain FIFO eviction (not worth an LLM call to compact 1-2 lessons)",
+    )
+    lesson_compression_jaccard_threshold: float = Field(
+        default=0.3,
+        description="Jaccard token-overlap ratio (same-category lessons) above which two lessons are considered 'related' for compression grouping. Deliberately lower than lesson_dedup_similarity_threshold (0.8) — dedup only collapses near-identical repeats, this groups genuinely distinct-but-topically-related lessons for an LLM to merge without losing information",
+    )
+    lesson_compression_llm_timeout_seconds: float = Field(
+        default=10.0,
+        description="Timeout for the lesson-compression LLM call specifically — deliberately much shorter than llm_call_timeout_seconds (300s) and uses 0 retries via its own isolated client, never the shared _call_anthropic/circuit-breaker path. This call is a best-effort background optimization on LessonStore.add()'s hot path (invoked after every agent submission, ~76 agents), not a critical-path submission — it must never block that path for anywhere near 300s, and a failing/unreachable compression call must never count toward (and potentially trip) the shared Anthropic circuit breaker that real, critical agent submissions depend on.",
     )
 
     # Phase 7 — Concurrency
@@ -989,6 +1095,144 @@ class Settings(BaseSettings):
         "actual agent performance instead of a static registration-time "
         "constant. 0 disables.",
     )
+
+    # plan14 Day 3 Task 6 (Performance-Aware Runtime Decisions) —
+    # FleetManager.select()'s scoring formula already weighs health/
+    # success_rate/error_count/tenure/confidence; these add cost and latency
+    # as two more real (MetricsCollector-tracked, not fabricated) ranking
+    # signals. Both default to 1.0 (neutral, today's exact scoring
+    # unchanged) for any agent with no run history yet.
+    #
+    # Deliberately a CAPPED linear penalty (1 - min(x*weight, max_penalty)),
+    # not an unbounded 1/(1+x) curve — matching tenure_factor's own capped-
+    # bonus shape (1 + min(x, 0.3)) elsewhere in this file/fleet_manager.py.
+    # A real regression test caught the unbounded version letting an
+    # extreme cost/latency outlier (e.g. $5 + 60s) flip a 0.95-vs-0.3
+    # success_rate gap — the audit's own instruction ("Performance MUST NOT
+    # override capability/health/security... is a ranking signal, not an
+    # authorization signal") is honored more robustly by a hard cap: even
+    # BOTH penalties simultaneously maxed out (0.7 * 0.7 = 0.49x) can never
+    # flip a real, multi-times success_rate gap, only break near-ties —
+    # the same guarantee tenure/confidence already provide.
+    fleet_select_cost_penalty_weight: float = Field(
+        default=0.1,
+        description="Multiplies an agent's avg_cost_usd (MetricsCollector.avg_cost_usd) before capping at fleet_select_max_cost_penalty in FleetManager.select()'s cost_factor term. 0 disables the cost penalty entirely (cost_factor becomes always 1.0).",
+    )
+    fleet_select_max_cost_penalty: float = Field(
+        default=0.3,
+        description="Upper bound on how much avg_cost_usd can reduce cost_factor below 1.0 (0.3 = at most a 30% reduction, regardless of how expensive the agent is).",
+    )
+    fleet_select_latency_penalty_weight: float = Field(
+        default=0.01,
+        description="Multiplies an agent's p50 latency in seconds before capping at fleet_select_max_latency_penalty in FleetManager.select()'s latency_factor term. 0 disables the latency penalty entirely.",
+    )
+    fleet_select_max_latency_penalty: float = Field(
+        default=0.3,
+        description="Upper bound on how much p50 latency can reduce latency_factor below 1.0 (0.3 = at most a 30% reduction, regardless of how slow the agent is).",
+    )
+
+    # plan14 follow-on #3 (Memory-Aware Agent Selection) — a durable,
+    # cross-process complement to confidence_factor above: AgentInstance.
+    # avg_confidence is in-process only (resets on restart), while this
+    # reads AgentHistoricalPerformance, a scheduled rollup over
+    # memory_embeddings.agent_name (real per-run outcomes, durable across
+    # restarts). Same "neutral (1.0) until real history exists, capped
+    # bonus/penalty, never a live join on FleetManager's hot path" shape as
+    # tenure_factor/cost_factor/latency_factor above.
+    agent_historical_performance_enabled: bool = Field(
+        default=True,
+        description="Master switch for both the background rollup job (app.fleet.agent_historical_performance) and FleetManager.select()'s memory_performance_factor term. False keeps select()'s exact pre-plan14-follow-on-#3 scoring.",
+    )
+    agent_historical_performance_rollup_interval_hours: float = Field(
+        default=6.0,
+        description="Hours between background recomputations of agent_historical_performance from memory_embeddings. Deliberately a scheduled rollup, not a live join, per plan14's own #3 spec — keeps FleetManager.select() a fast in-process/DB-row read, not an aggregation query, on every dispatch.",
+    )
+    fleet_select_memory_performance_weight: float = Field(
+        default=0.3,
+        description="How much AgentHistoricalPerformance.success_rate (category='task') can move memory_performance_factor away from 1.0 in FleetManager.select(), scaled to fleet_select_max_memory_performance_penalty. Same capped-linear shape as cost_factor/latency_factor — a real success_rate=0.9 memory history can move the factor at most fleet_select_max_memory_performance_penalty either direction, never enough to flip a live health/success_rate gap on its own.",
+    )
+    fleet_select_max_memory_performance_penalty: float = Field(
+        default=0.2,
+        description="Cap on memory_performance_factor's deviation from 1.0 in either direction (0.2 = factor stays in [0.8, 1.2]) — smaller than fleet_select_max_cost_penalty/fleet_select_max_latency_penalty since this is a slower-moving, longer-horizon signal (hours-old rollup) rather than a live per-run metric.",
+    )
+    fleet_select_memory_performance_min_samples: int = Field(
+        default=3,
+        description="AgentHistoricalPerformance rows with sample_size below this are treated as insufficient evidence (memory_performance_factor stays neutral at 1.0), same 'don't let sparse data overreact' principle tenure_factor's log1p curve already applies to total_runs.",
+    )
+
+    # plan14 Day 4 (#1 Agent-to-Agent Delegation + #13 Delegation Safety +
+    # #12 Agent Communication) — confirmed fully absent by repo-wide grep
+    # before building this: no delegate_to_agent, no cycle detection, no
+    # depth limit, no caller matrix anywhere. Built as one unit, the most
+    # security-sensitive day per the governing spec. delegation_allowed_matrix
+    # is config-driven (never hardcoded agent names in decision logic) —
+    # maps a real, registered source agent_name to the target capabilities
+    # (not agent names — FleetManager.select() resolves the concrete agent)
+    # it may delegate to.
+    delegation_enabled: bool = Field(
+        default=True,
+        description="If false, delegate_to_agent's handler refuses every delegation request outright (DelegationDisabledError), regardless of policy/depth/budget.",
+    )
+    delegation_max_depth: int = Field(
+        default=3,
+        description="Maximum delegation chain length (source -> target -> target's own target -> ...). A request at this depth is refused before dispatch, not after — never a silent infinite/deep recursion.",
+    )
+    delegation_max_delegations_per_run: int = Field(
+        default=5,
+        description="Maximum number of delegate_to_agent calls a single top-level agent run may make in total (tracked via the delegation count already present in ancestry/ledger, not a separate global counter) — bounds fan-out cost independent of depth.",
+    )
+    delegation_default_timeout_seconds: float = Field(
+        default=300.0,
+        description="Wall-clock timeout for a single delegated agent invocation. Exceeding it raises DelegationTimeoutError and returns a structured failure to the parent — never silently hangs the parent's own turn.",
+    )
+    delegation_default_budget_usd: float = Field(
+        default=1.0,
+        description="Budget (USD) allocated to a NEW top-level delegation chain when the initiating agent doesn't already have its own remaining-budget context. Every subsequent delegation in that chain draws down from this same allocation — a child never receives a fresh, unrestricted budget.",
+    )
+    delegation_allowed_matrix: dict[str, list[str]] = Field(
+        default_factory=lambda: {
+            "backend_dev": ["security_review", "research_spike"],
+            "frontend_dev": ["security_review", "research_spike"],
+            "bug_fix": ["security_review"],
+        },
+        description="source agent_name -> list of target capabilities (not agent names) it may delegate to. An agent absent from this dict, or requesting a capability not listed for it, is refused (DelegationNotAllowedError). Deliberately a small, explicit allow-list, not all-to-all — expanding it is a config-only change.",
+    )
+
+    # plan14 Day 5 Task 10 (Adaptive Runtime Replanning) — extends the
+    # existing _should_replan() (single "repeated failure" heuristic) with
+    # two more real, already-tracked-state-grounded triggers, and moves
+    # "which agents get replanning" from a hardcoded `enable_replanning=True`
+    # literal in 4 agent files to config, per the governing spec's own
+    # "use configurable thresholds/policies" instruction. Every default below
+    # preserves today's exact behavior for the 4 already-enabled agents
+    # (coder/pm/qa/security_reviewer) while making both "which agents" and
+    # "how sensitive" real config, not code.
+    replanning_enabled_agents: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "coder": True,
+            "pm": True,
+            "qa": True,
+            "security_reviewer": True,
+        },
+        description="agent_name -> whether build_agent_graph()'s enable_replanning flag is on for it. Replaces 4 hardcoded `enable_replanning=True` literals (coder.py/pm.py/qa.py/security_reviewer.py) with one config-driven policy — an agent absent from this dict defaults to False (replanning off), matching every other agent's pre-plan14 behavior.",
+    )
+    replanning_reflection_failure_threshold: int = Field(
+        default=2,
+        description="_should_replan()'s existing 'failure' trigger: consecutive reflection_unsatisfied_count judgments before replanning fires. Unchanged default from the pre-plan14 hardcoded value.",
+    )
+    replanning_critique_failure_threshold: int = Field(
+        default=2,
+        description="_should_replan()'s existing 'failure' trigger: consecutive critique_retries on the same unmet criteria before replanning fires. Unchanged default from the pre-plan14 hardcoded value.",
+    )
+    replanning_confidence_threshold: float = Field(
+        default=0.5,
+        description="NEW 'new-information' trigger: if the planner's own state['confidence'] is below this floor, replan — the plan was built on genuinely uncertain footing, distinct from a failure that's already happened during execution. 0.5 matches the same 'below-coinflip' reasoning already used for quality_gate_min_confidence_by_agent's pilot threshold (Day 1 Task 2).",
+    )
+    replanning_blocked_turn_threshold: int = Field(
+        default=4,
+        description="NEW 'blocked/dependency' trigger: if at least this many turns have passed and a required verification key (VerificationConfig.enforce_in_result) the agent's own contract cares about still isn't satisfied, replan — real evidence the plan's assumptions about the environment/dependencies aren't holding, not a fabricated heuristic. Only checked for agents that actually declare enforce_in_result requirements.",
+    )
+
     prompt_auto_rollback_interval_hours: float = Field(
         default=4.0,
         description="AUDIT_Q_BATCH15 §118 gap-closure — hours between checking "
@@ -1126,6 +1370,34 @@ class Settings(BaseSettings):
     lesson_retention_days: int = Field(
         default=180,
         description="Days to keep SUPERSEDED/MERGED_INTO versioned_lessons rows before archive_expired() marks them ARCHIVED. 0 disables.",
+    )
+
+    # plan14 Day 3 Task 5 (Memory Consolidation) — extends the existing Day 11
+    # merge-on-conflict lifecycle to N-way: promote()'s reactive sweep (any
+    # OTHER currently-published lesson similar enough gets merged at the
+    # moment a new one goes live) and the proactive consolidate_published_
+    # lessons() background pass (clusters existing published lessons and
+    # proposes merged drafts for human review). Both reuse
+    # memory_merge_similarity_threshold above rather than a second threshold.
+    memory_consolidation_enabled: bool = Field(
+        default=True,
+        description="If true, promote() also sweeps for and merges (state='merged_into') other currently-published lessons within memory_merge_similarity_threshold of the just-promoted lesson's embedding",
+    )
+    memory_consolidation_max_merge_per_promote: int = Field(
+        default=20,
+        description="Bounds how many other published lessons a single promote() call can flip to merged_into in one sweep",
+    )
+    memory_consolidation_max_candidates: int = Field(
+        default=200,
+        description="Bounds consolidate_published_lessons()'s proactive scan to the N most-recently-published lessons, keeping its O(n^2) pairwise clustering pass cost-bounded",
+    )
+    memory_consolidation_min_cluster_size: int = Field(
+        default=2,
+        description="Minimum related-lesson cluster size for consolidate_published_lessons() to propose a merged draft — a 'cluster' of 1 is nothing to consolidate",
+    )
+    memory_consolidation_interval_hours: float = Field(
+        default=24.0,
+        description="Hours between app/main.py's _versioned_lesson_consolidation_loop runs — matches the existing daily cadence _versioned_lesson_archive_loop already uses for the same table",
     )
     memory_embeddings_retention_days: int = Field(
         default=180,

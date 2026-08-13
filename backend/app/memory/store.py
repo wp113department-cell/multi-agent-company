@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import select, text
@@ -100,6 +101,100 @@ def _default_verified(outcome: str) -> bool:
     known-positive signal at write time (outcome='completed') — never a
     separate, invented judgment layered on top of existing data."""
     return outcome == "completed"
+
+
+@dataclass(frozen=True)
+class MemoryQualityDecision:
+    action: str  # "reject" | "draft" | "publish"
+    reasons: list[str] = field(default_factory=list)
+    length: int = 0
+    distinct_tokens: int = 0
+
+
+def evaluate_memory_quality(*text_fragments: str) -> MemoryQualityDecision:
+    """plan14 Day 2 Task 4 (Memory Quality Gate) — deterministic pre-store
+    gate for memory_embeddings writes. Every embed_*() function below calls
+    this after its own _find_near_duplicate() check (so it only evaluates
+    genuinely new candidates, not near-duplicates that reuse an existing
+    row) and before inserting.
+
+    Scope note: this is specifically the "routine memory" tier of the wider
+    quality-tiering design the original backlog described (deterministic
+    checks for routine memories; LLM/HITL validation for "lesson"-tagged and
+    fleet-wide content). The separate lessons/versioned_lessons system
+    (LessonStore, VersionedMemoryStore) already has its own dedicated
+    lifecycle/validation — extended separately by this same plan's Day 2
+    Task 3 (session compression) and Day 3 Task 5 (consolidation) — and is
+    untouched by this function.
+
+    No LLM call, no regex: length + distinct-token-count only. Deliberately
+    low floors — a stated preference like "use tabs not spaces" is
+    legitimately short and must never be rejected outright, only drafted at
+    most; 'reject' is reserved for near-empty/placeholder candidates ("",
+    "done", "ok", "n/a") that were never going to be useful to a future
+    agent. 'draft' still gets inserted (never silently discarded) — see
+    embed_task_outcome's own docstring note on how draft is represented
+    without a new column.
+
+    reject uses length only, deliberately not distinct-token-count: a real
+    regression run against this suite's own existing tests (short-but-real
+    fixture content like "desc A"/"summary A", used across several
+    repo-scoping tests that predate this feature and aren't testing quality-
+    gate behavior) showed a token-count floor in the reject tier was too
+    aggressive — it silently dropped legitimately short, real content
+    instead of only catching genuinely near-empty candidates, which a length
+    floor alone already does for every example above ("done"=4 chars,
+    "ok"=2, "n/a"=3). distinct-token-count remains a real signal for the
+    draft tier, where it can only ever de-prioritize a row, never make it
+    disappear.
+
+    Settings access is wrapped in try/except, failing open to "publish" on
+    any error — mirrors this same module's own _find_near_duplicate
+    convention immediately above. This is a nice-to-have layered check on
+    top of the real write path, not the write path itself: a settings
+    misconfiguration (or, as a real regression run against several
+    pre-existing tests that mock get_settings() with only memory_enabled
+    set surfaced, an incompletely-mocked settings object in a test) must
+    never block a real memory write, exactly like a dedup-check failure
+    already doesn't."""
+    combined = " ".join(t for t in text_fragments if t).strip()
+    length = len(combined)
+    distinct_tokens = len({t.lower() for t in combined.split() if len(t) > 2})
+
+    try:
+        settings = get_settings()
+        if not settings.memory_quality_gate_enabled:
+            return MemoryQualityDecision("publish", [], length, distinct_tokens)
+
+        if length < settings.memory_quality_reject_min_length_chars:
+            return MemoryQualityDecision(
+                "reject",
+                [
+                    f"{length} chars — below the reject floor "
+                    "(near-empty/placeholder content)"
+                ],
+                length,
+                distinct_tokens,
+            )
+        if (
+            length < settings.memory_quality_draft_min_length_chars
+            or distinct_tokens < settings.memory_quality_draft_min_distinct_tokens
+        ):
+            return MemoryQualityDecision(
+                "draft",
+                [
+                    f"{length} chars / {distinct_tokens} distinct tokens — "
+                    "below the publish floor"
+                ],
+                length,
+                distinct_tokens,
+            )
+        return MemoryQualityDecision("publish", [], length, distinct_tokens)
+    except Exception as exc:
+        logger.warning(
+            "Memory quality gate evaluation failed, defaulting to publish: %s", exc
+        )
+        return MemoryQualityDecision("publish", [], length, distinct_tokens)
 
 
 async def record_memory_access(memory_ids: list[int], db: AsyncSession) -> None:
@@ -270,6 +365,7 @@ async def embed_task_outcome(
     db: AsyncSession,
     epic_id: str | None = None,
     repo_id: int | None = None,
+    agent_name: str | None = None,
 ) -> MemoryEmbedding | None:
     """Embed a task outcome and store it in memory_embeddings.
 
@@ -278,7 +374,31 @@ async def embed_task_outcome(
     every pre-Day-2 row, and any caller not yet updated to pass its resolved
     repo id, keeps working exactly as before.
 
-    Returns the persisted row, or None if memory is disabled or embedding fails.
+    plan14 Day 2 Task 4 (Memory Quality Gate): a near-empty/placeholder
+    candidate is rejected outright (never inserted — see
+    evaluate_memory_quality). A borderline-specificity candidate is still
+    inserted, but as a draft: verified=False and importance dampened by
+    memory_quality_draft_importance_factor, pushing it toward the bottom of
+    the composite ranking without hiding it from retrieval. Deliberately NOT
+    the archived column — archived/archived_at are retention.py's own hard
+    exclusion filter (every query_*'s `WHERE archived = false`, and the
+    retention job's own `WHERE archived = false` re-archival query); a real
+    regression run proved that pre-setting archived=True at write time makes
+    the retention job find zero candidates for that row forever (two
+    independent lifecycle concerns collapsed onto one hard-filter boolean).
+    verified/importance are confirmed soft ranking-only signals (never used
+    in a hard WHERE filter anywhere in this module), so reusing them carries
+    no such collision risk.
+
+    agent_name (plan14 follow-on #3, Memory-Aware Agent Selection): None
+    (the default) means unattributed — correct for manager.py's epic-level
+    calls (an epic aggregates many agents' work, there is no single
+    attributable agent) and any caller not yet updated. app.memory.hooks.
+    record_agent_run_outcome, the one per-agent-run write path, passes its
+    own real agent_name through.
+
+    Returns the persisted row, or None if memory is disabled, embedding
+    fails, or the quality gate rejects the candidate.
     """
     settings = get_settings()
     if not settings.memory_enabled:
@@ -297,6 +417,15 @@ async def embed_task_outcome(
         )
         return duplicate
 
+    quality = evaluate_memory_quality(description, summary)
+    if quality.action == "reject":
+        logger.info(
+            "Memory: rejected low-quality task outcome for %s: %s",
+            task_id,
+            quality.reasons,
+        )
+        return None
+
     try:
         row = MemoryEmbedding(
             task_id=task_id,
@@ -307,8 +436,16 @@ async def embed_task_outcome(
             summary=summary,
             files_changed=files_changed,
             embedding=vector,
-            importance=_default_importance("task", outcome),
-            verified=_default_verified(outcome),
+            agent_name=agent_name,
+            importance=(
+                _default_importance("task", outcome)
+                * settings.memory_quality_draft_importance_factor
+                if quality.action == "draft"
+                else _default_importance("task", outcome)
+            ),
+            verified=(
+                _default_verified(outcome) if quality.action != "draft" else False
+            ),
         )
         db.add(row)
         await db.commit()
@@ -630,6 +767,15 @@ async def embed_architecture_note(
         )
         return duplicate
 
+    quality = evaluate_memory_quality(full_content)
+    if quality.action == "reject":
+        logger.info(
+            "Memory: rejected low-quality architecture note for %s: %s",
+            task_id,
+            quality.reasons,
+        )
+        return None
+
     try:
         row = MemoryEmbedding(
             task_id=task_id,
@@ -641,8 +787,18 @@ async def embed_architecture_note(
             summary=full_content[:300],
             files_changed=[],
             embedding=vector,
-            importance=_default_importance("architecture", "architecture"),
-            verified=_default_verified("architecture"),
+            agent_name=agent_name or None,
+            importance=(
+                _default_importance("architecture", "architecture")
+                * settings.memory_quality_draft_importance_factor
+                if quality.action == "draft"
+                else _default_importance("architecture", "architecture")
+            ),
+            verified=(
+                _default_verified("architecture")
+                if quality.action != "draft"
+                else False
+            ),
         )
         db.add(row)
         await db.commit()
@@ -796,10 +952,13 @@ async def embed_failure(
     db: AsyncSession,
     epic_id: str | None = None,
     repo_id: int | None = None,
+    agent_name: str | None = None,
 ) -> MemoryEmbedding | None:
     """Store a failure record so future agents can learn from past blocked tasks.
 
-    Uses outcome='failure' to tag the record type.
+    Uses outcome='failure' to tag the record type. agent_name (plan14
+    follow-on #3) is None by default for the same "epic-level caller has no
+    single agent" reason as embed_task_outcome.
     """
     settings = get_settings()
     if not settings.memory_enabled:
@@ -818,6 +977,15 @@ async def embed_failure(
         )
         return duplicate
 
+    quality = evaluate_memory_quality(error_description, root_cause)
+    if quality.action == "reject":
+        logger.info(
+            "Memory: rejected low-quality failure record for %s: %s",
+            task_id,
+            quality.reasons,
+        )
+        return None
+
     try:
         row = MemoryEmbedding(
             task_id=task_id,
@@ -829,8 +997,16 @@ async def embed_failure(
             summary=root_cause[:300],
             files_changed=[],
             embedding=vector,
-            importance=_default_importance("failure", "failure"),
-            verified=_default_verified("failure"),
+            agent_name=agent_name,
+            importance=(
+                _default_importance("failure", "failure")
+                * settings.memory_quality_draft_importance_factor
+                if quality.action == "draft"
+                else _default_importance("failure", "failure")
+            ),
+            verified=(
+                _default_verified("failure") if quality.action != "draft" else False
+            ),
         )
         db.add(row)
         await db.commit()
@@ -954,6 +1130,15 @@ async def embed_learning_signal(
         )
         return duplicate
 
+    quality = evaluate_memory_quality(description, outcome_summary)
+    if quality.action == "reject":
+        logger.info(
+            "Memory: rejected low-quality learning signal from %s: %s",
+            agent_name,
+            quality.reasons,
+        )
+        return None
+
     try:
         row = MemoryEmbedding(
             task_id=f"fleet-{agent_name}",
@@ -964,8 +1149,16 @@ async def embed_learning_signal(
             summary=outcome_summary[:300],
             files_changed=[],
             embedding=vector,
-            importance=_default_importance("learning", "learning"),
-            verified=_default_verified("learning"),
+            agent_name=agent_name,
+            importance=(
+                _default_importance("learning", "learning")
+                * settings.memory_quality_draft_importance_factor
+                if quality.action == "draft"
+                else _default_importance("learning", "learning")
+            ),
+            verified=(
+                _default_verified("learning") if quality.action != "draft" else False
+            ),
         )
         db.add(row)
         await db.commit()
@@ -1157,6 +1350,15 @@ async def embed_procedure(
         )
         return duplicate
 
+    quality = evaluate_memory_quality(symptom, summary_text)
+    if quality.action == "reject":
+        logger.info(
+            "Memory: rejected low-quality procedure for %s: %s",
+            task_id,
+            quality.reasons,
+        )
+        return None
+
     try:
         row = MemoryEmbedding(
             task_id=task_id,
@@ -1168,8 +1370,16 @@ async def embed_procedure(
             summary=summary_text[:2000],
             files_changed=[],
             embedding=vector,
-            importance=_default_importance("procedure", "procedure"),
-            verified=_default_verified("procedure"),
+            agent_name=agent_name,
+            importance=(
+                _default_importance("procedure", "procedure")
+                * settings.memory_quality_draft_importance_factor
+                if quality.action == "draft"
+                else _default_importance("procedure", "procedure")
+            ),
+            verified=(
+                _default_verified("procedure") if quality.action != "draft" else False
+            ),
         )
         db.add(row)
         await db.commit()
@@ -1315,6 +1525,15 @@ async def embed_preference(
         )
         return duplicate
 
+    quality = evaluate_memory_quality(preference)
+    if quality.action == "reject":
+        logger.info(
+            "Memory: rejected low-quality preference for %s: %s",
+            task_id,
+            quality.reasons,
+        )
+        return None
+
     try:
         row = MemoryEmbedding(
             task_id=task_id,
@@ -1326,8 +1545,15 @@ async def embed_preference(
             summary=f"scope={scope}"[:300],
             files_changed=[],
             embedding=vector,
-            importance=_default_importance("preference", "preference"),
-            verified=_default_verified("preference"),
+            importance=(
+                _default_importance("preference", "preference")
+                * settings.memory_quality_draft_importance_factor
+                if quality.action == "draft"
+                else _default_importance("preference", "preference")
+            ),
+            verified=(
+                _default_verified("preference") if quality.action != "draft" else False
+            ),
         )
         db.add(row)
         await db.commit()
@@ -1501,6 +1727,15 @@ async def embed_bug(
         )
         return duplicate
 
+    quality = evaluate_memory_quality(issue)
+    if quality.action == "reject":
+        logger.info(
+            "Memory: rejected low-quality bug record for %s: %s",
+            task_id,
+            quality.reasons,
+        )
+        return None
+
     try:
         row = MemoryEmbedding(
             task_id=task_id,
@@ -1512,8 +1747,13 @@ async def embed_bug(
             summary=f"severity={severity}"[:300],
             files_changed=[],
             embedding=vector,
-            importance=_default_importance("bug", "bug"),
-            verified=_default_verified("bug"),
+            importance=(
+                _default_importance("bug", "bug")
+                * settings.memory_quality_draft_importance_factor
+                if quality.action == "draft"
+                else _default_importance("bug", "bug")
+            ),
+            verified=(_default_verified("bug") if quality.action != "draft" else False),
         )
         db.add(row)
         await db.commit()

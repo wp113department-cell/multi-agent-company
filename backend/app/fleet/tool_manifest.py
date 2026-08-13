@@ -1418,6 +1418,28 @@ TOOL_MANIFEST: dict[str, ToolManifestEntry] = {
         verification_required=False,
         risk_level="medium",
     ),
+    "delegate_to_agent": ToolManifestEntry(
+        purpose=(
+            "plan14 Day 4 (#1 Agent-to-Agent Delegation) — delegate a "
+            "specific, well-scoped sub-task to another agent by capability, "
+            "resolved via FleetManager.select(). Real invocation, gated by "
+            "app.agents.delegation's depth limit, cycle detection, "
+            "config-driven allowed-capability policy, shared budget, and a "
+            "wall-clock timeout."
+        ),
+        permissions=["execute"],
+        timeout_s=300,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="high",
+        notes=(
+            "high risk deliberately: can trigger real, costly agent work. "
+            "Marking it high-risk here reinforces plan14 Day 1's dynamic-"
+            "tool-selection contract-drift check — any agent whose runtime "
+            "tool list includes this tool but whose own AgentCapability."
+            "tools doesn't declare it gets it filtered out automatically."
+        ),
+    ),
     "record_learning": ToolManifestEntry(
         purpose=(
             "Record a non-obvious finding for future agents working on similar "
