@@ -24,6 +24,10 @@ from app.agents.tools import (
     make_record_learning_handler,
 )
 from app.config import get_settings
+from app.tools.agents.delegate import (
+    DELEGATE_TO_AGENT_TOOL,
+    make_delegate_to_agent_handler,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +68,15 @@ AGENT_CONTRACT: dict[str, Any] = {
         # settings.dynamic_subtask_creation_enabled_agents["backend_dev"]
         # is True (see run_backend_dev's subtask_proposal_sink parameter).
         "propose_subtask",
+        # tool_enhance.md productionization pass, tool #3 (2026-08-15) —
+        # real gap found while auditing delegate_to_agent: config.py's
+        # delegation_allowed_matrix already listed "backend_dev":
+        # ["security_review", "research_spike"] as real, intended policy,
+        # but this agent never actually had the tool wired in — a real,
+        # silently-unusable capability, not a security hole (the matrix +
+        # base_graph.py's dispatch-authorization gate already refuse an
+        # unadvertised/unauthorized call either way).
+        "delegate_to_agent",
     ],
     "input_types": ["task_id", "subtask_id", "plan", "worktree_path", "repo_path"],
     "output_types": ["files_changed", "tokens_in", "tokens_out"],
@@ -170,15 +183,29 @@ def run_backend_dev(
     for attempt in range(max_retries):
         handlers = make_coder_handlers(worktree_path, repo, extra_env=extra_env)
         handlers["record_learning"] = make_record_learning_handler("backend_dev")
+        # tool_enhance.md productionization pass, tool #3 (2026-08-15) —
+        # wires the real capability config.py's delegation_allowed_matrix
+        # already grants this agent (see AGENT_CONTRACT's own comment
+        # above for why this was previously a real, unreachable gap).
+        # ancestry starts as just this agent's own name — backend_dev is
+        # always the first link in a chain it initiates.
+        handlers["delegate_to_agent"] = make_delegate_to_agent_handler(
+            source_agent="backend_dev",
+            task_id=str(task_id),
+            repo_path=repo,
+            ancestry=("backend_dev",),
+            delegation_depth=0,
+            budget_remaining_usd=settings.delegation_default_budget_usd,
+        )
 
-        tools = CODER_TOOLS
+        tools = CODER_TOOLS + [DELEGATE_TO_AGENT_TOOL]
         if subtask_proposal_sink is not None:
             from app.agents.tools import (
                 PROPOSE_SUBTASK_TOOL,
                 make_propose_subtask_handler,
             )
 
-            tools = CODER_TOOLS + [PROPOSE_SUBTASK_TOOL]
+            tools = tools + [PROPOSE_SUBTASK_TOOL]
             handlers["propose_subtask"] = make_propose_subtask_handler(
                 subtask_proposal_sink
             )

@@ -35,10 +35,10 @@ from app.agents.delegation import (
     DelegationTargetUnavailableError,
     delegate,
 )
-from app.agents.tools import make_delegate_to_agent_handler
 from app.config import get_settings, reset_settings_cache
 from app.fleet.agent_registry import get_agent_registry
 from app.fleet.capability_registry import AgentCapability, get_capability_registry
+from app.tools.agents.delegate import make_delegate_to_agent_handler
 
 
 def _register_test_agent(name: str, capability: str) -> None:
@@ -386,6 +386,66 @@ def test_handler_returns_summary_on_success(monkeypatch: pytest.MonkeyPatch) -> 
 
     assert "dg_test_handler_agent" in result
     assert "handler summary text" in result
+
+
+def test_handler_budget_actually_decrements_across_repeated_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Second hardening pass (2026-08-15) — real bug found: the handler
+    previously captured budget_remaining_usd once and reused it UNCHANGED
+    on every call, contradicting config.py's own documented contract
+    ("every subsequent delegation in that chain draws down from this same
+    allocation"). Proves a second call through the SAME handler closure
+    sees the real remaining balance after the first call's cost, and that
+    a third call exceeding what's left is refused."""
+    _register_test_agent("dg_test_budget_agent", "dg_test_budget_cap")
+    monkeypatch.setattr(
+        get_settings(),
+        "delegation_allowed_matrix",
+        {"dg_test_budget_source": ["dg_test_budget_cap"]},
+    )
+    monkeypatch.setattr(get_settings(), "delegation_max_delegations_per_run", 100)
+    handler = make_delegate_to_agent_handler(
+        source_agent="dg_test_budget_source",
+        task_id="1",
+        repo_path="",
+        budget_remaining_usd=1.0,
+    )
+    with (
+        patch(
+            "app.agents.delegation._build_adapter_registry",
+            return_value={"dg_test_budget_agent": lambda *a: _fake_result()},
+        ),
+        patch(
+            "app.agents.delegation._estimate_result_cost_usd", return_value=0.6
+        ),
+    ):
+        first = handler(
+            {"target_capability": "dg_test_budget_cap", "objective": "do it"}
+        )
+        second = handler(
+            {"target_capability": "dg_test_budget_cap", "objective": "do it again"}
+        )
+
+    assert "dg_test_budget_agent" in first
+    # Second call: 1.0 - 0.6 = 0.4 remaining, but the mocked cost is still
+    # 0.6 — real delegate() checks budget_remaining_usd <= 0 up front, so
+    # this only fails once the balance is truly exhausted. With 0.4 left
+    # (> 0), this second call is still permitted...
+    assert "dg_test_budget_agent" in second
+
+    with patch(
+        "app.agents.delegation._build_adapter_registry",
+        return_value={"dg_test_budget_agent": lambda *a: _fake_result()},
+    ):
+        # ...but a third call, after 1.0 - 0.6 - 0.6 = -0.2, must now be
+        # refused — proof the decrement genuinely carried across both
+        # prior calls, not just tracked in isolation.
+        third = handler(
+            {"target_capability": "dg_test_budget_cap", "objective": "one more"}
+        )
+    assert third.startswith("[POLICY DENIED]")
+    assert "budget" in third.lower()
 
 
 # ---------------------------------------------------------------------------

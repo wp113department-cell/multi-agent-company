@@ -16,10 +16,10 @@ from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
     BUG_FIX_TOOLS,
     make_bug_fix_handlers,
-    make_delegate_to_agent_handler,
     make_record_learning_handler,
 )
 from app.config import get_settings
+from app.tools.agents.delegate import make_delegate_to_agent_handler
 
 logger = logging.getLogger(__name__)
 
