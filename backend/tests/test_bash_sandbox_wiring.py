@@ -89,9 +89,19 @@ def test_bash_sandbox_disabled_falls_back_to_direct_host_execution(
 ) -> None:
     """An explicit, operator-set BASH_SANDBOX_ENABLED=false must route
     around the sandbox entirely — proven by mocking run_sandboxed and
-    asserting it's never called while the command still genuinely executes."""
-    with patch("app.agents.tools.get_settings") as mock_settings:
+    asserting it's never called while the command still genuinely executes.
+
+    tool_enhance.md productionization pass (bash tool, 2026-08-15):
+    make_scoped_bash_handler moved to app.tools.execution.bash — that
+    module's own imported `get_settings` is what _run_bash_command and the
+    handler's own timeout lookup both actually resolve now, so this patch
+    target moved with it (patching app.agents.tools.get_settings would
+    silently no-op after the move: real regression caught by this exact
+    test failing when the module moved without this patch target being
+    updated)."""
+    with patch("app.tools.execution.bash.get_settings") as mock_settings:
         mock_settings.return_value.bash_sandbox_enabled = False
+        mock_settings.return_value.bash_tool_timeout_seconds = {}
         with patch("app.policy.sandbox.run_sandboxed") as mock_run_sandboxed:
             bash_h = make_scoped_bash_handler(str(tmp_path))
             out = bash_h({"command": "echo hello-unsandboxed"})

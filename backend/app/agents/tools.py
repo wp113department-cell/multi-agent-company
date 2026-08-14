@@ -37,59 +37,33 @@ from app.policy.engine import (
     check_path_in_worktree,
 )
 
-# ---------------------------------------------------------------------------
-# Shared sandboxed-execution primitive — gap-closure Day 9 (answers.md Q21).
-# Used by the three fully-generic, denylist-only bash tools (chat_agent's
-# `bash`, coder's `bash`, make_scoped_bash_handler) — see
-# app/policy/sandbox.py's module docstring for the rollout-scope reasoning
-# (why the other ~12 already-allowlist-scoped bash handlers aren't wired to
-# this yet).
-# ---------------------------------------------------------------------------
-
-
-def _run_bash_command(
-    command: str,
-    cwd: str,
-    *,
-    timeout: int,
-    extra_env: dict[str, str] | None = None,
-) -> tuple[str, str, int, bool]:
-    """Returns (stdout, stderr, returncode, timed_out) regardless of which
-    path ran the command — each call site keeps its own existing output
-    formatting unchanged, only the execution primitive underneath it moves.
-
-    Routes through the real Docker sandbox (app.policy.sandbox.run_sandboxed)
-    when Settings.bash_sandbox_enabled is True (the default). Falls back to
-    direct host subprocess execution ONLY when an operator has explicitly
-    set BASH_SANDBOX_ENABLED=false — never silently, and never merely
-    because Docker itself is unreachable (that raises
-    SandboxUnavailableError inside run_sandboxed, surfaced here as a
-    [SANDBOX UNAVAILABLE] result instead of a quiet fallback).
-    """
-    settings = get_settings()
-    if settings.bash_sandbox_enabled:
-        from app.policy.sandbox import SandboxUnavailableError, run_sandboxed
-
-        try:
-            result = run_sandboxed(command, cwd, timeout=timeout, env=extra_env)
-            return result.stdout, result.stderr, result.returncode, result.timed_out
-        except SandboxUnavailableError as exc:
-            return "", f"[SANDBOX UNAVAILABLE] {exc}", -1, False
-
-    env = {**os.environ, **extra_env} if extra_env else None
-    try:
-        proc = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            cwd=cwd,
-            timeout=timeout,
-            env=env,
-        )
-        return proc.stdout, proc.stderr, proc.returncode, False
-    except subprocess.TimeoutExpired:
-        return "", f"Command timed out after {timeout}s", -1, True
+# tool_enhance.md productionization pass, tool #1 (bash), 2026-08-15 — the
+# FIRST step of this file's own gradual modularization (§7/§8). Real
+# migration report: app/tools/execution/bash.py's own module docstring.
+# Compatibility shim (§9): every name below still resolves via
+# `from app.agents.tools import X` exactly as before this move — owner =
+# this productionization pass, reason = avoid a repo-wide mechanical edit
+# across every agent file that imports these names for a move that doesn't
+# change behavior, migration target = agent files import directly from
+# app.tools.execution.bash at a later, separate, per-caller-verified pass,
+# removal condition = every real caller individually confirmed migrated.
+from app.tools.execution.bash import (
+    DEPENDENCY_AUDIT_ALLOWED_PREFIXES as DEPENDENCY_AUDIT_ALLOWED_PREFIXES,
+    DEPENDENCY_AUDIT_BASH_TOOL as DEPENDENCY_AUDIT_BASH_TOOL,
+    INFRA_DRY_RUN_ALLOWED_PREFIXES as INFRA_DRY_RUN_ALLOWED_PREFIXES,
+    INFRA_DRY_RUN_BASH_TOOL as INFRA_DRY_RUN_BASH_TOOL,
+    LOAD_TEST_ALLOWED_PREFIXES as LOAD_TEST_ALLOWED_PREFIXES,
+    LOAD_TEST_BASH_TOOL as LOAD_TEST_BASH_TOOL,
+    TEST_RUNNER_ALLOWED_PREFIXES as TEST_RUNNER_ALLOWED_PREFIXES,
+    TEST_RUNNER_BASH_TOOL as TEST_RUNNER_BASH_TOOL,
+    _FLEET_BASH_TOOL as _FLEET_BASH_TOOL,
+    _run_bash_command as _run_bash_command,
+    make_dependency_audit_bash_handler as make_dependency_audit_bash_handler,
+    make_infra_dry_run_bash_handler as make_infra_dry_run_bash_handler,
+    make_load_test_bash_handler as make_load_test_bash_handler,
+    make_scoped_bash_handler as make_scoped_bash_handler,
+    make_test_runner_bash_handler as make_test_runner_bash_handler,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1080,275 +1054,11 @@ _QA_ALLOWED_PREFIXES = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Shared test-runner bash — MASTER_AGENT_v2.md Phase 2.1 (Executor tier).
-# Same allowlist-then-denylist pattern make_qa_handlers already uses above,
-# scoped tighter (test commands only, no build/lint) and reused by any agent
-# whose job requires reproducing a failure or verifying a fix by actually
-# running a test — not duplicated per agent.
-# ---------------------------------------------------------------------------
-
-TEST_RUNNER_ALLOWED_PREFIXES = (
-    "pytest",
-    "python -m pytest",
-    "python3 -m pytest",
-    "npm test",
-    "npx jest",
-    "npx vitest",
-)
-
-TEST_RUNNER_BASH_TOOL: dict[str, Any] = {
-    "name": "bash",
-    "description": (
-        "Run a test command to reproduce a failure or verify a fix. Allowed: "
-        "pytest, npm test, npx jest/vitest. No write operations, no deploy commands."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "command": {"type": "string", "description": "Test command to run"},
-        },
-        "required": ["command"],
-    },
-}
-
-
-def make_test_runner_bash_handler(
-    worktree_path: str,
-) -> Callable[[dict[str, Any]], str]:
-    """Scoped bash handler for agents that only need to run tests (reproduce
-    a failure, or verify a fix). Never raises — a command outside the
-    allowlist returns a [POLICY DENIED] string, matching every other
-    scoped-bash handler's own contract."""
-    venv_bin = str(Path(sys.executable).parent)
-    env_with_venv = os.environ.copy()
-    env_with_venv["PATH"] = venv_bin + ":" + env_with_venv.get("PATH", "")
-
-    def bash(inp: dict[str, Any]) -> str:
-        cmd = str(inp["command"])
-        policy = check_allowlisted_command(cmd, TEST_RUNNER_ALLOWED_PREFIXES)
-        if not policy.allowed:
-            return f"[POLICY DENIED] {policy.reason}"
-        try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                cwd=worktree_path,
-                env=env_with_venv,
-                timeout=120,
-            )
-            out = (result.stdout + result.stderr)[:6000]
-            return out if out else "(no output)"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] Command timed out after 120s"
-
-    return bash
-
-
-# ---------------------------------------------------------------------------
-# Scoped load-test bash — MASTER_AGENT_v2.md Phase 2.1 (Executor tier).
-# k6/locust only. Real load tests run long; this tool's job is letting the
-# agent execute a short smoke run of the script it just wrote to confirm it
-# actually runs against the target (catches syntax errors, wrong URLs,
-# schema mismatches) — not to run the full-scale load test unattended.
-# ---------------------------------------------------------------------------
-
-LOAD_TEST_ALLOWED_PREFIXES = (
-    "k6 run",
-    "locust",
-)
-
-LOAD_TEST_BASH_TOOL: dict[str, Any] = {
-    "name": "bash",
-    "description": (
-        "Run a k6 or Locust load test script — use this for a short smoke run "
-        "(low duration/VU flags) to confirm the script actually executes against "
-        "the target before handing it off, not to run the full-scale load test. "
-        "Allowed: k6 run, locust. No write operations, no deploy commands."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "command": {"type": "string", "description": "k6/locust command to run"},
-        },
-        "required": ["command"],
-    },
-}
-
-
-def make_load_test_bash_handler(repo_path: str) -> Callable[[dict[str, Any]], str]:
-    """Scoped bash handler for load_test_agent — same allowlist-then-denylist
-    pattern as make_test_runner_bash_handler, scoped to k6/locust instead of
-    pytest/npm. A missing k6/locust binary is reported as command output
-    (non-zero exit + stderr), not an exception — the agent can see and
-    report that the tool isn't installed rather than the run crashing."""
-
-    def bash(inp: dict[str, Any]) -> str:
-        cmd = str(inp["command"])
-        policy = check_allowlisted_command(cmd, LOAD_TEST_ALLOWED_PREFIXES)
-        if not policy.allowed:
-            return f"[POLICY DENIED] {policy.reason}"
-        try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                cwd=repo_path,
-                timeout=120,
-            )
-            out = (result.stdout + result.stderr)[:6000]
-            return out if out else "(no output)"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] Command timed out after 120s"
-
-    return bash
-
-
-# ---------------------------------------------------------------------------
-# Scoped dependency-audit bash — gap-closure Day 7 (answers.md Q92).
-# roles/dependency_security_agent.md has always claimed "using LIVE audit
-# tooling only" / "never relies on training-data CVE recall", but the agent
-# had no tool capable of actually running one — every prior CVE claim was
-# necessarily the model's own (possibly stale, possibly invented) training
-# knowledge with no live tool call behind it. Same allowlist-then-denylist
-# pattern as make_test_runner_bash_handler/make_load_test_bash_handler,
-# scoped to pip-audit/npm audit only.
-# ---------------------------------------------------------------------------
-
-DEPENDENCY_AUDIT_ALLOWED_PREFIXES = (
-    "pip-audit",
-    "pip_audit",
-    "python -m pip_audit",
-    "python3 -m pip_audit",
-    "npm audit",
-)
-
-DEPENDENCY_AUDIT_BASH_TOOL: dict[str, Any] = {
-    "name": "bash",
-    "description": (
-        "Run a live dependency-vulnerability audit. Allowed: pip-audit (Python, "
-        "requirements.txt), npm audit (Node, package.json). Must be called at "
-        "least once before reporting any CVE — a finding not backed by this "
-        "run's real tool output is not a verified finding. No write operations."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "command": {
-                "type": "string",
-                "description": "pip-audit/npm audit command to run",
-            },
-        },
-        "required": ["command"],
-    },
-}
-
-
-def make_dependency_audit_bash_handler(
-    repo_path: str,
-) -> Callable[[dict[str, Any]], str]:
-    """Scoped bash handler for dependency_security_agent — the one real tool
-    call its role prompt's "LIVE audit tooling only" promise depends on."""
-
-    def bash(inp: dict[str, Any]) -> str:
-        cmd = str(inp["command"])
-        policy = check_allowlisted_command(cmd, DEPENDENCY_AUDIT_ALLOWED_PREFIXES)
-        if not policy.allowed:
-            return f"[POLICY DENIED] {policy.reason}"
-        try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                cwd=repo_path,
-                timeout=120,
-            )
-            out = (result.stdout + result.stderr)[:6000]
-            return out if out else "(no output — no known vulnerabilities found)"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] Command timed out after 120s"
-
-    return bash
-
-
-# ---------------------------------------------------------------------------
-# Scoped infra dry-run bash — MASTER_AGENT_v2.md Phase 2.1 (Executor tier).
-# Validate/lint/build only — no apply, no deploy, no push. This is the exact
-# boundary the spec calls for: "must be able to apply and verify an infra
-# change in a sandboxed/dry-run mode at minimum" — dry-run, not apply.
-#
-# terraform and kubectl are deliberately absent from this allowlist: both
-# are already unconditionally blocked for every agent in the fleet by
-# app/policy/engine.py's own _DENIED_COMMAND_PATTERNS (r"\bterraform\b",
-# r"\bkubectl\b" — verified directly, no dry-run/plan carve-out exists
-# there). That is a real, existing, fleet-wide security boundary this tool
-# does not override — building a carve-out into the shared denylist is a
-# separate, security-sensitive change that deserves its own review, not
-# something to fold silently into per-agent tool provisioning. Scoped to
-# what's actually real today: docker build (validates a Dockerfile builds),
-# docker-compose config (validates compose file syntax/interpolation), helm
-# template/lint (validates a chart renders/lints without installing it).
-# ---------------------------------------------------------------------------
-
-INFRA_DRY_RUN_ALLOWED_PREFIXES = (
-    "docker build",
-    "docker-compose config",
-    "helm template",
-    "helm lint",
-)
-
-INFRA_DRY_RUN_BASH_TOOL: dict[str, Any] = {
-    "name": "bash",
-    "description": (
-        "Run an infrastructure validation command in dry-run/lint mode only. "
-        "Allowed: docker build, docker-compose config, helm template, helm lint. "
-        "terraform and kubectl are not available here — they are blocked fleet-wide "
-        "by policy, with no dry-run exception. Never deploy, push, or otherwise "
-        "change live infrastructure."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "command": {
-                "type": "string",
-                "description": "Dry-run/plan/validate command to run",
-            },
-        },
-        "required": ["command"],
-    },
-}
-
-
-def make_infra_dry_run_bash_handler(repo_path: str) -> Callable[[dict[str, Any]], str]:
-    """Scoped bash handler for infra_agent — same allowlist-then-denylist
-    pattern as the other scoped-bash handlers, restricted to plan/validate/
-    lint commands. A missing terraform/docker/kubectl/helm binary is
-    reported as command output, not an exception."""
-
-    def bash(inp: dict[str, Any]) -> str:
-        cmd = str(inp["command"])
-        policy = check_allowlisted_command(cmd, INFRA_DRY_RUN_ALLOWED_PREFIXES)
-        if not policy.allowed:
-            return f"[POLICY DENIED] {policy.reason}"
-        try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                cwd=repo_path,
-                timeout=120,
-            )
-            out = (result.stdout + result.stderr)[:6000]
-            return out if out else "(no output)"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] Command timed out after 120s"
-
-    return bash
+# test_runner/load_test/dependency_audit/infra_dry_run bash tool specs +
+# handlers moved to app/tools/execution/bash.py (tool_enhance.md
+# productionization pass, tool #1, 2026-08-15) — imported at the top of
+# this file for backward compatibility. See that module's own docstring
+# for the full TOOL PATH MIGRATION REPORT.
 
 
 # --- Tool handlers ---
@@ -1851,11 +1561,12 @@ def make_coder_handlers(
         boundary_policy = check_command_stays_in_boundary(cmd, worktree_path)
         if not boundary_policy.allowed:
             return f"[POLICY DENIED] {boundary_policy.reason}"
+        timeout = get_settings().bash_tool_timeout_seconds.get("coder", 60)
         stdout, stderr, _returncode, timed_out = _run_bash_command(
-            cmd, worktree_path, timeout=60, extra_env=extra_env
+            cmd, worktree_path, timeout=timeout, extra_env=extra_env
         )
         if timed_out:
-            return "[ERROR] Command timed out after 60s"
+            return f"[ERROR] Command timed out after {timeout}s"
         out = (stdout + stderr)[:4000]
         return out if out else "(no output)"
 
@@ -1925,20 +1636,20 @@ def make_qa_handlers(worktree_path: str, repo_path: str) -> dict[str, Any]:
         policy = check_allowlisted_command(cmd, _QA_ALLOWED_PREFIXES)
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
-        try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                cwd=worktree_path,
-                env=_env_with_venv,
-                timeout=120,
-            )
-            out = (result.stdout + result.stderr)[:6000]
-            return out if out else "(no output)"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] Command timed out after 120s"
+        settings = get_settings()
+        timeout = settings.bash_tool_timeout_seconds.get("qa", 120)
+        stdout, stderr, _returncode, timed_out = _run_bash_command(
+            cmd,
+            worktree_path,
+            timeout=timeout,
+            extra_env=None if settings.bash_sandbox_enabled else _env_with_venv,
+            image=settings.bash_sandbox_toolchain_image,
+            network=settings.bash_tool_sandbox_network.get("qa"),
+        )
+        if timed_out:
+            return f"[ERROR] Command timed out after {timeout}s"
+        out = (stdout + stderr)[:6000]
+        return out if out else "(no output)"
 
     def submit_qa_result(inp: dict[str, Any]) -> str:
         qa_result.update(inp)
@@ -1973,23 +1684,23 @@ def make_devops_handlers(repo_path: str) -> dict[str, Any]:
 
     def bash(inp: dict[str, Any]) -> str:
         cmd = inp["command"]
-        devops_prefixes = get_settings().devops_bash_allowlist_tuple
+        settings = get_settings()
+        devops_prefixes = settings.devops_bash_allowlist_tuple
         policy = check_allowlisted_command(cmd, devops_prefixes)
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
-        try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                cwd=repo_path,
-                timeout=30,
-            )
-            out = (result.stdout + result.stderr)[:4000]
-            return out if out else "(no output)"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] Command timed out after 30s"
+        timeout = settings.bash_tool_timeout_seconds.get("devops", 30)
+        stdout, stderr, _returncode, timed_out = _run_bash_command(
+            cmd,
+            repo_path,
+            timeout=timeout,
+            image=settings.bash_sandbox_toolchain_image,
+            network=settings.bash_tool_sandbox_network.get("devops"),
+        )
+        if timed_out:
+            return f"[ERROR] Command timed out after {timeout}s"
+        out = (stdout + stderr)[:4000]
+        return out if out else "(no output)"
 
     def submit_health_report(inp: dict[str, Any]) -> str:
         health_result.update(inp)
@@ -5542,15 +5253,18 @@ def make_cicd_agent_handlers(repo_path: str) -> dict[str, Any]:
         policy = check_allowlisted_command(cmd, _CICD_ALLOWED)
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
-        r = subprocess.run(
+        settings = get_settings()
+        timeout = settings.bash_tool_timeout_seconds.get("cicd", 30)
+        stdout, stderr, _returncode, timed_out = _run_bash_command(
             cmd,
-            shell=True,
-            capture_output=True,
-            text=True,
-            cwd=repo_path,
-            timeout=30,
+            repo_path,
+            timeout=timeout,
+            image=settings.bash_sandbox_toolchain_image,
+            network=settings.bash_tool_sandbox_network.get("cicd"),
         )
-        return (r.stdout + r.stderr)[:4000] or "(no output)"
+        if timed_out:
+            return f"[ERROR] Command timed out after {timeout}s"
+        return (stdout + stderr)[:4000] or "(no output)"
 
     def ci_submit(inp: dict[str, Any]) -> str:
         cicd_result.update(inp)
@@ -5669,15 +5383,18 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
         policy = check_allowlisted_command(cmd, _RF_ALLOWED)
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
-        r = subprocess.run(
+        settings = get_settings()
+        timeout = settings.bash_tool_timeout_seconds.get("refactor", 60)
+        stdout, stderr, _returncode, timed_out = _run_bash_command(
             cmd,
-            shell=True,
-            capture_output=True,
-            text=True,
-            cwd=repo_path,
-            timeout=60,
+            repo_path,
+            timeout=timeout,
+            image=settings.bash_sandbox_toolchain_image,
+            network=settings.bash_tool_sandbox_network.get("refactor"),
         )
-        return (r.stdout + r.stderr)[:6000] or "(no output)"
+        if timed_out:
+            return f"[ERROR] Command timed out after {timeout}s"
+        return (stdout + stderr)[:6000] or "(no output)"
 
     def rf_submit(inp: dict[str, Any]) -> str:
         refactor_result.update(inp)
@@ -5895,15 +5612,18 @@ def make_dependency_agent_handlers(repo_path: str) -> dict[str, Any]:
         policy = check_allowlisted_command(cmd, _DEP_ALLOWED)
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
-        r = subprocess.run(
+        settings = get_settings()
+        timeout = settings.bash_tool_timeout_seconds.get("dependency_agent", 60)
+        stdout, stderr, _returncode, timed_out = _run_bash_command(
             cmd,
-            shell=True,
-            capture_output=True,
-            text=True,
-            cwd=repo_path,
-            timeout=60,
+            repo_path,
+            timeout=timeout,
+            image=settings.bash_sandbox_toolchain_image,
+            network=settings.bash_tool_sandbox_network.get("dependency_agent"),
         )
-        return (r.stdout + r.stderr)[:6000] or "(no output)"
+        if timed_out:
+            return f"[ERROR] Command timed out after {timeout}s"
+        return (stdout + stderr)[:6000] or "(no output)"
 
     def dep_edit_file(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
@@ -7192,16 +6912,29 @@ def make_migration_agent_handlers(repo_path: str) -> dict[str, Any]:
         policy = check_allowlisted_command(cmd, _MIGRATION_BASH_ALLOWLIST)
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
+        settings = get_settings()
+        timeout = settings.bash_tool_timeout_seconds.get("migration", 60)
         try:
-            r = _sp.run(
+            # alembic (migrations/env.py) reads DATABASE_URL from the
+            # environment — a sandboxed container does NOT inherit the
+            # host's env automatically (app.policy.sandbox.run_sandboxed's
+            # own docstring), so it must be forwarded explicitly. Reaching
+            # the real Postgres instance at all requires network="host"
+            # (bash_tool_sandbox_network's own default for this variant) —
+            # verified empirically: docker-compose.yml deliberately binds
+            # Postgres to 127.0.0.1 only, unreachable from a bridge-network
+            # container even via host.docker.internal routing.
+            stdout, stderr, _returncode, timed_out = _run_bash_command(
                 cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                cwd=str(root),
-                timeout=60,
+                str(root),
+                timeout=timeout,
+                extra_env={"DATABASE_URL": settings.database_url},
+                image=settings.bash_sandbox_toolchain_image,
+                network=settings.bash_tool_sandbox_network.get("migration"),
             )
-            return (r.stdout + r.stderr).strip() or "(no output)"
+            if timed_out:
+                return f"[ERROR] Command timed out after {timeout}s"
+            return (stdout + stderr).strip() or "(no output)"
         except Exception as e:
             return f"[ERROR] {e}"
 
@@ -7331,11 +7064,12 @@ def make_ai_engineer_handlers(repo_path: str) -> dict[str, Any]:
         policy = check_allowlisted_command(cmd, _AI_BASH_ALLOWLIST)
         if not policy.allowed:
             return f"[POLICY DENIED] {policy.reason}"
+        timeout = get_settings().bash_tool_timeout_seconds.get("ai_engineer", 120)
         stdout, stderr, _returncode, timed_out = _run_bash_command(
-            cmd, str(root), timeout=120
+            cmd, str(root), timeout=timeout
         )
         if timed_out:
-            return "[ERROR] Command timed out after 120s"
+            return f"[ERROR] Command timed out after {timeout}s"
         return (stdout + stderr).strip() or "(no output)"
 
     def ae_write_file(inp: dict[str, Any]) -> str:
@@ -7479,11 +7213,12 @@ def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
         # Docker sandboxing. Route through the same Docker-sandboxed
         # primitive every other bash-shaped tool uses instead of running
         # directly on the host.
+        timeout = get_settings().bash_tool_timeout_seconds.get("cleanup", 60)
         stdout, stderr, _returncode, timed_out = _run_bash_command(
-            cmd, str(root), timeout=60
+            cmd, str(root), timeout=timeout
         )
         if timed_out:
-            return "[ERROR] Command timed out after 60s"
+            return f"[ERROR] Command timed out after {timeout}s"
         return (stdout + stderr).strip() or "(no output)"
 
     def cu_submit(inp: dict[str, Any]) -> str:
@@ -8742,11 +8477,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 return f"[DENIED] User declined to run: {command!r}"
 
         try:
+            timeout = get_settings().bash_tool_timeout_seconds.get("chat", 120)
             stdout, stderr, returncode, timed_out = _run_bash_command(
-                command, cwd, timeout=120
+                command, cwd, timeout=timeout
             )
             if timed_out:
-                return "[ERROR] Command timed out after 120s"
+                return f"[ERROR] Command timed out after {timeout}s"
             output = stdout + (("\n[stderr]\n" + stderr) if stderr else "")
             if returncode != 0:
                 output += f"\n[exit code: {returncode}]"
@@ -14663,32 +14399,7 @@ FLEET_APPLY_TOOLS = [
     _GIT_COMMIT_CHANGE_TOOL,
 ]
 
-_FLEET_BASH_TOOL: dict[str, Any] = {
-    "name": "bash",
-    "description": "Run a diagnostic or check command (git log/blame/status, ps, grep, test/lint runners). Scoped by the same command-allowlist guardrail every bash-using agent uses — destructive/deploy commands are blocked regardless of role.",
-    "input_schema": {
-        "type": "object",
-        "properties": {"command": {"type": "string", "description": "Command to run"}},
-        "required": ["command"],
-    },
-}
-
-
-def make_scoped_bash_handler(repo_path: str) -> Any:
-    """Shared scoped-bash handler for fleet agents — check_command() guardrail,
-    same pattern every other bash-using agent already follows."""
-
-    def bash_h(inp: dict[str, Any]) -> str:
-        cmd = str(inp["command"])
-        policy = check_command(cmd)
-        if not policy.allowed:
-            return f"[POLICY DENIED] {policy.reason}"
-        stdout, stderr, _returncode, timed_out = _run_bash_command(
-            cmd, repo_path, timeout=60
-        )
-        if timed_out:
-            return "[ERROR] Command timed out after 60s"
-        out = (stdout + stderr)[:4000]
-        return out if out else "(no output)"
-
-    return bash_h
+# _FLEET_BASH_TOOL + make_scoped_bash_handler moved to
+# app/tools/execution/bash.py (tool_enhance.md productionization pass,
+# tool #1, 2026-08-15) — imported at the top of this file for backward
+# compatibility.

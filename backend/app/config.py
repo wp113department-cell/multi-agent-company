@@ -371,6 +371,40 @@ class Settings(BaseSettings):
         description="Comma-separated read-only bash command prefixes allowed for DevOps Agent",
     )
 
+    # tool_enhance.md productionization pass, tool #1 (bash) — the ~15
+    # separately-scoped bash-tool variants across app/agents/tools.py each
+    # hardcoded their own subprocess timeout literal (120/60/30, varying by
+    # variant) — a real rule-5 violation ("NO ARBITRARY HARDCODING...
+    # Production limits must be configuration-driven"). One dict, keyed by
+    # a stable per-variant identifier, rather than 15 separate named
+    # fields — matches this codebase's own established keyed-dict
+    # convention (replanning_enabled_agents, dynamic_subtask_allowed_
+    # matrix) and needs no new field when a 16th variant is added later.
+    # Every default below is the EXACT value that variant's call site
+    # already hardcoded — this is a zero-behavior-change extraction, not a
+    # tuning pass; retuning any one variant is now a config change instead
+    # of a code change.
+    bash_tool_timeout_seconds: dict[str, int] = Field(
+        default_factory=lambda: {
+            "test_runner": 120,
+            "load_test": 120,
+            "dependency_audit": 120,
+            "infra_dry_run": 120,
+            "coder": 60,
+            "qa": 120,
+            "devops": 30,
+            "cicd": 30,
+            "refactor": 60,
+            "dependency_agent": 60,
+            "migration": 60,
+            "ai_engineer": 120,
+            "cleanup": 60,
+            "chat": 120,
+            "scoped": 60,
+        },
+        description="bash-tool-variant -> subprocess/sandbox timeout in seconds. Keys match app.agents.tools's internal variant identifiers (see each bash handler's own get_settings().bash_tool_timeout_seconds.get(...) call). A variant absent from this dict falls back to that call site's own literal default, preserving today's behavior exactly.",
+    )
+
     # Phase 5 — RBAC
     rbac_enabled: bool = Field(
         default=True,
@@ -1061,6 +1095,34 @@ class Settings(BaseSettings):
     bash_sandbox_network: str = Field(
         default="bridge",
         description="Docker --network mode for sandboxed bash execution: 'bridge' (default, egress allowed — most real commands, e.g. package installs, need it) or 'none' (strictest, blocks all network egress/exfiltration for deployments that can accept losing network-dependent commands).",
+    )
+
+    # tool_enhance.md productionization pass, bash tool, follow-up
+    # sandboxing-coverage extension (2026-08-15) — this is exactly the
+    # "custom image with it preinstalled" bash_sandbox_image's own
+    # description above already anticipated. docker/bash-sandbox/Dockerfile
+    # builds `gridiron-bash-toolchain:latest`: python:3.12-slim + git +
+    # this project's own pinned requirements-dev.txt/requirements.txt
+    # (pytest/mypy/ruff/black/pip-audit/alembic, verified via `pip show`
+    # against the real host venv before pinning, plus every real runtime
+    # dependency so a sandboxed pytest run can actually import app.* code).
+    # Used only by the toolchain-needing bash variants (test_runner, qa,
+    # refactor, dependency_audit, dependency_agent, devops, cicd,
+    # load_test, migration) — the original 5 denylist-only variants
+    # (coder/chat/scoped/ai_engineer/cleanup) keep using the minimal
+    # bash_sandbox_image default, unchanged.
+    bash_sandbox_toolchain_image: str = Field(
+        default="gridiron-bash-toolchain:latest",
+        description="Docker image (built from docker/bash-sandbox/Dockerfile) used for the bash-tool variants that need this project's own Python/git toolchain — pytest, mypy, ruff, black, pip-audit, alembic, git all preinstalled at the exact versions this project's own requirements pin. Must be built (`docker build -t gridiron-bash-toolchain:latest -f docker/bash-sandbox/Dockerfile .`) before those variants can run inside the sandbox; app.policy.sandbox's own SandboxUnavailableError-style fail-closed behavior surfaces a clear error rather than silently falling back if the image is missing.",
+    )
+    bash_tool_sandbox_network: dict[str, str] = Field(
+        default_factory=lambda: {
+            "test_runner": "host",
+            "qa": "host",
+            "refactor": "host",
+            "migration": "host",
+        },
+        description="bash-tool-variant -> Docker --network override for sandboxed execution, when the variant needs to reach this deployment's own Postgres. Real, verified constraint (not a guess): docker-compose.yml deliberately binds Postgres to 127.0.0.1 only (\"host-only, not reachable from the network\" — see that file's own comment), so a default bridge-network sandboxed container cannot reach it at all, even via host.docker.internal (verified: that resolves to the bridge gateway, but the loopback-only bind still refuses the connection from there). network=host was verified to work cleanly with zero DATABASE_URL rewriting. A variant absent from this dict uses bash_sandbox_network's own default (bridge) — this is a narrow, evidence-driven exception for the specific variants whose real, legitimate functionality (running the project's own pytest suite, or applying a real migration) would otherwise break, not a blanket network-isolation downgrade for every sandboxed variant.",
     )
 
     # Day 10 — Fleet OS Budget Manager (live enforcement, per-run + daily cumulative)
