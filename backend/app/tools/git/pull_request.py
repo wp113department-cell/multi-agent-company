@@ -8,60 +8,47 @@ Old path: app/agents/tools.py (nested `create_pr` closure inside
     make_chat_handlers(), `_CREATE_PR_TOOL` schema dict, and the
     `_llm_generate_pr_description` helper — all three previously lived in
     the single 14,000+ line app/agents/tools.py)
-New path: app/tools/git/pull_request.py (this file) — `create_pr_handler`,
-    `CREATE_PR_TOOL`, `build_gh_pr_create_command`,
-    `generate_pr_description`
+New path: app/tools/git/pull_request.py (this file)
 
 Affected agents: only chat_agent's own AGENT_CONTRACT lists create_pr as
     an allowed_tool (confirmed via backend/tool_inventory.json's AST scan
     of every agent's real allowed_tools list). ~35 one-shot agents (e.g.
     devex_agent) call `make_chat_handlers()` and therefore have a
     create_pr handler present in their own handler dict too, but never
-    advertise it in their own tools spec — now additionally enforced
-    unreachable for them by the base_graph.py dispatch-authorization gate
-    added earlier in this same tool-enhancement pass.
-Affected modules: app/agents/tools.py (make_chat_handlers — now a thin
-    wrapper calling into this module, kept as a compatibility re-export so
-    existing `from app.agents.tools import ...`-style access and the
-    `handlers["create_pr"]` dict-lookup pattern every real test/agent uses
-    keeps working unchanged), app/agents/chat_agent.py (imports
-    `generate_pr_description` and `build_gh_pr_create_command` from here
-    instead of duplicating the command-building logic — the async
-    diff-gathering, confirmation gate, and `gh pr create` execution stay
-    in chat_agent.py since that is a genuinely different, interrupt()-
-    based execution model, not something to force-merge).
+    advertise it in their own tools spec — enforced unreachable for them
+    by the base_graph.py dispatch-authorization gate added earlier in this
+    same tool-enhancement pass.
+Affected modules: app/agents/tools.py (make_chat_handlers — thin wrapper
+    calling into this module), app/agents/chat_agent.py (imports
+    `generate_pr_description` and `build_gh_pr_create_command` from here).
 Affected registries: none — app/fleet/tool_manifest.py's "create_pr"
-    ToolManifestEntry is pure metadata (permissions/risk_level/timeout),
-    keyed by tool NAME not file path, unaffected by this move.
-Affected tests: none required changes — every real test accesses this
-    tool via `handlers["create_pr"](...)` (make_chat_handlers()'s
-    returned dict), never via a direct function import from tools.py, so
-    the compatibility layer keeps them passing unmodified. Verified by
-    real repository grep (see below), not assumed.
-
-Old references found (via `grep -rln create_pr --include=*.py .` from
-    backend/ before this move): app/agents/base_graph.py (comments only,
-    no functional reference), app/agents/chat_agent.py, app/agents/
-    tools.py, app/api/approvals.py (references the UNRELATED
-    app.tools.git_push_tool.push_and_create_pr — a separate, REST-API-
-    based, non-interactive PR mechanism used by the automated
-    approval-gate flow, explicitly documented in that file's own
-    docstring as distinct from this interactive chat-agent tool; not
-    touched by this move), app/fleet/tool_manifest.py (metadata only),
-    app/tools/git_push_tool.py (docstring mention only, not this tool),
-    plus 8 test files (all access via handlers dict, see above).
-Updated references: app/agents/tools.py, app/agents/chat_agent.py.
-Remaining old references: none — the only two real call sites both now
-    import from this module.
+    ToolManifestEntry is pure metadata, keyed by tool NAME not file path.
+Affected tests: 3 in test_audit_q_batch10_deployment_external_git_docs.py
+    patched the old symbol path directly and were updated; every other
+    real test accesses this tool via handlers["create_pr"](...) and needed
+    no change.
 
 Runtime verification: PASS — see
-    backend/docs/tool_productionization/create_pr.md's "Modularization"
-    section for the exact test run and full-suite regression count.
+    backend/docs/tool_productionization/create_pr.md.
 ---------------------------------------------------------------------------
+
+SECOND HARDENING PASS (2026-08-15, same day) — a second ChatGPT-authored
+review of this already-GREEN-FLAGGED tool surfaced a real, substantive
+set of gaps the first pass missed entirely: no repository/branch identity
+verification, no no-diff guard, no output validation on LLM-generated
+text, and — the most important one — the real diff sent to the LLM for
+PR-description generation was never scanned for secrets first. Evaluated
+item by item against real code (not blindly applied); what's below is
+what survived that evaluation. See create_pr.md's "Second hardening pass"
+section for the full item-by-item disposition, including what was
+deliberately NOT done and why (e.g. no invented "expected_repo" input,
+no structured-JSON return type, no test-verification gate hardcoded as
+mandatory).
 """
 
 from __future__ import annotations
 
+import re
 import subprocess
 from typing import Any
 
@@ -92,11 +79,15 @@ CREATE_PR_TOOL: dict[str, Any] = {
     },
 }
 
+_PR_URL_RE = re.compile(r"https://github\.com/\S+/pull/\d+")
+_MAX_PR_TITLE_LEN = 256  # GitHub's own practical single-line title limit
+_MAX_PR_BODY_LEN = 60_000  # generous but bounded; GitHub's real cap is ~65536
+
 
 def build_gh_pr_create_command(
     title: str, base: str, body: str, draft: bool
 ) -> list[str]:
-    """Pure command-builder, shared by both real call sites (tools.py's
+    """Pure command-builder, shared by both real call sites (this module's
     sync handler and chat_agent.py's async one) — previously duplicated
     with slightly different styles in each (a real drift symptom flagged
     while auditing this tool), now built in exactly one place."""
@@ -112,14 +103,20 @@ def generate_pr_description(
     stat: str, diff: str, branch: str, base: str
 ) -> tuple[str, str]:
     """LLM-generated (title, body) fill-in for whichever of the two the
-    caller omitted, grounded strictly in the real diff. Moved verbatim
-    from app/agents/tools.py's `_llm_generate_pr_description` — only ever
-    had 2 real callers (both migrated here). `_llm_generate_text` is
-    imported lazily (inside the function, not at module level) to avoid a
-    circular import: app.agents.tools imports FROM this module for
-    create_pr_handler below, so this module cannot also import FROM
-    app.agents.tools at module load time."""
+    caller omitted, grounded strictly in the real diff.
+
+    Second hardening pass (2026-08-15) — real gap found: the diff was
+    previously sent to the LLM completely unredacted. A git diff can
+    legitimately contain API keys, passwords, tokens, or .env contents an
+    agent's own change touched — reusing this codebase's existing
+    `_redact_secrets_in_text` (already relied on elsewhere for exactly
+    this class of leak, see app/agents/base_graph.py's tool-result
+    redaction) rather than inventing a second detector.
+    """
+    from app.agents.tool_security import _redact_secrets_in_text
     from app.agents.tools import _llm_generate_text
+
+    redacted_diff, _secret_found = _redact_secrets_in_text(diff)
 
     prompt = (
         f"Write a GitHub pull request title and description for branch "
@@ -128,7 +125,7 @@ def generate_pr_description(
         "format, no other text:\n"
         "TITLE: <one-line title>\n"
         "BODY:\n<markdown body: summary, key changes, testing notes>\n\n"
-        f"=== Changed files ===\n{stat}\n\n=== Diff (truncated) ===\n{diff}"
+        f"=== Changed files ===\n{stat}\n\n=== Diff (truncated) ===\n{redacted_diff}"
     )
     text = _llm_generate_text(prompt, max_tokens=700)
     if not text or "TITLE:" not in text:
@@ -140,39 +137,294 @@ def generate_pr_description(
     return after_title.strip(), ""
 
 
+def _sanitize_pr_title(title: str) -> str:
+    """Second hardening pass, P0 item #9 — validate LLM-generated (or
+    caller-supplied) title: one line, no control characters, bounded
+    length. Never raises — a malformed title degrades to a cleaned/
+    truncated string, not a crash."""
+    one_line = title.splitlines()[0] if title else ""
+    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", one_line).strip()
+    return cleaned[:_MAX_PR_TITLE_LEN]
+
+
+def _sanitize_pr_body(body: str) -> str:
+    """Second hardening pass, P0 item #9 (bounded size) + item #10
+    (defense in depth) — applied to EVERY body, not just LLM-generated
+    ones: a caller-supplied body could itself contain a pasted secret, and
+    this is the single chokepoint every real path (auto-generated or
+    explicit) passes through before `gh pr create`."""
+    from app.agents.tool_security import _redact_secrets_in_text
+
+    redacted, _found = _redact_secrets_in_text(body)
+    return redacted[:_MAX_PR_BODY_LEN]
+
+
+def check_gh_auth() -> str | None:
+    """Second hardening pass, P1 item #15 — fail fast, before any git
+    operations, if gh isn't authenticated at all."""
+    try:
+        r = subprocess.run(
+            ["gh", "auth", "status"], capture_output=True, text=True, timeout=15
+        )
+    except FileNotFoundError:
+        return "[ERROR] gh CLI not found — install with: sudo apt install gh"
+    except subprocess.TimeoutExpired:
+        return "[ERROR] gh auth status timed out"
+    if r.returncode != 0:
+        return "[ERROR] GitHub authentication unavailable — run `gh auth login` first."
+    return None
+
+
+def resolve_repository_identity(repo_path: str) -> tuple[str | None, str]:
+    """Returns (error_or_None, repo_full_name). Second hardening pass, P0
+    items #3/#16 ("repository identity should be explicitly verified") —
+    confirms a real git remote 'origin' exists AND that `gh` can resolve
+    it to a real GitHub repository, then surfaces that resolved identity
+    in both error and success output so the caller/log always has
+    explicit visibility into which real repository was targeted.
+
+    Deliberately does NOT compare against an externally supplied
+    "expected repo" — this tool's schema has no such input today, and
+    inventing one with no real caller to populate it would be exactly the
+    kind of unjustified addition tool_enhance.md's own rules warn
+    against. If a future caller needs that stronger guarantee, it can be
+    added as a real `expected_repo` input field with a real consumer.
+    """
+    try:
+        r_remote = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        return "[ERROR] git remote get-url origin timed out", ""
+    if r_remote.returncode != 0 or not r_remote.stdout.strip():
+        return (
+            "[ERROR] Could not verify the git remote 'origin' for this "
+            "repository — refusing to create a PR without a confirmed remote.",
+            "",
+        )
+
+    try:
+        r_repo = subprocess.run(
+            ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return (
+            "[ERROR] Could not resolve the GitHub repository for this "
+            "workspace via `gh repo view`.",
+            "",
+        )
+    repo_full_name = r_repo.stdout.strip()
+    if r_repo.returncode != 0 or not repo_full_name:
+        return (
+            "[ERROR] Could not resolve the GitHub repository for this "
+            "workspace via `gh repo view`.",
+            "",
+        )
+    return None, repo_full_name
+
+
+def get_current_branch(repo_path: str) -> tuple[str | None, str]:
+    """Returns (error_or_None, branch_name). Second hardening pass, P0
+    item #5 — rejects detached HEAD / unknown branch state up front."""
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        return "[ERROR] git rev-parse timed out while checking the current branch", ""
+    branch = r.stdout.strip()
+    if r.returncode != 0 or not branch or branch == "HEAD":
+        return (
+            "[ERROR] Cannot create a PR from a detached HEAD or unknown "
+            "branch state — check out a real branch first.",
+            "",
+        )
+    return None, branch
+
+
+def check_branch_safety(current_branch: str, base: str) -> str | None:
+    """Second hardening pass, P0 item #5 — refuse current == base (e.g. a
+    branch opening a PR into itself, such as main -> main)."""
+    if current_branch == base:
+        return (
+            f"[ERROR] Current branch and base branch are both {base!r} — "
+            "refusing to open a PR from a branch into itself."
+        )
+    return None
+
+
+def verify_base_branch_exists(repo_path: str, base: str) -> str | None:
+    """Second hardening pass, P0 item #4 — `base` previously reached
+    `gh pr create` completely untrusted."""
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--verify", f"origin/{base}"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        return "[ERROR] git rev-parse --verify timed out while checking the base branch"
+    if r.returncode != 0:
+        return (
+            f"[ERROR] Base branch {base!r} does not exist on origin — "
+            "refusing to create a PR against an unverified base."
+        )
+    return None
+
+
+def check_for_real_changes(repo_path: str, base: str) -> tuple[str | None, str]:
+    """Returns (error_or_None, stat_output). Second hardening pass, P0
+    item #6 — always checked before deciding whether to proceed,
+    regardless of whether title/body were explicitly supplied. Previously
+    an explicit title+body let a genuinely no-op PR attempt reach
+    `gh pr create` uncaught, since the diff-gathering block only ran when
+    title OR body was missing."""
+    try:
+        r_stat = subprocess.run(
+            ["git", "diff", f"{base}...HEAD", "--stat"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return "[ERROR] git diff --stat timed out while checking for changes", ""
+    stat = r_stat.stdout.strip()
+    if not stat:
+        return (
+            "[ERROR] No changes available for PR creation — this branch has "
+            "no diff against the base branch.",
+            "",
+        )
+    return None, stat
+
+
+def find_existing_open_pr(repo_path: str, branch: str, base: str) -> str | None:
+    """Second hardening pass, P1 item #17 — best-effort idempotency: if
+    `branch` already has an open PR against `base`, return its URL so the
+    caller can be told about it instead of attempting a duplicate. Any
+    failure here (gh auth already verified separately, but e.g. a
+    network blip) returns None rather than blocking PR creation — this is
+    a nice-to-have, not a hard gate."""
+    try:
+        r = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--head",
+                branch,
+                "--base",
+                base,
+                "--state",
+                "open",
+                "--json",
+                "url",
+            ],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    import json as _json
+
+    try:
+        results = _json.loads(r.stdout)
+    except Exception:
+        return None
+    if isinstance(results, list) and results:
+        url = results[0].get("url")
+        return url if isinstance(url, str) else None
+    return None
+
+
 def create_pr_handler(repo_path: str, inp: dict[str, Any]) -> str:
     """The sync create_pr handler used by make_chat_handlers() (and, via
     it, the ~35 one-shot agents that reuse that handler dict — though
     create_pr itself stays unreachable for them per the dispatch-
-    authorization gate in app/agents/base_graph.py). Moved verbatim from
-    app/agents/tools.py, `repo_path` now an explicit parameter instead of
-    a closure variable."""
+    authorization gate in app/agents/base_graph.py).
+
+    Second hardening pass (2026-08-15) order of checks, each returning a
+    clean [ERROR]/[POLICY DENIED] string on failure rather than letting
+    an exception or a bad PR reach `gh`: approval gate -> gh auth ->
+    repository identity -> current-branch safety -> base-branch existence
+    -> real-changes guard -> duplicate-PR check -> title/body resolution
+    (secret-redacted diff -> LLM -> output sanitization) -> `gh pr create`
+    with specific exception handling and real PR-URL extraction.
+    """
+    from app.config import get_settings
+
+    settings = get_settings()
+    if settings.create_pr_require_approval:
+        return (
+            "[POLICY DENIED] create_pr requires human approval, and this "
+            "execution context has no per-call approval channel available "
+            "(see Settings.create_pr_require_approval). Use the interactive "
+            "chat agent instead, which gates PR creation behind a real "
+            "confirmation prompt."
+        )
+
+    auth_error = check_gh_auth()
+    if auth_error:
+        return auth_error
+
+    identity_error, repo_full_name = resolve_repository_identity(repo_path)
+    if identity_error:
+        return identity_error
+
+    pr_base = str(inp.get("base", "main"))
+
+    branch_error, current_branch = get_current_branch(repo_path)
+    if branch_error:
+        return branch_error
+    safety_error = check_branch_safety(current_branch, pr_base)
+    if safety_error:
+        return safety_error
+
+    base_error = verify_base_branch_exists(repo_path, pr_base)
+    if base_error:
+        return base_error
+
+    changes_error, stat = check_for_real_changes(repo_path, pr_base)
+    if changes_error:
+        return changes_error
+
+    existing_pr_url = find_existing_open_pr(repo_path, current_branch, pr_base)
+    if existing_pr_url:
+        return (
+            f"An open PR already exists for {current_branch!r} -> {pr_base!r} "
+            f"in {repo_full_name}: {existing_pr_url}"
+        )
+
     pr_title = str(inp.get("title", "")).strip()
     pr_body = str(inp.get("body", "")).strip()
-    pr_base = str(inp.get("base", "main"))
     pr_draft = bool(inp.get("draft", False))
+
     if not pr_title or not pr_body:
         # AUDIT_Q_BATCH10 §40 "Generate PR descriptions: NO — not
         # auto-generated" — real diff of this branch vs pr_base, LLM-
         # generated to fill in whichever of title/body the caller didn't
         # supply. Explicit caller values always win — this only fills
         # gaps, never overrides an explicit title/body.
-        #
-        # tool_enhance.md productionization pass, tool #2 (2026-08-15) —
-        # real gap found by reading this code: these 3 calls had no
-        # timeout at all (unlike the gh pr create call below, which
-        # already had timeout=30), so a huge diff or a hung git process
-        # could block this handler indefinitely. Matches the same 30s
-        # bound chat_agent.py's own _git() helper already uses for its
-        # equivalent calls.
         try:
-            r_stat = subprocess.run(
-                ["git", "diff", f"{pr_base}...HEAD", "--stat"],
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
             r_diff = subprocess.run(
                 ["git", "diff", f"{pr_base}...HEAD"],
                 cwd=repo_path,
@@ -180,31 +432,35 @@ def create_pr_handler(repo_path: str, inp: dict[str, Any]) -> str:
                 text=True,
                 timeout=30,
             )
-            r_branch = subprocess.run(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
         except subprocess.TimeoutExpired:
-            return "[ERROR] git command timed out while preparing PR description"
-        branch = r_branch.stdout.strip() or "HEAD"
-        stat = r_stat.stdout.strip()
+            return "[ERROR] git diff timed out while preparing PR description"
         diff = r_diff.stdout[:6000]
-        if stat:
-            gen_title, gen_body = generate_pr_description(stat, diff, branch, pr_base)
-            pr_title = pr_title or gen_title
-            pr_body = pr_body or gen_body
+        gen_title, gen_body = generate_pr_description(stat, diff, current_branch, pr_base)
+        pr_title = pr_title or gen_title
+        pr_body = pr_body or gen_body
+
+    pr_title = _sanitize_pr_title(pr_title)
+    pr_body = _sanitize_pr_body(pr_body)
+
     if not pr_title:
         return "[ERROR] title is required (auto-generation failed — supply one explicitly)"
+
     pr_cmd = build_gh_pr_create_command(pr_title, pr_base, pr_body, pr_draft)
     try:
         r = subprocess.run(
             pr_cmd, cwd=repo_path, capture_output=True, text=True, timeout=30
         )
-        return (r.stdout + r.stderr).strip() or "PR created"
     except FileNotFoundError:
         return "[ERROR] gh CLI not found — install with: sudo apt install gh"
+    except subprocess.TimeoutExpired:
+        return "[ERROR] gh pr create timed out after 30s"
     except Exception as e:
         return f"[ERROR] {e}"
+
+    output = (r.stdout + r.stderr).strip()
+    if r.returncode != 0:
+        return f"[ERROR] gh pr create failed (exit {r.returncode}): {output or '(no output)'}"
+    url_match = _PR_URL_RE.search(output)
+    if url_match:
+        return f"PR created: {url_match.group(0)}\n\n{output}"
+    return output or "PR created"

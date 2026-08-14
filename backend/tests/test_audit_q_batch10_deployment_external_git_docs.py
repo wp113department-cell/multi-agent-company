@@ -167,23 +167,80 @@ def _make_diverged_branch(tmp_repo: Path) -> None:
     )
 
 
+def _add_real_local_origin(tmp_repo: Path, tmp_path_factory_dir: Path) -> None:
+    """Second hardening pass (2026-08-15) added real origin-remote/base-
+    branch verification to create_pr — this file's own stated philosophy
+    is real git operations, no mocking git itself, so this sets up a REAL
+    local bare 'origin' remote (not github.com, but real git nonetheless)
+    with a real `origin/main` ref, rather than mocking the new git-level
+    checks. Only the actual `gh` (GitHub CLI) calls get mocked below,
+    matching this file's existing "subprocess.run is mocked only for
+    docker/gh calls" convention."""
+    bare = tmp_path_factory_dir / "origin.git"
+    subprocess.run(["git", "init", "--bare", str(bare)], capture_output=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(bare)],
+        cwd=str(tmp_repo),
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "push", "origin", "main"], cwd=str(tmp_repo), capture_output=True
+    )
+    subprocess.run(["git", "fetch", "origin"], cwd=str(tmp_repo), capture_output=True)
+
+
 class TestCreatePrAutoGenerate:
+    """Second hardening pass (2026-08-15) added several real preconditions
+    (approval gate, gh auth, repository identity, base-branch existence)
+    ahead of the title/body auto-generation logic these tests exercise —
+    each test now explicitly satisfies/bypasses exactly those, real git
+    operations still real, only the actual `gh` CLI calls mocked."""
+
     def test_auto_generates_when_title_and_body_omitted(
-        self, handlers: dict[str, Any], tmp_repo: Path
+        self, handlers: dict[str, Any], tmp_repo: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        from app.config import get_settings
+
         _make_diverged_branch(tmp_repo)
-        with patch(
-            "app.tools.git.pull_request.generate_pr_description",
-            return_value=("Add b.txt", "Adds a new file b.txt"),
-        ) as mock_gen:
+        _add_real_local_origin(tmp_repo, tmp_path_factory.mktemp("origin_parent"))
+        monkeypatch.setattr(get_settings(), "create_pr_require_approval", False)
+        with (
+            patch("app.tools.git.pull_request.check_gh_auth", return_value=None),
+            patch(
+                "app.tools.git.pull_request.resolve_repository_identity",
+                return_value=(None, "test/repo"),
+            ),
+            patch(
+                "app.tools.git.pull_request.find_existing_open_pr", return_value=None
+            ),
+            patch(
+                "app.tools.git.pull_request.generate_pr_description",
+                return_value=("Add b.txt", "Adds a new file b.txt"),
+            ) as mock_gen,
+        ):
             result = handlers["create_pr"]({})
         mock_gen.assert_called_once()
         assert isinstance(result, str)  # gh likely unauthenticated — must not raise
 
     def test_explicit_title_and_body_skip_generation(
-        self, handlers: dict[str, Any], tmp_repo: Path
+        self, handlers: dict[str, Any], tmp_repo: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        with patch("app.tools.git.pull_request.generate_pr_description") as mock_gen:
+        from app.config import get_settings
+
+        _make_diverged_branch(tmp_repo)
+        _add_real_local_origin(tmp_repo, tmp_path_factory.mktemp("origin_parent"))
+        monkeypatch.setattr(get_settings(), "create_pr_require_approval", False)
+        with (
+            patch("app.tools.git.pull_request.check_gh_auth", return_value=None),
+            patch(
+                "app.tools.git.pull_request.resolve_repository_identity",
+                return_value=(None, "test/repo"),
+            ),
+            patch(
+                "app.tools.git.pull_request.find_existing_open_pr", return_value=None
+            ),
+            patch("app.tools.git.pull_request.generate_pr_description") as mock_gen,
+        ):
             result = handlers["create_pr"](
                 {"title": "Explicit title", "body": "Explicit body"}
             )
@@ -191,11 +248,26 @@ class TestCreatePrAutoGenerate:
         assert isinstance(result, str)
 
     def test_missing_title_after_failed_generation_errors(
-        self, handlers: dict[str, Any], tmp_repo: Path
+        self, handlers: dict[str, Any], tmp_repo: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        from app.config import get_settings
+
         _make_diverged_branch(tmp_repo)
-        with patch(
-            "app.tools.git.pull_request.generate_pr_description", return_value=("", "")
+        _add_real_local_origin(tmp_repo, tmp_path_factory.mktemp("origin_parent"))
+        monkeypatch.setattr(get_settings(), "create_pr_require_approval", False)
+        with (
+            patch("app.tools.git.pull_request.check_gh_auth", return_value=None),
+            patch(
+                "app.tools.git.pull_request.resolve_repository_identity",
+                return_value=(None, "test/repo"),
+            ),
+            patch(
+                "app.tools.git.pull_request.find_existing_open_pr", return_value=None
+            ),
+            patch(
+                "app.tools.git.pull_request.generate_pr_description",
+                return_value=("", ""),
+            ),
         ):
             result = handlers["create_pr"]({})
         assert "[ERROR] title is required" in result

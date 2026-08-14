@@ -1125,6 +1125,30 @@ class Settings(BaseSettings):
         description="bash-tool-variant -> Docker --network override for sandboxed execution, when the variant needs to reach this deployment's own Postgres. Real, verified constraint (not a guess): docker-compose.yml deliberately binds Postgres to 127.0.0.1 only (\"host-only, not reachable from the network\" — see that file's own comment), so a default bridge-network sandboxed container cannot reach it at all, even via host.docker.internal (verified: that resolves to the bridge gateway, but the loopback-only bind still refuses the connection from there). network=host was verified to work cleanly with zero DATABASE_URL rewriting. A variant absent from this dict uses bash_sandbox_network's own default (bridge) — this is a narrow, evidence-driven exception for the specific variants whose real, legitimate functionality (running the project's own pytest suite, or applying a real migration) would otherwise break, not a blanket network-isolation downgrade for every sandboxed variant.",
     )
 
+    # tool_enhance.md productionization pass, tool #2 (create_pr), P0 review
+    # item #8 (2026-08-15) — the sync create_pr_handler used by
+    # make_chat_handlers() (and, via it, any one-shot agent that legitimately
+    # advertises create_pr in its own tools list) runs in an execution
+    # context with NO interactive interrupt()/pause mechanism — unlike
+    # chat_agent.py's own create_pr dispatch, which gates behind a real
+    # self._confirm() pause. Every one-shot handler shares the uniform
+    # Callable[[dict], str] signature the whole agent-graph dispatch relies
+    # on (app/agents/base_graph.py's `tool_handlers.get(tu_name)(tu_input)`)
+    # — there is no channel today for a real human decision to reach a
+    # mid-call handler for this agent tier, and an `inp["_approved"]`-style
+    # flag would be meaningless (`inp` is LLM-controlled tool-call JSON, so
+    # the model could simply always set it). The only honest gate available
+    # at this layer is a static, operator-set deployment decision: fail
+    # closed by default (matches this codebase's existing
+    # bash_sandbox_enabled / SandboxUnavailableError fail-closed pattern),
+    # explicit True opt-out only for a deployment that has decided its
+    # one-shot agents may autonomously open PRs (or that layers its own
+    # separate approval mechanism above this handler).
+    create_pr_require_approval: bool = Field(
+        default=True,
+        description="When True (default), the sync create_pr_handler (used by make_chat_handlers()) always refuses to run `gh pr create` — there is no real per-call human-approval channel available to this handler tier. Set False only for a deployment that has explicitly decided its one-shot agents may autonomously open PRs. Does not affect chat_agent.py's own create_pr dispatch, which already has its own real, independent self._confirm() interactive gate.",
+    )
+
     # Day 10 — Fleet OS Budget Manager (live enforcement, per-run + daily cumulative)
     max_tokens_per_agent_run: int = Field(
         default=100_000,

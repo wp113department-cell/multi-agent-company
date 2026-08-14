@@ -168,14 +168,115 @@ chokepoint shared by ~76 agents, plus the giant `tools.py`/`chat_agent.py`
 import surface): **4751 passed, 52 skipped, 18 deselected, 0 failures** —
 confirms neither change broke any other agent's tool calls.
 
+## Second hardening pass (2026-08-15, same day)
+
+A second ChatGPT-authored review, run against the already-GREEN-FLAGGED
+tool, surfaced real gaps the first pass missed. Evaluated item by item
+against real code before applying anything — this section records what
+was applied, what was deliberately scoped differently, and what was
+skipped, with reasoning for each.
+
+**Applied (P0):**
+- **#3/#16 Repository identity verification** — `resolve_repository_identity()`
+  confirms a real `origin` remote exists and that `gh repo view` resolves
+  it to a real GitHub repository, surfacing that identity in every error
+  and success message. Deliberately does NOT compare against an invented
+  "expected repo" input — this tool's schema has no such field and no
+  real caller would populate it; adding one without a real consumer would
+  itself violate tool_enhance.md's own no-unjustified-addition rule.
+- **#4 Base branch validation** — `verify_base_branch_exists()` runs
+  `git rev-parse --verify origin/<base>` before ever reaching `gh`.
+- **#5 Branch safety** — `get_current_branch()` rejects detached HEAD/
+  unknown state; `check_branch_safety()` rejects `current == base`.
+- **#6 No-diff guard** — `check_for_real_changes()` now runs
+  unconditionally, closing a real regression: previously, supplying an
+  explicit title AND body skipped diff-gathering entirely, so a genuinely
+  no-op PR attempt could reach `gh pr create` uncaught.
+- **#8 Authorization on the standalone handler** — new
+  `Settings.create_pr_require_approval` (default `True`, fail-closed).
+  The sync `create_pr_handler` has no per-call human-approval channel
+  (every one-shot handler shares the uniform `Callable[[dict], str]`
+  signature the dispatch relies on) — an `inp["_approved"]`-style flag
+  would be meaningless since `inp` is LLM-controlled tool-call JSON the
+  model could simply always set. The only honest gate at this layer is a
+  static, operator-set deployment decision, matching this codebase's
+  existing `bash_sandbox_enabled` fail-closed pattern. Does not affect
+  `chat_agent.py`'s own path, which already has a real, independent
+  `self._confirm()` gate from the first pass.
+- **#9 LLM/caller output validation** — `_sanitize_pr_title()` (one line,
+  strips control characters, caps at 256 chars) and `_sanitize_pr_body()`
+  (bounded to 60,000 chars) applied to every title/body before use,
+  regardless of whether it was LLM-generated or caller-supplied.
+- **#10 Secrets must never reach the LLM** — the single most important
+  item. `generate_pr_description()` now redacts the diff via this
+  codebase's existing `_redact_secrets_in_text` (already relied on
+  elsewhere for the same class of leak — reused, not reinvented) before
+  it ever reaches the LLM prompt. `_sanitize_pr_body()` applies the same
+  redaction to the final body as a second, defense-in-depth layer.
+
+**Applied (P1):**
+- **#13 Real PR URL extraction** — a regex pulls the actual
+  `https://github.com/.../pull/N` URL out of `gh`'s output instead of
+  returning raw stdout+stderr uninterpreted.
+- **#14 Specific exception handling** — the final `gh pr create` call now
+  has its own `except subprocess.TimeoutExpired` with a clear message,
+  alongside the pre-existing `FileNotFoundError` handling.
+- **#15 Auth preflight** — `check_gh_auth()` runs `gh auth status` before
+  any git operations, failing fast with a clear message.
+- **#17 Duplicate-PR idempotency** — `find_existing_open_pr()` checks
+  `gh pr list --head <branch> --base <base> --state open` first; an
+  existing PR's URL is returned instead of attempting a duplicate.
+  Best-effort by design: any failure in this check returns `None` (falls
+  through to normal creation) rather than blocking on a nice-to-have.
+
+**Deliberately scoped differently, not silently applied:**
+- **#7 Require passing tests before PR creation** — real idea, not
+  implemented as a hard gate. `gh` itself supports `--draft` precisely
+  for the "PR before tests fully pass" workflow, which is a legitimate
+  real use case this tool must not break. Not added as a config flag this
+  pass either — doing it properly needs a real way to check "latest
+  verification evidence" that doesn't exist as an input to this handler
+  today; inventing one without a real consumer would repeat the same
+  mistake #3/#16 explicitly avoided.
+- **#11 Diff truncation (6000 chars)** — left as-is. The reviewer's own
+  framing was "safe for token usage, but..." — a real, minor, already-
+  understood limitation, not a defect; hunk-selection logic would be a
+  materially larger feature for a narrow benefit.
+- **#12 Structured JSON return** — not applied. Every one of this
+  codebase's ~274 tools returns text for LLM consumption; switching this
+  one tool's return type would break that convention for no benefit to a
+  text-consuming caller. The real PR URL is now extracted and surfaced
+  clearly in the text response instead (see #13).
+
+**Skipped:** #18 (labels/reviewers/milestone/assignees) — the reviewer's
+own words: "enhancements, not required for the basic production version."
+
+**Tests:** `tests/test_create_pr_hardening.py` (new, 21 tests) — one
+real test per fix above, using real git repos throughout (a real local
+bare `origin` remote, real branches, real diffs); only the actual `gh`
+CLI calls are mocked, matching this tool's test suite's existing
+convention. Includes a direct proof that a real secret substring never
+appears in the prompt handed to the LLM (`generate_pr_description`'s own
+capture-and-assert test). 3 tests in
+`test_audit_q_batch10_deployment_external_git_docs.py` updated to
+satisfy the new preconditions (real local origin remote added; `gh`-
+touching checks mocked) rather than testing around them.
+
+**Regression:** targeted sweep (create_pr + dispatch + hardening tests):
+222 passed. Full suite re-run after this pass: **4772 passed, 52 skipped,
+18 deselected, 0 failures.**
+
 ## Final verdict
 
-**GREEN FLAG.**
+**GREEN FLAG — held, both hardening passes included.**
 
-All three real problems found during the audit — the missing confirmation
-gate, the missing timeouts, and the shared dispatch-layer authorization
-gap — are fixed with real, evidence-backed tests, not assumed. The
-duplication between the two implementations is a real, explicitly logged,
-non-blocking follow-up (code organization, not correctness/security),
-consistent with how bash tool's own GREEN FLAG carried forward its own
-known follow-ups rather than blocking on them.
+Every P0 item from both reviews is fixed with real, evidence-backed
+tests, not assumed: confirmation/authorization gates on both real
+implementations, timeouts, the shared dispatch-authorization gap,
+repository/branch/base identity verification, the no-diff guard, and —
+most importantly — secrets no longer reach the LLM via the diff. Real,
+explicitly logged, non-blocking follow-ups remain (implementation
+duplication between the two call paths, no test-verification gate, diff
+truncation at 6000 chars), consistent with how every other GREEN-FLAGGED
+tool in this codebase carries forward known, narrow, documented
+limitations rather than blocking on them.
