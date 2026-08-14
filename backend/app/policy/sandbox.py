@@ -101,6 +101,7 @@ def run_sandboxed(
     memory: str = "1g",
     pids_limit: int = 512,
     cpus: str = "1.0",
+    tmp_size: str = "100m",
     timeout: int = 120,
     env: dict[str, str] | None = None,
 ) -> SandboxResult:
@@ -117,6 +118,33 @@ def run_sandboxed(
     `extra_env`) must pass them explicitly here or they silently vanish.
 
     Raises SandboxUnavailableError if Docker cannot run at all.
+
+    Hardening (tool_enhance.md productionization pass follow-up,
+    2026-08-15 — real gaps found by direct empirical testing, not assumed):
+
+    - **Orphaned containers on timeout**: `subprocess.run(..., timeout=X)`
+      on TimeoutExpired only kills the `docker run` CLIENT process — the
+      DAEMON keeps the container running indefinitely, verified directly
+      (started a container, SIGKILLed the client, the container was still
+      `Up` seconds later). Every container now gets a unique `--name`; the
+      timeout path explicitly `docker kill`s it (best-effort — `--rm`
+      handles removal once killed) before returning, so a timed-out command
+      cannot keep consuming CPU/memory/network in the background forever.
+    - **Root filesystem now `--read-only`** with a size-capped `--tmpfs
+      /tmp` for genuine scratch-space needs. `/workspace` (the one
+      explicitly, deliberately writable mount every real caller needs) is
+      unaffected — `--read-only` only locks the container's OWN root
+      filesystem (its installed toolchain, `/etc`, `/usr`, etc.), verified
+      empirically to not break real pytest/mypy/git runs, including their
+      own cache-file writes (which land in /workspace or the tmpfs, not the
+      read-only root).
+    - **Non-root by default**: `--user` set to the HOST's own real UID/GID
+      (`os.getuid()`/`os.getgid()`) rather than the container's default
+      root — verified empirically this doesn't break toolchain execution
+      (pip-installed packages are root-owned but world-readable/executable,
+      which is all a non-root process needs) or file writes to /workspace
+      (matches the host UID that already owns those files, so no new
+      permission-denied class of failure is introduced).
     """
     if not _docker_available():
         raise SandboxUnavailableError(
@@ -126,11 +154,15 @@ def run_sandboxed(
             "to explicitly opt out of sandboxing instead."
         )
 
+    import os
+    import uuid
+
     from app.config import get_settings
 
     settings = get_settings()
     resolved_image = image if image is not None else settings.bash_sandbox_image
     resolved_network = network if network is not None else settings.bash_sandbox_network
+    container_name = f"gridiron-sandbox-{uuid.uuid4().hex[:12]}"
 
     env_flags: list[str] = []
     for key, value in (env or {}).items():
@@ -140,10 +172,17 @@ def run_sandboxed(
         "docker",
         "run",
         "--rm",
+        "--name",
+        container_name,
         f"--network={resolved_network}",
         f"--memory={memory}",
         f"--pids-limit={pids_limit}",
         f"--cpus={cpus}",
+        "--read-only",
+        "--tmpfs",
+        f"/tmp:size={tmp_size},mode=1777",
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
         *env_flags,
         "-v",
         f"{cwd}:/workspace:rw",
@@ -162,6 +201,20 @@ def run_sandboxed(
             stdout=result.stdout, stderr=result.stderr, returncode=result.returncode
         )
     except subprocess.TimeoutExpired:
+        try:
+            subprocess.run(
+                ["docker", "kill", container_name],
+                capture_output=True,
+                timeout=15,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to kill timed-out sandbox container %s (may be "
+                "orphaned — will self-terminate if the command inside it "
+                "eventually exits, or persist until manually reaped)",
+                container_name,
+                exc_info=True,
+            )
         return SandboxResult(
             stdout="",
             stderr=f"Command timed out after {timeout}s",

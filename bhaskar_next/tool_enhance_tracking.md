@@ -8,7 +8,7 @@ Order: risk_level (high->medium->low->unknown), then agent_count desc (most-used
 
 | # | Tool | Risk | Agents | Manifest | Tests | Status |
 |---|---|---|---|---|---|---|
-| 1 | bash | high | 23 | yes | 31 | YELLOW_FLAG — see docs/tool_productionization/bash.md (real hardening done: config-driven timeouts, 2 real bugs fixed, 5/15 variants modularized; real gap remains: 10/15 variants still unsandboxed on host, tracked as a separate follow-up) |
+| 1 | bash | high | 23 | yes | 48 | GREEN_FLAG — see docs/tool_productionization/bash.md (9/10 remaining variants sandboxed via a real toolchain image + verified DB reachability; orphaned-container-on-timeout bug found+fixed; read-only root FS + tmpfs + non-root hardening added; tests/security/test_bash_security.py added, 84 adversarial tests; ChatGPT 20-item checklist evaluated item-by-item — applied where real, explicitly skipped w/ reasoning where not. 2 real non-blocking limitations logged: network not deny-by-default, cancellation-triggered cleanup not wired. infra_dry_run stays unsandboxed by design, documented) |
 | 2 | create_pr | high | 1 | yes | 2 | PENDING |
 | 3 | delegate_to_agent | high | 1 | yes | 0 | PENDING |
 | 4 | git_push | high | 1 | yes | 9 | PENDING |

@@ -171,9 +171,7 @@ def test_migration_bash_never_leaks_the_db_password_in_error_output() -> None:
 
     backend_root = str(Path(__file__).resolve().parent.parent)
     handlers = make_migration_agent_handlers(backend_root)
-    out = handlers["bash"](
-        {"command": "alembic upgrade nonexistent_revision_xyz"}
-    )
+    out = handlers["bash"]({"command": "alembic upgrade nonexistent_revision_xyz"})
     password = _gs().database_url.split(":")[2].split("@")[0]
     assert password not in out
 
