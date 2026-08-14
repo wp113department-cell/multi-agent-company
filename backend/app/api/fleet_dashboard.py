@@ -32,7 +32,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.db.models import AgentRun, EnhancementRequest, MemoryEmbedding
+from app.db.models import (
+    AgentHistoricalPerformance,
+    AgentRun,
+    EnhancementRequest,
+    MemoryEmbedding,
+)
 from app.middleware.rbac import require_approver, require_authenticated
 from app.services.activity_stream import get_activity_registry
 
@@ -653,6 +658,44 @@ async def repair_patterns_report(
             "lastSeen": last_seen.isoformat() if last_seen else None,
         }
         for summary, occurrences, last_seen in result.all()
+    ]
+
+
+@router.get("/reports/agent-memory-performance")
+async def agent_memory_performance_report(
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> list[dict[str, Any]]:
+    """plan14 #14 (Memory + Orchestration as One Feedback System) — makes
+    the loop this closes actually visible: agent_historical_performance
+    (app.fleet.agent_historical_performance, follow-on #3) is the durable
+    rollup FleetManager.select() itself reads as memory_performance_factor
+    every time it scores a candidate agent. Before this endpoint, that
+    table existed and was consumed by the scheduler, but had no read path
+    a human could see — this is that read path, one row per (agent_name,
+    category), most-recently-computed first.
+
+    success_rate is only ever populated for category='task' (see
+    AgentHistoricalPerformance's own docstring — every other category's
+    outcome isn't a genuine completed/blocked binary); other categories
+    report sample_size/avg_importance/verified_rate only, exactly what the
+    rollup itself computed, never a fabricated value for the missing field.
+    """
+    q = select(AgentHistoricalPerformance).order_by(
+        AgentHistoricalPerformance.computed_at.desc()
+    )
+    result = await db.execute(q)
+    return [
+        {
+            "agentName": row.agent_name,
+            "category": row.category,
+            "sampleSize": row.sample_size,
+            "successRate": row.success_rate,
+            "avgImportance": row.avg_importance,
+            "verifiedRate": row.verified_rate,
+            "computedAt": row.computed_at.isoformat() if row.computed_at else None,
+        }
+        for row in result.scalars().all()
     ]
 
 

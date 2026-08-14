@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import heapq
 import logging
+from collections import deque
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, TypedDict
@@ -293,6 +294,13 @@ async def _dispatch_one_subtask(
 
     local_tokens_in = 0
     local_tokens_out = 0
+    # plan14 follow-on #2 (Dynamic Subtask Creation) — owned entirely by
+    # THIS call; propose_subtask's handler (wired below, only when this
+    # subtask's own selected agent is opted in) appends to it. Included in
+    # every return point below (empty when the tool was never wired, or
+    # when a dev agent never actually ran) so run_manager() can collect it
+    # uniformly without caring which return path fired.
+    local_proposals: list[dict[str, Any]] = []
 
     subtask_id = int(subtask.get("id", 0))
     subtask_type = str(subtask.get("type", "backend"))
@@ -430,6 +438,8 @@ async def _dispatch_one_subtask(
             "blocked": True,
             "tokens_in": local_tokens_in,
             "tokens_out": local_tokens_out,
+            "proposed_subtasks": [],
+            "selected_agent_name": selected_agent_name,
         }
 
     await publish_event(
@@ -492,6 +502,8 @@ async def _dispatch_one_subtask(
             "blocked": True,
             "tokens_in": local_tokens_in,
             "tokens_out": local_tokens_out,
+            "proposed_subtasks": [],
+            "selected_agent_name": selected_agent_name,
         }
 
     for attempt in range(max_retries):
@@ -516,32 +528,57 @@ async def _dispatch_one_subtask(
         except Exception:
             pass
 
+        # plan14 follow-on #2 (Dynamic Subtask Creation) — only backend_dev
+        # is wired at the code level for now (the same "1-2 agents first"
+        # staged-rollout precedent Day 4's delegation piloted on bug_fix
+        # only); frontend_dev is a trivial, identical-shape follow-up. Even
+        # for backend_dev, the tool is only actually attached when this
+        # specific agent name is opted into
+        # settings.dynamic_subtask_creation_enabled_agents — empty by
+        # default, so this is a complete no-op (None passed through,
+        # run_backend_dev's own default) for every existing caller/test.
+        propose_sink: list[dict[str, Any]] | None = None
+        if (
+            selected_agent_name == "backend_dev"
+            and get_settings().dynamic_subtask_creation_enabled_agents.get(
+                "backend_dev", False
+            )
+        ):
+            propose_sink = local_proposals
+
         try:
             async with agent_run_slot(priority=task_priority):
                 if selected_agent_name == "frontend_dev":
-                    files_changed, dev_error, dev_tokens_in, dev_tokens_out = (
-                        await asyncio.to_thread(
-                            run_frontend_dev,
-                            task_id=task_id,
-                            subtask_id=subtask_id,
-                            plan=full_plan,
-                            worktree_path=worktree_path,
-                            repo_path=repo,
-                            images=images,
-                            extra_env=extra_env,
-                        )
+                    (
+                        files_changed,
+                        dev_error,
+                        dev_tokens_in,
+                        dev_tokens_out,
+                    ) = await asyncio.to_thread(
+                        run_frontend_dev,
+                        task_id=task_id,
+                        subtask_id=subtask_id,
+                        plan=full_plan,
+                        worktree_path=worktree_path,
+                        repo_path=repo,
+                        images=images,
+                        extra_env=extra_env,
                     )
                 else:
-                    files_changed, dev_error, dev_tokens_in, dev_tokens_out = (
-                        await asyncio.to_thread(
-                            run_backend_dev,
-                            task_id=task_id,
-                            subtask_id=subtask_id,
-                            plan=full_plan,
-                            worktree_path=worktree_path,
-                            repo_path=repo,
-                            extra_env=extra_env,
-                        )
+                    (
+                        files_changed,
+                        dev_error,
+                        dev_tokens_in,
+                        dev_tokens_out,
+                    ) = await asyncio.to_thread(
+                        run_backend_dev,
+                        task_id=task_id,
+                        subtask_id=subtask_id,
+                        plan=full_plan,
+                        worktree_path=worktree_path,
+                        repo_path=repo,
+                        extra_env=extra_env,
+                        subtask_proposal_sink=propose_sink,
                     )
         except SlotAcquisitionTimeout as exc:
             # Phase 5.6 — same treatment as a real dev-agent error, reusing
@@ -774,22 +811,23 @@ async def _dispatch_one_subtask(
         and get_settings().enable_security_architecture_gates
     ):
         try:
-            gate_tokens_in, gate_tokens_out, gate_blocked_reason = (
-                await _run_advisory_quality_gates(
-                    task_id=task_id,
-                    subtask_id=subtask_id,
-                    repo=repo,
-                    epic_id=epic_id,
-                    db=db,
-                )
+            (
+                gate_tokens_in,
+                gate_tokens_out,
+                gate_blocked_reason,
+            ) = await _run_advisory_quality_gates(
+                task_id=task_id,
+                subtask_id=subtask_id,
+                repo=repo,
+                epic_id=epic_id,
+                db=db,
             )
             local_tokens_in += gate_tokens_in
             local_tokens_out += gate_tokens_out
             if gate_blocked_reason:
                 subtask_status = "blocked"
                 logger.warning(
-                    "Subtask %d blocked by security/architecture/dependency "
-                    "gate: %s",
+                    "Subtask %d blocked by security/architecture/dependency gate: %s",
                     subtask_id,
                     gate_blocked_reason,
                 )
@@ -817,6 +855,14 @@ async def _dispatch_one_subtask(
                 exc_info=True,
             )
 
+    # plan14 follow-on #2 — stamp this subtask's own index onto every
+    # proposal it made, since propose_subtask's handler (app.agents.tools)
+    # has no visibility into which index it's running as; run_manager()
+    # needs this to resolve the parent for depth/dependency purposes at
+    # integration time.
+    for _proposal in local_proposals:
+        _proposal["_parent_subtask_idx"] = subtask_idx
+
     return {
         "result": {
             "subtask_id": subtask_id,
@@ -831,6 +877,8 @@ async def _dispatch_one_subtask(
         "blocked": subtask_status == "blocked",
         "tokens_in": local_tokens_in,
         "tokens_out": local_tokens_out,
+        "proposed_subtasks": local_proposals,
+        "selected_agent_name": selected_agent_name,
     }
 
 
@@ -1161,8 +1209,7 @@ async def run_manager(
                 task_priority = _task_row.priority
         except Exception:
             logger.debug(
-                "Could not fetch DevTask.priority for task %d (defaulting to "
-                "medium)",
+                "Could not fetch DevTask.priority for task %d (defaulting to medium)",
                 task_id,
                 exc_info=True,
             )
@@ -1182,8 +1229,27 @@ async def run_manager(
     else:
         waves = [[idx] for idx in _topological_subtask_order(subtasks)]
 
+    # plan14 follow-on #2 (Dynamic Subtask Creation) — dynamic_subtasks_
+    # active is a one-time settings read (bool(...) on an empty dict is
+    # False by default) that makes every line below a complete no-op for
+    # any caller that never opts an agent in: `subtasks`/`spawn_depth` are
+    # only ever appended to inside the `if dynamic_subtasks_active` block
+    # after a wave completes, and propose_subtask is never wired into any
+    # dev agent's tool list unless that same settings dict says so (see
+    # _dispatch_one_subtask). wave_queue replaces plain iteration over
+    # `waves` so a wave boundary can requeue newly-integrated subtasks —
+    # for every existing caller this degrades to exactly the original
+    # `for wave in waves:` behavior, one pass, never refilled.
+    dynamic_subtasks_active = bool(settings.dynamic_subtask_creation_enabled_agents)
+    spawn_depth: dict[int, int] = {i: 0 for i in range(len(subtasks))}
+    parent_agent_names: dict[int, str] = {}
+    dynamic_subtasks_created = 0
+    dispatched: set[int] = set()
+
+    wave_queue: deque[list[int]] = deque(waves)
     halted = False
-    for wave in waves:
+    while wave_queue:
+        wave = wave_queue.popleft()
         outcomes = await asyncio.gather(
             *[
                 _dispatch_one_subtask(
@@ -1206,13 +1272,18 @@ async def run_manager(
                 for idx in wave
             ]
         )
+        dispatched.update(wave)
+        wave_proposals: list[dict[str, Any]] = []
 
-        for outcome in outcomes:
+        for idx, outcome in zip(wave, outcomes):
             result = outcome["result"]
             subtask_id = result["subtask_id"]
             results.append(result)
             epic_tokens_in += outcome["tokens_in"]
             epic_tokens_out += outcome["tokens_out"]
+            if dynamic_subtasks_active:
+                parent_agent_names[idx] = outcome.get("selected_agent_name", "")
+                wave_proposals.extend(outcome.get("proposed_subtasks", []))
 
             if not outcome["blocked"]:
                 if on_status:
@@ -1306,12 +1377,40 @@ async def run_manager(
         if halted:
             break
 
+        # plan14 follow-on #2 — integrate this wave's proposals AFTER the
+        # halt decision above, never before: "stop before starting the next
+        # wave" (the pre-existing halt semantics _dispatch_one_subtask's
+        # own docstring documents) must apply to newly-proposed work too —
+        # a proposal made in a wave that just triggered a halt must never
+        # be scheduled. Only ever runs between waves, never mid-wave (see
+        # app.pipeline.dynamic_subtasks' own module docstring for why).
+        if dynamic_subtasks_active and wave_proposals:
+            from app.pipeline.dynamic_subtasks import integrate_proposals
+
+            new_indices, dynamic_subtasks_created = await integrate_proposals(
+                wave_proposals,
+                subtasks=subtasks,
+                spawn_depth=spawn_depth,
+                dynamic_count=dynamic_subtasks_created,
+                epic_id=epic_id,
+                db=db,
+                parent_agent_names=parent_agent_names,
+            )
+            if new_indices:
+                if enable_fanout:
+                    full_waves = _topological_subtask_waves(subtasks)
+                else:
+                    full_waves = [[i] for i in _topological_subtask_order(subtasks)]
+                remaining = [[i for i in w if i not in dispatched] for w in full_waves]
+                wave_queue = deque(w for w in remaining if w)
+
     return {
         "status": overall_status,
         "results": results,
         "blocked_count": blocked_count,
         "tokens_in": epic_tokens_in,
         "tokens_out": epic_tokens_out,
+        "dynamic_subtasks_created": dynamic_subtasks_created,
     }
 
 

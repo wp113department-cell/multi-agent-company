@@ -1440,6 +1440,27 @@ TOOL_MANIFEST: dict[str, ToolManifestEntry] = {
             "tools doesn't declare it gets it filtered out automatically."
         ),
     ),
+    "propose_subtask": ToolManifestEntry(
+        purpose=(
+            "plan14 follow-on #2 (Dynamic Subtask Creation) — proposes a "
+            "new subtask to be validated and, if accepted, dispatched after "
+            "the proposing subtask completes. Does not run anything itself "
+            "— app.pipeline.dynamic_subtasks.integrate_proposals() applies "
+            "the real allow-matrix/duplicate/depth/count/file-lock checks "
+            "at the next wave boundary."
+        ),
+        permissions=["write_pipeline_state"],
+        timeout_s=5,
+        retry_policy="none",
+        verification_required=False,
+        risk_level="high",
+        notes=(
+            "high risk deliberately: can grow the epic's own subtask set "
+            "and, if accepted, trigger real, costly follow-up agent work. "
+            "Same dynamic-tool-selection contract-drift reinforcement as "
+            "delegate_to_agent above — see that entry's own notes."
+        ),
+    ),
     "record_learning": ToolManifestEntry(
         purpose=(
             "Record a non-obvious finding for future agents working on similar "

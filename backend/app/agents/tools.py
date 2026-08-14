@@ -14319,6 +14319,106 @@ def make_delegate_to_agent_handler(
 BUG_FIX_TOOLS.append(_DELEGATE_TO_AGENT_TOOL)
 
 
+PROPOSE_SUBTASK_TOOL: dict[str, Any] = {
+    "name": "propose_subtask",
+    "description": (
+        "Propose a NEW follow-up subtask to be created and dispatched after "
+        "this one completes — use when you discover necessary work that "
+        "wasn't in the original plan (e.g. a companion piece, a missed "
+        "case, or a test that should exist). This does not run anything "
+        "itself: the epic manager validates every proposal (allowed-type "
+        "policy, duplicate-work check, file-lock availability, spawn-depth "
+        "and per-epic count limits) before it is ever scheduled, and a "
+        "proposal may be rejected. You will not be told the outcome — "
+        "continue and finish your own current subtask regardless."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "type": {
+                "type": "string",
+                "enum": ["backend", "frontend", "test", "docs"],
+                "description": "What kind of subtask this is — same vocabulary the original plan's subtasks use.",
+            },
+            "title": {"type": "string", "description": "A short, specific title."},
+            "description": {
+                "type": "string",
+                "description": "What needs to be done, specific enough for another agent to implement without further context.",
+            },
+            "files_to_edit": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Files this subtask is expected to touch (best guess — used for conflict/lock checking).",
+            },
+            "reason": {
+                "type": "string",
+                "description": "Why this follow-up work is needed — what you discovered that the original plan didn't cover.",
+            },
+        },
+        "required": ["type", "title", "description", "reason"],
+    },
+}
+
+
+def make_propose_subtask_handler(
+    sink: list[dict[str, Any]],
+) -> Callable[[dict[str, Any]], str]:
+    """Build the sync tool handler for propose_subtask. `sink` is a plain
+    list owned by the ONE _dispatch_one_subtask call this handler was built
+    for (see app.agents.manager) — appending to it here is safe with no
+    locking because that call's own dev-agent run is the only thing that
+    ever touches this particular list, and it runs to completion inside a
+    single asyncio.to_thread() worker before anything else reads it.
+
+    Deliberately does only cheap SHAPE validation (required fields present,
+    `type` is a real value, files_to_edit is a list of strings) — the real
+    policy checks (allow-matrix, duplicate-work, depth/count limits,
+    file-lock reservation) need epic-wide state this handler has no
+    visibility into, and run later, once per wave boundary, in
+    app.pipeline.dynamic_subtasks.integrate_proposals(). A proposal
+    accepted here is NOT yet a guarantee it will ever be scheduled."""
+
+    def _handler(inp: dict[str, Any]) -> str:
+        subtask_type = str(inp.get("type", "")).strip()
+        title = str(inp.get("title", "")).strip()
+        description = str(inp.get("description", "")).strip()
+        files_to_edit = inp.get("files_to_edit") or []
+        reason = str(inp.get("reason", "")).strip()
+
+        if subtask_type not in {"backend", "frontend", "test", "docs"}:
+            return (
+                "[ERROR] type must be one of backend/frontend/test/docs, "
+                f"got {subtask_type!r}."
+            )
+        if not title:
+            return "[ERROR] title is required."
+        if not description:
+            return "[ERROR] description is required."
+        if not reason:
+            return "[ERROR] reason is required."
+        if not isinstance(files_to_edit, list) or not all(
+            isinstance(f, str) for f in files_to_edit
+        ):
+            return "[ERROR] files_to_edit must be a list of strings."
+
+        sink.append(
+            {
+                "type": subtask_type,
+                "title": title,
+                "description": description,
+                "files_to_edit": [str(f) for f in files_to_edit],
+                "reason": reason,
+            }
+        )
+        return (
+            f"Proposal recorded: {title!r}. It will be reviewed and "
+            "validated by the epic manager — continue your own current "
+            "subtask now."
+        )
+
+    return _handler
+
+
 _GIT_COMMIT_CHANGE_TOOL: dict[str, Any] = {
     "name": "git_commit_change",
     "description": "Stage exactly the named files (never all changes) and commit them. Only usable in the APPLY phase, after a human has approved this specific fix.",

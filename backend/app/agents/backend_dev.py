@@ -57,6 +57,13 @@ AGENT_CONTRACT: dict[str, Any] = {
         "bash",
         "submit_patch",
         "record_learning",
+        # plan14 follow-on #2 (Dynamic Subtask Creation) — declared here so
+        # Day 1's dynamic-tool-selection contract-drift check doesn't strip
+        # this high-risk tool when both features are enabled together; the
+        # tool itself is only actually wired into a given run when
+        # settings.dynamic_subtask_creation_enabled_agents["backend_dev"]
+        # is True (see run_backend_dev's subtask_proposal_sink parameter).
+        "propose_subtask",
     ],
     "input_types": ["task_id", "subtask_id", "plan", "worktree_path", "repo_path"],
     "output_types": ["files_changed", "tokens_in", "tokens_out"],
@@ -127,6 +134,7 @@ def run_backend_dev(
     on_heartbeat: Any = None,  # kept for backward compat — no-op
     on_tool_call: Any = None,  # kept for backward compat — no-op
     extra_env: dict[str, str] | None = None,
+    subtask_proposal_sink: list[dict[str, Any]] | None = None,
 ) -> tuple[list[str], str | None, int, int]:
     """Run backend developer agent with static-check retry loop.
 
@@ -140,6 +148,15 @@ def run_backend_dev(
 
     extra_env (Day 17): custom secrets merged into the bash tool's
     subprocess env.
+
+    subtask_proposal_sink (plan14 follow-on #2, Dynamic Subtask Creation):
+    None (the default) means today's exact behavior — no propose_subtask
+    tool exists for this run at all. When the caller (app.agents.manager.
+    _dispatch_one_subtask, itself gated by settings.
+    dynamic_subtask_creation_enabled_agents) passes a list, propose_subtask
+    is wired in and any proposal the agent makes is appended to that list —
+    owned and read by the caller, never by this function, which only ever
+    appends.
     """
     from app.fleet.failure_ladder import should_retry
 
@@ -153,6 +170,18 @@ def run_backend_dev(
     for attempt in range(max_retries):
         handlers = make_coder_handlers(worktree_path, repo, extra_env=extra_env)
         handlers["record_learning"] = make_record_learning_handler("backend_dev")
+
+        tools = CODER_TOOLS
+        if subtask_proposal_sink is not None:
+            from app.agents.tools import (
+                PROPOSE_SUBTASK_TOOL,
+                make_propose_subtask_handler,
+            )
+
+            tools = CODER_TOOLS + [PROPOSE_SUBTASK_TOOL]
+            handlers["propose_subtask"] = make_propose_subtask_handler(
+                subtask_proposal_sink
+            )
 
         base_msg = (
             f"Task ID: {task_id}, Subtask ID: {subtask_id}\n\n"
@@ -172,7 +201,7 @@ def run_backend_dev(
             final_state = run_agent_graph(
                 role_name="backend_dev",
                 model=settings.model_coder,
-                tools=CODER_TOOLS,
+                tools=tools,
                 tool_handlers=handlers,
                 verification_cfg=_VERIFICATION_CFG,
                 initial_message=base_msg,

@@ -288,6 +288,39 @@ class Settings(BaseSettings):
         description="Dispatch independent subtasks (no depends_on edge) concurrently in dependency-respecting waves instead of strictly sequentially",
     )
 
+    # plan14 follow-on #2 (Dynamic Subtask Creation) — the highest-risk item
+    # in the backlog per its own audit ("genuine risk of destabilizing an
+    # existing, working invariant if rushed"): subtasks were created exactly
+    # once, up front, and run_manager()'s wave/order computation assumed a
+    # static, complete list. dynamic_subtask_creation_enabled_agents is
+    # EMPTY by default (unlike replanning_enabled_agents, which defaulted 4
+    # agents True to preserve pre-existing behavior) — this is a brand-new
+    # capability with no prior behavior to preserve, so the safe default is
+    # every agent off, opted in explicitly per the plan's own recommendation
+    # ("Build behind a feature flag, enabled only for specific epics/agents
+    # initially"). An agent absent from this dict (the default for all of
+    # them) never gets the propose_subtask tool wired at all — see
+    # app.agents.manager._dispatch_one_subtask.
+    dynamic_subtask_creation_enabled_agents: dict[str, bool] = Field(
+        default_factory=dict,
+        description="agent_name -> whether that agent gets the propose_subtask tool wired into its own dispatch call. Empty by default (nobody enabled) — this is a new capability, not preserving prior behavior.",
+    )
+    dynamic_subtask_max_per_epic: int = Field(
+        default=5,
+        description="Hard cap on the total number of dynamically-proposed subtasks integrated into one epic's run_manager() call, regardless of how many are proposed — bounds worst-case runaway self-replication.",
+    )
+    dynamic_subtask_max_depth: int = Field(
+        default=2,
+        description="Max spawn depth for a dynamically-proposed subtask (an original static subtask is depth 0; a subtask it proposes is depth 1; a subtask THAT proposes is depth 2, etc.) — a proposal that would exceed this is rejected regardless of dynamic_subtask_max_per_epic headroom.",
+    )
+    dynamic_subtask_allowed_matrix: dict[str, list[str]] = Field(
+        default_factory=lambda: {
+            "backend_dev": ["backend", "test"],
+            "frontend_dev": ["frontend", "test"],
+        },
+        description="proposing_agent_name -> list of subtask `type` values it may propose. Same config-driven, default-deny-outside-the-list shape as delegation_allowed_matrix (Day 4) — a proposal for a type not in its proposer's list is rejected, never silently reinterpreted.",
+    )
+
     # AUDIT_Q_BATCH16 §90 gap-closure (2026-08-11) — "Quality Gates": only
     # linting and tests were mandatory in the Dev→QA→Review pipeline;
     # security_reviewer and architecture_reviewer are real, fully-built,
