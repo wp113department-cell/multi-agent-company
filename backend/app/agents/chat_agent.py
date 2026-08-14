@@ -104,7 +104,6 @@ from app.agents.tools import (
     _llm_diagnose_deployment_failure,
     _llm_explain_conflict_hunks,
     _llm_generate_commit_message,
-    _llm_generate_pr_description,
     _llm_review_diff,
     _llm_summarize_url_content,
     _parse_conflict_markers,
@@ -118,6 +117,10 @@ from app.agents.tools import (
 from app.config import get_settings
 from app.models.chat import ChatSession
 from app.repo_tools import ast_engine as _ast_engine
+from app.tools.git.pull_request import (
+    build_gh_pr_create_command,
+    generate_pr_description as _llm_generate_pr_description,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -2224,19 +2227,13 @@ class ChatAgent:
             )
             if not approved:
                 return "[DENIED] User declined create_pr."
-            pr_cmd_parts = [
-                "gh",
-                "pr",
-                "create",
-                "--title",
-                pr_title,
-                "--base",
-                pr_base,
-            ]
-            if pr_body:
-                pr_cmd_parts += ["--body", pr_body]
-            if pr_draft:
-                pr_cmd_parts.append("--draft")
+            # Shared with app/tools/git/pull_request.py::create_pr_handler
+            # (the other real create_pr implementation) — previously each
+            # built this command independently and had already drifted
+            # apart; tool_enhance.md productionization pass, tool #2.
+            pr_cmd_parts = build_gh_pr_create_command(
+                pr_title, pr_base, pr_body, pr_draft
+            )
             cmd_s = " ".join(__import__("shlex").quote(c) for c in pr_cmd_parts)
             return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 30)
 

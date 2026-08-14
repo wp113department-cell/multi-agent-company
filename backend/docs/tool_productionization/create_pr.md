@@ -79,15 +79,66 @@ always win — generation only fills gaps).
   unbounded `git diff`/`git rev-parse` calls, wrapped in a
   `try/except subprocess.TimeoutExpired` returning a clean `[ERROR]`
   instead of letting the exception propagate uncaught.
-- **Duplication**: evaluated, not consolidated this pass. The two
-  implementations live in genuinely different execution models — one sync
-  handler-factory dispatched through LangGraph's node/state machine, one
-  async method using a real `interrupt()`-based pause/resume flow with its
-  own confirmation bookkeeping. Merging them would be a materially larger,
-  riskier refactor for a code-organization improvement, not a correctness
-  or security fix — tracked as a real, known, non-blocking follow-up
-  (same category as bash tool's own Remaining Issue #2), not silently
-  ignored.
+- **Duplication**: partially closed (see Modularization below) — the
+  command-building logic is now shared; the diff-gathering + execution
+  wrapper stays separate per implementation, for the reason below.
+
+## Modularization (tool_enhance.md §7 TOOL MODULARIZATION / §8 TOOL PATH MIGRATION REQUIREMENT)
+
+**Correction, logged transparently:** this tool was initially marked
+GREEN FLAG without doing this step — the same modularization discipline
+already applied to bash tool (extraction into `app/tools/execution/`)
+was skipped here. The user caught this directly ("did you seen this ???
+into this i said we have to do tools proper folderise... why you didnot
+follow this?") before any further tools were touched. Corrected below,
+and this step is now mandatory before GREEN FLAG on every subsequent
+tool, not an optional follow-up.
+
+**Extraction**: `create_pr`'s logic — previously split across a nested
+closure in the 14,000+ line `app/agents/tools.py`, a duplicate inline
+block in `chat_agent.py`, and a floating `_llm_generate_pr_description`
+helper — is now consolidated in `app/tools/git/pull_request.py`:
+`CREATE_PR_TOOL` (schema), `create_pr_handler` (the sync handler body),
+`generate_pr_description` (LLM title/body generation), and
+`build_gh_pr_create_command` (the previously-duplicated command-builder,
+now genuinely shared by both call sites — closing part of the
+"Duplication drift" problem found in the audit, not just documenting it).
+
+`app/agents/tools.py` keeps a compatibility layer (`_CREATE_PR_TOOL` and
+`create_pr_handler` imported with the `X as X` explicit-re-export
+convention already established for the bash-tool move), so every existing
+`handlers["create_pr"](...)` call site — every real test, every agent —
+keeps working unchanged. `app/agents/chat_agent.py` imports
+`build_gh_pr_create_command` and `generate_pr_description` directly from
+the new module instead of duplicating them.
+
+**Full TOOL PATH MIGRATION REPORT** (per §8's exact required format) lives
+in `app/tools/git/pull_request.py`'s own module docstring — old
+path/new path, affected agents/modules/registries/tests, old references
+found vs. updated vs. remaining, and the runtime verification result.
+Produced via real repository search (`grep -rln create_pr --include=*.py
+.`), not assumed — this also surfaced and correctly ruled OUT
+`app/tools/git_push_tool.py`'s `push_and_create_pr` as an unrelated,
+already-separate REST-API-based mechanism (used by the automated
+approval-gate flow in `app/api/approvals.py`), left untouched.
+
+**Consumers requiring updates, found by the search**: 3 tests in
+`tests/test_audit_q_batch10_deployment_external_git_docs.py` patched
+`app.agents.tools._llm_generate_pr_description` directly by string path
+(a mock, not a call through `handlers[...]`) — updated to patch
+`app.tools.git.pull_request.generate_pr_description` instead. Every other
+real consumer (all other tests, all agents) accesses this tool via
+`handlers["create_pr"](...)`, so the compatibility layer meant zero
+changes were needed there — confirmed by search, not assumed.
+
+Still separate, deliberately: `create_pr_handler`'s diff-gathering
+(sync `subprocess.run`) and `chat_agent.py`'s dispatch (async `_git()`
+calls + the `interrupt()`-based confirmation flow) remain two call paths
+into the shared command-builder, not one merged function. Force-merging a
+sync handler-factory closure with an async interrupt-based method would
+be a materially larger, riskier refactor than this pass's real findings
+justify — logged as a real, explicit, non-blocking follow-up, not
+silently left as duplication with no explanation.
 
 ## Tests (real, not mocked at the mechanism level)
 
@@ -110,11 +161,12 @@ always win — generation only fills gaps).
 
 ## Regression
 
-Targeted sweep (create_pr + dispatch + related contract tests): 250
-passed. Full suite re-run after the dispatch-layer change (touches a
-chokepoint shared by ~76 agents): **4751 passed, 52 skipped, 18
-deselected, 0 failures** — confirms the shared `base_graph.py` dispatch
-change did not break any other agent's tool calls.
+Targeted sweep (create_pr + dispatch + related contract tests, re-run
+after the modularization): 393 passed, 1 skipped, 0 failures. Full suite
+re-run after the dispatch-layer change AND the modularization (touches a
+chokepoint shared by ~76 agents, plus the giant `tools.py`/`chat_agent.py`
+import surface): **4751 passed, 52 skipped, 18 deselected, 0 failures** —
+confirms neither change broke any other agent's tool calls.
 
 ## Final verdict
 

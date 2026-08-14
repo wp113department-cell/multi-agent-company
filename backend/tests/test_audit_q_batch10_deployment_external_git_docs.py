@@ -173,7 +173,7 @@ class TestCreatePrAutoGenerate:
     ) -> None:
         _make_diverged_branch(tmp_repo)
         with patch(
-            "app.agents.tools._llm_generate_pr_description",
+            "app.tools.git.pull_request.generate_pr_description",
             return_value=("Add b.txt", "Adds a new file b.txt"),
         ) as mock_gen:
             result = handlers["create_pr"]({})
@@ -183,7 +183,7 @@ class TestCreatePrAutoGenerate:
     def test_explicit_title_and_body_skip_generation(
         self, handlers: dict[str, Any], tmp_repo: Path
     ) -> None:
-        with patch("app.agents.tools._llm_generate_pr_description") as mock_gen:
+        with patch("app.tools.git.pull_request.generate_pr_description") as mock_gen:
             result = handlers["create_pr"](
                 {"title": "Explicit title", "body": "Explicit body"}
             )
@@ -195,7 +195,7 @@ class TestCreatePrAutoGenerate:
     ) -> None:
         _make_diverged_branch(tmp_repo)
         with patch(
-            "app.agents.tools._llm_generate_pr_description", return_value=("", "")
+            "app.tools.git.pull_request.generate_pr_description", return_value=("", "")
         ):
             result = handlers["create_pr"]({})
         assert "[ERROR] title is required" in result
