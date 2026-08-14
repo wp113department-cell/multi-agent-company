@@ -2215,6 +2215,25 @@ def _make_execute_tools_node(
         if isinstance(t.get("input_schema"), dict)
     }
 
+    # tool_enhance.md productionization pass (2026-08-15) — real gap found
+    # while hardening create_pr: tool_handlers (passed in below) is often a
+    # much larger dict than `tools` (the spec list actually advertised to
+    # the LLM this run) — e.g. make_chat_handlers() builds one shared
+    # handler dict containing create_pr, git_push, etc. that ~35 one-shot
+    # agents reuse via `base = make_chat_handlers(repo_path)`, while each
+    # advertises only a curated subset as its own `tools`. Dispatch below
+    # used to do `tool_handlers.get(tu_name)` with no check that tu_name
+    # was ever actually offered to the model — so a hallucinated or
+    # prompt-injected tool_use block naming an unadvertised-but-present
+    # handler (e.g. a low-risk, untrusted-content-reading agent emitting
+    # "create_pr") would still execute for real. Built from `tools`
+    # directly (not reused from _schema_by_name above, which silently
+    # drops any entry missing a valid input_schema — a defense-in-depth
+    # gate must not inherit that same silent-drop behavior).
+    _allowed_tool_names: set[str] = {
+        t["name"] for t in (tools or []) if isinstance(t, dict) and t.get("name")
+    }
+
     # Stage 4 Cluster N (2026-08-04) — real per-run heartbeat state, private
     # to this one graph's own execute_tools_node closure (build_agent_graph()
     # constructs a fresh node, and therefore a fresh closure, per
@@ -2323,7 +2342,16 @@ def _make_execute_tools_node(
             except Exception:
                 pass
 
-        denial = _policy_check(tu_name, tu_input)
+        denial: str | None
+        if tu_name not in _allowed_tool_names:
+            denial = (
+                f"{tu_name!r} is not among the tools advertised to this "
+                "agent for this run — refusing to dispatch an "
+                "unadvertised tool call even though a handler for it may "
+                "exist in the shared handler set."
+            )
+        else:
+            denial = _policy_check(tu_name, tu_input)
         if not denial and tu_name in verification_cfg.blocking_until:
             required_key = verification_cfg.blocking_until[tu_name]
             if not new_verification.get(required_key, False):

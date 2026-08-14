@@ -9602,24 +9602,38 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             # generated to fill in whichever of title/body the caller didn't
             # supply. Explicit caller values always win — this only fills
             # gaps, never overrides an explicit title/body.
-            r_stat = subprocess.run(
-                ["git", "diff", f"{pr_base}...HEAD", "--stat"],
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-            )
-            r_diff = subprocess.run(
-                ["git", "diff", f"{pr_base}...HEAD"],
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-            )
-            r_branch = subprocess.run(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-            )
+            #
+            # tool_enhance.md productionization pass, tool #2 (2026-08-15) —
+            # real gap found by reading this code: these 3 calls had no
+            # timeout at all (unlike the gh pr create call 30 lines below,
+            # which already has timeout=30), so a huge diff or a hung git
+            # process could block this handler indefinitely. Matches the
+            # same 30s bound chat_agent.py's own _git() helper already uses
+            # for its equivalent calls.
+            try:
+                r_stat = subprocess.run(
+                    ["git", "diff", f"{pr_base}...HEAD", "--stat"],
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                r_diff = subprocess.run(
+                    ["git", "diff", f"{pr_base}...HEAD"],
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                r_branch = subprocess.run(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+            except subprocess.TimeoutExpired:
+                return "[ERROR] git command timed out while preparing PR description"
             branch = r_branch.stdout.strip() or "HEAD"
             stat = r_stat.stdout.strip()
             diff = r_diff.stdout[:6000]

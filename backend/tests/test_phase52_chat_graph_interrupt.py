@@ -171,6 +171,109 @@ async def test_denied_git_push_never_runs() -> None:
     assert git_call_count["n"] == 0
 
 
+def _patched_agent_for_create_pr(
+    agent: ChatAgent, responses: list, gh_call_count: dict
+):
+    """Same shape as _patched_agent, but for create_pr: patches
+    _run_subprocess (the real chokepoint for `gh pr create`) instead of
+    _git, since that's the call whose count proves whether the PR was
+    actually created."""
+    call_state = {"n": 0}
+
+    def fake_stream(*args: object, **kwargs: object):
+        resp = responses[call_state["n"]]
+        call_state["n"] += 1
+        return resp
+
+    def fake_run_subprocess(
+        command: str, cwd: str, timeout: int = 120, *, fail_on_nonzero_exit: bool = False
+    ) -> str:
+        gh_call_count["n"] += 1
+        return "https://github.com/example/repo/pull/1"
+
+    return (
+        patch.object(
+            ChatAgent,
+            "_client",
+            return_value=MagicMock(
+                messages=MagicMock(stream=MagicMock(side_effect=fake_stream))
+            ),
+        ),
+        patch("app.agents.chat_agent._run_subprocess", side_effect=fake_run_subprocess),
+        patch.object(agent, "_memory_read_context", new=AsyncMock(return_value="")),
+        patch.object(agent, "_memory_write_outcome", new=AsyncMock()),
+    )
+
+
+@pytest.mark.asyncio
+async def test_confirmed_create_pr_runs_exactly_once_across_pause_and_resume() -> None:
+    """tool_enhance.md productionization pass, tool #2 — create_pr is a
+    real, publicly-visible external write (permissions: write_remote) that
+    had NO confirmation gate at all before this pass, unlike git_push right
+    above it in the same dispatch. Same proof shape as
+    test_confirmed_git_push_runs_exactly_once_across_pause_and_resume:
+    the real side effect (here, the `gh pr create` subprocess call) must
+    not run before approval, and must run exactly once after it — not
+    zero, not twice."""
+    session = ChatSession(session_id="td_graph_pr_approve", repo_path="/tmp/repo")
+    agent = ChatAgent(session)
+    gh_call_count = {"n": 0}
+    responses = [
+        _FakeToolUseStream(
+            "create_pr",
+            {"title": "Add feature X", "body": "Implements X.", "base": "main"},
+            tool_id="toolu_pr1",
+        ),
+        _FakeTextStream("PR created."),
+    ]
+    p1, p2, p3, p4 = _patched_agent_for_create_pr(agent, responses, gh_call_count)
+
+    with p1, p2, p3, p4:
+        await agent.run("please open a PR")
+
+        assert gh_call_count["n"] == 0
+
+        config = {"configurable": {"thread_id": session.session_id}}
+        snapshot = await agent._graph.aget_state(config)
+        action_id = next(
+            i.value["action_id"] for task in snapshot.tasks for i in task.interrupts
+        )
+        assert action_id == "toolu_pr1"
+
+        resumed = await agent.resume(action_id, True)
+        assert resumed is True
+
+    assert gh_call_count["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_denied_create_pr_never_runs() -> None:
+    session = ChatSession(session_id="td_graph_pr_deny", repo_path="/tmp/repo")
+    agent = ChatAgent(session)
+    gh_call_count = {"n": 0}
+    responses = [
+        _FakeToolUseStream(
+            "create_pr",
+            {"title": "Add feature X", "body": "Implements X.", "base": "main"},
+            tool_id="toolu_pr2",
+        ),
+        _FakeTextStream("Understood, not opening a PR."),
+    ]
+    p1, p2, p3, p4 = _patched_agent_for_create_pr(agent, responses, gh_call_count)
+
+    with p1, p2, p3, p4:
+        await agent.run("open a pr")
+        config = {"configurable": {"thread_id": session.session_id}}
+        snapshot = await agent._graph.aget_state(config)
+        action_id = next(
+            i.value["action_id"] for task in snapshot.tasks for i in task.interrupts
+        )
+        resumed = await agent.resume(action_id, False)
+        assert resumed is True
+
+    assert gh_call_count["n"] == 0
+
+
 @pytest.mark.asyncio
 async def test_resume_with_mismatched_action_id_is_a_safe_no_op() -> None:
     session = ChatSession(session_id="td_graph_push_mismatch", repo_path="/tmp/repo")

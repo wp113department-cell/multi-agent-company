@@ -2206,6 +2206,24 @@ class ChatAgent:
                     pr_body = pr_body or gen_body
             if not pr_title:
                 return "[ERROR] title is required (auto-generation failed — supply one explicitly)"
+            # tool_enhance.md productionization pass, tool #2 (2026-08-15) —
+            # real gap found by reading this code: creating a PR is a real,
+            # publicly-visible external write (permissions: write_remote in
+            # its manifest), yet — unlike git_push and git_reset --hard
+            # right above this in the same dispatch — it had no
+            # confirmation gate at all. Confirmed AFTER title/body are
+            # resolved (including LLM auto-generation) so the human sees
+            # the real content that will actually be posted, not a preview
+            # of empty/unresolved fields.
+            approved = await self._confirm(
+                description="Create a GitHub pull request",
+                details=(
+                    f"gh pr create --title {pr_title!r} --base {pr_base!r}"
+                    f"{' --draft' if pr_draft else ''}\n\n{pr_body}"
+                ),
+            )
+            if not approved:
+                return "[DENIED] User declined create_pr."
             pr_cmd_parts = [
                 "gh",
                 "pr",
