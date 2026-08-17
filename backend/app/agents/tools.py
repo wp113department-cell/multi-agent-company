@@ -85,6 +85,10 @@ from app.tools.execution.parallel import (
     RUN_PARALLEL_COMMANDS_TOOL as _RUN_PARALLEL_COMMANDS_TOOL,
     run_parallel_commands_handler as run_parallel_commands_handler,
 )
+from app.tools.filesystem.write_file import (
+    WRITE_FILE_TOOL as _WRITE_FILE_TOOL,
+    write_file_handler as write_file_handler,
+)
 from app.tools.git.pull_request import (
     CREATE_PR_TOOL as _CREATE_PR_TOOL,
     GITHUB_CREATE_PR_TOOL as _GITHUB_CREATE_PR_TOOL,
@@ -852,28 +856,9 @@ CODER_TOOLS = READ_ONLY_TOOLS + [
             "required": ["path", "old_string", "new_string"],
         },
     },
-    {
-        "name": "write_file",
-        "description": (
-            "Write full content to a file (creates or completely overwrites). "
-            "Use edit_file instead when modifying an existing file. "
-            "Only use write_file for NEW files or when you need to fully replace a file."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "File path relative to worktree root",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "Complete file content to write",
-                },
-            },
-            "required": ["path", "content"],
-        },
-    },
+    # moved to app/tools/filesystem/write_file.py as WRITE_FILE_TOOL —
+    # tool_enhance.md productionization pass, tool #12 (2026-08-17).
+    _WRITE_FILE_TOOL,
     {
         "name": "git_diff",
         "description": "Show the current diff of changes in the worktree. Use this to review your own changes before submitting.",
@@ -4077,18 +4062,9 @@ _EDIT_FILE_TOOL_SPEC = {
     },
 }
 
-_WRITE_FILE_TOOL_SPEC = {
-    "name": "write_file",
-    "description": "Write full content to a file (creates or overwrites). Prefer edit_file for modifications.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string"},
-            "content": {"type": "string"},
-        },
-        "required": ["path", "content"],
-    },
-}
+# moved to app/tools/filesystem/write_file.py as WRITE_FILE_TOOL —
+# tool_enhance.md productionization pass, tool #12 (2026-08-17).
+_WRITE_FILE_TOOL_SPEC = _WRITE_FILE_TOOL
 
 _GIT_DIFF_TOOL_SPEC = {
     "name": "git_diff",
@@ -4533,14 +4509,10 @@ def _make_edit_file_handler(root: Path) -> Any:
 
 
 def _make_write_file_handler(root: Path) -> Any:
+    # moved to app/tools/filesystem/write_file.py as write_file_handler —
+    # tool_enhance.md productionization pass, tool #12 (2026-08-17).
     def write_file_h(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        if _is_protected_path(rel, str(root)):
-            return f"[POLICY DENIED] Cannot write to protected path: {rel}"
-        target = root / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(inp["content"], encoding="utf-8")
-        return f"Written {rel}"
+        return write_file_handler(root, str(root), inp)
 
     return write_file_h
 
@@ -8247,17 +8219,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] Cannot write {rel}: {e}"
 
     # ---- write_file ----
+    # moved to app/tools/filesystem/write_file.py as write_file_handler —
+    # tool_enhance.md productionization pass, tool #12 (2026-08-17).
     def write_file(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        if _is_protected_path(rel, repo_path):
-            return f"[POLICY DENIED] Cannot write to protected path: {rel}"
-        target = root / rel
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(inp["content"], encoding="utf-8")
-            return f"Written {rel} ({len(inp['content'])} bytes)"
-        except Exception as e:
-            return f"[ERROR] Cannot write {rel}: {e}"
+        return write_file_handler(root, repo_path, inp)
 
     # ---- git_diff ----
     def git_diff(inp: dict[str, Any]) -> str:
@@ -13517,6 +13482,9 @@ def make_fleet_apply_handlers(
     disk write — gap-closure Day 50."""
     base = Path(repo_path)
 
+    # Non-role-prompt branch moved to app/tools/filesystem/write_file.py as
+    # write_file_handler — tool_enhance.md productionization pass, tool #12
+    # (2026-08-17).
     def write_file_h(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
         result = check_path_in_worktree(rel, repo_path)
@@ -13527,10 +13495,7 @@ def make_fleet_apply_handlers(
             return _propose_and_deploy_role_prompt(
                 role_name, str(inp["content"]), agent_name
             )
-        target = base / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(str(inp["content"]), encoding="utf-8")
-        return f"Written {rel}"
+        return write_file_handler(base, repo_path, inp)
 
     def edit_file_h(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])

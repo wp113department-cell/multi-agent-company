@@ -120,6 +120,7 @@ from app.repo_tools import ast_engine as _ast_engine
 from app.tools.database.migration import validate_run_migration_inputs
 from app.tools.database.seed import validate_seed_database_script
 from app.tools.execution.parallel import MAX_PARALLEL_COMMANDS
+from app.tools.filesystem.write_file import write_file_handler
 from app.tools.git.pull_request import (
     build_gh_pr_create_command,
     generate_pr_description as _llm_generate_pr_description,
@@ -1358,9 +1359,7 @@ class ChatAgent:
                 )
                 if not approved:
                     return f"[DENIED] User declined to overwrite: {rel}"
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(str(inp["content"]), encoding="utf-8")
-            return f"Written {rel} ({len(str(inp['content']))} bytes)"
+            return write_file_handler(root, repo, inp)
 
         if tool_name == "edit_file":
             rel = str(inp["path"])

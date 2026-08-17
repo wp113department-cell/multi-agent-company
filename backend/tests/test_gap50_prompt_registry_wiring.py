@@ -179,7 +179,10 @@ def test_write_file_to_non_role_prompt_path_is_a_raw_disk_write_unchanged(
     plenty of non-prompt files too."""
     handlers = make_fleet_apply_handlers(str(tmp_path), agent_name="td_pr_gap50_raw")
     msg = handlers["write_file"]({"path": "docs/notes.md", "content": "hello"})
-    assert msg == "Written docs/notes.md"
+    # tool_enhance.md tool #12 (2026-08-17): write_file_h's non-role-prompt
+    # branch now delegates to the shared write_file_handler, whose success
+    # message includes a byte count — startswith is the real assertion.
+    assert msg.startswith("Written docs/notes.md")
     assert (Path(str(tmp_path)) / "docs/notes.md").read_text(
         encoding="utf-8"
     ) == "hello"
