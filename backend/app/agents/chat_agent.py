@@ -122,6 +122,7 @@ from app.tools.database.seed import validate_seed_database_script
 from app.tools.execution.parallel import MAX_PARALLEL_COMMANDS
 from app.tools.database.sql import run_sql_handler
 from app.tools.execution.docker_build import validate_docker_build_inputs
+from app.tools.execution.docker_compose import build_docker_compose_command
 from app.tools.execution.python_snippet import run_python_snippet_handler
 from app.tools.execution.run_tests import run_tests_handler
 from app.tools.filesystem.delete_file import delete_file_handler
@@ -2707,7 +2708,7 @@ class ChatAgent:
 
         if tool_name == "docker_compose":
             dc_action = str(inp["action"])
-            dc_services = " ".join(str(s) for s in (inp.get("services") or []))
+            dc_services = [str(s) for s in (inp.get("services") or [])]
             dc_detach = bool(inp.get("detach", True))
             if dc_action == "up":
                 # tool_enhance.md productionization pass, tool #4 (2026-08-16)
@@ -2717,7 +2718,7 @@ class ChatAgent:
                 # no restriction on privileged/host-mount config"), but this
                 # real, actually-executing dispatch had no gate at all.
                 dc_cmd_preview = (
-                    f"docker compose up {'-d' if dc_detach else ''} {dc_services}".strip()
+                    f"docker compose up {'-d' if dc_detach else ''} {' '.join(dc_services)}".strip()
                 )
                 dc_approved = await self._confirm(
                     description="Start containers via docker compose up",
@@ -2725,14 +2726,13 @@ class ChatAgent:
                 )
                 if not dc_approved:
                     return "[DENIED] User declined docker compose up."
-                dc_cmd = f"docker compose up {'-d' if dc_detach else ''} {dc_services}"
-            elif dc_action in ("down", "restart", "build", "ps", "pull"):
-                dc_cmd = f"docker compose {dc_action} {dc_services}"
-            elif dc_action == "logs":
-                dc_cmd = f"docker compose logs --tail=50 {dc_services}"
-            else:
-                return f"[ERROR] Unknown action: {dc_action}"
-            return await asyncio.to_thread(_run_subprocess, dc_cmd.strip(), repo, 120)
+            dc_cmd, dc_error = build_docker_compose_command(
+                dc_action, dc_services, dc_detach
+            )
+            if dc_error:
+                return f"[ERROR] {dc_error}"
+            assert dc_cmd is not None
+            return await asyncio.to_thread(_run_subprocess, dc_cmd, repo, 120)
 
         if tool_name == "npm_install":
             # tool_enhance.md productionization pass, tool #4 (2026-08-16)

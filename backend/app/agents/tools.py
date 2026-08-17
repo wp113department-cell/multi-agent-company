@@ -90,6 +90,10 @@ from app.tools.execution.docker_build import (
     DOCKER_BUILD_TOOL as _DOCKER_BUILD_TOOL,
     validate_docker_build_inputs as validate_docker_build_inputs,
 )
+from app.tools.execution.docker_compose import (
+    DOCKER_COMPOSE_TOOL as _DOCKER_COMPOSE_TOOL,
+    build_docker_compose_command as build_docker_compose_command,
+)
 from app.tools.execution.python_snippet import (
     RUN_PYTHON_SNIPPET_TOOL as _RUN_PYTHON_SNIPPET_TOOL,
     run_python_snippet_handler as run_python_snippet_handler,
@@ -3395,30 +3399,8 @@ _DOCKER_EXEC_TOOL = {
     },
 }
 
-_DOCKER_COMPOSE_TOOL = {
-    "name": "docker_compose",
-    "description": "Run docker compose commands (up, down, restart, build, ps, logs, pull).",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "action": {
-                "type": "string",
-                "enum": ["up", "down", "restart", "build", "ps", "logs", "pull"],
-                "description": "Action to perform",
-            },
-            "services": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Specific services to target (default: all)",
-            },
-            "detach": {
-                "type": "boolean",
-                "description": "Run in background for 'up' (default: true)",
-            },
-        },
-        "required": ["action"],
-    },
-}
+# moved to app/tools/execution/docker_compose.py as DOCKER_COMPOSE_TOOL —
+# tool_enhance.md productionization pass, tool #19 (2026-08-17).
 
 _DIAGNOSE_DEPLOYMENT_FAILURE_TOOL = {
     "name": "diagnose_deployment_failure",
