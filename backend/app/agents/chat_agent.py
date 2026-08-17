@@ -120,6 +120,7 @@ from app.repo_tools import ast_engine as _ast_engine
 from app.tools.database.migration import validate_run_migration_inputs
 from app.tools.database.seed import validate_seed_database_script
 from app.tools.execution.parallel import MAX_PARALLEL_COMMANDS
+from app.tools.database.sql import run_sql_handler
 from app.tools.execution.python_snippet import run_python_snippet_handler
 from app.tools.filesystem.edit_file import edit_file_handler
 from app.tools.filesystem.write_file import write_file_handler
@@ -2662,19 +2663,8 @@ class ChatAgent:
         if tool_name == "run_sql":
             from app.config import get_settings as _get_settings
 
-            rs_query = str(inp["query"])
-            rs_params: list[str] = list(inp.get("params") or [])
-            for rs_i, rs_p in enumerate(rs_params, 1):
-                rs_query = rs_query.replace(f"${rs_i}", f"'{rs_p}'")
             rs_db_url = str(getattr(_get_settings(), "database_url", ""))
-            if not rs_db_url:
-                return "[ERROR] DATABASE_URL not configured"
-            return await asyncio.to_thread(
-                _run_subprocess,
-                f"psql '{rs_db_url}' -c {__import__('shlex').quote(rs_query)} --no-password 2>&1",
-                repo,
-                30,
-            )
+            return await asyncio.to_thread(run_sql_handler, rs_db_url, inp)
 
         if tool_name == "inspect_schema":
             from app.config import get_settings as _get_settings

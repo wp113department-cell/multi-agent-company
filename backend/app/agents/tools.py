@@ -85,6 +85,10 @@ from app.tools.execution.parallel import (
     RUN_PARALLEL_COMMANDS_TOOL as _RUN_PARALLEL_COMMANDS_TOOL,
     run_parallel_commands_handler as run_parallel_commands_handler,
 )
+from app.tools.database.sql import (
+    RUN_SQL_TOOL as _RUN_SQL_TOOL,
+    run_sql_handler as run_sql_handler,
+)
 from app.tools.execution.python_snippet import (
     RUN_PYTHON_SNIPPET_TOOL as _RUN_PYTHON_SNIPPET_TOOL,
     run_python_snippet_handler as run_python_snippet_handler,
@@ -3354,22 +3358,8 @@ _ANALYZE_ERROR_TOOL = {
 # NEW TOOL SPECS — Batch 7: Database tools
 # ---------------------------------------------------------------------------
 
-_RUN_SQL_TOOL = {
-    "name": "run_sql",
-    "description": "Execute a SQL query against the project's PostgreSQL database via psql.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "SQL query to execute"},
-            "params": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Query parameters (positional, replaces $1, $2, ...)",
-            },
-        },
-        "required": ["query"],
-    },
-}
+# moved to app/tools/database/sql.py as RUN_SQL_TOOL —
+# tool_enhance.md productionization pass, tool #15 (2026-08-17).
 
 _INSPECT_SCHEMA_TOOL = {
     "name": "inspect_schema",
@@ -9607,29 +9597,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # BATCH 7 — Database tools
     # =========================================================================
 
+    # moved to app/tools/database/sql.py as run_sql_handler —
+    # tool_enhance.md productionization pass, tool #15 (2026-08-17).
     def run_sql(inp: dict[str, Any]) -> str:
-        rs_query = str(inp["query"])
-        rs_params: list[str] = list(inp.get("params") or [])
-        for rs_i, rs_p in enumerate(rs_params, 1):
-            rs_query = rs_query.replace(f"${rs_i}", f"'{rs_p}'")
         rs_settings = get_settings()
-        rs_db_url = getattr(rs_settings, "database_url", None)
-        if not rs_db_url:
-            return "[ERROR] DATABASE_URL not configured in settings"
-        try:
-            r = subprocess.run(
-                ["psql", str(rs_db_url), "-c", rs_query, "--no-password"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            return (r.stdout + r.stderr)[:5000] or "(no output)"
-        except FileNotFoundError:
-            return "[ERROR] psql not found — install postgresql-client"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] Query timed out after 30s"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        rs_db_url = str(getattr(rs_settings, "database_url", "") or "")
+        return run_sql_handler(rs_db_url, inp)
 
     def inspect_schema(inp: dict[str, Any]) -> str:
         is_table = str(inp.get("table", ""))
