@@ -72,6 +72,11 @@ from app.tools.agents.propose_subtask import (
     PROPOSE_SUBTASK_TOOL as PROPOSE_SUBTASK_TOOL,
     make_propose_subtask_handler as make_propose_subtask_handler,
 )
+from app.tools.database.migration import (
+    RUN_MIGRATION_TOOL as _RUN_MIGRATION_TOOL,
+    run_migration_handler as run_migration_handler,
+    validate_run_migration_inputs as validate_run_migration_inputs,
+)
 from app.tools.git.pull_request import (
     CREATE_PR_TOOL as _CREATE_PR_TOOL,
     GITHUB_CREATE_PR_TOOL as _GITHUB_CREATE_PR_TOOL,
@@ -4057,27 +4062,9 @@ _EXPLAIN_QUERY_TOOL = {
     },
 }
 
-_RUN_MIGRATION_TOOL = {
-    "name": "run_migration",
-    "description": (
-        "Run Alembic database migrations. Defaults to `alembic upgrade head`. "
-        "WARNING: This modifies the database schema. Requires user confirmation."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "direction": {
-                "type": "string",
-                "description": "'upgrade' or 'downgrade' (default: upgrade)",
-            },
-            "revision": {
-                "type": "string",
-                "description": "Target revision (default: head for upgrade, -1 for downgrade)",
-            },
-        },
-        "required": [],
-    },
-}
+# _RUN_MIGRATION_TOOL moved to app/tools/database/migration.py as
+# RUN_MIGRATION_TOOL — tool_enhance.md productionization pass, tool #8
+# (2026-08-16).
 
 _SEED_DATABASE_TOOL = {
     "name": "seed_database",
@@ -10869,29 +10856,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
-    def run_migration_h(inp: dict[str, Any]) -> str:
-        settings = get_settings()
-        if settings.sentry_environment == "production":
-            return (
-                "[BLOCKED] run_migration is disabled in the production environment. "
-                "Run migrations in a non-production environment only."
-            )
-
-        direction = str(inp.get("direction", "upgrade")).strip()
-        if direction not in ("upgrade", "downgrade"):
-            return (
-                f"[ERROR] direction must be 'upgrade' or 'downgrade', got {direction!r}"
-            )
-
-        # tool_enhance.md productionization pass, tool #4 (2026-08-16) —
-        # real gap found: `session` is never non-None for any real caller
-        # of make_chat_handlers() (grepped every real call site in the
-        # repo — none pass one; run_migration isn't in any one-shot
-        # agent's allowed_tools either). The interactive chat agent has
-        # its own separate, real, working run_migration dispatch with a
-        # genuine self._confirm() gate. Simplified to state that plainly
-        # instead of dead async plumbing that could never execute.
-        return "[BLOCKED] run_migration requires interactive session for safety confirmation"
+    # run_migration_h removed — tool_enhance.md productionization pass,
+    # tool #8 (2026-08-16). Now registered directly against
+    # run_migration_handler (app/tools/database/migration.py), which
+    # also closes a real shell-injection finding (see that module's
+    # docstring) that this handler was never actually reachable enough
+    # to be exploitable through, but shares the same validation as the
+    # real, reachable chat_agent.py dispatch for defense-in-depth.
 
     def seed_database_h(inp: dict[str, Any]) -> str:
         settings = get_settings()
@@ -10910,7 +10881,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         return "[BLOCKED] seed_database requires interactive session for safety confirmation"
 
     handlers["explain_query"] = explain_query_h
-    handlers["run_migration"] = run_migration_h
+    handlers["run_migration"] = lambda inp: run_migration_handler(repo_path, inp)
     handlers["seed_database"] = seed_database_h
 
     # =========================================================================

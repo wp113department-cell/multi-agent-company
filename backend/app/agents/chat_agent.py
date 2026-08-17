@@ -117,6 +117,7 @@ from app.agents.tools import (
 from app.config import get_settings
 from app.models.chat import ChatSession
 from app.repo_tools import ast_engine as _ast_engine
+from app.tools.database.migration import validate_run_migration_inputs
 from app.tools.git.pull_request import (
     build_gh_pr_create_command,
     generate_pr_description as _llm_generate_pr_description,
@@ -3366,6 +3367,24 @@ class ChatAgent:
             rmig_rev = str(
                 inp.get("revision", "head" if rmig_dir == "upgrade" else "-1")
             )
+            # tool_enhance.md productionization pass, tool #8 (2026-08-16)
+            # — real, empirically-verified shell-injection vulnerability
+            # found while auditing this tool: direction/revision are
+            # LLM-controlled strings interpolated directly into a raw
+            # shell=True command below, with no validation at all. Proved
+            # directly (not assumed) before writing this fix: passing
+            # revision="head; touch /tmp/PWNED..." actually executed the
+            # injected command — a real arbitrary-command-execution bug
+            # that bypassed the confirmation dialog's entire purpose,
+            # since a human reviewing "alembic upgrade <revision>" has no
+            # reasonable way to notice an injection payload hidden inside
+            # what looks like a revision identifier.
+            # validate_run_migration_inputs (shared with the second,
+            # currently unreachable make_chat_handlers() implementation of
+            # this same tool) closes this before ever reaching the shell.
+            rmig_validation_error = validate_run_migration_inputs(rmig_dir, rmig_rev)
+            if rmig_validation_error:
+                return rmig_validation_error
             rmig_confirmed = await self._confirm(
                 description=f"alembic {rmig_dir} {rmig_rev}",
                 details="Modifies the database schema — review migration file before confirming",
