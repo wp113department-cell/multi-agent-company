@@ -1149,6 +1149,31 @@ class Settings(BaseSettings):
         description="When True (default), the sync create_pr_handler (used by make_chat_handlers()) always refuses to run `gh pr create` — there is no real per-call human-approval channel available to this handler tier. Set False only for a deployment that has explicitly decided its one-shot agents may autonomously open PRs. Does not affect chat_agent.py's own create_pr dispatch, which already has its own real, independent self._confirm() interactive gate.",
     )
 
+    # tool_enhance.md productionization pass, tool #4 (git_push, 2026-08-16)
+    # — real gap found while auditing: chat_agent.py's git_push dispatch
+    # already always requires confirmation, but its own tool description
+    # promises force-push gets "extra confirmation" — the code gave force
+    # and normal pushes the identical single confirmation dialog. Branches
+    # here are config-driven (not hardcoded in decision logic) so a
+    # deployment can adjust what counts as protected.
+    git_push_protected_branches: list[str] = Field(
+        default_factory=lambda: ["main", "master"],
+        description="Branch names that get a distinct, stronger confirmation warning when force-pushed via the interactive chat agent's git_push tool — force-rewriting one of these is materially more dangerous (shared history other people/CI depend on) than a feature branch only the current session's agent is using.",
+    )
+    # Same real gap class as create_pr_require_approval above, found while
+    # auditing docker_compose: its "up" action creates/starts containers
+    # from whatever docker-compose.yml is in the repo, with no restriction
+    # on privileged/host-mount config — a real, legitimate one-shot agent
+    # (docker_agent) has docker_compose in its allowed_tools today, so
+    # this one (unlike most of the other session-gated tools.py handlers
+    # audited alongside it, which have no real one-shot caller at all)
+    # actually is reachable and was a live, permanently-broken dead end
+    # for that agent before this fix.
+    docker_compose_up_require_approval: bool = Field(
+        default=True,
+        description="When True (default), the sync docker_compose handler (used by make_chat_handlers(), reachable by docker_agent) always refuses the 'up' action — there is no real per-call human-approval channel available to this handler tier. Set False only for a deployment that has explicitly decided its one-shot agents may autonomously start containers. Does not affect chat_agent.py's own docker_compose dispatch, which has its own real, independent self._confirm() interactive gate for 'up' as of this same pass.",
+    )
+
     # Day 10 — Fleet OS Budget Manager (live enforcement, per-run + daily cumulative)
     max_tokens_per_agent_run: int = Field(
         default=100_000,

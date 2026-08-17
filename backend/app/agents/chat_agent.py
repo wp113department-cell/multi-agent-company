@@ -1551,10 +1551,40 @@ class ChatAgent:
             cmd_preview = (
                 f"git push {remote} {branch}{'  --force' if force else ''}".strip()
             )
-            approved = await self._confirm(
-                description="Push commits to remote repository",
-                details=cmd_preview,
-            )
+            # tool_enhance.md productionization pass, tool #4 (2026-08-16) —
+            # real gap found by reading this code against its own tool
+            # description: _GIT_PUSH_TOOL's schema promises force push
+            # "requires extra confirmation," but force and normal pushes
+            # previously got the identical single confirmation dialog. A
+            # force push to a real, configured protected branch (main/
+            # master by default) now gets a distinct, more explicit warning
+            # naming the actual risk (rewriting shared history), rather
+            # than the same generic "Push commits" description every push
+            # already shows.
+            settings = get_settings()
+            if force:
+                gp_target_branch = branch or await asyncio.to_thread(
+                    _git, ["rev-parse", "--abbrev-ref", "HEAD"], repo
+                )
+                if gp_target_branch in settings.git_push_protected_branches:
+                    approved = await self._confirm(
+                        description=(
+                            f"FORCE PUSH to protected branch {gp_target_branch!r} — "
+                            "this can permanently overwrite remote history other "
+                            "people or CI depend on"
+                        ),
+                        details=cmd_preview,
+                    )
+                else:
+                    approved = await self._confirm(
+                        description="FORCE PUSH — this overwrites remote history for this branch",
+                        details=cmd_preview,
+                    )
+            else:
+                approved = await self._confirm(
+                    description="Push commits to remote repository",
+                    details=cmd_preview,
+                )
             if not approved:
                 return "[DENIED] User declined git push."
             push_args = (
@@ -2669,6 +2699,21 @@ class ChatAgent:
             dc_services = " ".join(str(s) for s in (inp.get("services") or []))
             dc_detach = bool(inp.get("detach", True))
             if dc_action == "up":
+                # tool_enhance.md productionization pass, tool #4 (2026-08-16)
+                # — real gap found while auditing git_push's dead sibling in
+                # tools.py: that unreachable code already identified 'up' as
+                # needing confirmation ("creates/starts containers... with
+                # no restriction on privileged/host-mount config"), but this
+                # real, actually-executing dispatch had no gate at all.
+                dc_cmd_preview = (
+                    f"docker compose up {'-d' if dc_detach else ''} {dc_services}".strip()
+                )
+                dc_approved = await self._confirm(
+                    description="Start containers via docker compose up",
+                    details=dc_cmd_preview,
+                )
+                if not dc_approved:
+                    return "[DENIED] User declined docker compose up."
                 dc_cmd = f"docker compose up {'-d' if dc_detach else ''} {dc_services}"
             elif dc_action in ("down", "restart", "build", "ps", "pull"):
                 dc_cmd = f"docker compose {dc_action} {dc_services}"
@@ -2677,6 +2722,99 @@ class ChatAgent:
             else:
                 return f"[ERROR] Unknown action: {dc_action}"
             return await asyncio.to_thread(_run_subprocess, dc_cmd.strip(), repo, 120)
+
+        if tool_name == "npm_install":
+            # tool_enhance.md productionization pass, tool #4 (2026-08-16)
+            # — real bug found: npm_install is advertised to the model via
+            # CHAT_TOOLS/AGENT_CONTRACT["allowed_tools"] (chat_agent's own
+            # contract is built FROM CHAT_TOOLS), but _execute_tool had no
+            # dispatch branch for it at all — every real call from the
+            # interactive chat agent fell through to the generic "[ERROR]
+            # Unknown tool" response. Confirmation-gated to match the real,
+            # working pattern already used for pip_install below and for
+            # git_push/docker_compose above — installing arbitrary
+            # dependencies is a real side effect, not a read.
+            ni_directory = str(inp.get("directory", "."))
+            ni_package = str(inp.get("package", "")).strip()
+            ni_target_dir = str(root / ni_directory)
+            ni_cmd = ["npm", "install"] + ([ni_package] if ni_package else [])
+            ni_approved = await self._confirm(
+                description=(
+                    f"Run npm install in {ni_directory}"
+                    + (f" (package: {ni_package})" if ni_package else "")
+                ),
+                details=" ".join(ni_cmd),
+            )
+            if not ni_approved:
+                return f"[DENIED] User declined npm_install ({' '.join(ni_cmd)})."
+
+            def _run_npm_install() -> str:
+                try:
+                    r = subprocess.run(
+                        ni_cmd,
+                        capture_output=True,
+                        text=True,
+                        cwd=ni_target_dir,
+                        timeout=120,
+                    )
+                    return (r.stdout + r.stderr).strip()[-2000:] or "npm install complete"
+                except Exception as e:
+                    return f"[ERROR] npm_install: {e}"
+
+            return await asyncio.to_thread(_run_npm_install)
+
+        if tool_name == "npm_run":
+            # Real bug, same class as npm_install above — advertised via
+            # CHAT_TOOLS, no dispatch existed. No confirmation gate,
+            # matching tools.py's own npm_run_h precedent: running a
+            # package.json script (build/test/lint) is lower-risk than
+            # installing arbitrary new dependencies.
+            nr_script = str(inp["script"])
+            nr_directory = str(inp.get("directory", "."))
+            nr_target_dir = str(root / nr_directory)
+
+            def _run_npm_script() -> str:
+                try:
+                    r = subprocess.run(
+                        ["npm", "run", nr_script],
+                        capture_output=True,
+                        text=True,
+                        cwd=nr_target_dir,
+                        timeout=180,
+                    )
+                    return (
+                        (r.stdout + r.stderr).strip()[-3000:]
+                        or f"npm run {nr_script} complete"
+                    )
+                except Exception as e:
+                    return f"[ERROR] npm_run: {e}"
+
+            return await asyncio.to_thread(_run_npm_script)
+
+        if tool_name == "pip_install":
+            # Real bug, same class as npm_install above — advertised via
+            # CHAT_TOOLS, no dispatch existed.
+            pi_package = str(inp["package"])
+            pi_approved = await self._confirm(
+                description=f"Install Python package: {pi_package}",
+                details=f"pip install {pi_package}",
+            )
+            if not pi_approved:
+                return f"[DENIED] User declined pip_install ({pi_package})."
+
+            def _run_pip_install() -> str:
+                try:
+                    r = subprocess.run(
+                        [sys.executable, "-m", "pip", "install", pi_package],
+                        capture_output=True,
+                        text=True,
+                        timeout=120,
+                    )
+                    return (r.stdout + r.stderr).strip()[-2000:]
+                except Exception as e:
+                    return f"[ERROR] pip_install: {e}"
+
+            return await asyncio.to_thread(_run_pip_install)
 
         if tool_name == "diagnose_deployment_failure":
             dd_container = str(inp.get("container", "")).strip()

@@ -72,6 +72,10 @@ from app.tools.git.pull_request import (
     CREATE_PR_TOOL as _CREATE_PR_TOOL,
     create_pr_handler as create_pr_handler,
 )
+from app.tools.git.push import (
+    GIT_PUSH_TOOL as _GIT_PUSH_TOOL,
+    git_push_handler as git_push_handler,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -2390,32 +2394,8 @@ _DELETE_FILE_TOOL = {
     },
 }
 
-_GIT_PUSH_TOOL = {
-    "name": "git_push",
-    "description": (
-        "Push commits to the remote repository. "
-        "ALWAYS requires explicit user confirmation before executing. "
-        "Specify the branch; defaults to current branch."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "branch": {
-                "type": "string",
-                "description": "Branch to push (defaults to current branch)",
-            },
-            "remote": {
-                "type": "string",
-                "description": "Remote name (default: origin)",
-            },
-            "force": {
-                "type": "boolean",
-                "description": "Force push (default: false — requires extra confirmation)",
-            },
-        },
-        "required": [],
-    },
-}
+# _GIT_PUSH_TOOL moved to app/tools/git/push.py as GIT_PUSH_TOOL —
+# tool_enhance.md productionization pass, tool #4 (2026-08-16).
 
 _CREATE_BRANCH_TOOL = {
     "name": "create_branch",
@@ -8375,9 +8355,6 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     # ---- bash (with confirmation for dangerous commands) ----
     def bash(inp: dict[str, Any]) -> str:
-        import asyncio
-        import uuid
-
         command = inp["command"]
         # Gap-closure (Audit 05 fix, SEC-05-006): this used to accept an
         # LLM-controlled cwd override (`inp.get("cwd") or repo_path`) with no
@@ -8409,40 +8386,24 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                     f"[BLOCKED] This command is irreversible/catastrophic and "
                     f"cannot be run even with confirmation: {command!r}"
                 )
-            if session is None:
-                return (
-                    f"[BLOCKED] This command is potentially destructive: {command!r}\n"
-                    "No confirmation mechanism available. Refusing to run."
-                )
-            action_id = str(uuid.uuid4())
-
-            # We need to run the coroutine from within a sync handler
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # We're inside an async context — schedule and block
-                    future = asyncio.run_coroutine_threadsafe(
-                        session.request_confirmation(
-                            action_id=action_id,
-                            description="Run dangerous command",
-                            details=command,
-                        ),
-                        loop,
-                    )
-                    approved = future.result(timeout=300)  # 5 min timeout
-                else:
-                    approved = loop.run_until_complete(
-                        session.request_confirmation(
-                            action_id=action_id,
-                            description="Run dangerous command",
-                            details=command,
-                        )
-                    )
-            except Exception as exc:
-                return f"[ERROR] Confirmation failed: {exc}"
-
-            if not approved:
-                return f"[DENIED] User declined to run: {command!r}"
+            # tool_enhance.md productionization pass, tool #4 (2026-08-16) —
+            # real gap found: the session.request_confirmation() plumbing
+            # below this used to exist for the case where session IS
+            # provided, but `session` is never non-None for any real
+            # caller of make_chat_handlers() (grepped every real call
+            # site in the repo — none pass one). Unlike git_push/
+            # undo_changes/etc. below, "bash" genuinely IS reachable by
+            # many real one-shot agents (bug_fix, backend_dev, ...), so
+            # this fail-closed behavior is real, live, and correct — a
+            # one-shot agent must never autonomously run a flagged-
+            # dangerous command with no human present to ask. Simplified
+            # to state that plainly instead of dead async plumbing that
+            # could never execute.
+            return (
+                f"[BLOCKED] This command is potentially destructive: {command!r}\n"
+                "No interactive confirmation channel is available in this "
+                "execution context. Refusing to run."
+            )
 
         try:
             timeout = get_settings().bash_tool_timeout_seconds.get("chat", 120)
@@ -8474,61 +8435,8 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] Cannot delete {rel}: {e}"
 
-    # ---- git_push (always requires confirmation) ----
-    def git_push(inp: dict[str, Any]) -> str:
-        import asyncio
-        import uuid
-
-        branch = inp.get("branch", "")
-        remote = inp.get("remote", "origin")
-        force = inp.get("force", False)
-
-        if session is None:
-            return "[BLOCKED] git_push always requires user confirmation; no session available."
-
-        action_id = str(uuid.uuid4())
-        cmd_preview = f"git push {remote} {branch}{'  --force' if force else ''}"
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                future = asyncio.run_coroutine_threadsafe(
-                    session.request_confirmation(
-                        action_id=action_id,
-                        description="Push commits to remote repository",
-                        details=cmd_preview,
-                    ),
-                    loop,
-                )
-                approved = future.result(timeout=300)
-            else:
-                approved = loop.run_until_complete(
-                    session.request_confirmation(
-                        action_id=action_id,
-                        description="Push commits to remote repository",
-                        details=cmd_preview,
-                    )
-                )
-        except Exception as exc:
-            return f"[ERROR] Confirmation failed: {exc}"
-
-        if not approved:
-            return "[DENIED] User declined git push."
-
-        cmd_parts = ["git", "push", remote]
-        if branch:
-            cmd_parts.append(branch)
-        if force:
-            cmd_parts.append("--force")
-
-        try:
-            result = subprocess.run(
-                cmd_parts, cwd=repo_path, capture_output=True, text=True, timeout=60
-            )
-            out = result.stdout + result.stderr
-            return out.strip() or "Push complete."
-        except Exception as e:
-            return f"[ERROR] git push failed: {e}"
+    # git_push moved to app/tools/git/push.py as git_push_handler —
+    # tool_enhance.md productionization pass, tool #4 (2026-08-16).
 
     # ---- create_branch ----
     def create_branch(inp: dict[str, Any]) -> str:
@@ -10088,53 +9996,35 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         dc_detach = bool(inp.get("detach", True))
         dc_cmd = ["docker", "compose"]
         if dc_action == "up":
-            # Gap-closure: "up" creates/starts containers from whatever
-            # docker-compose.yml currently sits in the repo — including one
-            # this same agent could have just written via write_file, with
-            # no restriction on privileged:/pid: host/cap_add/host mounts.
-            # docker_exec's own risk-inspection guard only ever sees a
-            # container *after* it exists; this is the actual creation step,
-            # so it's gated the same way run_migration/seed_database/
-            # undo_changes already gate their own irreversible-ish actions
-            # in this file: require human confirmation, hard-block if no
-            # interactive session is available to ask.
-            import asyncio
-            import uuid as _uuid
-
-            if session is None:
-                return "[BLOCKED] docker_compose('up') requires interactive session for safety confirmation"
-
-            dc_cmd_preview = (
-                "docker compose up"
-                + (" -d" if dc_detach else "")
-                + (f" {' '.join(dc_services)}" if dc_services else "")
-            )
-            dc_action_id = str(_uuid.uuid4())
-            try:
-                dc_loop = asyncio.get_event_loop()
-                if dc_loop.is_running():
-                    dc_fut = asyncio.run_coroutine_threadsafe(
-                        session.request_confirmation(
-                            action_id=dc_action_id,
-                            description="Start containers via docker compose up",
-                            details=dc_cmd_preview,
-                        ),
-                        dc_loop,
-                    )
-                    dc_approved = dc_fut.result(timeout=300)
-                else:
-                    dc_approved = dc_loop.run_until_complete(
-                        session.request_confirmation(
-                            action_id=dc_action_id,
-                            description="Start containers via docker compose up",
-                            details=dc_cmd_preview,
-                        )
-                    )
-            except Exception as exc:
-                return f"[ERROR] Confirmation failed: {exc}"
-
-            if not dc_approved:
-                return "[DENIED] User declined docker compose up"
+            # "up" creates/starts containers from whatever docker-compose.yml
+            # currently sits in the repo — including one this same agent
+            # could have just written via write_file, with no restriction on
+            # privileged:/pid: host/cap_add/host mounts. docker_exec's own
+            # risk-inspection guard only ever sees a container *after* it
+            # exists; this is the actual creation step.
+            #
+            # tool_enhance.md productionization pass, tool #4 (2026-08-16) —
+            # real gap found: the confirmation attempt here used
+            # session.request_confirmation(), but `session` is never
+            # non-None for any real caller of make_chat_handlers() (grepped
+            # every real call site in the repo — none pass one; only tests
+            # construct a fake session). docker_agent, a real, registered
+            # one-shot agent, genuinely has docker_compose in its
+            # allowed_tools — so 'up' was a live, permanently-broken dead
+            # end for it (every other action still worked). Fixed with the
+            # same fail-closed, config-driven gate as create_pr_require_approval
+            # (tool #2's second pass) — the honest fix for this handler
+            # tier, which has no per-call human-approval channel at all,
+            # rather than an unreachable pseudo-confirmation.
+            if get_settings().docker_compose_up_require_approval:
+                return (
+                    "[POLICY DENIED] docker_compose('up') requires human "
+                    "approval, and this execution context has no per-call "
+                    "approval channel available (see Settings."
+                    "docker_compose_up_require_approval). Use the "
+                    "interactive chat agent instead, which gates this "
+                    "behind a real confirmation prompt."
+                )
 
             dc_cmd.append("up")
             if dc_detach:
@@ -10260,7 +10150,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["git_pull"] = git_pull
     handlers["git_fetch"] = git_fetch
     handlers["git_restore"] = git_restore
-    handlers["git_push"] = git_push
+    handlers["git_push"] = git_push_handler
     handlers["create_branch"] = create_branch
     handlers["run_tests"] = run_tests
     handlers["run_linter"] = run_linter
@@ -10956,14 +10846,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         return f"Replaced class '{rcl_name}' in {rcl_rel} (was lines {rcl_start + 1}–{rcl_end})"
 
     def undo_changes_h(inp: dict[str, Any]) -> str:
-        import asyncio
-        import uuid as _uuid
-
         undo_rel = str(inp["path"])
         if _is_protected_path(undo_rel, repo_path):
             return f"[POLICY DENIED] Protected path: {undo_rel}"
-        if session is None:
-            return "[BLOCKED] undo_changes requires interactive session for safety confirmation"
 
         settings = get_settings()
         if settings.sentry_environment == "production":
@@ -10972,48 +10857,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 "Run migrations in a non-production environment only."
             )
 
-        cmd_preview = f"git checkout -- {undo_rel}"
-        action_id = str(_uuid.uuid4())
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                fut = asyncio.run_coroutine_threadsafe(
-                    session.request_confirmation(
-                        action_id=action_id,
-                        description="Discard all uncommitted changes to file",
-                        details=cmd_preview,
-                    ),
-                    loop,
-                )
-                approved = fut.result(timeout=300)
-            else:
-                approved = loop.run_until_complete(
-                    session.request_confirmation(
-                        action_id=action_id,
-                        description="Discard all uncommitted changes to file",
-                        details=cmd_preview,
-                    )
-                )
-        except Exception as exc:
-            return f"[ERROR] Confirmation failed: {exc}"
-
-        if not approved:
-            return f"[DENIED] User declined undo_changes for: {undo_rel!r}"
-
-        try:
-            r = subprocess.run(
-                ["git", "checkout", "--", undo_rel],
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            out = (r.stdout + r.stderr).strip()
-            if r.returncode != 0:
-                return f"[ERROR] git checkout failed: {out}"
-            return f"Restored {undo_rel} to last committed state"
-        except Exception as exc:
-            return f"[ERROR] {exc}"
+        # tool_enhance.md productionization pass, tool #4 (2026-08-16) —
+        # real gap found: `session` is never non-None for any real caller
+        # of make_chat_handlers() (grepped every real call site in the
+        # repo — none pass one; undo_changes isn't in any one-shot agent's
+        # allowed_tools either). The interactive chat agent has its own
+        # separate, real, working undo_changes dispatch with a genuine
+        # self._confirm() gate. Simplified to state that plainly instead
+        # of dead async plumbing that could never execute.
+        return "[BLOCKED] undo_changes requires interactive session for safety confirmation"
 
     def generate_patch_h(inp: dict[str, Any]) -> str:
         import difflib
@@ -11058,12 +10910,6 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] {e}"
 
     def run_migration_h(inp: dict[str, Any]) -> str:
-        import asyncio
-        import uuid as _uuid
-
-        if session is None:
-            return "[BLOCKED] run_migration requires interactive session for safety confirmation"
-
         settings = get_settings()
         if settings.sentry_environment == "production":
             return (
@@ -11072,66 +10918,22 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             )
 
         direction = str(inp.get("direction", "upgrade")).strip()
-        revision = str(
-            inp.get("revision", "head" if direction == "upgrade" else "-1")
-        ).strip()
         if direction not in ("upgrade", "downgrade"):
             return (
                 f"[ERROR] direction must be 'upgrade' or 'downgrade', got {direction!r}"
             )
 
-        cmd_args = ["alembic", direction, revision]
-        cmd_preview = " ".join(cmd_args)
-        action_id = str(_uuid.uuid4())
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                fut = asyncio.run_coroutine_threadsafe(
-                    session.request_confirmation(
-                        action_id=action_id,
-                        description=f"Run Alembic migration: {direction} to {revision}",
-                        details=cmd_preview,
-                    ),
-                    loop,
-                )
-                approved = fut.result(timeout=300)
-            else:
-                approved = loop.run_until_complete(
-                    session.request_confirmation(
-                        action_id=action_id,
-                        description=f"Run Alembic migration: {direction} to {revision}",
-                        details=cmd_preview,
-                    )
-                )
-        except Exception as exc:
-            return f"[ERROR] Confirmation failed: {exc}"
-
-        if not approved:
-            return f"[DENIED] User declined run_migration ({cmd_preview})"
-
-        try:
-            r = subprocess.run(
-                cmd_args,
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            out = (r.stdout + r.stderr).strip()
-            if r.returncode != 0:
-                return f"[ERROR] alembic {direction} failed:\n{out}"
-            return f"Migration complete ({cmd_preview}):\n{out}"
-        except Exception as exc:
-            return f"[ERROR] {exc}"
+        # tool_enhance.md productionization pass, tool #4 (2026-08-16) —
+        # real gap found: `session` is never non-None for any real caller
+        # of make_chat_handlers() (grepped every real call site in the
+        # repo — none pass one; run_migration isn't in any one-shot
+        # agent's allowed_tools either). The interactive chat agent has
+        # its own separate, real, working run_migration dispatch with a
+        # genuine self._confirm() gate. Simplified to state that plainly
+        # instead of dead async plumbing that could never execute.
+        return "[BLOCKED] run_migration requires interactive session for safety confirmation"
 
     def seed_database_h(inp: dict[str, Any]) -> str:
-        import asyncio
-        import uuid as _uuid
-
-        if session is None:
-            return "[BLOCKED] seed_database requires interactive session for safety confirmation"
-
         settings = get_settings()
         if settings.sentry_environment == "production":
             return (
@@ -11143,49 +10945,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         if not (root / script).exists() and not (Path(repo_path) / script).exists():
             return f"[ERROR] Seed script not found: {script}"
 
-        cmd_preview = f"python {script}"
-        action_id = str(_uuid.uuid4())
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                fut = asyncio.run_coroutine_threadsafe(
-                    session.request_confirmation(
-                        action_id=action_id,
-                        description=f"Run database seed script: {script}",
-                        details=cmd_preview,
-                    ),
-                    loop,
-                )
-                approved = fut.result(timeout=300)
-            else:
-                approved = loop.run_until_complete(
-                    session.request_confirmation(
-                        action_id=action_id,
-                        description=f"Run database seed script: {script}",
-                        details=cmd_preview,
-                    )
-                )
-        except Exception as exc:
-            return f"[ERROR] Confirmation failed: {exc}"
-
-        if not approved:
-            return f"[DENIED] User declined seed_database ({script})"
-
-        try:
-            r = subprocess.run(
-                ["python", script],
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            out = (r.stdout + r.stderr).strip()
-            if r.returncode != 0:
-                return f"[ERROR] seed script failed:\n{out}"
-            return f"Seed complete ({script}):\n{out}"
-        except Exception as exc:
-            return f"[ERROR] {exc}"
+        # tool_enhance.md productionization pass, tool #4 (2026-08-16) —
+        # same real gap as run_migration_h above.
+        return "[BLOCKED] seed_database requires interactive session for safety confirmation"
 
     handlers["explain_query"] = explain_query_h
     handlers["run_migration"] = run_migration_h
@@ -12986,59 +12748,17 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] loc_stats: {e}"
 
     def npm_install_h(inp: dict[str, Any]) -> str:
-        import asyncio
-        import uuid as _uuid
-
-        # AUDIT_Q_BATCH07 §39 gap-closure (2026-08-11) — "Dependency upgrades:
-        # NO — confirmed gap ... npm_install_h/pip_install_h run subprocess.run
-        # directly with zero confirmation and zero policy check." Same
-        # session-gated confirmation pattern already proven by
-        # run_migration_h/seed_database_h above — not a new mechanism.
-        if session is None:
-            return "[BLOCKED] npm_install requires interactive session for safety confirmation"
-
-        directory = str(inp.get("directory", "."))
-        package = str(inp.get("package", ""))
-        target_dir = str(root / directory)
-        cmd = ["npm", "install"] + ([package] if package else [])
-        cmd_preview = " ".join(cmd)
-        action_id = str(_uuid.uuid4())
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                fut = asyncio.run_coroutine_threadsafe(
-                    session.request_confirmation(
-                        action_id=action_id,
-                        description=f"Run npm install in {directory}"
-                        + (f" (package: {package})" if package else ""),
-                        details=cmd_preview,
-                    ),
-                    loop,
-                )
-                approved = fut.result(timeout=300)
-            else:
-                approved = loop.run_until_complete(
-                    session.request_confirmation(
-                        action_id=action_id,
-                        description=f"Run npm install in {directory}"
-                        + (f" (package: {package})" if package else ""),
-                        details=cmd_preview,
-                    )
-                )
-        except Exception as exc:
-            return f"[ERROR] Confirmation failed: {exc}"
-
-        if not approved:
-            return f"[DENIED] User declined npm_install ({cmd_preview})"
-
-        try:
-            r = subprocess.run(
-                cmd, capture_output=True, text=True, cwd=target_dir, timeout=120
-            )
-            return (r.stdout + r.stderr).strip()[-2000:] or "npm install complete"
-        except Exception as e:
-            return f"[ERROR] npm_install: {e}"
+        # tool_enhance.md productionization pass, tool #4 (2026-08-16) —
+        # real gap found: `session` is never non-None for any real caller
+        # of make_chat_handlers() (grepped every real call site in the
+        # repo — none pass one; npm_install isn't in any one-shot agent's
+        # allowed_tools either). npm_install/npm_run/pip_install are
+        # advertised to the interactive chat agent via CHAT_TOOLS but had
+        # NO dispatch in chat_agent.py at all — a real, separate bug,
+        # fixed there in this same pass (see that file). Simplified here
+        # to state the real constraint plainly instead of dead async
+        # plumbing that could never execute.
+        return "[BLOCKED] npm_install requires interactive session for safety confirmation"
 
     def npm_run_h(inp: dict[str, Any]) -> str:
         script = str(inp["script"])
@@ -13057,54 +12777,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] npm_run: {e}"
 
     def pip_install_h(inp: dict[str, Any]) -> str:
-        import asyncio
-        import uuid as _uuid
-
-        # AUDIT_Q_BATCH07 §39 gap-closure (2026-08-11) — same session-gated
-        # confirmation pattern as npm_install_h above / run_migration_h.
-        if session is None:
-            return "[BLOCKED] pip_install requires interactive session for safety confirmation"
-
-        package = str(inp["package"])
-        cmd_preview = f"pip install {package}"
-        action_id = str(_uuid.uuid4())
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                fut = asyncio.run_coroutine_threadsafe(
-                    session.request_confirmation(
-                        action_id=action_id,
-                        description=f"Install Python package: {package}",
-                        details=cmd_preview,
-                    ),
-                    loop,
-                )
-                approved = fut.result(timeout=300)
-            else:
-                approved = loop.run_until_complete(
-                    session.request_confirmation(
-                        action_id=action_id,
-                        description=f"Install Python package: {package}",
-                        details=cmd_preview,
-                    )
-                )
-        except Exception as exc:
-            return f"[ERROR] Confirmation failed: {exc}"
-
-        if not approved:
-            return f"[DENIED] User declined pip_install ({cmd_preview})"
-
-        try:
-            r = subprocess.run(
-                [sys.executable, "-m", "pip", "install", package],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            return (r.stdout + r.stderr).strip()[-2000:]
-        except Exception as e:
-            return f"[ERROR] pip_install: {e}"
+        # tool_enhance.md productionization pass, tool #4 (2026-08-16) —
+        # same real gap as npm_install_h above.
+        return "[BLOCKED] pip_install requires interactive session for safety confirmation"
 
     def pip_list_h(inp: dict[str, Any]) -> str:
         name_filter = str(inp.get("filter", ""))

@@ -16,7 +16,6 @@ import inspect
 import subprocess
 import uuid
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncio
@@ -66,63 +65,45 @@ class TestPackageInstallConfirmationGate:
         assert "[BLOCKED]" in result
         mock_run.assert_not_called()
 
-    def test_npm_install_runs_when_session_approves(self, tmp_path: Path) -> None:
-        # A deterministic stand-in for asyncio.get_event_loop() — driving a
-        # real global loop here is flaky under a full test-suite run (its
-        # state depends on whatever other async tests ran earlier), exactly
-        # mirroring run_migration_h's pre-existing, identically-shaped
-        # is_running()/run_until_complete() branch a few functions above.
-        # This fake loop makes the *outcome* (approved -> subprocess runs
-        # exactly once) deterministic without depending on that global state.
-        class _FakeLoop:
-            def is_running(self) -> bool:
-                return False
-
-            def run_until_complete(self, coro: Any) -> Any:
-                try:
-                    coro.send(None)
-                except StopIteration as e:
-                    return e.value
-                raise AssertionError("coroutine did not complete synchronously")
-
+    def test_npm_install_blocked_even_with_a_session_supplied(
+        self, tmp_path: Path
+    ) -> None:
+        """tool_enhance.md productionization pass, tool #4 (2026-08-16) —
+        real gap found while auditing git_push: `session` is never
+        non-None for any real caller of make_chat_handlers() anywhere in
+        the repo (grepped every real call site — none pass one). The
+        session.request_confirmation() plumbing this test used to
+        exercise could therefore never run in production; removed as
+        dead code. npm_install now always refuses at this handler tier,
+        regardless of whether a caller happens to pass a session object —
+        the interactive chat agent's own real npm_install dispatch
+        (added in this same pass, see chat_agent.py) is the one place
+        this can genuinely run, gated by a real self._confirm()."""
         session = MagicMock()
         session.request_confirmation = AsyncMock(return_value=True)
         handlers = make_chat_handlers(str(tmp_path), session=session)
 
-        fake_proc = MagicMock(stdout="added 1 package", stderr="")
-        with patch(
-            "app.agents.tools.subprocess.run", return_value=fake_proc
-        ) as mock_run, patch("asyncio.get_event_loop", return_value=_FakeLoop()):
+        with patch("app.agents.tools.subprocess.run") as mock_run:
             result = handlers["npm_install"]({"directory": "."})
 
-        session.request_confirmation.assert_awaited_once()
-        mock_run.assert_called_once()
-        assert "added 1 package" in result
+        session.request_confirmation.assert_not_awaited()
+        mock_run.assert_not_called()
+        assert "[BLOCKED]" in result
 
-    def test_pip_install_denied_when_session_declines(self, tmp_path: Path) -> None:
-        class _FakeLoop:
-            def is_running(self) -> bool:
-                return False
-
-            def run_until_complete(self, coro: Any) -> Any:
-                try:
-                    coro.send(None)
-                except StopIteration as e:
-                    return e.value
-                raise AssertionError("coroutine did not complete synchronously")
-
+    def test_pip_install_blocked_even_with_a_session_supplied(
+        self, tmp_path: Path
+    ) -> None:
+        """Same real gap as npm_install above."""
         session = MagicMock()
-        session.request_confirmation = AsyncMock(return_value=False)
+        session.request_confirmation = AsyncMock(return_value=True)
         handlers = make_chat_handlers(str(tmp_path), session=session)
 
-        with patch("app.agents.tools.subprocess.run") as mock_run, patch(
-            "asyncio.get_event_loop", return_value=_FakeLoop()
-        ):
+        with patch("app.agents.tools.subprocess.run") as mock_run:
             result = handlers["pip_install"]({"package": "requests"})
 
-        session.request_confirmation.assert_awaited_once()
+        session.request_confirmation.assert_not_awaited()
         mock_run.assert_not_called()
-        assert "[DENIED]" in result
+        assert "[BLOCKED]" in result
 
     def test_npm_install_tool_manifest_documents_confirmation_gate(self) -> None:
         from app.fleet.tool_manifest import TOOL_MANIFEST
