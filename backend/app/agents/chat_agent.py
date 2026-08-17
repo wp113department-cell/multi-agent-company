@@ -125,6 +125,7 @@ from app.tools.database.sql import run_sql_handler
 from app.tools.execution.docker_build import validate_docker_build_inputs
 from app.tools.execution.docker_compose import build_docker_compose_command
 from app.tools.execution.docker_exec import build_docker_exec_command
+from app.tools.execution.docker_restart import build_docker_restart_command
 from app.tools.execution.python_snippet import run_python_snippet_handler
 from app.tools.execution.run_tests import run_tests_handler
 from app.tools.filesystem.delete_file import delete_file_handler
@@ -3064,7 +3065,7 @@ class ChatAgent:
 
         if tool_name == "docker_restart":
             drst_name = str(inp["container"])
-            drst_cmd = f"docker restart {drst_name} 2>&1"
+            drst_cmd = build_docker_restart_command(drst_name)
             return await asyncio.to_thread(_run_subprocess, drst_cmd, repo, 60)
 
         # ========== BATCH 13 — Smart search ==========

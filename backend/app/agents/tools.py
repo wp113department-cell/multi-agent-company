@@ -98,6 +98,10 @@ from app.tools.execution.docker_exec import (
     DOCKER_EXEC_TOOL as _DOCKER_EXEC_TOOL,
     build_docker_exec_command as build_docker_exec_command,
 )
+from app.tools.execution.docker_restart import (
+    DOCKER_RESTART_TOOL as _DOCKER_RESTART_TOOL,
+    build_docker_restart_command as build_docker_restart_command,
+)
 from app.tools.execution.python_snippet import (
     RUN_PYTHON_SNIPPET_TOOL as _RUN_PYTHON_SNIPPET_TOOL,
     run_python_snippet_handler as run_python_snippet_handler,
@@ -3657,17 +3661,8 @@ _RUN_SCRIPT_TOOL = {
 # moved to app/tools/execution/docker_build.py as DOCKER_BUILD_TOOL —
 # tool_enhance.md productionization pass, tool #18 (2026-08-17).
 
-_DOCKER_RESTART_TOOL = {
-    "name": "docker_restart",
-    "description": "Restart a running Docker container by name or ID.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "container": {"type": "string", "description": "Container name or ID"},
-        },
-        "required": ["container"],
-    },
-}
+# moved to app/tools/execution/docker_restart.py as DOCKER_RESTART_TOOL
+# — tool_enhance.md productionization pass, tool #21 (2026-08-17).
 
 # Batch 13 — Smart search
 _FIND_ROUTE_TOOL = {
