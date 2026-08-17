@@ -77,6 +77,11 @@ from app.tools.database.migration import (
     run_migration_handler as run_migration_handler,
     validate_run_migration_inputs as validate_run_migration_inputs,
 )
+from app.tools.database.seed import (
+    SEED_DATABASE_TOOL as _SEED_DATABASE_TOOL,
+    seed_database_handler as seed_database_handler,
+    validate_seed_database_script as validate_seed_database_script,
+)
 from app.tools.execution.parallel import (
     RUN_PARALLEL_COMMANDS_TOOL as _RUN_PARALLEL_COMMANDS_TOOL,
     run_parallel_commands_handler as run_parallel_commands_handler,
@@ -4043,23 +4048,9 @@ _EXPLAIN_QUERY_TOOL = {
 # RUN_MIGRATION_TOOL — tool_enhance.md productionization pass, tool #8
 # (2026-08-16).
 
-_SEED_DATABASE_TOOL = {
-    "name": "seed_database",
-    "description": (
-        "Run a database seed script to populate initial/test data. "
-        "Looks for backend/scripts/seed.py by default. Requires user confirmation."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "script": {
-                "type": "string",
-                "description": "Path to seed script (relative to repo root, default: backend/scripts/seed.py)",
-            },
-        },
-        "required": [],
-    },
-}
+# _SEED_DATABASE_TOOL moved to app/tools/database/seed.py as
+# SEED_DATABASE_TOOL — tool_enhance.md productionization pass, tool #10
+# (2026-08-16).
 
 
 # ===========================================================================
@@ -10792,25 +10783,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # to be exploitable through, but shares the same validation as the
     # real, reachable chat_agent.py dispatch for defense-in-depth.
 
-    def seed_database_h(inp: dict[str, Any]) -> str:
-        settings = get_settings()
-        if settings.sentry_environment == "production":
-            return (
-                "[BLOCKED] seed_database is disabled in the production environment. "
-                "Seeding must only be run in development or staging."
-            )
-
-        script = str(inp.get("script", "backend/scripts/seed.py")).strip()
-        if not (root / script).exists() and not (Path(repo_path) / script).exists():
-            return f"[ERROR] Seed script not found: {script}"
-
-        # tool_enhance.md productionization pass, tool #4 (2026-08-16) —
-        # same real gap as run_migration_h above.
-        return "[BLOCKED] seed_database requires interactive session for safety confirmation"
+    # seed_database_h removed — tool_enhance.md productionization pass,
+    # tool #10 (2026-08-16). Now registered directly against
+    # seed_database_handler (app/tools/database/seed.py), which also
+    # closes a real shell-injection + path-boundary-escape finding (see
+    # that module's docstring).
 
     handlers["explain_query"] = explain_query_h
     handlers["run_migration"] = lambda inp: run_migration_handler(repo_path, inp)
-    handlers["seed_database"] = seed_database_h
+    handlers["seed_database"] = lambda inp: seed_database_handler(repo_path, inp)
 
     # =========================================================================
     # DAY 3A — Browser tools (Playwright)

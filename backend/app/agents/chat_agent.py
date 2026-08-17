@@ -118,6 +118,7 @@ from app.models.chat import ChatSession
 from app.policy.engine import check_path_in_worktree
 from app.repo_tools import ast_engine as _ast_engine
 from app.tools.database.migration import validate_run_migration_inputs
+from app.tools.database.seed import validate_seed_database_script
 from app.tools.execution.parallel import MAX_PARALLEL_COMMANDS
 from app.tools.git.pull_request import (
     build_gh_pr_create_command,
@@ -3458,6 +3459,27 @@ class ChatAgent:
             seeddb_script = str(inp.get("script", ""))
             if not seeddb_script:
                 seeddb_script = "backend/scripts/seed.py"
+            # tool_enhance.md productionization pass, tool #10 (2026-08-16)
+            # — real, empirically-verified vulnerabilities found (first
+            # diagnosed while auditing run_migration, tool #8, closed
+            # here): (1) shell injection — `script` was interpolated
+            # directly into a raw shell=True command below with zero
+            # validation, proved directly with a crafted filename that
+            # actually executed an injected command; (2) a path-boundary
+            # escape — `root / script` silently ignores `root` entirely
+            # when `script` is an absolute path (Python's own
+            # Path.__truediv__ behavior), proved directly with
+            # script="/etc/hostname" resolving outside the repo, despite
+            # this tool's own schema documenting `script` as "relative to
+            # repo root." validate_seed_database_script (shared with the
+            # second, currently unreachable make_chat_handlers()
+            # implementation of this same tool) closes both before the
+            # path is ever touched.
+            seeddb_validation_error = validate_seed_database_script(
+                seeddb_script, repo
+            )
+            if seeddb_validation_error:
+                return seeddb_validation_error
             seeddb_fp = root / seeddb_script
             if not seeddb_fp.exists():
                 return f"[ERROR] Seed script not found: {seeddb_script}"
