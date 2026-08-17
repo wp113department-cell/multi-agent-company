@@ -136,6 +136,7 @@ from app.tools.git.pull_request import (
     generate_pr_description as _llm_generate_pr_description,
 )
 from app.tools.git.reset import validate_git_reset_inputs
+from app.tools.git.tag import git_tag_handler
 
 logger = logging.getLogger(__name__)
 
@@ -3067,6 +3068,13 @@ class ChatAgent:
             drst_name = str(inp["container"])
             drst_cmd = build_docker_restart_command(drst_name)
             return await asyncio.to_thread(_run_subprocess, drst_cmd, repo, 60)
+
+        if tool_name == "git_tag":
+            # tool_enhance.md productionization pass, tool #22 (2026-08-17)
+            # — real gap found: advertised via CHAT_TOOLS but never
+            # dispatched here at all, same class as npm_install/pip_install
+            # (tool #4) — every real call fell through to "Unknown tool".
+            return await asyncio.to_thread(git_tag_handler, repo, inp)
 
         # ========== BATCH 13 — Smart search ==========
 

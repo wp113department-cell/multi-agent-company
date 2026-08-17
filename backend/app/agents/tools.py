@@ -135,6 +135,10 @@ from app.tools.git.reset import (
     GIT_RESET_TOOL as _GIT_RESET_TOOL,
     git_reset_handler as git_reset_handler,
 )
+from app.tools.git.tag import (
+    GIT_TAG_TOOL as _GIT_TAG_TOOL,
+    git_tag_handler as git_tag_handler,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -7027,29 +7031,8 @@ def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
 # ===========================================================================
 
 # -- Git extras --
-_GIT_TAG_TOOL: dict[str, Any] = {
-    "name": "git_tag",
-    "description": "Create, list, or delete git tags. action: 'list' (default), 'create', 'delete'.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "action": {
-                "type": "string",
-                "enum": ["list", "create", "delete"],
-                "description": "Tag operation",
-            },
-            "name": {
-                "type": "string",
-                "description": "Tag name (required for create/delete)",
-            },
-            "message": {
-                "type": "string",
-                "description": "Annotated tag message (optional, create only)",
-            },
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/git/tag.py as GIT_TAG_TOOL —
+# tool_enhance.md productionization pass, tool #22 (2026-08-17).
 _GIT_LOG_FILE_TOOL: dict[str, Any] = {
     "name": "git_log_file",
     "description": "Show git commit history for a specific file. Returns commits that touched that file.",
@@ -11391,50 +11374,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     # ---- Batch 15 handlers ----
 
+    # moved to app/tools/git/tag.py as git_tag_handler —
+    # tool_enhance.md productionization pass, tool #22 (2026-08-17).
     def git_tag_h(inp: dict[str, Any]) -> str:
-        action = str(inp.get("action", "list"))
-        name = str(inp.get("name", ""))
-        msg = str(inp.get("message", ""))
-        try:
-            if action == "list":
-                r = subprocess.run(
-                    ["git", "tag", "--sort=-creatordate"],
-                    capture_output=True,
-                    text=True,
-                    cwd=repo_path,
-                    timeout=15,
-                )
-                return r.stdout.strip() or "(no tags)"
-            if action == "create":
-                cmd = (
-                    ["git", "tag", "-a", name, "-m", msg]
-                    if msg
-                    else ["git", "tag", name]
-                )
-                r = subprocess.run(
-                    cmd, capture_output=True, text=True, cwd=repo_path, timeout=15
-                )
-                return (
-                    r.stdout.strip() or f"Tag '{name}' created"
-                    if r.returncode == 0
-                    else f"[ERROR] {r.stderr.strip()}"
-                )
-            if action == "delete":
-                r = subprocess.run(
-                    ["git", "tag", "-d", name],
-                    capture_output=True,
-                    text=True,
-                    cwd=repo_path,
-                    timeout=15,
-                )
-                return (
-                    r.stdout.strip() or f"Tag '{name}' deleted"
-                    if r.returncode == 0
-                    else f"[ERROR] {r.stderr.strip()}"
-                )
-            return "[ERROR] Unknown action"
-        except Exception as e:
-            return f"[ERROR] git_tag: {e}"
+        return git_tag_handler(repo_path, inp)
 
     def git_log_file_h(inp: dict[str, Any]) -> str:
         path = str(inp["path"])
