@@ -76,6 +76,10 @@ from app.tools.git.push import (
     GIT_PUSH_TOOL as _GIT_PUSH_TOOL,
     git_push_handler as git_push_handler,
 )
+from app.tools.git.reset import (
+    GIT_RESET_TOOL as _GIT_RESET_TOOL,
+    git_reset_handler as git_reset_handler,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -3164,25 +3168,8 @@ _RESOLVE_MERGE_CONFLICT_TOOL = {
     },
 }
 
-_GIT_RESET_TOOL = {
-    "name": "git_reset",
-    "description": "Reset HEAD. --soft keeps staged, --mixed keeps working tree, --hard discards all (requires confirmation).",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "ref": {
-                "type": "string",
-                "description": "Ref to reset to (e.g. 'HEAD~1', commit hash). Default: HEAD",
-            },
-            "mode": {
-                "type": "string",
-                "enum": ["soft", "mixed", "hard"],
-                "description": "Reset mode (default: mixed)",
-            },
-        },
-        "required": [],
-    },
-}
+# _GIT_RESET_TOOL moved to app/tools/git/reset.py as GIT_RESET_TOOL —
+# tool_enhance.md productionization pass, tool #5 (2026-08-16).
 
 _GIT_WORKTREE_TOOL = {
     "name": "git_worktree",
@@ -9412,22 +9399,8 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             )
         return f"Resolved all {len(applied)} conflict hunk(s) in {rel}."
 
-    def git_reset(inp: dict[str, Any]) -> str:
-        gr_ref = str(inp.get("ref", "HEAD"))
-        gr_mode = str(inp.get("mode", "mixed"))
-        if gr_mode == "hard":
-            return (
-                "[BLOCKED] git reset --hard is destructive and requires confirmation. "
-                "Use the bash tool if you're sure, or use mode=soft/mixed."
-            )
-        gr_cmd = ["git", "reset", f"--{gr_mode}", gr_ref]
-        try:
-            r = subprocess.run(
-                gr_cmd, cwd=repo_path, capture_output=True, text=True, timeout=10
-            )
-            return (r.stdout + r.stderr).strip() or f"Reset {gr_mode} to {gr_ref}"
-        except Exception as e:
-            return f"[ERROR] {e}"
+    # git_reset moved to app/tools/git/reset.py as git_reset_handler —
+    # tool_enhance.md productionization pass, tool #5 (2026-08-16).
 
     def git_worktree(inp: dict[str, Any]) -> str:
         gw_action = str(inp.get("action", "list"))
@@ -10184,7 +10157,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["parse_merge_conflicts"] = parse_merge_conflicts
     handlers["explain_merge_conflict"] = explain_merge_conflict
     handlers["resolve_merge_conflict"] = resolve_merge_conflict
-    handlers["git_reset"] = git_reset
+    handlers["git_reset"] = lambda inp: git_reset_handler(repo_path, inp)
     handlers["git_worktree"] = git_worktree
     handlers["create_pr"] = create_pr
     handlers["generate_commit_msg"] = generate_commit_msg

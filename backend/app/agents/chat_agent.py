@@ -121,6 +121,7 @@ from app.tools.git.pull_request import (
     build_gh_pr_create_command,
     generate_pr_description as _llm_generate_pr_description,
 )
+from app.tools.git.reset import validate_git_reset_inputs
 
 logger = logging.getLogger(__name__)
 
@@ -2191,6 +2192,23 @@ class ChatAgent:
         if tool_name == "git_reset":
             gr_ref = str(inp.get("ref", "HEAD"))
             gr_mode = str(inp.get("mode", "mixed"))
+            # tool_enhance.md productionization pass, tool #5 (2026-08-16)
+            # — real, empirically-verified confirmation bypass found while
+            # auditing this tool: `git reset --soft --hard HEAD` actually
+            # performs a HARD reset (git takes the LAST reset-mode flag as
+            # authoritative — verified directly, not assumed: a real repo
+            # with an uncommitted change had it silently discarded).
+            # Building the command as ["git", "reset", f"--{gr_mode}",
+            # gr_ref] meant a caller could set mode="soft" (bypassing the
+            # confirmation check below entirely) while setting
+            # ref="--hard", which git then reads as a second mode flag —
+            # a real, exploitable way to perform an unconfirmed hard reset.
+            # validate_git_reset_inputs (shared with the second, currently
+            # unreachable make_chat_handlers() implementation of this same
+            # tool) closes this before ever reaching the confirmation check.
+            gr_validation_error = validate_git_reset_inputs(gr_mode, gr_ref)
+            if gr_validation_error:
+                return gr_validation_error
             if gr_mode == "hard":
                 approved = await self._confirm(
                     description="git reset --hard — discards ALL uncommitted changes",
