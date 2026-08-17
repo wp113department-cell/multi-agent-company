@@ -2236,7 +2236,22 @@ class ChatAgent:
                 return _git(["worktree", "remove", gw_wt_path], repo)
             return f"[ERROR] Unknown action: {gw_action}"
 
-        if tool_name == "create_pr":
+        if tool_name in ("create_pr", "github_create_pr"):
+            # tool_enhance.md productionization pass, tool #6 (2026-08-16)
+            # — real finding: github_create_pr is functionally the same
+            # action as create_pr (both run `gh pr create`), just with a
+            # schema that requires title/body explicitly instead of
+            # offering LLM auto-generation. It had NO dispatch here at
+            # all despite being advertised via CHAT_TOOLS/
+            # AGENT_CONTRACT["allowed_tools"] — every real call fell
+            # through to "[ERROR] Unknown tool", the same live bug class
+            # found for npm_install/npm_run/pip_install in tool #4.
+            # Routed through this same, already-hardened block (confirmed
+            # safe: with title/body always supplied per its schema, the
+            # auto-generation branch below simply never triggers) rather
+            # than building a second, separately-maintained, unhardened
+            # implementation — real duplication tool #2's own pass
+            # already flagged as a risk pattern to avoid repeating.
             pr_title = str(inp.get("title", "")).strip()
             pr_body = str(inp.get("body", "")).strip()
             pr_base = str(inp.get("base", "main"))

@@ -79,6 +79,40 @@ CREATE_PR_TOOL: dict[str, Any] = {
     },
 }
 
+# GITHUB_CREATE_PR_TOOL — tool_enhance.md productionization pass, tool #6
+# (2026-08-16). Previously a second, separately-maintained tool
+# (github_create_pr) with its own far-less-hardened implementation doing
+# the exact same real action as create_pr above (both just run `gh pr
+# create`) — no repo/branch/base identity verification, no no-diff
+# guard, no duplicate-PR check, no approval gate at all. Its only real
+# difference is a schema that REQUIRES title/body explicitly instead of
+# offering auto-generation. Now shares create_pr_handler entirely (see
+# app/agents/tools.py's github_create_pr_h and app/agents/chat_agent.py's
+# merged "create_pr"/"github_create_pr" dispatch branch) rather than
+# duplicating that hardening a second time — safe because
+# create_pr_handler's auto-generation path simply never triggers when
+# title/body are already supplied, which this schema guarantees.
+GITHUB_CREATE_PR_TOOL: dict[str, Any] = {
+    "name": "github_create_pr",
+    "description": "Create a GitHub pull request using the gh CLI. Requires gh to be authenticated.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "PR title"},
+            "body": {"type": "string", "description": "PR description / body"},
+            "base": {
+                "type": "string",
+                "description": "Target base branch (default: main)",
+            },
+            "draft": {
+                "type": "boolean",
+                "description": "Create as draft PR (default: false)",
+            },
+        },
+        "required": ["title", "body"],
+    },
+}
+
 _PR_URL_RE = re.compile(r"https://github\.com/\S+/pull/\d+")
 _MAX_PR_TITLE_LEN = 256  # GitHub's own practical single-line title limit
 _MAX_PR_BODY_LEN = 60_000  # generous but bounded; GitHub's real cap is ~65536

@@ -70,6 +70,7 @@ from app.tools.agents.delegate import (
 )
 from app.tools.git.pull_request import (
     CREATE_PR_TOOL as _CREATE_PR_TOOL,
+    GITHUB_CREATE_PR_TOOL as _GITHUB_CREATE_PR_TOOL,
     create_pr_handler as create_pr_handler,
 )
 from app.tools.git.push import (
@@ -6196,27 +6197,9 @@ _READ_IMAGE_TOOL: dict[str, Any] = {
 }
 
 # --- Day 2 Gap: GitHub PR tool ---
-
-_GITHUB_CREATE_PR_TOOL: dict[str, Any] = {
-    "name": "github_create_pr",
-    "description": "Create a GitHub pull request using the gh CLI. Requires gh to be authenticated.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "title": {"type": "string", "description": "PR title"},
-            "body": {"type": "string", "description": "PR description / body"},
-            "base": {
-                "type": "string",
-                "description": "Target base branch (default: main)",
-            },
-            "draft": {
-                "type": "boolean",
-                "description": "Create as draft PR (default: false)",
-            },
-        },
-        "required": ["title", "body"],
-    },
-}
+# _GITHUB_CREATE_PR_TOOL moved to app/tools/git/pull_request.py as
+# GITHUB_CREATE_PR_TOOL — tool_enhance.md productionization pass, tool #6
+# (2026-08-16).
 
 # --- Day 3G: External integration tool specs (GitHub CLI / Linear / Slack
 # webhooks — plain REST/CLI wrappers, NOT the Model Context Protocol. See
@@ -11803,35 +11786,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] read_image: {e}"
 
-    def github_create_pr_h(inp: dict[str, Any]) -> str:
-        title = str(inp["title"])
-        body = str(inp["body"])
-        base = str(inp.get("base", "main"))
-        draft = bool(inp.get("draft", False))
-        try:
-            cmd = [
-                "gh",
-                "pr",
-                "create",
-                "--title",
-                title,
-                "--body",
-                body,
-                "--base",
-                base,
-            ]
-            if draft:
-                cmd.append("--draft")
-            out = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=30, cwd=repo_path
-            )
-            if out.returncode != 0:
-                return f"[ERROR] gh pr create failed: {out.stderr[:400]}"
-            return f"PR created: {out.stdout.strip()}"
-        except FileNotFoundError:
-            return "[ERROR] gh CLI not found. Install: https://cli.github.com/"
-        except Exception as e:
-            return f"[ERROR] github_create_pr: {e}"
+    # github_create_pr_h removed — tool_enhance.md productionization
+    # pass, tool #6 (2026-08-16). It was a second, separately-maintained,
+    # far less hardened implementation of the exact same action as
+    # create_pr (both just run `gh pr create`) — no repo/branch/base
+    # identity verification, no no-diff guard, no duplicate-PR check, no
+    # approval gate at all. Now registered directly against the already-
+    # hardened create_pr_handler below.
 
     handlers["find_queue"] = find_queue_h
     handlers["find_worker"] = find_worker_h
@@ -11843,7 +11804,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["generate_release_notes"] = generate_release_notes_h
     handlers["read_pdf"] = read_pdf_h
     handlers["read_image"] = read_image_h
-    handlers["github_create_pr"] = github_create_pr_h
+    handlers["github_create_pr"] = lambda inp: create_pr_handler(repo_path, inp)
 
     # ---- Batch 15 handlers ----
 

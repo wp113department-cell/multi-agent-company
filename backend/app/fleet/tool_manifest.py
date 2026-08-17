@@ -1546,7 +1546,12 @@ TOOL_MANIFEST: dict[str, ToolManifestEntry] = {
         risk_level="high",
     ),
     "github_create_pr": ToolManifestEntry(
-        purpose="Create a GitHub pull request via API",
+        # tool_enhance.md productionization pass, tool #6 (2026-08-16) —
+        # real doc/code mismatch found: this said "via API" but the real
+        # implementation (app/tools/git/pull_request.py's shared
+        # create_pr_handler, delegated to by this tool) shells out to the
+        # `gh` CLI, same mechanism as create_pr — not a direct REST call.
+        purpose="Create a GitHub pull request using the gh CLI (title/body required explicitly, no auto-generation — see create_pr for that)",
         permissions=["write_remote"],
         timeout_s=30,
         retry_policy="once",

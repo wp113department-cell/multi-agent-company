@@ -555,26 +555,27 @@ class TestReadImageHandler:
 
 
 class TestGithubCreatePrHandler:
-    def test_errors_gracefully_when_gh_not_authed(self) -> None:
+    def test_refuses_by_default_no_confirmation_channel(self) -> None:
+        """tool_enhance.md productionization pass, tool #6 (2026-08-16) —
+        github_create_pr now delegates to the same, already-hardened
+        create_pr_handler (see app/tools/git/pull_request.py), which
+        fails closed by default for this handler tier (no per-call human-
+        approval channel exists for one-shot batch agents). Real,
+        intended behavior — not a regression."""
         h = _make_handlers()
         result = h["github_create_pr"]({"title": "Test PR", "body": "Test body"})
-        # Should either succeed or return a meaningful error
-        assert isinstance(result, str)
-        assert len(result) > 0
+        assert result.startswith("[POLICY DENIED]")
 
-    def test_errors_when_gh_not_installed(
+    def test_errors_when_gh_not_installed_with_approval_disabled(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import subprocess as sp
+        from app.config import get_settings
 
-        original_run = sp.run
-
-        def fake_run(cmd: Any, **kwargs: Any) -> Any:
-            if "gh" in cmd:
-                raise FileNotFoundError("gh not found")
-            return original_run(cmd, **kwargs)
-
-        monkeypatch.setattr(sp, "run", fake_run)
+        monkeypatch.setattr(get_settings(), "create_pr_require_approval", False)
+        monkeypatch.setattr(
+            "app.tools.git.pull_request.check_gh_auth",
+            lambda: "[ERROR] gh CLI not found — install with: sudo apt install gh",
+        )
         h = _make_handlers()
         result = h["github_create_pr"]({"title": "x", "body": "y"})
         assert "ERROR" in result or "not found" in result.lower()
