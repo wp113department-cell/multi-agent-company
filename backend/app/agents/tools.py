@@ -85,6 +85,10 @@ from app.tools.execution.parallel import (
     RUN_PARALLEL_COMMANDS_TOOL as _RUN_PARALLEL_COMMANDS_TOOL,
     run_parallel_commands_handler as run_parallel_commands_handler,
 )
+from app.tools.execution.python_snippet import (
+    RUN_PYTHON_SNIPPET_TOOL as _RUN_PYTHON_SNIPPET_TOOL,
+    run_python_snippet_handler as run_python_snippet_handler,
+)
 from app.tools.filesystem.edit_file import (
     EDIT_FILE_TOOL as _EDIT_FILE_TOOL,
     edit_file_handler as edit_file_handler,
@@ -2956,21 +2960,8 @@ _KILL_PROCESS_TOOL = {
     },
 }
 
-_RUN_PYTHON_SNIPPET_TOOL = {
-    "name": "run_python_snippet",
-    "description": "Run an inline Python code snippet and return stdout/stderr. Runs in the repo's virtualenv if available.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "code": {"type": "string", "description": "Python code to execute"},
-            "timeout": {
-                "type": "integer",
-                "description": "Timeout in seconds (default: 30)",
-            },
-        },
-        "required": ["code"],
-    },
-}
+# moved to app/tools/execution/python_snippet.py as RUN_PYTHON_SNIPPET_TOOL
+# — tool_enhance.md productionization pass, tool #14 (2026-08-17).
 
 _RUN_MAKE_TOOL = {
     "name": "run_make",
@@ -8975,29 +8966,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # which also closes a real cwd-boundary-escape finding (see that
     # module's docstring) shared with the generic bash tool.
 
+    # moved to app/tools/execution/python_snippet.py as
+    # run_python_snippet_handler — tool_enhance.md productionization pass,
+    # tool #14 (2026-08-17).
     def run_python_snippet(inp: dict[str, Any]) -> str:
-        import shlex as _shlex
-
-        code = str(inp["code"])
-        ps_timeout = int(inp.get("timeout", 30))
-        activate = (
-            _venv_activate_snippet()
-        )  # cwd=repo_path is passed to subprocess.run below
-        cmd = f"{activate} && python3 -c {_shlex.quote(code)} 2>&1"
-        try:
-            r = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                cwd=repo_path,
-                timeout=ps_timeout,
-            )
-            return (r.stdout + r.stderr)[:5000] or "(no output)"
-        except subprocess.TimeoutExpired:
-            return f"[ERROR] Python snippet timed out after {ps_timeout}s"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return run_python_snippet_handler(
+            repo_path, inp, activate_snippet=_venv_activate_snippet()
+        )
 
     def run_make(inp: dict[str, Any]) -> str:
         make_target = str(inp.get("target", ""))

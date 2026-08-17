@@ -120,6 +120,7 @@ from app.repo_tools import ast_engine as _ast_engine
 from app.tools.database.migration import validate_run_migration_inputs
 from app.tools.database.seed import validate_seed_database_script
 from app.tools.execution.parallel import MAX_PARALLEL_COMMANDS
+from app.tools.execution.python_snippet import run_python_snippet_handler
 from app.tools.filesystem.edit_file import edit_file_handler
 from app.tools.filesystem.write_file import write_file_handler
 from app.tools.git.pull_request import (
@@ -2041,19 +2042,12 @@ class ChatAgent:
             return _pm.format_tracked(self._background_processes)
 
         if tool_name == "run_python_snippet":
-            import shlex as _shlex
-
-            code = str(inp["code"])
-            ps_timeout = int(inp.get("timeout", 30))
-            # AUDIT_Q_BATCH01 §1 "Windows terminal support" — was hardcoded
-            # POSIX `source`, silently never activating the venv on Windows
-            # (relative path is safe here: _run_subprocess always passes
-            # cwd=repo, so the shell's starting directory is already repo,
-            # matching this line's previous absolute-path behavior exactly
-            # on POSIX while adding a real Windows branch).
-            activate = _venv_activate_snippet()
-            cmd_s = f"{activate} && python3 -c {_shlex.quote(code)} 2>&1"
-            return await asyncio.to_thread(_run_subprocess, cmd_s, repo, ps_timeout)
+            return await asyncio.to_thread(
+                run_python_snippet_handler,
+                repo,
+                inp,
+                activate_snippet=_venv_activate_snippet(),
+            )
 
         if tool_name == "run_make":
             make_target = str(inp.get("target", ""))
