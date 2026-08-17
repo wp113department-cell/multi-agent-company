@@ -200,7 +200,7 @@ def run_backend_dev(
 
         tools = CODER_TOOLS + [DELEGATE_TO_AGENT_TOOL]
         if subtask_proposal_sink is not None:
-            from app.agents.tools import (
+            from app.tools.agents.propose_subtask import (
                 PROPOSE_SUBTASK_TOOL,
                 make_propose_subtask_handler,
             )

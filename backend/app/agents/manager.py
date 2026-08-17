@@ -528,21 +528,22 @@ async def _dispatch_one_subtask(
         except Exception:
             pass
 
-        # plan14 follow-on #2 (Dynamic Subtask Creation) — only backend_dev
-        # is wired at the code level for now (the same "1-2 agents first"
-        # staged-rollout precedent Day 4's delegation piloted on bug_fix
-        # only); frontend_dev is a trivial, identical-shape follow-up. Even
-        # for backend_dev, the tool is only actually attached when this
-        # specific agent name is opted into
-        # settings.dynamic_subtask_creation_enabled_agents — empty by
-        # default, so this is a complete no-op (None passed through,
-        # run_backend_dev's own default) for every existing caller/test.
+        # plan14 follow-on #2 (Dynamic Subtask Creation) — staged rollout,
+        # same "1-2 agents first" precedent Day 4's delegation piloted on
+        # bug_fix only. tool_enhance.md productionization pass, tool #7
+        # (2026-08-16) closed the real gap this comment used to describe:
+        # frontend_dev was left unwired despite config.py's
+        # dynamic_subtask_allowed_matrix already listing it as real,
+        # intended policy ("frontend_dev is a trivial, identical-shape
+        # follow-up" — never actually done until now). Either agent's
+        # tool is only actually attached when that specific agent name is
+        # opted into settings.dynamic_subtask_creation_enabled_agents —
+        # empty by default, so this remains a complete no-op (None passed
+        # through, both run_*_dev functions' own default) for every
+        # existing caller/test that never opts in.
         propose_sink: list[dict[str, Any]] | None = None
-        if (
-            selected_agent_name == "backend_dev"
-            and get_settings().dynamic_subtask_creation_enabled_agents.get(
-                "backend_dev", False
-            )
+        if get_settings().dynamic_subtask_creation_enabled_agents.get(
+            selected_agent_name, False
         ):
             propose_sink = local_proposals
 
@@ -563,6 +564,7 @@ async def _dispatch_one_subtask(
                         repo_path=repo,
                         images=images,
                         extra_env=extra_env,
+                        subtask_proposal_sink=propose_sink,
                     )
                 else:
                     (

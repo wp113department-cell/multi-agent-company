@@ -69,6 +69,19 @@ AGENT_CONTRACT: dict[str, Any] = {
         # base_graph.py's dispatch-authorization gate already refuse an
         # unadvertised/unauthorized call either way).
         "delegate_to_agent",
+        # tool_enhance.md productionization pass, tool #7 (2026-08-16) —
+        # same real gap class found while auditing propose_subtask:
+        # config.py's dynamic_subtask_allowed_matrix already listed
+        # "frontend_dev": ["frontend", "test"] as real, intended policy,
+        # and app/agents/manager.py's own comment explicitly called
+        # frontend_dev wiring "a trivial, identical-shape follow-up" to
+        # backend_dev's — never done. Declared here so Day 1's dynamic-
+        # tool-selection contract-drift check doesn't strip it; the tool
+        # itself is only actually wired into a given run when
+        # settings.dynamic_subtask_creation_enabled_agents["frontend_dev"]
+        # is True (see run_frontend_dev's subtask_proposal_sink parameter),
+        # matching backend_dev's own identical, pre-existing pattern.
+        "propose_subtask",
     ],
     "input_types": ["task_id", "subtask_id", "plan", "worktree_path", "repo_path"],
     "output_types": ["files_changed", "tokens_in", "tokens_out"],
@@ -126,6 +139,7 @@ def run_frontend_dev(
     on_tool_call: Any = None,  # kept for backward compat — no-op
     images: list[dict[str, str]] | None = None,
     extra_env: dict[str, str] | None = None,
+    subtask_proposal_sink: list[dict[str, Any]] | None = None,
 ) -> tuple[list[str], str | None, int, int]:
     """Run frontend developer agent with static-check retry loop.
 
@@ -138,6 +152,17 @@ def run_frontend_dev(
     screenshot) — build the UI to match what they show.
     extra_env (Day 17): custom secrets merged into the bash tool's
     subprocess env.
+
+    subtask_proposal_sink (tool_enhance.md productionization pass, tool #7,
+    2026-08-16): the real "trivial, identical-shape follow-up" to
+    backend_dev.py's own identical parameter, named explicitly as pending
+    in app/agents/manager.py's own comment until this pass. None (the
+    default) means today's exact prior behavior — no propose_subtask tool
+    exists for this run at all. When the caller (manager.py's
+    _dispatch_one_subtask, gated by
+    settings.dynamic_subtask_creation_enabled_agents) passes a list,
+    propose_subtask is wired in and any proposal appended to it — owned
+    and read by the caller, never by this function, which only appends.
     """
     from app.fleet.failure_ladder import should_retry
 
@@ -172,6 +197,18 @@ def run_frontend_dev(
             budget_remaining_usd=settings.delegation_default_budget_usd,
         )
 
+        tools = CODER_TOOLS + [DELEGATE_TO_AGENT_TOOL]
+        if subtask_proposal_sink is not None:
+            from app.tools.agents.propose_subtask import (
+                PROPOSE_SUBTASK_TOOL,
+                make_propose_subtask_handler,
+            )
+
+            tools = tools + [PROPOSE_SUBTASK_TOOL]
+            handlers["propose_subtask"] = make_propose_subtask_handler(
+                subtask_proposal_sink
+            )
+
         base_msg = (
             f"Task ID: {task_id}, Subtask ID: {subtask_id}\n\n"
             f"Frontend Implementation Plan:\n{plan}"
@@ -191,7 +228,7 @@ def run_frontend_dev(
             final_state = run_agent_graph(
                 role_name="frontend_dev",
                 model=settings.model_coder,
-                tools=CODER_TOOLS + [DELEGATE_TO_AGENT_TOOL],
+                tools=tools,
                 tool_handlers=handlers,
                 verification_cfg=_VERIFICATION_CFG,
                 initial_message=base_msg,

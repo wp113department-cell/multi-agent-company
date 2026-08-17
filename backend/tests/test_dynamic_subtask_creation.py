@@ -37,7 +37,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from app.agents.tools import make_propose_subtask_handler
 from app.config import get_settings
 from app.db.models import EpicFileLock
 from app.pipeline.dynamic_subtasks import (
@@ -45,6 +44,7 @@ from app.pipeline.dynamic_subtasks import (
     reserve_files_for_proposal,
     validate_and_build_subtask,
 )
+from app.tools.agents.propose_subtask import make_propose_subtask_handler
 
 
 def _engine() -> AsyncEngine:
@@ -787,3 +787,108 @@ def test_halted_epic_never_dispatches_a_pending_proposal(
         "the halt must prevent the proposed follow-up from ever dispatching"
     )
     assert result["dynamic_subtasks_created"] == 0
+
+
+# ---------------------------------------------------------------------------
+# tool_enhance.md productionization pass, tool #7 (2026-08-16) — the real
+# gap this closes: config.py's dynamic_subtask_allowed_matrix already
+# listed "frontend_dev": ["frontend", "test"] as real, intended policy,
+# and app/agents/manager.py's own comment explicitly named frontend_dev
+# wiring as pending ("a trivial, identical-shape follow-up") — never
+# actually done until now. Mirrors the two backend_dev tests immediately
+# above exactly, proving frontend_dev genuinely got the same real
+# capability, not just a config/schema entry with no working code behind
+# it.
+# ---------------------------------------------------------------------------
+
+
+def test_frontend_dev_feature_disabled_by_default_never_wires_the_sink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.agents.manager import run_manager
+
+    monkeypatch.setattr(get_settings(), "allowed_workspace_parent", str(tmp_path))
+
+    task_id = 999_504
+    repo, worktree = _init_repo_with_worktree(tmp_path, task_id)
+
+    with (
+        patch("app.agents.frontend_dev.run_frontend_dev") as mock_frontend_dev,
+        patch("app.agents.qa.run_qa", return_value=_passing_qa()),
+        patch("app.agents.reviewer.run_reviewer", return_value=_approved_review()),
+        patch("app.repo_tools.worktree.get_diff", return_value=""),
+    ):
+        mock_frontend_dev.return_value = (["Component.tsx"], None, 100, 50)
+
+        asyncio.run(
+            run_manager(
+                task_id=task_id,
+                subtasks=[{"id": 1, "type": "frontend", "title": "Add component"}],
+                worktree_path=str(worktree),
+                plan="Add a component",
+                repo_path=str(repo),
+            )
+        )
+
+    _, kwargs = mock_frontend_dev.call_args
+    assert kwargs.get("subtask_proposal_sink") is None
+
+
+def test_frontend_dev_proposed_subtask_is_integrated_and_dispatched_in_a_later_wave(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.agents.manager import run_manager
+
+    monkeypatch.setattr(get_settings(), "allowed_workspace_parent", str(tmp_path))
+    monkeypatch.setattr(
+        get_settings(),
+        "dynamic_subtask_creation_enabled_agents",
+        {"frontend_dev": True},
+    )
+
+    task_id = 999_505
+    repo, worktree = _init_repo_with_worktree(tmp_path, task_id)
+
+    call_count = 0
+
+    def _frontend_dev_side_effect(**kwargs: Any) -> tuple[list[str], None, int, int]:
+        nonlocal call_count
+        call_count += 1
+        sink = kwargs.get("subtask_proposal_sink")
+        if sink is not None and call_count == 1:
+            sink.append(
+                {
+                    "type": "frontend",
+                    "title": "Follow-up: add missing test",
+                    "description": "Add a test for the new component.",
+                    "files_to_edit": [],
+                }
+            )
+        return ([f"Component_{call_count}.tsx"], None, 100, 50)
+
+    with (
+        patch(
+            "app.agents.frontend_dev.run_frontend_dev",
+            side_effect=_frontend_dev_side_effect,
+        ) as mock_frontend_dev,
+        patch("app.agents.qa.run_qa", return_value=_passing_qa()),
+        patch("app.agents.reviewer.run_reviewer", return_value=_approved_review()),
+        patch("app.repo_tools.worktree.get_diff", return_value=""),
+    ):
+        result = asyncio.run(
+            run_manager(
+                task_id=task_id,
+                subtasks=[{"id": 1, "type": "frontend", "title": "Add component"}],
+                worktree_path=str(worktree),
+                plan="Add a component",
+                repo_path=str(repo),
+            )
+        )
+
+    assert mock_frontend_dev.call_count == 2, (
+        "the dynamically-proposed subtask must have been dispatched too"
+    )
+    assert len(result["results"]) == 2
+    assert result["dynamic_subtasks_created"] == 1
+    titles = {r["type"] for r in result["results"]}
+    assert titles == {"frontend"}
