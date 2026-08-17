@@ -121,6 +121,7 @@ from app.tools.database.migration import validate_run_migration_inputs
 from app.tools.database.seed import validate_seed_database_script
 from app.tools.execution.parallel import MAX_PARALLEL_COMMANDS
 from app.tools.database.sql import run_sql_handler
+from app.tools.execution.docker_build import validate_docker_build_inputs
 from app.tools.execution.python_snippet import run_python_snippet_handler
 from app.tools.execution.run_tests import run_tests_handler
 from app.tools.filesystem.delete_file import delete_file_handler
@@ -3040,6 +3041,11 @@ class ChatAgent:
             dbld_tag = str(inp["tag"])
             dbld_context = str(inp.get("context", "."))
             dbld_df = inp.get("dockerfile")
+            dbld_error = validate_docker_build_inputs(
+                dbld_context, str(dbld_df) if dbld_df else None, repo
+            )
+            if dbld_error:
+                return f"[POLICY DENIED] {dbld_error}"
             dbld_ctx_path = str(root / dbld_context) if dbld_context != "." else repo
             dbld_cmd_parts = ["docker", "build", "-t", dbld_tag]
             if dbld_df:

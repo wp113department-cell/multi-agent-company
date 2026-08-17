@@ -86,6 +86,10 @@ from app.tools.database.sql import (
     RUN_SQL_TOOL as _RUN_SQL_TOOL,
     run_sql_handler as run_sql_handler,
 )
+from app.tools.execution.docker_build import (
+    DOCKER_BUILD_TOOL as _DOCKER_BUILD_TOOL,
+    validate_docker_build_inputs as validate_docker_build_inputs,
+)
 from app.tools.execution.python_snippet import (
     RUN_PYTHON_SNIPPET_TOOL as _RUN_PYTHON_SNIPPET_TOOL,
     run_python_snippet_handler as run_python_snippet_handler,
@@ -3677,25 +3681,8 @@ _RUN_SCRIPT_TOOL = {
     },
 }
 
-_DOCKER_BUILD_TOOL = {
-    "name": "docker_build",
-    "description": "Build a Docker image from a Dockerfile. Runs `docker build -t <tag> <context>`.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "tag": {"type": "string", "description": "Image tag, e.g. 'myapp:latest'"},
-            "context": {
-                "type": "string",
-                "description": "Build context directory (default: repo root)",
-            },
-            "dockerfile": {
-                "type": "string",
-                "description": "Path to Dockerfile (optional, uses Docker default)",
-            },
-        },
-        "required": ["tag"],
-    },
-}
+# moved to app/tools/execution/docker_build.py as DOCKER_BUILD_TOOL —
+# tool_enhance.md productionization pass, tool #18 (2026-08-17).
 
 _DOCKER_RESTART_TOOL = {
     "name": "docker_restart",
@@ -4879,6 +4866,9 @@ def make_docker_agent_handlers(repo_path: str) -> dict[str, Any]:
         db_tag = str(inp.get("tag", "app:dev"))
         db_file = str(inp.get("dockerfile", "Dockerfile"))
         db_ctx = str(inp.get("context", "."))
+        db_error = validate_docker_build_inputs(db_ctx, db_file, repo_path)
+        if db_error:
+            return f"[POLICY DENIED] {db_error}"
         r = subprocess.run(
             ["docker", "build", "-t", db_tag, "-f", db_file, db_ctx],
             cwd=repo_path,
@@ -10024,6 +10014,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         dbld_tag = str(inp["tag"])
         dbld_context = str(inp.get("context", "."))
         dbld_df = inp.get("dockerfile")
+        dbld_error = validate_docker_build_inputs(
+            dbld_context, str(dbld_df) if dbld_df else None, repo_path
+        )
+        if dbld_error:
+            return f"[POLICY DENIED] {dbld_error}"
         dbld_ctx_path = str(root / dbld_context) if dbld_context != "." else repo_path
         dbld_cmd = ["docker", "build", "-t", dbld_tag]
         if dbld_df:
