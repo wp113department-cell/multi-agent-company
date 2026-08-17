@@ -98,6 +98,7 @@ from app.agents.output_parsers import parse_diagnostic_summary
 from app.agents.tools import (
     CHAT_TOOLS,
     _apply_conflict_resolutions,
+    _docker_container_risk_reason,
     _is_dangerous_command,
     _is_protected_path,
     _llm_diagnose_deployment_failure,
@@ -115,7 +116,7 @@ from app.agents.tools import (
 )
 from app.config import get_settings
 from app.models.chat import ChatSession
-from app.policy.engine import check_path_in_worktree
+from app.policy.engine import check_command, check_path_in_worktree
 from app.repo_tools import ast_engine as _ast_engine
 from app.tools.database.migration import validate_run_migration_inputs
 from app.tools.database.seed import validate_seed_database_script
@@ -123,6 +124,7 @@ from app.tools.execution.parallel import MAX_PARALLEL_COMMANDS
 from app.tools.database.sql import run_sql_handler
 from app.tools.execution.docker_build import validate_docker_build_inputs
 from app.tools.execution.docker_compose import build_docker_compose_command
+from app.tools.execution.docker_exec import build_docker_exec_command
 from app.tools.execution.python_snippet import run_python_snippet_handler
 from app.tools.execution.run_tests import run_tests_handler
 from app.tools.filesystem.delete_file import delete_file_handler
@@ -2695,13 +2697,17 @@ class ChatAgent:
             )
 
         if tool_name == "docker_exec":
-            import shlex as _shlex
-
             de_container = str(inp["container"])
             de_command = str(inp["command"])
+            de_cmd_policy = check_command(de_command)
+            if not de_cmd_policy.allowed:
+                return f"[POLICY DENIED] {de_cmd_policy.reason}"
+            de_risk = _docker_container_risk_reason(de_container)
+            if de_risk:
+                return f"[POLICY DENIED] {de_risk}"
             return await asyncio.to_thread(
                 _run_subprocess,
-                f"docker exec {de_container} sh -c {_shlex.quote(de_command)} 2>&1",
+                build_docker_exec_command(de_container, de_command),
                 repo,
                 30,
             )

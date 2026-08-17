@@ -94,6 +94,10 @@ from app.tools.execution.docker_compose import (
     DOCKER_COMPOSE_TOOL as _DOCKER_COMPOSE_TOOL,
     build_docker_compose_command as build_docker_compose_command,
 )
+from app.tools.execution.docker_exec import (
+    DOCKER_EXEC_TOOL as _DOCKER_EXEC_TOOL,
+    build_docker_exec_command as build_docker_exec_command,
+)
 from app.tools.execution.python_snippet import (
     RUN_PYTHON_SNIPPET_TOOL as _RUN_PYTHON_SNIPPET_TOOL,
     run_python_snippet_handler as run_python_snippet_handler,
@@ -3383,21 +3387,8 @@ _DOCKER_LOGS_TOOL = {
     },
 }
 
-_DOCKER_EXEC_TOOL = {
-    "name": "docker_exec",
-    "description": "Run a command inside a running Docker container.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "container": {"type": "string", "description": "Container name or ID"},
-            "command": {
-                "type": "string",
-                "description": "Command to run inside the container",
-            },
-        },
-        "required": ["container", "command"],
-    },
-}
+# moved to app/tools/execution/docker_exec.py as DOCKER_EXEC_TOOL —
+# tool_enhance.md productionization pass, tool #20 (2026-08-17).
 
 # moved to app/tools/execution/docker_compose.py as DOCKER_COMPOSE_TOOL —
 # tool_enhance.md productionization pass, tool #19 (2026-08-17).
