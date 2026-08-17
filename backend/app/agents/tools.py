@@ -85,6 +85,10 @@ from app.tools.execution.parallel import (
     RUN_PARALLEL_COMMANDS_TOOL as _RUN_PARALLEL_COMMANDS_TOOL,
     run_parallel_commands_handler as run_parallel_commands_handler,
 )
+from app.tools.filesystem.edit_file import (
+    EDIT_FILE_TOOL as _EDIT_FILE_TOOL,
+    edit_file_handler as edit_file_handler,
+)
 from app.tools.filesystem.write_file import (
     WRITE_FILE_TOOL as _WRITE_FILE_TOOL,
     write_file_handler as write_file_handler,
@@ -829,33 +833,9 @@ def make_request_clarification_handler(
 
 
 CODER_TOOLS = READ_ONLY_TOOLS + [
-    {
-        "name": "edit_file",
-        "description": (
-            "Make a targeted edit to a file by replacing an exact string. "
-            "PREFER this over write_file for modifying existing files — it is safer because "
-            "it only changes the specified region and fails if the text is not found. "
-            "old_string must be unique in the file. Read the file first if unsure."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "File path relative to the worktree root",
-                },
-                "old_string": {
-                    "type": "string",
-                    "description": "Exact text to find and replace. Must appear exactly once in the file.",
-                },
-                "new_string": {
-                    "type": "string",
-                    "description": "Replacement text. Can be empty string to delete old_string.",
-                },
-            },
-            "required": ["path", "old_string", "new_string"],
-        },
-    },
+    # moved to app/tools/filesystem/edit_file.py as EDIT_FILE_TOOL —
+    # tool_enhance.md productionization pass, tool #13 (2026-08-17).
+    _EDIT_FILE_TOOL,
     # moved to app/tools/filesystem/write_file.py as WRITE_FILE_TOOL —
     # tool_enhance.md productionization pass, tool #12 (2026-08-17).
     _WRITE_FILE_TOOL,
@@ -4041,26 +4021,9 @@ _EXPLAIN_QUERY_TOOL = {
 # Day 2 Agents — shared tool spec constants, tool lists, handler factories
 # ===========================================================================
 
-_EDIT_FILE_TOOL_SPEC = {
-    "name": "edit_file",
-    "description": (
-        "Make a targeted edit to a file by replacing an exact string. "
-        "old_string must appear exactly once in the file. "
-        "Always read the file first with read_file."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string"},
-            "old_string": {
-                "type": "string",
-                "description": "Exact text to replace (must be unique in file)",
-            },
-            "new_string": {"type": "string", "description": "Replacement text"},
-        },
-        "required": ["path", "old_string", "new_string"],
-    },
-}
+# moved to app/tools/filesystem/edit_file.py as EDIT_FILE_TOOL —
+# tool_enhance.md productionization pass, tool #13 (2026-08-17).
+_EDIT_FILE_TOOL_SPEC = _EDIT_FILE_TOOL
 
 # moved to app/tools/filesystem/write_file.py as WRITE_FILE_TOOL —
 # tool_enhance.md productionization pass, tool #12 (2026-08-17).
@@ -4488,22 +4451,10 @@ MONITORING_AGENT_TOOLS = READ_ONLY_TOOLS + [
 
 
 def _make_edit_file_handler(root: Path) -> Any:
+    # moved to app/tools/filesystem/edit_file.py as edit_file_handler —
+    # tool_enhance.md productionization pass, tool #13 (2026-08-17).
     def edit_file_h(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        if _is_protected_path(rel, str(root)):
-            return f"[POLICY DENIED] Cannot write to protected path: {rel}"
-        target = root / rel
-        if not target.exists():
-            return f"[ERROR] File not found: {rel}"
-        text = target.read_text(encoding="utf-8")
-        old_s, new_s = inp["old_string"], inp["new_string"]
-        count = text.count(old_s)
-        if count == 0:
-            return f"[ERROR] old_string not found in {rel}"
-        if count > 1:
-            return f"[ERROR] old_string appears {count} times — must be unique"
-        target.write_text(text.replace(old_s, new_s, 1), encoding="utf-8")
-        return f"Edited {rel}"
+        return edit_file_handler(root, str(root), inp)
 
     return edit_file_h
 
@@ -8194,29 +8145,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     _session_bg_procs: dict[int, "subprocess.Popen[str]"] = {}
 
     # ---- edit_file ----
+    # moved to app/tools/filesystem/edit_file.py as edit_file_handler —
+    # tool_enhance.md productionization pass, tool #13 (2026-08-17).
     def edit_file(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        if _is_protected_path(rel, repo_path):
-            return f"[POLICY DENIED] Cannot edit protected path: {rel}"
-        old_s = inp["old_string"]
-        new_s = inp["new_string"]
-        target = root / rel
-        if not target.exists():
-            return f"[ERROR] File not found: {rel}"
-        try:
-            text = target.read_text(encoding="utf-8")
-        except Exception as e:
-            return f"[ERROR] Cannot read {rel}: {e}"
-        count = text.count(old_s)
-        if count == 0:
-            return f"[ERROR] old_string not found in {rel}. Check for whitespace differences."
-        if count > 1:
-            return f"[ERROR] old_string appears {count} times in {rel} — must be unique. Add more context."
-        try:
-            target.write_text(text.replace(old_s, new_s, 1), encoding="utf-8")
-            return f"Edited {rel}"
-        except Exception as e:
-            return f"[ERROR] Cannot write {rel}: {e}"
+        return edit_file_handler(root, repo_path, inp)
 
     # ---- write_file ----
     # moved to app/tools/filesystem/write_file.py as write_file_handler —

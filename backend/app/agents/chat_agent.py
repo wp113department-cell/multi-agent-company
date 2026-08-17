@@ -120,6 +120,7 @@ from app.repo_tools import ast_engine as _ast_engine
 from app.tools.database.migration import validate_run_migration_inputs
 from app.tools.database.seed import validate_seed_database_script
 from app.tools.execution.parallel import MAX_PARALLEL_COMMANDS
+from app.tools.filesystem.edit_file import edit_file_handler
 from app.tools.filesystem.write_file import write_file_handler
 from app.tools.git.pull_request import (
     build_gh_pr_create_command,
@@ -1362,24 +1363,7 @@ class ChatAgent:
             return write_file_handler(root, repo, inp)
 
         if tool_name == "edit_file":
-            rel = str(inp["path"])
-            old_s = str(inp["old_string"])
-            new_s = str(inp["new_string"])
-            if _is_protected_path(rel, repo):
-                return f"[POLICY DENIED] Cannot write to protected path: {rel}"
-            target = root / rel
-            if not target.exists():
-                return f"[ERROR] File not found: {rel}"
-            text = target.read_text(encoding="utf-8")
-            count = text.count(old_s)
-            if count == 0:
-                return (
-                    f"[ERROR] old_string not found in {rel}. Check whitespace/newlines."
-                )
-            if count > 1:
-                return f"[ERROR] old_string appears {count} times — must be unique. Add more context."
-            target.write_text(text.replace(old_s, new_s, 1), encoding="utf-8")
-            return f"Edited {rel}"
+            return edit_file_handler(root, repo, inp)
 
         if tool_name == "append_file":
             rel = str(inp["path"])
