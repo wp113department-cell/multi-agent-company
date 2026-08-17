@@ -12,10 +12,7 @@ from app.agents.conflict_resolution import (
     _apply_conflict_resolutions as _apply_conflict_resolutions,
     _parse_conflict_markers as _parse_conflict_markers,
 )
-from app.agents.output_parsers import (
-    parse_diagnostic_summary,
-    parse_pytest_summary,
-)
+from app.agents.output_parsers import parse_diagnostic_summary
 from app.agents.tool_security import (
     _docker_container_risk_reason as _docker_container_risk_reason,
     _extract_patch_target_paths as _extract_patch_target_paths,
@@ -92,6 +89,14 @@ from app.tools.database.sql import (
 from app.tools.execution.python_snippet import (
     RUN_PYTHON_SNIPPET_TOOL as _RUN_PYTHON_SNIPPET_TOOL,
     run_python_snippet_handler as run_python_snippet_handler,
+)
+from app.tools.execution.run_tests import (
+    RUN_TESTS_TOOL as _RUN_TESTS_TOOL,
+    run_tests_handler as run_tests_handler,
+)
+from app.tools.filesystem.delete_file import (
+    DELETE_FILE_TOOL as _DELETE_FILE_TOOL,
+    delete_file_handler as delete_file_handler,
 )
 from app.tools.filesystem.edit_file import (
     EDIT_FILE_TOOL as _EDIT_FILE_TOOL,
@@ -2366,28 +2371,8 @@ DOCS_TOOLS = READ_ONLY_TOOLS + [
 # CHAT AGENT TOOLS — full unrestricted access (dangerous cmds need confirmation)
 # ---------------------------------------------------------------------------
 
-_DELETE_FILE_TOOL = {
-    "name": "delete_file",
-    "description": (
-        "Permanently delete a file from the repository. "
-        "Cannot delete .env*, secrets/**, or .github/workflows/**. "
-        "Always confirm with the user before deleting important files."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "File path relative to repo root",
-            },
-            "reason": {
-                "type": "string",
-                "description": "Why this file is being deleted",
-            },
-        },
-        "required": ["path", "reason"],
-    },
-}
+# moved to app/tools/filesystem/delete_file.py as DELETE_FILE_TOOL —
+# tool_enhance.md productionization pass, tool #17 (2026-08-17).
 
 # _GIT_PUSH_TOOL moved to app/tools/git/push.py as GIT_PUSH_TOOL —
 # tool_enhance.md productionization pass, tool #4 (2026-08-16).
@@ -2655,29 +2640,8 @@ _GIT_RESTORE_TOOL = {
     },
 }
 
-_RUN_TESTS_TOOL = {
-    "name": "run_tests",
-    "description": "Run the test suite. Supports pytest (Python) and npm test (Node). Returns test output including failures.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "runner": {
-                "type": "string",
-                "enum": ["pytest", "npm_test", "tsc"],
-                "description": "Test runner to use (default: pytest)",
-            },
-            "path": {
-                "type": "string",
-                "description": "Specific test file or directory to run (optional)",
-            },
-            "flags": {
-                "type": "string",
-                "description": "Extra flags to pass to the test runner (e.g. '-v -x -k test_name')",
-            },
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/execution/run_tests.py as RUN_TESTS_TOOL —
+# tool_enhance.md productionization pass, tool #16 (2026-08-17).
 
 _RUN_LINTER_TOOL = {
     "name": "run_linter",
@@ -6950,18 +6914,10 @@ def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # moved to app/tools/filesystem/delete_file.py as delete_file_handler
+    # — tool_enhance.md productionization pass, tool #17 (2026-08-17).
     def cu_delete_file(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        if _is_protected_path(rel, repo_path):
-            return f"[POLICY DENIED] Protected path: {rel}"
-        fp = root / rel
-        if not fp.exists():
-            return f"[ERROR] File not found: {rel}"
-        try:
-            fp.unlink()
-            return f"Deleted: {rel}"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return delete_file_handler(root, repo_path, inp)
 
     def cu_edit_file(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
@@ -8226,20 +8182,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] {e}"
 
     # ---- delete_file ----
+    # moved to app/tools/filesystem/delete_file.py as delete_file_handler
+    # — tool_enhance.md productionization pass, tool #17 (2026-08-17).
     def delete_file(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        if _is_protected_path(rel, repo_path):
-            return f"[POLICY DENIED] Cannot delete protected path: {rel}"
-        target = root / rel
-        if not target.exists():
-            return f"[ERROR] File not found: {rel}"
-        if not target.is_file():
-            return f"[ERROR] {rel} is not a file (use bash 'rm -rf' for directories)"
-        try:
-            target.unlink()
-            return f"Deleted {rel}"
-        except Exception as e:
-            return f"[ERROR] Cannot delete {rel}: {e}"
+        return delete_file_handler(root, repo_path, inp)
 
     # git_push moved to app/tools/git/push.py as git_push_handler —
     # tool_enhance.md productionization pass, tool #4 (2026-08-16).
@@ -8497,68 +8443,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] {e}"
 
     # ---- run_tests ----
+    # moved to app/tools/execution/run_tests.py as run_tests_handler —
+    # tool_enhance.md productionization pass, tool #16 (2026-08-17).
     def run_tests(inp: dict[str, Any]) -> str:
-        import shlex as _shlex
-
-        runner = str(inp.get("runner", "pytest"))
-        path = str(inp.get("path", ""))
-        flags = str(inp.get("flags", ""))
-
-        flags_reason = _shell_metachar_reason(flags, "flags")
-        if flags_reason:
-            return f"[POLICY DENIED] {flags_reason}"
-        qpath = _shlex.quote(path) if path else ""
-
-        # Gap-closure Day 15 (Stage 1.2, answers.md): these used to end with
-        # `| head -100` — harmless for the OUTPUT (still truncated below via
-        # Python slicing) but fatal for the exit code: in a shell pipeline,
-        # `$?`/subprocess.run's returncode reflects the LAST command
-        # (`head`, which always exits 0), not the test runner. That silently
-        # meant every run "succeeded" regardless of whether tests actually
-        # passed — the real bug the exit-code check below was written to
-        # fix. Removed; output truncation is Python-side only now.
-        if runner == "pytest":
-            cmd = f"cd {repo_path} && {_venv_activate_snippet()} && python -m pytest {qpath} {flags} --tb=short -q 2>&1"
-        elif runner == "npm_test":
-            web_path = str(root.parent / "apps" / "web") if not path else qpath
-            cmd = f"cd {web_path} && npm test {flags} 2>&1"
-        elif runner == "tsc":
-            web_path = str(root.parent / "apps" / "web") if not path else qpath
-            cmd = f"cd {web_path} && npx tsc --noEmit {flags} 2>&1"
-        else:
-            return f"[ERROR] Unknown runner: {runner}"
-
-        try:
-            result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, timeout=180
-            )
-            out = (result.stdout + result.stderr)[:5000]
-            # AUDIT_Q_BATCH01 §17 "Parse test output (pytest/etc.)" —
-            # structured pass/fail/error/skip counts from pytest's own
-            # summary line, prepended so the exit code isn't the only
-            # signal a caller has to distinguish e.g. 1 assertion failure
-            # from 40 collection errors.
-            summary = parse_pytest_summary(out) if runner == "pytest" else None
-            if summary:
-                out = f"{summary}\n{out}"
-            # Gap-closure Day 15 (Stage 1.2, answers.md): the real exit code
-            # used to be discarded entirely — any non-crashing run (all
-            # tests failing included) returned plain text, which every
-            # verification_cfg.set_by consumer of this tool
-            # (bug_fix/dependency_agent/refactor_agent/chat_agent map
-            # "run_tests" -> "tests_passed") reads as "ran cleanly" =
-            # verified True. A run with real failing output now surfaces as
-            # [ERROR]-prefixed, so it flows through the SAME existing
-            # "don't set the flag on an [ERROR]-prefixed result" check
-            # _execute_tool_node already applies to every other tool —
-            # tests_passed now means the exit code was actually 0.
-            if result.returncode != 0:
-                return f"[ERROR] Tests failed (exit code {result.returncode}):\n{out.strip() or '(no output)'}"
-            return out.strip() or "(no output)"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] Tests timed out after 3 minutes"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return run_tests_handler(
+            repo_path, inp, activate_snippet=_venv_activate_snippet()
+        )
 
     # ---- run_linter ----
     def run_linter(inp: dict[str, Any]) -> str:

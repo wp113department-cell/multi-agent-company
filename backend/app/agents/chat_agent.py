@@ -94,7 +94,7 @@ from app.agents.base_graph import (
     _stringify_messages_for_summary,
     _wrap_untrusted_tool_content,
 )
-from app.agents.output_parsers import parse_diagnostic_summary, parse_pytest_summary
+from app.agents.output_parsers import parse_diagnostic_summary
 from app.agents.tools import (
     CHAT_TOOLS,
     _apply_conflict_resolutions,
@@ -122,6 +122,8 @@ from app.tools.database.seed import validate_seed_database_script
 from app.tools.execution.parallel import MAX_PARALLEL_COMMANDS
 from app.tools.database.sql import run_sql_handler
 from app.tools.execution.python_snippet import run_python_snippet_handler
+from app.tools.execution.run_tests import run_tests_handler
+from app.tools.filesystem.delete_file import delete_file_handler
 from app.tools.filesystem.edit_file import edit_file_handler
 from app.tools.filesystem.write_file import write_file_handler
 from app.tools.git.pull_request import (
@@ -1410,6 +1412,7 @@ class ChatAgent:
 
         if tool_name == "delete_file":
             rel = str(inp["path"])
+            del_reason = str(inp.get("reason", "")).strip()
             if _is_protected_path(rel, repo):
                 return f"[POLICY DENIED] Cannot delete protected path: {rel}"
             target = root / rel
@@ -1423,11 +1426,13 @@ class ChatAgent:
             # irreversible and, unlike write_file/edit_file, not something a
             # coding agent does dozens of times per turn — same confirmation
             # pattern as git_push/dangerous-bash/git_reset --hard below.
-            approved = await self._confirm(description="Delete a file", details=rel)
+            confirm_details = f"{rel}\nReason: {del_reason}" if del_reason else rel
+            approved = await self._confirm(
+                description="Delete a file", details=confirm_details
+            )
             if not approved:
                 return f"[DENIED] User declined to delete: {rel}"
-            target.unlink()
-            return f"Deleted {rel}"
+            return delete_file_handler(root, repo, inp)
 
         # ========== GIT — WRITE ==========
 
@@ -1663,36 +1668,12 @@ class ChatAgent:
         # ========== TESTING / LINTING ==========
 
         if tool_name == "run_tests":
-            runner = str(inp.get("runner", "pytest"))
-            test_path = str(inp.get("path", ""))
-            flags = str(inp.get("flags", ""))
-            # Gap-closure Day 15 (Stage 1.2, answers.md): these used to end
-            # with `| head -N` — in a shell pipeline, the exit code
-            # subprocess.run sees is the LAST command's (head always exits
-            # 0), which silently destroyed the test runner's real exit code
-            # before fail_on_nonzero_exit below could ever see it. Removed;
-            # truncated in Python instead, after _run_subprocess returns.
-            if runner == "pytest":
-                cmd_str = f"cd {repo} && {_venv_activate_snippet()} && python -m pytest {test_path} {flags} --tb=short -q 2>&1"
-            elif runner == "npm_test":
-                web = str(root.parent / "apps" / "web")
-                cmd_str = f"cd {web} && npm test {flags} 2>&1"
-            elif runner == "tsc":
-                web = str(root.parent / "apps" / "web")
-                cmd_str = f"cd {web} && npx tsc --noEmit {flags} 2>&1"
-            else:
-                return f"[ERROR] Unknown runner: {runner}"
-            output = await asyncio.to_thread(
-                _run_subprocess, cmd_str, repo, 180, fail_on_nonzero_exit=True
+            return await asyncio.to_thread(
+                run_tests_handler,
+                repo,
+                inp,
+                activate_snippet=_venv_activate_snippet(),
             )
-            # AUDIT_Q_BATCH01 §17 "Parse test output (pytest/etc.)" —
-            # structured pass/fail/error/skip counts, not just the exit
-            # code, prepended when pytest's own summary line is present.
-            if runner == "pytest":
-                summary = parse_pytest_summary(output)
-                if summary:
-                    output = f"{summary}\n{output}"
-            return output[:8000]
 
         if tool_name == "run_linter":
             lint_tool = str(inp.get("tool", "all"))
