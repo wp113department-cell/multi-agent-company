@@ -493,3 +493,40 @@ default, #17 cancellation-triggered container cleanup) are real,
 explicitly logged, non-blocking limitations — consistent with the same
 GREEN-FLAG-with-documented-limitations pattern already established above
 for `infra_dry_run`, not silently hidden.
+
+## Correction — real sandbox boundary escape found while auditing tool #9 (2026-08-16)
+
+While auditing `run_parallel_commands` (tool #9,
+`docs/tool_productionization/run_parallel_commands.md`), the identical
+`cwd`-handling code shape was found in `bash`'s own real dispatch: `cwd`
+is fully LLM-controlled and was passed straight through to
+`run_sandboxed()`, which mounts whatever `cwd` it receives **read-write**
+as the container's `/workspace` — with no validation it stays inside the
+caller's own repo. Verified directly (not assumed): a real directory
+outside any intended worktree was mounted into the sandbox and a file
+inside it was read back through the container.
+
+This is logged here transparently rather than only in tool #9's own
+report, because it means this tool's GREEN FLAG above was issued before
+this gap was found — the standing practice in this initiative (see
+`run_migration`/`seed_database`'s equivalent split, and this codebase's
+own earlier `Gap-closure Audit 05 SEC-05-006` fix for the same bug class
+in a different `bash` implementation) is to record this kind of
+retroactive finding explicitly, not silently patch and move on.
+
+**Fix**: `chat_agent.py`'s `bash` dispatch now validates `cwd` via
+`check_path_in_worktree(cwd, repo)` (the same mechanism this codebase
+already uses for `write_file`/`edit_file`'s own path arguments) before
+the command ever reaches the sandbox. A `cwd` outside the repo (absolute
+or via `../` traversal) is refused with `[POLICY DENIED]`. Real,
+legitimate `cwd` usage (e.g. a real subdirectory like `apps/web`)
+continues to work — proven by regression tests, not assumed.
+
+**Tests**: `tests/test_run_parallel_commands_hardening.py` (shared with
+tool #9, since both tools had the identical bug and the identical fix)
+proves the exploit is closed for `bash` specifically, plus the full
+pre-existing bash-tool suite (159 tests) re-run clean, confirming this
+correction introduced no regression.
+
+**Verdict: GREEN FLAG, reaffirmed** — with this correction applied and
+verified, not just assumed still valid.

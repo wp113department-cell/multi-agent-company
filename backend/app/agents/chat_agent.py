@@ -97,7 +97,6 @@ from app.agents.base_graph import (
 from app.agents.output_parsers import parse_diagnostic_summary, parse_pytest_summary
 from app.agents.tools import (
     CHAT_TOOLS,
-    _MAX_PARALLEL_COMMANDS,
     _apply_conflict_resolutions,
     _is_dangerous_command,
     _is_protected_path,
@@ -116,8 +115,10 @@ from app.agents.tools import (
 )
 from app.config import get_settings
 from app.models.chat import ChatSession
+from app.policy.engine import check_path_in_worktree
 from app.repo_tools import ast_engine as _ast_engine
 from app.tools.database.migration import validate_run_migration_inputs
+from app.tools.execution.parallel import MAX_PARALLEL_COMMANDS
 from app.tools.git.pull_request import (
     build_gh_pr_create_command,
     generate_pr_description as _llm_generate_pr_description,
@@ -1601,6 +1602,21 @@ class ChatAgent:
         if tool_name == "bash":
             command = str(inp["command"])
             cwd = str(inp.get("cwd") or repo)
+            # tool_enhance.md productionization pass, tool #9 (2026-08-16)
+            # — real, empirically-verified boundary-escape found: `cwd` is
+            # fully LLM-controlled and was passed straight through to the
+            # real sandboxed execution primitive with NO validation that
+            # it stays inside this session's own repo. run_sandboxed()
+            # mounts whatever `cwd` it receives read-write as the
+            # container's /workspace — proved directly (not assumed): a
+            # cwd pointed at an unrelated directory let a real file
+            # outside the intended worktree be read back through the
+            # sandbox. check_path_in_worktree (already used elsewhere in
+            # this codebase for exactly this class of check, e.g.
+            # write_file/edit_file's own path arguments) closes it here.
+            cwd_check = check_path_in_worktree(cwd, repo)
+            if not cwd_check.allowed:
+                return f"[POLICY DENIED] {cwd_check.reason}"
             if _is_dangerous_command(command):
                 approved = await self._confirm(
                     description="Run potentially destructive command",
@@ -1614,8 +1630,8 @@ class ChatAgent:
             rpc_raw = inp.get("commands")
             if not isinstance(rpc_raw, list) or not rpc_raw:
                 return "[ERROR] commands must be a non-empty list of {command, cwd?} objects"
-            if len(rpc_raw) > _MAX_PARALLEL_COMMANDS:
-                return f"[ERROR] run_parallel_commands supports at most {_MAX_PARALLEL_COMMANDS} commands per call"
+            if len(rpc_raw) > MAX_PARALLEL_COMMANDS:
+                return f"[ERROR] run_parallel_commands supports at most {MAX_PARALLEL_COMMANDS} commands per call"
             rpc_timeout = int(inp.get("timeout", 60))
             rpc_parsed: list[tuple[str, str]] = []
             for rpc_entry in rpc_raw:
@@ -1626,7 +1642,14 @@ class ChatAgent:
                     rpc_cmd = str(rpc_entry)
                     rpc_cwd = repo
                 rpc_parsed.append((rpc_cmd, rpc_cwd))
-            for rpc_cmd, _rpc_cwd in rpc_parsed:
+            # tool_enhance.md productionization pass, tool #9 (2026-08-16)
+            # — same real boundary-escape found and fixed for the `bash`
+            # tool just above: each sub-command's own `cwd` gets the same
+            # check_path_in_worktree validation before any of them run.
+            for rpc_cmd, rpc_cwd in rpc_parsed:
+                rpc_cwd_check = check_path_in_worktree(rpc_cwd, repo)
+                if not rpc_cwd_check.allowed:
+                    return f"[POLICY DENIED] {rpc_cwd_check.reason}"
                 if rpc_cmd and _is_dangerous_command(rpc_cmd):
                     return (
                         f"[POLICY DENIED] {rpc_cmd!r} looks destructive/dangerous — "

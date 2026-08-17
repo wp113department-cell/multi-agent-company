@@ -77,6 +77,10 @@ from app.tools.database.migration import (
     run_migration_handler as run_migration_handler,
     validate_run_migration_inputs as validate_run_migration_inputs,
 )
+from app.tools.execution.parallel import (
+    RUN_PARALLEL_COMMANDS_TOOL as _RUN_PARALLEL_COMMANDS_TOOL,
+    run_parallel_commands_handler as run_parallel_commands_handler,
+)
 from app.tools.git.pull_request import (
     CREATE_PR_TOOL as _CREATE_PR_TOOL,
     GITHUB_CREATE_PR_TOOL as _GITHUB_CREATE_PR_TOOL,
@@ -2961,37 +2965,10 @@ _LIST_BACKGROUND_PROCESSES_TOOL = {
 # zero asyncio.gather/TaskGroup usage anywhere in backend/app; every
 # bash-shaped tool ran exactly one command at a time even when a caller had
 # several genuinely independent commands to run.
-_MAX_PARALLEL_COMMANDS = 10
-
-_RUN_PARALLEL_COMMANDS_TOOL = {
-    "name": "run_parallel_commands",
-    "description": f"Run up to {_MAX_PARALLEL_COMMANDS} independent shell commands concurrently (fan-out) and return each result. Use only for commands that do NOT depend on each other's output (e.g. two unrelated test suites); for anything destructive or that needs human confirmation, use the bash tool individually instead.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "commands": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "command": {"type": "string"},
-                        "cwd": {
-                            "type": "string",
-                            "description": "Working directory (default: repo root)",
-                        },
-                    },
-                    "required": ["command"],
-                },
-                "description": f"Commands to run concurrently (max {_MAX_PARALLEL_COMMANDS})",
-            },
-            "timeout": {
-                "type": "integer",
-                "description": "Per-command timeout in seconds (default 60)",
-            },
-        },
-        "required": ["commands"],
-    },
-}
+# _MAX_PARALLEL_COMMANDS / _RUN_PARALLEL_COMMANDS_TOOL moved to
+# app/tools/execution/parallel.py as MAX_PARALLEL_COMMANDS /
+# RUN_PARALLEL_COMMANDS_TOOL — tool_enhance.md productionization pass,
+# tool #9 (2026-08-16).
 
 _KILL_PROCESS_TOOL = {
     "name": "kill_process",
@@ -9103,62 +9080,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
         return _pm.format_tracked(_session_bg_procs)
 
-    def run_parallel_commands_h(inp: dict[str, Any]) -> str:
-        import asyncio as _asyncio
-
-        raw_commands = inp.get("commands")
-        if not isinstance(raw_commands, list) or not raw_commands:
-            return (
-                "[ERROR] commands must be a non-empty list of {command, cwd?} objects"
-            )
-        if len(raw_commands) > _MAX_PARALLEL_COMMANDS:
-            return f"[ERROR] run_parallel_commands supports at most {_MAX_PARALLEL_COMMANDS} commands per call"
-        rpc_timeout = int(inp.get("timeout", 60))
-
-        parsed: list[tuple[str, str]] = []
-        for entry in raw_commands:
-            if isinstance(entry, dict):
-                cmd = str(entry.get("command", ""))
-                cwd = str(entry.get("cwd") or repo_path)
-            else:
-                cmd = str(entry)
-                cwd = repo_path
-            parsed.append((cmd, cwd))
-
-        for cmd, _cwd in parsed:
-            if cmd and _is_dangerous_command(cmd):
-                return (
-                    f"[POLICY DENIED] {cmd!r} looks destructive/dangerous — "
-                    "run_parallel_commands does not support the bash tool's "
-                    "human-confirmation flow. Run it individually via bash instead."
-                )
-
-        async def _run_one(cmd: str, cwd: str) -> str:
-            if not cmd:
-                return "[ERROR] empty command"
-            rpc_policy = check_command(cmd)
-            if not rpc_policy.allowed:
-                return f"[POLICY DENIED] {rpc_policy.reason}"
-            stdout, stderr, returncode, timed_out = await _asyncio.to_thread(
-                _run_bash_command, cmd, cwd, timeout=rpc_timeout
-            )
-            if timed_out:
-                return f"[ERROR] Command timed out after {rpc_timeout}s"
-            out = stdout
-            if stderr:
-                out += f"\n[stderr]\n{stderr}"
-            if returncode != 0:
-                out += f"\n[exit {returncode}]"
-            return out.strip() or "(no output)"
-
-        async def _run_all() -> list[str]:
-            return await _asyncio.gather(*(_run_one(c, w) for c, w in parsed))
-
-        results = _asyncio.run(_run_all())
-        return "\n\n".join(
-            f"=== [{i}] {cmd[:80]!r} ===\n{res}"
-            for i, ((cmd, _cwd), res) in enumerate(zip(parsed, results))
-        )
+    # run_parallel_commands_h removed — tool_enhance.md productionization
+    # pass, tool #9 (2026-08-16). Now registered directly against
+    # run_parallel_commands_handler (app/tools/execution/parallel.py),
+    # which also closes a real cwd-boundary-escape finding (see that
+    # module's docstring) shared with the generic bash tool.
 
     def run_python_snippet(inp: dict[str, Any]) -> str:
         import shlex as _shlex
@@ -10116,7 +10042,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["run_background"] = run_background
     handlers["kill_process"] = kill_process
     handlers["list_background_processes"] = list_background_processes_h
-    handlers["run_parallel_commands"] = run_parallel_commands_h
+    handlers["run_parallel_commands"] = lambda inp: run_parallel_commands_handler(
+        repo_path, inp
+    )
     handlers["run_python_snippet"] = run_python_snippet
     handlers["run_make"] = run_make
     handlers["fetch_url"] = fetch_url
