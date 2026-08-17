@@ -18,22 +18,22 @@ Order: risk_level (high->medium->low->unknown), then agent_count desc (most-used
 | 8 | run_migration | high | 1 | yes | 17 | GREEN_FLAG — see docs/tool_productionization/run_migration.md. Found + fixed a REAL, empirically-verified shell-injection vulnerability (most severe finding of this initiative so far): chat_agent.py's real dispatch interpolated LLM-controlled direction/revision directly into a shell=True command with zero validation — proved with a real payload (revision="head; touch /tmp/PWNED...") that actually executed. Fixed via a shared validate_run_migration_inputs() chokepoint (strict allowlist covering every real Alembic revision shape, rejects all shell metacharacters). MODULARIZED into app/tools/database/migration.py (new domain folder). Full suite clean (4829 passed). NOTE: the identical bug pattern was found (not fixed) in seed_database — see that row below, flagged for its own turn
 | 9 | run_parallel_commands | high | 1 | yes | 9 | GREEN_FLAG — see docs/tool_productionization/run_parallel_commands.md. Found + fixed a REAL, empirically-verified sandbox boundary escape: cwd (per-command, LLM-controlled) was passed unvalidated to run_sandboxed(), which mounts it read-write as the container's /workspace — proved by reading a real file from an arbitrary outside directory through the sandbox. The IDENTICAL bug also existed in the generic bash tool (tool #1, already GREEN-FLAGGED) — fixed both together per explicit user direction rather than splitting across turns (see bash.md's own "Correction" section). Fixed via check_path_in_worktree validation on cwd before it reaches the sandbox, for both tools' real chat_agent.py dispatches and their tools.py handlers. MODULARIZED into app/tools/execution/parallel.py (matches tool_enhance.md's own suggested execution/parallel.py location exactly). Full suite clean (4837 passed) |
 | 10 | seed_database | high | 1 | yes | 13 | GREEN_FLAG — see docs/tool_productionization/seed_database.md. Closed the shell-injection bug diagnosed during tool #8's audit (proven with a real crafted-filename payload that executed). Also found a SECOND, distinct vulnerability while fixing it: `root / script` in Python's pathlib silently discards `root` entirely when `script` is an absolute path — proved with script="/etc/hostname" resolving outside the repo, despite the schema documenting "relative to repo root." Fixed via a shared validate_seed_database_script() (allowlist + check_path_in_worktree, mirroring validate_run_migration_inputs). MODULARIZED into app/tools/database/seed.py. Full suite clean (4848 passed) |
-| 11 | undo_changes | high | 1 | yes | 3 | PENDING |
-| 12 | write_file | medium | 60 | yes | 35 | PENDING |
-| 13 | edit_file | medium | 19 | yes | 14 | PENDING |
+| 11 | undo_changes | high | 1 | yes | 3 | GREEN_FLAG — see docs/tool_productionization/undo_changes.md. undo_changes itself proved safe in isolation (git checkout -- already refuses paths outside the repo, verified directly). Auditing its missing `_is_protected_path` worktree argument surfaced the most severe cross-tool finding of this initiative: ALL 14 `_is_protected_path()` call sites in chat_agent.py's real dispatch (write_file/edit_file/append_file/rename_file/copy_file/delete_file/insert_at_line/replace_function/delete_lines/parse_merge_conflicts/resolve_merge_conflict/explain_merge_conflict/replace_class/undo_changes) were missing worktree-boundary validation — proved with a real arbitrary-file-write outside the repo via write_file (zero confirmation gate on new-file writes) and a real cross-repo exfiltration via copy_file's unchecked from_path. Same root-cause bug also found+fixed in tools.py's make_chat_handlers (copy_file, parse/resolve/explain_merge_conflict), make_fleet_apply_handlers (write_file/edit_file, used by 4 real fleet self-enhancement agents), and make_git_commit_change_handler (secret-leak oracle). Fixed via check_path_in_worktree everywhere. User explicitly approved fixing the whole class now rather than deferring (same pattern as tool #9's bash correction). Full suite clean — see below |
+| 12 | write_file | medium | 60 | yes | 35 | PENDING — NOTE: worktree-boundary validation gap found+fixed 2026-08-17 during tool #11's (undo_changes) cross-cutting audit (see docs/tool_productionization/undo_changes.md and tests/test_file_ops_worktree_boundary_hardening.py / test_tools_py_file_ops_worktree_boundary_hardening.py); this was the most severe instance found — a real arbitrary-file-write outside the repo with zero confirmation gate on new-file writes, now closed for both chat_agent.py's real dispatch and tools.py's make_fleet_apply_handlers. This tool's own full tool_enhance.md audit/modularization turn is still pending |
+| 13 | edit_file | medium | 19 | yes | 14 | PENDING — NOTE: same worktree-boundary fix as write_file above (2026-08-17) — edit_file had NO protected-path check at all before this fix, not even the denylist. Now closed for chat_agent.py's real dispatch and tools.py's make_fleet_apply_handlers. This tool's own full tool_enhance.md audit/modularization turn is still pending |
 | 14 | run_python_snippet | medium | 5 | yes | 4 | PENDING |
 | 15 | run_sql | medium | 5 | yes | 4 | PENDING |
 | 16 | run_tests | medium | 5 | yes | 9 | PENDING |
-| 17 | delete_file | medium | 2 | yes | 6 | PENDING |
+| 17 | delete_file | medium | 2 | yes | 6 | PENDING  — NOTE: worktree-boundary validation gap found+fixed 2026-08-17 during tool #11's (undo_changes) cross-cutting audit (see docs/tool_productionization/undo_changes.md and tests/test_file_ops_worktree_boundary_hardening.py / test_tools_py_file_ops_worktree_boundary_hardening.py); this fix closed the path-escape bug for this tool's real call sites, but its own full tool_enhance.md audit/modularization turn is still pending |
 | 18 | docker_build | medium | 2 | yes | 5 | PENDING |
 | 19 | docker_compose | medium | 2 | yes | 2 | PENDING |
 | 20 | docker_exec | medium | 2 | yes | 6 | PENDING |
 | 21 | docker_restart | medium | 2 | yes | 3 | PENDING |
 | 22 | git_tag | medium | 2 | yes | 1 | PENDING |
 | 23 | rename_symbol | medium | 2 | yes | 3 | PENDING |
-| 24 | replace_function | medium | 2 | yes | 2 | PENDING |
+| 24 | replace_function | medium | 2 | yes | 2 | PENDING  — NOTE: worktree-boundary validation gap found+fixed 2026-08-17 during tool #11's (undo_changes) cross-cutting audit (see docs/tool_productionization/undo_changes.md and tests/test_file_ops_worktree_boundary_hardening.py / test_tools_py_file_ops_worktree_boundary_hardening.py); this fix closed the path-escape bug for this tool's real call sites, but its own full tool_enhance.md audit/modularization turn is still pending |
 | 25 | semver_bump | medium | 2 | yes | 2 | PENDING |
-| 26 | append_file | medium | 1 | yes | 0 | PENDING |
+| 26 | append_file | medium | 1 | yes | 0 | PENDING  — NOTE: worktree-boundary validation gap found+fixed 2026-08-17 during tool #11's (undo_changes) cross-cutting audit (see docs/tool_productionization/undo_changes.md and tests/test_file_ops_worktree_boundary_hardening.py / test_tools_py_file_ops_worktree_boundary_hardening.py); this fix closed the path-escape bug for this tool's real call sites, but its own full tool_enhance.md audit/modularization turn is still pending |
 | 27 | apply_patch | medium | 1 | yes | 4 | PENDING |
 | 28 | browser_click | medium | 1 | yes | 1 | PENDING |
 | 29 | browser_navigate | medium | 1 | yes | 0 | PENDING |
@@ -41,7 +41,7 @@ Order: risk_level (high->medium->low->unknown), then agent_count desc (most-used
 | 31 | browser_type | medium | 1 | yes | 0 | PENDING |
 | 32 | create_branch | medium | 1 | yes | 0 | PENDING |
 | 33 | delete_block | medium | 1 | yes | 1 | PENDING |
-| 34 | delete_lines | medium | 1 | yes | 1 | PENDING |
+| 34 | delete_lines | medium | 1 | yes | 1 | PENDING  — NOTE: worktree-boundary validation gap found+fixed 2026-08-17 during tool #11's (undo_changes) cross-cutting audit (see docs/tool_productionization/undo_changes.md and tests/test_file_ops_worktree_boundary_hardening.py / test_tools_py_file_ops_worktree_boundary_hardening.py); this fix closed the path-escape bug for this tool's real call sites, but its own full tool_enhance.md audit/modularization turn is still pending |
 | 35 | git_checkout | medium | 1 | yes | 0 | PENDING |
 | 36 | git_cherry_pick | medium | 1 | yes | 1 | PENDING |
 | 37 | git_commit | medium | 1 | yes | 1 | PENDING |
@@ -54,7 +54,7 @@ Order: risk_level (high->medium->low->unknown), then agent_count desc (most-used
 | 44 | github_comment | medium | 1 | yes | 0 | PENDING |
 | 45 | github_create_issue | medium | 1 | yes | 0 | PENDING |
 | 46 | insert_after | medium | 1 | yes | 1 | PENDING |
-| 47 | insert_at_line | medium | 1 | yes | 1 | PENDING |
+| 47 | insert_at_line | medium | 1 | yes | 1 | PENDING  — NOTE: worktree-boundary validation gap found+fixed 2026-08-17 during tool #11's (undo_changes) cross-cutting audit (see docs/tool_productionization/undo_changes.md and tests/test_file_ops_worktree_boundary_hardening.py / test_tools_py_file_ops_worktree_boundary_hardening.py); this fix closed the path-escape bug for this tool's real call sites, but its own full tool_enhance.md audit/modularization turn is still pending |
 | 48 | insert_before | medium | 1 | yes | 1 | PENDING |
 | 49 | kill_process | medium | 1 | yes | 2 | PENDING |
 | 50 | linear_create_issue | medium | 1 | yes | 0 | PENDING |
@@ -63,8 +63,8 @@ Order: risk_level (high->medium->low->unknown), then agent_count desc (most-used
 | 53 | npm_install | medium | 1 | yes | 2 | PENDING |
 | 54 | npm_run | medium | 1 | yes | 0 | PENDING |
 | 55 | pip_install | medium | 1 | yes | 2 | PENDING |
-| 56 | rename_file | medium | 1 | yes | 1 | PENDING |
-| 57 | replace_class | medium | 1 | yes | 1 | PENDING |
+| 56 | rename_file | medium | 1 | yes | 1 | PENDING  — NOTE: worktree-boundary validation gap found+fixed 2026-08-17 during tool #11's (undo_changes) cross-cutting audit (see docs/tool_productionization/undo_changes.md and tests/test_file_ops_worktree_boundary_hardening.py / test_tools_py_file_ops_worktree_boundary_hardening.py); this fix closed the path-escape bug for this tool's real call sites, but its own full tool_enhance.md audit/modularization turn is still pending |
+| 57 | replace_class | medium | 1 | yes | 1 | PENDING  — NOTE: worktree-boundary validation gap found+fixed 2026-08-17 during tool #11's (undo_changes) cross-cutting audit (see docs/tool_productionization/undo_changes.md and tests/test_file_ops_worktree_boundary_hardening.py / test_tools_py_file_ops_worktree_boundary_hardening.py); this fix closed the path-escape bug for this tool's real call sites, but its own full tool_enhance.md audit/modularization turn is still pending |
 | 58 | run_background | medium | 1 | yes | 3 | PENDING |
 | 59 | run_make | medium | 1 | yes | 1 | PENDING |
 | 60 | run_node | medium | 1 | yes | 1 | PENDING |
@@ -135,7 +135,7 @@ Order: risk_level (high->medium->low->unknown), then agent_count desc (most-used
 | 125 | browser_screenshot | low | 1 | yes | 0 | PENDING |
 | 126 | check_url_status | low | 1 | yes | 2 | PENDING |
 | 127 | compare_files | low | 1 | yes | 1 | PENDING |
-| 128 | copy_file | low | 1 | yes | 1 | PENDING |
+| 128 | copy_file | low | 1 | yes | 1 | PENDING  — NOTE: worktree-boundary validation gap found+fixed 2026-08-17 during tool #11's (undo_changes) cross-cutting audit (see docs/tool_productionization/undo_changes.md and tests/test_file_ops_worktree_boundary_hardening.py / test_tools_py_file_ops_worktree_boundary_hardening.py); this fix closed the path-escape bug for this tool's real call sites, but its own full tool_enhance.md audit/modularization turn is still pending |
 | 129 | count_lines | low | 1 | yes | 1 | PENDING |
 | 130 | cpu_profile | low | 1 | yes | 0 | PENDING |
 | 131 | create_directory | low | 1 | yes | 1 | PENDING |
@@ -143,7 +143,7 @@ Order: risk_level (high->medium->low->unknown), then agent_count desc (most-used
 | 133 | decision_log_append | low | 1 | yes | 0 | PENDING |
 | 134 | deps_outdated | low | 1 | yes | 0 | PENDING |
 | 135 | env_diff | low | 1 | yes | 1 | PENDING |
-| 136 | explain_merge_conflict | low | 1 | yes | 2 | PENDING |
+| 136 | explain_merge_conflict | low | 1 | yes | 2 | PENDING  — NOTE: worktree-boundary validation gap found+fixed 2026-08-17 during tool #11's (undo_changes) cross-cutting audit (see docs/tool_productionization/undo_changes.md and tests/test_file_ops_worktree_boundary_hardening.py / test_tools_py_file_ops_worktree_boundary_hardening.py); this fix closed the path-escape bug for this tool's real call sites, but its own full tool_enhance.md audit/modularization turn is still pending |
 | 137 | export_markdown | low | 1 | yes | 1 | PENDING |
 | 138 | find_file | low | 1 | yes | 1 | PENDING |
 | 139 | find_queue | low | 1 | yes | 1 | PENDING |
@@ -235,8 +235,8 @@ Order: risk_level (high->medium->low->unknown), then agent_count desc (most-used
 | 225 | memory_list_draft_lessons | NO_MANIFEST | 1 | NO | 1 | PENDING |
 | 226 | memory_promote_lesson | NO_MANIFEST | 1 | NO | 1 | PENDING |
 | 227 | memory_search | NO_MANIFEST | 1 | NO | 1 | PENDING |
-| 228 | parse_merge_conflicts | NO_MANIFEST | 1 | NO | 2 | PENDING |
-| 229 | resolve_merge_conflict | NO_MANIFEST | 1 | NO | 2 | PENDING |
+| 228 | parse_merge_conflicts | NO_MANIFEST | 1 | NO | 2 | PENDING  — NOTE: worktree-boundary validation gap found+fixed 2026-08-17 during tool #11's (undo_changes) cross-cutting audit (see docs/tool_productionization/undo_changes.md and tests/test_file_ops_worktree_boundary_hardening.py / test_tools_py_file_ops_worktree_boundary_hardening.py); this fix closed the path-escape bug for this tool's real call sites, but its own full tool_enhance.md audit/modularization turn is still pending |
+| 229 | resolve_merge_conflict | NO_MANIFEST | 1 | NO | 2 | PENDING  — NOTE: worktree-boundary validation gap found+fixed 2026-08-17 during tool #11's (undo_changes) cross-cutting audit (see docs/tool_productionization/undo_changes.md and tests/test_file_ops_worktree_boundary_hardening.py / test_tools_py_file_ops_worktree_boundary_hardening.py); this fix closed the path-escape bug for this tool's real call sites, but its own full tool_enhance.md audit/modularization turn is still pending |
 | 230 | score_tech_options | NO_MANIFEST | 1 | NO | 1 | PENDING |
 | 231 | submit_accessibility_agent | NO_MANIFEST | 1 | NO | 1 | PENDING |
 | 232 | submit_agentic_ai_architect | NO_MANIFEST | 1 | NO | 0 | PENDING |

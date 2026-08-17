@@ -1338,7 +1338,7 @@ class ChatAgent:
 
         if tool_name == "write_file":
             rel = str(inp["path"])
-            if _is_protected_path(rel):
+            if _is_protected_path(rel, repo):
                 return f"[POLICY DENIED] Cannot write to protected path: {rel}"
             target = root / rel
             # Gap-closure Day 5 (root cause 2, answers.md Q39): write_file
@@ -1366,6 +1366,8 @@ class ChatAgent:
             rel = str(inp["path"])
             old_s = str(inp["old_string"])
             new_s = str(inp["new_string"])
+            if _is_protected_path(rel, repo):
+                return f"[POLICY DENIED] Cannot write to protected path: {rel}"
             target = root / rel
             if not target.exists():
                 return f"[ERROR] File not found: {rel}"
@@ -1382,7 +1384,7 @@ class ChatAgent:
 
         if tool_name == "append_file":
             rel = str(inp["path"])
-            if _is_protected_path(rel):
+            if _is_protected_path(rel, repo):
                 return f"[POLICY DENIED] Cannot write to protected path: {rel}"
             target = root / rel
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -1394,7 +1396,7 @@ class ChatAgent:
         if tool_name == "rename_file":
             from_rel = str(inp["from_path"])
             to_rel = str(inp["to_path"])
-            if _is_protected_path(from_rel) or _is_protected_path(to_rel):
+            if _is_protected_path(from_rel, repo) or _is_protected_path(to_rel, repo):
                 return "[POLICY DENIED] Protected path involved"
             src = root / from_rel
             dst = root / to_rel
@@ -1409,7 +1411,9 @@ class ChatAgent:
 
             from_rel = str(inp["from_path"])
             to_rel = str(inp["to_path"])
-            if _is_protected_path(to_rel):
+            if _is_protected_path(from_rel, repo):
+                return f"[POLICY DENIED] Protected source: {from_rel}"
+            if _is_protected_path(to_rel, repo):
                 return f"[POLICY DENIED] Protected destination: {to_rel}"
             src = root / from_rel
             dst = root / to_rel
@@ -1421,7 +1425,7 @@ class ChatAgent:
 
         if tool_name == "delete_file":
             rel = str(inp["path"])
-            if _is_protected_path(rel):
+            if _is_protected_path(rel, repo):
                 return f"[POLICY DENIED] Cannot delete protected path: {rel}"
             target = root / rel
             if not target.exists():
@@ -1839,7 +1843,7 @@ class ChatAgent:
             rel = str(inp["path"])
             line_num = int(inp["line"])
             content = str(inp["content"])
-            if _is_protected_path(rel):
+            if _is_protected_path(rel, repo):
                 return f"[POLICY DENIED] Cannot write to protected path: {rel}"
             ial_target = root / rel
             if not ial_target.exists():
@@ -1861,7 +1865,7 @@ class ChatAgent:
             rel = str(inp["path"])
             rf_name = str(inp["function_name"])
             new_code = str(inp["new_code"])
-            if _is_protected_path(rel):
+            if _is_protected_path(rel, repo):
                 return f"[POLICY DENIED] Cannot write to protected path: {rel}"
             rf_target = root / rel
             if not rf_target.exists():
@@ -1908,7 +1912,7 @@ class ChatAgent:
             rel = str(inp["path"])
             dl_start = int(inp["start_line"])
             dl_end = int(inp["end_line"])
-            if _is_protected_path(rel):
+            if _is_protected_path(rel, repo):
                 return f"[POLICY DENIED] Cannot write to protected path: {rel}"
             dl_target = root / rel
             if not dl_target.exists():
@@ -2154,7 +2158,7 @@ class ChatAgent:
 
         if tool_name == "parse_merge_conflicts":
             pmc_rel = str(inp["path"])
-            if _is_protected_path(pmc_rel):
+            if _is_protected_path(pmc_rel, repo):
                 return f"[POLICY DENIED] Protected path: {pmc_rel}"
             pmc_target = root / pmc_rel
             if not pmc_target.exists():
@@ -2169,7 +2173,7 @@ class ChatAgent:
 
         if tool_name == "resolve_merge_conflict":
             rmc_rel = str(inp["path"])
-            if _is_protected_path(rmc_rel):
+            if _is_protected_path(rmc_rel, repo):
                 return f"[POLICY DENIED] Protected path: {rmc_rel}"
             rmc_target = root / rmc_rel
             if not rmc_target.exists():
@@ -2201,7 +2205,7 @@ class ChatAgent:
 
         if tool_name == "explain_merge_conflict":
             emc_rel = str(inp["path"])
-            if _is_protected_path(emc_rel):
+            if _is_protected_path(emc_rel, repo):
                 return f"[POLICY DENIED] Protected path: {emc_rel}"
             emc_target = root / emc_rel
             if not emc_target.exists():
@@ -3303,7 +3307,7 @@ class ChatAgent:
             rcl_rel = str(inp["path"])
             rcl_name = str(inp["class_name"])
             rcl_new = str(inp["new_code"])
-            if _is_protected_path(rcl_rel):
+            if _is_protected_path(rcl_rel, repo):
                 return f"[POLICY DENIED] Protected path: {rcl_rel}"
             rcl_fp = root / rcl_rel
             if not rcl_fp.exists():
@@ -3344,7 +3348,7 @@ class ChatAgent:
 
         if tool_name == "undo_changes":
             undo_rel = str(inp["path"])
-            if _is_protected_path(undo_rel):
+            if _is_protected_path(undo_rel, repo):
                 return f"[POLICY DENIED] Protected path: {undo_rel}"
             undo_fp = root / undo_rel
             if not undo_fp.exists():

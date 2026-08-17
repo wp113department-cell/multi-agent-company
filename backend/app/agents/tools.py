@@ -33,7 +33,6 @@ from app.policy.engine import (
     check_allowlisted_command,
     check_command,
     check_command_stays_in_boundary,
-    check_path,
     check_path_in_worktree,
 )
 
@@ -8451,6 +8450,8 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
         from_rel = str(inp["from_path"])
         to_rel = str(inp["to_path"])
+        if _is_protected_path(from_rel, repo_path):
+            return f"[POLICY DENIED] Protected source: {from_rel}"
         if _is_protected_path(to_rel, repo_path):
             return f"[POLICY DENIED] Protected destination: {to_rel}"
         src = root / from_rel
@@ -9234,7 +9235,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def parse_merge_conflicts(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
-        result = check_path(rel)
+        result = check_path_in_worktree(rel, repo_path)
         if not result.allowed:
             return f"[POLICY DENIED] {rel}: {result.reason}"
         target = Path(repo_path) / rel
@@ -9250,7 +9251,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def explain_merge_conflict(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
-        result = check_path(rel)
+        result = check_path_in_worktree(rel, repo_path)
         if not result.allowed:
             return f"[POLICY DENIED] {rel}: {result.reason}"
         target = Path(repo_path) / rel
@@ -9264,7 +9265,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def resolve_merge_conflict(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
-        result = check_path(rel)
+        result = check_path_in_worktree(rel, repo_path)
         if not result.allowed:
             return f"[POLICY DENIED] {rel}: {result.reason}"
         target = Path(repo_path) / rel
@@ -13402,7 +13403,7 @@ def make_git_commit_change_handler(repo_path: str) -> Any:
             return "[ERROR] message is required"
 
         for f in files:
-            result = check_path(f)
+            result = check_path_in_worktree(f, repo_path)
             if not result.allowed:
                 return f"[POLICY DENIED] {f}: {result.reason}"
             fpath = Path(repo_path) / f
@@ -13518,7 +13519,7 @@ def make_fleet_apply_handlers(
 
     def write_file_h(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
-        result = check_path(rel)
+        result = check_path_in_worktree(rel, repo_path)
         if not result.allowed:
             return f"[POLICY DENIED] {rel}: {result.reason}"
         role_name = _role_prompt_name(rel)
@@ -13533,7 +13534,7 @@ def make_fleet_apply_handlers(
 
     def edit_file_h(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
-        result = check_path(rel)
+        result = check_path_in_worktree(rel, repo_path)
         if not result.allowed:
             return f"[POLICY DENIED] {rel}: {result.reason}"
         role_name = _role_prompt_name(rel)
