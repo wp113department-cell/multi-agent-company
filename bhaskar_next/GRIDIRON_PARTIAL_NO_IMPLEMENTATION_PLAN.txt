@@ -1,4 +1,962 @@
 ==============================================================================
+GRIDIRON PROJECT — FULL PRODUCTION AUDIT SUMMARY (Question-by-Question)
+Compiled from 18 audit batch reports (covers all 120 question sections)
+Legend: YES = production ready | PARTIAL = works but incomplete/needs
+        follow-up | NO = missing, real gap | SKIP = not needed / out of
+        scope / architectural boundary (safe to ignore for production)
+==============================================================================
+
+
+----- Section 1: Repository Execution -----
+1. Clones repo into user-selected folder: YES
+2. Every operation stays inside that cloned repo: YES
+3. Always uses 'the repository's terminal' (real PTY/interactive terminal): PARTIAL
+4. Terminal/session manager: YES
+5. Multiple terminals simultaneously (true parallel interactive shells): PARTIAL
+6. Windows terminal support: PARTIAL
+7. Linux/Ubuntu support: YES
+8. Docker terminal handling: YES
+9. Virtual environment activation: YES
+10. Safe shell execution (injection prevention): YES
+11. Execution pipeline trace: YES
+
+----- Section 17: Terminal Intelligence -----
+12. Monitor streaming output (live, mid-command): PARTIAL
+13. Detect completion: YES
+14. Detect failure: YES
+15. Detect hanging processes: YES
+16. Wait for commands to finish: YES
+17. Parse generic logs: YES
+18. Parse Docker logs: YES
+19. Parse test output (pytest etc.): YES
+20. Parse compiler/type-checker output: YES
+
+----- Section 58: Multi-Terminal & Parallel Execution -----
+21. Concurrent shell-session registry: YES
+22. Concurrent command execution (fan-out): YES
+23. Background vs foreground distinction: YES
+24. Task dependency handling between terminal jobs: YES
+25. Terminal monitoring, recovery, cleanup: YES
+
+----- Section 18: Coding Workflow -----
+26. Create/edit/delete files: YES
+27. Compare files: YES
+28. Synchronize files: YES
+29. Refactor projects: YES
+30. Preserve formatting: YES
+31. Preserve comments: YES
+32. Avoid restricted files: YES
+33. Obey repository rules: YES
+
+----- Section 59: Multi-File Operations -----
+34. Read hundreds of files safely: YES
+35. Edit hundreds of files: YES
+36. Rename/move/delete files: YES
+37. Preserve formatting/comments across multi-file edits: YES
+38. Preserve architecture consistency across multi-file edits: PARTIAL
+
+----- Section 2: Complete Orchestration -----
+39. Who receives the request first (defined path): YES
+40. Who decides which agents work: YES
+41. Routing is automatic/rule-based: YES
+42. Routing is AI-based (LLM-driven dispatch): SKIP
+43. Multiple agents work simultaneously (fan-out): PARTIAL
+44. Agents create subtasks dynamically: NO
+45. Agents request help from other agents: NO
+46. Agents reject tasks they're not suited for: YES
+47. Orchestration changes dynamically mid-execution (replanning): PARTIAL
+48. Dependencies managed: YES
+49. Priorities managed: YES
+50. Conflicts resolved: YES
+51. Duplicate work prevented (file locking): YES
+
+----- Section 3: Agent Selection -----
+52. Considers skills/capability: YES
+53. Considers tools availability: YES
+54. Considers current workload: YES
+55. Considers health/previous success/previous failures: YES
+56. Considers experience (tenure): YES
+57. Considers confidence: YES
+58. Considers memory (past outcomes) in selection: NO
+
+----- Section 4: Tool Selection -----
+59. Automatic tool selection: YES
+60. Call multiple tools per turn: YES
+61. Retry failed tools: YES
+62. Verify tool outputs: YES
+63. Recover from failures: YES
+64. Tool list adapts mid-run (intelligent vs hardcoded): SKIP
+
+----- Section 62: Runtime Decision Making -----
+65. Switch strategies (replanning) live: PARTIAL
+66. Switch tools mid-run: NO
+67. Call additional agents mid-run: NO
+68. Request human approval (HITL): YES
+69. Stop execution: YES
+70. Retry: YES
+71. Rollback (automatic): PARTIAL
+72. Skip unnecessary work: YES
+
+----- Section 5: Memory System Audit -----
+73. Working Memory: YES
+74. Session Memory: YES
+75. Shared Memory: YES
+76. Project Memory: YES
+77. Long-Term Memory: YES
+78. Procedural Memory: YES
+79. Failure Memory: YES
+80. Knowledge Memory: YES
+81. Where memory is stored (real DB schema): YES
+82. How memory is updated: YES
+83. How memory is retrieved: YES
+84. How memory is synchronized (race-safe): YES
+85. Memory survives restart: YES
+86. Memory shared between agents: YES
+
+----- Section 120: Intelligent Memory Management -----
+87. Working Memory scoped to task, no overflow: YES
+88. Session memory retains/compresses/summarizes: PARTIAL
+89. Long-term memory promotion gate (draft->published): YES
+90. Context Compression (general purpose): PARTIAL
+91. Memory Retrieval targeted, not full dump: YES
+92. Automatic Memory Cleanup: YES
+93. Memory Prioritization: YES
+94. Token Optimization: YES
+95. Context Window Management (aggregate cap): YES
+96. Memory Aging/Lifecycle: YES
+97. Shared Memory Synchronization (lock safety): YES
+98. Memory Quality Control (accuracy validation): PARTIAL
+99. Memory Analytics: YES
+100. Memory Evolution (active shrink/consolidate over time): PARTIAL
+
+----- Section 6: Agent Specification Audit (per-agent scaffold) -----
+101. Identity/Role/Responsibilities: YES
+102. System prompt loaded from role file: YES
+103. Skills/Tool List: YES
+104. Memory wired per agent: YES
+105. Knowledge Base (repo context): YES
+106. Planning Engine: PARTIAL
+107. Reasoning Loop: YES
+108. Verification Loop: YES
+109. Self-Critique: YES
+110. Recovery System (retry+feedback): YES
+111. Safety Layer: YES
+112. Learning Layer: YES
+113. Configuration (no hardcoding): YES
+114. Observability/Logging: YES
+115. Metrics: YES
+
+----- Section 7: Capability Audit (from implementation) -----
+116. Intelligent Understanding / Deep Instruction Analysis: YES
+117. Smart Planning (fleet-wide default): PARTIAL
+118. Context Awareness: YES
+119. Long-Term Memory: YES
+120. Learn From Success: YES
+121. Learn From Failure: YES
+122. Detect User Satisfaction: YES
+123. Verification Before Reply (fleet-wide default): PARTIAL
+124. Honest Error Handling: YES
+125. Credential Handling: YES
+126. Step-by-Step Guidance (dedicated renderer): PARTIAL
+127. Cross-Agent Collaboration / Shared Learning: YES
+128. Architecture Awareness: YES
+129. Performance Awareness (behavior changes from timing data): PARTIAL
+130. Confidence Evaluation (feeds control flow): PARTIAL
+131. Self Review: YES
+132. Continuous Improvement: YES
+133. Production Quality (lint/test gates): YES
+
+----- Section 72: Universal Skill Coverage -----
+134. Requirement Analysis / Problem Decomposition: YES
+135. Planning: YES
+136. Code Reading/Writing: YES
+137. Code Review: YES
+138. Debugging / Root Cause Analysis: YES
+139. Testing / Verification: YES
+140. Security Awareness: YES
+141. Cost Awareness: YES
+142. Risk Assessment: YES
+143. Observability: YES
+144. Refactoring: YES
+145. Documentation: YES
+146. Step-by-Step Guidance (skill): PARTIAL
+147. Performance Analysis (acted upon): PARTIAL
+148. Deployment Planning (execution, not just plan): SKIP
+149. Reliability Engineering / Maintainability (beyond lint gates): PARTIAL
+150. Communication/Collaboration/Decision Making/Critical Thinking as dedicated skill: PARTIAL
+
+----- Section 8: Performance Audit -----
+151. Response latency tracking: YES
+152. Planning speed tracking: YES
+153. Orchestration speed tracking: YES
+154. File scanning speed tracking: YES
+155. Editing speed tracking: YES
+156. Tool execution speed tracking: YES
+157. Memory retrieval speed tracking: YES
+158. Comparison with Claude Code / Cursor (real benchmark): SKIP
+159. Bottleneck: sequential subtask execution (parallel-safe fan-out): SKIP
+160. Bottleneck: sync blocking in async code: YES
+
+----- Section 10: Project Architecture Audit -----
+161. Folder structure: YES
+162. Modularity (god-module tools.py fully split): PARTIAL
+163. Dependency management (pinning): YES
+164. Code quality (lint/type-check clean): YES
+165. Testing volume: YES
+166. Observability: YES
+167. Deployment readiness (prod manifest): YES
+
+----- Section 46: Scalability -----
+168. Hardcoded agent lists that wouldn't survive growth: YES
+169. In-memory single-process-only registries (fully distributed): PARTIAL
+170. DB indexing on frequently-filtered columns: YES
+171. Horizontal scaling (multiple backend instances, live dispatch state): NO
+172. Connection pooling: YES
+
+----- Section 9: Frontend and Backend Audit -----
+173. API connections: YES
+174. Streaming (SSE): YES
+175. WebSocket support: SKIP
+176. State management: YES
+177. Error handling: YES
+178. Reconnect logic: YES
+179. Frontend/backend synchronization: YES
+180. Authentication: YES
+181. Authorization (RBAC): YES
+182. Broken/incomplete integration items: YES
+
+----- Section 11: Testing Audit -----
+183. Unit Tests: YES
+184. Integration Tests: YES
+185. End-to-End Tests: YES
+186. Agent Tests: YES
+187. Tool Tests: YES
+188. Memory Tests: YES
+189. Orchestrator Tests: YES
+190. Regression Tests: YES
+191. Performance Tests: YES
+192. Load / Stress Tests: YES
+193. Failure Recovery Tests: YES
+
+----- Section 12: Autonomous Guardian/Ranger Agents (§12/§64) -----
+194. Architecturally separate 5-agent supervisory tier (as literally described): SKIP
+195. Separate memory subsystem for guardian tier: SKIP
+196. Separate tools for guardian tier: PARTIAL
+197. Autonomous scheduling (no manual trigger): YES
+198. Codebase monitoring: PARTIAL
+199. Log monitoring: YES
+200. Docker monitoring: YES
+201. Git monitoring: YES
+202. Architecture monitoring: YES
+203. Enhancement suggestions: YES
+204. Bug detection: YES
+205. Automatic multi-step planning (unprompted): SKIP
+206. Approval workflow before code changes: YES
+207. Never modifies code without approval: YES
+
+----- Section 13: Human Interaction -----
+208. Ask permission: YES
+209. Wait indefinitely for a response: YES
+210. Present options (multi-choice): YES
+211. Recommend choices (structured field): YES
+212. Pause/resume execution for plain worker agents: PARTIAL
+213. Understand follow-up replies / continue prior context (worker agents): PARTIAL
+
+----- Section 39: Human Approval System -----
+214. Delete a file gated: YES
+215. Overwrite an existing file gated: YES
+216. git push (incl. force) gated: YES
+217. git reset --hard gated: YES
+218. Dangerous bash command gated: YES
+219. undo_changes gated: YES
+220. DB migration gated: YES
+221. seed_database gated: YES
+222. Dependency upgrades gated: YES
+223. Deployment gated: SKIP
+224. 'Don't ask again this session' option: YES
+
+----- Section 103: Human Override -----
+225. Interrupt any agent mid-run: YES
+226. Resume with injected input: YES
+227. Take over a task / edit plan / reject one step and resume exactly there: NO
+
+----- Section 14: Execution Control -----
+228. Pause: YES
+229. Resume: YES
+230. Cancel (distinct terminal state): YES
+231. Retry: YES
+232. Rollback (manual operator-invoked): YES
+233. Checkpoints (Postgres-backed, all paths): YES
+234. Recovery after crash (full state): PARTIAL
+235. Recovery after reboot (auto-resume worker runs): PARTIAL
+236. Continue from checkpoint if interrupted (all agent types): PARTIAL
+
+----- Section 38: Failure Recovery -----
+237. Docker crashes (sandbox) - fails closed correctly: YES
+238. Python backend crashes - full state recovery: PARTIAL
+239. Terminal/shell session closes - detected live: YES
+240. Internet disconnects - retry/backoff: YES
+241. LLM API fails (rate limit/500/timeout): YES
+
+----- Section 97: Disaster Recovery -----
+242. Backup exists and is automated/scheduled: YES
+243. Auto-restart on crash: YES
+
+----- Section 102: Long-Running Jobs -----
+244. Run 30+ min / hours without being killed: YES
+245. Progress reporting: YES
+246. Checkpointing / Resumability (all agent types): PARTIAL
+
+----- Section 66: Production Reliability -----
+247. Retries: YES
+248. Exponential backoff: YES
+249. Circuit breakers: YES
+250. Timeout handling (incl. DB statement timeout): YES
+251. Idempotency: YES
+252. Transaction safety: YES
+253. Structured error reporting: YES
+
+----- Section 15: Large Project Handling -----
+254. Understand 9,000+ line files: YES
+255. Edit very large files safely (streaming I/O): PARTIAL
+256. Scan 1,000+ files: YES
+257. Modify 100+ files (dedicated batch-edit tool): PARTIAL
+258. Build complete projects (scaffold): YES
+259. Repository-wide refactoring (AST-aware, all languages): PARTIAL
+
+----- Section 16: File Understanding -----
+260. Python: YES
+261. TypeScript/JavaScript: YES
+262. HTML/CSS (structural parsing): SKIP
+263. PHP: SKIP
+264. Markdown: YES
+265. JSON (incl. schema validation): YES
+266. YAML (incl. schema validation): YES
+267. Docker/Docker Compose: YES
+268. Jupyter Notebook: YES
+269. PDF: YES
+270. Images: YES
+271. Audio/Video: SKIP
+272. XML: YES
+273. CSV: YES
+274. Excel: SKIP
+275. Word/PowerPoint: SKIP
+
+----- Section 79: Technology Adaptation / External Docs (§79-81) -----
+276. Open URLs: YES
+277. SSRF protection on URL fetch: YES
+278. Summarize fetched web content (LLM-in-tool-loop): SKIP
+279. Detect 'I don't know this tech, look it up' (research agent): YES
+280. Inspect external GitHub repositories: YES
+281. Inspect APIs (OpenAPI/Swagger): YES
+282. Auto-feed external docs into coding-task context: SKIP
+
+----- Section 19: Deployment Intelligence -----
+283. Detect deployment issues: YES
+284. Diagnose deployment failures: YES
+285. Generate deployment guides for this project: YES
+286. Vercel (execution): SKIP
+287. Docker: YES
+288. Railway: SKIP
+289. Render: SKIP
+290. Kubernetes (execution): SKIP
+291. AWS (deploy-execution tooling): PARTIAL
+292. Azure / GCP: SKIP
+
+----- Section 20: External Knowledge -----
+293. Open URLs: YES
+294. Understand / summarize websites: YES
+295. Inspect external GitHub repos: YES
+296. Inspect APIs (OpenAPI/Swagger): YES
+297. Use documentation while coding automatically (no explicit call): NO
+
+----- Section 40: Git Intelligence -----
+298. Create meaningful commits / write commit messages: YES
+299. Create branches: YES
+300. Resolve merge conflicts (auto, no human judgment): PARTIAL
+301. Explain conflicts: YES
+302. Review diffs (structured, beyond raw output): YES
+303. Summarize changes: YES
+304. Generate PR descriptions: YES
+
+----- Section 41: Documentation Intelligence -----
+305. README generation: YES
+306. Architecture docs generation: YES
+307. API docs generation: YES
+308. Agent docs generation: YES
+309. Tool docs generation: YES
+310. Changelog generation: YES
+311. Migration guide generation: YES
+312. Auto-update when code changes: YES
+
+----- Section 21: Security Audit -----
+313. Credential protection: YES
+314. Secret management: YES
+315. Sandboxing: YES
+316. Dangerous command detection: YES
+317. Permission system: YES
+318. Prompt injection resistance: YES
+319. Data leakage prevention: YES
+
+----- Section 22: Safety Audit -----
+320. Refuses malware/ransomware/credential-theft/phishing requests: YES
+321. Code-level classifier blocking harmful code categories: SKIP
+
+----- Section 96: Enterprise Security -----
+322. Secret scanning: YES
+323. Encrypted credential storage: YES
+324. Audit logs (tamper-resistant + queryable): YES
+325. Role-based permissions: YES
+326. Least-privilege access: YES
+327. Approval chains: YES
+328. Compliance readiness (GDPR/CCPA export & erase): YES
+
+----- Section 85: Governance & Policy Engine -----
+329. Central governance system beyond security policy engine: PARTIAL
+330. All agents automatically follow policy (structural guarantee): YES
+331. Licensing policy enforcement: YES
+
+----- Section 25: User Intent Understanding -----
+332. Understand vague/incomplete requests (structural completeness gate): SKIP
+333. Detect hidden intent / conflicting requirements: SKIP
+334. Ask clarification questions before acting: YES
+335. Refuse to guess when info insufficient: YES
+336. Separate multiple tasks from one prompt: SKIP
+337. Detect intent type (explain/implement/debug/compare/docs): SKIP
+
+----- Section 26: Difficult User Handling / Emotion (§26/§63) -----
+338. Frustration detection changes behavior: YES
+339. Repetition detection changes behavior: YES
+340. Contradictory/changing instructions detection: SKIP
+341. Abusive language / poor English / mixed language / length handling: SKIP
+342. Remains professional: YES
+
+----- Section 27: Clarification Engine -----
+343. Ask only necessary questions: SKIP
+344. Build temporary plan while waiting for answer: SKIP
+345. Remember previous answers on re-dispatch: YES
+
+----- Section 28: Requirement Analysis -----
+346. Break a huge pasted spec into milestones: SKIP
+347. Detect impossible requirements / duplicated work / suggest architecture: SKIP
+348. Produce an execution roadmap: SKIP
+
+----- Section 29: Existing Project Awareness -----
+349. Check for existing implementation before building (enforced, not advisory): YES
+
+----- Section 30: Safe Implementation -----
+350. Repo search/read files/understand architecture required before writing (enforced): YES
+351. Explain risks / preserve backward compatibility (code-enforced): SKIP
+352. Static quality checks (mypy/ruff): YES
+
+----- Section 42: Cost Awareness -----
+353. Pre-execution cost/token estimate: YES
+354. Recommend cheaper approaches: YES
+
+----- Section 43: Confidence & Uncertainty -----
+355. Every important answer has a confidence estimate: YES
+356. Distinguish verified facts from assumptions: YES
+357. Explicitly say 'I don't know': YES
+
+----- Section 44: Explainability -----
+358. Explain why this approach / agents / tools chosen: YES
+359. Structured decision-log/rationale field in DB: YES
+
+----- Section 45: Multi-Session Continuity -----
+360. Context persists across app restart: YES
+361. Branch-context tracking after switching git branches: PARTIAL
+
+----- Section 52: Large Context Understanding -----
+362. Condensation trigger: YES
+363. Compression method (real summarization, not truncation): YES
+364. Applied to chat_agent conversations too: YES
+365. Multiple repos/documents in one context: SKIP
+
+----- Section 65: Token & Context Budget Management -----
+366. Check against model's real context limit: YES
+367. Warn user when approaching limits: YES
+
+----- Section 101: Economic Awareness -----
+368. Token usage estimate: YES
+369. API cost estimate: YES
+370. Execution time estimate: YES
+371. Storage impact estimate: YES
+372. Compute requirements estimate: YES
+
+----- Section 47: Extensibility -----
+373. New agent via role/tools/prompt/memory config only, no orchestration code change: YES
+374. New agent auto-joins / becomes dispatchable: YES
+
+----- Section 48: Enterprise Readiness -----
+375. Multiple users (normalized users table): YES
+376. Multiple projects/workspaces (true multi-tenant): SKIP
+377. Concurrent sessions (per-tenant isolation of singletons): PARTIAL
+378. Enterprise authentication (SSO/SAML/OAuth): SKIP
+379. Audit logging: YES
+380. Role-based access: YES
+381. Usage analytics (full per-user cost/token attribution): PARTIAL
+
+----- Section 77: Company-Scale Readiness / Multi-Project Management (§77/§94) -----
+382. Agent lifecycle (hire/retire/replace/promote): YES
+383. Full cross-repo isolation (every table): PARTIAL
+
+----- Section 95: Workspace Isolation -----
+384. Credentials scoped per-repo/project: YES
+385. Agents use the correct repo_path consistently: YES
+
+----- Section 98: Version Awareness -----
+386. Git tags / semver: YES
+387. Migration state reasoning: YES
+
+----- Section 99: User Experience Intelligence -----
+388. Detect confusion / beginner vs expert mode: SKIP
+389. Generate diagrams: YES
+390. Summarize long outputs: YES
+
+----- Section 100: Accessibility -----
+391. ARIA / semantic HTML in the product's own frontend: YES
+392. a11y linting: YES
+393. Internationalization: SKIP
+
+----- Section 33: AI Suggestion Review -----
+394. Provenance-aware review of externally-sourced code (escalated scrutiny): SKIP
+
+----- Section 34: Incremental Implementation -----
+395. Phased delivery with milestone gating: SKIP
+
+----- Section 35: Project Health Monitoring / Self-Audit (§35/§36) -----
+396. Broken imports / dead code / unused files / duplicate functions / circular deps: YES
+397. Dependency conflicts: YES
+398. Memory leaks detection (in target repo): SKIP
+399. Performance regressions (app-runtime level): SKIP
+
+----- Section 37: Learning System -----
+400. Agent routing score updates from real outcomes over time: YES
+
+----- Section 74: User Preference Learning (§74/§113) -----
+401. Preferences recorded and retrieved as first-class memory: YES
+
+----- Section 75: Organizational Knowledge Sharing / Company Brain (§75/§105/§112) -----
+402. Central store consulted before starting work: YES
+403. Covers proven patterns/failed approaches/architecture decisions/templates: YES
+404. Covers known bugs as a distinct type: YES
+405. Covers approved prompts/MCPs/tools as a distinct knowledge type: NO
+406. Knowledge validation before promotion: YES
+
+----- Section 76: Continuous Improvement / Performance & Architecture Review / Capability Gap Detection (§76/106/108/109/116) -----
+407. Per-agent performance metrics aggregated over time (persisted, not just ring buffer): PARTIAL
+408. agent_performance_reviewer uses real data, not self-reports: YES
+409. Capability gap detection from repeated failed/blocked requests: YES
+
+----- Section 110: Prompt Evolution / Tool Evolution (§110/§111) -----
+410. Prompt evolution (versioning + rollback, human & automatic): YES
+411. Tool evolution (hot-swap live executable code safely): SKIP
+
+----- Section 114: Project Evolution -----
+412. Per-repo knowledge isolation: YES
+
+----- Section 115: Release Retrospectives -----
+413. Real 'what went well / what failed' report tied to a release event: YES
+
+----- Section 117: Quality Score -----
+414. Aggregate quality score across all categories (9/9): PARTIAL
+
+----- Section 118: Safe Self-Improvement Lifecycle -----
+415. Detect: YES
+416. Analyze: YES
+417. Propose: YES
+418. Simulate impact before applying (sandboxed): SKIP
+419. Show plan: YES
+420. Wait for approval: YES
+421. Implement: YES
+422. Test: YES
+423. Rollback if quality declines: YES
+
+----- Section 86: Organization-Wide Task Scheduler -----
+424. Queue: YES
+425. Prioritize: YES
+426. Pause / Resume / Cancel: YES
+427. Reorder (true in-place queue reordering): PARTIAL
+428. Detect blocked tasks (dependency-driven, not just failure-driven): PARTIAL
+429. Detect dependencies / optimize order org-wide (auto-dispatch): PARTIAL
+430. Retry (both queue backends): YES
+
+----- Section 87: Agent Performance Metrics -----
+431. Success rate: YES
+432. Failure rate: YES
+433. Avg execution time (p50/p95): YES
+434. Tool usage / accuracy: YES
+435. Token usage: YES
+436. Reasoning quality (LLM-judge grading): SKIP
+437. Retry count (real per-run persisted value): PARTIAL
+438. User approval rate: YES
+439. User satisfaction (real, not proxy): PARTIAL
+440. Reliability score: YES
+
+----- Section 88: Agent Health Monitoring -----
+441. Detect slow/crashed agents: YES
+442. Detect looping agents (cross-run): YES
+443. Detect hallucinating agents / memory leaks / sync failures: NO
+444. Health state transitions are real, not static: YES
+445. 'degraded' state reachable and persisted: YES
+446. Automatic recovery from unhealthy: YES
+
+----- Section 89: Automatic Agent Retirement -----
+447. Disable a repeatedly-failing agent: YES
+448. Notify a supervisor: YES
+449. Replace / permanently disable (persists across restart): YES
+
+----- Section 90: Quality Gates -----
+450. Linting: YES
+451. Formatting: YES
+452. Tests: YES
+453. Security checks (mandatory pipeline gate): PARTIAL
+454. Dependency checks (mandatory pipeline gate): NO
+455. Architecture checks (mandatory pipeline gate): PARTIAL
+456. Performance checks (broad, not just role-prompt deploys): PARTIAL
+457. Documentation checks (mandatory pre-completion gate): NO
+
+----- Section 91: Architecture Drift Detection -----
+458. Deterministic architecture drift detection vs stored baseline: YES
+
+----- Section 92: Dependency Intelligence -----
+459. Outdated packages: YES
+460. Security vulnerabilities: YES
+461. Breaking changes detection: SKIP
+462. Abandoned/unmaintained libraries (structured, enforced): PARTIAL
+463. Dependency conflicts (real solver, not just pip check): PARTIAL
+
+----- Section 93: Knowledge Validation -----
+464. Draft->published promotion gate with real approver: YES
+
+----- Section 71: Professional Domain Coverage (§71/§82) — 24 domains checked -----
+465. Backend Development: YES
+466. Frontend Development: YES
+467. Full Stack: YES
+468. API Development (REST/GraphQL): YES
+469. Mobile Development: YES
+470. AI/ML/LLM Engineering: YES
+471. RAG Systems: YES
+472. Agentic AI / LangGraph design (for user's own project): YES
+473. MCP Development: YES
+474. Prompt Engineering: YES
+475. Data Engineering / ETL / Warehousing: YES
+476. SQL: YES
+477. Docker: YES
+478. Kubernetes live execution: SKIP
+479. CI/CD: YES
+480. Monitoring/Logging: YES
+481. Security: YES
+482. QA/Testing: YES
+483. Architecture/System Design: YES
+484. Product Management (roadmap/strategy): YES
+485. Business Analysis: YES
+486. Sprint Planning: YES
+487. UI/UX Design, Design Systems: YES
+488. Accessibility: YES
+
+----- Section 73: Adaptive Expertise -----
+489. Detects professional role and adapts terminology/depth: YES
+
+----- Section 83: Technology Recommendation Engine -----
+490. Dedicated multi-criteria recommendation engine (real weighted scoring, not model-guessed): YES
+491. General single-question research/recommendation capability: YES
+
+----- Section 84: Capability Boundaries -----
+492. Communicates what it can't do (real, code-enforced limitation classification): YES
+
+----- Section 23: Production Readiness Score -----
+493. Overall production readiness scored across all categories: YES
+
+----- Section 24: Missing Features -----
+494. AgentRegistry dispatch coordination + concurrency semaphores distributed across processes: NO
+495. Verification/evidence-first blocking (blocking_until) applied to every agent: PARTIAL
+496. Accessibility tooling in this product's own frontend: YES
+
+----- Section 49: Claude Code / Cursor Feature Gap & Parity Audit (§49/§70) -----
+497. Real feature-parity benchmark vs Claude Code/Cursor: SKIP
+
+----- Section 50: Final Roadmap -----
+498. Roadmap tracked, sequenced, and re-sequenced against real progress: YES
+
+----- Section 51: Repeat Task & Historical Context -----
+499. Deterministic 'repeat this exact prior task by ID' mechanism: YES
+500. Chat-conversational 'do that again' surface: NO
+
+----- Section 54: No-Hallucination / Truthfulness / Evidence-First (§54/§55/§56) -----
+501. Refuse to invent test/execution results: YES
+502. Refuse to invent APIs/files/functions/classes (code-checked citations): YES
+503. Verify before answering (evidence-first) universally enforced: PARTIAL
+504. Say 'I cannot verify this' instead of guessing: YES
+505. Distinguish facts from assumptions structurally (plain-language, all agents): PARTIAL
+
+----- Section 57: Intelligent Clarification -----
+506. Approving a clarification correctly resumes the owning agent with the answer: YES
+
+----- Section 69: Autonomous Quality Improvement -----
+507. Pre-change impact simulation (blast radius) before human review: YES
+508. Automatic rollback-on-quality-decline for code-commit enhancements: YES
+
+----- Section 78: Final Verdict -----
+509. Could this run today as a professional AI software company at Claude-Code/Cursor-comparable quality: PARTIAL
+
+----- Section BONUS: Hidden Architectural Risks -----
+510. Chat's bash tool sandboxed (not running unsandboxed on host): YES
+511. In-process singletons blocking true horizontal scaling — fully resolved: PARTIAL
+512. Doc-agent modules crash-on-invocation (missing role files): YES
+513. versioned_lessons table has same advisory-lock protection as sibling table: YES
+514. Production deployment manifest + backend restart policy exists: YES
+515. Default queue backend has job timeout + retry: YES
+516. Audit log query layer uncapped + tamper-chain verification: YES
+517. coder.py has code-enforced read-before-write gate: YES
+518. All API routes require authentication (no unauthenticated internal-data routes): YES
+519. DevTask.priority and model-context-limit checks are live, not dead code: YES
+
+
+==============================================================================
+PART 2 — OVERALL ANALYSIS
+==============================================================================
+
+Total checkpoints evaluated: 519
+
+YES (production ready)........: 394  (75.9%)
+PARTIAL (needs work)...........: 61  (11.8%)
+NO (missing / real gap)........: 14  (2.7%)
+SKIP (not needed / out of scope): 50  (9.6%)
+
+If SKIP items are excluded (they don't count against production
+readiness), effective score on the 469 checkpoints that actually matter:
+  YES: 394 (84.0%)   PARTIAL: 61 (13.0%)   NO: 14 (3.0%)
+
+Overall estimated production readiness (per Batch 18's own final
+scored verdict, weighted across categories): ~66%
+
+==============================================================================
+PART 3 — PARTIAL & NO ITEMS: WHAT STILL NEEDS WORK FOR PRODUCTION
+(This is your real to-do list. Ordered as they appear above.)
+==============================================================================
+
+[PARTIAL] (#3) Always uses 'the repository's terminal' (real PTY/interactive terminal)  —  §1 Repository Execution
+[PARTIAL] (#5) Multiple terminals simultaneously (true parallel interactive shells)  —  §1 Repository Execution
+[PARTIAL] (#6) Windows terminal support  —  §1 Repository Execution
+[PARTIAL] (#12) Monitor streaming output (live, mid-command)  —  §17 Terminal Intelligence
+[PARTIAL] (#38) Preserve architecture consistency across multi-file edits  —  §59 Multi-File Operations
+[PARTIAL] (#43) Multiple agents work simultaneously (fan-out)  —  §2 Complete Orchestration
+[NO] (#44) Agents create subtasks dynamically  —  §2 Complete Orchestration
+[NO] (#45) Agents request help from other agents  —  §2 Complete Orchestration
+[PARTIAL] (#47) Orchestration changes dynamically mid-execution (replanning)  —  §2 Complete Orchestration
+[NO] (#58) Considers memory (past outcomes) in selection  —  §3 Agent Selection
+[PARTIAL] (#65) Switch strategies (replanning) live  —  §62 Runtime Decision Making
+[NO] (#66) Switch tools mid-run  —  §62 Runtime Decision Making
+[NO] (#67) Call additional agents mid-run  —  §62 Runtime Decision Making
+[PARTIAL] (#71) Rollback (automatic)  —  §62 Runtime Decision Making
+[PARTIAL] (#88) Session memory retains/compresses/summarizes  —  §120 Intelligent Memory Management
+[PARTIAL] (#90) Context Compression (general purpose)  —  §120 Intelligent Memory Management
+[PARTIAL] (#98) Memory Quality Control (accuracy validation)  —  §120 Intelligent Memory Management
+[PARTIAL] (#100) Memory Evolution (active shrink/consolidate over time)  —  §120 Intelligent Memory Management
+[PARTIAL] (#106) Planning Engine  —  §6 Agent Specification Audit (per-agent scaffold)
+[PARTIAL] (#117) Smart Planning (fleet-wide default)  —  §7 Capability Audit (from implementation)
+[PARTIAL] (#123) Verification Before Reply (fleet-wide default)  —  §7 Capability Audit (from implementation)
+[PARTIAL] (#126) Step-by-Step Guidance (dedicated renderer)  —  §7 Capability Audit (from implementation)
+[PARTIAL] (#129) Performance Awareness (behavior changes from timing data)  —  §7 Capability Audit (from implementation)
+[PARTIAL] (#130) Confidence Evaluation (feeds control flow)  —  §7 Capability Audit (from implementation)
+[PARTIAL] (#146) Step-by-Step Guidance (skill)  —  §72 Universal Skill Coverage
+[PARTIAL] (#147) Performance Analysis (acted upon)  —  §72 Universal Skill Coverage
+[PARTIAL] (#149) Reliability Engineering / Maintainability (beyond lint gates)  —  §72 Universal Skill Coverage
+[PARTIAL] (#150) Communication/Collaboration/Decision Making/Critical Thinking as dedicated skill  —  §72 Universal Skill Coverage
+[PARTIAL] (#162) Modularity (god-module tools.py fully split)  —  §10 Project Architecture Audit
+[PARTIAL] (#169) In-memory single-process-only registries (fully distributed)  —  §46 Scalability
+[NO] (#171) Horizontal scaling (multiple backend instances, live dispatch state)  —  §46 Scalability
+[PARTIAL] (#196) Separate tools for guardian tier  —  §12 Autonomous Guardian/Ranger Agents (§12/§64)
+[PARTIAL] (#198) Codebase monitoring  —  §12 Autonomous Guardian/Ranger Agents (§12/§64)
+[PARTIAL] (#212) Pause/resume execution for plain worker agents  —  §13 Human Interaction
+[PARTIAL] (#213) Understand follow-up replies / continue prior context (worker agents)  —  §13 Human Interaction
+[NO] (#227) Take over a task / edit plan / reject one step and resume exactly there  —  §103 Human Override
+[PARTIAL] (#234) Recovery after crash (full state)  —  §14 Execution Control
+[PARTIAL] (#235) Recovery after reboot (auto-resume worker runs)  —  §14 Execution Control
+[PARTIAL] (#236) Continue from checkpoint if interrupted (all agent types)  —  §14 Execution Control
+[PARTIAL] (#238) Python backend crashes - full state recovery  —  §38 Failure Recovery
+[PARTIAL] (#246) Checkpointing / Resumability (all agent types)  —  §102 Long-Running Jobs
+[PARTIAL] (#255) Edit very large files safely (streaming I/O)  —  §15 Large Project Handling
+[PARTIAL] (#257) Modify 100+ files (dedicated batch-edit tool)  —  §15 Large Project Handling
+[PARTIAL] (#259) Repository-wide refactoring (AST-aware, all languages)  —  §15 Large Project Handling
+[PARTIAL] (#291) AWS (deploy-execution tooling)  —  §19 Deployment Intelligence
+[NO] (#297) Use documentation while coding automatically (no explicit call)  —  §20 External Knowledge
+[PARTIAL] (#300) Resolve merge conflicts (auto, no human judgment)  —  §40 Git Intelligence
+[PARTIAL] (#329) Central governance system beyond security policy engine  —  §85 Governance & Policy Engine
+[PARTIAL] (#361) Branch-context tracking after switching git branches  —  §45 Multi-Session Continuity
+[PARTIAL] (#377) Concurrent sessions (per-tenant isolation of singletons)  —  §48 Enterprise Readiness
+[PARTIAL] (#381) Usage analytics (full per-user cost/token attribution)  —  §48 Enterprise Readiness
+[PARTIAL] (#383) Full cross-repo isolation (every table)  —  §77 Company-Scale Readiness / Multi-Project Management (§77/§94)
+[NO] (#405) Covers approved prompts/MCPs/tools as a distinct knowledge type  —  §75 Organizational Knowledge Sharing / Company Brain (§75/§105/§112)
+[PARTIAL] (#407) Per-agent performance metrics aggregated over time (persisted, not just ring buffer)  —  §76 Continuous Improvement / Performance & Architecture Review / Capability Gap Detection (§76/106/108/109/116)
+[PARTIAL] (#414) Aggregate quality score across all categories (9/9)  —  §117 Quality Score
+[PARTIAL] (#427) Reorder (true in-place queue reordering)  —  §86 Organization-Wide Task Scheduler
+[PARTIAL] (#428) Detect blocked tasks (dependency-driven, not just failure-driven)  —  §86 Organization-Wide Task Scheduler
+[PARTIAL] (#429) Detect dependencies / optimize order org-wide (auto-dispatch)  —  §86 Organization-Wide Task Scheduler
+[PARTIAL] (#437) Retry count (real per-run persisted value)  —  §87 Agent Performance Metrics
+[PARTIAL] (#439) User satisfaction (real, not proxy)  —  §87 Agent Performance Metrics
+[NO] (#443) Detect hallucinating agents / memory leaks / sync failures  —  §88 Agent Health Monitoring
+[PARTIAL] (#453) Security checks (mandatory pipeline gate)  —  §90 Quality Gates
+[NO] (#454) Dependency checks (mandatory pipeline gate)  —  §90 Quality Gates
+[PARTIAL] (#455) Architecture checks (mandatory pipeline gate)  —  §90 Quality Gates
+[PARTIAL] (#456) Performance checks (broad, not just role-prompt deploys)  —  §90 Quality Gates
+[NO] (#457) Documentation checks (mandatory pre-completion gate)  —  §90 Quality Gates
+[PARTIAL] (#462) Abandoned/unmaintained libraries (structured, enforced)  —  §92 Dependency Intelligence
+[PARTIAL] (#463) Dependency conflicts (real solver, not just pip check)  —  §92 Dependency Intelligence
+[NO] (#494) AgentRegistry dispatch coordination + concurrency semaphores distributed across processes  —  §24 Missing Features
+[PARTIAL] (#495) Verification/evidence-first blocking (blocking_until) applied to every agent  —  §24 Missing Features
+[NO] (#500) Chat-conversational 'do that again' surface  —  §51 Repeat Task & Historical Context
+[PARTIAL] (#503) Verify before answering (evidence-first) universally enforced  —  §54 No-Hallucination / Truthfulness / Evidence-First (§54/§55/§56)
+[PARTIAL] (#505) Distinguish facts from assumptions structurally (plain-language, all agents)  —  §54 No-Hallucination / Truthfulness / Evidence-First (§54/§55/§56)
+[PARTIAL] (#509) Could this run today as a professional AI software company at Claude-Code/Cursor-comparable quality  —  §78 Final Verdict
+[PARTIAL] (#511) In-process singletons blocking true horizontal scaling — fully resolved  —  §BONUS Hidden Architectural Risks
+
+
+TOP PRIORITY (real gaps, marked NO — nothing built yet):
+  - (#44) Agents create subtasks dynamically  —  §2 Complete Orchestration
+  - (#45) Agents request help from other agents  —  §2 Complete Orchestration
+  - (#58) Considers memory (past outcomes) in selection  —  §3 Agent Selection
+  - (#66) Switch tools mid-run  —  §62 Runtime Decision Making
+  - (#67) Call additional agents mid-run  —  §62 Runtime Decision Making
+  - (#171) Horizontal scaling (multiple backend instances, live dispatch state)  —  §46 Scalability
+  - (#227) Take over a task / edit plan / reject one step and resume exactly there  —  §103 Human Override
+  - (#297) Use documentation while coding automatically (no explicit call)  —  §20 External Knowledge
+  - (#405) Covers approved prompts/MCPs/tools as a distinct knowledge type  —  §75 Organizational Knowledge Sharing / Company Brain (§75/§105/§112)
+  - (#443) Detect hallucinating agents / memory leaks / sync failures  —  §88 Agent Health Monitoring
+  - (#454) Dependency checks (mandatory pipeline gate)  —  §90 Quality Gates
+  - (#457) Documentation checks (mandatory pre-completion gate)  —  §90 Quality Gates
+  - (#494) AgentRegistry dispatch coordination + concurrency semaphores distributed across processes  —  §24 Missing Features
+  - (#500) Chat-conversational 'do that again' surface  —  §51 Repeat Task & Historical Context
+
+SECONDARY (marked PARTIAL — something real exists but is incomplete,
+narrow, opt-in, or not applied everywhere):
+  - (#3) Always uses 'the repository's terminal' (real PTY/interactive terminal)  —  §1 Repository Execution
+  - (#5) Multiple terminals simultaneously (true parallel interactive shells)  —  §1 Repository Execution
+  - (#6) Windows terminal support  —  §1 Repository Execution
+  - (#12) Monitor streaming output (live, mid-command)  —  §17 Terminal Intelligence
+  - (#38) Preserve architecture consistency across multi-file edits  —  §59 Multi-File Operations
+  - (#43) Multiple agents work simultaneously (fan-out)  —  §2 Complete Orchestration
+  - (#47) Orchestration changes dynamically mid-execution (replanning)  —  §2 Complete Orchestration
+  - (#65) Switch strategies (replanning) live  —  §62 Runtime Decision Making
+  - (#71) Rollback (automatic)  —  §62 Runtime Decision Making
+  - (#88) Session memory retains/compresses/summarizes  —  §120 Intelligent Memory Management
+  - (#90) Context Compression (general purpose)  —  §120 Intelligent Memory Management
+  - (#98) Memory Quality Control (accuracy validation)  —  §120 Intelligent Memory Management
+  - (#100) Memory Evolution (active shrink/consolidate over time)  —  §120 Intelligent Memory Management
+  - (#106) Planning Engine  —  §6 Agent Specification Audit (per-agent scaffold)
+  - (#117) Smart Planning (fleet-wide default)  —  §7 Capability Audit (from implementation)
+  - (#123) Verification Before Reply (fleet-wide default)  —  §7 Capability Audit (from implementation)
+  - (#126) Step-by-Step Guidance (dedicated renderer)  —  §7 Capability Audit (from implementation)
+  - (#129) Performance Awareness (behavior changes from timing data)  —  §7 Capability Audit (from implementation)
+  - (#130) Confidence Evaluation (feeds control flow)  —  §7 Capability Audit (from implementation)
+  - (#146) Step-by-Step Guidance (skill)  —  §72 Universal Skill Coverage
+  - (#147) Performance Analysis (acted upon)  —  §72 Universal Skill Coverage
+  - (#149) Reliability Engineering / Maintainability (beyond lint gates)  —  §72 Universal Skill Coverage
+  - (#150) Communication/Collaboration/Decision Making/Critical Thinking as dedicated skill  —  §72 Universal Skill Coverage
+  - (#162) Modularity (god-module tools.py fully split)  —  §10 Project Architecture Audit
+  - (#169) In-memory single-process-only registries (fully distributed)  —  §46 Scalability
+  - (#196) Separate tools for guardian tier  —  §12 Autonomous Guardian/Ranger Agents (§12/§64)
+  - (#198) Codebase monitoring  —  §12 Autonomous Guardian/Ranger Agents (§12/§64)
+  - (#212) Pause/resume execution for plain worker agents  —  §13 Human Interaction
+  - (#213) Understand follow-up replies / continue prior context (worker agents)  —  §13 Human Interaction
+  - (#234) Recovery after crash (full state)  —  §14 Execution Control
+  - (#235) Recovery after reboot (auto-resume worker runs)  —  §14 Execution Control
+  - (#236) Continue from checkpoint if interrupted (all agent types)  —  §14 Execution Control
+  - (#238) Python backend crashes - full state recovery  —  §38 Failure Recovery
+  - (#246) Checkpointing / Resumability (all agent types)  —  §102 Long-Running Jobs
+  - (#255) Edit very large files safely (streaming I/O)  —  §15 Large Project Handling
+  - (#257) Modify 100+ files (dedicated batch-edit tool)  —  §15 Large Project Handling
+  - (#259) Repository-wide refactoring (AST-aware, all languages)  —  §15 Large Project Handling
+  - (#291) AWS (deploy-execution tooling)  —  §19 Deployment Intelligence
+  - (#300) Resolve merge conflicts (auto, no human judgment)  —  §40 Git Intelligence
+  - (#329) Central governance system beyond security policy engine  —  §85 Governance & Policy Engine
+  - (#361) Branch-context tracking after switching git branches  —  §45 Multi-Session Continuity
+  - (#377) Concurrent sessions (per-tenant isolation of singletons)  —  §48 Enterprise Readiness
+  - (#381) Usage analytics (full per-user cost/token attribution)  —  §48 Enterprise Readiness
+  - (#383) Full cross-repo isolation (every table)  —  §77 Company-Scale Readiness / Multi-Project Management (§77/§94)
+  - (#407) Per-agent performance metrics aggregated over time (persisted, not just ring buffer)  —  §76 Continuous Improvement / Performance & Architecture Review / Capability Gap Detection (§76/106/108/109/116)
+  - (#414) Aggregate quality score across all categories (9/9)  —  §117 Quality Score
+  - (#427) Reorder (true in-place queue reordering)  —  §86 Organization-Wide Task Scheduler
+  - (#428) Detect blocked tasks (dependency-driven, not just failure-driven)  —  §86 Organization-Wide Task Scheduler
+  - (#429) Detect dependencies / optimize order org-wide (auto-dispatch)  —  §86 Organization-Wide Task Scheduler
+  - (#437) Retry count (real per-run persisted value)  —  §87 Agent Performance Metrics
+  - (#439) User satisfaction (real, not proxy)  —  §87 Agent Performance Metrics
+  - (#453) Security checks (mandatory pipeline gate)  —  §90 Quality Gates
+  - (#455) Architecture checks (mandatory pipeline gate)  —  §90 Quality Gates
+  - (#456) Performance checks (broad, not just role-prompt deploys)  —  §90 Quality Gates
+  - (#462) Abandoned/unmaintained libraries (structured, enforced)  —  §92 Dependency Intelligence
+  - (#463) Dependency conflicts (real solver, not just pip check)  —  §92 Dependency Intelligence
+  - (#495) Verification/evidence-first blocking (blocking_until) applied to every agent  —  §24 Missing Features
+  - (#503) Verify before answering (evidence-first) universally enforced  —  §54 No-Hallucination / Truthfulness / Evidence-First (§54/§55/§56)
+  - (#505) Distinguish facts from assumptions structurally (plain-language, all agents)  —  §54 No-Hallucination / Truthfulness / Evidence-First (§54/§55/§56)
+  - (#509) Could this run today as a professional AI software company at Claude-Code/Cursor-comparable quality  —  §78 Final Verdict
+  - (#511) In-process singletons blocking true horizontal scaling — fully resolved  —  §BONUS Hidden Architectural Risks
+
+
+==============================================================================
+PART 4 — SKIP LIST: NOT NEEDED / USELESS FOR YOUR PRODUCTION GOALS
+These are items the audits themselves concluded are either:
+  (a) architecturally intentional / correct-as-is,
+  (b) impossible without turning this into a different, bigger product
+      (e.g. multi-tenant SaaS, real Kubernetes execution, SSO),
+  (c) would need external tools/benchmarks this repo can't fabricate, or
+  (d) a deliberate safety boundary (e.g. deploy is always a human action).
+You can safely ignore these for a normal production launch.
+==============================================================================
+
+(#42) Routing is AI-based (LLM-driven dispatch)  —  §2 Complete Orchestration
+(#64) Tool list adapts mid-run (intelligent vs hardcoded)  —  §4 Tool Selection
+(#148) Deployment Planning (execution, not just plan)  —  §72 Universal Skill Coverage
+(#158) Comparison with Claude Code / Cursor (real benchmark)  —  §8 Performance Audit
+(#159) Bottleneck: sequential subtask execution (parallel-safe fan-out)  —  §8 Performance Audit
+(#175) WebSocket support  —  §9 Frontend and Backend Audit
+(#194) Architecturally separate 5-agent supervisory tier (as literally described)  —  §12 Autonomous Guardian/Ranger Agents (§12/§64)
+(#195) Separate memory subsystem for guardian tier  —  §12 Autonomous Guardian/Ranger Agents (§12/§64)
+(#205) Automatic multi-step planning (unprompted)  —  §12 Autonomous Guardian/Ranger Agents (§12/§64)
+(#223) Deployment gated  —  §39 Human Approval System
+(#262) HTML/CSS (structural parsing)  —  §16 File Understanding
+(#263) PHP  —  §16 File Understanding
+(#271) Audio/Video  —  §16 File Understanding
+(#274) Excel  —  §16 File Understanding
+(#275) Word/PowerPoint  —  §16 File Understanding
+(#278) Summarize fetched web content (LLM-in-tool-loop)  —  §79 Technology Adaptation / External Docs (§79-81)
+(#282) Auto-feed external docs into coding-task context  —  §79 Technology Adaptation / External Docs (§79-81)
+(#286) Vercel (execution)  —  §19 Deployment Intelligence
+(#288) Railway  —  §19 Deployment Intelligence
+(#289) Render  —  §19 Deployment Intelligence
+(#290) Kubernetes (execution)  —  §19 Deployment Intelligence
+(#292) Azure / GCP  —  §19 Deployment Intelligence
+(#321) Code-level classifier blocking harmful code categories  —  §22 Safety Audit
+(#332) Understand vague/incomplete requests (structural completeness gate)  —  §25 User Intent Understanding
+(#333) Detect hidden intent / conflicting requirements  —  §25 User Intent Understanding
+(#336) Separate multiple tasks from one prompt  —  §25 User Intent Understanding
+(#337) Detect intent type (explain/implement/debug/compare/docs)  —  §25 User Intent Understanding
+(#340) Contradictory/changing instructions detection  —  §26 Difficult User Handling / Emotion (§26/§63)
+(#341) Abusive language / poor English / mixed language / length handling  —  §26 Difficult User Handling / Emotion (§26/§63)
+(#343) Ask only necessary questions  —  §27 Clarification Engine
+(#344) Build temporary plan while waiting for answer  —  §27 Clarification Engine
+(#346) Break a huge pasted spec into milestones  —  §28 Requirement Analysis
+(#347) Detect impossible requirements / duplicated work / suggest architecture  —  §28 Requirement Analysis
+(#348) Produce an execution roadmap  —  §28 Requirement Analysis
+(#351) Explain risks / preserve backward compatibility (code-enforced)  —  §30 Safe Implementation
+(#365) Multiple repos/documents in one context  —  §52 Large Context Understanding
+(#376) Multiple projects/workspaces (true multi-tenant)  —  §48 Enterprise Readiness
+(#378) Enterprise authentication (SSO/SAML/OAuth)  —  §48 Enterprise Readiness
+(#388) Detect confusion / beginner vs expert mode  —  §99 User Experience Intelligence
+(#393) Internationalization  —  §100 Accessibility
+(#394) Provenance-aware review of externally-sourced code (escalated scrutiny)  —  §33 AI Suggestion Review
+(#395) Phased delivery with milestone gating  —  §34 Incremental Implementation
+(#398) Memory leaks detection (in target repo)  —  §35 Project Health Monitoring / Self-Audit (§35/§36)
+(#399) Performance regressions (app-runtime level)  —  §35 Project Health Monitoring / Self-Audit (§35/§36)
+(#411) Tool evolution (hot-swap live executable code safely)  —  §110 Prompt Evolution / Tool Evolution (§110/§111)
+(#418) Simulate impact before applying (sandboxed)  —  §118 Safe Self-Improvement Lifecycle
+(#436) Reasoning quality (LLM-judge grading)  —  §87 Agent Performance Metrics
+(#461) Breaking changes detection  —  §92 Dependency Intelligence
+(#478) Kubernetes live execution  —  §71 Professional Domain Coverage (§71/§82) — 24 domains checked
+(#497) Real feature-parity benchmark vs Claude Code/Cursor  —  §49 Claude Code / Cursor Feature Gap & Parity Audit (§49/§70)
+
+==============================================================================
 GRIDIRON PROJECT — PARTIAL & NO IMPLEMENTATION PLAN (one by one)
 Total items to implement: 75  (NO: 14  PARTIAL: 61)
 Work these top to bottom. Each has: the question, its current status,
@@ -445,6 +1403,7 @@ SKIP — 50 questions
 461 — Breaking-change detection
 478 — Kubernetes live execution
 497 — Real Claude Code/Cursor feature-parity benchmark
+
 
 
 
