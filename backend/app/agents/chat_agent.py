@@ -147,6 +147,7 @@ from app.tools.filesystem.replace_function import replace_function_handler
 from app.tools.filesystem.semver_bump import semver_bump_handler
 from app.tools.filesystem.write_file import write_file_handler
 from app.tools.git.checkout import validate_git_checkout_inputs
+from app.tools.git.cherry_pick import validate_git_cherry_pick_inputs
 from app.tools.git.create_branch import validate_create_branch_inputs
 from app.tools.git.pull_request import (
     build_gh_pr_create_command,
@@ -2908,6 +2909,9 @@ class ChatAgent:
 
         if tool_name == "git_cherry_pick":
             gcp_hash = str(inp["commit_hash"])
+            gcp_error = validate_git_cherry_pick_inputs(gcp_hash)
+            if gcp_error:
+                return gcp_error
             gcp_args = ["cherry-pick"]
             if bool(inp.get("no_commit", False)):
                 gcp_args.append("--no-commit")

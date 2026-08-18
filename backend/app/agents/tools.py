@@ -166,6 +166,10 @@ from app.tools.git.checkout import (
     GIT_CHECKOUT_TOOL as _GIT_CHECKOUT_TOOL,
     validate_git_checkout_inputs as validate_git_checkout_inputs,
 )
+from app.tools.git.cherry_pick import (
+    GIT_CHERRY_PICK_TOOL as _GIT_CHERRY_PICK_TOOL,
+    validate_git_cherry_pick_inputs as validate_git_cherry_pick_inputs,
+)
 from app.tools.git.create_branch import (
     CREATE_BRANCH_TOOL as _CREATE_BRANCH_TOOL,
     validate_create_branch_inputs as validate_create_branch_inputs,
@@ -3497,24 +3501,8 @@ _GIT_REBASE_TOOL = {
     },
 }
 
-_GIT_CHERRY_PICK_TOOL = {
-    "name": "git_cherry_pick",
-    "description": "Apply a specific commit from another branch onto the current branch.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "commit_hash": {
-                "type": "string",
-                "description": "SHA or ref of the commit to cherry-pick",
-            },
-            "no_commit": {
-                "type": "boolean",
-                "description": "Stage changes without committing (default: false)",
-            },
-        },
-        "required": ["commit_hash"],
-    },
-}
+# moved to app/tools/git/cherry_pick.py as GIT_CHERRY_PICK_TOOL —
+# tool_enhance.md productionization pass, tool #36 (2026-08-18).
 
 # Batch 12 — Terminal extras
 _READ_OUTPUT_TOOL = {
@@ -9519,6 +9507,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def git_cherry_pick_h(inp: dict[str, Any]) -> str:
         gcp_hash = str(inp["commit_hash"])
+        gcp_error = validate_git_cherry_pick_inputs(gcp_hash)
+        if gcp_error:
+            return gcp_error
         gcp_cmd = ["git", "cherry-pick"]
         if bool(inp.get("no_commit", False)):
             gcp_cmd.append("--no-commit")
