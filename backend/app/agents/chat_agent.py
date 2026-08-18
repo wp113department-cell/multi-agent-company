@@ -130,6 +130,7 @@ from app.tools.execution.python_snippet import run_python_snippet_handler
 from app.tools.execution.run_tests import run_tests_handler
 from app.tools.filesystem.delete_file import delete_file_handler
 from app.tools.filesystem.edit_file import edit_file_handler
+from app.tools.filesystem.replace_function import replace_function_handler
 from app.tools.filesystem.write_file import write_file_handler
 from app.tools.git.pull_request import (
     build_gh_pr_create_command,
@@ -1835,51 +1836,7 @@ class ChatAgent:
                 return f"[ERROR] {e}"
 
         if tool_name == "replace_function":
-            rel = str(inp["path"])
-            rf_name = str(inp["function_name"])
-            new_code = str(inp["new_code"])
-            if _is_protected_path(rel, repo):
-                return f"[POLICY DENIED] Cannot write to protected path: {rel}"
-            rf_target = root / rel
-            if not rf_target.exists():
-                return f"[ERROR] File not found: {rel}"
-            try:
-                rf_lines = rf_target.read_text(encoding="utf-8").splitlines(
-                    keepends=True
-                )
-                rf_start: int | None = None
-                rf_indent = 0
-                for rf_i, rf_line in enumerate(rf_lines):
-                    s = rf_line.strip()
-                    if s.startswith(f"def {rf_name}(") or s.startswith(
-                        f"async def {rf_name}("
-                    ):
-                        rf_start = rf_i
-                        rf_indent = len(rf_line) - len(rf_line.lstrip())
-                        break
-                if rf_start is None:
-                    return f"[ERROR] Function '{rf_name}' not found in {rel}"
-                rf_end = len(rf_lines)
-                for rf_j in range(rf_start + 1, len(rf_lines)):
-                    rf_jl = rf_lines[rf_j]
-                    if rf_jl.strip() == "":
-                        continue
-                    rf_jind = len(rf_jl) - len(rf_jl.lstrip())
-                    if (
-                        rf_jind <= rf_indent
-                        and rf_jl.strip()
-                        and not rf_jl.strip().startswith(("#", "@"))
-                    ):
-                        rf_end = rf_j
-                        break
-                rf_new = new_code if new_code.endswith("\n") else new_code + "\n"
-                rf_target.write_text(
-                    "".join(rf_lines[:rf_start] + [rf_new] + rf_lines[rf_end:]),
-                    encoding="utf-8",
-                )
-                return f"Replaced '{rf_name}' in {rel} (lines {rf_start + 1}-{rf_end})"
-            except Exception as e:
-                return f"[ERROR] {e}"
+            return replace_function_handler(root, repo, inp)
 
         if tool_name == "delete_lines":
             rel = str(inp["path"])

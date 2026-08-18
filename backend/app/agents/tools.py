@@ -118,6 +118,10 @@ from app.tools.filesystem.edit_file import (
     EDIT_FILE_TOOL as _EDIT_FILE_TOOL,
     edit_file_handler as edit_file_handler,
 )
+from app.tools.filesystem.replace_function import (
+    REPLACE_FUNCTION_TOOL as _REPLACE_FUNCTION_TOOL,
+    replace_function_handler as replace_function_handler,
+)
 from app.tools.filesystem.write_file import (
     WRITE_FILE_TOOL as _WRITE_FILE_TOOL,
     write_file_handler as write_file_handler,
@@ -2773,28 +2777,9 @@ _INSERT_AT_LINE_TOOL = {
     },
 }
 
-_REPLACE_FUNCTION_TOOL = {
-    "name": "replace_function",
-    "description": "Replace an entire function/method definition in a Python file. Finds by name and replaces the full block.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Python file path relative to repo root",
-            },
-            "function_name": {
-                "type": "string",
-                "description": "Name of the function or method to replace",
-            },
-            "new_code": {
-                "type": "string",
-                "description": "Complete new function code (def line + body, properly indented)",
-            },
-        },
-        "required": ["path", "function_name", "new_code"],
-    },
-}
+# moved to app/tools/filesystem/replace_function.py as
+# REPLACE_FUNCTION_TOOL — tool_enhance.md productionization pass, tool
+# #24 (2026-08-18).
 
 _DELETE_LINES_TOOL = {
     "name": "delete_lines",
@@ -4973,7 +4958,6 @@ def make_cicd_agent_handlers(repo_path: str) -> dict[str, Any]:
 def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
     """Refactor agent: read-only + AST + write + rename + limited bash (test/lint only)."""
     from app.repo_tools import ast_engine as _ast
-    import re as _re
 
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
@@ -5049,29 +5033,19 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
             confirm_large_batch=bool(inp.get("confirm_large_batch", False)),
         )
 
+    # moved to app/tools/filesystem/replace_function.py as
+    # replace_function_handler — tool_enhance.md productionization pass,
+    # tool #24 (2026-08-18). Real bug found+fixed here: this handler
+    # previously read inp["new_body"], but REPLACE_FUNCTION_TOOL's own
+    # schema (what refactor_agent actually advertises to its LLM)
+    # documents the field as "new_code" — every real, schema-conformant
+    # call raised an uncaught KeyError. Its own regex also only matched
+    # top-level functions, never class methods, unlike the shared
+    # handler below (already proven correct via chat_agent.py/
+    # make_chat_handlers). See replace_function.py's own docstring for
+    # the full real proof.
     def rf_replace_function(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        if _is_protected_path(rel, repo_path):
-            return f"[POLICY DENIED] Cannot write to protected path: {rel}"
-        target = root / rel
-        if not target.exists():
-            return f"[ERROR] File not found: {rel}"
-        name = str(inp["function_name"])
-        new_body = str(inp["new_body"])
-        text = target.read_text(encoding="utf-8")
-        pat = _re.compile(
-            r"(?m)^((?:async )?def "
-            + _re.escape(name)
-            + r"\b.*?)(?=\n(?:async )?def |\Z)",
-            _re.DOTALL,
-        )
-        m = pat.search(text)
-        if not m:
-            return f"[ERROR] Function '{name}' not found in {rel}"
-        target.write_text(
-            text[: m.start()] + new_body + text[m.end() :], encoding="utf-8"
-        )
-        return f"Replaced function '{name}' in {rel}"
+        return replace_function_handler(root, repo_path, inp)
 
     def rf_bash(inp: dict[str, Any]) -> str:
         cmd = inp["command"]
@@ -8532,48 +8506,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # moved to app/tools/filesystem/replace_function.py as
+    # replace_function_handler — tool_enhance.md productionization pass,
+    # tool #24 (2026-08-18).
     def replace_function(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        func_name = str(inp["function_name"])
-        new_code = str(inp["new_code"])
-        if _is_protected_path(rel, repo_path):
-            return f"[POLICY DENIED] Cannot write to protected path: {rel}"
-        rf_target = root / rel
-        if not rf_target.exists():
-            return f"[ERROR] File not found: {rel}"
-        try:
-            rf_lines = rf_target.read_text(encoding="utf-8").splitlines(keepends=True)
-            rf_start = None
-            rf_indent = 0
-            for rf_i, rf_line in enumerate(rf_lines):
-                rf_stripped = rf_line.strip()
-                if rf_stripped.startswith(
-                    f"def {func_name}("
-                ) or rf_stripped.startswith(f"async def {func_name}("):
-                    rf_start = rf_i
-                    rf_indent = len(rf_line) - len(rf_line.lstrip())
-                    break
-            if rf_start is None:
-                return f"[ERROR] Function '{func_name}' not found in {rel}"
-            rf_end = len(rf_lines)
-            for rf_j in range(rf_start + 1, len(rf_lines)):
-                rf_jline = rf_lines[rf_j]
-                if rf_jline.strip() == "":
-                    continue
-                rf_jind = len(rf_jline) - len(rf_jline.lstrip())
-                if (
-                    rf_jind <= rf_indent
-                    and rf_jline.strip()
-                    and not rf_jline.strip().startswith(("#", "@"))
-                ):
-                    rf_end = rf_j
-                    break
-            rf_new = new_code if new_code.endswith("\n") else new_code + "\n"
-            rf_result = rf_lines[:rf_start] + [rf_new] + rf_lines[rf_end:]
-            rf_target.write_text("".join(rf_result), encoding="utf-8")
-            return f"Replaced '{func_name}' in {rel} (lines {rf_start + 1}-{rf_end})"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return replace_function_handler(root, repo_path, inp)
 
     def delete_lines(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
