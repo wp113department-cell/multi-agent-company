@@ -162,6 +162,10 @@ from app.tools.filesystem.write_file import (
     WRITE_FILE_TOOL as _WRITE_FILE_TOOL,
     write_file_handler as write_file_handler,
 )
+from app.tools.git.checkout import (
+    GIT_CHECKOUT_TOOL as _GIT_CHECKOUT_TOOL,
+    validate_git_checkout_inputs as validate_git_checkout_inputs,
+)
 from app.tools.git.create_branch import (
     CREATE_BRANCH_TOOL as _CREATE_BRANCH_TOOL,
     validate_create_branch_inputs as validate_create_branch_inputs,
@@ -2575,24 +2579,8 @@ _GIT_BRANCH_TOOL = {
     },
 }
 
-_GIT_CHECKOUT_TOOL = {
-    "name": "git_checkout",
-    "description": "Switch to a branch or restore a file to its last committed state.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "target": {
-                "type": "string",
-                "description": "Branch name or commit hash to checkout",
-            },
-            "file": {
-                "type": "string",
-                "description": "If provided, restore only this file (git checkout -- file)",
-            },
-        },
-        "required": ["target"],
-    },
-}
+# moved to app/tools/git/checkout.py as GIT_CHECKOUT_TOOL —
+# tool_enhance.md productionization pass, tool #35 (2026-08-18).
 
 _GIT_STASH_TOOL = {
     "name": "git_stash",
@@ -8093,7 +8081,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # ---- git_checkout ----
     def git_checkout(inp: dict[str, Any]) -> str:
         target = str(inp["target"])
-        file_path = inp.get("file", "")
+        file_path = str(inp.get("file", ""))
+        gc_error = validate_git_checkout_inputs(target, file_path)
+        if gc_error:
+            return gc_error
         cmd = ["git", "checkout", target]
         if file_path:
             cmd = ["git", "checkout", target, "--", file_path]

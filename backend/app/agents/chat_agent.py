@@ -146,6 +146,7 @@ from app.tools.filesystem.edit_file import edit_file_handler
 from app.tools.filesystem.replace_function import replace_function_handler
 from app.tools.filesystem.semver_bump import semver_bump_handler
 from app.tools.filesystem.write_file import write_file_handler
+from app.tools.git.checkout import validate_git_checkout_inputs
 from app.tools.git.create_branch import validate_create_branch_inputs
 from app.tools.git.pull_request import (
     build_gh_pr_create_command,
@@ -1522,6 +1523,9 @@ class ChatAgent:
         if tool_name == "git_checkout":
             ck_target = str(inp["target"])
             file_arg = str(inp.get("file", ""))
+            ck_error = validate_git_checkout_inputs(ck_target, file_arg)
+            if ck_error:
+                return ck_error
             if file_arg:
                 return _git(["checkout", ck_target, "--", file_arg], repo)
             return _git(["checkout", ck_target], repo)
