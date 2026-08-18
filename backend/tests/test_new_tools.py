@@ -37,13 +37,24 @@ def test_chat_tools_count() -> None:
 
 
 def test_total_tool_names_190() -> None:
-    """All unique tool names across tools.py must reach 190."""
+    """All unique tool names across tools.py + app/tools/ must reach 190.
+
+    tool_enhance.md's productionization pass (started 2026-08-17)
+    deliberately moves each tool's schema out of tools.py into its own
+    app/tools/<domain>/<name>.py module, leaving a "moved to X" comment
+    behind — so tools.py's own raw text alone under-counts real tools
+    once enough of them have been extracted. Scan both locations, since
+    together they're still the complete, real set of tool schemas.
+    """
     import re
 
-    src = (Path(__file__).parent.parent / "app" / "agents" / "tools.py").read_text(
-        encoding="utf-8"
-    )
-    names = set(re.findall(r'"name":\s*"([a-z][a-z0-9_]+)"', src))
+    backend = Path(__file__).parent.parent
+    names: set[str] = set()
+    for f in [backend / "app" / "agents" / "tools.py"] + sorted(
+        (backend / "app" / "tools").rglob("*.py")
+    ):
+        src = f.read_text(encoding="utf-8")
+        names |= set(re.findall(r'"name":\s*"([a-z][a-z0-9_]+)"', src))
     assert (
         len(names) >= 190
     ), f"Expected ≥190 unique tool names, got {len(names)}: {sorted(names)}"

@@ -16,10 +16,18 @@ import pytest  # noqa: E402
 
 
 def test_total_tools_190() -> None:
-    src = (Path(__file__).parent.parent / "app/agents/tools.py").read_text(
-        encoding="utf-8"
-    )
-    names = set(re.findall(r'"name":\s*"([a-z][a-z0-9_]+)"', src))
+    """tool_enhance.md's productionization pass (started 2026-08-17)
+    deliberately moves each tool's schema out of tools.py into its own
+    app/tools/<domain>/<name>.py module — scan both locations, since
+    together they're still the complete, real set of tool schemas.
+    """
+    backend = Path(__file__).parent.parent
+    names: set[str] = set()
+    for f in [backend / "app" / "agents" / "tools.py"] + sorted(
+        (backend / "app" / "tools").rglob("*.py")
+    ):
+        src = f.read_text(encoding="utf-8")
+        names |= set(re.findall(r'"name":\s*"([a-z][a-z0-9_]+)"', src))
     assert len(names) >= 190, f"Expected ≥190 tools, got {len(names)}"
 
 

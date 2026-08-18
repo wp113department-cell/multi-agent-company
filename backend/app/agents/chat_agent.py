@@ -156,6 +156,7 @@ from app.tools.git.pull_request import (
     build_gh_pr_create_command,
     generate_pr_description as _llm_generate_pr_description,
 )
+from app.tools.git.rebase import validate_git_rebase_inputs
 from app.tools.git.reset import validate_git_reset_inputs
 from app.tools.git.tag import git_tag_handler
 from app.tools.refactor.rename_symbol import validate_rename_symbol_directory
@@ -2891,6 +2892,9 @@ class ChatAgent:
 
         if tool_name == "git_rebase":
             grb_onto = str(inp["onto"])
+            grb_error = validate_git_rebase_inputs(grb_onto)
+            if grb_error:
+                return grb_error
             if bool(inp.get("interactive", False)):
                 return "[BLOCKED] Interactive rebase requires a TTY. Run 'git rebase -i' manually in a terminal."
             return await asyncio.to_thread(_git, ["rebase", grb_onto], repo, 60)

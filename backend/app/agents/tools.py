@@ -195,6 +195,10 @@ from app.tools.git.push import (
     GIT_PUSH_TOOL as _GIT_PUSH_TOOL,
     git_push_handler as git_push_handler,
 )
+from app.tools.git.rebase import (
+    GIT_REBASE_TOOL as _GIT_REBASE_TOOL,
+    validate_git_rebase_inputs as validate_git_rebase_inputs,
+)
 from app.tools.git.reset import (
     GIT_RESET_TOOL as _GIT_RESET_TOOL,
     git_reset_handler as git_reset_handler,
@@ -3434,20 +3438,7 @@ _CIRCULAR_DEP_DETECT_TOOL = {
 # tool_enhance.md productionization pass, tool #23 (2026-08-18).
 
 # Batch 11 — Git extras
-_GIT_REBASE_TOOL = {
-    "name": "git_rebase",
-    "description": "Rebase current branch onto another branch or commit. Interactive rebase is not supported (no TTY).",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "onto": {
-                "type": "string",
-                "description": "Branch or commit to rebase onto (e.g. 'main', 'HEAD~3')",
-            },
-        },
-        "required": ["onto"],
-    },
-}
+# moved to app/tools/git/rebase.py as GIT_REBASE_TOOL — tool_enhance.md productionization pass, tool #40 (2026-08-18).
 
 # moved to app/tools/git/cherry_pick.py as GIT_CHERRY_PICK_TOOL —
 # tool_enhance.md productionization pass, tool #36 (2026-08-18).
@@ -9419,8 +9410,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # BATCH 11 — Git extras (git_rebase, git_cherry_pick)
     # =========================================================================
 
+    # moved to app/tools/git/rebase.py — this now calls the shared validate_git_rebase_inputs() first
     def git_rebase_h(inp: dict[str, Any]) -> str:
         grb_onto = str(inp["onto"])
+        grb_error = validate_git_rebase_inputs(grb_onto)
+        if grb_error:
+            return grb_error
         if bool(inp.get("interactive", False)):
             return "[BLOCKED] Interactive rebase requires a TTY. Run 'git rebase -i' manually in a terminal."
         try:
