@@ -139,6 +139,7 @@ from app.tools.execution.python_snippet import run_python_snippet_handler
 from app.tools.execution.run_tests import run_tests_handler
 from app.tools.filesystem.append_file import append_file_handler
 from app.tools.filesystem.apply_patch import apply_patch_handler
+from app.tools.filesystem.delete_block import delete_block_handler
 from app.tools.filesystem.delete_file import delete_file_handler
 from app.tools.filesystem.edit_file import edit_file_handler
 from app.tools.filesystem.replace_function import replace_function_handler
@@ -3021,6 +3022,12 @@ class ChatAgent:
             # in the only existing implementation — both closed in the
             # shared handler.
             return await asyncio.to_thread(semver_bump_handler, root, repo, inp)
+
+        if tool_name == "delete_block":
+            # tool_enhance.md productionization pass, tool #33 (2026-08-18)
+            # — same "advertised but never dispatched" gap as git_tag/
+            # semver_bump/create_branch (tools #22/#25/#32).
+            return await asyncio.to_thread(delete_block_handler, root, repo, inp)
 
         if tool_name in (
             "browser_open",

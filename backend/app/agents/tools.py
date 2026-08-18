@@ -130,6 +130,10 @@ from app.tools.filesystem.append_file import (
     APPEND_FILE_TOOL as _APPEND_FILE_TOOL,
     append_file_handler as append_file_handler,
 )
+from app.tools.filesystem.delete_block import (
+    DELETE_BLOCK_TOOL as _DELETE_BLOCK_TOOL,
+    delete_block_handler as delete_block_handler,
+)
 from app.tools.filesystem.apply_patch import (
     APPLY_PATCH_TOOL as _APPLY_PATCH_TOOL_DEF,
     apply_patch_handler as apply_patch_handler,
@@ -5722,28 +5726,8 @@ _INSERT_AFTER_TOOL: dict[str, Any] = {
     },
 }
 
-_DELETE_BLOCK_TOOL: dict[str, Any] = {
-    "name": "delete_block",
-    "description": "Delete all lines between (inclusive) start_pattern and end_pattern in a file.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "File path relative to repo root",
-            },
-            "start_pattern": {
-                "type": "string",
-                "description": "Pattern marking the start of the block to delete",
-            },
-            "end_pattern": {
-                "type": "string",
-                "description": "Pattern marking the end of the block to delete",
-            },
-        },
-        "required": ["path", "start_pattern", "end_pattern"],
-    },
-}
+# moved to app/tools/filesystem/delete_block.py as DELETE_BLOCK_TOOL —
+# tool_enhance.md productionization pass, tool #33 (2026-08-18).
 
 # --- Day 2 Gap: Documentation generation tools ---
 
@@ -10794,37 +10778,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] insert_after: {e}"
 
+    # moved to app/tools/filesystem/delete_block.py as
+    # delete_block_handler — tool_enhance.md productionization pass,
+    # tool #33 (2026-08-18).
     def delete_block_h(inp: dict[str, Any]) -> str:
-        path = str(inp["path"])
-        start_pat = str(inp["start_pattern"])
-        end_pat = str(inp["end_pattern"])
-        fpath = root / path
-        if _is_protected_path(path, repo_path):
-            return f"[BLOCKED] {path} is a protected path"
-        try:
-            import re as _re_db
-
-            lines = fpath.read_text(encoding="utf-8").splitlines(keepends=True)
-            new_lines: list[str] = []
-            in_block = False
-            deleted = 0
-            for line in lines:
-                if not in_block and _re_db.search(start_pat, line):
-                    in_block = True
-                    deleted += 1
-                    continue
-                if in_block:
-                    deleted += 1
-                    if _re_db.search(end_pat, line):
-                        in_block = False
-                    continue
-                new_lines.append(line)
-            if deleted == 0:
-                return f"[WARN] Block pattern not found in {path}"
-            fpath.write_text("".join(new_lines), encoding="utf-8")
-            return f"Deleted {deleted} lines between '{start_pat}' and '{end_pat}' in {path}"
-        except Exception as e:
-            return f"[ERROR] delete_block: {e}"
+        return delete_block_handler(root, repo_path, inp)
 
     def generate_changelog_h(inp: dict[str, Any]) -> str:
         _rp = str(inp.get("repo_path", repo_path))
