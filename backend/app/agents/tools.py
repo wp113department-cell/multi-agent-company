@@ -134,6 +134,10 @@ from app.tools.filesystem.delete_block import (
     DELETE_BLOCK_TOOL as _DELETE_BLOCK_TOOL,
     delete_block_handler as delete_block_handler,
 )
+from app.tools.filesystem.delete_lines import (
+    DELETE_LINES_TOOL as _DELETE_LINES_TOOL,
+    delete_lines_handler as delete_lines_handler,
+)
 from app.tools.filesystem.apply_patch import (
     APPLY_PATCH_TOOL as _APPLY_PATCH_TOOL_DEF,
     apply_patch_handler as apply_patch_handler,
@@ -2784,28 +2788,8 @@ _INSERT_AT_LINE_TOOL = {
 # REPLACE_FUNCTION_TOOL — tool_enhance.md productionization pass, tool
 # #24 (2026-08-18).
 
-_DELETE_LINES_TOOL = {
-    "name": "delete_lines",
-    "description": "Delete a range of lines from a file (1-indexed, inclusive). Prefer edit_file for targeted changes.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "File path relative to repo root",
-            },
-            "start_line": {
-                "type": "integer",
-                "description": "First line to delete (1-indexed, inclusive)",
-            },
-            "end_line": {
-                "type": "integer",
-                "description": "Last line to delete (1-indexed, inclusive)",
-            },
-        },
-        "required": ["path", "start_line", "end_line"],
-    },
-}
+# moved to app/tools/filesystem/delete_lines.py as DELETE_LINES_TOOL —
+# tool_enhance.md productionization pass, tool #34 (2026-08-18).
 
 # moved to app/tools/filesystem/apply_patch.py as APPLY_PATCH_TOOL —
 # tool_enhance.md productionization pass, tool #27 (2026-08-18).
@@ -8377,31 +8361,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def replace_function(inp: dict[str, Any]) -> str:
         return replace_function_handler(root, repo_path, inp)
 
+    # moved to app/tools/filesystem/delete_lines.py as
+    # delete_lines_handler — tool_enhance.md productionization pass,
+    # tool #34 (2026-08-18).
     def delete_lines(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        dl_start = int(inp["start_line"])
-        dl_end = int(inp["end_line"])
-        if _is_protected_path(rel, repo_path):
-            return f"[POLICY DENIED] Cannot write to protected path: {rel}"
-        dl_target = root / rel
-        if not dl_target.exists():
-            return f"[ERROR] File not found: {rel}"
-        if dl_start < 1 or dl_end < dl_start:
-            return f"[ERROR] Invalid line range: {dl_start}-{dl_end}"
-        try:
-            dl_lines = dl_target.read_text(encoding="utf-8").splitlines(keepends=True)
-            total = len(dl_lines)
-            if dl_start > total:
-                return f"[ERROR] File only has {total} lines"
-            dl_s = dl_start - 1
-            dl_e = min(dl_end, total)
-            deleted = dl_e - dl_s
-            dl_target.write_text(
-                "".join(dl_lines[:dl_s] + dl_lines[dl_e:]), encoding="utf-8"
-            )
-            return f"Deleted {deleted} lines ({dl_start}-{dl_end}) from {rel}"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return delete_lines_handler(root, repo_path, inp)
 
     # moved to app/tools/filesystem/apply_patch.py as apply_patch_handler
     # — tool_enhance.md productionization pass, tool #27 (2026-08-18).

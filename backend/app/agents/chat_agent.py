@@ -140,6 +140,7 @@ from app.tools.execution.run_tests import run_tests_handler
 from app.tools.filesystem.append_file import append_file_handler
 from app.tools.filesystem.apply_patch import apply_patch_handler
 from app.tools.filesystem.delete_block import delete_block_handler
+from app.tools.filesystem.delete_lines import delete_lines_handler
 from app.tools.filesystem.delete_file import delete_file_handler
 from app.tools.filesystem.edit_file import edit_file_handler
 from app.tools.filesystem.replace_function import replace_function_handler
@@ -1848,32 +1849,7 @@ class ChatAgent:
             return replace_function_handler(root, repo, inp)
 
         if tool_name == "delete_lines":
-            rel = str(inp["path"])
-            dl_start = int(inp["start_line"])
-            dl_end = int(inp["end_line"])
-            if _is_protected_path(rel, repo):
-                return f"[POLICY DENIED] Cannot write to protected path: {rel}"
-            dl_target = root / rel
-            if not dl_target.exists():
-                return f"[ERROR] File not found: {rel}"
-            if dl_start < 1 or dl_end < dl_start:
-                return f"[ERROR] Invalid range: {dl_start}-{dl_end}"
-            try:
-                dl_lines = dl_target.read_text(encoding="utf-8").splitlines(
-                    keepends=True
-                )
-                total = len(dl_lines)
-                if dl_start > total:
-                    return f"[ERROR] File only has {total} lines"
-                dl_s = dl_start - 1
-                dl_e = min(dl_end, total)
-                deleted = dl_e - dl_s
-                dl_target.write_text(
-                    "".join(dl_lines[:dl_s] + dl_lines[dl_e:]), encoding="utf-8"
-                )
-                return f"Deleted {deleted} lines ({dl_start}-{dl_end}) from {rel}"
-            except Exception as e:
-                return f"[ERROR] {e}"
+            return delete_lines_handler(root, repo, inp)
 
         if tool_name == "apply_patch":
             return await asyncio.to_thread(apply_patch_handler, repo, inp)
