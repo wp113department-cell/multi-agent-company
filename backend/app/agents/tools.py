@@ -60,6 +60,22 @@ from app.tools.execution.bash import (
     make_scoped_bash_handler as make_scoped_bash_handler,
     make_test_runner_bash_handler as make_test_runner_bash_handler,
 )
+from app.tools.browser.browser_tools import (
+    BROWSER_CLICK_TOOL as _BROWSER_CLICK_TOOL,
+    BROWSER_CLOSE_TOOL as _BROWSER_CLOSE_TOOL,
+    BROWSER_NAVIGATE_TOOL as _BROWSER_NAVIGATE_TOOL,
+    BROWSER_OPEN_TOOL as _BROWSER_OPEN_TOOL,
+    BROWSER_READ_DOM_TOOL as _BROWSER_READ_DOM_TOOL,
+    BROWSER_SCREENSHOT_TOOL as _BROWSER_SCREENSHOT_TOOL,
+    BROWSER_TYPE_TOOL as _BROWSER_TYPE_TOOL,
+    browser_click_handler as browser_click_handler,
+    browser_close_handler as browser_close_handler,
+    browser_navigate_handler as browser_navigate_handler,
+    browser_open_handler as browser_open_handler,
+    browser_read_dom_handler as browser_read_dom_handler,
+    browser_screenshot_handler as browser_screenshot_handler,
+    browser_type_handler as browser_type_handler,
+)
 from app.tools.agents.delegate import (
     DELEGATE_TO_AGENT_TOOL as _DELEGATE_TO_AGENT_TOOL,
     make_delegate_to_agent_handler as make_delegate_to_agent_handler,
@@ -5479,91 +5495,11 @@ def make_monitoring_agent_handlers(repo_path: str) -> dict[str, Any]:
 # tool lists + Factories
 # ===========================================================================
 
-# --- Day 3A: Browser tool specs ---
-
-_BROWSER_OPEN_TOOL: dict[str, Any] = {
-    "name": "browser_open",
-    "description": "Open a URL in a headless browser. Returns page title, URL, and status.",
-    "input_schema": {
-        "type": "object",
-        "properties": {"url": {"type": "string", "description": "URL to open"}},
-        "required": ["url"],
-    },
-}
-
-_BROWSER_NAVIGATE_TOOL: dict[str, Any] = {
-    "name": "browser_navigate",
-    "description": "Navigate the current browser page to a new URL.",
-    "input_schema": {
-        "type": "object",
-        "properties": {"url": {"type": "string"}},
-        "required": ["url"],
-    },
-}
-
-_BROWSER_SCREENSHOT_TOOL: dict[str, Any] = {
-    "name": "browser_screenshot",
-    "description": "Take a screenshot of the current page. Saves to /tmp and returns the file path.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Optional output path. Auto-generated if omitted.",
-            }
-        },
-        "required": [],
-    },
-}
-
-_BROWSER_READ_DOM_TOOL: dict[str, Any] = {
-    "name": "browser_read_dom",
-    "description": "Read the visible text content of the current page, or a specific selector.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "selector": {
-                "type": "string",
-                "description": "CSS selector (optional). If omitted, reads entire body.",
-            }
-        },
-        "required": [],
-    },
-}
-
-_BROWSER_CLICK_TOOL: dict[str, Any] = {
-    "name": "browser_click",
-    "description": "Click an element by CSS selector.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "selector": {
-                "type": "string",
-                "description": "CSS selector of element to click",
-            }
-        },
-        "required": ["selector"],
-    },
-}
-
-_BROWSER_TYPE_TOOL: dict[str, Any] = {
-    "name": "browser_type",
-    "description": "Type text into an input field identified by a CSS selector.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "selector": {"type": "string"},
-            "text": {"type": "string"},
-        },
-        "required": ["selector", "text"],
-    },
-}
-
-_BROWSER_CLOSE_TOOL: dict[str, Any] = {
-    "name": "browser_close",
-    "description": "Close the browser session and release resources.",
-    "input_schema": {"type": "object", "properties": {}, "required": []},
-}
+# moved to app/tools/browser/browser_tools.py as BROWSER_OPEN_TOOL/
+# BROWSER_NAVIGATE_TOOL/BROWSER_SCREENSHOT_TOOL/BROWSER_READ_DOM_TOOL/
+# BROWSER_CLICK_TOOL/BROWSER_TYPE_TOOL/BROWSER_CLOSE_TOOL —
+# tool_enhance.md productionization pass, tools #28-#31 + #123-#125
+# (2026-08-18).
 
 # --- Day 3B: Memory tool specs ---
 
@@ -10302,75 +10238,31 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # DAY 3A — Browser tools (Playwright)
     # =========================================================================
 
+    # moved to app/tools/browser/browser_tools.py — tool_enhance.md
+    # productionization pass, tools #28-#31 + #123-#125 (2026-08-18).
     def _browser_sid() -> str:
         return getattr(session, "session_id", None) or "__default__"
 
     def browser_open_h(inp: dict[str, Any]) -> str:
-        try:
-            from app.repo_tools import browser_driver as _bd
-
-            result = _bd.browser_open(str(inp["url"]), session_id=_browser_sid())
-            if result.get("status") == "blocked":
-                return f"[BLOCKED] {result.get('error', 'URL blocked by SSRF guard')}"
-            return f"Opened: {result['url']} — title: {result['title']}"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return browser_open_handler(inp, session_id=_browser_sid())
 
     def browser_navigate_h(inp: dict[str, Any]) -> str:
-        try:
-            from app.repo_tools import browser_driver as _bd
-
-            result = _bd.browser_navigate(str(inp["url"]), session_id=_browser_sid())
-            if "error" in result:
-                return f"[BLOCKED] {result['error']}"
-            return f"Navigated to: {result['url']} — title: {result['title']}"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return browser_navigate_handler(inp, session_id=_browser_sid())
 
     def browser_screenshot_h(inp: dict[str, Any]) -> str:
-        try:
-            from app.repo_tools import browser_driver as _bd
-
-            path_out = _bd.browser_screenshot(
-                inp.get("path"), session_id=_browser_sid()
-            )
-            return f"Screenshot saved: {path_out}"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return browser_screenshot_handler(inp, session_id=_browser_sid())
 
     def browser_read_dom_h(inp: dict[str, Any]) -> str:
-        try:
-            from app.repo_tools import browser_driver as _bd
-
-            return _bd.browser_read_dom(inp.get("selector"), session_id=_browser_sid())
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return browser_read_dom_handler(inp, session_id=_browser_sid())
 
     def browser_click_h(inp: dict[str, Any]) -> str:
-        try:
-            from app.repo_tools import browser_driver as _bd
-
-            return _bd.browser_click(str(inp["selector"]), session_id=_browser_sid())
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return browser_click_handler(inp, session_id=_browser_sid())
 
     def browser_type_h(inp: dict[str, Any]) -> str:
-        try:
-            from app.repo_tools import browser_driver as _bd
-
-            return _bd.browser_type(
-                str(inp["selector"]), str(inp["text"]), session_id=_browser_sid()
-            )
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return browser_type_handler(inp, session_id=_browser_sid())
 
     def browser_close_h(inp: dict[str, Any]) -> str:
-        try:
-            from app.repo_tools import browser_driver as _bd
-
-            return _bd.browser_close(session_id=_browser_sid())
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return browser_close_handler(inp, session_id=_browser_sid())
 
     handlers["browser_open"] = browser_open_h
     handlers["browser_navigate"] = browser_navigate_h

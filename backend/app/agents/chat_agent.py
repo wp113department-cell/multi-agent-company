@@ -118,6 +118,15 @@ from app.config import get_settings
 from app.models.chat import ChatSession
 from app.policy.engine import check_command, check_path_in_worktree
 from app.repo_tools import ast_engine as _ast_engine
+from app.tools.browser.browser_tools import (
+    browser_click_handler,
+    browser_close_handler,
+    browser_navigate_handler,
+    browser_open_handler,
+    browser_read_dom_handler,
+    browser_screenshot_handler,
+    browser_type_handler,
+)
 from app.tools.database.migration import validate_run_migration_inputs
 from app.tools.database.seed import validate_seed_database_script
 from app.tools.execution.parallel import MAX_PARALLEL_COMMANDS
@@ -3008,6 +3017,32 @@ class ChatAgent:
             # in the only existing implementation — both closed in the
             # shared handler.
             return await asyncio.to_thread(semver_bump_handler, root, repo, inp)
+
+        if tool_name in (
+            "browser_open",
+            "browser_navigate",
+            "browser_screenshot",
+            "browser_read_dom",
+            "browser_click",
+            "browser_type",
+            "browser_close",
+        ):
+            # tool_enhance.md productionization pass, tools #28-#31 +
+            # #123-#125 (2026-08-18) — same "advertised but never
+            # dispatched" gap as git_tag/semver_bump (tools #22/#25): all
+            # 7 browser_* tools are in CHAT_TOOLS but chat_agent.py never
+            # had a dispatch branch for any of them.
+            bsid = self.session.session_id or "__default__"
+            _browser_handler = {
+                "browser_open": browser_open_handler,
+                "browser_navigate": browser_navigate_handler,
+                "browser_screenshot": browser_screenshot_handler,
+                "browser_read_dom": browser_read_dom_handler,
+                "browser_click": browser_click_handler,
+                "browser_type": browser_type_handler,
+                "browser_close": browser_close_handler,
+            }[tool_name]
+            return await asyncio.to_thread(_browser_handler, inp, session_id=bsid)
 
         # ========== BATCH 13 — Smart search ==========
 
