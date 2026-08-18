@@ -114,6 +114,10 @@ from app.tools.filesystem.append_file import (
     APPEND_FILE_TOOL as _APPEND_FILE_TOOL,
     append_file_handler as append_file_handler,
 )
+from app.tools.filesystem.apply_patch import (
+    APPLY_PATCH_TOOL as _APPLY_PATCH_TOOL_DEF,
+    apply_patch_handler as apply_patch_handler,
+)
 from app.tools.filesystem.delete_file import (
     DELETE_FILE_TOOL as _DELETE_FILE_TOOL,
     delete_file_handler as delete_file_handler,
@@ -2799,24 +2803,8 @@ _DELETE_LINES_TOOL = {
     },
 }
 
-_APPLY_PATCH_TOOL_DEF = {
-    "name": "apply_patch",
-    "description": "Apply a unified diff patch (git diff format) to files in the repository.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "patch": {
-                "type": "string",
-                "description": "Unified diff string (output of git diff or diff -u)",
-            },
-            "strip": {
-                "type": "integer",
-                "description": "Strip N leading path components (like patch -pN, default: 1)",
-            },
-        },
-        "required": ["patch"],
-    },
-}
+# moved to app/tools/filesystem/apply_patch.py as APPLY_PATCH_TOOL —
+# tool_enhance.md productionization pass, tool #27 (2026-08-18).
 
 _COMPARE_FILES_TOOL = {
     "name": "compare_files",
@@ -8508,57 +8496,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # moved to app/tools/filesystem/apply_patch.py as apply_patch_handler
+    # — tool_enhance.md productionization pass, tool #27 (2026-08-18).
     def apply_patch(inp: dict[str, Any]) -> str:
-        import os as _os
-        import tempfile as _tempfile
-
-        patch_content = str(inp["patch"])
-        strip = int(inp.get("strip", 1))
-
-        # Blocker 1 fix (audit_v1.md 4.5/4.8): apply_patch's schema has no
-        # top-level "path" field (targets are embedded in the diff's own
-        # +++/--- header lines), so the universal tool gate's
-        # tool_input.get("path", "") lookup always silently passes. Extract
-        # every target path from the diff text itself and run each through
-        # the same worktree-containment + denylist check every other write
-        # tool enforces (_is_protected_path -> check_path_in_worktree).
-        target_paths = _extract_patch_target_paths(patch_content, strip)
-        if not target_paths:
-            return (
-                "[ERROR] Could not determine any target file path from the "
-                "patch's +++/--- headers — refusing to apply"
-            )
-        for _tp in target_paths:
-            if _is_protected_path(_tp, repo_path):
-                return f"[POLICY DENIED] apply_patch target {_tp!r} is denied by policy"
-        try:
-            with _tempfile.NamedTemporaryFile(
-                mode="w", suffix=".patch", delete=False
-            ) as pf:
-                pf.write(patch_content)
-                pf_name = pf.name
-        except Exception as e:
-            return f"[ERROR] Cannot write patch file: {e}"
-        try:
-            r = subprocess.run(
-                ["patch", f"-p{strip}", "--input", pf_name],
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            return (r.stdout + r.stderr).strip() or "Patch applied"
-        except FileNotFoundError:
-            return "[ERROR] 'patch' command not found"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] patch timed out"
-        except Exception as e:
-            return f"[ERROR] {e}"
-        finally:
-            try:
-                _os.unlink(pf_name)
-            except Exception:
-                pass
+        return apply_patch_handler(repo_path, inp)
 
     def compare_files(inp: dict[str, Any]) -> str:
         rel_a = str(inp["path_a"])

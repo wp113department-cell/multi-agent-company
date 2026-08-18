@@ -129,6 +129,7 @@ from app.tools.execution.docker_restart import build_docker_restart_command
 from app.tools.execution.python_snippet import run_python_snippet_handler
 from app.tools.execution.run_tests import run_tests_handler
 from app.tools.filesystem.append_file import append_file_handler
+from app.tools.filesystem.apply_patch import apply_patch_handler
 from app.tools.filesystem.delete_file import delete_file_handler
 from app.tools.filesystem.edit_file import edit_file_handler
 from app.tools.filesystem.replace_function import replace_function_handler
@@ -1861,38 +1862,7 @@ class ChatAgent:
                 return f"[ERROR] {e}"
 
         if tool_name == "apply_patch":
-            import os as _os
-            import tempfile as _tempfile
-
-            patch_content = str(inp["patch"])
-            strip = int(inp.get("strip", 1))
-            try:
-                with _tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".patch", delete=False
-                ) as pf:
-                    pf.write(patch_content)
-                    pf_name = pf.name
-            except Exception as e:
-                return f"[ERROR] Cannot write patch file: {e}"
-            try:
-                r = await asyncio.to_thread(
-                    subprocess.run,
-                    ["patch", f"-p{strip}", "--input", pf_name],
-                    cwd=repo,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-                return (r.stdout + r.stderr).strip() or "Patch applied"
-            except FileNotFoundError:
-                return "[ERROR] 'patch' command not found"
-            except Exception as e:
-                return f"[ERROR] {e}"
-            finally:
-                try:
-                    _os.unlink(pf_name)
-                except Exception:
-                    pass
+            return await asyncio.to_thread(apply_patch_handler, repo, inp)
 
         if tool_name == "compare_files":
             rel_a = str(inp["path_a"])
