@@ -148,6 +148,7 @@ from app.tools.filesystem.semver_bump import semver_bump_handler
 from app.tools.filesystem.write_file import write_file_handler
 from app.tools.git.checkout import validate_git_checkout_inputs
 from app.tools.git.cherry_pick import validate_git_cherry_pick_inputs
+from app.tools.git.commit import stage_and_commit
 from app.tools.git.create_branch import validate_create_branch_inputs
 from app.tools.git.pull_request import (
     build_gh_pr_create_command,
@@ -1454,35 +1455,14 @@ class ChatAgent:
         # ========== GIT — WRITE ==========
 
         if tool_name == "git_commit":
-            message = str(inp["message"])
-            raw_files = inp.get("files", [])
-            files: list[str] = (
-                list(raw_files) if isinstance(raw_files, list) else ["--all"]
+            gc_message = str(inp["message"])
+            gc_raw_files = inp.get("files", [])
+            gc_files: list[str] = (
+                list(gc_raw_files) if isinstance(gc_raw_files, list) else ["--all"]
             )
-            try:
-                if files == ["--all"] or files == ["-a"]:
-                    subprocess.run(
-                        ["git", "add", "-A"], cwd=repo, check=True, capture_output=True
-                    )
-                else:
-                    for gf in files:
-                        subprocess.run(
-                            ["git", "add", str(gf)],
-                            cwd=repo,
-                            check=True,
-                            capture_output=True,
-                        )
-                r = subprocess.run(
-                    ["git", "commit", "-m", message],
-                    cwd=repo,
-                    capture_output=True,
-                    text=True,
-                )
-                return (r.stdout + r.stderr).strip()
-            except subprocess.CalledProcessError as e:
-                return f"[ERROR] git add failed: {e}"
-            except Exception as e:
-                return f"[ERROR] {e}"
+            return await asyncio.to_thread(
+                stage_and_commit, repo, gc_message, gc_files
+            )
 
         if tool_name == "git_branch":
             action = str(inp.get("action", "list"))

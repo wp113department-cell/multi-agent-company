@@ -170,6 +170,10 @@ from app.tools.git.cherry_pick import (
     GIT_CHERRY_PICK_TOOL as _GIT_CHERRY_PICK_TOOL,
     validate_git_cherry_pick_inputs as validate_git_cherry_pick_inputs,
 )
+from app.tools.git.commit import (
+    GIT_COMMIT_TOOL as _GIT_COMMIT_TOOL,
+    stage_and_commit as stage_and_commit,
+)
 from app.tools.git.create_branch import (
     CREATE_BRANCH_TOOL as _CREATE_BRANCH_TOOL,
     validate_create_branch_inputs as validate_create_branch_inputs,
@@ -2543,25 +2547,7 @@ _COPY_FILE_TOOL = {
     },
 }
 
-_GIT_COMMIT_TOOL = {
-    "name": "git_commit",
-    "description": "Stage specified files and create a git commit. Uses conventional commit format. Always run tests before committing.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "message": {
-                "type": "string",
-                "description": "Commit message (use conventional commits: feat/fix/docs/refactor: description)",
-            },
-            "files": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Files to stage and commit. Use ['--all'] to stage all changes.",
-            },
-        },
-        "required": ["message", "files"],
-    },
-}
+# moved to app/tools/git/commit.py as GIT_COMMIT_TOOL — tool_enhance.md productionization pass, tool #37 (2026-08-18).
 
 _GIT_BRANCH_TOOL = {
     "name": "git_branch",
@@ -8000,34 +7986,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
-    # ---- git_commit ----
+    # ---- git_commit ---- (moved to app/tools/git/commit.py — this now delegates to the shared, hardened stage_and_commit())
     def git_commit(inp: dict[str, Any]) -> str:
         message = str(inp["message"])
         files: list[str] = inp.get("files", [])
-        try:
-            if files == ["--all"] or files == ["-a"]:
-                subprocess.run(
-                    ["git", "add", "-A"], cwd=repo_path, check=True, capture_output=True
-                )
-            else:
-                for f in files:
-                    subprocess.run(
-                        ["git", "add", f],
-                        cwd=repo_path,
-                        check=True,
-                        capture_output=True,
-                    )
-            result = subprocess.run(
-                ["git", "commit", "-m", message],
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-            )
-            return (result.stdout + result.stderr).strip()
-        except subprocess.CalledProcessError as e:
-            return f"[ERROR] git add failed: {e.stderr}"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return stage_and_commit(repo_path, message, files)
 
     # ---- git_branch ----
     def git_branch(inp: dict[str, Any]) -> str:
