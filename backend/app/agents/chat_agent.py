@@ -151,6 +151,7 @@ from app.tools.git.cherry_pick import validate_git_cherry_pick_inputs
 from app.tools.git.commit import stage_and_commit
 from app.tools.git.create_branch import validate_create_branch_inputs
 from app.tools.git.merge import validate_git_merge_inputs
+from app.tools.git.pull import validate_git_pull_inputs
 from app.tools.git.pull_request import (
     build_gh_pr_create_command,
     generate_pr_description as _llm_generate_pr_description,
@@ -1520,14 +1521,17 @@ class ChatAgent:
             return _git(["stash", action], repo)
 
         if tool_name == "git_pull":
-            remote = str(inp.get("remote", "origin"))
-            branch = str(inp.get("branch", ""))
-            rebase = bool(inp.get("rebase", False))
+            gp_remote = str(inp.get("remote", "origin"))
+            gp_branch = str(inp.get("branch", ""))
+            gp_error = validate_git_pull_inputs(gp_remote, gp_branch)
+            if gp_error:
+                return gp_error
+            gp_rebase = bool(inp.get("rebase", False))
             pull_args = (
                 ["pull"]
-                + (["--rebase"] if rebase else [])
-                + [remote]
-                + ([branch] if branch else [])
+                + (["--rebase"] if gp_rebase else [])
+                + [gp_remote]
+                + ([gp_branch] if gp_branch else [])
             )
             return await asyncio.to_thread(_git, pull_args, repo, 60)
 

@@ -182,6 +182,10 @@ from app.tools.git.merge import (
     GIT_MERGE_TOOL as _GIT_MERGE_TOOL,
     validate_git_merge_inputs as validate_git_merge_inputs,
 )
+from app.tools.git.pull import (
+    GIT_PULL_TOOL as _GIT_PULL_TOOL,
+    validate_git_pull_inputs as validate_git_pull_inputs,
+)
 from app.tools.git.pull_request import (
     CREATE_PR_TOOL as _CREATE_PR_TOOL,
     GITHUB_CREATE_PR_TOOL as _GITHUB_CREATE_PR_TOOL,
@@ -2596,28 +2600,7 @@ _GIT_STASH_TOOL = {
     },
 }
 
-_GIT_PULL_TOOL = {
-    "name": "git_pull",
-    "description": "Pull latest changes from remote. Optionally specify remote and branch.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "remote": {
-                "type": "string",
-                "description": "Remote name (default: origin)",
-            },
-            "branch": {
-                "type": "string",
-                "description": "Branch to pull (default: current branch)",
-            },
-            "rebase": {
-                "type": "boolean",
-                "description": "Use --rebase instead of merge (default: false)",
-            },
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/git/pull.py as GIT_PULL_TOOL — tool_enhance.md productionization pass, tool #39 (2026-08-18).
 
 _GIT_FETCH_TOOL = {
     "name": "git_fetch",
@@ -8045,10 +8028,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
-    # ---- git_pull ----
+    # ---- git_pull ---- (moved to app/tools/git/pull.py — this now calls the shared validate_git_pull_inputs() first)
     def git_pull(inp: dict[str, Any]) -> str:
         remote = str(inp.get("remote", "origin"))
         branch = str(inp.get("branch", ""))
+        pull_error = validate_git_pull_inputs(remote, branch)
+        if pull_error:
+            return pull_error
         rebase = bool(inp.get("rebase", False))
         cmd = ["git", "pull"]
         if rebase:
