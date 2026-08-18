@@ -110,6 +110,10 @@ from app.tools.execution.run_tests import (
     RUN_TESTS_TOOL as _RUN_TESTS_TOOL,
     run_tests_handler as run_tests_handler,
 )
+from app.tools.filesystem.append_file import (
+    APPEND_FILE_TOOL as _APPEND_FILE_TOOL,
+    append_file_handler as append_file_handler,
+)
 from app.tools.filesystem.delete_file import (
     DELETE_FILE_TOOL as _DELETE_FILE_TOOL,
     delete_file_handler as delete_file_handler,
@@ -2478,21 +2482,8 @@ _SUBMIT_RESULT_TOOL = {
     },
 }
 
-_APPEND_FILE_TOOL = {
-    "name": "append_file",
-    "description": "Append content to the end of an existing file. Creates the file if it doesn't exist.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "File path relative to repo root",
-            },
-            "content": {"type": "string", "description": "Content to append"},
-        },
-        "required": ["path", "content"],
-    },
-}
+# moved to app/tools/filesystem/append_file.py as APPEND_FILE_TOOL —
+# tool_enhance.md productionization pass, tool #26 (2026-08-18).
 
 _RENAME_FILE_TOOL = {
     "name": "rename_file",
@@ -8109,18 +8100,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         return f"Result submitted: {inp.get('status', 'done')}"
 
     # ---- append_file ----
+    # moved to app/tools/filesystem/append_file.py as append_file_handler
+    # — tool_enhance.md productionization pass, tool #26 (2026-08-18).
     def append_file(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        if _is_protected_path(rel, repo_path):
-            return f"[POLICY DENIED] Cannot write to protected path: {rel}"
-        target = root / rel
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with open(target, "a", encoding="utf-8") as f:
-                f.write(inp["content"])
-            return f"Appended {len(inp['content'])} bytes to {rel}"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return append_file_handler(root, repo_path, inp)
 
     # ---- rename_file ----
     def rename_file(inp: dict[str, Any]) -> str:

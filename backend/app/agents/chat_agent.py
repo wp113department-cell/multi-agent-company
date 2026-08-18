@@ -128,6 +128,7 @@ from app.tools.execution.docker_exec import build_docker_exec_command
 from app.tools.execution.docker_restart import build_docker_restart_command
 from app.tools.execution.python_snippet import run_python_snippet_handler
 from app.tools.execution.run_tests import run_tests_handler
+from app.tools.filesystem.append_file import append_file_handler
 from app.tools.filesystem.delete_file import delete_file_handler
 from app.tools.filesystem.edit_file import edit_file_handler
 from app.tools.filesystem.replace_function import replace_function_handler
@@ -1379,15 +1380,7 @@ class ChatAgent:
             return edit_file_handler(root, repo, inp)
 
         if tool_name == "append_file":
-            rel = str(inp["path"])
-            if _is_protected_path(rel, repo):
-                return f"[POLICY DENIED] Cannot write to protected path: {rel}"
-            target = root / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            content = str(inp["content"])
-            with open(target, "a", encoding="utf-8") as f:
-                f.write(content)
-            return f"Appended {len(content)} bytes to {rel}"
+            return append_file_handler(root, repo, inp)
 
         if tool_name == "rename_file":
             from_rel = str(inp["from_path"])
