@@ -122,6 +122,10 @@ from app.tools.filesystem.replace_function import (
     REPLACE_FUNCTION_TOOL as _REPLACE_FUNCTION_TOOL,
     replace_function_handler as replace_function_handler,
 )
+from app.tools.filesystem.semver_bump import (
+    SEMVER_BUMP_TOOL as _SEMVER_BUMP_TOOL,
+    semver_bump_handler as semver_bump_handler,
+)
 from app.tools.filesystem.write_file import (
     WRITE_FILE_TOOL as _WRITE_FILE_TOOL,
     write_file_handler as write_file_handler,
@@ -6996,25 +7000,8 @@ _GIT_LOG_FILE_TOOL: dict[str, Any] = {
         "required": ["path"],
     },
 }
-_SEMVER_BUMP_TOOL: dict[str, Any] = {
-    "name": "semver_bump",
-    "description": "Bump the project version (patch/minor/major) in pyproject.toml, package.json, or VERSION file.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "part": {
-                "type": "string",
-                "enum": ["patch", "minor", "major"],
-                "description": "Which part to bump",
-            },
-            "file": {
-                "type": "string",
-                "description": "Version file path (auto-detected if omitted)",
-            },
-        },
-        "required": ["part"],
-    },
-}
+# moved to app/tools/filesystem/semver_bump.py as SEMVER_BUMP_TOOL —
+# tool_enhance.md productionization pass, tool #25 (2026-08-18).
 _GIT_STASH_LIST_TOOL: dict[str, Any] = {
     "name": "git_stash_list",
     "description": "List all git stashes with their index and description.",
@@ -11306,44 +11293,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] git_log_file: {e}"
 
+    # moved to app/tools/filesystem/semver_bump.py as semver_bump_handler
+    # — tool_enhance.md productionization pass, tool #25 (2026-08-18).
     def semver_bump_h(inp: dict[str, Any]) -> str:
-        import re as _re
-
-        part = str(inp["part"])
-        version_file = str(inp.get("file", ""))
-        candidates = (
-            [version_file]
-            if version_file
-            else ["pyproject.toml", "package.json", "VERSION"]
-        )
-        for cand in candidates:
-            fp = root / cand if cand else None
-            if fp and fp.exists():
-                text = fp.read_text(encoding="utf-8")
-                pattern = r'(version\s*[=:]\s*["\']?)(\d+)\.(\d+)\.(\d+)(["\']?)'
-                m = _re.search(pattern, text)
-                if m:
-                    major, minor, patch_v = (
-                        int(m.group(2)),
-                        int(m.group(3)),
-                        int(m.group(4)),
-                    )
-                    if part == "major":
-                        major, minor, patch_v = major + 1, 0, 0
-                    elif part == "minor":
-                        minor, patch_v = minor + 1, 0
-                    else:
-                        patch_v += 1
-                    new_ver = f"{major}.{minor}.{patch_v}"
-                    new_text = _re.sub(
-                        pattern,
-                        lambda x: f"{x.group(1)}{new_ver}{x.group(5)}",
-                        text,
-                        count=1,
-                    )
-                    fp.write_text(new_text, encoding="utf-8")
-                    return f"Bumped version to {new_ver} in {cand}"
-        return "[ERROR] No version file found (tried pyproject.toml, package.json, VERSION)"
+        return semver_bump_handler(root, repo_path, inp)
 
     def git_stash_list_h(inp: dict[str, Any]) -> str:
         try:

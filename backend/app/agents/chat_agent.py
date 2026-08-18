@@ -131,6 +131,7 @@ from app.tools.execution.run_tests import run_tests_handler
 from app.tools.filesystem.delete_file import delete_file_handler
 from app.tools.filesystem.edit_file import edit_file_handler
 from app.tools.filesystem.replace_function import replace_function_handler
+from app.tools.filesystem.semver_bump import semver_bump_handler
 from app.tools.filesystem.write_file import write_file_handler
 from app.tools.git.pull_request import (
     build_gh_pr_create_command,
@@ -3036,6 +3037,14 @@ class ChatAgent:
             # dispatched here at all, same class as npm_install/pip_install
             # (tool #4) — every real call fell through to "Unknown tool".
             return await asyncio.to_thread(git_tag_handler, repo, inp)
+
+        if tool_name == "semver_bump":
+            # tool_enhance.md productionization pass, tool #25 (2026-08-18)
+            # — same "advertised but never dispatched" gap as git_tag
+            # (tool #22), plus a real worktree-boundary-escape write bug
+            # in the only existing implementation — both closed in the
+            # shared handler.
+            return await asyncio.to_thread(semver_bump_handler, root, repo, inp)
 
         # ========== BATCH 13 — Smart search ==========
 
