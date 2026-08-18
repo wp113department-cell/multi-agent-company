@@ -139,6 +139,10 @@ from app.tools.git.tag import (
     GIT_TAG_TOOL as _GIT_TAG_TOOL,
     git_tag_handler as git_tag_handler,
 )
+from app.tools.refactor.rename_symbol import (
+    RENAME_SYMBOL_TOOL as _RENAME_SYMBOL_TOOL,
+    validate_rename_symbol_directory as validate_rename_symbol_directory,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -3530,44 +3534,8 @@ _CIRCULAR_DEP_DETECT_TOOL = {
     },
 }
 
-_RENAME_SYMBOL_TOOL = {
-    "name": "rename_symbol",
-    "description": (
-        "Rename a symbol (function, class, variable) across all matching files. "
-        "For .py files, uses a token-based rename that skips occurrences inside "
-        "string literals and comments (other file patterns use word-boundary regex). "
-        "Shows each file changed and replacement count. If more files would be "
-        "touched than the configured safety threshold, returns a no-write dry-run "
-        "preview instead — pass confirm_large_batch=true to actually apply it. "
-        "Always read the file first to confirm the symbol before renaming."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "old_name": {
-                "type": "string",
-                "description": "Current symbol name (must be a valid identifier)",
-            },
-            "new_name": {
-                "type": "string",
-                "description": "New symbol name (must be a valid identifier)",
-            },
-            "directory": {
-                "type": "string",
-                "description": "Root directory to rename within (default: repo root)",
-            },
-            "file_pattern": {
-                "type": "string",
-                "description": "Glob pattern for files (default: *.py)",
-            },
-            "confirm_large_batch": {
-                "type": "boolean",
-                "description": "Set true to actually apply a rename that would touch more files than the safety threshold (otherwise a dry-run preview is returned instead)",
-            },
-        },
-        "required": ["old_name", "new_name"],
-    },
-}
+# moved to app/tools/refactor/rename_symbol.py as RENAME_SYMBOL_TOOL —
+# tool_enhance.md productionization pass, tool #23 (2026-08-18).
 
 # Batch 11 — Git extras
 _GIT_REBASE_TOOL = {
@@ -5070,6 +5038,9 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
 
     def rf_rename_symbol(inp: dict[str, Any]) -> str:
         directory = str(inp.get("directory", ""))
+        rsym_error = validate_rename_symbol_directory(directory, repo_path)
+        if rsym_error:
+            return f"[POLICY DENIED] {rsym_error}"
         return _ast.rename_symbol(
             inp["old_name"],
             inp["new_name"],
@@ -9796,11 +9767,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         from app.repo_tools.ast_engine import rename_symbol as _rsym
 
         rs_d = str(inp.get("directory", ""))
+        rsym_error = validate_rename_symbol_directory(rs_d, repo_path)
+        if rsym_error:
+            return f"[POLICY DENIED] {rsym_error}"
         return _rsym(
             str(inp["old_name"]),
             str(inp["new_name"]),
             str(root / rs_d) if rs_d else repo_path,
             str(inp.get("file_pattern", "*.py")),
+            confirm_large_batch=bool(inp.get("confirm_large_batch", False)),
         )
 
     handlers["parse_ast"] = parse_ast_h

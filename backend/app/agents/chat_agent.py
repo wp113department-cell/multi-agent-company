@@ -137,6 +137,7 @@ from app.tools.git.pull_request import (
 )
 from app.tools.git.reset import validate_git_reset_inputs
 from app.tools.git.tag import git_tag_handler
+from app.tools.refactor.rename_symbol import validate_rename_symbol_directory
 
 logger = logging.getLogger(__name__)
 
@@ -2966,6 +2967,9 @@ class ChatAgent:
             rsym_new = str(inp["new_name"])
             rsym_d = str(inp.get("directory", ""))
             rsym_pat = str(inp.get("file_pattern", "*.py"))
+            rsym_error = validate_rename_symbol_directory(rsym_d, repo)
+            if rsym_error:
+                return f"[POLICY DENIED] {rsym_error}"
             rsym_target = str(root / rsym_d) if rsym_d else repo
             rsym_confirm = bool(inp.get("confirm_large_batch", False))
             if rsym_old == rsym_new:
