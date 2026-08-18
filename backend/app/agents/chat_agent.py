@@ -144,6 +144,7 @@ from app.tools.filesystem.edit_file import edit_file_handler
 from app.tools.filesystem.replace_function import replace_function_handler
 from app.tools.filesystem.semver_bump import semver_bump_handler
 from app.tools.filesystem.write_file import write_file_handler
+from app.tools.git.create_branch import validate_create_branch_inputs
 from app.tools.git.pull_request import (
     build_gh_pr_create_command,
     generate_pr_description as _llm_generate_pr_description,
@@ -1502,6 +1503,9 @@ class ChatAgent:
             bname = str(inp["name"])
             do_checkout = bool(inp.get("checkout", True))
             from_b = str(inp.get("from_branch", ""))
+            cb_error = validate_create_branch_inputs(bname, from_b)
+            if cb_error:
+                return cb_error
             create_args = ["branch", bname] + ([from_b] if from_b else [])
             out = _git(create_args, repo)
             if "[ERROR]" in out:

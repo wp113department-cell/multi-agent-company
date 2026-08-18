@@ -154,6 +154,10 @@ from app.tools.filesystem.write_file import (
     WRITE_FILE_TOOL as _WRITE_FILE_TOOL,
     write_file_handler as write_file_handler,
 )
+from app.tools.git.create_branch import (
+    CREATE_BRANCH_TOOL as _CREATE_BRANCH_TOOL,
+    validate_create_branch_inputs as validate_create_branch_inputs,
+)
 from app.tools.git.pull_request import (
     CREATE_PR_TOOL as _CREATE_PR_TOOL,
     GITHUB_CREATE_PR_TOOL as _GITHUB_CREATE_PR_TOOL,
@@ -2433,28 +2437,8 @@ DOCS_TOOLS = READ_ONLY_TOOLS + [
 # _GIT_PUSH_TOOL moved to app/tools/git/push.py as GIT_PUSH_TOOL —
 # tool_enhance.md productionization pass, tool #4 (2026-08-16).
 
-_CREATE_BRANCH_TOOL = {
-    "name": "create_branch",
-    "description": "Create a new git branch and optionally switch to it.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "name": {
-                "type": "string",
-                "description": "Branch name (e.g. 'feat/add-login')",
-            },
-            "checkout": {
-                "type": "boolean",
-                "description": "Switch to the new branch after creating it (default: true)",
-            },
-            "from_branch": {
-                "type": "string",
-                "description": "Base branch (default: current HEAD)",
-            },
-        },
-        "required": ["name"],
-    },
-}
+# moved to app/tools/git/create_branch.py as CREATE_BRANCH_TOOL —
+# tool_enhance.md productionization pass, tool #32 (2026-08-18).
 
 _CHAT_BASH_TOOL = {
     "name": "bash",
@@ -7982,7 +7966,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def create_branch(inp: dict[str, Any]) -> str:
         name = str(inp["name"])
         checkout = inp.get("checkout", True)
-        from_branch = inp.get("from_branch", "")
+        from_branch = str(inp.get("from_branch", ""))
+        cb_error = validate_create_branch_inputs(name, from_branch)
+        if cb_error:
+            return cb_error
 
         # Create the branch
         create_cmd = ["git", "branch", name]
