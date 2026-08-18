@@ -150,6 +150,7 @@ from app.tools.git.checkout import validate_git_checkout_inputs
 from app.tools.git.cherry_pick import validate_git_cherry_pick_inputs
 from app.tools.git.commit import stage_and_commit
 from app.tools.git.create_branch import validate_create_branch_inputs
+from app.tools.git.merge import validate_git_merge_inputs
 from app.tools.git.pull_request import (
     build_gh_pr_create_command,
     generate_pr_description as _llm_generate_pr_description,
@@ -1994,6 +1995,9 @@ class ChatAgent:
 
         if tool_name == "git_merge":
             gm_branch = str(inp["branch"])
+            gm_error = validate_git_merge_inputs(gm_branch)
+            if gm_error:
+                return gm_error
             gm_no_ff = bool(inp.get("no_ff", False))
             gm_squash = bool(inp.get("squash", False))
             gm_msg = str(inp.get("message", ""))

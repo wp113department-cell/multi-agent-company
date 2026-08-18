@@ -178,6 +178,10 @@ from app.tools.git.create_branch import (
     CREATE_BRANCH_TOOL as _CREATE_BRANCH_TOOL,
     validate_create_branch_inputs as validate_create_branch_inputs,
 )
+from app.tools.git.merge import (
+    GIT_MERGE_TOOL as _GIT_MERGE_TOOL,
+    validate_git_merge_inputs as validate_git_merge_inputs,
+)
 from app.tools.git.pull_request import (
     CREATE_PR_TOOL as _CREATE_PR_TOOL,
     GITHUB_CREATE_PR_TOOL as _GITHUB_CREATE_PR_TOOL,
@@ -2932,32 +2936,7 @@ _FETCH_URL_TOOL = {
 # NEW TOOL SPECS — Batch 3: Git extras
 # ---------------------------------------------------------------------------
 
-_GIT_MERGE_TOOL = {
-    "name": "git_merge",
-    "description": "Merge a branch into the current branch.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "branch": {
-                "type": "string",
-                "description": "Branch name to merge into current branch",
-            },
-            "no_ff": {
-                "type": "boolean",
-                "description": "Create a merge commit even for fast-forwards (default: false)",
-            },
-            "squash": {
-                "type": "boolean",
-                "description": "Squash all commits into one (default: false)",
-            },
-            "message": {
-                "type": "string",
-                "description": "Commit message for the merge (optional)",
-            },
-        },
-        "required": ["branch"],
-    },
-}
+# moved to app/tools/git/merge.py as GIT_MERGE_TOOL — tool_enhance.md productionization pass, tool #38 (2026-08-18).
 
 # ---------------------------------------------------------------------------
 # Gap-closure Day 51 (Stage 2, answers.md Q40 "Merge conflict resolution/
@@ -8513,8 +8492,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # BATCH 3 — Git extras
     # =========================================================================
 
+    # moved to app/tools/git/merge.py — this now calls the shared validate_git_merge_inputs() first
     def git_merge(inp: dict[str, Any]) -> str:
         gm_branch = str(inp["branch"])
+        gm_error = validate_git_merge_inputs(gm_branch)
+        if gm_error:
+            return gm_error
         gm_no_ff = bool(inp.get("no_ff", False))
         gm_squash = bool(inp.get("squash", False))
         gm_msg = str(inp.get("message", ""))
