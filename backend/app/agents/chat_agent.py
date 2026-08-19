@@ -1544,10 +1544,24 @@ class ChatAgent:
             )
 
         if tool_name == "git_restore":
-            rel = str(inp["path"])
-            restore_staged = bool(inp.get("staged", False))
+            gres_rel = str(inp["path"])
+            if _is_protected_path(gres_rel, repo):
+                return f"[POLICY DENIED] Protected path: {gres_rel}"
+            gres_staged = bool(inp.get("staged", False))
+            if not gres_staged:
+                gres_fp = root / gres_rel
+                if not gres_fp.exists():
+                    return f"[ERROR] File not found: {gres_rel}"
+                gres_confirmed = await self._confirm(
+                    description=f"git restore {gres_rel}",
+                    details="DISCARDS all uncommitted working-tree changes to this file — irreversible",
+                )
+                if not gres_confirmed:
+                    return f"[CANCELLED] git_restore for {gres_rel} cancelled by user"
             restore_args = (
-                ["restore"] + (["--staged"] if restore_staged else []) + [rel]
+                ["restore"]
+                + (["--staged"] if gres_staged else [])
+                + ["--", gres_rel]
             )
             return _git(restore_args, repo)
 

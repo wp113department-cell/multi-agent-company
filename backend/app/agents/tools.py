@@ -203,6 +203,7 @@ from app.tools.git.reset import (
     GIT_RESET_TOOL as _GIT_RESET_TOOL,
     git_reset_handler as git_reset_handler,
 )
+from app.tools.git.restore import GIT_RESTORE_TOOL as _GIT_RESTORE_TOOL
 from app.tools.git.tag import (
     GIT_TAG_TOOL as _GIT_TAG_TOOL,
     git_tag_handler as git_tag_handler,
@@ -2625,24 +2626,7 @@ _GIT_FETCH_TOOL = {
     },
 }
 
-_GIT_RESTORE_TOOL = {
-    "name": "git_restore",
-    "description": "Discard changes in a file and restore it to the last committed version. This CANNOT be undone.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "File path to restore (relative to repo root)",
-            },
-            "staged": {
-                "type": "boolean",
-                "description": "Unstage staged changes instead of discarding working tree changes (default: false)",
-            },
-        },
-        "required": ["path"],
-    },
-}
+# moved to app/tools/git/restore.py as GIT_RESTORE_TOOL — tool_enhance.md productionization pass, tool #41 (2026-08-19).
 
 # moved to app/tools/execution/run_tests.py as RUN_TESTS_TOOL —
 # tool_enhance.md productionization pass, tool #16 (2026-08-17).
@@ -8061,19 +8045,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] {e}"
 
     # ---- git_restore ----
+    # moved to app/tools/git/restore.py — like undo_changes_h, this has no real,
+    # safely-confirmable one-shot caller (grepped: git_restore is in zero
+    # agent's allowed_tools), so it's blocked outright instead of silently
+    # executing an unconfirmed irreversible discard.
     def git_restore(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
-        staged = bool(inp.get("staged", False))
-        cmd = ["git", "restore"]
-        if staged:
-            cmd.append("--staged")
-        cmd.append(rel)
-        try:
-            r = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True)
-            out = (r.stdout + r.stderr).strip()
-            return out or f"Restored {rel}"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        if _is_protected_path(rel, repo_path):
+            return f"[POLICY DENIED] Protected path: {rel}"
+        return "[BLOCKED] git_restore requires interactive session for safety confirmation"
 
     # ---- run_tests ----
     # moved to app/tools/execution/run_tests.py as run_tests_handler —
