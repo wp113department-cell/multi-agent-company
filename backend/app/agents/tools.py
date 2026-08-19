@@ -182,6 +182,10 @@ from app.tools.git.github_comment import (
     GITHUB_COMMENT_TOOL as _GITHUB_COMMENT_TOOL,
     github_comment_command as github_comment_command,
 )
+from app.tools.git.github_create_issue import (
+    GITHUB_CREATE_ISSUE_TOOL as _GITHUB_CREATE_ISSUE_TOOL,
+    github_create_issue_command as github_create_issue_command,
+)
 from app.tools.git.merge import (
     GIT_MERGE_TOOL as _GIT_MERGE_TOOL,
     validate_git_merge_inputs as validate_git_merge_inputs,
@@ -5682,23 +5686,7 @@ _READ_IMAGE_TOOL: dict[str, Any] = {
 # was a naming mismatch — real MCP-protocol-building help now lives in the
 # dedicated mcp_developer_agent.py instead. ---
 
-_GITHUB_CREATE_ISSUE_TOOL: dict[str, Any] = {
-    "name": "github_create_issue",
-    "description": "Create a GitHub issue using the gh CLI. Requires gh to be authenticated.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "title": {"type": "string"},
-            "body": {"type": "string"},
-            "labels": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Optional label names",
-            },
-        },
-        "required": ["title", "body"],
-    },
-}
+# moved to app/tools/git/github_create_issue.py as GITHUB_CREATE_ISSUE_TOOL — tool_enhance.md productionization pass, tool #45 (2026-08-19).
 
 _GITHUB_LIST_PRS_TOOL: dict[str, Any] = {
     "name": "github_list_prs",
@@ -10340,13 +10328,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     import subprocess as _sp_mcp
     import os as _os_mcp
 
+    # moved to app/tools/git/github_create_issue.py — command-building now shared via github_create_issue_command()
     def github_create_issue_h(inp: dict[str, Any]) -> str:
         title = str(inp["title"])
         body = str(inp["body"])
-        labels = list(inp.get("labels", []))
-        cmd = ["gh", "issue", "create", "--title", title, "--body", body]
-        for lbl in labels:
-            cmd += ["--label", lbl]
+        labels = [str(lbl) for lbl in inp.get("labels", [])]
+        cmd = github_create_issue_command(title, body, labels)
         try:
             r = _sp_mcp.run(
                 cmd, capture_output=True, text=True, cwd=str(root), timeout=30

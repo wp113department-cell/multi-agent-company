@@ -151,6 +151,7 @@ from app.tools.git.cherry_pick import validate_git_cherry_pick_inputs
 from app.tools.git.commit import stage_and_commit
 from app.tools.git.create_branch import validate_create_branch_inputs
 from app.tools.git.github_comment import github_comment_command
+from app.tools.git.github_create_issue import github_create_issue_command
 from app.tools.git.merge import validate_git_merge_inputs
 from app.tools.git.pull import validate_git_pull_inputs
 from app.tools.git.pull_request import (
@@ -2278,16 +2279,17 @@ class ChatAgent:
 
         if tool_name == "github_comment":
             # tool_enhance.md productionization pass, tool #44 (2026-08-19)
-            # — github_comment had a real, safe handler in
-            # make_chat_handlers() but was in neither CHAT_TOOLS nor this
-            # dispatch, so no live agent could ever reach it. Per explicit
-            # user decision (AskUserQuestion), wired up here instead of
-            # left as dead code. Posting a comment is a real, publicly-
-            # visible external write (permissions: write_remote) — same
-            # risk category as create_pr (tool #2) — so this mirrors that
-            # tool's exact confirmation pattern: confirm AFTER all fields
-            # are resolved, so the human sees the real content that will
-            # actually be posted.
+            # — same "advertised but never dispatched" bug class as tools
+            # #4/#6/#22/#25/#33: github_comment was already in CHAT_TOOLS
+            # (see the correction note in
+            # docs/tool_productionization/github_comment.md for how an
+            # earlier pass of this same audit briefly got that wrong) but
+            # had zero dispatch here, so no live agent could ever reach it.
+            # Posting a comment is a real, publicly-visible external write
+            # (permissions: write_remote) — same risk category as create_pr
+            # (tool #2) — so this mirrors that tool's exact confirmation
+            # pattern: confirm AFTER all fields are resolved, so the human
+            # sees the real content that will actually be posted.
             gc_number = int(inp["number"])
             gc_body = str(inp["body"])
             gc_kind = str(inp.get("kind", "issue"))
@@ -2310,6 +2312,40 @@ class ChatAgent:
                 return (gc_r.stdout + gc_r.stderr).strip() or "Comment posted"
             except FileNotFoundError:
                 return "[ERROR] gh CLI not found"
+            except Exception as e:
+                return f"[ERROR] {e}"
+
+        if tool_name == "github_create_issue":
+            # tool_enhance.md productionization pass, tool #45 (2026-08-19)
+            # — same "advertised but never dispatched" bug class as tool
+            # #44's github_comment: already in CHAT_TOOLS ("Day 3G —
+            # External integrations"), zero dispatch here, every real call
+            # fell through to "Unknown tool". Creating a GitHub issue is a
+            # real, publicly-visible external write — same risk category
+            # as create_pr/github_comment — so this mirrors their exact
+            # confirmation pattern.
+            gci_title = str(inp["title"])
+            gci_body = str(inp["body"])
+            gci_labels = [str(lbl) for lbl in inp.get("labels", [])]
+            gci_cmd = github_create_issue_command(gci_title, gci_body, gci_labels)
+            gci_approved = await self._confirm(
+                description=f"Create a GitHub issue: {gci_title!r}",
+                details=f"{' '.join(gci_cmd[:-1])!r} <<< {gci_body!r}",
+            )
+            if not gci_approved:
+                return "[DENIED] User declined github_create_issue."
+            try:
+                gci_r = await asyncio.to_thread(
+                    subprocess.run,
+                    gci_cmd,
+                    capture_output=True,
+                    text=True,
+                    cwd=repo,
+                    timeout=30,
+                )
+                return (gci_r.stdout + gci_r.stderr).strip() or "(no output)"
+            except FileNotFoundError:
+                return "[ERROR] gh CLI not found — install GitHub CLI"
             except Exception as e:
                 return f"[ERROR] {e}"
 
