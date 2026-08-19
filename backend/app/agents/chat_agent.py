@@ -150,6 +150,7 @@ from app.tools.git.checkout import validate_git_checkout_inputs
 from app.tools.git.cherry_pick import validate_git_cherry_pick_inputs
 from app.tools.git.commit import stage_and_commit
 from app.tools.git.create_branch import validate_create_branch_inputs
+from app.tools.git.github_comment import github_comment_command
 from app.tools.git.merge import validate_git_merge_inputs
 from app.tools.git.pull import validate_git_pull_inputs
 from app.tools.git.pull_request import (
@@ -2274,6 +2275,43 @@ class ChatAgent:
                 f"[ERROR] Review generation unavailable — raw diff below.\n\n"
                 f"=== Changed files ===\n{rd_stat}\n\n=== Diff ===\n{rd_diff}"
             )
+
+        if tool_name == "github_comment":
+            # tool_enhance.md productionization pass, tool #44 (2026-08-19)
+            # — github_comment had a real, safe handler in
+            # make_chat_handlers() but was in neither CHAT_TOOLS nor this
+            # dispatch, so no live agent could ever reach it. Per explicit
+            # user decision (AskUserQuestion), wired up here instead of
+            # left as dead code. Posting a comment is a real, publicly-
+            # visible external write (permissions: write_remote) — same
+            # risk category as create_pr (tool #2) — so this mirrors that
+            # tool's exact confirmation pattern: confirm AFTER all fields
+            # are resolved, so the human sees the real content that will
+            # actually be posted.
+            gc_number = int(inp["number"])
+            gc_body = str(inp["body"])
+            gc_kind = str(inp.get("kind", "issue"))
+            gc_cmd = github_comment_command(gc_number, gc_body, gc_kind)
+            gc_approved = await self._confirm(
+                description=f"Post a comment on GitHub {gc_kind} #{gc_number}",
+                details=f"{' '.join(gc_cmd[:-1])!r} <<< {gc_body!r}",
+            )
+            if not gc_approved:
+                return "[DENIED] User declined github_comment."
+            try:
+                gc_r = await asyncio.to_thread(
+                    subprocess.run,
+                    gc_cmd,
+                    capture_output=True,
+                    text=True,
+                    cwd=repo,
+                    timeout=30,
+                )
+                return (gc_r.stdout + gc_r.stderr).strip() or "Comment posted"
+            except FileNotFoundError:
+                return "[ERROR] gh CLI not found"
+            except Exception as e:
+                return f"[ERROR] {e}"
 
         if tool_name == "inspect_github_repo":
             return await asyncio.to_thread(_inspect_github_repo, inp)

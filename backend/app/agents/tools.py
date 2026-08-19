@@ -178,6 +178,10 @@ from app.tools.git.create_branch import (
     CREATE_BRANCH_TOOL as _CREATE_BRANCH_TOOL,
     validate_create_branch_inputs as validate_create_branch_inputs,
 )
+from app.tools.git.github_comment import (
+    GITHUB_COMMENT_TOOL as _GITHUB_COMMENT_TOOL,
+    github_comment_command as github_comment_command,
+)
 from app.tools.git.merge import (
     GIT_MERGE_TOOL as _GIT_MERGE_TOOL,
     validate_git_merge_inputs as validate_git_merge_inputs,
@@ -5711,19 +5715,7 @@ _GITHUB_LIST_PRS_TOOL: dict[str, Any] = {
     },
 }
 
-_GITHUB_COMMENT_TOOL: dict[str, Any] = {
-    "name": "github_comment",
-    "description": "Post a comment on a GitHub issue or pull request.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "number": {"type": "integer", "description": "Issue or PR number"},
-            "body": {"type": "string", "description": "Comment text"},
-            "kind": {"type": "string", "description": "issue or pr (default: issue)"},
-        },
-        "required": ["number", "body"],
-    },
-}
+# moved to app/tools/git/github_comment.py as GITHUB_COMMENT_TOOL — tool_enhance.md productionization pass, tool #44 (2026-08-19).
 
 _LINEAR_CREATE_ISSUE_TOOL: dict[str, Any] = {
     "name": "linear_create_issue",
@@ -10389,14 +10381,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # moved to app/tools/git/github_comment.py — command-building now shared via github_comment_command()
     def github_comment_h(inp: dict[str, Any]) -> str:
         number = int(inp["number"])
         body = str(inp["body"])
         kind = str(inp.get("kind", "issue"))
-        subcmd = "pr" if kind == "pr" else "issue"
         try:
             r = _sp_mcp.run(
-                ["gh", subcmd, "comment", str(number), "--body", body],
+                github_comment_command(number, body, kind),
                 capture_output=True,
                 text=True,
                 cwd=str(root),
