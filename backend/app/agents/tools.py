@@ -212,6 +212,10 @@ from app.tools.git.tag import (
     GIT_TAG_TOOL as _GIT_TAG_TOOL,
     git_tag_handler as git_tag_handler,
 )
+from app.tools.git.worktree import (
+    GIT_WORKTREE_TOOL as _GIT_WORKTREE_TOOL,
+    validate_git_worktree_inputs as validate_git_worktree_inputs,
+)
 from app.tools.refactor.rename_symbol import (
     RENAME_SYMBOL_TOOL as _RENAME_SYMBOL_TOOL,
     validate_rename_symbol_directory as validate_rename_symbol_directory,
@@ -2980,29 +2984,7 @@ _RESOLVE_MERGE_CONFLICT_TOOL = {
 # _GIT_RESET_TOOL moved to app/tools/git/reset.py as GIT_RESET_TOOL —
 # tool_enhance.md productionization pass, tool #5 (2026-08-16).
 
-_GIT_WORKTREE_TOOL = {
-    "name": "git_worktree",
-    "description": "Manage git worktrees — isolated checkouts for parallel work.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "action": {
-                "type": "string",
-                "enum": ["list", "add", "remove"],
-                "description": "Action to perform (default: list)",
-            },
-            "path": {
-                "type": "string",
-                "description": "Path for the new worktree (required for add)",
-            },
-            "branch": {
-                "type": "string",
-                "description": "Branch for the new worktree (required for add)",
-            },
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/git/worktree.py as GIT_WORKTREE_TOOL — tool_enhance.md productionization pass, tool #43 (2026-08-19).
 
 # _CREATE_PR_TOOL moved to app/tools/git/pull_request.py as CREATE_PR_TOOL
 # (imported near the top of this file as _CREATE_PR_TOOL) —
@@ -8549,10 +8531,16 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # git_reset moved to app/tools/git/reset.py as git_reset_handler —
     # tool_enhance.md productionization pass, tool #5 (2026-08-16).
 
+    # moved to app/tools/git/worktree.py — validates inputs and blocks the
+    # unconfirmable "add" action (like undo_changes_h/git_restore, this has no
+    # real, safely-confirmable one-shot caller for a destructive/impactful action)
     def git_worktree(inp: dict[str, Any]) -> str:
         gw_action = str(inp.get("action", "list"))
         gw_path = str(inp.get("path", ""))
         gw_branch = str(inp.get("branch", ""))
+        gw_error = validate_git_worktree_inputs(gw_action, gw_path, gw_branch)
+        if gw_error:
+            return gw_error
         try:
             if gw_action == "list":
                 r = subprocess.run(
@@ -8563,21 +8551,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 )
                 return r.stdout or "(no worktrees)"
             elif gw_action == "add":
-                if not gw_path or not gw_branch:
-                    return "[ERROR] path and branch required for add"
-                r = subprocess.run(
-                    ["git", "worktree", "add", gw_path, gw_branch],
-                    cwd=repo_path,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
+                return (
+                    "[BLOCKED] git_worktree add requires interactive session "
+                    "for safety confirmation — it writes a new checkout to "
+                    "an arbitrary filesystem path."
                 )
-                return (r.stdout + r.stderr).strip() or f"Created worktree at {gw_path}"
             elif gw_action == "remove":
-                if not gw_path:
-                    return "[ERROR] path required for remove"
                 r = subprocess.run(
-                    ["git", "worktree", "remove", gw_path],
+                    ["git", "worktree", "remove", "--", gw_path],
                     cwd=repo_path,
                     capture_output=True,
                     text=True,

@@ -160,6 +160,7 @@ from app.tools.git.rebase import validate_git_rebase_inputs
 from app.tools.git.reset import validate_git_reset_inputs
 from app.tools.git.stash import validate_git_stash_action
 from app.tools.git.tag import git_tag_handler
+from app.tools.git.worktree import validate_git_worktree_inputs
 from app.tools.refactor.rename_symbol import validate_rename_symbol_directory
 
 logger = logging.getLogger(__name__)
@@ -2140,18 +2141,27 @@ class ChatAgent:
             gw_action = str(inp.get("action", "list"))
             gw_wt_path = str(inp.get("path", ""))
             gw_branch = str(inp.get("branch", ""))
+            gw_error = validate_git_worktree_inputs(gw_action, gw_wt_path, gw_branch)
+            if gw_error:
+                return gw_error
             if gw_action == "list":
                 return _git(["worktree", "list"], repo)
             elif gw_action == "add":
-                if not gw_wt_path or not gw_branch:
-                    return "[ERROR] path and branch required for add"
+                gw_confirmed = await self._confirm(
+                    description=f"git worktree add {gw_wt_path} {gw_branch}",
+                    details=(
+                        "Creates a full checkout of the branch's tree at "
+                        f"{gw_wt_path!r} — this path may be anywhere on "
+                        "disk, including outside the current repository."
+                    ),
+                )
+                if not gw_confirmed:
+                    return f"[CANCELLED] git_worktree add {gw_wt_path} cancelled by user"
                 return await asyncio.to_thread(
-                    _git, ["worktree", "add", gw_wt_path, gw_branch], repo, 30
+                    _git, ["worktree", "add", "--", gw_wt_path, gw_branch], repo, 30
                 )
             elif gw_action == "remove":
-                if not gw_wt_path:
-                    return "[ERROR] path required for remove"
-                return _git(["worktree", "remove", gw_wt_path], repo)
+                return _git(["worktree", "remove", "--", gw_wt_path], repo)
             return f"[ERROR] Unknown action: {gw_action}"
 
         if tool_name in ("create_pr", "github_create_pr"):
