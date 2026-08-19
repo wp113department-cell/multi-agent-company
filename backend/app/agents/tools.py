@@ -154,6 +154,10 @@ from app.tools.filesystem.insert_after import (
     INSERT_AFTER_TOOL as _INSERT_AFTER_TOOL,
     insert_after_handler as insert_after_handler,
 )
+from app.tools.filesystem.insert_at_line import (
+    INSERT_AT_LINE_TOOL as _INSERT_AT_LINE_TOOL,
+    insert_at_line_handler as insert_at_line_handler,
+)
 from app.tools.filesystem.replace_function import (
     REPLACE_FUNCTION_TOOL as _REPLACE_FUNCTION_TOOL,
     replace_function_handler as replace_function_handler,
@@ -2719,25 +2723,7 @@ _ORGANIZE_IMPORTS_TOOL = {
     },
 }
 
-_INSERT_AT_LINE_TOOL = {
-    "name": "insert_at_line",
-    "description": "Insert content at a specific line number in a file. Existing content shifts down.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "File path relative to repo root",
-            },
-            "line": {
-                "type": "integer",
-                "description": "1-indexed line to insert before. Use 0 to prepend.",
-            },
-            "content": {"type": "string", "description": "Content to insert"},
-        },
-        "required": ["path", "line", "content"],
-    },
-}
+# moved to app/tools/filesystem/insert_at_line.py as INSERT_AT_LINE_TOOL — tool_enhance.md productionization pass, tool #47 (2026-08-19).
 
 # moved to app/tools/filesystem/replace_function.py as
 # REPLACE_FUNCTION_TOOL — tool_enhance.md productionization pass, tool
@@ -8146,27 +8132,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         )
         return (r.stdout + r.stderr).strip() or f"Imports organized in {rel}"
 
+    # moved to app/tools/filesystem/insert_at_line.py — this now delegates to the shared insert_at_line_handler()
     def insert_at_line(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        line_num = int(inp["line"])
-        content = str(inp["content"])
-        if _is_protected_path(rel, repo_path):
-            return f"[POLICY DENIED] Cannot write to protected path: {rel}"
-        ial_target = root / rel
-        if not ial_target.exists():
-            return f"[ERROR] File not found: {rel}"
-        try:
-            file_lines = ial_target.read_text(encoding="utf-8").splitlines(
-                keepends=True
-            )
-            insert_at = max(0, line_num - 1) if line_num > 0 else len(file_lines)
-            insert_at = min(insert_at, len(file_lines))
-            ins_content = content if content.endswith("\n") else content + "\n"
-            file_lines.insert(insert_at, ins_content)
-            ial_target.write_text("".join(file_lines), encoding="utf-8")
-            return f"Inserted at line {line_num} in {rel}"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return insert_at_line_handler(root, repo_path, inp)
 
     # moved to app/tools/filesystem/replace_function.py as
     # replace_function_handler — tool_enhance.md productionization pass,

@@ -144,6 +144,7 @@ from app.tools.filesystem.delete_lines import delete_lines_handler
 from app.tools.filesystem.delete_file import delete_file_handler
 from app.tools.filesystem.edit_file import edit_file_handler
 from app.tools.filesystem.insert_after import insert_after_handler
+from app.tools.filesystem.insert_at_line import insert_at_line_handler
 from app.tools.filesystem.replace_function import replace_function_handler
 from app.tools.filesystem.semver_bump import semver_bump_handler
 from app.tools.filesystem.write_file import write_file_handler
@@ -1837,26 +1838,7 @@ class ChatAgent:
             return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 30)
 
         if tool_name == "insert_at_line":
-            rel = str(inp["path"])
-            line_num = int(inp["line"])
-            content = str(inp["content"])
-            if _is_protected_path(rel, repo):
-                return f"[POLICY DENIED] Cannot write to protected path: {rel}"
-            ial_target = root / rel
-            if not ial_target.exists():
-                return f"[ERROR] File not found: {rel}"
-            try:
-                file_lines = ial_target.read_text(encoding="utf-8").splitlines(
-                    keepends=True
-                )
-                insert_at = max(0, line_num - 1) if line_num > 0 else len(file_lines)
-                insert_at = min(insert_at, len(file_lines))
-                ins_content = content if content.endswith("\n") else content + "\n"
-                file_lines.insert(insert_at, ins_content)
-                ial_target.write_text("".join(file_lines), encoding="utf-8")
-                return f"Inserted at line {line_num} in {rel}"
-            except Exception as e:
-                return f"[ERROR] {e}"
+            return insert_at_line_handler(root, repo, inp)
 
         if tool_name == "insert_after":
             # tool_enhance.md productionization pass, tool #46 (2026-08-19)
