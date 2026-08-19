@@ -158,6 +158,7 @@ from app.tools.git.pull_request import (
 )
 from app.tools.git.rebase import validate_git_rebase_inputs
 from app.tools.git.reset import validate_git_reset_inputs
+from app.tools.git.stash import validate_git_stash_action
 from app.tools.git.tag import git_tag_handler
 from app.tools.refactor.rename_symbol import validate_rename_symbol_directory
 
@@ -1515,11 +1516,14 @@ class ChatAgent:
             return _git(["checkout", ck_target], repo)
 
         if tool_name == "git_stash":
-            action = str(inp.get("action", "push"))
-            msg = str(inp.get("message", ""))
-            if action == "push" and msg:
-                return _git(["stash", "push", "-m", msg], repo)
-            return _git(["stash", action], repo)
+            gst_action = str(inp.get("action", "push"))
+            gst_error = validate_git_stash_action(gst_action)
+            if gst_error:
+                return gst_error
+            gst_msg = str(inp.get("message", ""))
+            if gst_action == "push" and gst_msg:
+                return _git(["stash", "push", "-m", gst_msg], repo)
+            return _git(["stash", gst_action], repo)
 
         if tool_name == "git_pull":
             gp_remote = str(inp.get("remote", "origin"))

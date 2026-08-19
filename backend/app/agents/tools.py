@@ -204,6 +204,10 @@ from app.tools.git.reset import (
     git_reset_handler as git_reset_handler,
 )
 from app.tools.git.restore import GIT_RESTORE_TOOL as _GIT_RESTORE_TOOL
+from app.tools.git.stash import (
+    GIT_STASH_TOOL as _GIT_STASH_TOOL,
+    validate_git_stash_action as validate_git_stash_action,
+)
 from app.tools.git.tag import (
     GIT_TAG_TOOL as _GIT_TAG_TOOL,
     git_tag_handler as git_tag_handler,
@@ -2585,25 +2589,7 @@ _GIT_BRANCH_TOOL = {
 # moved to app/tools/git/checkout.py as GIT_CHECKOUT_TOOL —
 # tool_enhance.md productionization pass, tool #35 (2026-08-18).
 
-_GIT_STASH_TOOL = {
-    "name": "git_stash",
-    "description": "Stash current changes or pop the most recent stash. Useful for temporarily saving work.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "action": {
-                "type": "string",
-                "enum": ["push", "pop", "list", "drop"],
-                "description": "Stash action (default: push)",
-            },
-            "message": {
-                "type": "string",
-                "description": "Optional label for the stash (push only)",
-            },
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/git/stash.py as GIT_STASH_TOOL — tool_enhance.md productionization pass, tool #42 (2026-08-19).
 
 # moved to app/tools/git/pull.py as GIT_PULL_TOOL — tool_enhance.md productionization pass, tool #39 (2026-08-18).
 
@@ -7984,8 +7970,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] {e}"
 
     # ---- git_stash ----
+    # moved to app/tools/git/stash.py — this now calls the shared validate_git_stash_action() first
     def git_stash(inp: dict[str, Any]) -> str:
         action = str(inp.get("action", "push"))
+        stash_error = validate_git_stash_action(action)
+        if stash_error:
+            return stash_error
         message = inp.get("message", "")
         cmd = ["git", "stash"]
         if action == "push":
