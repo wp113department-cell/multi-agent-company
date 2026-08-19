@@ -143,6 +143,7 @@ from app.tools.filesystem.delete_block import delete_block_handler
 from app.tools.filesystem.delete_lines import delete_lines_handler
 from app.tools.filesystem.delete_file import delete_file_handler
 from app.tools.filesystem.edit_file import edit_file_handler
+from app.tools.filesystem.insert_after import insert_after_handler
 from app.tools.filesystem.replace_function import replace_function_handler
 from app.tools.filesystem.semver_bump import semver_bump_handler
 from app.tools.filesystem.write_file import write_file_handler
@@ -1856,6 +1857,19 @@ class ChatAgent:
                 return f"Inserted at line {line_num} in {rel}"
             except Exception as e:
                 return f"[ERROR] {e}"
+
+        if tool_name == "insert_after":
+            # tool_enhance.md productionization pass, tool #46 (2026-08-19)
+            # — same "advertised but never dispatched" bug class as tools
+            # #4/#6/#22/#25/#33/#44/#45: already in CHAT_TOOLS, zero
+            # dispatch here, every real call fell through to "Unknown
+            # tool". Its worktree-boundary handling was already correct
+            # (tool #11's fix, re-verified not re-fixed). Deferred, not
+            # fixed here (same class + reasoning as tool #33's
+            # delete_block): `pattern` is an LLM-controlled regex run via
+            # re.search() per line with no timeout — real ReDoS exposure,
+            # but Python's stdlib re has no timeout primitive.
+            return insert_after_handler(root, repo, inp)
 
         if tool_name == "replace_function":
             return replace_function_handler(root, repo, inp)
