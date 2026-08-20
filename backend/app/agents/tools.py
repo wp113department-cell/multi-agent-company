@@ -118,6 +118,9 @@ from app.tools.execution.docker_restart import (
     DOCKER_RESTART_TOOL as _DOCKER_RESTART_TOOL,
     build_docker_restart_command as build_docker_restart_command,
 )
+from app.tools.execution.kill_process import (
+    KILL_PROCESS_TOOL as _KILL_PROCESS_TOOL,
+)
 from app.tools.execution.python_snippet import (
     RUN_PYTHON_SNIPPET_TOOL as _RUN_PYTHON_SNIPPET_TOOL,
     run_python_snippet_handler as run_python_snippet_handler,
@@ -2836,22 +2839,7 @@ _LIST_BACKGROUND_PROCESSES_TOOL = {
 # RUN_PARALLEL_COMMANDS_TOOL — tool_enhance.md productionization pass,
 # tool #9 (2026-08-16).
 
-_KILL_PROCESS_TOOL = {
-    "name": "kill_process",
-    "description": "Kill a background process by PID. Use after run_background.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "pid": {"type": "integer", "description": "Process ID to kill"},
-            "signal": {
-                "type": "string",
-                "enum": ["TERM", "KILL", "INT"],
-                "description": "Signal to send (default: TERM)",
-            },
-        },
-        "required": ["pid"],
-    },
-}
+# moved to app/tools/execution/kill_process.py as KILL_PROCESS_TOOL — tool_enhance.md productionization pass, tool #49 (2026-08-20).
 
 # moved to app/tools/execution/python_snippet.py as RUN_PYTHON_SNIPPET_TOOL
 # — tool_enhance.md productionization pass, tool #14 (2026-08-17).
@@ -8223,6 +8211,10 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             rb_command, rb_cwd, _session_bg_procs, wait_for_pids=rb_wait_pids
         )
 
+    # tool_enhance.md productionization pass, tool #49 (2026-08-20) — the
+    # real fix (an ownership gate) lives in process_manager.kill() itself,
+    # already the shared implementation this call delegates to; see that
+    # function's own docstring.
     def kill_process(inp: dict[str, Any]) -> str:
         from app.fleet import process_manager as _pm
 

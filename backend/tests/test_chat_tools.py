@@ -285,15 +285,35 @@ class TestRunBackground:
 
 class TestKillProcess:
     def test_kills_existing_process(self, handlers: dict[str, Any]) -> None:
-        proc = subprocess.Popen(["sleep", "60"])
-        pid = proc.pid
+        # tool_enhance.md productionization pass, tool #49 (2026-08-20) —
+        # kill_process now only stops processes the calling session
+        # itself started via run_background (a real, proven ownership-gate
+        # fix — see app/fleet/process_manager.py::kill()'s own docstring
+        # and docs/tool_productionization/kill_process.md). A bare
+        # subprocess.Popen the handlers never tracked is no longer
+        # killable through this tool, by design — spawn via the real
+        # run_background handler instead, matching the tool's own always-
+        # documented "Use after run_background" contract.
+        spawn_result = handlers["run_background"]({"command": "sleep 60"})
+        pid = int(spawn_result.split("PID ")[1].split(":")[0])
         result = handlers["kill_process"]({"pid": pid})
         assert "TERM" in result or f"{pid}" in result
-        proc.wait(timeout=2)
 
     def test_error_on_nonexistent_pid(self, handlers: dict[str, Any]) -> None:
         result = handlers["kill_process"]({"pid": 9999999})
         assert "[ERROR]" in result or "No process" in result
+
+    def test_rejects_untracked_process_not_started_by_run_background(
+        self, handlers: dict[str, Any]
+    ) -> None:
+        proc = subprocess.Popen(["sleep", "60"])
+        try:
+            result = handlers["kill_process"]({"pid": proc.pid})
+            assert "[ERROR]" in result
+            assert proc.poll() is None
+        finally:
+            proc.kill()
+            proc.wait()
 
 
 class TestRunPythonSnippet:

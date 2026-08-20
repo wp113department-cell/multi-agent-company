@@ -1948,6 +1948,14 @@ class ChatAgent:
             )
 
         if tool_name == "kill_process":
+            # tool_enhance.md productionization pass, tool #49 (2026-08-20)
+            # — real, severe finding, proved live: process_manager.kill()
+            # previously sent os.kill() to ANY pid, not just ones this
+            # session tracked, letting a real unrelated process (even the
+            # server's own) be killed. Fixed at the shared implementation
+            # itself (process_manager.kill()'s own docstring has the full
+            # account) via an ownership gate — this call site is
+            # unchanged, it already delegated there.
             from app.fleet import process_manager as _pm
 
             kp_pid = int(inp["pid"])

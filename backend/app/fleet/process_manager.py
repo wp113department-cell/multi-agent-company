@@ -111,11 +111,35 @@ def spawn(
 
 def kill(pid: int, sig_name: str, procs: dict[int, Any]) -> str:
     """Send `sig_name` to `pid`, removing it from `procs` and the durable
-    registry either way. Matches the pre-existing behavior at both original
-    call sites exactly: a kill is attempted even for a PID this process
-    never itself tracked (no ownership gate existed before this
-    unification, and none is added here — see this module's own docstring
-    on why NOT changing that is deliberate)."""
+    registry.
+
+    tool_enhance.md productionization pass, tool #49 (2026-08-20) — real,
+    empirically-proven finding: this function previously sent `os.kill()`
+    to ANY pid at all, with no check that it belonged to a process the
+    calling session actually spawned via `run_background`. Proved live: a
+    completely unrelated `sleep 300` process, never tracked in `procs`,
+    was genuinely killed. That included the ability to kill the backend
+    server's own process, or any other process on the host the server's
+    OS user has permission to signal — a real arbitrary-process-
+    termination primitive, despite `kill_process`'s own schema
+    documenting it as "Kill a background process by PID. Use after
+    run_background." A prior refactor (the de-duplication that created
+    this shared module) explicitly preserved that gap rather than
+    introducing one, matching the pre-existing behavior at both original
+    call sites — see git history for that decision's own reasoning.
+    Raised to the user directly (AskUserQuestion) given it was a
+    documented, deliberate prior choice, not an oversight; user chose to
+    close it. Fixed: `pid` must now be a key in the caller's own `procs`
+    dict (i.e. a process this exact session started via `run_background`)
+    before any signal is sent — matching the tool's own documented
+    contract exactly.
+    """
+    if pid not in procs:
+        return (
+            f"[ERROR] PID {pid} was not started by run_background in this "
+            "session — kill_process can only stop processes this session "
+            "itself spawned."
+        )
     sig = _SIGNAL_MAP.get(sig_name, signal.SIGTERM)
     procs.pop(pid, None)
     bg_process_registry.unregister(pid)
