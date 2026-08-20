@@ -166,6 +166,7 @@ from app.tools.git.reset import validate_git_reset_inputs
 from app.tools.git.stash import validate_git_stash_action
 from app.tools.git.tag import git_tag_handler
 from app.tools.git.worktree import validate_git_worktree_inputs
+from app.tools.integrations.linear_create_issue import create_linear_issue
 from app.tools.refactor.rename_symbol import validate_rename_symbol_directory
 
 logger = logging.getLogger(__name__)
@@ -2362,6 +2363,33 @@ class ChatAgent:
                 return "[ERROR] gh CLI not found — install GitHub CLI"
             except Exception as e:
                 return f"[ERROR] {e}"
+
+        if tool_name == "linear_create_issue":
+            # tool_enhance.md productionization pass, tool #50 (2026-08-20)
+            # — same "advertised but never dispatched" bug class as tools
+            # #44/#45: already in CHAT_TOOLS, zero dispatch here, every
+            # real call fell through to "Unknown tool". Its own request-
+            # building logic was already safe (GraphQL variables, never
+            # string-interpolated into the query). Creating a Linear
+            # issue is a real external write with a real cost/consequence
+            # — same risk category as create_pr/github_comment/
+            # github_create_issue — so this mirrors their confirmation
+            # pattern.
+            lci_api_key = os.environ.get("LINEAR_API_KEY", "")
+            if not lci_api_key:
+                return "[ERROR] LINEAR_API_KEY not set"
+            lci_title = str(inp["title"])
+            lci_description = str(inp["description"])
+            lci_team_key = str(inp["team_key"])
+            lci_approved = await self._confirm(
+                description=f"Create a Linear issue in team {lci_team_key!r}: {lci_title!r}",
+                details=lci_description,
+            )
+            if not lci_approved:
+                return "[DENIED] User declined linear_create_issue."
+            return await asyncio.to_thread(
+                create_linear_issue, lci_api_key, lci_title, lci_description, lci_team_key
+            )
 
         if tool_name == "inspect_github_repo":
             return await asyncio.to_thread(_inspect_github_repo, inp)

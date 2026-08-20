@@ -239,6 +239,10 @@ from app.tools.git.worktree import (
     GIT_WORKTREE_TOOL as _GIT_WORKTREE_TOOL,
     validate_git_worktree_inputs as validate_git_worktree_inputs,
 )
+from app.tools.integrations.linear_create_issue import (
+    LINEAR_CREATE_ISSUE_TOOL as _LINEAR_CREATE_ISSUE_TOOL,
+    create_linear_issue as create_linear_issue,
+)
 from app.tools.refactor.rename_symbol import (
     RENAME_SYMBOL_TOOL as _RENAME_SYMBOL_TOOL,
     validate_rename_symbol_directory as validate_rename_symbol_directory,
@@ -5645,19 +5649,7 @@ _GITHUB_LIST_PRS_TOOL: dict[str, Any] = {
 
 # moved to app/tools/git/github_comment.py as GITHUB_COMMENT_TOOL — tool_enhance.md productionization pass, tool #44 (2026-08-19).
 
-_LINEAR_CREATE_ISSUE_TOOL: dict[str, Any] = {
-    "name": "linear_create_issue",
-    "description": "Create a Linear issue via the Linear API. Requires LINEAR_API_KEY env var.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "title": {"type": "string"},
-            "description": {"type": "string"},
-            "team_key": {"type": "string", "description": "Linear team key (e.g. ENG)"},
-        },
-        "required": ["title", "description", "team_key"],
-    },
-}
+# moved to app/tools/integrations/linear_create_issue.py as LINEAR_CREATE_ISSUE_TOOL — tool_enhance.md productionization pass, tool #50 (2026-08-20).
 
 _SLACK_SEND_MESSAGE_TOOL: dict[str, Any] = {
     "name": "slack_send_message",
@@ -10313,49 +10305,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # moved to app/tools/integrations/linear_create_issue.py — this now calls the shared create_linear_issue()
     def linear_create_issue_h(inp: dict[str, Any]) -> str:
-        import urllib.request as _ur_li
-        import urllib.error as _ue_li
-
         api_key = _os_mcp.environ.get("LINEAR_API_KEY", "")
         if not api_key:
             return "[ERROR] LINEAR_API_KEY not set"
         title = str(inp["title"])
         description = str(inp["description"])
         team_key = str(inp["team_key"])
-        # First resolve team key → team ID
-        query = '{"query": "query { teams { nodes { id key } } }"}'
-        try:
-            req = _ur_li.Request(
-                "https://api.linear.app/graphql",
-                data=query.encode(),
-                headers={"Content-Type": "application/json", "Authorization": api_key},
-            )
-            with _ur_li.urlopen(req, timeout=10) as resp:
-                data = __import__("json").loads(resp.read())
-            teams = data.get("data", {}).get("teams", {}).get("nodes", [])
-            team_id = next((t["id"] for t in teams if t["key"] == team_key), None)
-            if not team_id:
-                return f"[ERROR] Team '{team_key}' not found in Linear"
-            mut = __import__("json").dumps(
-                {
-                    "query": "mutation($title: String!, $desc: String!, $tid: String!) { issueCreate(input: {title: $title, description: $desc, teamId: $tid}) { issue { id identifier title } } }",
-                    "variables": {"title": title, "desc": description, "tid": team_id},
-                }
-            )
-            req2 = _ur_li.Request(
-                "https://api.linear.app/graphql",
-                data=mut.encode(),
-                headers={"Content-Type": "application/json", "Authorization": api_key},
-            )
-            with _ur_li.urlopen(req2, timeout=10) as resp2:
-                data2 = __import__("json").loads(resp2.read())
-            issue = data2.get("data", {}).get("issueCreate", {}).get("issue", {})
-            return f"Linear issue created: {issue.get('identifier', '?')} — {issue.get('title', title)}"
-        except _ue_li.HTTPError as e:
-            return f"[ERROR] Linear API {e.code}: {e.read().decode()[:200]}"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return create_linear_issue(api_key, title, description, team_key)
 
     def slack_send_message_h(inp: dict[str, Any]) -> str:
         import urllib.request as _ur_sl
