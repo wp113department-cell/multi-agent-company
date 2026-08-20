@@ -145,6 +145,7 @@ from app.tools.filesystem.delete_file import delete_file_handler
 from app.tools.filesystem.edit_file import edit_file_handler
 from app.tools.filesystem.insert_after import insert_after_handler
 from app.tools.filesystem.insert_at_line import insert_at_line_handler
+from app.tools.filesystem.insert_before import insert_before_handler
 from app.tools.filesystem.replace_function import replace_function_handler
 from app.tools.filesystem.semver_bump import semver_bump_handler
 from app.tools.filesystem.write_file import write_file_handler
@@ -1852,6 +1853,15 @@ class ChatAgent:
             # re.search() per line with no timeout — real ReDoS exposure,
             # but Python's stdlib re has no timeout primitive.
             return insert_after_handler(root, repo, inp)
+
+        if tool_name == "insert_before":
+            # tool_enhance.md productionization pass, tool #48 (2026-08-20)
+            # — identical shape to tool #46's insert_after (its exact
+            # mirror-image sibling): same "advertised but never
+            # dispatched" bug class, same already-correct worktree check,
+            # same deferred ReDoS finding on `pattern` (documented, not
+            # fixed, matching tools #33/#46's reasoning).
+            return insert_before_handler(root, repo, inp)
 
         if tool_name == "replace_function":
             return replace_function_handler(root, repo, inp)

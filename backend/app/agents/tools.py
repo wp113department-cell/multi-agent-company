@@ -158,6 +158,10 @@ from app.tools.filesystem.insert_at_line import (
     INSERT_AT_LINE_TOOL as _INSERT_AT_LINE_TOOL,
     insert_at_line_handler as insert_at_line_handler,
 )
+from app.tools.filesystem.insert_before import (
+    INSERT_BEFORE_TOOL as _INSERT_BEFORE_TOOL,
+    insert_before_handler as insert_before_handler,
+)
 from app.tools.filesystem.replace_function import (
     REPLACE_FUNCTION_TOOL as _REPLACE_FUNCTION_TOOL,
     replace_function_handler as replace_function_handler,
@@ -5529,28 +5533,7 @@ _FIND_WORKER_TOOL: dict[str, Any] = {
 
 # --- Day 2 Gap: Advanced editing tools ---
 
-_INSERT_BEFORE_TOOL: dict[str, Any] = {
-    "name": "insert_before",
-    "description": "Insert lines of text immediately BEFORE the first line matching a pattern in a file.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "File path relative to repo root",
-            },
-            "pattern": {
-                "type": "string",
-                "description": "String or regex pattern to match",
-            },
-            "content": {
-                "type": "string",
-                "description": "Text to insert (can be multi-line)",
-            },
-        },
-        "required": ["path", "pattern", "content"],
-    },
-}
+# moved to app/tools/filesystem/insert_before.py as INSERT_BEFORE_TOOL — tool_enhance.md productionization pass, tool #48 (2026-08-20).
 
 # moved to app/tools/filesystem/insert_after.py as INSERT_AFTER_TOOL — tool_enhance.md productionization pass, tool #46 (2026-08-19).
 
@@ -10478,32 +10461,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return "No worker patterns found."
         return "\n".join(results)
 
+    # moved to app/tools/filesystem/insert_before.py — this now delegates to the shared insert_before_handler()
     def insert_before_h(inp: dict[str, Any]) -> str:
-        path = str(inp["path"])
-        pattern = str(inp["pattern"])
-        content = str(inp["content"])
-        fpath = root / path
-        if _is_protected_path(path, repo_path):
-            return f"[BLOCKED] {path} is a protected path"
-        try:
-            import re as _re_ib
-
-            lines = fpath.read_text(encoding="utf-8").splitlines(keepends=True)
-            new_lines: list[str] = []
-            inserted = False
-            for line in lines:
-                if not inserted and _re_ib.search(pattern, line):
-                    new_lines.append(
-                        content if content.endswith("\n") else content + "\n"
-                    )
-                    inserted = True
-                new_lines.append(line)
-            if not inserted:
-                return f"[WARN] Pattern '{pattern}' not found in {path}"
-            fpath.write_text("".join(new_lines), encoding="utf-8")
-            return f"Inserted {len(content.splitlines())} line(s) before pattern '{pattern}' in {path}"
-        except Exception as e:
-            return f"[ERROR] insert_before: {e}"
+        return insert_before_handler(root, repo_path, inp)
 
     # moved to app/tools/filesystem/insert_after.py — this now delegates to the shared insert_after_handler()
     def insert_after_h(inp: dict[str, Any]) -> str:
