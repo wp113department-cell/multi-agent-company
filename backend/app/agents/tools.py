@@ -138,6 +138,10 @@ from app.tools.execution.python_snippet import (
     RUN_PYTHON_SNIPPET_TOOL as _RUN_PYTHON_SNIPPET_TOOL,
     run_python_snippet_handler as run_python_snippet_handler,
 )
+from app.tools.execution.run_background import (
+    RUN_BACKGROUND_TOOL,
+    validate_run_background_cwd as validate_run_background_cwd,
+)
 from app.tools.execution.run_tests import (
     RUN_TESTS_TOOL as _RUN_TESTS_TOOL,
     run_tests_handler as run_tests_handler,
@@ -2808,29 +2812,12 @@ _SYNC_FILES_TOOL = {
 # NEW TOOL SPECS — Batch 2: Terminal extras
 # ---------------------------------------------------------------------------
 
-_RUN_BACKGROUND_TOOL_DEF = {
-    "name": "run_background",
-    "description": "Start a shell command in the background. Returns immediately with a PID. Use kill_process to stop it. Pass wait_for_pids to only start this command after other background PID(s) have exited (task dependency chaining).",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "command": {
-                "type": "string",
-                "description": "Shell command to run in background",
-            },
-            "cwd": {
-                "type": "string",
-                "description": "Working directory (default: repo root)",
-            },
-            "wait_for_pids": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "description": "PIDs (from earlier run_background calls) that must exit before this command starts running — expresses a dependency between background jobs.",
-            },
-        },
-        "required": ["command"],
-    },
-}
+# moved to app/tools/execution/run_background.py as RUN_BACKGROUND_TOOL /
+# validate_run_background_cwd — tool_enhance.md productionization pass,
+# tool #58 (2026-08-20). See that module's docstring for the real
+# sandboxing finding (fixed in app/fleet/process_manager.py) and the
+# retroactive kill_process (tool #49) fix found along the way.
+_RUN_BACKGROUND_TOOL_DEF = RUN_BACKGROUND_TOOL
 
 _LIST_BACKGROUND_PROCESSES_TOOL = {
     "name": "list_background_processes",
@@ -8083,6 +8070,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # BATCH 2 — Terminal extras
     # =========================================================================
 
+    # tool_enhance.md productionization pass, tool #58 (2026-08-20) — the
+    # real fix (Docker sandboxing) lives in process_manager.spawn() itself,
+    # already the shared implementation this call delegates to; see that
+    # function's own docstring, including a retroactive kill_process
+    # (tool #49) fix found along the way. `cwd` is now validated here
+    # since it gets bind-mounted read-write into the sandbox.
     def run_background(inp: dict[str, Any]) -> str:
         from app.fleet import process_manager as _pm
 
@@ -8091,6 +8084,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         rb_policy = check_command(rb_command)
         if not rb_policy.allowed:
             return f"[POLICY DENIED] {rb_policy.reason}"
+        rb_cwd_error = validate_run_background_cwd(rb_cwd, repo_path)
+        if rb_cwd_error:
+            return rb_cwd_error
         rb_wait_for = inp.get("wait_for_pids")
         rb_wait_pids = [int(p) for p in rb_wait_for] if rb_wait_for else None
         return _pm.spawn(

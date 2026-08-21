@@ -40,6 +40,79 @@ _SIGNAL_MAP = {
 }
 
 
+def _build_sandboxed_argv(command: str, cwd: str, container_name: str) -> list[str]:
+    """Real Docker-sandbox argv for a background command — mirrors
+    app.policy.sandbox.run_sandboxed()'s own security flags (fresh --rm
+    container, cwd bind-mounted read-write at /workspace and nothing else
+    of the host visible, no docker.sock, real cgroup memory/pids/cpu caps,
+    read-only rootfs with a size-capped tmpfs /tmp, non-root host UID/GID)
+    — see that module's docstring for the full reasoning behind each flag,
+    not re-derived here.
+
+    tool_enhance.md productionization pass, tool #58 (2026-08-20) — unlike
+    run_sandboxed() (synchronous, `subprocess.run` + blocking `docker run`),
+    this returns argv for a FOREGROUND (non-detached) `docker run`, so the
+    caller can wrap it in a normal Popen: `docker run` without `-d` blocks
+    for the container's entire lifetime, streaming its real stdout/stderr
+    through the client process's own pipes — proved live (a real multi-line,
+    multi-second script's output arrived via Popen.communicate() exactly as
+    if run unsandboxed) — so kill_process/read_output/list_background_
+    processes need zero changes: they already only ever look at a tracked
+    Popen's `.pid`/`.poll()`/`.stdout`/`.stderr`, all of which remain valid
+    and correctly reflect the sandboxed container's real state.
+
+    `--init` is required, not optional — proved live: without it, `docker
+    kill --signal=TERM` on a `sh -c "sleep 300"` container did NOT stop it
+    (a well-known Docker gotcha: a shell running as the container's PID 1
+    does not forward signals to its own child processes by default). With
+    `--init` (a lightweight init process as real PID 1, forwarding signals
+    correctly), the identical TERM test stopped the container within
+    seconds, exit code 143. Without this, kill_process's TERM/INT signals
+    would silently do nothing against a sandboxed background process.
+
+    Bind-mounts `cwd` at its OWN path inside the container (`-v cwd:cwd -w
+    cwd`), deliberately diverging from run_sandboxed()'s fixed `/workspace`
+    mount point — proved live as a real regression, not a style choice: a
+    pre-existing test (AUDIT_Q_BATCH01's wait_for_pids dependency test,
+    predating this turn) ran `touch {tmp_path}/marker` — an ABSOLUTE host
+    path — and failed once sandboxing was enabled, because inside a
+    `/workspace`-mounted container that same absolute path resolves to
+    nothing (it's created in the container's own ephemeral filesystem,
+    invisible to the host, and vanishes with the container). Mounting at
+    the identical path keeps absolute-path commands referencing files
+    under `cwd` working exactly as before, with an identical security
+    posture — still only `cwd` and nothing else of the host is exposed.
+    """
+    from app.config import get_settings
+
+    settings = get_settings()
+    return [
+        "docker",
+        "run",
+        "--rm",
+        "--init",
+        "--name",
+        container_name,
+        f"--network={settings.bash_sandbox_network}",
+        "--memory=1g",
+        "--pids-limit=512",
+        "--cpus=1.0",
+        "--read-only",
+        "--tmpfs",
+        "/tmp:size=100m,mode=1777",
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
+        "-v",
+        f"{cwd}:{cwd}:rw",
+        "-w",
+        cwd,
+        settings.bash_sandbox_image,
+        "sh",
+        "-c",
+        command,
+    ]
+
+
 def spawn(
     command: str,
     cwd: str,
@@ -52,6 +125,24 @@ def spawn(
     bg_process_registry. Returns the exact human-readable status string
     every run_background tool handler already returned as-is.
 
+    tool_enhance.md productionization pass, tool #58 (2026-08-20) — real,
+    severe finding, raised to the user before fixing (AskUserQuestion)
+    given the scope: `command` was run via `subprocess.Popen(command,
+    shell=True, cwd=cwd)` with ZERO sandboxing — fully unrestricted host
+    shell execution, the same unsandboxed state `bash` (tool #1) was in
+    before its own real Docker-sandboxing remediation. Proved live: a real
+    payload wrote a marker file to an arbitrary host path with no
+    restriction whatsoever. User chose: apply the same real Docker
+    sandboxing tool #1 built for bash. Now routes through
+    `_build_sandboxed_argv()` (see its own docstring for the real
+    empirical findings that shaped it) when `Settings.bash_sandbox_enabled`
+    (the same flag `bash` uses, default True) — fails closed with a real
+    `[SANDBOX UNAVAILABLE]` result if Docker itself isn't reachable, never
+    silently falling back to unsandboxed host execution (matching
+    app.policy.sandbox.run_sandboxed()'s own established fail-closed
+    contract). Falls back to the original raw host execution ONLY when an
+    operator has explicitly set `BASH_SANDBOX_ENABLED=false`.
+
     wait_for_pids (AUDIT_Q_BATCH01 §58 "Task dependency handling between
     terminal jobs" — previously NO code expressed one background job
     depending on another's completion): when given, the real command is
@@ -60,7 +151,12 @@ def spawn(
     whole dependency-wait-then-run lifecycle — the tool call itself still
     returns immediately, matching every other run_background call's
     existing fire-and-forget contract, and the returned PID can be
-    killed/read like any other background process while it waits.
+    killed/read like any other background process while it waits. This
+    wait-loop step deliberately stays OUTSIDE the sandboxed container (it
+    only ever runs `kill -0 <host-integer-pid>`/`sleep`, both fixed,
+    non-LLM-controlled shell fragments, never the real command) — a
+    container has its own PID namespace and could never see a host PID to
+    poll in the first place, sandboxed or not.
 
     Found via real execution, not just code review: `kill -0 <pid>` cannot
     distinguish a genuinely running process from a zombie — a dependency
@@ -75,6 +171,32 @@ def spawn(
     responsibility, an inherent limit of any cross-process PID dependency,
     not something this function can fix.
     """
+    from app.config import get_settings
+
+    settings = get_settings()
+    container_name: str | None = None
+    real_command = command
+
+    if settings.bash_sandbox_enabled:
+        from app.policy.sandbox import _docker_available
+
+        if not _docker_available():
+            return (
+                "[SANDBOX UNAVAILABLE] Docker is not available in this "
+                "environment — sandboxed background execution cannot "
+                "proceed. Refusing to fall back to unsandboxed host "
+                "execution. Set BASH_SANDBOX_ENABLED=false to explicitly "
+                "opt out of sandboxing instead."
+            )
+        import shlex
+        import uuid
+
+        container_name = f"gridiron-bg-{uuid.uuid4().hex[:12]}"
+        docker_argv = _build_sandboxed_argv(real_command, cwd, container_name)
+        run_command = shlex.join(docker_argv)
+    else:
+        run_command = real_command
+
     if wait_for_pids:
         for dep_pid in wait_for_pids:
             dep_proc = procs.get(dep_pid)
@@ -84,15 +206,26 @@ def spawn(
             f"while kill -0 {int(dep_pid)} 2>/dev/null; do sleep 1; done; "
             for dep_pid in wait_for_pids
         )
-        command = f"{wait_clause}{command}"
+        run_command = f"{wait_clause}{run_command}"
     try:
         proc = subprocess.Popen(
-            command,
+            run_command,
             shell=True,
             cwd=cwd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            # tool_enhance.md productionization pass, tool #58 (2026-08-20)
+            # — real, pre-existing, retroactive finding, uncovered while
+            # verifying this turn's sandboxing fix, not introduced by it:
+            # `shell=True` makes `proc.pid` the WRAPPING /bin/sh process,
+            # not the real command — proved live with a plain `sleep 300`.
+            # `start_new_session=True` puts that shell (and everything it
+            # spawns, sandboxed or not) in its own new process group,
+            # required for kill()'s companion fix (os.killpg) below to be
+            # able to signal the whole tree without also reaching the
+            # caller's own process group.
+            start_new_session=True,
         )
     except Exception as e:
         return f"[ERROR] {e}"
@@ -100,13 +233,13 @@ def spawn(
     # Gap-closure Day 23 (Stage 1.3, answers.md) — durably persisted so a
     # crash/restart before kill_process ever runs still leaves a trail
     # sweep_orphaned_processes() can find and clean up at the next startup.
-    bg_process_registry.register(proc.pid, command, cwd)
+    bg_process_registry.register(proc.pid, real_command, cwd)
     if wait_for_pids:
         return (
             f"Started background process PID {proc.pid} (waiting on "
-            f"PID(s) {wait_for_pids} to exit before running): {command[:80]}"
+            f"PID(s) {wait_for_pids} to exit before running): {real_command[:80]}"
         )
-    return f"Started background process PID {proc.pid}: {command[:80]}"
+    return f"Started background process PID {proc.pid}: {real_command[:80]}"
 
 
 def kill(pid: int, sig_name: str, procs: dict[int, Any]) -> str:
@@ -133,6 +266,26 @@ def kill(pid: int, sig_name: str, procs: dict[int, Any]) -> str:
     dict (i.e. a process this exact session started via `run_background`)
     before any signal is sent — matching the tool's own documented
     contract exactly.
+
+    **Second retroactive correction, tool #58 (2026-08-20)**: uncovered
+    while verifying tool #58's own (unrelated) sandboxing fix, not
+    introduced by it — a real, severe, pre-existing bug present since
+    this function (and both of its original, independently-maintained
+    predecessors) was written. `spawn()` always used `shell=True`, which
+    makes the tracked PID the WRAPPING `/bin/sh -c <command>` process, not
+    the real command — `sig_name` was being sent to that shell wrapper via
+    plain `os.kill()`, not to its child. Proved live with a plain
+    `sleep 300` background command: the shell wrapper was correctly
+    reaped (confirmed via `.wait()`, returncode -15), but the real `sleep`
+    process was left running, orphaned, completely untracked —
+    `kill_process` returned a false "Sent TERM to PID X" success message
+    while the actual background command kept running indefinitely. Fixed
+    by signaling the whole process GROUP (`os.killpg`) instead of the
+    single PID — `spawn()`'s companion fix (`start_new_session=True`)
+    ensures each background command's shell (and everything it spawns,
+    including a sandboxed `docker run` and the container inside it) gets
+    its own process group, so `killpg` reaches the real command without
+    also reaching the caller's (backend server's) own process group.
     """
     if pid not in procs:
         return (
@@ -144,7 +297,13 @@ def kill(pid: int, sig_name: str, procs: dict[int, Any]) -> str:
     procs.pop(pid, None)
     bg_process_registry.unregister(pid)
     try:
-        os.kill(pid, sig)
+        try:
+            os.killpg(os.getpgid(pid), sig)
+        except (ProcessLookupError, PermissionError, OSError):
+            # No separate process group (e.g. a Popen from before this fix,
+            # or a platform without process-group support) — fall back to
+            # signaling the tracked PID directly, the prior behavior.
+            os.kill(pid, sig)
         return f"Sent {sig_name} to PID {pid}"
     except ProcessLookupError:
         return f"[ERROR] No process with PID {pid}"

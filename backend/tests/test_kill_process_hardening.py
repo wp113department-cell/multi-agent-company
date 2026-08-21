@@ -60,7 +60,15 @@ def test_kill_rejects_an_untracked_real_process() -> None:
 
 
 def test_kill_allows_a_tracked_real_process() -> None:
-    proc = subprocess.Popen(["sleep", "300"])
+    # start_new_session=True matches how every real tracked process is
+    # actually created (process_manager.spawn() always sets it — see its
+    # own docstring's tool #58 correction). Without it, this Popen shares
+    # the *test runner's own* process group, and pm.kill()'s killpg()
+    # (tool #58's retroactive fix) would signal the whole group —
+    # killing pytest itself, not just the intended child. Proved live:
+    # omitting this flag here made the test suite's own process vanish
+    # mid-run (SIGKILL, exit 137) with no kernel OOM event logged.
+    proc = subprocess.Popen(["sleep", "300"], start_new_session=True)
     procs = {proc.pid: proc}
     result = pm.kill(proc.pid, "KILL", procs)
     assert "Sent KILL" in result

@@ -139,6 +139,7 @@ from app.tools.execution.docker_restart import build_docker_restart_command
 from app.tools.execution.npm_install import validate_npm_install_directory
 from app.tools.execution.npm_run import validate_npm_run_directory
 from app.tools.execution.python_snippet import run_python_snippet_handler
+from app.tools.execution.run_background import validate_run_background_cwd
 from app.tools.execution.run_tests import run_tests_handler
 from app.tools.filesystem.append_file import append_file_handler
 from app.tools.filesystem.apply_patch import apply_patch_handler
@@ -1945,10 +1946,28 @@ class ChatAgent:
         # ========== BATCH 2 — Terminal extras ==========
 
         if tool_name == "run_background":
+            # tool_enhance.md productionization pass, tool #58 (2026-08-20)
+            # — real, severe finding, raised to the user before fixing
+            # (AskUserQuestion) given the scope: `command` had zero
+            # sandboxing at all, full unrestricted host shell execution —
+            # the same unsandboxed state bash (tool #1) was in before its
+            # own real Docker-sandboxing remediation. Fixed at the shared
+            # process_manager.spawn() (now routes through a real
+            # Docker sandbox when enabled — see that function's own
+            # docstring, including a retroactive kill_process fix found
+            # along the way). `cwd` now gets bind-mounted into the
+            # sandbox, so it must stay inside the repo — validated here
+            # before spawn() is ever called.
             from app.fleet import process_manager as _pm
 
             rb_command = str(inp["command"])
             rb_cwd = str(inp.get("cwd") or repo)
+            rb_policy = check_command(rb_command)
+            if not rb_policy.allowed:
+                return f"[POLICY DENIED] {rb_policy.reason}"
+            rb_cwd_error = validate_run_background_cwd(rb_cwd, repo)
+            if rb_cwd_error:
+                return rb_cwd_error
             rb_wait_for = inp.get("wait_for_pids")
             rb_wait_pids = [int(p) for p in rb_wait_for] if rb_wait_for else None
             return _pm.spawn(

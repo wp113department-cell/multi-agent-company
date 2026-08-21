@@ -97,3 +97,42 @@ after this pass: **5239 passed, 52 skipped, 18 deselected, 0 failed**
 ## Final verdict
 
 **GREEN FLAG.**
+
+## Correction (added during tool #58's turn, 2026-08-20)
+
+While verifying tool #58's (`run_background`) own Docker-sandboxing
+work, a second real, severe bug was found in `kill()` — not introduced
+by tool #58, pre-existing since this tool's own original
+implementation: `process_manager.spawn()`'s `subprocess.Popen(command,
+shell=True)` makes the TRACKED pid the WRAPPING `/bin/sh -c <command>`
+process, not the real command underneath it. `kill()`'s plain
+`os.kill(pid, sig)` therefore only ever reached that shell wrapper.
+Proved live with a plain `sleep 300` background command: the shell
+wrapper was correctly reaped, but the real `sleep` process was left
+running, orphaned, completely untracked — `kill_process` returned a
+false "Sent TERM to PID X" success message while the actual command
+kept running indefinitely.
+
+**Fix** (in `app/fleet/process_manager.py`): `kill()` now calls
+`os.killpg(os.getpgid(pid), sig)` (signals the whole process group)
+instead of plain `os.kill()`, falling back to `os.kill()` only if
+`killpg` raises. This requires `spawn()`'s Popen to set
+`start_new_session=True` so each background command gets its own
+process group — without it, `killpg` would reach the CALLER's process
+group too (proved live: an early test of `killpg` without this flag
+killed the test script's own process group).
+
+This also surfaced a matching hazard in this tool's own existing test
+suite: `tests/test_kill_process_hardening.py::
+test_kill_allows_a_tracked_real_process` constructed its `Popen`
+without `start_new_session=True`. Under the old plain-`os.kill()`
+`kill()`, that was harmless; under the new `killpg()`-based `kill()`,
+it meant running that ONE test SIGKILL'd the entire pytest process
+(confirmed via `journalctl -k` showing no kernel OOM event — this was
+not memory pressure). Fixed by adding `start_new_session=True` to that
+test's own `Popen`, matching how every real tracked process is
+actually created in production. Re-verified: 6/6 tests pass cleanly.
+
+Full account, both fixes, and their live verification:
+`docs/tool_productionization/run_background.md` (tool #58's own
+report).
