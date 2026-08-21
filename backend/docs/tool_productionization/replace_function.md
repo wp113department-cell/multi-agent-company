@@ -103,3 +103,25 @@ A genuinely broken tool (100% failure rate for every real
 already-proven implementation — gaining real capability (class-method
 support) in the process, not just fixing the crash. No functionality
 lost for the two implementations that already worked.
+
+## Correction (added during tool #57's turn, 2026-08-20)
+
+While building `replace_class` (tool #57), the exact same boundary-
+detection algorithm used here was found to have a second, independent,
+real bug: the end-boundary scan skipped lines starting with `"#"`/`"@"`,
+meaning a decorator or comment belonging to the NEXT function/method
+got silently swallowed into (and discarded along with) the replaced
+target's region. Proved live: replacing `foo()` in a file where
+`bar()` was immediately preceded by `@decorator` deleted that decorator
+line entirely from the output — a real, functional regression (not
+cosmetic) for any decorated function immediately following a
+`replace_function` call.
+
+Fixed by removing the `#`/`@` special-case from
+`replace_function_handler`'s own boundary scan (the same fix applied to
+the new `replace_class_handler`): the end boundary is simply the next
+non-blank line at or below the target's own indentation, full stop. A
+new regression test
+(`test_chat_agent_replace_function_preserves_next_functions_decorator`
+in `tests/test_replace_function_hardening.py`) proves this closed. Full
+account and the twin fix: `docs/tool_productionization/replace_class.md`.

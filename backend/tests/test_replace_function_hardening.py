@@ -14,6 +14,15 @@ methods, unlike the other two implementations.
 Every test here proves the fix against the REAL dispatch methods
 (ChatAgent._execute_tool and the real handler factories), not a
 reimplementation — real file rewrites throughout.
+
+Retroactive correction, added during tool #57's turn (2026-08-20):
+building `replace_class` found the exact same boundary-detection
+algorithm has a second, independent, real bug — skipping lines
+starting with "#"/"@" when searching for the end boundary silently
+swallowed (and discarded) a decorator/comment belonging to the NEXT
+symbol, instead of preserving it. Proved live: replacing `foo()`
+immediately followed by `@decorator\ndef bar():` deleted the decorator
+entirely. Fixed by removing the "#"/"@" special-case.
 """
 
 from __future__ import annotations
@@ -145,6 +154,26 @@ def test_make_chat_handlers_replace_function_still_works(tmp_path: Path) -> None
         {"path": "mod.py", "function_name": "foo", "new_code": "def foo():\n    return 2\n"}
     )
     assert result.startswith("Replaced 'foo'")
+
+
+@pytest.mark.asyncio
+async def test_chat_agent_replace_function_preserves_next_functions_decorator(
+    tmp_path: Path,
+) -> None:
+    """The retroactively-fixed bug: replacing foo() must not delete
+    @decorator on the immediately-following bar()."""
+    (tmp_path / "mod.py").write_text(
+        "def foo():\n    return 1\n\n\n@decorator\ndef bar():\n    return 2\n"
+    )
+    agent = _agent(str(tmp_path))
+    result = await agent._execute_tool(
+        "replace_function",
+        {"path": "mod.py", "function_name": "foo", "new_code": "def foo():\n    return 999\n"},
+    )
+    assert result.startswith("Replaced 'foo'")
+    content = (tmp_path / "mod.py").read_text()
+    assert "@decorator\ndef bar():" in content
+    assert "return 999" in content
 
 
 def test_handler_rejects_worktree_boundary_escape(tmp_path: Path) -> None:

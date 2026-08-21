@@ -62,6 +62,23 @@ regex version's two independent bugs in place, this pass switches
 two-other-call-sites implementation — a strict capability increase (top-
 level functions it could already find, PLUS methods it never could), not
 a narrowing.
+
+**Correction, added during tool #57's turn (2026-08-20)**: while
+building `replace_class` (tool #57), the exact same boundary-detection
+algorithm was found to have a second, independent, real bug: skipping
+lines starting with `"#"`/`"@"` when searching for the end boundary
+meant a decorator or comment belonging to the NEXT top-level symbol got
+silently swallowed into (and discarded with) the replaced target's
+region, instead of being preserved as part of the file. Proved live:
+replacing `foo()` in a file where `bar()` was immediately preceded by
+`@decorator` deleted that decorator line entirely from the output.
+Fixed by removing the `#`/`@` special-case — the boundary is simply the
+next non-blank line at or below the target's own indentation, full
+stop; a trailing decorator or comment for the *next* symbol now
+correctly ends the current block and survives in the untouched
+`after` text. See `docs/tool_productionization/replace_class.md` for
+the full account (this fix was applied to both tools together, since
+it's the identical underlying bug).
 """
 
 from __future__ import annotations
@@ -99,8 +116,10 @@ def replace_function_handler(root: Path, worktree_path: str, inp: dict[str, Any]
     """Core replace_function logic shared by every real call site.
     Finds `def <name>(`/`async def <name>(` at ANY indentation level
     (top-level function or class method) by scanning stripped lines, then
-    replaces through the next same-or-lower-indent, non-continuation
-    line (a blank line, decorator, or comment doesn't end the block)."""
+    replaces through the next same-or-lower-indent, non-blank line (a
+    blank line doesn't end the block; a decorator or comment at or below
+    the target's own indentation DOES end it — see the tool #57
+    correction note below)."""
     rel = str(inp["path"])
     func_name = str(inp["function_name"])
     new_code = str(inp["new_code"])
@@ -129,11 +148,7 @@ def replace_function_handler(root: Path, worktree_path: str, inp: dict[str, Any]
             if jline.strip() == "":
                 continue
             jindent = len(jline) - len(jline.lstrip())
-            if (
-                jindent <= indent
-                and jline.strip()
-                and not jline.strip().startswith(("#", "@"))
-            ):
+            if jindent <= indent and jline.strip():
                 end = j
                 break
         new_final = new_code if new_code.endswith("\n") else new_code + "\n"

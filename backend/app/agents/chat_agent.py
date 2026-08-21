@@ -151,6 +151,7 @@ from app.tools.filesystem.insert_at_line import insert_at_line_handler
 from app.tools.filesystem.insert_before import insert_before_handler
 from app.tools.filesystem.move_file import move_file_handler
 from app.tools.filesystem.rename_file import rename_file_handler
+from app.tools.filesystem.replace_class import replace_class_handler
 from app.tools.filesystem.replace_function import replace_function_handler
 from app.tools.filesystem.semver_bump import semver_bump_handler
 from app.tools.filesystem.write_file import write_file_handler
@@ -3437,47 +3438,7 @@ class ChatAgent:
         # ========== BATCH 15 — Editing extras ==========
 
         if tool_name == "replace_class":
-            rcl_rel = str(inp["path"])
-            rcl_name = str(inp["class_name"])
-            rcl_new = str(inp["new_code"])
-            if _is_protected_path(rcl_rel, repo):
-                return f"[POLICY DENIED] Protected path: {rcl_rel}"
-            rcl_fp = root / rcl_rel
-            if not rcl_fp.exists():
-                return f"[ERROR] File not found: {rcl_rel}"
-            rcl_lines = rcl_fp.read_text(encoding="utf-8").splitlines(keepends=True)
-            rcl_start: int | None = None
-            rcl_base_i = 0
-            for rcl_idx, rcl_ln in enumerate(rcl_lines):
-                rcl_s = rcl_ln.strip()
-                if (
-                    rcl_s.startswith(f"class {rcl_name}(")
-                    or rcl_s.startswith(f"class {rcl_name}:")
-                    or rcl_s == f"class {rcl_name}"
-                ):
-                    rcl_start = rcl_idx
-                    rcl_base_i = len(rcl_ln) - len(rcl_ln.lstrip())
-                    break
-            if rcl_start is None:
-                return f"[ERROR] Class '{rcl_name}' not found in {rcl_rel}"
-            rcl_end_i = len(rcl_lines)
-            for rcl_j2 in range(rcl_start + 1, len(rcl_lines)):
-                rcl_jl2 = rcl_lines[rcl_j2]
-                if rcl_jl2.strip() == "":
-                    continue
-                rcl_ji2 = len(rcl_jl2) - len(rcl_jl2.lstrip())
-                if (
-                    rcl_ji2 <= rcl_base_i
-                    and rcl_jl2.strip()
-                    and not rcl_jl2.strip().startswith(("@", "#"))
-                ):
-                    rcl_end_i = rcl_j2
-                    break
-            rcl_before = "".join(rcl_lines[:rcl_start])
-            rcl_after = "".join(rcl_lines[rcl_end_i:])
-            rcl_new_final = rcl_new if rcl_new.endswith("\n") else rcl_new + "\n"
-            rcl_fp.write_text(rcl_before + rcl_new_final + rcl_after, encoding="utf-8")
-            return f"Replaced class '{rcl_name}' in {rcl_rel} (was lines {rcl_start + 1}–{rcl_end_i})"
+            return replace_class_handler(root, repo, inp)
 
         if tool_name == "undo_changes":
             undo_rel = str(inp["path"])

@@ -186,6 +186,10 @@ from app.tools.filesystem.rename_file import (
     RENAME_FILE_TOOL as _RENAME_FILE_TOOL,
     rename_file_handler as rename_file_handler,
 )
+from app.tools.filesystem.replace_class import (
+    REPLACE_CLASS_TOOL as _REPLACE_CLASS_TOOL,
+    replace_class_handler as replace_class_handler,
+)
 from app.tools.filesystem.replace_function import (
     REPLACE_FUNCTION_TOOL as _REPLACE_FUNCTION_TOOL,
     replace_function_handler as replace_function_handler,
@@ -3611,32 +3615,7 @@ _TASK_PROGRESS_TOOL = {
 }
 
 # Batch 15 — Editing extras
-_REPLACE_CLASS_TOOL = {
-    "name": "replace_class",
-    "description": (
-        "Replace an entire class block in a Python file by class name. "
-        "Finds the class by its `class <name>` line and replaces everything up to the next "
-        "top-level definition. Always read the file first."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "File path (relative to repo root)",
-            },
-            "class_name": {
-                "type": "string",
-                "description": "Name of the class to replace",
-            },
-            "new_code": {
-                "type": "string",
-                "description": "Complete new class code (including the class definition line)",
-            },
-        },
-        "required": ["path", "class_name", "new_code"],
-    },
-}
+# moved to app/tools/filesystem/replace_class.py as REPLACE_CLASS_TOOL — tool_enhance.md productionization pass, tool #57 (2026-08-20).
 
 _UNDO_CHANGES_TOOL = {
     "name": "undo_changes",
@@ -9714,51 +9693,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # BATCH 15 — Editing extras (replace_class, undo_changes, generate_patch)
     # =========================================================================
 
+    # moved to app/tools/filesystem/replace_class.py — this now delegates to the shared replace_class_handler()
     def replace_class_h(inp: dict[str, Any]) -> str:
-        rcl_rel = str(inp["path"])
-        rcl_name = str(inp["class_name"])
-        rcl_new = str(inp["new_code"])
-        if _is_protected_path(rcl_rel, repo_path):
-            return f"[POLICY DENIED] Protected path: {rcl_rel}"
-        rcl_fp = root / rcl_rel
-        if not rcl_fp.exists():
-            return f"[ERROR] File not found: {rcl_rel}"
-        try:
-            rcl_lines = rcl_fp.read_text(encoding="utf-8").splitlines(keepends=True)
-        except Exception as e:
-            return f"[ERROR] {e}"
-        rcl_start: int | None = None
-        rcl_base_ind = 0
-        for rcl_i, rcl_ln in enumerate(rcl_lines):
-            s = rcl_ln.strip()
-            if (
-                s.startswith(f"class {rcl_name}(")
-                or s.startswith(f"class {rcl_name}:")
-                or s == f"class {rcl_name}"
-            ):
-                rcl_start = rcl_i
-                rcl_base_ind = len(rcl_ln) - len(rcl_ln.lstrip())
-                break
-        if rcl_start is None:
-            return f"[ERROR] Class '{rcl_name}' not found in {rcl_rel}"
-        rcl_end = len(rcl_lines)
-        for rcl_j in range(rcl_start + 1, len(rcl_lines)):
-            rcl_jl = rcl_lines[rcl_j]
-            if rcl_jl.strip() == "":
-                continue
-            rcl_ji = len(rcl_jl) - len(rcl_jl.lstrip())
-            if (
-                rcl_ji <= rcl_base_ind
-                and rcl_jl.strip()
-                and not rcl_jl.strip().startswith(("@", "#"))
-            ):
-                rcl_end = rcl_j
-                break
-        before = "".join(rcl_lines[:rcl_start])
-        after = "".join(rcl_lines[rcl_end:])
-        new_final = rcl_new if rcl_new.endswith("\n") else rcl_new + "\n"
-        rcl_fp.write_text(before + new_final + after, encoding="utf-8")
-        return f"Replaced class '{rcl_name}' in {rcl_rel} (was lines {rcl_start + 1}–{rcl_end})"
+        return replace_class_handler(root, repo_path, inp)
 
     def undo_changes_h(inp: dict[str, Any]) -> str:
         undo_rel = str(inp["path"])
