@@ -182,6 +182,10 @@ from app.tools.filesystem.move_file import (
     MOVE_FILE_TOOL as _MOVE_FILE_TOOL,
     move_file_handler as move_file_handler,
 )
+from app.tools.filesystem.rename_file import (
+    RENAME_FILE_TOOL as _RENAME_FILE_TOOL,
+    rename_file_handler as rename_file_handler,
+)
 from app.tools.filesystem.replace_function import (
     REPLACE_FUNCTION_TOOL as _REPLACE_FUNCTION_TOOL,
     replace_function_handler as replace_function_handler,
@@ -2574,24 +2578,7 @@ _SUBMIT_RESULT_TOOL = {
 # moved to app/tools/filesystem/append_file.py as APPEND_FILE_TOOL —
 # tool_enhance.md productionization pass, tool #26 (2026-08-18).
 
-_RENAME_FILE_TOOL = {
-    "name": "rename_file",
-    "description": "Rename or move a file within the repository. Cannot move outside the repo.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "from_path": {
-                "type": "string",
-                "description": "Current file path relative to repo root",
-            },
-            "to_path": {
-                "type": "string",
-                "description": "New file path relative to repo root",
-            },
-        },
-        "required": ["from_path", "to_path"],
-    },
-}
+# moved to app/tools/filesystem/rename_file.py as RENAME_FILE_TOOL — tool_enhance.md productionization pass, tool #56 (2026-08-20).
 
 _COPY_FILE_TOOL = {
     "name": "copy_file",
@@ -7706,23 +7693,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         return append_file_handler(root, repo_path, inp)
 
     # ---- rename_file ----
+    # moved to app/tools/filesystem/rename_file.py — this now delegates to the shared rename_file_handler()
     def rename_file(inp: dict[str, Any]) -> str:
-        from_rel = str(inp["from_path"])
-        to_rel = str(inp["to_path"])
-        if _is_protected_path(from_rel, repo_path) or _is_protected_path(
-            to_rel, repo_path
-        ):
-            return "[POLICY DENIED] Protected path involved."
-        src = root / from_rel
-        dst = root / to_rel
-        if not src.exists():
-            return f"[ERROR] Source not found: {from_rel}"
-        try:
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            src.rename(dst)
-            return f"Moved {from_rel} → {to_rel}"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return rename_file_handler(root, repo_path, inp)
 
     # ---- copy_file ----
     def copy_file(inp: dict[str, Any]) -> str:

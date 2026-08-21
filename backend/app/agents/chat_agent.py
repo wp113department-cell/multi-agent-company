@@ -150,6 +150,7 @@ from app.tools.filesystem.insert_after import insert_after_handler
 from app.tools.filesystem.insert_at_line import insert_at_line_handler
 from app.tools.filesystem.insert_before import insert_before_handler
 from app.tools.filesystem.move_file import move_file_handler
+from app.tools.filesystem.rename_file import rename_file_handler
 from app.tools.filesystem.replace_function import replace_function_handler
 from app.tools.filesystem.semver_bump import semver_bump_handler
 from app.tools.filesystem.write_file import write_file_handler
@@ -1414,17 +1415,7 @@ class ChatAgent:
             return append_file_handler(root, repo, inp)
 
         if tool_name == "rename_file":
-            from_rel = str(inp["from_path"])
-            to_rel = str(inp["to_path"])
-            if _is_protected_path(from_rel, repo) or _is_protected_path(to_rel, repo):
-                return "[POLICY DENIED] Protected path involved"
-            src = root / from_rel
-            dst = root / to_rel
-            if not src.exists():
-                return f"[ERROR] Source not found: {from_rel}"
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            src.rename(dst)
-            return f"Moved {from_rel} → {to_rel}"
+            return rename_file_handler(root, repo, inp)
 
         if tool_name == "copy_file":
             import shutil as _shutil
