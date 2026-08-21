@@ -80,6 +80,10 @@ from app.tools.agents.delegate import (
     DELEGATE_TO_AGENT_TOOL as _DELEGATE_TO_AGENT_TOOL,
     make_delegate_to_agent_handler as make_delegate_to_agent_handler,
 )
+from app.tools.agents.memory_write import (
+    MEMORY_WRITE_TOOL as _MEMORY_WRITE_TOOL,
+    write_memory_key as write_memory_key,
+)
 from app.tools.agents.propose_subtask import (
     PROPOSE_SUBTASK_TOOL as PROPOSE_SUBTASK_TOOL,
     make_propose_subtask_handler as make_propose_subtask_handler,
@@ -5348,18 +5352,7 @@ _MEMORY_READ_TOOL: dict[str, Any] = {
     },
 }
 
-_MEMORY_WRITE_TOOL: dict[str, Any] = {
-    "name": "memory_write",
-    "description": "Write a value to the per-repo memory store under a key.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "key": {"type": "string"},
-            "value": {"type": "string"},
-        },
-        "required": ["key", "value"],
-    },
-}
+# moved to app/tools/agents/memory_write.py as MEMORY_WRITE_TOOL — tool_enhance.md productionization pass, tool #51 (2026-08-20).
 
 _DECISION_LOG_APPEND_TOOL: dict[str, Any] = {
     "name": "decision_log_append",
@@ -10027,13 +10020,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         val = store.get(key)
         return val if val is not None else f"(key '{key}' not found in memory)"
 
+    # moved to app/tools/agents/memory_write.py — this now calls the shared, atomic write_memory_key()
+    # (real, empirically-proven lost-update race condition fixed there; see that module's own docstring)
     def memory_write_h(inp: dict[str, Any]) -> str:
         key = str(inp["key"])
         value = str(inp["value"])
-        store = _read_mem_store()
-        store[key] = value
-        _write_mem_store(store)
-        return f"Memory written: {key}"
+        return write_memory_key(repo_path, key, value)
 
     def decision_log_append_h(inp: dict[str, Any]) -> str:
         import datetime as _dt

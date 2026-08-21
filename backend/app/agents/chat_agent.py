@@ -118,6 +118,7 @@ from app.config import get_settings
 from app.models.chat import ChatSession
 from app.policy.engine import check_command, check_path_in_worktree
 from app.repo_tools import ast_engine as _ast_engine
+from app.tools.agents.memory_write import write_memory_key
 from app.tools.browser.browser_tools import (
     browser_click_handler,
     browser_close_handler,
@@ -2390,6 +2391,22 @@ class ChatAgent:
             return await asyncio.to_thread(
                 create_linear_issue, lci_api_key, lci_title, lci_description, lci_team_key
             )
+
+        if tool_name == "memory_write":
+            # tool_enhance.md productionization pass, tool #51 (2026-08-20)
+            # — same "advertised but never dispatched" bug class as tools
+            # #44/#45/#50: already in CHAT_TOOLS, zero dispatch here,
+            # every real call fell through to "Unknown tool". Also found
+            # a real, severe, empirically-proven data-loss race
+            # condition in the underlying store logic (17 of 20
+            # concurrent writes silently lost) — fixed at the shared
+            # write_memory_key() implementation itself; see that
+            # function's own docstring. Purely a local, non-externally-
+            # visible write (unlike create_pr/github_comment/
+            # linear_create_issue), so no confirmation gate needed here.
+            mw_key = str(inp["key"])
+            mw_value = str(inp["value"])
+            return await asyncio.to_thread(write_memory_key, repo, mw_key, mw_value)
 
         if tool_name == "inspect_github_repo":
             return await asyncio.to_thread(_inspect_github_repo, inp)

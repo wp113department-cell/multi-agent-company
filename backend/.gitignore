@@ -8,3 +8,6 @@ pytest-results.xml
 *.egg-info/
 dist/
 build/
+
+# per-repo runtime memory store (app/tools/agents/memory_write.py) — never committed
+app/memory/*.json
