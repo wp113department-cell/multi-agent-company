@@ -136,6 +136,7 @@ from app.tools.execution.docker_build import validate_docker_build_inputs
 from app.tools.execution.docker_compose import build_docker_compose_command
 from app.tools.execution.docker_exec import build_docker_exec_command
 from app.tools.execution.docker_restart import build_docker_restart_command
+from app.tools.execution.npm_install import validate_npm_install_directory
 from app.tools.execution.python_snippet import run_python_snippet_handler
 from app.tools.execution.run_tests import run_tests_handler
 from app.tools.filesystem.append_file import append_file_handler
@@ -2835,8 +2836,20 @@ class ChatAgent:
             # working pattern already used for pip_install below and for
             # git_push/docker_compose above — installing arbitrary
             # dependencies is a real side effect, not a read.
+            #
+            # tool_enhance.md productionization pass, tool #53 (2026-08-20)
+            # — real, severe finding on this same turn's own full audit:
+            # `directory` was never validated, letting npm run in an
+            # arbitrary directory outside the repo. Proved live: a real
+            # package.json with a malicious preinstall script, placed
+            # outside the repo, had that script actually executed —
+            # arbitrary command execution via npm's own lifecycle-script
+            # mechanism. Fixed via validate_npm_install_directory().
             ni_directory = str(inp.get("directory", "."))
             ni_package = str(inp.get("package", "")).strip()
+            ni_dir_error = validate_npm_install_directory(ni_directory, repo)
+            if ni_dir_error:
+                return ni_dir_error
             ni_target_dir = str(root / ni_directory)
             ni_cmd = ["npm", "install"] + ([ni_package] if ni_package else [])
             ni_approved = await self._confirm(

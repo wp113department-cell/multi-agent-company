@@ -125,6 +125,9 @@ from app.tools.execution.docker_restart import (
 from app.tools.execution.kill_process import (
     KILL_PROCESS_TOOL as _KILL_PROCESS_TOOL,
 )
+from app.tools.execution.npm_install import (
+    NPM_INSTALL_TOOL as _NPM_INSTALL_TOOL,
+)
 from app.tools.execution.python_snippet import (
     RUN_PYTHON_SNIPPET_TOOL as _RUN_PYTHON_SNIPPET_TOOL,
     run_python_snippet_handler as run_python_snippet_handler,
@@ -7136,24 +7139,7 @@ _LOC_STATS_TOOL: dict[str, Any] = {
 }
 
 # -- Package management --
-_NPM_INSTALL_TOOL: dict[str, Any] = {
-    "name": "npm_install",
-    "description": "Run npm install in a directory. Use to install Node.js dependencies.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "directory": {
-                "type": "string",
-                "description": "Directory containing package.json (default: repo root)",
-            },
-            "package": {
-                "type": "string",
-                "description": "Optional specific package to install (e.g. 'lodash@4')",
-            },
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/execution/npm_install.py as NPM_INSTALL_TOOL — tool_enhance.md productionization pass, tool #53 (2026-08-20).
 _NPM_RUN_TOOL: dict[str, Any] = {
     "name": "npm_run",
     "description": "Run an npm script defined in package.json (e.g. build, test, lint).",
