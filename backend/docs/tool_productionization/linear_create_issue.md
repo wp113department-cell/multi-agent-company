@@ -75,8 +75,21 @@ GraphQL variable construction — is genuinely exercised)
 
 Targeted sweep (new test file + kill_process hardening +
 `test_chat_tools.py`/`test_day1_tools.py`/`test_day2_tools.py`): **368
-passed, 1 skipped.** Full suite re-run after this pass — see
-`tool_enhance_tracking.md`'s row for this tool for the final count.
+passed, 1 skipped.**
+
+First full-suite run hit 1 failure
+(`test_phase51_epic_manager_graph.py::TestConflictHaltPath::
+test_run_epic_manager_halts_on_a_real_file_conflict_without_reaching_coding`)
+— investigated rather than assumed: the machine was under genuine real
+resource pressure at the time (load average 55+ on 6 CPUs, ~1GB RAM
+free, 4GB swap nearly full, most likely a concurrent session sharing
+this machine), which tripped a real resource-exhaustion guard the test
+didn't expect. Confirmed via `free -h`/`uptime` before and after, and
+by re-running the single test once load had genuinely dropped (load
+average 4.29, 5.7GB available) — passed cleanly. Full suite re-run
+fresh once more: **5247 passed, 52 skipped, 18 deselected, 0 failed**
+(up from 5239 before this tool) — confirms the earlier failure was
+environmental, not caused by this tool's change.
 
 ## Final verdict
 
