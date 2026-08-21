@@ -131,6 +131,9 @@ from app.tools.execution.npm_install import (
 from app.tools.execution.npm_run import (
     NPM_RUN_TOOL as _NPM_RUN_TOOL,
 )
+from app.tools.execution.pip_install import (
+    PIP_INSTALL_TOOL as _PIP_INSTALL_TOOL,
+)
 from app.tools.execution.python_snippet import (
     RUN_PYTHON_SNIPPET_TOOL as _RUN_PYTHON_SNIPPET_TOOL,
     run_python_snippet_handler as run_python_snippet_handler,
@@ -7144,20 +7147,7 @@ _LOC_STATS_TOOL: dict[str, Any] = {
 # -- Package management --
 # moved to app/tools/execution/npm_install.py as NPM_INSTALL_TOOL — tool_enhance.md productionization pass, tool #53 (2026-08-20).
 # moved to app/tools/execution/npm_run.py as NPM_RUN_TOOL — tool_enhance.md productionization pass, tool #54 (2026-08-20).
-_PIP_INSTALL_TOOL: dict[str, Any] = {
-    "name": "pip_install",
-    "description": "Install a Python package in the current environment.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "package": {
-                "type": "string",
-                "description": "Package name with optional version, e.g. 'requests==2.31.0'",
-            },
-        },
-        "required": ["package"],
-    },
-}
+# moved to app/tools/execution/pip_install.py as PIP_INSTALL_TOOL — tool_enhance.md productionization pass, tool #55 (2026-08-20).
 _PIP_LIST_TOOL: dict[str, Any] = {
     "name": "pip_list",
     "description": "List installed Python packages and their versions.",
@@ -11441,7 +11431,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     def pip_install_h(inp: dict[str, Any]) -> str:
         # tool_enhance.md productionization pass, tool #4 (2026-08-16) —
-        # same real gap as npm_install_h above.
+        # same real gap as npm_install_h above. Re-audited during tool #55
+        # (2026-08-20): still correct, no changes needed — see
+        # app/tools/execution/pip_install.py's own docstring.
         return "[BLOCKED] pip_install requires interactive session for safety confirmation"
 
     def pip_list_h(inp: dict[str, Any]) -> str:

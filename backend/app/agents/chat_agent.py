@@ -2924,6 +2924,19 @@ class ChatAgent:
         if tool_name == "pip_install":
             # Real bug, same class as npm_install above — advertised via
             # CHAT_TOOLS, no dispatch existed.
+            #
+            # tool_enhance.md productionization pass, tool #55 (2026-08-20)
+            # — full audit found no new vulnerability: no directory/cwd
+            # field exists (unlike npm_install/npm_run, no worktree-
+            # escape surface), list-args (no shell injection), and this
+            # confirmation gate already shows the human the exact raw
+            # command before anything runs — the correct, intended
+            # safeguard for pip's own rich package-spec syntax (editable/
+            # VCS installs), which has no safe reject-boundary without
+            # breaking real use. See app/tools/execution/pip_install.py's
+            # docstring for the full audit, including a real (but
+            # non-actionable) finding about pip's internal flag
+            # recognition within a single package string.
             pi_package = str(inp["package"])
             pi_approved = await self._confirm(
                 description=f"Install Python package: {pi_package}",
