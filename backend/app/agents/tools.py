@@ -169,6 +169,10 @@ from app.tools.filesystem.insert_before import (
     INSERT_BEFORE_TOOL as _INSERT_BEFORE_TOOL,
     insert_before_handler as insert_before_handler,
 )
+from app.tools.filesystem.move_file import (
+    MOVE_FILE_TOOL as _MOVE_FILE_TOOL,
+    move_file_handler as move_file_handler,
+)
 from app.tools.filesystem.replace_function import (
     REPLACE_FUNCTION_TOOL as _REPLACE_FUNCTION_TOOL,
     replace_function_handler as replace_function_handler,
@@ -6748,24 +6752,7 @@ _UNZIP_FILES_TOOL: dict[str, Any] = {
         "required": ["archive"],
     },
 }
-_MOVE_FILE_TOOL: dict[str, Any] = {
-    "name": "move_file",
-    "description": "Move a file or directory to a new path (mv semantics, can move across directories).",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "source": {
-                "type": "string",
-                "description": "Source path (relative to repo root)",
-            },
-            "dest": {
-                "type": "string",
-                "description": "Destination path (relative to repo root)",
-            },
-        },
-        "required": ["source", "dest"],
-    },
-}
+# moved to app/tools/filesystem/move_file.py as MOVE_FILE_TOOL — tool_enhance.md productionization pass, tool #52 (2026-08-20).
 _HASH_FILE_TOOL: dict[str, Any] = {
     "name": "hash_file",
     "description": "Compute the SHA-256 hash of a file. Useful for integrity checking.",
@@ -10815,19 +10802,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] unzip_files: {e}"
 
+    # moved to app/tools/filesystem/move_file.py — this now calls the shared, hardened move_file_handler()
     def move_file_h(inp: dict[str, Any]) -> str:
-        import shutil as _shutil
-
-        src = root / str(inp["source"])
-        dst = root / str(inp["dest"])
-        if _is_protected_path(str(inp["dest"]), repo_path):
-            return f"[POLICY DENIED] Cannot move to protected path: {inp['dest']}"
-        try:
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            _shutil.move(str(src), str(dst))
-            return f"Moved {inp['source']} → {inp['dest']}"
-        except Exception as e:
-            return f"[ERROR] move_file: {e}"
+        return move_file_handler(root, repo_path, inp)
 
     def hash_file_h(inp: dict[str, Any]) -> str:
         import hashlib as _hl

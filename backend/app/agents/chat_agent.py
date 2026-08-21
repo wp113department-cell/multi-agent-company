@@ -147,6 +147,7 @@ from app.tools.filesystem.edit_file import edit_file_handler
 from app.tools.filesystem.insert_after import insert_after_handler
 from app.tools.filesystem.insert_at_line import insert_at_line_handler
 from app.tools.filesystem.insert_before import insert_before_handler
+from app.tools.filesystem.move_file import move_file_handler
 from app.tools.filesystem.replace_function import replace_function_handler
 from app.tools.filesystem.semver_bump import semver_bump_handler
 from app.tools.filesystem.write_file import write_file_handler
@@ -1439,6 +1440,20 @@ class ChatAgent:
             dst.parent.mkdir(parents=True, exist_ok=True)
             _shutil.copy2(str(src), str(dst))
             return f"Copied {from_rel} → {to_rel}"
+
+        if tool_name == "move_file":
+            # tool_enhance.md productionization pass, tool #52 (2026-08-20)
+            # — same "advertised but never dispatched" class as tools
+            # #44/#45/#46/#48/#50/#51: already in CHAT_TOOLS, zero
+            # dispatch here. Also found a real, severe finding matching
+            # tool #11's copy_file bug class (never validated from_path)
+            # but worse — `source` was never validated at all, and a
+            # move also DELETES the original, proved live: an absolute
+            # outside-repo source was successfully relocated into the
+            # repo, destroying the original file at its source location.
+            # Fixed via the shared move_file_handler(), which validates
+            # both source and dest.
+            return move_file_handler(root, repo, inp)
 
         if tool_name == "delete_file":
             rel = str(inp["path"])
