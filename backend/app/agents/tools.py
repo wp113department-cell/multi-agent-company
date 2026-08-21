@@ -128,6 +128,9 @@ from app.tools.execution.kill_process import (
 from app.tools.execution.npm_install import (
     NPM_INSTALL_TOOL as _NPM_INSTALL_TOOL,
 )
+from app.tools.execution.npm_run import (
+    NPM_RUN_TOOL as _NPM_RUN_TOOL,
+)
 from app.tools.execution.python_snippet import (
     RUN_PYTHON_SNIPPET_TOOL as _RUN_PYTHON_SNIPPET_TOOL,
     run_python_snippet_handler as run_python_snippet_handler,
@@ -7140,24 +7143,7 @@ _LOC_STATS_TOOL: dict[str, Any] = {
 
 # -- Package management --
 # moved to app/tools/execution/npm_install.py as NPM_INSTALL_TOOL — tool_enhance.md productionization pass, tool #53 (2026-08-20).
-_NPM_RUN_TOOL: dict[str, Any] = {
-    "name": "npm_run",
-    "description": "Run an npm script defined in package.json (e.g. build, test, lint).",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "script": {
-                "type": "string",
-                "description": "Script name from package.json scripts",
-            },
-            "directory": {
-                "type": "string",
-                "description": "Directory containing package.json (default: repo root)",
-            },
-        },
-        "required": ["script"],
-    },
-}
+# moved to app/tools/execution/npm_run.py as NPM_RUN_TOOL — tool_enhance.md productionization pass, tool #54 (2026-08-20).
 _PIP_INSTALL_TOOL: dict[str, Any] = {
     "name": "pip_install",
     "description": "Install a Python package in the current environment.",
@@ -11442,21 +11428,16 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         # plumbing that could never execute.
         return "[BLOCKED] npm_install requires interactive session for safety confirmation"
 
+    # tool_enhance.md productionization pass, tool #54 (2026-08-20) — real
+    # gap found: same shape as npm_install_h/pip_install_h right below
+    # (no real one-shot caller, grepped; a real side effect — arbitrary
+    # script execution). Unlike those two, this handler had NOT been
+    # blocked, and its own directory field was never validated either —
+    # proved live, a real malicious package.json script placed outside
+    # the repo was genuinely executed via this exact handler, with zero
+    # confirmation gate anywhere. Brought in line with its own siblings.
     def npm_run_h(inp: dict[str, Any]) -> str:
-        script = str(inp["script"])
-        directory = str(inp.get("directory", "."))
-        target_dir = str(root / directory)
-        try:
-            r = subprocess.run(
-                ["npm", "run", script],
-                capture_output=True,
-                text=True,
-                cwd=target_dir,
-                timeout=180,
-            )
-            return (r.stdout + r.stderr).strip()[-3000:] or f"npm run {script} complete"
-        except Exception as e:
-            return f"[ERROR] npm_run: {e}"
+        return "[BLOCKED] npm_run requires interactive session for safety confirmation"
 
     def pip_install_h(inp: dict[str, Any]) -> str:
         # tool_enhance.md productionization pass, tool #4 (2026-08-16) —

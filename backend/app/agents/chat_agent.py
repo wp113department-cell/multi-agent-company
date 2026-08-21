@@ -137,6 +137,7 @@ from app.tools.execution.docker_compose import build_docker_compose_command
 from app.tools.execution.docker_exec import build_docker_exec_command
 from app.tools.execution.docker_restart import build_docker_restart_command
 from app.tools.execution.npm_install import validate_npm_install_directory
+from app.tools.execution.npm_run import validate_npm_run_directory
 from app.tools.execution.python_snippet import run_python_snippet_handler
 from app.tools.execution.run_tests import run_tests_handler
 from app.tools.filesystem.append_file import append_file_handler
@@ -2883,8 +2884,23 @@ class ChatAgent:
             # matching tools.py's own npm_run_h precedent: running a
             # package.json script (build/test/lint) is lower-risk than
             # installing arbitrary new dependencies.
+            #
+            # tool_enhance.md productionization pass, tool #54 (2026-08-20)
+            # — real, severe finding, same shape as tool #53's
+            # npm_install: `directory` was never validated, letting npm
+            # run in an arbitrary directory outside the repo. Proved
+            # live (via make_chat_handlers, no confirmation gate at all
+            # there): a real malicious package.json script, placed
+            # outside the repo, was genuinely executed. Fixed via
+            # validate_npm_run_directory(); the no-confirmation-gate
+            # design above is kept, since it's only safe once directory
+            # is actually constrained to this repo (this fix) — the
+            # same trust level run_tests/run_make already operate at.
             nr_script = str(inp["script"])
             nr_directory = str(inp.get("directory", "."))
+            nr_dir_error = validate_npm_run_directory(nr_directory, repo)
+            if nr_dir_error:
+                return nr_dir_error
             nr_target_dir = str(root / nr_directory)
 
             def _run_npm_script() -> str:
