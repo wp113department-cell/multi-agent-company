@@ -202,6 +202,10 @@ from app.tools.filesystem.insert_before import (
     INSERT_BEFORE_TOOL as _INSERT_BEFORE_TOOL,
     insert_before_handler as insert_before_handler,
 )
+from app.tools.filesystem.get_file_tree import (
+    GET_FILE_TREE_TOOL,
+    get_file_tree_handler,
+)
 from app.tools.filesystem.read_file import (
     READ_FILE_TOOL,
     read_file_handler,
@@ -598,24 +602,12 @@ READ_ONLY_TOOLS = [
             "required": ["name"],
         },
     },
-    {
-        "name": "get_file_tree",
-        "description": "Get a tree view of the project structure. Use this first to understand what exists before exploring individual files.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "directory": {
-                    "type": "string",
-                    "description": "Starting directory (default: repo root)",
-                },
-                "max_depth": {
-                    "type": "integer",
-                    "description": "Max depth to show, 1-4 (default: 3)",
-                },
-            },
-            "required": [],
-        },
-    },
+    # tool_enhance.md productionization pass, tool #67 (2026-08-22) —
+    # moved to app/tools/filesystem/get_file_tree.py as GET_FILE_TREE_TOOL.
+    # Kept at the SAME list index deliberately: RESEARCH_TOOLS indexes
+    # into READ_ONLY_TOOLS positionally (READ_ONLY_TOOLS[4] is expected
+    # to be get_file_tree — see the comment near RESEARCH_TOOLS below).
+    GET_FILE_TREE_TOOL,
     {
         "name": "git_log",
         "description": "Show recent git commits with messages. Use this to understand recent changes, active areas, and what was recently modified.",
@@ -1273,48 +1265,13 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
         combined = "\n".join(results)[:6000]
         return combined if combined.strip() else f"(no symbol '{name}' found)"
 
+    # tool_enhance.md productionization pass, tool #67 (2026-08-22) — the
+    # real fix (chat_agent.py's own separate dispatch had zero
+    # worktree-boundary validation; this implementation already had it)
+    # lives in the shared get_file_tree_handler() itself; see that
+    # function's own module docstring.
     def get_file_tree(inp: dict[str, Any]) -> str:
-        directory = str(inp.get("directory", ""))
-        max_depth = min(int(inp.get("max_depth", 3)), 4)
-        if directory:
-            policy = check_path_in_worktree(directory, repo_path)
-            if not policy.allowed:
-                return f"[POLICY DENIED] {policy.reason}"
-        start = base / directory if directory else base
-        if not start.exists():
-            return f"[ERROR] Directory not found: {directory}"
-        _SKIP = {
-            "__pycache__",
-            "node_modules",
-            ".next",
-            ".venv",
-            "venv",
-            ".git",
-            "dist",
-            "build",
-            ".mypy_cache",
-        }
-        lines: list[str] = [directory or "."]
-
-        def _tree(path: Path, depth: int, prefix: str) -> None:
-            if depth > max_depth:
-                return
-            try:
-                items = sorted(path.iterdir(), key=lambda p: (p.is_file(), p.name))
-            except PermissionError:
-                return
-            items = [
-                i for i in items if i.name not in _SKIP and not i.name.startswith(".")
-            ]
-            for idx, item in enumerate(items):
-                connector = "└── " if idx == len(items) - 1 else "├── "
-                lines.append(f"{prefix}{connector}{item.name}")
-                if item.is_dir() and depth < max_depth:
-                    ext = "    " if idx == len(items) - 1 else "│   "
-                    _tree(item, depth + 1, prefix + ext)
-
-        _tree(start, 1, "")
-        return "\n".join(lines[:300])
+        return get_file_tree_handler(base, repo_path, inp)
 
     def git_log(inp: dict[str, Any]) -> str:
         count = min(int(inp.get("count", 10)), 30)

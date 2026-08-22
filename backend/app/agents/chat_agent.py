@@ -155,6 +155,7 @@ from app.tools.filesystem.insert_after import insert_after_handler
 from app.tools.filesystem.insert_at_line import insert_at_line_handler
 from app.tools.filesystem.insert_before import insert_before_handler
 from app.tools.filesystem.move_file import move_file_handler
+from app.tools.filesystem.get_file_tree import get_file_tree_handler
 from app.tools.filesystem.read_file import read_file_handler
 from app.tools.filesystem.rename_file import rename_file_handler
 from app.tools.filesystem.replace_class import replace_class_handler
@@ -1158,45 +1159,16 @@ class ChatAgent:
             return "\n".join(paths[:300])
 
         if tool_name == "get_file_tree":
-            directory = str(inp.get("directory", ""))
-            max_depth = min(int(inp.get("max_depth", 3)), 4)
-            start = root / directory if directory else root
-            if not start.exists():
-                return f"[ERROR] Not found: {directory}"
-            _SKIP = {
-                "__pycache__",
-                "node_modules",
-                ".next",
-                ".venv",
-                "venv",
-                ".git",
-                "dist",
-                "build",
-                ".mypy_cache",
-            }
-            tree_lines: list[str] = [directory or "."]
-
-            def _tree(path: Path, depth: int, prefix: str) -> None:
-                if depth > max_depth:
-                    return
-                try:
-                    items = sorted(path.iterdir(), key=lambda x: (x.is_file(), x.name))
-                except PermissionError:
-                    return
-                items = [
-                    i
-                    for i in items
-                    if i.name not in _SKIP and not i.name.startswith(".")
-                ]
-                for idx, item in enumerate(items):
-                    conn = "└── " if idx == len(items) - 1 else "├── "
-                    tree_lines.append(f"{prefix}{conn}{item.name}")
-                    if item.is_dir() and depth < max_depth:
-                        ext = "    " if idx == len(items) - 1 else "│   "
-                        _tree(item, depth + 1, prefix + ext)
-
-            _tree(start, 1, "")
-            return "\n".join(tree_lines[:300])
+            # tool_enhance.md productionization pass, tool #67 (2026-08-22)
+            # — real, empirically-verified finding: this dispatch had
+            # ZERO worktree-boundary validation, unlike the canonical
+            # make_read_only_handlers() implementation. Proved live:
+            # get_file_tree({"directory": "/etc"}) genuinely returned the
+            # real directory structure of /etc — an information-
+            # disclosure primitive. Full account in
+            # get_file_tree_handler()'s own module docstring. Now
+            # delegates to that same shared, protected handler.
+            return await asyncio.to_thread(get_file_tree_handler, root, repo, inp)
 
         # ========== SEARCH ==========
 
