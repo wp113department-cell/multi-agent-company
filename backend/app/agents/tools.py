@@ -142,6 +142,10 @@ from app.tools.execution.run_background import (
     RUN_BACKGROUND_TOOL,
     validate_run_background_cwd as validate_run_background_cwd,
 )
+from app.tools.execution.run_make import (
+    RUN_MAKE_TOOL,
+    run_make_handler,
+)
 from app.tools.execution.run_tests import (
     RUN_TESTS_TOOL as _RUN_TESTS_TOOL,
     run_tests_handler as run_tests_handler,
@@ -2843,24 +2847,13 @@ _LIST_BACKGROUND_PROCESSES_TOOL = {
 # moved to app/tools/execution/python_snippet.py as RUN_PYTHON_SNIPPET_TOOL
 # — tool_enhance.md productionization pass, tool #14 (2026-08-17).
 
-_RUN_MAKE_TOOL = {
-    "name": "run_make",
-    "description": "Run a Makefile target. Lists available targets if no target specified.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "target": {
-                "type": "string",
-                "description": "Make target to run (e.g. 'test', 'build', 'lint'). Leave empty to list.",
-            },
-            "directory": {
-                "type": "string",
-                "description": "Directory containing Makefile (default: repo root)",
-            },
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/execution/run_make.py as RUN_MAKE_TOOL /
+# run_make_handler — tool_enhance.md productionization pass, tool #59
+# (2026-08-22). See that module's docstring for the real findings (a
+# classic shell-injection bug in chat_agent.py's own dispatch, a second
+# GNU-make-own-flag code-execution primitive affecting BOTH real
+# implementations even with list-args, and a directory worktree-escape).
+_RUN_MAKE_TOOL = RUN_MAKE_TOOL
 
 _FETCH_URL_TOOL = {
     "name": "fetch_url",
@@ -8123,51 +8116,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             repo_path, inp, activate_snippet=_venv_activate_snippet()
         )
 
+    # tool_enhance.md productionization pass, tool #59 (2026-08-22) — the
+    # real fix lives in the shared run_make_handler() itself; see that
+    # function's own module docstring.
     def run_make(inp: dict[str, Any]) -> str:
-        make_target = str(inp.get("target", ""))
-        make_dir_rel = str(inp.get("directory", ""))
-        make_dir = (root / make_dir_rel) if make_dir_rel else root
-        makefile_exists = (make_dir / "Makefile").exists() or (
-            make_dir / "makefile"
-        ).exists()
-        if not makefile_exists:
-            return f"[ERROR] No Makefile found in {make_dir}"
-        if not make_target:
-            r = subprocess.run(
-                ["make", "-pRrq"],
-                cwd=str(make_dir),
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            tgts: list[str] = []
-            for mk_line in r.stdout.splitlines():
-                if (
-                    mk_line
-                    and not mk_line.startswith(("\t", "#", " "))
-                    and ":" in mk_line
-                ):
-                    tgt = mk_line.split(":")[0].strip()
-                    if tgt and not tgt.startswith(".") and " " not in tgt:
-                        tgts.append(tgt)
-            return (
-                "Targets:\n" + "\n".join(sorted(set(tgts[:30])))
-                if tgts
-                else "Makefile found but targets not parseable"
-            )
-        try:
-            r = subprocess.run(
-                ["make", make_target],
-                cwd=str(make_dir),
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            return (r.stdout + r.stderr)[:5000] or f"make {make_target} complete"
-        except subprocess.TimeoutExpired:
-            return f"[ERROR] make {make_target} timed out"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return run_make_handler(root, repo_path, inp)
 
     def fetch_url(inp: dict[str, Any]) -> str:
         fu_url = str(inp["url"])

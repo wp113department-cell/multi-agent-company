@@ -140,6 +140,7 @@ from app.tools.execution.npm_install import validate_npm_install_directory
 from app.tools.execution.npm_run import validate_npm_run_directory
 from app.tools.execution.python_snippet import run_python_snippet_handler
 from app.tools.execution.run_background import validate_run_background_cwd
+from app.tools.execution.run_make import run_make_handler
 from app.tools.execution.run_tests import run_tests_handler
 from app.tools.filesystem.append_file import append_file_handler
 from app.tools.filesystem.apply_patch import apply_patch_handler
@@ -2006,39 +2007,18 @@ class ChatAgent:
             )
 
         if tool_name == "run_make":
-            make_target = str(inp.get("target", ""))
-            make_dir_rel = str(inp.get("directory", ""))
-            make_dir = (root / make_dir_rel) if make_dir_rel else root
-            if (
-                not (make_dir / "Makefile").exists()
-                and not (make_dir / "makefile").exists()
-            ):
-                return f"[ERROR] No Makefile found in {make_dir}"
-            if not make_target:
-                r = subprocess.run(
-                    ["make", "-pRrq"],
-                    cwd=str(make_dir),
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
-                tgts: list[str] = []
-                for mk_line in r.stdout.splitlines():
-                    if (
-                        mk_line
-                        and not mk_line.startswith(("\t", "#", " "))
-                        and ":" in mk_line
-                    ):
-                        tgt = mk_line.split(":")[0].strip()
-                        if tgt and not tgt.startswith(".") and " " not in tgt:
-                            tgts.append(tgt)
-                return (
-                    "Targets:\n" + "\n".join(sorted(set(tgts[:30])))
-                    if tgts
-                    else "Makefile found but targets not parseable"
-                )
-            cmd_s = f"make {make_target}"
-            return await asyncio.to_thread(_run_subprocess, cmd_s, str(make_dir), 120)
+            # tool_enhance.md productionization pass, tool #59 (2026-08-22)
+            # — real, proven findings: (1) this dispatch used to interpolate
+            # `target` raw into a shell=True command (classic shell
+            # injection, proved live); (2) GNU make's own flags (e.g.
+            # --eval) let a single flag-shaped `target` run arbitrary code
+            # even with no shell involved — closed for both real call
+            # sites at the shared validator; (3) `directory` could escape
+            # the repo entirely (proved live: a real Makefile target ran
+            # from outside the repo). Full account in run_make_handler()'s
+            # own docstring. Now delegates to the same shared, fixed
+            # handler `tools.py`'s implementation already used.
+            return await asyncio.to_thread(run_make_handler, root, repo, inp)
 
         if tool_name == "fetch_url":
             fu_url = str(inp["url"])
