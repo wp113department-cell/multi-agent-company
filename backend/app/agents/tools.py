@@ -150,6 +150,10 @@ from app.tools.execution.run_node import (
     RUN_NODE_TOOL,
     run_node_handler,
 )
+from app.tools.execution.run_script import (
+    RUN_SCRIPT_TOOL,
+    run_script_handler,
+)
 from app.tools.execution.run_tests import (
     RUN_TESTS_TOOL as _RUN_TESTS_TOOL,
     run_tests_handler as run_tests_handler,
@@ -3408,24 +3412,14 @@ _READ_OUTPUT_TOOL = {
 # unbounded `timeout` on both, same class as run_python_snippet (#14).
 _RUN_NODE_TOOL = RUN_NODE_TOOL
 
-_RUN_SCRIPT_TOOL = {
-    "name": "run_script",
-    "description": "Execute a script file (.py, .sh, .js). Auto-detects interpreter from extension.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Path to the script file (relative to repo root)",
-            },
-            "interpreter": {
-                "type": "string",
-                "description": "Interpreter to use: 'auto', 'python3', 'bash', 'node' (default: auto)",
-            },
-        },
-        "required": ["path"],
-    },
-}
+# moved to app/tools/execution/run_script.py as RUN_SCRIPT_TOOL /
+# run_script_handler — tool_enhance.md productionization pass, tool #61
+# (2026-08-22). See that module's docstring for the real findings: a
+# classic shell-injection bug in chat_agent.py's own dispatch, a severe
+# arbitrary-program-execution primitive via `interpreter` affecting BOTH
+# real implementations even with list-args (proved live: interpreter=
+# "rm" deleted a real file), and a `path` worktree-escape.
+_RUN_SCRIPT_TOOL = RUN_SCRIPT_TOOL
 
 # moved to app/tools/execution/docker_build.py as DOCKER_BUILD_TOOL —
 # tool_enhance.md productionization pass, tool #18 (2026-08-17).
@@ -9195,37 +9189,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def run_node_h(inp: dict[str, Any]) -> str:
         return run_node_handler(repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #61 (2026-08-22) — the
+    # real fix lives in the shared run_script_handler() itself; see that
+    # function's own module docstring.
     def run_script_h(inp: dict[str, Any]) -> str:
-        rscr_rel = str(inp["path"])
-        rscr_interp = str(inp.get("interpreter", "auto"))
-        rscr_fp = root / rscr_rel
-        if not rscr_fp.exists():
-            return f"[ERROR] Script not found: {rscr_rel}"
-        if rscr_interp == "auto":
-            ext = rscr_fp.suffix
-            rscr_interp = (
-                "python3"
-                if ext == ".py"
-                else "node"
-                if ext in (".js", ".mjs", ".cjs")
-                else "bash"
-            )
-        try:
-            r = subprocess.run(
-                [rscr_interp, str(rscr_fp)],
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            result = (r.stdout + r.stderr).strip()
-            if r.returncode != 0:
-                result += f"\n[exit {r.returncode}]"
-            return result or "(no output)"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] Script timed out after 120s"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return run_script_handler(root, repo_path, inp)
 
     def docker_build_h(inp: dict[str, Any]) -> str:
         dbld_tag = str(inp["tag"])

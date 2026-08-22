@@ -142,6 +142,7 @@ from app.tools.execution.python_snippet import run_python_snippet_handler
 from app.tools.execution.run_background import validate_run_background_cwd
 from app.tools.execution.run_make import run_make_handler
 from app.tools.execution.run_node import run_node_handler
+from app.tools.execution.run_script import run_script_handler
 from app.tools.execution.run_tests import run_tests_handler
 from app.tools.filesystem.append_file import append_file_handler
 from app.tools.filesystem.apply_patch import apply_patch_handler
@@ -3146,19 +3147,19 @@ class ChatAgent:
             return await asyncio.to_thread(run_node_handler, repo, inp)
 
         if tool_name == "run_script":
-            rscr_rel = str(inp["path"])
-            rscr_fp = root / rscr_rel
-            if not rscr_fp.exists():
-                return f"[ERROR] Script not found: {rscr_rel}"
-            rscr_interp = str(inp.get("interpreter", "auto"))
-            if rscr_interp == "auto":
-                rscr_interp = (
-                    "python3"
-                    if rscr_fp.suffix == ".py"
-                    else "node" if rscr_fp.suffix in (".js", ".mjs", ".cjs") else "bash"
-                )
-            rscr_cmd = f"{rscr_interp} {str(rscr_fp)} 2>&1"
-            return await asyncio.to_thread(_run_subprocess, rscr_cmd, repo, 120)
+            # tool_enhance.md productionization pass, tool #61 (2026-08-22)
+            # — real, severe findings: (1) this dispatch used to
+            # interpolate `interpreter` raw into a shell=True command
+            # (classic shell injection, proved live); (2) `interpreter`
+            # had no allowlist at all — any host program name reached
+            # argv[0], proved live even against the OTHER (list-args)
+            # real implementation: interpreter="rm" genuinely deleted a
+            # real file; (3) `path` could escape the repo entirely
+            # (proved live: a real script ran from outside the repo).
+            # Full account in run_script_handler()'s own docstring. Now
+            # delegates to the same shared, fixed handler `tools.py`'s
+            # implementation already used.
+            return await asyncio.to_thread(run_script_handler, root, repo, inp)
 
         if tool_name == "docker_build":
             dbld_tag = str(inp["tag"])
