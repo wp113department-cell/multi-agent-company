@@ -155,6 +155,7 @@ from app.tools.filesystem.insert_after import insert_after_handler
 from app.tools.filesystem.insert_at_line import insert_at_line_handler
 from app.tools.filesystem.insert_before import insert_before_handler
 from app.tools.filesystem.move_file import move_file_handler
+from app.tools.filesystem.analyze_file import analyze_file_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_references import find_references_handler
@@ -1245,39 +1246,22 @@ class ChatAgent:
             return await asyncio.to_thread(search_imports_handler, root, inp)
 
         if tool_name == "analyze_file":
-            rel = str(inp["path"])
-            fp = root / rel
-            if not fp.exists():
-                return f"[ERROR] Not found: {rel}"
-            content = fp.read_text(encoding="utf-8", errors="replace")
-            af_lines = content.splitlines()
-            af_imports: list[str] = []
-            af_defs: list[str] = []
-            for i, line in enumerate(af_lines, 1):
-                s = line.strip()
-                if s.startswith(("import ", "from ")):
-                    af_imports.append(f"  L{i}: {s}")
-                elif s.startswith(
-                    (
-                        "def ",
-                        "async def ",
-                        "class ",
-                        "export function ",
-                        "export async function ",
-                        "export class ",
-                        "export const ",
-                        "export interface ",
-                        "export type ",
-                        "export default function ",
-                    )
-                ):
-                    af_defs.append(f"  L{i}: {s[:120]}")
-            af_result = [f"File: {rel}  ({len(af_lines)} lines)"]
-            if af_imports:
-                af_result += [f"\nImports ({len(af_imports)}):"] + af_imports[:30]
-            if af_defs:
-                af_result += [f"\nDefinitions ({len(af_defs)}):"] + af_defs[:50]
-            return "\n".join(af_result)
+            # tool_enhance.md productionization pass, tool #76 (2026-08-22)
+            # — real, severe findings, on BOTH real implementations
+            # (including the canonical make_read_only_handlers() one,
+            # unlike most prior READ_ONLY_TOOLS turns): (1) ZERO
+            # worktree-boundary validation — proved live,
+            # analyze_file({"path": "/etc/passwd"}) genuinely analyzed a
+            # real host file's content outside the repo; (2) an uncaught
+            # PermissionError (proved live with a real chmod 000 parent
+            # directory); (3) this dispatch's own TS/JS definition
+            # detection was a real functionality-parity gap versus the
+            # canonical implementation — it silently missed plain
+            # (non-exported) `function `/`const `/`interface `/`type `
+            # definitions the canonical version already detected. Full
+            # account in analyze_file_handler()'s own module docstring.
+            # Now delegates to that same shared, fixed handler.
+            return await asyncio.to_thread(analyze_file_handler, root, repo, inp)
 
         # ========== GIT — READ ==========
 

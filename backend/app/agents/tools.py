@@ -202,6 +202,10 @@ from app.tools.filesystem.insert_before import (
     INSERT_BEFORE_TOOL as _INSERT_BEFORE_TOOL,
     insert_before_handler as insert_before_handler,
 )
+from app.tools.filesystem.analyze_file import (
+    ANALYZE_FILE_TOOL,
+    analyze_file_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -702,20 +706,12 @@ READ_ONLY_TOOLS = [
             "required": ["path"],
         },
     },
-    {
-        "name": "analyze_file",
-        "description": "Get a structural summary of a file: top-level imports, class names, function/method signatures. Fast way to understand what a file contains before reading it fully.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "File path relative to repo root (.py, .ts, .tsx supported)",
-                },
-            },
-            "required": ["path"],
-        },
-    },
+    # tool_enhance.md productionization pass, tool #76 (2026-08-22) —
+    # moved to app/tools/filesystem/analyze_file.py as ANALYZE_FILE_TOOL.
+    # See that module's docstring — this was the first READ_ONLY_TOOLS
+    # tool where the CANONICAL implementation itself, not just
+    # chat_agent.py's copy, had the worktree-escape bug.
+    ANALYZE_FILE_TOOL,
 ]
 
 # ---------------------------------------------------------------------------
@@ -1284,57 +1280,14 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # tool_enhance.md productionization pass, tool #76 (2026-08-22) — the
+    # real fix (this implementation itself had ZERO worktree-boundary
+    # validation, an uncaught PermissionError, and chat_agent.py's
+    # separate copy had a real functionality-parity gap) lives in the
+    # shared analyze_file_handler() itself; see that function's own
+    # module docstring.
     def analyze_file(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        p = base / rel
-        if not p.exists():
-            return f"[ERROR] File not found: {rel}"
-        try:
-            content = p.read_text(encoding="utf-8", errors="replace")
-        except Exception as e:
-            return f"[ERROR] {e}"
-
-        lines = content.splitlines()
-        total = len(lines)
-        imports: list[str] = []
-        definitions: list[str] = []
-
-        for i, line in enumerate(lines, 1):
-            stripped = line.strip()
-            # Python / TS imports
-            if stripped.startswith(("import ", "from ")):
-                imports.append(f"  L{i}: {stripped}")
-            # Python definitions
-            elif stripped.startswith(("def ", "async def ", "class ")):
-                definitions.append(f"  L{i}: {stripped.rstrip(':')}")
-            # TypeScript/JS definitions
-            elif any(
-                stripped.startswith(p)
-                for p in (
-                    "export function ",
-                    "export async function ",
-                    "export class ",
-                    "export const ",
-                    "export default ",
-                    "export interface ",
-                    "export type ",
-                    "function ",
-                    "const ",
-                    "class ",
-                    "interface ",
-                    "type ",
-                )
-            ) and ("=" in stripped or "(" in stripped or "{" in stripped):
-                definitions.append(f"  L{i}: {stripped[:100]}")
-
-        summary = [f"File: {rel}  ({total} lines)"]
-        if imports:
-            summary.append(f"\nImports ({len(imports)}):")
-            summary.extend(imports[:30])
-        if definitions:
-            summary.append(f"\nDefinitions ({len(definitions)}):")
-            summary.extend(definitions[:50])
-        return "\n".join(summary)
+        return analyze_file_handler(base, repo_path, inp)
 
     return {
         "read_file": read_file,
