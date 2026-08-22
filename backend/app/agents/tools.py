@@ -88,6 +88,10 @@ from app.tools.agents.propose_subtask import (
     PROPOSE_SUBTASK_TOOL as PROPOSE_SUBTASK_TOOL,
     make_propose_subtask_handler as make_propose_subtask_handler,
 )
+from app.tools.agents.record_learning import (
+    RECORD_LEARNING_TOOL as RECORD_LEARNING_TOOL,
+    make_record_learning_handler as make_record_learning_handler,
+)
 from app.tools.database.migration import (
     RUN_MIGRATION_TOOL as _RUN_MIGRATION_TOOL,
     run_migration_handler as run_migration_handler,
@@ -804,52 +808,12 @@ READ_ONLY_TOOLS = [
 # workaround, a gotcha another agent working on a similar task would want).
 # ---------------------------------------------------------------------------
 
-RECORD_LEARNING_TOOL: dict[str, Any] = {
-    "name": "record_learning",
-    "description": (
-        "Record a non-obvious finding for future agents working on similar tasks. "
-        "Use this for something a plain code search would not surface on its own — "
-        "a root cause, a workaround, a gotcha — not for routine progress notes. "
-        "This writes to shared, durable, cross-agent memory; it does not replace "
-        "your normal submit_* result."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "finding": {
-                "type": "string",
-                "description": "The non-obvious insight, in one or two sentences.",
-            },
-            "outcome": {
-                "type": "string",
-                "description": "What this finding led to, or why it mattered.",
-            },
-        },
-        "required": ["finding"],
-    },
-}
-
-
-def make_record_learning_handler(agent_name: str) -> Callable[[dict[str, Any]], str]:
-    """Build the sync tool handler for record_learning, scoped to the calling
-    agent's own name so the stored signal is correctly attributed."""
-
-    def _handler(inp: dict[str, Any]) -> str:
-        finding = str(inp.get("finding", "")).strip()
-        if not finding:
-            return "[ERROR] finding is required."
-        outcome = (
-            str(inp.get("outcome", "")).strip() or "recorded during task execution"
-        )
-
-        from app.memory.store import embed_learning_signal_sync
-
-        stored = embed_learning_signal_sync(
-            agent_name=agent_name, description=finding, outcome_summary=outcome
-        )
-        return "Recorded." if stored else "[ERROR] failed to record learning."
-
-    return _handler
+# moved to app/tools/agents/record_learning.py — tool_enhance.md
+# productionization pass, tool #66 (2026-08-22). No fix required (see
+# that module's own docstring for the full audit) — pure modularization.
+# RECORD_LEARNING_TOOL / make_record_learning_handler imported below,
+# same names, so every existing reference in this file keeps working
+# unchanged.
 
 
 # ---------------------------------------------------------------------------
