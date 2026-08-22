@@ -222,6 +222,10 @@ from app.tools.filesystem.read_file import (
     READ_FILE_TOOL,
     read_file_handler,
 )
+from app.tools.filesystem.read_files import (
+    READ_FILES_TOOL,
+    read_files_handler,
+)
 from app.tools.filesystem.move_file import (
     MOVE_FILE_TOOL as _MOVE_FILE_TOOL,
     move_file_handler as move_file_handler,
@@ -613,25 +617,9 @@ READ_ONLY_TOOLS = [
         },
     },
     # ---- Enhanced search & analysis tools (non-destructive) ----
-    {
-        "name": "read_files",
-        "description": "Read multiple files at once. Returns each file's content labeled by path. Far more efficient than calling read_file repeatedly when you need to explore several files. Only 20 files are read per call; if more paths are given, the result ends with a [NOTICE] telling you the offset to pass on the next call to read the rest.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "paths": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "List of file paths relative to repo root (20 read per call, see offset)",
-                },
-                "offset": {
-                    "type": "integer",
-                    "description": "Index into paths to start reading from, for paging through more than 20 paths across multiple calls (default 0)",
-                },
-            },
-            "required": ["paths"],
-        },
-    },
+    # tool_enhance.md productionization pass, tool #71 (2026-08-22) —
+    # moved to app/tools/filesystem/read_files.py as READ_FILES_TOOL.
+    READ_FILES_TOOL,
     # tool_enhance.md productionization pass, tool #70 (2026-08-22) —
     # moved to app/tools/filesystem/file_exists.py as FILE_EXISTS_TOOL.
     FILE_EXISTS_TOOL,
@@ -1254,79 +1242,13 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
         except subprocess.TimeoutExpired:
             return "[ERROR] git log timed out"
 
+    # tool_enhance.md productionization pass, tool #71 (2026-08-22) — the
+    # real fix (chat_agent.py's own separate dispatch had zero
+    # worktree-boundary validation on any path in the batch) lives in
+    # the shared read_files_handler() itself; see that function's own
+    # module docstring.
     def read_files(inp: dict[str, Any]) -> str:
-        # AUDIT_Q_BATCH01 §59 "Read hundreds of files safely" — previously
-        # silently truncated to the first 20 paths with no signal to the
-        # caller that anything was dropped. offset lets a caller page
-        # through more than 20 paths across repeated calls; the truncation
-        # notice makes it explicit rather than a caller having to notice a
-        # missing file on its own.
-        all_paths: list[str] = inp.get("paths", [])
-        rf_offset = max(0, int(inp.get("offset", 0)))
-        paths = all_paths[rf_offset : rf_offset + 20]
-        parts: list[str] = []
-        settings = get_settings()
-        for rel in paths:
-            policy = check_path_in_worktree(rel, repo_path)
-            if not policy.allowed:
-                parts.append(f"=== {rel} ===\n[POLICY DENIED] {policy.reason}")
-                continue
-            p = base / rel
-            if not p.exists():
-                parts.append(f"=== {rel} ===\n[ERROR] Not found")
-            else:
-                try:
-                    content = p.read_text(encoding="utf-8")
-                except Exception as e:
-                    parts.append(f"=== {rel} ===\n[ERROR] {e}")
-                    continue
-                # AUDIT_Q_BATCH09 §15 gap-closure — read_files (plural) used to
-                # return every file's full content unfolded, inconsistent with
-                # read_file (singular) which already folds/truncates large
-                # files. A batch call including a 9,000-line file silently
-                # blew past the same context budget read_file protects
-                # against. Reuse read_file's exact folding logic so both
-                # paths behave identically.
-                line_count = content.count("\n") + 1
-                if (
-                    settings.file_fold_enabled
-                    and line_count > settings.file_fold_line_threshold
-                ):
-                    from app.repo_tools.file_folding import fold_file_content
-
-                    folded = fold_file_content(p, settings.file_fold_max_chars)
-                    if folded is not None:
-                        parts.append(
-                            f"=== {rel} ===\n[NOTE] {rel} is {line_count} lines "
-                            "— showing structure only (functions/classes + "
-                            "line ranges) instead of full content to avoid an "
-                            "oversized context. Read a specific line range if "
-                            f"you need implementation detail.\n\n{folded}"
-                        )
-                        continue
-                    if len(content) > settings.file_fold_fallback_max_chars:
-                        cap = settings.file_fold_fallback_max_chars
-                        parts.append(
-                            f"=== {rel} ===\n{content[:cap]}\n... [TRUNCATED: "
-                            f"{rel} is {line_count} lines; showing the first "
-                            f"{cap} characters]"
-                        )
-                        continue
-                parts.append(f"=== {rel} ===\n{content}")
-        if not parts:
-            return (
-                "[ERROR] No paths provided"
-                if not all_paths
-                else "(no paths at this offset)"
-            )
-        remaining = len(all_paths) - (rf_offset + len(paths))
-        if remaining > 0:
-            parts.append(
-                f"[NOTICE] {remaining} of {len(all_paths)} requested path(s) were "
-                f"not read (20-per-call limit). Call again with "
-                f"offset={rf_offset + len(paths)} to continue."
-            )
-        return "\n\n".join(parts)
+        return read_files_handler(base, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #70 (2026-08-22) — the
     # real fix (chat_agent.py's own separate dispatch had zero

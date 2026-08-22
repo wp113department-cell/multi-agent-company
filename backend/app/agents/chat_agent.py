@@ -160,6 +160,7 @@ from app.tools.filesystem.get_file_tree import get_file_tree_handler
 from app.tools.filesystem.list_files import list_files_handler
 from app.tools.filesystem.search_code import search_code_handler
 from app.tools.filesystem.read_file import read_file_handler
+from app.tools.filesystem.read_files import read_files_handler
 from app.tools.filesystem.rename_file import rename_file_handler
 from app.tools.filesystem.replace_class import replace_class_handler
 from app.tools.filesystem.replace_function import replace_function_handler
@@ -1096,34 +1097,20 @@ class ChatAgent:
             return await asyncio.to_thread(read_file_handler, root, repo, inp)
 
         if tool_name == "read_files":
-            rf_all_paths = inp.get("paths") or []
-            rf_offset = max(0, int(inp.get("offset", 0)))
-            rf_page = rf_all_paths[rf_offset : rf_offset + 20]
-            file_parts: list[str] = []
-            for rel in rf_page:
-                fp = root / str(rel)
-                try:
-                    file_parts.append(
-                        f"=== {rel} ===\n{fp.read_text(encoding='utf-8')}"
-                        if fp.exists()
-                        else f"=== {rel} ===\n[NOT FOUND]"
-                    )
-                except Exception as e:
-                    file_parts.append(f"=== {rel} ===\n[ERROR] {e}")
-            if not file_parts:
-                return (
-                    "[ERROR] No paths given"
-                    if not rf_all_paths
-                    else "(no paths at this offset)"
-                )
-            rf_remaining = len(rf_all_paths) - (rf_offset + len(rf_page))
-            if rf_remaining > 0:
-                file_parts.append(
-                    f"[NOTICE] {rf_remaining} of {len(rf_all_paths)} requested "
-                    f"path(s) were not read (20-per-call limit). Call again "
-                    f"with offset={rf_offset + len(rf_page)} to continue."
-                )
-            return "\n\n".join(file_parts)
+            # tool_enhance.md productionization pass, tool #71 (2026-08-22)
+            # — real, severe finding, worse than tool #65's single-file
+            # read_file finding since this reads up to 20 files per call:
+            # this dispatch had ZERO worktree-boundary validation on any
+            # path in the batch. Proved live:
+            # read_files({"paths": ["/etc/passwd", "/etc/hostname"]})
+            # genuinely returned the real, full content of both host
+            # files, completely outside the repo, in one call — a real
+            # batch-exfiltration primitive. Full account in
+            # read_files_handler()'s own module docstring. Now delegates
+            # to that same shared, protected handler — also picking up
+            # its large-file folding/truncation safeguard, which this
+            # dispatch previously lacked entirely.
+            return await asyncio.to_thread(read_files_handler, root, repo, inp)
 
         if tool_name == "file_exists":
             # tool_enhance.md productionization pass, tool #70 (2026-08-22)
