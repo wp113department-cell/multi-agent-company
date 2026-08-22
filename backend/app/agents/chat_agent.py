@@ -155,6 +155,7 @@ from app.tools.filesystem.insert_after import insert_after_handler
 from app.tools.filesystem.insert_at_line import insert_at_line_handler
 from app.tools.filesystem.insert_before import insert_before_handler
 from app.tools.filesystem.move_file import move_file_handler
+from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.get_file_tree import get_file_tree_handler
 from app.tools.filesystem.list_files import list_files_handler
 from app.tools.filesystem.search_code import search_code_handler
@@ -1125,8 +1126,18 @@ class ChatAgent:
             return "\n\n".join(file_parts)
 
         if tool_name == "file_exists":
-            p = root / str(inp["path"])
-            return "file" if p.is_file() else "directory" if p.is_dir() else "not_found"
+            # tool_enhance.md productionization pass, tool #70 (2026-08-22)
+            # — real, empirically-verified findings: (1) this dispatch
+            # had ZERO worktree-boundary validation, unlike the
+            # canonical make_read_only_handlers() implementation —
+            # proved live, file_exists({"path": "/etc/passwd"}) genuinely
+            # returned "file", confirming the real existence and type of
+            # a host file outside the repo; (2) an uncaught
+            # PermissionError on both implementations (proved live with
+            # a real permission-restricted path). Full account in
+            # file_exists_handler()'s own module docstring. Now delegates
+            # to that same shared, fixed handler.
+            return await asyncio.to_thread(file_exists_handler, root, repo, inp)
 
         if tool_name == "file_info":
             import datetime
