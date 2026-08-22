@@ -156,6 +156,7 @@ from app.tools.filesystem.insert_at_line import insert_at_line_handler
 from app.tools.filesystem.insert_before import insert_before_handler
 from app.tools.filesystem.move_file import move_file_handler
 from app.tools.filesystem.file_exists import file_exists_handler
+from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.get_file_tree import get_file_tree_handler
 from app.tools.filesystem.list_files import list_files_handler
 from app.tools.filesystem.search_code import search_code_handler
@@ -1127,23 +1128,19 @@ class ChatAgent:
             return await asyncio.to_thread(file_exists_handler, root, repo, inp)
 
         if tool_name == "file_info":
-            import datetime
-
-            p = root / str(inp["path"])
-            if not p.exists():
-                return f"[ERROR] Not found: {inp['path']}"
-            stat = p.stat()
-            line_count = ""
-            if p.is_file():
-                try:
-                    line_count = f"\nlines: {len(p.read_text(encoding='utf-8', errors='replace').splitlines())}"
-                except Exception:
-                    pass
-            return (
-                f"path: {inp['path']}\ntype: {'file' if p.is_file() else 'dir'}\n"
-                f"size: {stat.st_size} bytes{line_count}\n"
-                f"modified: {datetime.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec='seconds')}"
-            )
+            # tool_enhance.md productionization pass, tool #72 (2026-08-22)
+            # — real, empirically-verified findings: (1) this dispatch
+            # had ZERO worktree-boundary validation, unlike the canonical
+            # make_read_only_handlers() implementation — proved live,
+            # file_info({"path": "/etc/passwd"}) genuinely returned the
+            # real size/type/line-count/mtime of a host file outside the
+            # repo; (2) an uncaught PermissionError on both
+            # implementations (proved live with a real file inside a
+            # chmod 000 parent directory) — same finding class as tool
+            # #70's file_exists finding #2. Full account in
+            # file_info_handler()'s own module docstring. Now delegates
+            # to that same shared, fixed handler.
+            return await asyncio.to_thread(file_info_handler, root, repo, inp)
 
         if tool_name == "list_files":
             # tool_enhance.md productionization pass, tool #68 (2026-08-22)

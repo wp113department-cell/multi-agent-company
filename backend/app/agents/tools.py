@@ -206,6 +206,10 @@ from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
 )
+from app.tools.filesystem.file_info import (
+    FILE_INFO_TOOL,
+    file_info_handler,
+)
 from app.tools.filesystem.get_file_tree import (
     GET_FILE_TREE_TOOL,
     get_file_tree_handler,
@@ -623,20 +627,9 @@ READ_ONLY_TOOLS = [
     # tool_enhance.md productionization pass, tool #70 (2026-08-22) —
     # moved to app/tools/filesystem/file_exists.py as FILE_EXISTS_TOOL.
     FILE_EXISTS_TOOL,
-    {
-        "name": "file_info",
-        "description": "Get metadata about a file: size in bytes, line count, last modified time, and language detected from extension.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "File path relative to repo root",
-                },
-            },
-            "required": ["path"],
-        },
-    },
+    # tool_enhance.md productionization pass, tool #72 (2026-08-22) —
+    # moved to app/tools/filesystem/file_info.py as FILE_INFO_TOOL.
+    FILE_INFO_TOOL,
     {
         "name": "find_references",
         "description": "Find every place in the codebase where a function, class, or variable is referenced/called. Shows file:line context. Use this before refactoring to understand impact.",
@@ -1258,30 +1251,13 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
     def file_exists(inp: dict[str, Any]) -> str:
         return file_exists_handler(base, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #72 (2026-08-22) — the
+    # real fix (chat_agent.py's own separate dispatch had zero
+    # worktree-boundary validation, and both implementations had an
+    # uncaught PermissionError) lives in the shared file_info_handler()
+    # itself; see that function's own module docstring.
     def file_info(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        policy = check_path_in_worktree(rel, repo_path)
-        if not policy.allowed:
-            return f"[POLICY DENIED] {policy.reason}"
-        p = base / rel
-        if not p.exists():
-            return f"[ERROR] Not found: {rel}"
-        import datetime
-
-        stat = p.stat()
-        size = stat.st_size
-        mtime = datetime.datetime.fromtimestamp(stat.st_mtime).isoformat(
-            timespec="seconds"
-        )
-        kind = "directory" if p.is_dir() else "file"
-        lines = ""
-        if p.is_file():
-            try:
-                lines = f"\nlines: {len(p.read_text(encoding='utf-8', errors='replace').splitlines())}"
-            except Exception:
-                pass
-        ext = p.suffix or "(no extension)"
-        return f"path: {rel}\ntype: {kind}\nsize: {size} bytes\nextension: {ext}{lines}\nmodified: {mtime}"
+        return file_info_handler(base, repo_path, inp)
 
     def find_references(inp: dict[str, Any]) -> str:
         symbol = inp["symbol"]
