@@ -146,6 +146,10 @@ from app.tools.execution.run_make import (
     RUN_MAKE_TOOL,
     run_make_handler,
 )
+from app.tools.execution.run_node import (
+    RUN_NODE_TOOL,
+    run_node_handler,
+)
 from app.tools.execution.run_tests import (
     RUN_TESTS_TOOL as _RUN_TESTS_TOOL,
     run_tests_handler as run_tests_handler,
@@ -3397,24 +3401,12 @@ _READ_OUTPUT_TOOL = {
     },
 }
 
-_RUN_NODE_TOOL = {
-    "name": "run_node",
-    "description": "Execute a Node.js code snippet and return its output. Node.js must be installed.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "code": {
-                "type": "string",
-                "description": "JavaScript code to execute via `node -e`",
-            },
-            "timeout": {
-                "type": "integer",
-                "description": "Timeout in seconds (default: 30)",
-            },
-        },
-        "required": ["code"],
-    },
-}
+# moved to app/tools/execution/run_node.py as RUN_NODE_TOOL /
+# run_node_handler — tool_enhance.md productionization pass, tool #60
+# (2026-08-22). See that module's docstring: `code` was already safely
+# shlex.quote()'d on both real call sites; the real finding was an
+# unbounded `timeout` on both, same class as run_python_snippet (#14).
+_RUN_NODE_TOOL = RUN_NODE_TOOL
 
 _RUN_SCRIPT_TOOL = {
     "name": "run_script",
@@ -9197,32 +9189,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             ro_pid, ro_max, _session_bg_procs, _read_stream_nonblocking
         )
 
+    # tool_enhance.md productionization pass, tool #60 (2026-08-22) — the
+    # real fix (an unbounded timeout clamp) lives in the shared
+    # run_node_handler() itself; see that function's own module docstring.
     def run_node_h(inp: dict[str, Any]) -> str:
-        import shlex as _shlex
-
-        rnd_code = str(inp["code"])
-        rnd_timeout = int(inp.get("timeout", 30))
-        node_chk = subprocess.run(["which", "node"], capture_output=True, text=True)
-        if node_chk.returncode != 0:
-            node_chk2 = subprocess.run(
-                ["which", "nodejs"], capture_output=True, text=True
-            )
-            if node_chk2.returncode != 0:
-                return "[ERROR] Node.js not found. Install Node.js first (e.g. nvm install --lts)."
-        try:
-            r = subprocess.run(
-                f"node -e {_shlex.quote(rnd_code)} 2>&1",
-                shell=True,
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-                timeout=rnd_timeout,
-            )
-            return (r.stdout + r.stderr).strip() or "(no output)"
-        except subprocess.TimeoutExpired:
-            return f"[ERROR] node timed out after {rnd_timeout}s"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return run_node_handler(repo_path, inp)
 
     def run_script_h(inp: dict[str, Any]) -> str:
         rscr_rel = str(inp["path"])

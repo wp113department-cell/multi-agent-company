@@ -141,6 +141,7 @@ from app.tools.execution.npm_run import validate_npm_run_directory
 from app.tools.execution.python_snippet import run_python_snippet_handler
 from app.tools.execution.run_background import validate_run_background_cwd
 from app.tools.execution.run_make import run_make_handler
+from app.tools.execution.run_node import run_node_handler
 from app.tools.execution.run_tests import run_tests_handler
 from app.tools.filesystem.append_file import append_file_handler
 from app.tools.filesystem.apply_patch import apply_patch_handler
@@ -3134,25 +3135,15 @@ class ChatAgent:
             )
 
         if tool_name == "run_node":
-            import shlex as _shlex2
-
-            rnd_code = str(inp["code"])
-            rnd_timeout = int(inp.get("timeout", 30))
-            rnd_node_chk = await asyncio.to_thread(
-                lambda: subprocess.run(
-                    ["which", "node"], capture_output=True, text=True, timeout=5
-                )
-            )
-            if rnd_node_chk.returncode != 0:
-                rnd_node_chk2 = await asyncio.to_thread(
-                    lambda: subprocess.run(
-                        ["which", "nodejs"], capture_output=True, text=True, timeout=5
-                    )
-                )
-                if rnd_node_chk2.returncode != 0:
-                    return "[ERROR] Node.js not found. Install via nvm or your package manager."
-            rnd_cmd = f"node -e {_shlex2.quote(rnd_code)} 2>&1"
-            return await asyncio.to_thread(_run_subprocess, rnd_cmd, repo, rnd_timeout)
+            # tool_enhance.md productionization pass, tool #60 (2026-08-22)
+            # — `code` was already safely shlex.quote()'d here (proved live:
+            # a real shell-metacharacter-and-quote-breakout payload was NOT
+            # shell-interpreted). Real finding: `timeout` had no upper
+            # bound on either real call site — proved live, a real
+            # timeout=999999999 reached subprocess.run's own timeout
+            # unmodified. Fixed at the shared run_node_handler(); see that
+            # function's own module docstring.
+            return await asyncio.to_thread(run_node_handler, repo, inp)
 
         if tool_name == "run_script":
             rscr_rel = str(inp["path"])
