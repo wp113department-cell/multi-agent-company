@@ -214,6 +214,10 @@ from app.tools.filesystem.find_references import (
     FIND_REFERENCES_TOOL,
     find_references_handler,
 )
+from app.tools.filesystem.search_imports import (
+    SEARCH_IMPORTS_TOOL,
+    search_imports_handler,
+)
 from app.tools.filesystem.get_file_tree import (
     GET_FILE_TREE_TOOL,
     get_file_tree_handler,
@@ -648,24 +652,11 @@ READ_ONLY_TOOLS = [
             "required": [],
         },
     },
-    {
-        "name": "search_imports",
-        "description": "Find all import statements for a specific module, package, or symbol. Use this to understand how a library is used, or to find all callers of a module.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "module": {
-                    "type": "string",
-                    "description": "Module/package name to search (e.g. 'fastapi', 'asyncpg', 'useState')",
-                },
-                "file_pattern": {
-                    "type": "string",
-                    "description": "Limit to file type (e.g. '*.py', '*.ts')",
-                },
-            },
-            "required": ["module"],
-        },
-    },
+    # tool_enhance.md productionization pass, tool #75 (2026-08-22) —
+    # moved to app/tools/filesystem/search_imports.py as
+    # SEARCH_IMPORTS_TOOL. No new vulnerability — see that module's
+    # docstring for the full audit.
+    SEARCH_IMPORTS_TOOL,
     {
         "name": "git_status",
         "description": "Show current git working tree state: staged, modified, untracked files. Always run before committing or diffing.",
@@ -1244,29 +1235,11 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
         except subprocess.TimeoutExpired:
             return "[ERROR] Search timed out"
 
+    # tool_enhance.md productionization pass, tool #75 (2026-08-22) — no
+    # new vulnerability; the shared search_imports_handler() itself
+    # documents the full audit in its own module docstring.
     def search_imports(inp: dict[str, Any]) -> str:
-        module = inp["module"]
-        file_pattern = inp.get("file_pattern", "")
-        patterns = [
-            f"import {module}",
-            f"from {module}",
-            f'require("{module}")',
-            f"require('{module}')",
-        ]
-        results: list[str] = []
-        for pat in patterns:
-            cmd = ["grep", "-rn"]
-            if file_pattern:
-                cmd += ["--include", file_pattern]
-            cmd += [pat, str(base)]
-            try:
-                r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-                if r.stdout.strip():
-                    results.append(r.stdout[:2000])
-            except subprocess.TimeoutExpired:
-                pass
-        combined = "\n".join(results)[:6000]
-        return combined if combined.strip() else f"(no imports of '{module}' found)"
+        return search_imports_handler(base, inp)
 
     def git_status(inp: dict[str, Any]) -> str:
         try:

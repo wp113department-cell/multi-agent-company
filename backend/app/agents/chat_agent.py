@@ -158,6 +158,7 @@ from app.tools.filesystem.move_file import move_file_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_references import find_references_handler
+from app.tools.filesystem.search_imports import search_imports_handler
 from app.tools.filesystem.get_file_tree import get_file_tree_handler
 from app.tools.filesystem.list_files import list_files_handler
 from app.tools.filesystem.search_code import search_code_handler
@@ -1234,29 +1235,14 @@ class ChatAgent:
                 return "[ERROR] Search timed out"
 
         if tool_name == "search_imports":
-            module = str(inp["module"])
-            fp = inp.get("file_pattern", "")
-            imp_patterns = [
-                f"import {module}",
-                f"from {module}",
-                f'require("{module}")',
-                f"require('{module}')",
-            ]
-            import_results: list[str] = []
-            for pat in imp_patterns:
-                imp_cmd = ["grep", "-rn"]
-                if fp:
-                    imp_cmd += ["--include", str(fp)]
-                imp_cmd += [pat, repo]
-                try:
-                    r = subprocess.run(
-                        imp_cmd, capture_output=True, text=True, timeout=10
-                    )
-                    if r.stdout.strip():
-                        import_results.append(r.stdout[:2000])
-                except subprocess.TimeoutExpired:
-                    pass
-            return "\n".join(import_results)[:6000] or f"(no imports of '{module}')"
+            # tool_enhance.md productionization pass, tool #75 (2026-08-22)
+            # — no new vulnerability; the shared search_imports_handler()
+            # itself documents the full audit (no path/directory field
+            # exists in this tool's schema, and `module` is always
+            # embedded inside a fixed-prefix pattern before reaching
+            # grep, so it can never be interpreted as a flag). Now
+            # delegates to that same shared handler.
+            return await asyncio.to_thread(search_imports_handler, root, inp)
 
         if tool_name == "analyze_file":
             rel = str(inp["path"])
