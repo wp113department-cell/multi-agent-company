@@ -210,6 +210,10 @@ from app.tools.filesystem.list_files import (
     LIST_FILES_TOOL,
     list_files_handler,
 )
+from app.tools.filesystem.search_code import (
+    SEARCH_CODE_TOOL,
+    search_code_handler,
+)
 from app.tools.filesystem.read_file import (
     READ_FILE_TOOL,
     read_file_handler,
@@ -556,24 +560,11 @@ READ_ONLY_TOOLS = [
     # Kept at the SAME list index deliberately: RESEARCH_TOOLS indexes
     # into READ_ONLY_TOOLS positionally.
     LIST_FILES_TOOL,
-    {
-        "name": "search_code",
-        "description": "Search for a string or regex pattern across the repository. Returns file:line:match results. Use this to find where something is defined or used.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "pattern": {
-                    "type": "string",
-                    "description": "Regex or literal string to search for",
-                },
-                "file_pattern": {
-                    "type": "string",
-                    "description": "Limit search to files matching this glob (e.g. '*.py', '*.ts')",
-                },
-            },
-            "required": ["pattern"],
-        },
-    },
+    # tool_enhance.md productionization pass, tool #69 (2026-08-22) —
+    # moved to app/tools/filesystem/search_code.py as SEARCH_CODE_TOOL.
+    # Kept at the SAME list index deliberately: RESEARCH_TOOLS indexes
+    # into READ_ONLY_TOOLS positionally.
+    SEARCH_CODE_TOOL,
     {
         "name": "search_symbols",
         "description": "Search for function, class, or interface definitions by name. Faster than search_code for finding where something is defined. Use this before referencing any function or class to confirm it exists.",
@@ -1201,16 +1192,13 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
     def list_files(inp: dict[str, Any]) -> str:
         return list_files_handler(base, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #69 (2026-08-22) — the
+    # real fix (a flag-shaped `pattern` reaching grep's own argument
+    # parser, on BOTH real implementations) lives in the shared
+    # search_code_handler() itself; see that function's own module
+    # docstring.
     def search_code(inp: dict[str, Any]) -> str:
-        pattern = inp["pattern"]
-        file_pattern = inp.get("file_pattern", "")
-        cmd = ["grep", "-rn", "--include", file_pattern or "*", pattern, str(base)]
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-            output = result.stdout[:8000] if result.stdout else "(no matches)"
-            return output
-        except subprocess.TimeoutExpired:
-            return "[ERROR] Search timed out"
+        return search_code_handler(base, inp)
 
     def search_symbols(inp: dict[str, Any]) -> str:
         name = str(inp["name"])

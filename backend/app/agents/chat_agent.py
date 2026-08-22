@@ -157,6 +157,7 @@ from app.tools.filesystem.insert_before import insert_before_handler
 from app.tools.filesystem.move_file import move_file_handler
 from app.tools.filesystem.get_file_tree import get_file_tree_handler
 from app.tools.filesystem.list_files import list_files_handler
+from app.tools.filesystem.search_code import search_code_handler
 from app.tools.filesystem.read_file import read_file_handler
 from app.tools.filesystem.rename_file import rename_file_handler
 from app.tools.filesystem.replace_class import replace_class_handler
@@ -1177,21 +1178,17 @@ class ChatAgent:
         # ========== SEARCH ==========
 
         if tool_name == "search_code":
-            pattern = str(inp["pattern"])
-            fp = inp.get("file_pattern", "")
-            cmd_args = [
-                "grep",
-                "-rn",
-                "--include",
-                str(fp) if fp else "*",
-                pattern,
-                repo,
-            ]
-            try:
-                r = subprocess.run(cmd_args, capture_output=True, text=True, timeout=15)
-                return r.stdout[:8000] or "(no matches)"
-            except subprocess.TimeoutExpired:
-                return "[ERROR] Search timed out"
+            # tool_enhance.md productionization pass, tool #69 (2026-08-22)
+            # — real finding, on BOTH real implementations (not just this
+            # dispatch): `pattern` was a bare positional grep argument
+            # with no `--` separator, so a leading '-' let GNU grep's own
+            # argument parser consume it as a flag instead of the search
+            # text. Proved live: pattern="-r"/"-f"/"-e" each silently
+            # returned "(no matches)" instead of the real search result.
+            # Full account in search_code_handler()'s own module
+            # docstring. Now delegates to that same shared, fixed
+            # handler.
+            return await asyncio.to_thread(search_code_handler, root, inp)
 
         if tool_name == "search_symbols":
             sym_name = str(inp["name"])
