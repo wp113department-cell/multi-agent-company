@@ -222,6 +222,10 @@ from app.tools.filesystem.search_code import (
     SEARCH_CODE_TOOL,
     search_code_handler,
 )
+from app.tools.filesystem.search_symbols import (
+    SEARCH_SYMBOLS_TOOL,
+    search_symbols_handler,
+)
 from app.tools.filesystem.read_file import (
     READ_FILE_TOOL,
     read_file_handler,
@@ -577,25 +581,11 @@ READ_ONLY_TOOLS = [
     # Kept at the SAME list index deliberately: RESEARCH_TOOLS indexes
     # into READ_ONLY_TOOLS positionally.
     SEARCH_CODE_TOOL,
-    {
-        "name": "search_symbols",
-        "description": "Search for function, class, or interface definitions by name. Faster than search_code for finding where something is defined. Use this before referencing any function or class to confirm it exists.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Symbol name or partial name to search for (e.g. 'get_task', 'DevTask', 'fetchTasks')",
-                },
-                "kind": {
-                    "type": "string",
-                    "enum": ["function", "class", "all"],
-                    "description": "Symbol type to search for (default: all)",
-                },
-            },
-            "required": ["name"],
-        },
-    },
+    # tool_enhance.md productionization pass, tool #73 (2026-08-22) —
+    # moved to app/tools/filesystem/search_symbols.py as
+    # SEARCH_SYMBOLS_TOOL. No new vulnerability — see that module's
+    # docstring for the full audit.
+    SEARCH_SYMBOLS_TOOL,
     # tool_enhance.md productionization pass, tool #67 (2026-08-22) —
     # moved to app/tools/filesystem/get_file_tree.py as GET_FILE_TREE_TOOL.
     # Kept at the SAME list index deliberately: RESEARCH_TOOLS indexes
@@ -1174,42 +1164,11 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
     def search_code(inp: dict[str, Any]) -> str:
         return search_code_handler(base, inp)
 
+    # tool_enhance.md productionization pass, tool #73 (2026-08-22) — no
+    # new vulnerability; the shared search_symbols_handler() itself
+    # documents the full audit in its own module docstring.
     def search_symbols(inp: dict[str, Any]) -> str:
-        name = str(inp["name"])
-        kind = inp.get("kind", "all")
-        patterns: list[str] = []
-        if kind in ("function", "all"):
-            patterns += [
-                f"def {name}",
-                f"async def {name}",
-                f"function {name}",
-                f"const {name} =",
-            ]
-        if kind in ("class", "all"):
-            patterns += [f"class {name}", f"interface {name}", f"type {name} ="]
-        results: list[str] = []
-        for pat in patterns:
-            try:
-                result = subprocess.run(
-                    [
-                        "grep",
-                        "-rn",
-                        "--include=*.py",
-                        "--include=*.ts",
-                        "--include=*.tsx",
-                        pat,
-                        str(base),
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
-                if result.stdout:
-                    results.append(result.stdout[:2000])
-            except subprocess.TimeoutExpired:
-                pass
-        combined = "\n".join(results)[:6000]
-        return combined if combined.strip() else f"(no symbol '{name}' found)"
+        return search_symbols_handler(base, inp)
 
     # tool_enhance.md productionization pass, tool #67 (2026-08-22) — the
     # real fix (chat_agent.py's own separate dispatch had zero

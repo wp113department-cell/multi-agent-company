@@ -160,6 +160,7 @@ from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.get_file_tree import get_file_tree_handler
 from app.tools.filesystem.list_files import list_files_handler
 from app.tools.filesystem.search_code import search_code_handler
+from app.tools.filesystem.search_symbols import search_symbols_handler
 from app.tools.filesystem.read_file import read_file_handler
 from app.tools.filesystem.read_files import read_files_handler
 from app.tools.filesystem.rename_file import rename_file_handler
@@ -1186,45 +1187,14 @@ class ChatAgent:
             return await asyncio.to_thread(search_code_handler, root, inp)
 
         if tool_name == "search_symbols":
-            sym_name = str(inp["name"])
-            kind = str(inp.get("kind", "all"))
-            patterns: list[str] = []
-            if kind in ("function", "all"):
-                patterns += [
-                    f"def {sym_name}",
-                    f"async def {sym_name}",
-                    f"function {sym_name}",
-                    f"const {sym_name} =",
-                ]
-            if kind in ("class", "all"):
-                patterns += [
-                    f"class {sym_name}",
-                    f"interface {sym_name}",
-                    f"type {sym_name} =",
-                ]
-            sym_results: list[str] = []
-            for pat in patterns:
-                try:
-                    r = subprocess.run(
-                        [
-                            "grep",
-                            "-rn",
-                            "--include=*.py",
-                            "--include=*.ts",
-                            "--include=*.tsx",
-                            pat,
-                            repo,
-                        ],
-                        capture_output=True,
-                        text=True,
-                        timeout=10,
-                    )
-                    if r.stdout:
-                        sym_results.append(r.stdout[:2000])
-                except subprocess.TimeoutExpired:
-                    pass
-            combined = "\n".join(sym_results)[:6000]
-            return combined or f"(no symbol '{sym_name}' found)"
+            # tool_enhance.md productionization pass, tool #73 (2026-08-22)
+            # — no new vulnerability; the shared search_symbols_handler()
+            # itself documents the full audit (no path/directory field
+            # exists in this tool's schema at all, and `name` is always
+            # prefixed with a fixed literal before reaching grep, so it
+            # can never be interpreted as a flag — unlike search_code,
+            # tool #69). Now delegates to that same shared handler.
+            return await asyncio.to_thread(search_symbols_handler, root, inp)
 
         if tool_name == "find_references":
             sym = str(inp["symbol"])
