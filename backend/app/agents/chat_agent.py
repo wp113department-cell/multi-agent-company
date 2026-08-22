@@ -155,6 +155,7 @@ from app.tools.filesystem.insert_after import insert_after_handler
 from app.tools.filesystem.insert_at_line import insert_at_line_handler
 from app.tools.filesystem.insert_before import insert_before_handler
 from app.tools.filesystem.move_file import move_file_handler
+from app.tools.filesystem.read_file import read_file_handler
 from app.tools.filesystem.rename_file import rename_file_handler
 from app.tools.filesystem.replace_class import replace_class_handler
 from app.tools.filesystem.replace_function import replace_function_handler
@@ -1076,13 +1077,19 @@ class ChatAgent:
         # ========== FILE SYSTEM — READ ==========
 
         if tool_name == "read_file":
-            p = root / str(inp["path"])
-            if not p.exists():
-                return f"[ERROR] File not found: {inp['path']}"
-            try:
-                return p.read_text(encoding="utf-8")
-            except Exception as e:
-                return f"[ERROR] {e}"
+            # tool_enhance.md productionization pass, tool #65 (2026-08-22)
+            # — real, severe finding: this dispatch had ZERO
+            # worktree-boundary validation, unlike the canonical
+            # make_read_only_handlers() implementation (used by every
+            # run_agent_graph-based agent). Proved live:
+            # read_file({"path": "/etc/hostname"}) genuinely returned a
+            # real host file's content, completely outside the repo.
+            # Full account in read_file_handler()'s own module
+            # docstring. Now delegates to that same shared, protected
+            # handler — also picking up its large-file folding/
+            # truncation safeguard, which this dispatch previously
+            # lacked entirely.
+            return await asyncio.to_thread(read_file_handler, root, repo, inp)
 
         if tool_name == "read_files":
             rf_all_paths = inp.get("paths") or []

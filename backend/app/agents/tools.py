@@ -198,6 +198,10 @@ from app.tools.filesystem.insert_before import (
     INSERT_BEFORE_TOOL as _INSERT_BEFORE_TOOL,
     insert_before_handler as insert_before_handler,
 )
+from app.tools.filesystem.read_file import (
+    READ_FILE_TOOL,
+    read_file_handler,
+)
 from app.tools.filesystem.move_file import (
     MOVE_FILE_TOOL as _MOVE_FILE_TOOL,
     move_file_handler as move_file_handler,
@@ -529,21 +533,12 @@ def _llm_diagnose_deployment_failure(context: str) -> str:
 
 # --- Tool specs (Anthropic input_schema format) ---
 
+# tool_enhance.md productionization pass, tool #65 (2026-08-22) —
+# READ_ONLY_TOOLS[0] moved to app/tools/filesystem/read_file.py as
+# READ_FILE_TOOL. Kept at the SAME list index deliberately: RESEARCH_TOOLS
+# (below) and other bundles index into READ_ONLY_TOOLS positionally.
 READ_ONLY_TOOLS = [
-    {
-        "name": "read_file",
-        "description": "Read the full contents of a file. Always read a file before editing it.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "File path relative to the repo root",
-                },
-            },
-            "required": ["path"],
-        },
-    },
+    READ_FILE_TOOL,
     {
         "name": "list_files",
         "description": "List files in a directory. Returns file paths relative to repo root. Use pattern='**/*.py' to filter by type.",
@@ -1243,50 +1238,13 @@ _QA_ALLOWED_PREFIXES = (
 def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
     base = Path(repo_path)
 
+    # tool_enhance.md productionization pass, tool #65 (2026-08-22) — the
+    # real fix (chat_agent.py's own separate dispatch had zero
+    # worktree-boundary validation; this implementation already had it)
+    # lives in the shared read_file_handler() itself; see that
+    # function's own module docstring.
     def read_file(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        policy = check_path_in_worktree(rel, repo_path)
-        if not policy.allowed:
-            return f"[POLICY DENIED] {policy.reason}"
-        p = base / rel
-        if not p.exists():
-            return f"[ERROR] File not found: {rel}"
-        try:
-            content = str(p.read_text(encoding="utf-8"))
-        except Exception as e:
-            return f"[ERROR] Cannot read {rel}: {e}"
-
-        # Gap-closure Days 45-47 (Stage 2) — this file has "no truncation/
-        # chunking safeguard" for 9,000+ line files (answers.md); a large
-        # file is folded to its structural signature instead of loaded in
-        # full, or bounded-truncated when folding isn't possible (non-code
-        # file types).
-        settings = get_settings()
-        line_count = content.count("\n") + 1
-        if (
-            settings.file_fold_enabled
-            and line_count > settings.file_fold_line_threshold
-        ):
-            from app.repo_tools.file_folding import fold_file_content
-
-            folded = fold_file_content(p, settings.file_fold_max_chars)
-            if folded is not None:
-                return (
-                    f"[NOTE] {rel} is {line_count} lines — showing structure "
-                    "only (functions/classes + line ranges) instead of full "
-                    "content to avoid an oversized context. Read a specific "
-                    "line range if you need implementation detail.\n\n"
-                    f"{folded}"
-                )
-            if len(content) > settings.file_fold_fallback_max_chars:
-                cap = settings.file_fold_fallback_max_chars
-                return (
-                    content[:cap]
-                    + f"\n... [TRUNCATED: {rel} is {line_count} lines; showing "
-                    f"the first {cap} characters]"
-                )
-
-        return content
+        return read_file_handler(base, repo_path, inp)
 
     def list_files(inp: dict[str, Any]) -> str:
         directory = str(inp.get("directory", ""))
