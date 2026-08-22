@@ -288,6 +288,10 @@ from app.tools.integrations.linear_create_issue import (
     LINEAR_CREATE_ISSUE_TOOL as _LINEAR_CREATE_ISSUE_TOOL,
     create_linear_issue as create_linear_issue,
 )
+from app.tools.integrations.slack_send_message import (
+    SLACK_SEND_MESSAGE_TOOL,
+    send_slack_message,
+)
 from app.tools.refactor.rename_symbol import (
     RENAME_SYMBOL_TOOL as _RENAME_SYMBOL_TOOL,
     validate_rename_symbol_directory as validate_rename_symbol_directory,
@@ -5581,21 +5585,13 @@ _GITHUB_LIST_PRS_TOOL: dict[str, Any] = {
 
 # moved to app/tools/integrations/linear_create_issue.py as LINEAR_CREATE_ISSUE_TOOL — tool_enhance.md productionization pass, tool #50 (2026-08-20).
 
-_SLACK_SEND_MESSAGE_TOOL: dict[str, Any] = {
-    "name": "slack_send_message",
-    "description": "Send a Slack message via webhook. Requires SLACK_WEBHOOK_URL env var.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "channel": {
-                "type": "string",
-                "description": "Channel name (informational only — webhook targets one channel)",
-            },
-            "text": {"type": "string", "description": "Message text"},
-        },
-        "required": ["text"],
-    },
-}
+# moved to app/tools/integrations/slack_send_message.py as
+# SLACK_SEND_MESSAGE_TOOL / send_slack_message — tool_enhance.md
+# productionization pass, tool #63 (2026-08-22). Same "advertised but
+# never dispatched" bug class as tool #50's linear_create_issue —
+# chat_agent.py had zero dispatch branch despite this being advertised
+# via CHAT_TOOLS.
+_SLACK_SEND_MESSAGE_TOOL: dict[str, Any] = SLACK_SEND_MESSAGE_TOOL
 
 # --- Day 3 Agent submit tool specs ---
 
@@ -10029,26 +10025,16 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         team_key = str(inp["team_key"])
         return create_linear_issue(api_key, title, description, team_key)
 
+    # tool_enhance.md productionization pass, tool #63 (2026-08-22) —
+    # the real fix (a new chat_agent.py dispatch, since this was
+    # advertised but never dispatched there) lives in
+    # send_slack_message() itself; see that function's own module
+    # docstring.
     def slack_send_message_h(inp: dict[str, Any]) -> str:
-        import urllib.request as _ur_sl
-        import urllib.error as _ue_sl
-
         webhook_url = _os_mcp.environ.get("SLACK_WEBHOOK_URL", "")
         if not webhook_url:
             return "[ERROR] SLACK_WEBHOOK_URL not set"
-        text = str(inp["text"])
-        payload = __import__("json").dumps({"text": text}).encode()
-        try:
-            req = _ur_sl.Request(
-                webhook_url, data=payload, headers={"Content-Type": "application/json"}
-            )
-            with _ur_sl.urlopen(req, timeout=10) as resp:
-                body = resp.read().decode()
-            return f"Slack message sent: {body}"
-        except _ue_sl.HTTPError as e:
-            return f"[ERROR] Slack webhook {e.code}: {e.read().decode()[:200]}"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return send_slack_message(webhook_url, str(inp["text"]))
 
     handlers["github_create_issue"] = github_create_issue_h
     handlers["github_list_prs"] = github_list_prs_h

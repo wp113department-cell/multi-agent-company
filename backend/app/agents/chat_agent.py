@@ -178,6 +178,7 @@ from app.tools.git.stash import validate_git_stash_action
 from app.tools.git.tag import git_tag_handler
 from app.tools.git.worktree import validate_git_worktree_inputs
 from app.tools.integrations.linear_create_issue import create_linear_issue
+from app.tools.integrations.slack_send_message import send_slack_message
 from app.tools.refactor.rename_symbol import validate_rename_symbol_directory
 
 logger = logging.getLogger(__name__)
@@ -2418,6 +2419,31 @@ class ChatAgent:
             mw_key = str(inp["key"])
             mw_value = str(inp["value"])
             return await asyncio.to_thread(write_memory_key, repo, mw_key, mw_value)
+
+        if tool_name == "slack_send_message":
+            # tool_enhance.md productionization pass, tool #63 (2026-08-22)
+            # — same "advertised but never dispatched" bug class as tools
+            # #44/#45/#50: already in CHAT_TOOLS, zero dispatch here,
+            # every real call fell through to "Unknown tool". Its own
+            # request-building logic was already safe (`text` is
+            # JSON-encoded, never string-interpolated into a command or
+            # URL; the webhook URL comes from SLACK_WEBHOOK_URL, never an
+            # LLM-controlled argument). Posting a Slack message is a real
+            # external write, publicly visible to a real channel's
+            # members — same risk category as create_pr/github_comment/
+            # github_create_issue/linear_create_issue — so this mirrors
+            # their confirmation pattern.
+            ssm_webhook_url = os.environ.get("SLACK_WEBHOOK_URL", "")
+            if not ssm_webhook_url:
+                return "[ERROR] SLACK_WEBHOOK_URL not set"
+            ssm_text = str(inp["text"])
+            ssm_approved = await self._confirm(
+                description="Send a Slack message",
+                details=ssm_text,
+            )
+            if not ssm_approved:
+                return "[DENIED] User declined slack_send_message."
+            return await asyncio.to_thread(send_slack_message, ssm_webhook_url, ssm_text)
 
         if tool_name == "inspect_github_repo":
             return await asyncio.to_thread(_inspect_github_repo, inp)
