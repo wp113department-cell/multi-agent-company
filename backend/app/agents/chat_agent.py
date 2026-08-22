@@ -156,6 +156,7 @@ from app.tools.filesystem.insert_at_line import insert_at_line_handler
 from app.tools.filesystem.insert_before import insert_before_handler
 from app.tools.filesystem.move_file import move_file_handler
 from app.tools.filesystem.get_file_tree import get_file_tree_handler
+from app.tools.filesystem.list_files import list_files_handler
 from app.tools.filesystem.read_file import read_file_handler
 from app.tools.filesystem.rename_file import rename_file_handler
 from app.tools.filesystem.replace_class import replace_class_handler
@@ -1146,17 +1147,20 @@ class ChatAgent:
             )
 
         if tool_name == "list_files":
-            directory = str(inp.get("directory", ""))
-            pattern = str(inp.get("pattern", "**/*"))
-            search_root = root / directory if directory else root
-            if not search_root.exists():
-                return f"[ERROR] Directory not found: {directory}"
-            paths = sorted(
-                str(fp.relative_to(root))
-                for fp in search_root.glob(pattern)
-                if fp.is_file()
-            )
-            return "\n".join(paths[:300])
+            # tool_enhance.md productionization pass, tool #68 (2026-08-22)
+            # — real finding: this dispatch called `relative_to(root)`
+            # unguarded inside a generator handed to `sorted()` — the
+            # first out-of-repo match raised an uncaught ValueError.
+            # Proved live: through the real graph-node call path (which
+            # wraps every _execute_tool() call in a generic except
+            # Exception), the resulting error message embedded the
+            # absolute path of a real file outside the repo — a real,
+            # if minor, information-disclosure primitive the canonical
+            # make_read_only_handlers() implementation never had (it
+            # already wraps relative_to() in try/except). Full account
+            # in list_files_handler()'s own module docstring. Now
+            # delegates to that same shared, protected handler.
+            return await asyncio.to_thread(list_files_handler, root, repo, inp)
 
         if tool_name == "get_file_tree":
             # tool_enhance.md productionization pass, tool #67 (2026-08-22)

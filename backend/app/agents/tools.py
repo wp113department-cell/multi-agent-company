@@ -206,6 +206,10 @@ from app.tools.filesystem.get_file_tree import (
     GET_FILE_TREE_TOOL,
     get_file_tree_handler,
 )
+from app.tools.filesystem.list_files import (
+    LIST_FILES_TOOL,
+    list_files_handler,
+)
 from app.tools.filesystem.read_file import (
     READ_FILE_TOOL,
     read_file_handler,
@@ -547,24 +551,11 @@ def _llm_diagnose_deployment_failure(context: str) -> str:
 # (below) and other bundles index into READ_ONLY_TOOLS positionally.
 READ_ONLY_TOOLS = [
     READ_FILE_TOOL,
-    {
-        "name": "list_files",
-        "description": "List files in a directory. Returns file paths relative to repo root. Use pattern='**/*.py' to filter by type.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "directory": {
-                    "type": "string",
-                    "description": "Directory path (default: repo root)",
-                },
-                "pattern": {
-                    "type": "string",
-                    "description": "Glob pattern filter (e.g. '**/*.py', '**/*.ts')",
-                },
-            },
-            "required": [],
-        },
-    },
+    # tool_enhance.md productionization pass, tool #68 (2026-08-22) —
+    # moved to app/tools/filesystem/list_files.py as LIST_FILES_TOOL.
+    # Kept at the SAME list index deliberately: RESEARCH_TOOLS indexes
+    # into READ_ONLY_TOOLS positionally.
+    LIST_FILES_TOOL,
     {
         "name": "search_code",
         "description": "Search for a string or regex pattern across the repository. Returns file:line:match results. Use this to find where something is defined or used.",
@@ -1202,20 +1193,13 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
     def read_file(inp: dict[str, Any]) -> str:
         return read_file_handler(base, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #68 (2026-08-22) — the
+    # real fix (chat_agent.py's own separate dispatch could raise an
+    # uncaught ValueError that leaked an absolute host file path via the
+    # resulting error message) lives in the shared list_files_handler()
+    # itself; see that function's own module docstring.
     def list_files(inp: dict[str, Any]) -> str:
-        directory = str(inp.get("directory", ""))
-        pattern = str(inp.get("pattern", "**/*"))
-        search_root = base / directory if directory else base
-        if not search_root.exists():
-            return f"[ERROR] Directory not found: {directory}"
-        str_paths: list[str] = []
-        for p in search_root.glob(pattern):
-            if p.is_file():
-                try:
-                    str_paths.append(str(p.relative_to(base)))
-                except ValueError:
-                    pass  # skip symlinks or paths that escape the repo root
-        return "\n".join(sorted(str_paths)[:200])
+        return list_files_handler(base, repo_path, inp)
 
     def search_code(inp: dict[str, Any]) -> str:
         pattern = inp["pattern"]
