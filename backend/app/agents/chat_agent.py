@@ -159,6 +159,7 @@ from app.tools.filesystem.rename_file import rename_file_handler
 from app.tools.filesystem.replace_class import replace_class_handler
 from app.tools.filesystem.replace_function import replace_function_handler
 from app.tools.filesystem.semver_bump import semver_bump_handler
+from app.tools.filesystem.sync_files import sync_files_handler
 from app.tools.filesystem.write_file import write_file_handler
 from app.tools.git.checkout import validate_git_checkout_inputs
 from app.tools.git.cherry_pick import validate_git_cherry_pick_inputs
@@ -1907,46 +1908,19 @@ class ChatAgent:
             return r.stdout[:8000] or "Files are identical"
 
         if tool_name == "sync_files":
-            sf_source = str(inp["source"])
-            sf_targets = inp.get("paths") or []
-            if not sf_targets:
-                return "[ERROR] paths must be a non-empty list of target file paths"
-            sf_source_path = root / sf_source
-            if not sf_source_path.exists():
-                return f"[ERROR] Source file not found: {sf_source}"
-            try:
-                sf_content = sf_source_path.read_text(encoding="utf-8")
-            except Exception as e:
-                return f"[ERROR] Could not read source {sf_source}: {e}"
-            sf_results: list[str] = []
-            for sf_target in sf_targets:
-                sf_target = str(sf_target)
-                sf_tgt_path = root / sf_target
-                try:
-                    sf_existing = (
-                        sf_tgt_path.read_text(encoding="utf-8")
-                        if sf_tgt_path.exists()
-                        else None
-                    )
-                except Exception as e:
-                    sf_results.append(f"  {sf_target}: [ERROR] {e}")
-                    continue
-                if sf_existing == sf_content:
-                    sf_results.append(f"  {sf_target}: unchanged (already in sync)")
-                    continue
-                try:
-                    sf_tgt_path.parent.mkdir(parents=True, exist_ok=True)
-                    sf_tgt_path.write_text(sf_content, encoding="utf-8")
-                    sf_results.append(
-                        f"  {sf_target}: "
-                        f"{'created' if sf_existing is None else 'updated'} from {sf_source}"
-                    )
-                except Exception as e:
-                    sf_results.append(f"  {sf_target}: [ERROR] {e}")
-            return (
-                f"Synchronized '{sf_source}' to {len(sf_targets)} target(s):\n"
-                + "\n".join(sf_results)
-            )
+            # tool_enhance.md productionization pass, tool #64 (2026-08-22)
+            # — real, severe finding: this dispatch had ZERO worktree-
+            # boundary validation on `source` or any `paths` entry, unlike
+            # tools.py's own implementation which already had it. Proved
+            # live: source="/etc/hostname" combined with paths=
+            # ["exfiltrated.txt", "/tmp/PWNED.txt"] genuinely read a real
+            # host file outside the repo and wrote its content both INTO
+            # the repo (exfiltration) and to an arbitrary outside-repo
+            # path (arbitrary write) in one call. Full account in
+            # sync_files_handler()'s own module docstring. Now delegates
+            # to the same shared, protected handler tools.py's
+            # implementation already used.
+            return await asyncio.to_thread(sync_files_handler, root, repo, inp)
 
         # ========== BATCH 2 — Terminal extras ==========
 

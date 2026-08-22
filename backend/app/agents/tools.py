@@ -218,6 +218,10 @@ from app.tools.filesystem.semver_bump import (
     SEMVER_BUMP_TOOL as _SEMVER_BUMP_TOOL,
     semver_bump_handler as semver_bump_handler,
 )
+from app.tools.filesystem.sync_files import (
+    SYNC_FILES_TOOL,
+    sync_files_handler,
+)
 from app.tools.filesystem.write_file import (
     WRITE_FILE_TOOL as _WRITE_FILE_TOOL,
     write_file_handler as write_file_handler,
@@ -2808,25 +2812,16 @@ _COMPARE_FILES_TOOL = {
 # base_graph.py so the shared single-interceptor _policy_check
 # automatically path-checks every target here, the same as read_files'
 # own "paths" field — no special-casing needed there.
-_SYNC_FILES_TOOL = {
-    "name": "sync_files",
-    "description": "Copy a source file's content to one or more target paths, but only where the content actually differs (also creates targets that don't exist yet). Use to keep intentionally-duplicated files (e.g. a shared config copied into multiple packages) consistent.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "source": {
-                "type": "string",
-                "description": "Source file path relative to repo root",
-            },
-            "paths": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Target file paths to synchronize from source",
-            },
-        },
-        "required": ["source", "paths"],
-    },
-}
+#
+# moved to app/tools/filesystem/sync_files.py as SYNC_FILES_TOOL /
+# sync_files_handler — tool_enhance.md productionization pass, tool #64
+# (2026-08-22). This implementation's own check_path_in_worktree() calls
+# were already correct; the real, severe finding was that
+# chat_agent.py's own interactive dispatch (a separate code path from
+# base_graph.py's interceptor mentioned above) had ZERO such validation
+# — see that new module's docstring for the live proof (a real
+# combined exfiltration + arbitrary-write via source="/etc/hostname").
+_SYNC_FILES_TOOL = SYNC_FILES_TOOL
 
 # ---------------------------------------------------------------------------
 # NEW TOOL SPECS — Batch 2: Terminal extras
@@ -7981,57 +7976,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         )
         return r.stdout[:8000] or "Files are identical"
 
+    # tool_enhance.md productionization pass, tool #64 (2026-08-22) — the
+    # real fix (chat_agent.py's own dispatch had zero worktree-boundary
+    # validation, this implementation already had it) lives in the
+    # shared sync_files_handler() itself; see that function's own module
+    # docstring.
     def sync_files(inp: dict[str, Any]) -> str:
-        sf_source = str(inp["source"])
-        sf_targets = inp.get("paths") or []
-        if not sf_targets:
-            return "[ERROR] paths must be a non-empty list of target file paths"
-        sf_source_policy = check_path_in_worktree(sf_source, repo_path)
-        if not sf_source_policy.allowed:
-            return f"[POLICY DENIED] {sf_source_policy.reason}"
-        sf_source_path = root / sf_source
-        if not sf_source_path.exists():
-            return f"[ERROR] Source file not found: {sf_source}"
-        try:
-            sf_content = sf_source_path.read_text(encoding="utf-8")
-        except Exception as e:
-            return f"[ERROR] Could not read source {sf_source}: {e}"
-
-        sf_results: list[str] = []
-        for sf_target in sf_targets:
-            sf_target = str(sf_target)
-            sf_tgt_policy = check_path_in_worktree(sf_target, repo_path)
-            if not sf_tgt_policy.allowed:
-                sf_results.append(
-                    f"  {sf_target}: [POLICY DENIED] {sf_tgt_policy.reason}"
-                )
-                continue
-            sf_tgt_path = root / sf_target
-            try:
-                sf_existing = (
-                    sf_tgt_path.read_text(encoding="utf-8")
-                    if sf_tgt_path.exists()
-                    else None
-                )
-            except Exception as e:
-                sf_results.append(f"  {sf_target}: [ERROR] {e}")
-                continue
-            if sf_existing == sf_content:
-                sf_results.append(f"  {sf_target}: unchanged (already in sync)")
-                continue
-            try:
-                sf_tgt_path.parent.mkdir(parents=True, exist_ok=True)
-                sf_tgt_path.write_text(sf_content, encoding="utf-8")
-                sf_results.append(
-                    f"  {sf_target}: "
-                    f"{'created' if sf_existing is None else 'updated'} from {sf_source}"
-                )
-            except Exception as e:
-                sf_results.append(f"  {sf_target}: [ERROR] {e}")
-        return (
-            f"Synchronized '{sf_source}' to {len(sf_targets)} target(s):\n"
-            + "\n".join(sf_results)
-        )
+        return sync_files_handler(root, repo_path, inp)
 
     # =========================================================================
     # BATCH 2 — Terminal extras
