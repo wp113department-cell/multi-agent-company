@@ -154,6 +154,10 @@ from app.tools.execution.run_script import (
     RUN_SCRIPT_TOOL,
     run_script_handler,
 )
+from app.tools.execution.run_single_test import (
+    RUN_SINGLE_TEST_TOOL,
+    run_single_test_handler,
+)
 from app.tools.execution.run_tests import (
     RUN_TESTS_TOOL as _RUN_TESTS_TOOL,
     run_tests_handler as run_tests_handler,
@@ -3018,28 +3022,16 @@ _REVIEW_DIFF_TOOL = {
 # NEW TOOL SPECS — Batch 4: Testing extras
 # ---------------------------------------------------------------------------
 
-_RUN_SINGLE_TEST_TOOL = {
-    "name": "run_single_test",
-    "description": "Run a single test by name/keyword. Much faster than running the full suite.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "keyword": {
-                "type": "string",
-                "description": "Test name or keyword to match (-k flag for pytest)",
-            },
-            "file": {
-                "type": "string",
-                "description": "Specific test file to run (optional)",
-            },
-            "verbose": {
-                "type": "boolean",
-                "description": "Show verbose output (default: true)",
-            },
-        },
-        "required": ["keyword"],
-    },
-}
+# moved to app/tools/execution/run_single_test.py as
+# RUN_SINGLE_TEST_TOOL / run_single_test_handler — tool_enhance.md
+# productionization pass, tool #62 (2026-08-22). See that module's
+# docstring: chat_agent.py's own dispatch had a real shell-injection bug
+# (this implementation was already correctly shlex.quote()'d); the real
+# finding shared by BOTH implementations was a `file` worktree-escape —
+# pytest collection executes a Python file's module-level code at
+# import time, proved live with a real outside-repo file's os.system()
+# side effect genuinely running.
+_RUN_SINGLE_TEST_TOOL = RUN_SINGLE_TEST_TOOL
 
 _COVERAGE_REPORT_TOOL = {
     "name": "coverage_report",
@@ -8367,32 +8359,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # BATCH 4 — Testing extras
     # =========================================================================
 
+    # tool_enhance.md productionization pass, tool #62 (2026-08-22) — the
+    # real fix (a `file` worktree-escape validator, shared with
+    # chat_agent.py's dispatch which also had a real shell-injection bug)
+    # lives in the shared run_single_test_handler() itself; see that
+    # function's own module docstring.
     def run_single_test(inp: dict[str, Any]) -> str:
-        import shlex as _shlex
-
-        rst_kw = str(inp["keyword"])
-        rst_file = str(inp.get("file", ""))
-        rst_verbose = bool(inp.get("verbose", True))
-        rst_vflag = "-v" if rst_verbose else "-q"
-        activate = (
-            _venv_activate_snippet()
-        )  # cwd=repo_path is passed to subprocess.run below
-        rst_path = rst_file if rst_file else "backend/tests/"
-        cmd = f"{activate} && python -m pytest {_shlex.quote(rst_path)} -k {_shlex.quote(rst_kw)} {rst_vflag} --tb=short 2>&1 | head -100"
-        try:
-            r = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                cwd=repo_path,
-                timeout=120,
-            )
-            return (r.stdout + r.stderr)[:5000] or "(no output)"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] Tests timed out after 2 minutes"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return run_single_test_handler(
+            repo_path, inp, activate_snippet=_venv_activate_snippet()
+        )
 
     def coverage_report(inp: dict[str, Any]) -> str:
         import shlex as _shlex

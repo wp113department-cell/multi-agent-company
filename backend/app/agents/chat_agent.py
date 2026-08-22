@@ -143,6 +143,7 @@ from app.tools.execution.run_background import validate_run_background_cwd
 from app.tools.execution.run_make import run_make_handler
 from app.tools.execution.run_node import run_node_handler
 from app.tools.execution.run_script import run_script_handler
+from app.tools.execution.run_single_test import run_single_test_handler
 from app.tools.execution.run_tests import run_tests_handler
 from app.tools.filesystem.append_file import append_file_handler
 from app.tools.filesystem.apply_patch import apply_patch_handler
@@ -2427,20 +2428,24 @@ class ChatAgent:
         # ========== BATCH 4 — Testing extras ==========
 
         if tool_name == "run_single_test":
-            rst_kw = str(inp["keyword"])
-            rst_file = str(inp.get("file", ""))
-            rst_verbose = bool(inp.get("verbose", True))
-            rst_vflag = "-v" if rst_verbose else "-q"
-            # AUDIT_Q_BATCH01 §1 "Windows terminal support" — was hardcoded
-            # POSIX `source`, silently never activating the venv on Windows
-            # (relative path is safe here: _run_subprocess always passes
-            # cwd=repo, so the shell's starting directory is already repo,
-            # matching this line's previous absolute-path behavior exactly
-            # on POSIX while adding a real Windows branch).
-            activate = _venv_activate_snippet()
-            rst_path = rst_file if rst_file else "backend/tests/"
-            cmd_s = f"{activate} && python -m pytest {rst_path} -k '{rst_kw}' {rst_vflag} --tb=short 2>&1 | head -100"
-            return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 120)
+            # tool_enhance.md productionization pass, tool #62 (2026-08-22)
+            # — real, severe findings: (1) this dispatch used to
+            # interpolate `keyword` inside single quotes in a shell
+            # command with no escaping (`-k '{rst_kw}'`) — a literal `'`
+            # broke out of the quoting, proved live; (2) `file` had no
+            # worktree-boundary check on either real call site — pytest
+            # collection executes a Python file's module-level code at
+            # import time, proved live with a real outside-repo file's
+            # os.system() side effect genuinely running. Full account in
+            # run_single_test_handler()'s own docstring. Now delegates to
+            # the same shared, fixed handler `tools.py`'s implementation
+            # already used (which was already correctly shlex.quote()'d).
+            return await asyncio.to_thread(
+                run_single_test_handler,
+                repo,
+                inp,
+                activate_snippet=_venv_activate_snippet(),
+            )
 
         if tool_name == "coverage_report":
             cov_path = str(inp.get("path", "backend/tests/"))
