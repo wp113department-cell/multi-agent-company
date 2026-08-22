@@ -157,6 +157,7 @@ from app.tools.filesystem.insert_before import insert_before_handler
 from app.tools.filesystem.move_file import move_file_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
+from app.tools.filesystem.find_references import find_references_handler
 from app.tools.filesystem.get_file_tree import get_file_tree_handler
 from app.tools.filesystem.list_files import list_files_handler
 from app.tools.filesystem.search_code import search_code_handler
@@ -1197,17 +1198,14 @@ class ChatAgent:
             return await asyncio.to_thread(search_symbols_handler, root, inp)
 
         if tool_name == "find_references":
-            sym = str(inp["symbol"])
-            fp = inp.get("file_pattern", "")
-            ref_cmd = ["grep", "-rn"]
-            if fp:
-                ref_cmd += ["--include", str(fp)]
-            ref_cmd += [r"\b" + sym + r"\b", repo]
-            try:
-                r = subprocess.run(ref_cmd, capture_output=True, text=True, timeout=15)
-                return r.stdout[:6000] or f"(no references to '{sym}')"
-            except subprocess.TimeoutExpired:
-                return "[ERROR] Search timed out"
+            # tool_enhance.md productionization pass, tool #74 (2026-08-22)
+            # — no new vulnerability; the shared find_references_handler()
+            # itself documents the full audit (no path/directory field
+            # exists in this tool's schema, and `symbol` is always
+            # wrapped with a literal \b prefix before reaching grep, so
+            # it can never be interpreted as a flag). Now delegates to
+            # that same shared handler.
+            return await asyncio.to_thread(find_references_handler, root, inp)
 
         if tool_name == "find_todos":
             directory = str(inp.get("directory", ""))

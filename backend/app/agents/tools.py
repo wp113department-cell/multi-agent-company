@@ -210,6 +210,10 @@ from app.tools.filesystem.file_info import (
     FILE_INFO_TOOL,
     file_info_handler,
 )
+from app.tools.filesystem.find_references import (
+    FIND_REFERENCES_TOOL,
+    find_references_handler,
+)
 from app.tools.filesystem.get_file_tree import (
     GET_FILE_TREE_TOOL,
     get_file_tree_handler,
@@ -620,24 +624,11 @@ READ_ONLY_TOOLS = [
     # tool_enhance.md productionization pass, tool #72 (2026-08-22) —
     # moved to app/tools/filesystem/file_info.py as FILE_INFO_TOOL.
     FILE_INFO_TOOL,
-    {
-        "name": "find_references",
-        "description": "Find every place in the codebase where a function, class, or variable is referenced/called. Shows file:line context. Use this before refactoring to understand impact.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "symbol": {
-                    "type": "string",
-                    "description": "Symbol name to find usages of (e.g. 'get_task', 'DevTask', 'fetchTasks')",
-                },
-                "file_pattern": {
-                    "type": "string",
-                    "description": "Limit to files matching this glob (e.g. '*.py', '*.ts')",
-                },
-            },
-            "required": ["symbol"],
-        },
-    },
+    # tool_enhance.md productionization pass, tool #74 (2026-08-22) —
+    # moved to app/tools/filesystem/find_references.py as
+    # FIND_REFERENCES_TOOL. No new vulnerability — see that module's
+    # docstring for the full audit.
+    FIND_REFERENCES_TOOL,
     {
         "name": "find_todos",
         "description": "Find all TODO, FIXME, HACK, XXX, and NOTE comments across the codebase. Essential for understanding what is incomplete or known-broken.",
@@ -1218,19 +1209,11 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
     def file_info(inp: dict[str, Any]) -> str:
         return file_info_handler(base, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #74 (2026-08-22) — no
+    # new vulnerability; the shared find_references_handler() itself
+    # documents the full audit in its own module docstring.
     def find_references(inp: dict[str, Any]) -> str:
-        symbol = inp["symbol"]
-        file_pattern = inp.get("file_pattern", "")
-        cmd = ["grep", "-rn"]
-        if file_pattern:
-            cmd += ["--include", file_pattern]
-        cmd += [r"\b" + symbol + r"\b", str(base)]
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-            out = result.stdout[:6000]
-            return out if out.strip() else f"(no references to '{symbol}' found)"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] Search timed out"
+        return find_references_handler(base, inp)
 
     def find_todos(inp: dict[str, Any]) -> str:
         directory = str(inp.get("directory", ""))
