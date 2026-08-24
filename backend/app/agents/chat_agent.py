@@ -189,6 +189,7 @@ from app.tools.git.pull_request import (
 from app.tools.git.rebase import validate_git_rebase_inputs
 from app.tools.git.reset import validate_git_reset_inputs
 from app.tools.git.stash import validate_git_stash_action
+from app.tools.git.show import git_show_handler
 from app.tools.git.status import git_status_handler
 from app.tools.git.tag import git_tag_handler
 from app.tools.git.worktree import validate_git_worktree_inputs
@@ -1282,9 +1283,18 @@ class ChatAgent:
             return await asyncio.to_thread(git_status_handler, root)
 
         if tool_name == "git_show":
-            ref = str(inp.get("ref", "HEAD"))
-            out = _git(["show", "--stat", "--no-color", ref], repo)
-            return out[:5000]
+            # tool_enhance.md productionization pass, tool #80 (2026-08-23)
+            # — the MOST SEVERE finding in the low-risk tier so far, on
+            # BOTH real implementations: `ref` was a bare positional
+            # argv element with no `--` separator, exploitable via
+            # git's own --output=<path> flag for a silent
+            # arbitrary-file-write. Proved live:
+            # ref="--output=/tmp/git_show_pwned.txt" genuinely wrote a
+            # real file to that path with zero indication in the
+            # tool's own returned text. Full account in
+            # git_show_handler()'s own module docstring. Now delegates
+            # to that same shared, fixed handler.
+            return await asyncio.to_thread(git_show_handler, root, inp)
 
         if tool_name == "git_blame":
             rel = str(inp["path"])

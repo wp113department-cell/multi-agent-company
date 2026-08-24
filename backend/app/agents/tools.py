@@ -332,6 +332,10 @@ from app.tools.git.reset import (
     git_reset_handler as git_reset_handler,
 )
 from app.tools.git.restore import GIT_RESTORE_TOOL as _GIT_RESTORE_TOOL
+from app.tools.git.show import (
+    GIT_SHOW_TOOL,
+    git_show_handler,
+)
 from app.tools.git.status import (
     GIT_STATUS_TOOL,
     git_status_handler,
@@ -656,20 +660,13 @@ READ_ONLY_TOOLS = [
     # silently reported "(clean)" even when `git status` genuinely
     # failed, never checking returncode.
     GIT_STATUS_TOOL,
-    {
-        "name": "git_show",
-        "description": "Show the full details of a specific commit: message, author, date, and unified diff of changes.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "ref": {
-                    "type": "string",
-                    "description": "Commit hash, tag, or relative ref like HEAD~2 (default: HEAD)",
-                },
-            },
-            "required": [],
-        },
-    },
+    # tool_enhance.md productionization pass, tool #80 (2026-08-23) —
+    # moved to app/tools/git/show.py as GIT_SHOW_TOOL. See that
+    # module's docstring — the MOST SEVERE finding in the low-risk
+    # tier so far: `ref` was flag-collision vulnerable to git's own
+    # `--output=<path>` flag, a silent arbitrary-file-write primitive,
+    # on BOTH real implementations.
+    GIT_SHOW_TOOL,
     {
         "name": "git_blame",
         "description": "Show who last modified each line of a file and in which commit. Use to understand history and context of specific code.",
@@ -1202,19 +1199,13 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
     def git_status(inp: dict[str, Any]) -> str:
         return git_status_handler(base)
 
+    # tool_enhance.md productionization pass, tool #80 (2026-08-23) — the
+    # real fix (this implementation had ZERO validation of `ref`,
+    # exploitable via git's own --output=<path> flag for a silent
+    # arbitrary-file-write) lives in the shared git_show_handler()
+    # itself; see that function's own module docstring.
     def git_show(inp: dict[str, Any]) -> str:
-        ref = str(inp.get("ref", "HEAD"))
-        try:
-            result = subprocess.run(
-                ["git", "show", "--stat", "--no-color", ref],
-                capture_output=True,
-                text=True,
-                cwd=str(base),
-                timeout=15,
-            )
-            return (result.stdout or result.stderr)[:5000]
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return git_show_handler(base, inp)
 
     def git_blame(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
