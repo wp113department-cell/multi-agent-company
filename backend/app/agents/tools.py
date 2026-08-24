@@ -278,6 +278,10 @@ from app.tools.filesystem.write_file import (
     WRITE_FILE_TOOL as _WRITE_FILE_TOOL,
     write_file_handler as write_file_handler,
 )
+from app.tools.git.blame import (
+    GIT_BLAME_TOOL,
+    git_blame_handler,
+)
 from app.tools.git.checkout import (
     GIT_CHECKOUT_TOOL as _GIT_CHECKOUT_TOOL,
     validate_git_checkout_inputs as validate_git_checkout_inputs,
@@ -667,28 +671,14 @@ READ_ONLY_TOOLS = [
     # `--output=<path>` flag, a silent arbitrary-file-write primitive,
     # on BOTH real implementations.
     GIT_SHOW_TOOL,
-    {
-        "name": "git_blame",
-        "description": "Show who last modified each line of a file and in which commit. Use to understand history and context of specific code.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "File path relative to repo root",
-                },
-                "start_line": {
-                    "type": "integer",
-                    "description": "First line to blame (optional)",
-                },
-                "end_line": {
-                    "type": "integer",
-                    "description": "Last line to blame (optional)",
-                },
-            },
-            "required": ["path"],
-        },
-    },
+    # tool_enhance.md productionization pass, tool #81 (2026-08-23) —
+    # moved to app/tools/git/blame.py as GIT_BLAME_TOOL. See that
+    # module's docstring — same flag-collision class as tool #80's
+    # git_show (path had no `--` separator), checked and confirmed
+    # lower severity here (no --output-equivalent flag exists for git
+    # blame), fixed defensively anyway per this initiative's
+    # consistent policy.
+    GIT_BLAME_TOOL,
     # tool_enhance.md productionization pass, tool #76 (2026-08-22) —
     # moved to app/tools/filesystem/analyze_file.py as ANALYZE_FILE_TOOL.
     # See that module's docstring — this was the first READ_ONLY_TOOLS
@@ -1207,21 +1197,13 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
     def git_show(inp: dict[str, Any]) -> str:
         return git_show_handler(base, inp)
 
+    # tool_enhance.md productionization pass, tool #81 (2026-08-23) — the
+    # real fix (this implementation had ZERO validation of `path`,
+    # same flag-collision class as tool #80's git_show) lives in the
+    # shared git_blame_handler() itself; see that function's own
+    # module docstring.
     def git_blame(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        start = inp.get("start_line")
-        end = inp.get("end_line")
-        cmd = ["git", "blame", "--date=short", "-w"]
-        if start and end:
-            cmd += [f"-L{start},{end}"]
-        cmd.append(rel)
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, cwd=str(base), timeout=15
-            )
-            return (result.stdout or result.stderr)[:5000]
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return git_blame_handler(base, inp)
 
     # tool_enhance.md productionization pass, tool #76 (2026-08-22) — the
     # real fix (this implementation itself had ZERO worktree-boundary

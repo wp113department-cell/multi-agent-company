@@ -173,6 +173,7 @@ from app.tools.filesystem.replace_function import replace_function_handler
 from app.tools.filesystem.semver_bump import semver_bump_handler
 from app.tools.filesystem.sync_files import sync_files_handler
 from app.tools.filesystem.write_file import write_file_handler
+from app.tools.git.blame import git_blame_handler
 from app.tools.git.checkout import validate_git_checkout_inputs
 from app.tools.git.cherry_pick import validate_git_cherry_pick_inputs
 from app.tools.git.commit import stage_and_commit
@@ -1297,14 +1298,16 @@ class ChatAgent:
             return await asyncio.to_thread(git_show_handler, root, inp)
 
         if tool_name == "git_blame":
-            rel = str(inp["path"])
-            blame_start = inp.get("start_line")
-            blame_end = inp.get("end_line")
-            blame_args = ["blame", "--date=short", "-w"]
-            if blame_start and blame_end:
-                blame_args.append(f"-L{blame_start},{blame_end}")
-            blame_args.append(rel)
-            return _git(blame_args, repo)[:5000]
+            # tool_enhance.md productionization pass, tool #81 (2026-08-23)
+            # — real finding, on BOTH real implementations: `path` was a
+            # bare positional argv element with no `--` separator, same
+            # flag-collision class as tool #80's git_show (checked and
+            # confirmed lower severity here — no --output-equivalent
+            # flag exists for git blame — but fixed defensively per
+            # this initiative's consistent policy). Full account in
+            # git_blame_handler()'s own module docstring. Now delegates
+            # to that same shared, fixed handler.
+            return await asyncio.to_thread(git_blame_handler, root, inp)
 
         if tool_name == "git_diff":
             file_ = str(inp.get("file", ""))
