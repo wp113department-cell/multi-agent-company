@@ -160,6 +160,7 @@ from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
 from app.tools.filesystem.find_references import find_references_handler
 from app.tools.filesystem.find_route import find_route_handler
+from app.tools.filesystem.find_sql import find_sql_handler
 from app.tools.filesystem.find_todos import find_todos_handler
 from app.tools.filesystem.search_imports import search_imports_handler
 from app.tools.filesystem.get_file_tree import get_file_tree_handler
@@ -3168,26 +3169,17 @@ class ChatAgent:
             return await asyncio.to_thread(find_api_handler, root, inp)
 
         if tool_name == "find_sql":
-            import shlex as _shlex4
-
-            fsql_kw = str(inp.get("keyword", "")).upper()
-            if fsql_kw:
-                # -i case-insensitive, -w whole-word; avoid (?i) inline flag
-                fsql_cmd = (
-                    f"grep -rn -i -w {_shlex4.quote(fsql_kw)} {repo} "
-                    "--include=*.py --include=*.sql --include=*.ts "
-                    "--exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=__pycache__ 2>/dev/null || true"
-                )
-            else:
-                fsql_cmd = (
-                    f"grep -rn -i -E 'SELECT|INSERT|UPDATE|DELETE|CREATE TABLE|ALTER TABLE' {repo} "
-                    "--include=*.py --include=*.sql --include=*.ts "
-                    "--exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=__pycache__ 2>/dev/null || true"
-                )
-            fsql_result = await asyncio.to_thread(_run_subprocess, fsql_cmd, repo, 15)
-            return (
-                fsql_result[:5000] if fsql_result.strip() else "No SQL statements found"
-            )
+            # tool_enhance.md productionization pass, tool #91 (2026-08-24)
+            # — real finding, on this AND 3 other real implementations:
+            # ZERO validation of `keyword` — a flag-injection bug, same
+            # class as tool #69's search_code. This dispatch's
+            # shlex.quote() only protects against SHELL metacharacter
+            # injection, not grep's own argv-level flag parsing — proved
+            # live, keyword="-w" was silently consumed as grep's own
+            # flag instead of the literal search text. Full account in
+            # find_sql_handler()'s own module docstring. Now delegates
+            # to that same shared, fixed handler.
+            return await asyncio.to_thread(find_sql_handler, root, inp)
 
         if tool_name == "find_test":
             ftest_fn = str(inp["function_name"])

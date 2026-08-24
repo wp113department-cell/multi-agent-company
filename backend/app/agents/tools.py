@@ -222,6 +222,10 @@ from app.tools.filesystem.find_route import (
     FIND_ROUTE_TOOL as _FIND_ROUTE_TOOL,
     find_route_handler,
 )
+from app.tools.filesystem.find_sql import (
+    FIND_SQL_TOOL as _FIND_SQL_TOOL,
+    find_sql_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -2930,20 +2934,13 @@ _RUN_SCRIPT_TOOL = RUN_SCRIPT_TOOL
 # chat_agent.py's dispatch (its shlex.quote() only protects against
 # shell metacharacters, not grep's own argv-level flag parsing).
 
-_FIND_SQL_TOOL = {
-    "name": "find_sql",
-    "description": "Find SQL queries and database operations in the codebase (SELECT, INSERT, SQLAlchemy text(), etc).",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "keyword": {
-                "type": "string",
-                "description": "SQL keyword to search for, e.g. 'SELECT', 'INSERT', 'UPDATE' (empty = all SQL)",
-            },
-        },
-        "required": [],
-    },
-}
+# tool_enhance.md productionization pass, tool #91 (2026-08-24) — moved
+# to app/tools/filesystem/find_sql.py as FIND_SQL_TOOL (imported above
+# as _FIND_SQL_TOOL). See that module's docstring — `keyword` was
+# flag-injection vulnerable on 4 of 5 real implementations; the 5th
+# (pure-Python, no subprocess) had a real functionality bug instead
+# (empty keyword searched only "SELECT", not the full SQL keyword set
+# the schema promises).
 
 _FIND_TEST_TOOL = {
     "name": "find_test",
@@ -3667,33 +3664,13 @@ def make_security_reviewer_handlers(repo_path: str) -> dict[str, Any]:
         directory = str(inp.get("directory", ""))
         return _scan_directory_for_secrets(root, directory)
 
+    # tool_enhance.md productionization pass, tool #91 (2026-08-24) — the
+    # real fix (ZERO validation of `keyword` — a flag-injection bug,
+    # same class as tool #69's search_code) lives in the shared
+    # find_sql_handler() itself; see that function's own module
+    # docstring.
     def sec_find_sql(inp: dict[str, Any]) -> str:
-        keyword = str(inp.get("keyword", ""))
-        fp = str(inp.get("file_pattern", "*.py"))
-        if keyword:
-            r = subprocess.run(
-                ["grep", "-rn", "-i", "-w", keyword, "--include", fp, str(root)],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-        else:
-            r = subprocess.run(
-                [
-                    "grep",
-                    "-rn",
-                    "-i",
-                    "-E",
-                    "SELECT|INSERT|UPDATE|DELETE|CREATE TABLE|DROP TABLE",
-                    "--include",
-                    fp,
-                    str(root),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-        return r.stdout[:6000] if r.stdout else "(no SQL found)"
+        return find_sql_handler(root, inp)
 
     def sec_find_config(inp: dict[str, Any]) -> str:
         fp = str(inp.get("file_pattern", "*.py"))
@@ -3866,33 +3843,11 @@ def make_sql_agent_handlers(repo_path: str) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # tool_enhance.md productionization pass, tool #91 (2026-08-24) — the
+    # real fix lives in the shared find_sql_handler(); see that
+    # function's own module docstring.
     def sq_find_sql(inp: dict[str, Any]) -> str:
-        keyword = str(inp.get("keyword", ""))
-        fp = str(inp.get("file_pattern", "*.py"))
-        if keyword:
-            r = subprocess.run(
-                ["grep", "-rn", "-i", "-w", keyword, "--include", fp, str(root)],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-        else:
-            r = subprocess.run(
-                [
-                    "grep",
-                    "-rn",
-                    "-i",
-                    "-E",
-                    "SELECT|INSERT|UPDATE|DELETE|CREATE TABLE",
-                    "--include",
-                    fp,
-                    str(root),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-        return r.stdout[:6000] if r.stdout else "(no SQL found)"
+        return find_sql_handler(root, inp)
 
     def sq_explain_query(inp: dict[str, Any]) -> str:
         eq_query = str(inp.get("query", ""))
@@ -5209,18 +5164,14 @@ def make_performance_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     handlers = make_read_only_handlers(repo_path)
     perf_result: dict[str, Any] = {}
 
+    # tool_enhance.md productionization pass, tool #91 (2026-08-24) — the
+    # real fix (empty `keyword` searched only "SELECT", not the full
+    # SQL keyword set the schema promises — a real functionality bug,
+    # proved live with a real INSERT statement invisible to this
+    # implementation) lives in the shared find_sql_handler() itself;
+    # see that function's own module docstring.
     def pr_find_sql(inp: dict[str, Any]) -> str:
-        keyword = str(inp.get("keyword", "")).upper() or "SELECT"
-        results: list[str] = []
-        for fp in root.rglob("*.py"):
-            try:
-                text = fp.read_text(encoding="utf-8", errors="replace")
-            except Exception:
-                continue
-            for i, line in enumerate(text.splitlines(), 1):
-                if keyword in line.upper():
-                    results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
-        return "\n".join(results[:50]) or f"(no matches for {keyword})"
+        return find_sql_handler(root, inp)
 
     def pr_run_sql(inp: dict[str, Any]) -> str:
         sql = str(inp["query"]).strip()
@@ -8433,43 +8384,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def find_api_h(inp: dict[str, Any]) -> str:
         return find_api_handler(root, inp)
 
+    # tool_enhance.md productionization pass, tool #91 (2026-08-24) — the
+    # real fix (ZERO validation of `keyword` — a flag-injection bug)
+    # lives in the shared find_sql_handler() itself; see that
+    # function's own module docstring.
     def find_sql_h(inp: dict[str, Any]) -> str:
-        fsql_kw = str(inp.get("keyword", "")).upper()
-        # Use -i for case-insensitive, -w for whole-word; avoid (?i) inline flag (not ERE)
-        if fsql_kw:
-            fsql_pat = fsql_kw
-            fsql_flags = ["-rn", "-i", "-w"]
-        else:
-            fsql_pat = r"SELECT|INSERT|UPDATE|DELETE|CREATE TABLE|ALTER TABLE"
-            fsql_flags = ["-rn", "-i", "-E"]
-        exclude = [
-            "--exclude-dir=node_modules",
-            "--exclude-dir=.venv",
-            "--exclude-dir=__pycache__",
-        ]
-        try:
-            r = subprocess.run(
-                ["grep"]
-                + fsql_flags
-                + [
-                    fsql_pat,
-                    repo_path,
-                    "--include=*.py",
-                    "--include=*.sql",
-                    "--include=*.ts",
-                ]
-                + exclude,
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            return (
-                r.stdout[:5000]
-                if r.stdout.strip()
-                else "No SQL statements found in codebase"
-            )
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return find_sql_handler(root, inp)
 
     def find_test_h(inp: dict[str, Any]) -> str:
         ftest_fn = str(inp["function_name"])
