@@ -161,6 +161,7 @@ from app.tools.filesystem.find_references import find_references_handler
 from app.tools.filesystem.find_todos import find_todos_handler
 from app.tools.filesystem.search_imports import search_imports_handler
 from app.tools.filesystem.get_file_tree import get_file_tree_handler
+from app.tools.filesystem.list_classes import list_classes_handler
 from app.tools.filesystem.list_files import list_files_handler
 from app.tools.filesystem.list_functions import list_functions_handler
 from app.tools.filesystem.parse_ast import parse_ast_handler
@@ -2449,43 +2450,21 @@ class ChatAgent:
             return await asyncio.to_thread(list_functions_handler, root, repo, inp)
 
         if tool_name == "list_classes":
-            rel = str(inp["path"])
-            lc_fp = root / rel
-            if not lc_fp.exists():
-                return f"[ERROR] File not found: {rel}"
-            lc_lines = lc_fp.read_text(encoding="utf-8", errors="replace").splitlines()
-            lc_results: list[str] = []
-            lc_current: str | None = None
-            lc_base_indent = 0
-            for lc_i, lc_line in enumerate(lc_lines, 1):
-                s = lc_line.strip()
-                curr_indent = len(lc_line) - len(lc_line.lstrip())
-                if s.startswith(("class ", "export class ", "export default class ")):
-                    lc_current = s.split("(")[0].split("{")[0].rstrip()
-                    lc_base_indent = curr_indent
-                    lc_results.append(f"\nL{lc_i}: {lc_current}")
-                elif lc_current and curr_indent > lc_base_indent:
-                    if s.startswith(("def ", "async def ")):
-                        lc_results.append(f"    L{lc_i}: {s.split(':')[0]}")
-                    elif (
-                        s.startswith(
-                            ("public ", "private ", "protected ", "async ", "static ")
-                        )
-                        and "(" in s
-                    ):
-                        lc_results.append(f"    L{lc_i}: {s[:120]}")
-                elif (
-                    lc_current
-                    and lc_line.strip()
-                    and curr_indent <= lc_base_indent
-                    and not s.startswith(("@", "#", "/"))
-                ):
-                    lc_current = None
-            return (
-                f"Classes in {rel}:\n" + "\n".join(lc_results)
-                if lc_results
-                else f"(no classes in {rel})"
-            )
+            # tool_enhance.md productionization pass, tool #87 (2026-08-24)
+            # — real, severe finding, on this AND 6 other real
+            # implementations across 7 agents (the sibling tool to #82's
+            # list_functions, same finding classes proved
+            # independently): this dispatch had ZERO worktree-boundary
+            # validation and an uncaught PermissionError — proved live,
+            # list_classes({"path": "/tmp/outside/secret.py"}) genuinely
+            # listed a real class definition from a file completely
+            # outside the repo. Three agent-specific implementations
+            # elsewhere in tools.py read the wrong input field entirely
+            # (schema says `path`, they read `file`); two others had a
+            # worktree escape via relative traversal. Full account in
+            # list_classes_handler()'s own module docstring. Now
+            # delegates to that same shared, fixed handler.
+            return await asyncio.to_thread(list_classes_handler, root, repo, inp)
 
         if tool_name == "find_function_body":
             rel = str(inp["path"])

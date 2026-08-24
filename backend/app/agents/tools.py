@@ -238,6 +238,10 @@ from app.tools.filesystem.get_file_tree import (
     GET_FILE_TREE_TOOL,
     get_file_tree_handler,
 )
+from app.tools.filesystem.list_classes import (
+    LIST_CLASSES_TOOL,
+    list_classes_handler,
+)
 from app.tools.filesystem.list_files import (
     LIST_FILES_TOOL,
     list_files_handler,
@@ -2617,20 +2621,15 @@ _TYPE_CHECK_TOOL = {
 # implementations across 32 agents now delegate to one shared,
 # corrected handler.
 
-_LIST_CLASSES_TOOL = {
-    "name": "list_classes",
-    "description": "List all class definitions in a file with their methods and line numbers.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "File path relative to repo root (.py, .ts, .tsx supported)",
-            },
-        },
-        "required": ["path"],
-    },
-}
+# tool_enhance.md productionization pass, tool #87 (2026-08-24) — moved
+# to app/tools/filesystem/list_classes.py as LIST_CLASSES_TOOL
+# (imported above). Sibling tool to tool #82's list_functions, same
+# four finding classes proved independently: worktree escape + an
+# uncaught PermissionError on the 2 single-file implementations, a
+# field-name mismatch (`file` vs schema's `path`) in 3 agent-specific
+# ones, a relative-traversal worktree escape in 2 more, and a
+# single-file-vs-subtree design mismatch across all 5.
+_LIST_CLASSES_TOOL = LIST_CLASSES_TOOL
 
 _FIND_FUNCTION_BODY_TOOL = {
     "name": "find_function_body",
@@ -3832,22 +3831,13 @@ def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     def ar_list_functions(inp: dict[str, Any]) -> str:
         return list_functions_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #87 (2026-08-24) — the
+    # real fix (this implementation read the wrong field — `file`
+    # instead of the schema's own `path`) lives in the shared
+    # list_classes_handler() itself; see that function's own module
+    # docstring.
     def ar_list_classes(inp: dict[str, Any]) -> str:
-        fp = str(inp.get("file", ""))
-        r = subprocess.run(
-            [
-                "grep",
-                "-rn",
-                "-E",
-                "^class ",
-                "--include=*.py",
-                str(root / fp) if fp else str(root),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return r.stdout[:6000] if r.stdout else "(no classes)"
+        return list_classes_handler(root, repo_path, inp)
 
     def ar_call_graph(inp: dict[str, Any]) -> str:
         return _ast.build_call_graph(
@@ -4248,22 +4238,11 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
     def rf_list_functions(inp: dict[str, Any]) -> str:
         return list_functions_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #87 (2026-08-24) — the
+    # real fix lives in the shared list_classes_handler(); see that
+    # function's own module docstring.
     def rf_list_classes(inp: dict[str, Any]) -> str:
-        fp = str(inp.get("file", ""))
-        r = subprocess.run(
-            [
-                "grep",
-                "-rn",
-                "-E",
-                "^class ",
-                "--include=*.py",
-                str(root / fp) if fp else str(root),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return r.stdout[:6000] if r.stdout else "(no classes)"
+        return list_classes_handler(root, repo_path, inp)
 
     def rf_find_function_body(inp: dict[str, Any]) -> str:
         name = str(inp["name"])
@@ -4375,22 +4354,11 @@ def make_readme_agent_handlers(repo_path: str) -> dict[str, Any]:
     def rm_list_functions(inp: dict[str, Any]) -> str:
         return list_functions_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #87 (2026-08-24) — the
+    # real fix lives in the shared list_classes_handler(); see that
+    # function's own module docstring.
     def rm_list_classes(inp: dict[str, Any]) -> str:
-        fp = str(inp.get("file", ""))
-        r = subprocess.run(
-            [
-                "grep",
-                "-rn",
-                "-E",
-                "^class ",
-                "--include=*.py",
-                str(root / fp) if fp else str(root),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return r.stdout[:6000] if r.stdout else "(no classes)"
+        return list_classes_handler(root, repo_path, inp)
 
     def rm_write_file(inp: dict[str, Any]) -> str:
         from app.policy.engine import check_path_in_worktree
@@ -5427,19 +5395,13 @@ def make_style_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     def sr_list_functions(inp: dict[str, Any]) -> str:
         return list_functions_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #87 (2026-08-24) — the
+    # real fix (this implementation had ZERO worktree-boundary
+    # validation on `path` — a relative `../` traversal genuinely
+    # escaped the repo) lives in the shared list_classes_handler()
+    # itself; see that function's own module docstring.
     def sr_list_classes(inp: dict[str, Any]) -> str:
-        sr_path = str(inp.get("path", "."))
-        results: list[str] = []
-        for fp in (root / sr_path).rglob("*.py"):
-            try:
-                for i, line in enumerate(
-                    fp.read_text(encoding="utf-8").splitlines(), 1
-                ):
-                    if line.strip().startswith("class "):
-                        results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
-            except Exception:
-                continue
-        return "\n".join(results[:100]) or "(none found)"
+        return list_classes_handler(root, repo_path, inp)
 
     def sr_find_todos(inp: dict[str, Any]) -> str:
         results: list[str] = []
@@ -5929,19 +5891,13 @@ def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
     def td_list_functions(inp: dict[str, Any]) -> str:
         return list_functions_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #87 (2026-08-24) — the
+    # real fix (this implementation had ZERO worktree-boundary
+    # validation on `path`, same relative-traversal-escape finding as
+    # sr_list_classes) lives in the shared list_classes_handler()
+    # itself; see that function's own module docstring.
     def td_list_classes(inp: dict[str, Any]) -> str:
-        td_path = str(inp.get("path", "."))
-        results: list[str] = []
-        for fp in (root / td_path).rglob("*.py"):
-            try:
-                for i, line in enumerate(
-                    fp.read_text(encoding="utf-8").splitlines(), 1
-                ):
-                    if line.strip().startswith("class "):
-                        results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
-            except Exception:
-                continue
-        return "\n".join(results[:100]) or "(none found)"
+        return list_classes_handler(root, repo_path, inp)
 
     def td_find_todos(inp: dict[str, Any]) -> str:
         results: list[str] = []
@@ -7820,43 +7776,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def list_functions(inp: dict[str, Any]) -> str:
         return list_functions_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #87 (2026-08-24) — the
+    # real fix (this implementation had ZERO worktree-boundary
+    # validation and an uncaught PermissionError, same class as tool
+    # #76's analyze_file/tool #82's list_functions) lives in the
+    # shared list_classes_handler() itself; see that function's own
+    # module docstring.
     def list_classes(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        lc_fp = root / rel
-        if not lc_fp.exists():
-            return f"[ERROR] File not found: {rel}"
-        content = lc_fp.read_text(encoding="utf-8", errors="replace")
-        lc_lines = content.splitlines()
-        lc_results: list[str] = []
-        lc_current: str | None = None
-        lc_base_indent = 0
-        for lc_i, lc_line in enumerate(lc_lines, 1):
-            s = lc_line.strip()
-            curr_indent = len(lc_line) - len(lc_line.lstrip())
-            if s.startswith(("class ", "export class ", "export default class ")):
-                lc_current = s.split("(")[0].split("{")[0].rstrip()
-                lc_base_indent = curr_indent
-                lc_results.append(f"\nL{lc_i}: {lc_current}")
-            elif lc_current and curr_indent > lc_base_indent:
-                if s.startswith(("def ", "async def ")):
-                    lc_results.append(f"    L{lc_i}: {s.split(':')[0]}")
-                elif (
-                    s.startswith(
-                        ("public ", "private ", "protected ", "async ", "static ")
-                    )
-                    and "(" in s
-                ):
-                    lc_results.append(f"    L{lc_i}: {s[:120]}")
-            elif (
-                lc_current
-                and lc_line.strip()
-                and curr_indent <= lc_base_indent
-                and not s.startswith(("@", "#", "/"))
-            ):
-                lc_current = None
-        if not lc_results:
-            return f"(no class definitions found in {rel})"
-        return f"Classes in {rel}:\n" + "\n".join(lc_results)
+        return list_classes_handler(root, repo_path, inp)
 
     def find_function_body(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
