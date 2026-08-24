@@ -105,11 +105,9 @@ from app.agents.tools import (
     _llm_explain_conflict_hunks,
     _llm_generate_commit_message,
     _llm_review_diff,
-    _llm_summarize_url_content,
     _parse_conflict_markers,
     _redact_secrets_in_text,
     _run_bash_command,
-    _ssrf_denial_reason,
     _venv_activate_snippet,
     inspect_github_repo as _inspect_github_repo,
     inspect_openapi_spec as _inspect_openapi_spec,
@@ -136,6 +134,7 @@ from app.tools.execution.docker_build import validate_docker_build_inputs
 from app.tools.execution.docker_compose import build_docker_compose_command
 from app.tools.execution.docker_exec import build_docker_exec_command
 from app.tools.execution.docker_restart import build_docker_restart_command
+from app.tools.execution.fetch_url import fetch_url_handler
 from app.tools.execution.npm_install import validate_npm_install_directory
 from app.tools.execution.npm_run import validate_npm_run_directory
 from app.tools.execution.python_snippet import run_python_snippet_handler
@@ -1935,25 +1934,16 @@ class ChatAgent:
             return await asyncio.to_thread(run_make_handler, root, repo, inp)
 
         if tool_name == "fetch_url":
-            fu_url = str(inp["url"])
-            fu_timeout = int(inp.get("timeout", 15))
-            fu_summarize = bool(inp.get("summarize", False))
-            fu_ssrf_reason = _ssrf_denial_reason(fu_url)
-            if fu_ssrf_reason:
-                return f"[POLICY DENIED] {fu_ssrf_reason}"
-            import shlex as _shlex_fu
-
-            cmd_s = f"curl -s -L --max-time {fu_timeout} --user-agent 'Gridiron-Agent/1.0' {_shlex_fu.quote(fu_url)} 2>&1"
-            fu_raw = await asyncio.to_thread(
-                _run_subprocess, cmd_s, repo, fu_timeout + 5
-            )
-            if fu_summarize and fu_raw and not fu_raw.startswith("[ERROR]"):
-                fu_summary = await asyncio.to_thread(
-                    _llm_summarize_url_content, fu_url, fu_raw
-                )
-                if fu_summary:
-                    return f"=== Summary ===\n{fu_summary}\n\n=== Raw content (first 10000 chars) ===\n{fu_raw[:10000]}"
-            return fu_raw
+            # tool_enhance.md productionization pass, tool #86 (2026-08-24)
+            # — real finding, on this AND make_chat_handlers's own
+            # closure: an unbounded LLM-controlled timeout (flagged
+            # back in tool #14's own audit) plus an uncaught ValueError
+            # on a non-numeric timeout (proved live with
+            # timeout="not_a_number"). SSRF protection was already
+            # correct and unchanged. Full account in
+            # fetch_url_handler()'s own module docstring. Now delegates
+            # to that same shared, fixed handler.
+            return await asyncio.to_thread(fetch_url_handler, inp)
 
         # ========== BATCH 3 — Git extras ==========
 

@@ -122,6 +122,10 @@ from app.tools.execution.docker_compose import (
     DOCKER_COMPOSE_TOOL as _DOCKER_COMPOSE_TOOL,
     build_docker_compose_command as build_docker_compose_command,
 )
+from app.tools.execution.fetch_url import (
+    FETCH_URL_TOOL,
+    fetch_url_handler,
+)
 from app.tools.execution.docker_exec import (
     DOCKER_EXEC_TOOL as _DOCKER_EXEC_TOOL,
     build_docker_exec_command as build_docker_exec_command,
@@ -239,11 +243,11 @@ from app.tools.filesystem.list_files import (
     list_files_handler,
 )
 from app.tools.filesystem.list_functions import (
-    LIST_FUNCTIONS_TOOL as _LIST_FUNCTIONS_TOOL,
+    LIST_FUNCTIONS_TOOL,
     list_functions_handler,
 )
 from app.tools.filesystem.parse_ast import (
-    PARSE_AST_TOOL as _PARSE_AST_TOOL,
+    PARSE_AST_TOOL,
     parse_ast_handler,
 )
 from app.tools.filesystem.search_code import (
@@ -384,6 +388,20 @@ from app.tools.refactor.rename_symbol import (
     RENAME_SYMBOL_TOOL as _RENAME_SYMBOL_TOOL,
     validate_rename_symbol_directory as validate_rename_symbol_directory,
 )
+
+# mypy --strict flags a renaming `as` import (`X as _X`) as not
+# "explicitly exported" when another module imports the name directly
+# from app.agents.tools — spike_agent.py and code_explainer_agent.py
+# do exactly that for these three. A plain module-level assignment IS
+# recognized as a genuine definition here. tool_enhance.md
+# productionization pass, tool #86 (2026-08-24) — _LIST_FUNCTIONS_TOOL/
+# _PARSE_AST_TOOL were a pre-existing gap from tools #82/#83, caught
+# and fixed alongside _FETCH_URL_TOOL's identical issue (missed then
+# because a per-file mypy check on the new module alone doesn't follow
+# imports to external CONSUMERS of app.agents.tools).
+_FETCH_URL_TOOL = FETCH_URL_TOOL
+_LIST_FUNCTIONS_TOOL = LIST_FUNCTIONS_TOOL
+_PARSE_AST_TOOL = PARSE_AST_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2386,25 +2404,13 @@ _LIST_BACKGROUND_PROCESSES_TOOL = {
 # implementations even with list-args, and a directory worktree-escape).
 _RUN_MAKE_TOOL = RUN_MAKE_TOOL
 
-_FETCH_URL_TOOL = {
-    "name": "fetch_url",
-    "description": "Fetch content from a URL (HTTP GET). Useful for reading documentation or checking API endpoints. Set summarize=true to also get an LLM-generated summary of the fetched content ahead of the raw text.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "url": {"type": "string", "description": "URL to fetch"},
-            "timeout": {
-                "type": "integer",
-                "description": "Timeout in seconds (default: 15)",
-            },
-            "summarize": {
-                "type": "boolean",
-                "description": "If true, prepend an LLM-generated summary of the fetched content (default: false)",
-            },
-        },
-        "required": ["url"],
-    },
-}
+# tool_enhance.md productionization pass, tool #86 (2026-08-24) — moved
+# to app/tools/execution/fetch_url.py as FETCH_URL_TOOL (imported
+# above as _FETCH_URL_TOOL). See that module's docstring — the
+# unbounded-timeout finding flagged back in tool #14 is now closed;
+# ae_fetch_url (ai_engineer) previously ignored this schema's own
+# timeout/summarize fields entirely, now unified onto the same
+# shared, fixed handler.
 
 # ---------------------------------------------------------------------------
 # NEW TOOL SPECS — Batch 3: Git extras
@@ -5768,19 +5774,14 @@ def make_ai_engineer_handlers(repo_path: str) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # tool_enhance.md productionization pass, tool #86 (2026-08-24) — this
+    # implementation previously ignored its own advertised
+    # timeout/summarize schema fields entirely (hardcoded 10s,
+    # urllib.request, no summarize support) — a real functionality-
+    # parity gap. Now delegates to the shared fetch_url_handler(); see
+    # that function's own module docstring.
     def ae_fetch_url(inp: dict[str, Any]) -> str:
-        import urllib.request as _ur
-
-        url = str(inp["url"])
-        _ssrf_reason = _ssrf_denial_reason(url)
-        if _ssrf_reason:
-            return f"[POLICY DENIED] {_ssrf_reason}"
-        try:
-            with _ur.urlopen(url, timeout=10) as resp:
-                body = resp.read(8192).decode("utf-8", errors="replace")
-            return str(body[:2000])
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return fetch_url_handler(inp)
 
     def ae_submit(inp: dict[str, Any]) -> str:
         ai_result.update(inp)
@@ -7489,41 +7490,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def run_make(inp: dict[str, Any]) -> str:
         return run_make_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #86 (2026-08-24) — the
+    # real fix (an unbounded LLM-controlled timeout, flagged back in
+    # tool #14, plus an uncaught ValueError on a non-numeric timeout)
+    # lives in the shared fetch_url_handler() itself; see that
+    # function's own module docstring.
     def fetch_url(inp: dict[str, Any]) -> str:
-        fu_url = str(inp["url"])
-        fu_timeout = int(inp.get("timeout", 15))
-        fu_summarize = bool(inp.get("summarize", False))
-        _ssrf_reason = _ssrf_denial_reason(fu_url)
-        if _ssrf_reason:
-            return f"[POLICY DENIED] {_ssrf_reason}"
-        try:
-            r = subprocess.run(
-                [
-                    "curl",
-                    "-s",
-                    "-L",
-                    "--max-time",
-                    str(fu_timeout),
-                    "--user-agent",
-                    "Gridiron-Agent/1.0",
-                    fu_url,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=fu_timeout + 5,
-            )
-            raw = r.stdout[:10000] or r.stderr or "[empty response]"
-            if fu_summarize and r.stdout:
-                summary = _llm_summarize_url_content(fu_url, r.stdout)
-                if summary:
-                    return f"=== Summary ===\n{summary}\n\n=== Raw content ===\n{raw}"
-            return raw
-        except subprocess.TimeoutExpired:
-            return f"[ERROR] Request timed out after {fu_timeout}s"
-        except FileNotFoundError:
-            return "[ERROR] curl not found"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return fetch_url_handler(inp)
 
     # =========================================================================
     # BATCH 3 — Git extras
