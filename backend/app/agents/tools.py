@@ -306,6 +306,10 @@ from app.tools.git.create_branch import (
     CREATE_BRANCH_TOOL as _CREATE_BRANCH_TOOL,
     validate_create_branch_inputs as validate_create_branch_inputs,
 )
+from app.tools.git.diff import (
+    GIT_DIFF_TOOL,
+    git_diff_handler,
+)
 from app.tools.git.github_comment import (
     GITHUB_COMMENT_TOOL as _GITHUB_COMMENT_TOOL,
     github_comment_command as github_comment_command,
@@ -889,20 +893,13 @@ CODER_TOOLS = READ_ONLY_TOOLS + [
     # moved to app/tools/filesystem/write_file.py as WRITE_FILE_TOOL —
     # tool_enhance.md productionization pass, tool #12 (2026-08-17).
     _WRITE_FILE_TOOL,
-    {
-        "name": "git_diff",
-        "description": "Show the current diff of changes in the worktree. Use this to review your own changes before submitting.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "file": {
-                    "type": "string",
-                    "description": "Optional: show diff for a specific file only",
-                },
-            },
-            "required": [],
-        },
-    },
+    # tool_enhance.md productionization pass, tool #84 (2026-08-24) —
+    # moved to app/tools/git/diff.py as GIT_DIFF_TOOL. See that
+    # module's docstring — `file` had no `--` separator in 3 of the 4
+    # real implementations (not this agent's own — make_coder_handlers
+    # was already safe), a silent arbitrary-file-write via git's own
+    # --output=<path> flag, same class as tool #80's git_show.
+    GIT_DIFF_TOOL,
     {
         "name": "bash",
         "description": "Run a shell command (allowlisted safe commands only). Use for running tests, typecheck, and lint.",
@@ -1307,20 +1304,13 @@ def make_coder_handlers(
         target.write_text(content.replace(old_string, new_string, 1), encoding="utf-8")
         return f"Edited {rel_path}"
 
+    # tool_enhance.md productionization pass, tool #84 (2026-08-24) — this
+    # implementation was already safe (already used a `--` separator);
+    # unified onto the shared git_diff_handler() anyway for the more
+    # complete staged+unstaged output; see that function's own module
+    # docstring.
     def git_diff(inp: dict[str, Any]) -> str:
-        file_filter = str(inp.get("file", ""))
-        cmd = ["git", "diff", "--no-color"]
-        if file_filter:
-            cmd += ["--", file_filter]
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, cwd=worktree_path, timeout=15
-            )
-            if result.returncode != 0:
-                return f"[ERROR] git diff: {result.stderr[:300]}"
-            return result.stdout[:8000] if result.stdout else "(no changes yet)"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] git diff timed out"
+        return git_diff_handler(wt, inp)
 
     def submit_patch(inp: dict[str, Any]) -> str:
         patch_result["files_changed"] = inp.get("files_changed", [])
@@ -3178,17 +3168,12 @@ _EDIT_FILE_TOOL_SPEC = _EDIT_FILE_TOOL
 # tool_enhance.md productionization pass, tool #12 (2026-08-17).
 _WRITE_FILE_TOOL_SPEC = _WRITE_FILE_TOOL
 
-_GIT_DIFF_TOOL_SPEC = {
-    "name": "git_diff",
-    "description": "Show current unstaged and staged diff. Optionally limit to one file.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "file": {"type": "string", "description": "Limit to this file (optional)"},
-        },
-        "required": [],
-    },
-}
+# tool_enhance.md productionization pass, tool #84 (2026-08-24) — moved
+# to app/tools/git/diff.py as GIT_DIFF_TOOL (imported above as
+# git_diff_handler; this alias preserves every existing reference to
+# the old name across BUG_FIX_AGENT_TOOLS/REFACTOR_AGENT_TOOLS/
+# CHAT_TOOLS).
+_GIT_DIFF_TOOL_SPEC = GIT_DIFF_TOOL
 
 # --- Day 2 submit tool specs ---
 
@@ -3617,15 +3602,16 @@ def _make_write_file_handler(root: Path) -> Any:
     return write_file_h
 
 
+# tool_enhance.md productionization pass, tool #84 (2026-08-24) — the
+# real fix (ZERO `--` separator before `file` — a silent
+# arbitrary-file-write via git's own --output=<path> flag, same class
+# as tool #80's git_show) lives in the shared git_diff_handler()
+# itself; see that function's own module docstring.
 def _make_git_diff_handler(repo_path: str) -> Any:
+    root = Path(repo_path)
+
     def git_diff_h(inp: dict[str, Any]) -> str:
-        r = subprocess.run(
-            ["git", "diff", "--no-color"] + ([inp["file"]] if inp.get("file") else []),
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-        )
-        return r.stdout[:8000] or "No changes."
+        return git_diff_handler(root, inp)
 
     return git_diff_h
 
@@ -6947,26 +6933,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         return write_file_handler(root, repo_path, inp)
 
     # ---- git_diff ----
+    # tool_enhance.md productionization pass, tool #84 (2026-08-24) — the
+    # real fix (ZERO `--` separator before `file` — a silent
+    # arbitrary-file-write via git's own --output=<path> flag, same
+    # class as tool #80's git_show) lives in the shared
+    # git_diff_handler() itself; see that function's own module
+    # docstring.
     def git_diff(inp: dict[str, Any]) -> str:
-        args = ["git", "diff", "--no-color"]
-        staged = subprocess.run(
-            ["git", "diff", "--cached", "--no-color"],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-        )
-        unstaged = subprocess.run(
-            args + ([inp["file"]] if inp.get("file") else []),
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-        )
-        out = ""
-        if staged.stdout.strip():
-            out += "=== STAGED ===\n" + staged.stdout
-        if unstaged.stdout.strip():
-            out += "=== UNSTAGED ===\n" + unstaged.stdout
-        return out or "No changes."
+        return git_diff_handler(root, inp)
 
     # ---- bash (with confirmation for dangerous commands) ----
     def bash(inp: dict[str, Any]) -> str:

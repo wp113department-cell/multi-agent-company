@@ -180,6 +180,7 @@ from app.tools.git.checkout import validate_git_checkout_inputs
 from app.tools.git.cherry_pick import validate_git_cherry_pick_inputs
 from app.tools.git.commit import stage_and_commit
 from app.tools.git.create_branch import validate_create_branch_inputs
+from app.tools.git.diff import git_diff_handler
 from app.tools.git.github_comment import github_comment_command
 from app.tools.git.github_create_issue import github_create_issue_command
 from app.tools.git.log import git_log_handler
@@ -1312,16 +1313,18 @@ class ChatAgent:
             return await asyncio.to_thread(git_blame_handler, root, inp)
 
         if tool_name == "git_diff":
-            file_ = str(inp.get("file", ""))
-            staged = _git(["diff", "--cached", "--no-color"], repo)
-            unstaged_args = ["diff", "--no-color"] + ([file_] if file_ else [])
-            unstaged = _git(unstaged_args, repo)
-            out = ""
-            if staged.strip():
-                out += "=== STAGED ===\n" + staged
-            if unstaged.strip():
-                out += "=== UNSTAGED ===\n" + unstaged
-            return out or "No changes."
+            # tool_enhance.md productionization pass, tool #84 (2026-08-24)
+            # — real, severe finding, on this AND 2 other real
+            # implementations (make_coder_handlers's own copy was
+            # already safe): ZERO `--` separator before `file` — proved
+            # live, file="--output=/tmp/x" genuinely wrote a real file
+            # containing the actual diff content to an attacker-chosen
+            # path, with the tool's own returned text giving zero
+            # indication anything was written — same silent
+            # arbitrary-file-write class as tool #80's git_show. Full
+            # account in git_diff_handler()'s own module docstring. Now
+            # delegates to that same shared, fixed handler.
+            return await asyncio.to_thread(git_diff_handler, root, inp)
 
         # ========== FILE SYSTEM — WRITE ==========
 
