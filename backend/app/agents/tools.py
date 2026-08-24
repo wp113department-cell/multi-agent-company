@@ -92,6 +92,10 @@ from app.tools.agents.record_learning import (
     RECORD_LEARNING_TOOL as RECORD_LEARNING_TOOL,
     make_record_learning_handler as make_record_learning_handler,
 )
+from app.tools.agents.submit_docs import (
+    SUBMIT_DOCS_TOOL as _SUBMIT_DOCS_TOOL,
+    make_submit_docs_handler,
+)
 from app.tools.database.migration import (
     RUN_MIGRATION_TOOL as _RUN_MIGRATION_TOOL,
     run_migration_handler as run_migration_handler,
@@ -1529,25 +1533,12 @@ def make_research_handlers(repo_path: str) -> dict[str, Any]:
 
 # ---- Phase 6 — Docs Agent tools ----
 
-_SUBMIT_DOCS_TOOL = {
-    "name": "submit_docs",
-    "description": "Submit the list of documentation files written or updated.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "files_written": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Paths of markdown files created or updated",
-            },
-            "summary": {
-                "type": "string",
-                "description": "Brief summary of documentation changes",
-            },
-        },
-        "required": ["files_written", "summary"],
-    },
-}
+# tool_enhance.md productionization pass, tool #85 (2026-08-24) — moved
+# to app/tools/agents/submit_docs.py as SUBMIT_DOCS_TOOL (imported
+# above as _SUBMIT_DOCS_TOOL). See that module's docstring — no
+# security vulnerability, no functional bug; all four real
+# implementations were already-correct, functionally identical
+# in-memory sinks, now unified for maintainability.
 
 
 # ---------------------------------------------------------------------------
@@ -2004,12 +1995,12 @@ def make_doc_generator_handlers(repo_path: str) -> dict[str, Any]:
         target.write_text(str(inp["content"]), encoding="utf-8")
         return f"Written {rel}"
 
-    def dg_submit(inp: dict[str, Any]) -> str:
-        docs_result.update(inp)
-        return "Docs submitted"
-
     handlers["write_file"] = dg_write_file
-    handlers["submit_docs"] = dg_submit
+    # tool_enhance.md productionization pass, tool #85 (2026-08-24) —
+    # the shared, already-correct logic now lives in
+    # make_submit_docs_handler(); see that function's own module
+    # docstring.
+    handlers["submit_docs"] = make_submit_docs_handler(docs_result)
     handlers["_docs_result"] = docs_result
     return handlers
 
@@ -2043,12 +2034,12 @@ def make_docs_handlers(worktree_path: str, repo_path: str) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] Cannot write {rel_path}: {e}"
 
-    def submit_docs(inp: dict[str, Any]) -> str:
-        docs_result.update(inp)
-        return "Docs report submitted"
-
     handlers["write_file"] = write_file
-    handlers["submit_docs"] = submit_docs
+    # tool_enhance.md productionization pass, tool #85 (2026-08-24) —
+    # the shared, already-correct logic now lives in
+    # make_submit_docs_handler(); see that function's own module
+    # docstring.
+    handlers["submit_docs"] = make_submit_docs_handler(docs_result)
     handlers["_docs_result"] = docs_result
     return handlers
 
@@ -4411,15 +4402,15 @@ def make_readme_agent_handlers(repo_path: str) -> dict[str, Any]:
         target.write_text(inp["content"], encoding="utf-8")
         return f"Written {rel}"
 
-    def rm_submit(inp: dict[str, Any]) -> str:
-        docs_result.update(inp)
-        return "Docs submitted"
-
     handlers["parse_ast"] = rm_parse_ast
     handlers["list_functions"] = rm_list_functions
     handlers["list_classes"] = rm_list_classes
     handlers["write_file"] = rm_write_file
-    handlers["submit_docs"] = rm_submit
+    # tool_enhance.md productionization pass, tool #85 (2026-08-24) —
+    # the shared, already-correct logic now lives in
+    # make_submit_docs_handler(); see that function's own module
+    # docstring.
+    handlers["submit_docs"] = make_submit_docs_handler(docs_result)
     handlers["_docs_result"] = docs_result
     return handlers
 
@@ -4495,16 +4486,16 @@ def make_api_docs_agent_handlers(repo_path: str) -> dict[str, Any]:
         target.write_text(inp["content"], encoding="utf-8")
         return f"Written {rel}"
 
-    def ad_submit(inp: dict[str, Any]) -> str:
-        docs_result.update(inp)
-        return "API docs submitted"
-
     handlers["find_route"] = ad_find_route
     handlers["find_api"] = ad_find_api
     handlers["parse_ast"] = ad_parse_ast
     handlers["list_functions"] = ad_list_functions
     handlers["write_file"] = ad_write_file
-    handlers["submit_docs"] = ad_submit
+    # tool_enhance.md productionization pass, tool #85 (2026-08-24) —
+    # the shared, already-correct logic now lives in
+    # make_submit_docs_handler(); see that function's own module
+    # docstring.
+    handlers["submit_docs"] = make_submit_docs_handler(docs_result)
     handlers["_docs_result"] = docs_result
     return handlers
 
