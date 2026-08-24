@@ -22,7 +22,7 @@ from app.agents.tools import (
     make_read_only_handlers,
     make_record_learning_handler,
     make_submit_enhancement_request_handler,
-    web_search,
+    web_search_handler,
 )
 from app.config import get_settings
 
@@ -144,7 +144,7 @@ def make_scan_handlers(repo_path: str, trace_id: str = "") -> dict[str, Any]:
         "agent_performance_reviewer"
     )
     handlers["fleet_metrics_read"] = fleet_metrics_read
-    handlers["web_search"] = web_search
+    handlers["web_search"] = web_search_handler
     handlers["submit_enhancement_request"] = make_submit_enhancement_request_handler(
         "agent_performance_reviewer", trace_id=trace_id, repo_path=repo_path
     )

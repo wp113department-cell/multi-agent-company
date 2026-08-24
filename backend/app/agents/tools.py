@@ -93,7 +93,7 @@ from app.tools.agents.record_learning import (
     make_record_learning_handler as make_record_learning_handler,
 )
 from app.tools.agents.submit_docs import (
-    SUBMIT_DOCS_TOOL as _SUBMIT_DOCS_TOOL,
+    SUBMIT_DOCS_TOOL,
     make_submit_docs_handler,
 )
 from app.tools.database.migration import (
@@ -287,7 +287,7 @@ from app.tools.filesystem.replace_function import (
     replace_function_handler as replace_function_handler,
 )
 from app.tools.filesystem.semver_bump import (
-    SEMVER_BUMP_TOOL as _SEMVER_BUMP_TOOL,
+    SEMVER_BUMP_TOOL,
     semver_bump_handler as semver_bump_handler,
 )
 from app.tools.filesystem.sync_files import (
@@ -373,7 +373,7 @@ from app.tools.git.stash import (
     validate_git_stash_action as validate_git_stash_action,
 )
 from app.tools.git.tag import (
-    GIT_TAG_TOOL as _GIT_TAG_TOOL,
+    GIT_TAG_TOOL,
     git_tag_handler as git_tag_handler,
 )
 from app.tools.git.worktree import (
@@ -388,6 +388,10 @@ from app.tools.integrations.slack_send_message import (
     SLACK_SEND_MESSAGE_TOOL,
     send_slack_message,
 )
+from app.tools.integrations.web_search import (
+    WEB_SEARCH_TOOL,
+    web_search_handler as web_search_handler,
+)
 from app.tools.refactor.rename_symbol import (
     RENAME_SYMBOL_TOOL as _RENAME_SYMBOL_TOOL,
     validate_rename_symbol_directory as validate_rename_symbol_directory,
@@ -395,17 +399,26 @@ from app.tools.refactor.rename_symbol import (
 
 # mypy --strict flags a renaming `as` import (`X as _X`) as not
 # "explicitly exported" when another module imports the name directly
-# from app.agents.tools — spike_agent.py and code_explainer_agent.py
-# do exactly that for these three. A plain module-level assignment IS
-# recognized as a genuine definition here. tool_enhance.md
-# productionization pass, tool #86 (2026-08-24) — _LIST_FUNCTIONS_TOOL/
-# _PARSE_AST_TOOL were a pre-existing gap from tools #82/#83, caught
-# and fixed alongside _FETCH_URL_TOOL's identical issue (missed then
-# because a per-file mypy check on the new module alone doesn't follow
-# imports to external CONSUMERS of app.agents.tools).
+# from app.agents.tools. A plain module-level assignment IS recognized
+# as a genuine definition here. tool_enhance.md productionization
+# pass, tool #86 (2026-08-24) — _LIST_FUNCTIONS_TOOL/_PARSE_AST_TOOL
+# were a pre-existing gap from tools #82/#83, caught and fixed
+# alongside _FETCH_URL_TOOL's identical issue (missed then because a
+# per-file mypy check on the new module alone doesn't follow imports
+# to external CONSUMERS of app.agents.tools). Tool #88 (2026-08-24)
+# applied the lesson proactively for _WEB_SEARCH_TOOL, then ran a
+# COMPREHENSIVE `mypy app/agents/` sweep (not just tools.py) that
+# surfaced three more pre-existing instances from even earlier tools:
+# _SUBMIT_DOCS_TOOL (tool #85), _GIT_TAG_TOOL (tool #22),
+# _SEMVER_BUMP_TOOL (tool #25) — all fixed together here rather than
+# left for a future turn to rediscover one at a time.
 _FETCH_URL_TOOL = FETCH_URL_TOOL
 _LIST_FUNCTIONS_TOOL = LIST_FUNCTIONS_TOOL
 _PARSE_AST_TOOL = PARSE_AST_TOOL
+_WEB_SEARCH_TOOL = WEB_SEARCH_TOOL
+_SUBMIT_DOCS_TOOL = SUBMIT_DOCS_TOOL
+_SEMVER_BUMP_TOOL = SEMVER_BUMP_TOOL
+_GIT_TAG_TOOL = GIT_TAG_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -1445,21 +1458,10 @@ def make_devops_handlers(repo_path: str) -> dict[str, Any]:
 
 # ---- Phase 6 — Research Agent tools ----
 
-_WEB_SEARCH_TOOL = {
-    "name": "web_search",
-    "description": (
-        "Search the web for technical information using DuckDuckGo. "
-        "Returns titles, URLs, and snippets for up to 5 results. "
-        "Use for finding library documentation, versions, and best practices."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "Search query"},
-        },
-        "required": ["query"],
-    },
-}
+# tool_enhance.md productionization pass, tool #88 (2026-08-24) — moved
+# to app/tools/integrations/web_search.py as WEB_SEARCH_TOOL (imported
+# above, aliased to _WEB_SEARCH_TOOL after the import block). No
+# vulnerability found — see that module's docstring.
 
 _SUBMIT_RESEARCH_TOOL = {
     "name": "submit_research",
@@ -1515,29 +1517,6 @@ RESEARCH_TOOLS = [
 ]
 
 
-def web_search(inp: dict[str, Any]) -> str:
-    """Search the web via DuckDuckGo — no API key needed. Standalone (not repo-scoped)
-    so any agent can reuse it, not just the research agent."""
-    query = str(inp.get("query", "")).strip()
-    if not query:
-        return "[ERROR] query is required"
-    try:
-        from duckduckgo_search import DDGS
-
-        results = list(DDGS().text(query, max_results=5))
-        if not results:
-            return f"(no results found for: {query!r})"
-        lines = []
-        for r in results:
-            title = r.get("title", "")
-            href = r.get("href", "")
-            body = r.get("body", "")[:300]
-            lines.append(f"## {title}\n{href}\n{body}")
-        return "\n\n".join(lines)[:6000]
-    except Exception as exc:
-        return f"[ERROR] web_search failed: {exc}"
-
-
 def make_research_handlers(repo_path: str) -> dict[str, Any]:
     """Research agent: read-only + web_search placeholder + submit_research. No write, no bash."""
     handlers = make_read_only_handlers(repo_path)
@@ -1547,7 +1526,10 @@ def make_research_handlers(repo_path: str) -> dict[str, Any]:
         research_result.update(inp)
         return "Research report submitted"
 
-    handlers["web_search"] = web_search
+    # tool_enhance.md productionization pass, tool #88 (2026-08-24) — the
+    # real logic now lives in web_search_handler(); see that
+    # function's own module docstring.
+    handlers["web_search"] = web_search_handler
     handlers["submit_research"] = submit_research
     handlers["_research_result"] = research_result  # caller reads this after run
     return handlers
@@ -8235,7 +8217,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # agent"), but was only ever wired into make_research_handlers. Any
     # agent built on make_chat_handlers (e.g. spike_agent) can now declare
     # it in allowed_tools and get a real handler, matching fetch_url above.
-    handlers["web_search"] = web_search
+    handlers["web_search"] = web_search_handler
     # Batch 3
     handlers["git_merge"] = git_merge
     handlers["parse_merge_conflicts"] = parse_merge_conflicts
