@@ -159,6 +159,7 @@ from app.tools.filesystem.analyze_file import analyze_file_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_references import find_references_handler
+from app.tools.filesystem.find_todos import find_todos_handler
 from app.tools.filesystem.search_imports import search_imports_handler
 from app.tools.filesystem.get_file_tree import get_file_tree_handler
 from app.tools.filesystem.list_files import list_files_handler
@@ -1210,30 +1211,19 @@ class ChatAgent:
             return await asyncio.to_thread(find_references_handler, root, inp)
 
         if tool_name == "find_todos":
-            directory = str(inp.get("directory", ""))
-            kind = str(inp.get("kind", "all"))
-            search_root = root / directory if directory else root
-            markers = ["TODO", "FIXME", "HACK", "XXX"] if kind == "all" else [kind]
-            try:
-                r = subprocess.run(
-                    [
-                        "grep",
-                        "-rn",
-                        "-E",
-                        f"({'|'.join(markers)}):",
-                        str(search_root),
-                        "--include=*.py",
-                        "--include=*.ts",
-                        "--include=*.tsx",
-                        "--include=*.md",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                )
-                return r.stdout[:5000] or "(no TODOs found)"
-            except subprocess.TimeoutExpired:
-                return "[ERROR] Search timed out"
+            # tool_enhance.md productionization pass, tool #77 (2026-08-23)
+            # — real, severe findings, on BOTH real implementations
+            # (including the canonical make_read_only_handlers() one,
+            # same class as tool #76's analyze_file): (1) ZERO
+            # worktree-boundary validation on `directory` — proved live,
+            # find_todos({"directory": "/tmp/outside"}) genuinely
+            # returned a real TODO comment's content from a file
+            # completely outside the repo; (2) this dispatch's own
+            # --include list was missing *.js, a real functionality-
+            # parity gap versus the canonical implementation. Full
+            # account in find_todos_handler()'s own module docstring.
+            # Now delegates to that same shared, fixed handler.
+            return await asyncio.to_thread(find_todos_handler, root, repo, inp)
 
         if tool_name == "search_imports":
             # tool_enhance.md productionization pass, tool #75 (2026-08-22)

@@ -218,6 +218,10 @@ from app.tools.filesystem.find_references import (
     FIND_REFERENCES_TOOL,
     find_references_handler,
 )
+from app.tools.filesystem.find_todos import (
+    FIND_TODOS_TOOL,
+    find_todos_handler,
+)
 from app.tools.filesystem.search_imports import (
     SEARCH_IMPORTS_TOOL,
     search_imports_handler,
@@ -637,25 +641,12 @@ READ_ONLY_TOOLS = [
     # FIND_REFERENCES_TOOL. No new vulnerability — see that module's
     # docstring for the full audit.
     FIND_REFERENCES_TOOL,
-    {
-        "name": "find_todos",
-        "description": "Find all TODO, FIXME, HACK, XXX, and NOTE comments across the codebase. Essential for understanding what is incomplete or known-broken.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "directory": {
-                    "type": "string",
-                    "description": "Directory to search (default: repo root)",
-                },
-                "kind": {
-                    "type": "string",
-                    "enum": ["all", "TODO", "FIXME", "HACK", "XXX"],
-                    "description": "Marker type to find (default: all)",
-                },
-            },
-            "required": [],
-        },
-    },
+    # tool_enhance.md productionization pass, tool #77 (2026-08-23) —
+    # moved to app/tools/filesystem/find_todos.py as FIND_TODOS_TOOL.
+    # See that module's docstring — like tool #76's analyze_file, the
+    # CANONICAL implementation itself, not just chat_agent.py's copy,
+    # had the worktree-escape bug.
+    FIND_TODOS_TOOL,
     # tool_enhance.md productionization pass, tool #75 (2026-08-22) —
     # moved to app/tools/filesystem/search_imports.py as
     # SEARCH_IMPORTS_TOOL. No new vulnerability — see that module's
@@ -1202,34 +1193,13 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
     def find_references(inp: dict[str, Any]) -> str:
         return find_references_handler(base, inp)
 
+    # tool_enhance.md productionization pass, tool #77 (2026-08-23) — the
+    # real fix (this implementation itself had ZERO worktree-boundary
+    # validation on `directory`, same class as tool #76's analyze_file)
+    # lives in the shared find_todos_handler() itself; see that
+    # function's own module docstring.
     def find_todos(inp: dict[str, Any]) -> str:
-        directory = str(inp.get("directory", ""))
-        kind = str(inp.get("kind", "all"))
-        search_root = base / directory if directory else base
-        markers = ["TODO", "FIXME", "HACK", "XXX"] if kind == "all" else [kind]
-        pattern = "|".join(markers)
-        try:
-            result = subprocess.run(
-                [
-                    "grep",
-                    "-rn",
-                    "-E",
-                    f"({pattern}):",
-                    str(search_root),
-                    "--include=*.py",
-                    "--include=*.ts",
-                    "--include=*.tsx",
-                    "--include=*.js",
-                    "--include=*.md",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            out = result.stdout[:5000]
-            return out if out.strip() else "(no TODOs found)"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] Search timed out"
+        return find_todos_handler(base, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #75 (2026-08-22) — no
     # new vulnerability; the shared search_imports_handler() itself
