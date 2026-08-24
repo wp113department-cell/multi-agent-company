@@ -332,6 +332,10 @@ from app.tools.git.reset import (
     git_reset_handler as git_reset_handler,
 )
 from app.tools.git.restore import GIT_RESTORE_TOOL as _GIT_RESTORE_TOOL
+from app.tools.git.status import (
+    GIT_STATUS_TOOL,
+    git_status_handler,
+)
 from app.tools.git.stash import (
     GIT_STASH_TOOL as _GIT_STASH_TOOL,
     validate_git_stash_action as validate_git_stash_action,
@@ -645,15 +649,13 @@ READ_ONLY_TOOLS = [
     # SEARCH_IMPORTS_TOOL. No new vulnerability — see that module's
     # docstring for the full audit.
     SEARCH_IMPORTS_TOOL,
-    {
-        "name": "git_status",
-        "description": "Show current git working tree state: staged, modified, untracked files. Always run before committing or diffing.",
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    },
+    # tool_enhance.md productionization pass, tool #79 (2026-08-23) —
+    # moved to app/tools/git/status.py as GIT_STATUS_TOOL. See that
+    # module's docstring — no security vulnerability (zero-input
+    # schema), but a real functionality bug: this implementation
+    # silently reported "(clean)" even when `git status` genuinely
+    # failed, never checking returncode.
+    GIT_STATUS_TOOL,
     {
         "name": "git_show",
         "description": "Show the full details of a specific commit: message, author, date, and unified diff of changes.",
@@ -1192,18 +1194,13 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
     def search_imports(inp: dict[str, Any]) -> str:
         return search_imports_handler(base, inp)
 
+    # tool_enhance.md productionization pass, tool #79 (2026-08-23) — the
+    # real fix (this implementation silently reported "(clean)" even
+    # when `git status` genuinely failed) lives in the shared
+    # git_status_handler() itself; see that function's own module
+    # docstring.
     def git_status(inp: dict[str, Any]) -> str:
-        try:
-            result = subprocess.run(
-                ["git", "status", "--short", "--branch"],
-                capture_output=True,
-                text=True,
-                cwd=str(base),
-                timeout=10,
-            )
-            return result.stdout or "(clean)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return git_status_handler(base)
 
     def git_show(inp: dict[str, Any]) -> str:
         ref = str(inp.get("ref", "HEAD"))

@@ -189,6 +189,7 @@ from app.tools.git.pull_request import (
 from app.tools.git.rebase import validate_git_rebase_inputs
 from app.tools.git.reset import validate_git_reset_inputs
 from app.tools.git.stash import validate_git_stash_action
+from app.tools.git.status import git_status_handler
 from app.tools.git.tag import git_tag_handler
 from app.tools.git.worktree import validate_git_worktree_inputs
 from app.tools.integrations.linear_create_issue import create_linear_issue
@@ -1268,7 +1269,17 @@ class ChatAgent:
             return await asyncio.to_thread(git_log_handler, root, inp)
 
         if tool_name == "git_status":
-            return _git(["status", "--short", "--branch"], repo) or "(clean)"
+            # tool_enhance.md productionization pass, tool #79 (2026-08-23)
+            # — no security vulnerability (zero-input schema). Real
+            # finding was in the CANONICAL make_read_only_handlers()
+            # implementation, not this dispatch: it silently reported
+            # "(clean)" even when `git status` genuinely failed, never
+            # checking returncode. This dispatch already surfaced the
+            # real error correctly via `_git()`'s combined stdout+stderr;
+            # now unified onto the same shared, fixed handler for
+            # consistency. Full account in git_status_handler()'s own
+            # module docstring.
+            return await asyncio.to_thread(git_status_handler, root)
 
         if tool_name == "git_show":
             ref = str(inp.get("ref", "HEAD"))
