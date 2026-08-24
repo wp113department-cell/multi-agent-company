@@ -157,6 +157,7 @@ from app.tools.filesystem.move_file import move_file_handler
 from app.tools.filesystem.analyze_file import analyze_file_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
+from app.tools.filesystem.find_api import find_api_handler
 from app.tools.filesystem.find_references import find_references_handler
 from app.tools.filesystem.find_todos import find_todos_handler
 from app.tools.filesystem.search_imports import search_imports_handler
@@ -3167,26 +3168,17 @@ class ChatAgent:
             )
 
         if tool_name == "find_api":
-            fapi_name = str(inp.get("name", ""))
-            fapi_pat = (
-                fapi_name
-                if fapi_name
-                else r"@(router|app)\.(get|post|put|delete|patch)\("
-            )
-            fapi_cmd = (
-                f"grep -rn -E {__import__('shlex').quote(fapi_pat)} {repo} "
-                "--include=*.py --include=*.ts "
-                "--exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=__pycache__ 2>/dev/null || true"
-            )
-            fapi_result = await asyncio.to_thread(_run_subprocess, fapi_cmd, repo, 15)
-            return (
-                fapi_result[:5000]
-                if fapi_result.strip()
-                else (
-                    "No API definitions found"
-                    + (f" matching '{fapi_name}'" if fapi_name else "")
-                )
-            )
+            # tool_enhance.md productionization pass, tool #89 (2026-08-24)
+            # — real finding, on this AND 3 other real implementations:
+            # ZERO validation of `name` — a flag-injection bug, same
+            # class as tool #69's search_code. This dispatch's
+            # shlex.quote() only protects against SHELL metacharacter
+            # injection, not grep's own argv-level flag parsing — proved
+            # live, name="-l" was silently consumed as grep's own flag
+            # instead of the literal search text. Full account in
+            # find_api_handler()'s own module docstring. Now delegates
+            # to that same shared, fixed handler.
+            return await asyncio.to_thread(find_api_handler, root, inp)
 
         if tool_name == "find_sql":
             import shlex as _shlex4

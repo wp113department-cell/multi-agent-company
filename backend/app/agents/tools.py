@@ -214,6 +214,10 @@ from app.tools.filesystem.analyze_file import (
     ANALYZE_FILE_TOOL,
     analyze_file_handler,
 )
+from app.tools.filesystem.find_api import (
+    FIND_API_TOOL as _FIND_API_TOOL,
+    find_api_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -2929,20 +2933,12 @@ _FIND_ROUTE_TOOL = {
     },
 }
 
-_FIND_API_TOOL = {
-    "name": "find_api",
-    "description": "Find API endpoint function definitions by name or keyword in the codebase.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "name": {
-                "type": "string",
-                "description": "Function or endpoint name to search for (empty = all route handlers)",
-            },
-        },
-        "required": [],
-    },
-}
+# tool_enhance.md productionization pass, tool #89 (2026-08-24) — moved
+# to app/tools/filesystem/find_api.py as FIND_API_TOOL (imported above
+# as _FIND_API_TOOL). See that module's docstring — `name` was
+# flag-injection vulnerable on all 4 real implementations, including
+# chat_agent.py's dispatch (its shlex.quote() only protects against
+# shell metacharacters, not grep's own argv-level flag parsing).
 
 _FIND_SQL_TOOL = {
     "name": "find_sql",
@@ -3728,30 +3724,13 @@ def make_security_reviewer_handlers(repo_path: str) -> dict[str, Any]:
         )
         return r.stdout[:6000] if r.stdout else "(no config patterns found)"
 
+    # tool_enhance.md productionization pass, tool #89 (2026-08-24) — the
+    # real fix (ZERO validation of `name` — a flag-injection bug, same
+    # class as tool #69's search_code) lives in the shared
+    # find_api_handler() itself; see that function's own module
+    # docstring.
     def sec_find_api(inp: dict[str, Any]) -> str:
-        name = str(inp.get("name", ""))
-        if name:
-            r = subprocess.run(
-                ["grep", "-rn", name, "--include=*.py", str(root)],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-        else:
-            r = subprocess.run(
-                [
-                    "grep",
-                    "-rn",
-                    "-E",
-                    r"@(app|router)\.(get|post|put|delete|patch)",
-                    "--include=*.py",
-                    str(root),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-        return r.stdout[:6000] if r.stdout else "(no API handlers found)"
+        return find_api_handler(root, inp)
 
     def sec_find_route(inp: dict[str, Any]) -> str:
         path_pat = str(inp.get("path", ""))
@@ -4387,30 +4366,11 @@ def make_api_docs_agent_handlers(repo_path: str) -> dict[str, Any]:
         )
         return r.stdout[:6000] if r.stdout else "(no routes)"
 
+    # tool_enhance.md productionization pass, tool #89 (2026-08-24) — the
+    # real fix lives in the shared find_api_handler(); see that
+    # function's own module docstring.
     def ad_find_api(inp: dict[str, Any]) -> str:
-        name = str(inp.get("name", ""))
-        if name:
-            r = subprocess.run(
-                ["grep", "-rn", name, "--include=*.py", str(root)],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-        else:
-            r = subprocess.run(
-                [
-                    "grep",
-                    "-rn",
-                    "-E",
-                    r"@(app|router)\.(get|post|put|delete|patch)",
-                    "--include=*.py",
-                    str(root),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-        return r.stdout[:6000] if r.stdout else "(no API handlers)"
+        return find_api_handler(root, inp)
 
     # tool_enhance.md productionization pass, tool #83 (2026-08-24) — the
     # real fix lives in the shared parse_ast_handler(); see that
@@ -8512,41 +8472,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # tool_enhance.md productionization pass, tool #89 (2026-08-24) — the
+    # real fix (ZERO validation of `name` — a flag-injection bug, same
+    # class as tool #69's search_code) lives in the shared
+    # find_api_handler() itself; see that function's own module
+    # docstring.
     def find_api_h(inp: dict[str, Any]) -> str:
-        fapi_name = str(inp.get("name", ""))
-        if fapi_name:
-            pat = fapi_name
-        else:
-            pat = r"@(router|app)\.(get|post|put|delete|patch)\("
-        exclude = [
-            "--exclude-dir=node_modules",
-            "--exclude-dir=.venv",
-            "--exclude-dir=__pycache__",
-        ]
-        try:
-            r = subprocess.run(
-                [
-                    "grep",
-                    "-rn",
-                    "-E",
-                    pat,
-                    repo_path,
-                    "--include=*.py",
-                    "--include=*.ts",
-                ]
-                + exclude,
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            return (
-                r.stdout[:5000]
-                if r.stdout.strip()
-                else "No API definitions found"
-                + (f" matching '{fapi_name}'" if fapi_name else "")
-            )
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return find_api_handler(root, inp)
 
     def find_sql_h(inp: dict[str, Any]) -> str:
         fsql_kw = str(inp.get("keyword", "")).upper()
