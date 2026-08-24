@@ -179,6 +179,7 @@ from app.tools.git.commit import stage_and_commit
 from app.tools.git.create_branch import validate_create_branch_inputs
 from app.tools.git.github_comment import github_comment_command
 from app.tools.git.github_create_issue import github_create_issue_command
+from app.tools.git.log import git_log_handler
 from app.tools.git.merge import validate_git_merge_inputs
 from app.tools.git.pull import validate_git_pull_inputs
 from app.tools.git.pull_request import (
@@ -1256,12 +1257,15 @@ class ChatAgent:
         # ========== GIT — READ ==========
 
         if tool_name == "git_log":
-            count = min(int(inp.get("count", 10)), 30)
-            file_filter = str(inp.get("file", ""))
-            log_args = ["log", "--oneline", f"-{count}", "--no-merges"]
-            if file_filter:
-                log_args += ["--", file_filter]
-            return _git(log_args, repo)
+            # tool_enhance.md productionization pass, tool #78 (2026-08-23)
+            # — real finding, on BOTH real implementations: an uncaught
+            # ValueError/TypeError on a non-numeric `count`, proved live
+            # with count="not_a_number". `file` already safe by
+            # construction (`--` separator + git's own outside-repo
+            # refusal, both verified live). Full account in
+            # git_log_handler()'s own module docstring. Now delegates to
+            # that same shared, fixed handler.
+            return await asyncio.to_thread(git_log_handler, root, inp)
 
         if tool_name == "git_status":
             return _git(["status", "--short", "--branch"], repo) or "(clean)"

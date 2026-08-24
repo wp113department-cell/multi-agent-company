@@ -302,6 +302,10 @@ from app.tools.git.github_create_issue import (
     GITHUB_CREATE_ISSUE_TOOL as _GITHUB_CREATE_ISSUE_TOOL,
     github_create_issue_command as github_create_issue_command,
 )
+from app.tools.git.log import (
+    GIT_LOG_TOOL,
+    git_log_handler,
+)
 from app.tools.git.merge import (
     GIT_MERGE_TOOL as _GIT_MERGE_TOOL,
     validate_git_merge_inputs as validate_git_merge_inputs,
@@ -608,24 +612,13 @@ READ_ONLY_TOOLS = [
     # into READ_ONLY_TOOLS positionally (READ_ONLY_TOOLS[4] is expected
     # to be get_file_tree — see the comment near RESEARCH_TOOLS below).
     GET_FILE_TREE_TOOL,
-    {
-        "name": "git_log",
-        "description": "Show recent git commits with messages. Use this to understand recent changes, active areas, and what was recently modified.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "count": {
-                    "type": "integer",
-                    "description": "Number of commits to show (default: 10, max: 30)",
-                },
-                "file": {
-                    "type": "string",
-                    "description": "Optional: show only commits that touched this file",
-                },
-            },
-            "required": [],
-        },
-    },
+    # tool_enhance.md productionization pass, tool #78 (2026-08-23) —
+    # moved to app/tools/git/log.py as GIT_LOG_TOOL. See that module's
+    # docstring — an uncaught ValueError/TypeError on a non-numeric
+    # `count`, on BOTH real implementations; `file` already safe by
+    # construction (`--` separator + git's own outside-repo refusal,
+    # both verified live).
+    GIT_LOG_TOOL,
     # ---- Enhanced search & analysis tools (non-destructive) ----
     # tool_enhance.md productionization pass, tool #71 (2026-08-22) —
     # moved to app/tools/filesystem/read_files.py as READ_FILES_TOOL.
@@ -1147,21 +1140,13 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
     def get_file_tree(inp: dict[str, Any]) -> str:
         return get_file_tree_handler(base, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #78 (2026-08-23) — the
+    # real fix (an uncaught ValueError/TypeError on a non-numeric
+    # `count`, on both real implementations) lives in the shared
+    # git_log_handler() itself; see that function's own module
+    # docstring.
     def git_log(inp: dict[str, Any]) -> str:
-        count = min(int(inp.get("count", 10)), 30)
-        file_filter = str(inp.get("file", ""))
-        cmd = ["git", "log", "--oneline", f"-{count}", "--no-merges"]
-        if file_filter:
-            cmd.extend(["--", file_filter])
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, cwd=str(base), timeout=15
-            )
-            if result.returncode != 0:
-                return f"[ERROR] git log failed: {result.stderr[:300]}"
-            return result.stdout[:4000] if result.stdout else "(no commits found)"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] git log timed out"
+        return git_log_handler(base, inp)
 
     # tool_enhance.md productionization pass, tool #71 (2026-08-22) — the
     # real fix (chat_agent.py's own separate dispatch had zero
