@@ -163,6 +163,7 @@ from app.tools.filesystem.find_todos import find_todos_handler
 from app.tools.filesystem.search_imports import search_imports_handler
 from app.tools.filesystem.get_file_tree import get_file_tree_handler
 from app.tools.filesystem.list_files import list_files_handler
+from app.tools.filesystem.list_functions import list_functions_handler
 from app.tools.filesystem.search_code import search_code_handler
 from app.tools.filesystem.search_symbols import search_symbols_handler
 from app.tools.filesystem.read_file import read_file_handler
@@ -2435,34 +2436,23 @@ class ChatAgent:
         # ========== BATCH 5 — Code Intelligence ==========
 
         if tool_name == "list_functions":
-            rel = str(inp["path"])
-            lf_fp = root / rel
-            if not lf_fp.exists():
-                return f"[ERROR] File not found: {rel}"
-            lf_lines = lf_fp.read_text(encoding="utf-8", errors="replace").splitlines()
-            lf_results: list[str] = []
-            for lf_i, lf_line in enumerate(lf_lines, 1):
-                s = lf_line.strip()
-                if s.startswith(("def ", "async def ")):
-                    lf_results.append(
-                        f"  L{lf_i}: {s.split(':')[0] if ':' in s else s}"
-                    )
-                elif (
-                    s.startswith(
-                        ("export function ", "export async function ", "function ")
-                    )
-                    and "(" in s
-                ):
-                    lf_results.append(f"  L{lf_i}: {s[:120]}")
-                elif s.startswith(("export const ", "const ")) and (
-                    "=>" in s or "= (" in s or "= async" in s
-                ):
-                    lf_results.append(f"  L{lf_i}: {s[:120]}")
-            return (
-                f"Functions in {rel} ({len(lf_results)}):\n" + "\n".join(lf_results)
-                if lf_results
-                else f"(no functions in {rel})"
-            )
+            # tool_enhance.md productionization pass, tool #82 (2026-08-24)
+            # — real, severe finding, on this AND 8 other real
+            # implementations across 32 agents (the widest
+            # consolidation in the low-risk tier so far): this dispatch
+            # had ZERO worktree-boundary validation and an uncaught
+            # PermissionError (same class as tool #76's analyze_file) —
+            # proved live, list_functions({"path": "/tmp/outside/
+            # secret.py"}) genuinely listed a real function definition
+            # from a file completely outside the repo. Four agent-
+            # specific implementations elsewhere in tools.py also read
+            # the wrong input field entirely (schema says `path`, they
+            # read `file`), silently scanning the whole repo on every
+            # real call; three others had the same worktree-escape via
+            # relative traversal. Full account in
+            # list_functions_handler()'s own module docstring. Now
+            # delegates to that same shared, fixed handler.
+            return await asyncio.to_thread(list_functions_handler, root, repo, inp)
 
         if tool_name == "list_classes":
             rel = str(inp["path"])

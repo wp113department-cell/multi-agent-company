@@ -234,6 +234,10 @@ from app.tools.filesystem.list_files import (
     LIST_FILES_TOOL,
     list_files_handler,
 )
+from app.tools.filesystem.list_functions import (
+    LIST_FUNCTIONS_TOOL as _LIST_FUNCTIONS_TOOL,
+    list_functions_handler,
+)
 from app.tools.filesystem.search_code import (
     SEARCH_CODE_TOOL,
     search_code_handler,
@@ -2614,20 +2618,13 @@ _TYPE_CHECK_TOOL = {
 # NEW TOOL SPECS — Batch 5: Code Intelligence
 # ---------------------------------------------------------------------------
 
-_LIST_FUNCTIONS_TOOL = {
-    "name": "list_functions",
-    "description": "List all function and method definitions in a file with their line numbers and signatures.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "File path relative to repo root (.py, .ts, .tsx supported)",
-            },
-        },
-        "required": ["path"],
-    },
-}
+# tool_enhance.md productionization pass, tool #82 (2026-08-24) — moved
+# to app/tools/filesystem/list_functions.py as LIST_FUNCTIONS_TOOL
+# (imported above as _LIST_FUNCTIONS_TOOL to preserve every existing
+# reference). See that module's docstring — this was the widest
+# consolidation in the low-risk tier so far: all NINE real
+# implementations across 32 agents now delegate to one shared,
+# corrected handler.
 
 _LIST_CLASSES_TOOL = {
     "name": "list_classes",
@@ -3843,22 +3840,14 @@ def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     def ar_parse_ast(inp: dict[str, Any]) -> str:
         return _ast.parse_file_ast(str(root / inp["path"]))
 
+    # tool_enhance.md productionization pass, tool #82 (2026-08-24) — the
+    # real fix (this implementation read the wrong field — `file`
+    # instead of the schema's own `path` — so every real call silently
+    # ignored the requested path and grepped the entire repo instead)
+    # lives in the shared list_functions_handler() itself; see that
+    # function's own module docstring.
     def ar_list_functions(inp: dict[str, Any]) -> str:
-        fp = str(inp.get("file", ""))
-        r = subprocess.run(
-            [
-                "grep",
-                "-rn",
-                "-E",
-                "^(async )?def ",
-                "--include=*.py",
-                str(root / fp) if fp else str(root),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return r.stdout[:6000] if r.stdout else "(no functions)"
+        return list_functions_handler(root, repo_path, inp)
 
     def ar_list_classes(inp: dict[str, Any]) -> str:
         fp = str(inp.get("file", ""))
@@ -4268,22 +4257,13 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
 
     _RF_ALLOWED = ("python -m pytest", "mypy", "ruff", "black", "isort")
 
+    # tool_enhance.md productionization pass, tool #82 (2026-08-24) — the
+    # real fix (this implementation read the wrong field — `file`
+    # instead of the schema's own `path`) lives in the shared
+    # list_functions_handler() itself; see that function's own module
+    # docstring.
     def rf_list_functions(inp: dict[str, Any]) -> str:
-        fp = str(inp.get("file", ""))
-        r = subprocess.run(
-            [
-                "grep",
-                "-rn",
-                "-E",
-                "^(async )?def ",
-                "--include=*.py",
-                str(root / fp) if fp else str(root),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return r.stdout[:6000] if r.stdout else "(no functions)"
+        return list_functions_handler(root, repo_path, inp)
 
     def rf_list_classes(inp: dict[str, Any]) -> str:
         fp = str(inp.get("file", ""))
@@ -4400,22 +4380,13 @@ def make_readme_agent_handlers(repo_path: str) -> dict[str, Any]:
     def rm_parse_ast(inp: dict[str, Any]) -> str:
         return _ast.parse_file_ast(str(root / inp["path"]))
 
+    # tool_enhance.md productionization pass, tool #82 (2026-08-24) — the
+    # real fix (this implementation read the wrong field — `file`
+    # instead of the schema's own `path`) lives in the shared
+    # list_functions_handler() itself; see that function's own module
+    # docstring.
     def rm_list_functions(inp: dict[str, Any]) -> str:
-        fp = str(inp.get("file", ""))
-        r = subprocess.run(
-            [
-                "grep",
-                "-rn",
-                "-E",
-                "^(async )?def ",
-                "--include=*.py",
-                str(root / fp) if fp else str(root),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return r.stdout[:6000] if r.stdout else "(no functions)"
+        return list_functions_handler(root, repo_path, inp)
 
     def rm_list_classes(inp: dict[str, Any]) -> str:
         fp = str(inp.get("file", ""))
@@ -4509,22 +4480,13 @@ def make_api_docs_agent_handlers(repo_path: str) -> dict[str, Any]:
     def ad_parse_ast(inp: dict[str, Any]) -> str:
         return _ast.parse_file_ast(str(root / inp["path"]))
 
+    # tool_enhance.md productionization pass, tool #82 (2026-08-24) — the
+    # real fix (this implementation read the wrong field — `file`
+    # instead of the schema's own `path`) lives in the shared
+    # list_functions_handler() itself; see that function's own module
+    # docstring.
     def ad_list_functions(inp: dict[str, Any]) -> str:
-        fp = str(inp.get("file", ""))
-        r = subprocess.run(
-            [
-                "grep",
-                "-rn",
-                "-E",
-                "^(async )?def ",
-                "--include=*.py",
-                str(root / fp) if fp else str(root),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return r.stdout[:6000] if r.stdout else "(no functions)"
+        return list_functions_handler(root, repo_path, inp)
 
     def ad_write_file(inp: dict[str, Any]) -> str:
         from app.policy.engine import check_path_in_worktree
@@ -5424,21 +5386,15 @@ def make_performance_reviewer_handlers(repo_path: str) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # tool_enhance.md productionization pass, tool #82 (2026-08-24) — the
+    # real fix (this implementation had ZERO worktree-boundary
+    # validation on `path` — a relative `../` traversal genuinely
+    # escaped the repo, since the accidental `relative_to(root)`
+    # safety net only blocked ABSOLUTE outside-repo paths, not
+    # traversal) lives in the shared list_functions_handler() itself;
+    # see that function's own module docstring.
     def pr_list_functions(inp: dict[str, Any]) -> str:
-        pr_path = str(inp.get("path", "."))
-        pr_results: list[str] = []
-        for fp in (root / pr_path).rglob("*.py"):
-            try:
-                for i, line in enumerate(
-                    fp.read_text(encoding="utf-8").splitlines(), 1
-                ):
-                    if line.strip().startswith("def ") or line.strip().startswith(
-                        "async def "
-                    ):
-                        pr_results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
-            except Exception:
-                continue
-        return "\n".join(pr_results[:100]) or "(none found)"
+        return list_functions_handler(root, repo_path, inp)
 
     def pr_submit(inp: dict[str, Any]) -> str:
         perf_result.update(inp)
@@ -5475,21 +5431,13 @@ def make_style_reviewer_handlers(repo_path: str) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # tool_enhance.md productionization pass, tool #82 (2026-08-24) — the
+    # real fix (this implementation had ZERO worktree-boundary
+    # validation on `path`, same relative-traversal-escape finding as
+    # pr_list_functions) lives in the shared list_functions_handler()
+    # itself; see that function's own module docstring.
     def sr_list_functions(inp: dict[str, Any]) -> str:
-        sr_path = str(inp.get("path", "."))
-        results: list[str] = []
-        for fp in (root / sr_path).rglob("*.py"):
-            try:
-                for i, line in enumerate(
-                    fp.read_text(encoding="utf-8").splitlines(), 1
-                ):
-                    if line.strip().startswith("def ") or line.strip().startswith(
-                        "async def "
-                    ):
-                        results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
-            except Exception:
-                continue
-        return "\n".join(results[:100]) or "(none found)"
+        return list_functions_handler(root, repo_path, inp)
 
     def sr_list_classes(inp: dict[str, Any]) -> str:
         sr_path = str(inp.get("path", "."))
@@ -5989,21 +5937,14 @@ def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
     handlers = make_read_only_handlers(repo_path)
     tech_debt_result: dict[str, Any] = {}
 
+    # tool_enhance.md productionization pass, tool #82 (2026-08-24) — the
+    # real fix (this implementation had ZERO worktree-boundary
+    # validation on `path`, same relative-traversal-escape finding as
+    # pr_/sr_list_functions) lives in the shared
+    # list_functions_handler() itself; see that function's own module
+    # docstring.
     def td_list_functions(inp: dict[str, Any]) -> str:
-        td_path = str(inp.get("path", "."))
-        results: list[str] = []
-        for fp in (root / td_path).rglob("*.py"):
-            try:
-                for i, line in enumerate(
-                    fp.read_text(encoding="utf-8").splitlines(), 1
-                ):
-                    if line.strip().startswith("def ") or line.strip().startswith(
-                        "async def "
-                    ):
-                        results.append(f"{fp.relative_to(root)}:{i}: {line.strip()}")
-            except Exception:
-                continue
-        return "\n".join(results[:100]) or "(none found)"
+        return list_functions_handler(root, repo_path, inp)
 
     def td_list_classes(inp: dict[str, Any]) -> str:
         td_path = str(inp.get("path", "."))
@@ -7928,33 +7869,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # BATCH 5 — Code Intelligence
     # =========================================================================
 
+    # tool_enhance.md productionization pass, tool #82 (2026-08-24) — the
+    # real fix (this implementation had ZERO worktree-boundary
+    # validation and an uncaught PermissionError, same class as tool
+    # #76's analyze_file) lives in the shared list_functions_handler()
+    # itself; see that function's own module docstring.
     def list_functions(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        lf_fp = root / rel
-        if not lf_fp.exists():
-            return f"[ERROR] File not found: {rel}"
-        content = lf_fp.read_text(encoding="utf-8", errors="replace")
-        lf_lines = content.splitlines()
-        lf_results: list[str] = []
-        for lf_i, lf_line in enumerate(lf_lines, 1):
-            s = lf_line.strip()
-            if s.startswith(("def ", "async def ")):
-                sig = s.split(":")[0] if ":" in s else s
-                lf_results.append(f"  L{lf_i}: {sig}")
-            elif (
-                s.startswith(
-                    ("export function ", "export async function ", "function ")
-                )
-                and "(" in s
-            ):
-                lf_results.append(f"  L{lf_i}: {s[:120]}")
-            elif s.startswith(("export const ", "const ")) and (
-                "=>" in s or "= (" in s or "= async" in s
-            ):
-                lf_results.append(f"  L{lf_i}: {s[:120]}")
-        if not lf_results:
-            return f"(no function definitions found in {rel})"
-        return f"Functions in {rel} ({len(lf_results)}):\n" + "\n".join(lf_results)
+        return list_functions_handler(root, repo_path, inp)
 
     def list_classes(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
