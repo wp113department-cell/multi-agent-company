@@ -96,6 +96,10 @@ from app.tools.agents.submit_docs import (
     SUBMIT_DOCS_TOOL,
     make_submit_docs_handler,
 )
+from app.tools.agents.submit_patch import (
+    SUBMIT_PATCH_TOOL,
+    make_submit_patch_handler,
+)
 from app.tools.database.migration import (
     RUN_MIGRATION_TOOL as _RUN_MIGRATION_TOOL,
     run_migration_handler as run_migration_handler,
@@ -962,25 +966,12 @@ CODER_TOOLS = READ_ONLY_TOOLS + [
             "required": ["command"],
         },
     },
-    {
-        "name": "submit_patch",
-        "description": "Signal that implementation is complete. Call this ONLY after all tests pass.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "files_changed": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "List of file paths that were created or modified",
-                },
-                "summary": {
-                    "type": "string",
-                    "description": "One-paragraph summary of what was implemented and verified",
-                },
-            },
-            "required": ["files_changed", "summary"],
-        },
-    },
+    # tool_enhance.md productionization pass, tool #92 (2026-08-24) —
+    # moved to app/tools/agents/submit_patch.py as SUBMIT_PATCH_TOOL.
+    # See that module's docstring — no vulnerability in this handler
+    # itself; files_changed's real downstream consumer (git_add()) was
+    # traced and confirmed already safe.
+    SUBMIT_PATCH_TOOL,
     RECORD_LEARNING_TOOL,
 ]
 
@@ -1363,10 +1354,11 @@ def make_coder_handlers(
     def git_diff(inp: dict[str, Any]) -> str:
         return git_diff_handler(wt, inp)
 
-    def submit_patch(inp: dict[str, Any]) -> str:
-        patch_result["files_changed"] = inp.get("files_changed", [])
-        patch_result["summary"] = inp.get("summary", "")
-        return "Patch submitted"
+    # tool_enhance.md productionization pass, tool #92 (2026-08-24) — the
+    # shared, already-correct logic now lives in
+    # make_submit_patch_handler(); see that function's own module
+    # docstring.
+    submit_patch = make_submit_patch_handler(patch_result)
 
     handlers["edit_file"] = edit_file
     handlers["git_diff"] = git_diff
