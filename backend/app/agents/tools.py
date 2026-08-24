@@ -218,6 +218,10 @@ from app.tools.filesystem.find_api import (
     FIND_API_TOOL as _FIND_API_TOOL,
     find_api_handler,
 )
+from app.tools.filesystem.find_route import (
+    FIND_ROUTE_TOOL as _FIND_ROUTE_TOOL,
+    find_route_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -2911,27 +2915,13 @@ _RUN_SCRIPT_TOOL = RUN_SCRIPT_TOOL
 # — tool_enhance.md productionization pass, tool #21 (2026-08-17).
 
 # Batch 13 — Smart search
-_FIND_ROUTE_TOOL = {
-    "name": "find_route",
-    "description": (
-        "Find API route definitions (FastAPI @router.get/post/put/delete, Flask @app.route) in the codebase. "
-        "Filter by HTTP method and/or path pattern."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "method": {
-                "type": "string",
-                "description": "HTTP method to filter: GET, POST, PUT, DELETE, PATCH (empty = all)",
-            },
-            "path_pattern": {
-                "type": "string",
-                "description": "URL path string to search for (e.g. '/users', '/api')",
-            },
-        },
-        "required": [],
-    },
-}
+# tool_enhance.md productionization pass, tool #90 (2026-08-24) — moved
+# to app/tools/filesystem/find_route.py as FIND_ROUTE_TOOL (imported
+# above as _FIND_ROUTE_TOOL). See that module's docstring — a severe
+# field-name mismatch (schema declares `path_pattern`, 2 of 4 real
+# implementations read a nonexistent `path` field and ignored `method`
+# entirely) caused every real, schema-conformant call to those two to
+# silently return the wrong (fixed-fallback) results.
 
 # tool_enhance.md productionization pass, tool #89 (2026-08-24) — moved
 # to app/tools/filesystem/find_api.py as FIND_API_TOOL (imported above
@@ -3732,15 +3722,13 @@ def make_security_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     def sec_find_api(inp: dict[str, Any]) -> str:
         return find_api_handler(root, inp)
 
+    # tool_enhance.md productionization pass, tool #90 (2026-08-24) — the
+    # real fix (this implementation read a nonexistent `path` field —
+    # the schema declares `path_pattern` — and ignored `method`
+    # entirely) lives in the shared find_route_handler() itself; see
+    # that function's own module docstring.
     def sec_find_route(inp: dict[str, Any]) -> str:
-        path_pat = str(inp.get("path", ""))
-        r = subprocess.run(
-            ["grep", "-rn", path_pat or "/api/", "--include=*.py", str(root)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return r.stdout[:6000] if r.stdout else "(no routes found)"
+        return find_route_handler(root, inp)
 
     def sec_submit(inp: dict[str, Any]) -> str:
         security_result.update(inp)
@@ -4356,15 +4344,11 @@ def make_api_docs_agent_handlers(repo_path: str) -> dict[str, Any]:
     root = Path(repo_path)
     docs_result: dict[str, Any] = {}
 
+    # tool_enhance.md productionization pass, tool #90 (2026-08-24) — the
+    # real fix lives in the shared find_route_handler(); see that
+    # function's own module docstring.
     def ad_find_route(inp: dict[str, Any]) -> str:
-        path_pat = str(inp.get("path", ""))
-        r = subprocess.run(
-            ["grep", "-rn", path_pat or "/api/", "--include=*.py", str(root)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return r.stdout[:6000] if r.stdout else "(no routes)"
+        return find_route_handler(root, inp)
 
     # tool_enhance.md productionization pass, tool #89 (2026-08-24) — the
     # real fix lives in the shared find_api_handler(); see that
@@ -8433,44 +8417,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # BATCH 13 — Smart search (find_route, find_api, find_sql, find_test, find_config)
     # =========================================================================
 
+    # tool_enhance.md productionization pass, tool #90 (2026-08-24) — this
+    # implementation was already correct; unified onto the shared
+    # find_route_handler() for maintainability (2 sibling
+    # implementations elsewhere had a severe field-name mismatch); see
+    # that function's own module docstring.
     def find_route_h(inp: dict[str, Any]) -> str:
-        frt_method = str(inp.get("method", "")).upper()
-        frt_path_pat = str(inp.get("path_pattern", ""))
-        if frt_method:
-            pat = rf"@(router|app)\.{frt_method.lower()}\("
-        else:
-            pat = r"@(router|app)\.(get|post|put|delete|patch|head|options)\("
-        exclude = [
-            "--exclude-dir=node_modules",
-            "--exclude-dir=.venv",
-            "--exclude-dir=__pycache__",
-        ]
-        try:
-            r = subprocess.run(
-                [
-                    "grep",
-                    "-rn",
-                    "-E",
-                    pat,
-                    repo_path,
-                    "--include=*.py",
-                    "--include=*.ts",
-                ]
-                + exclude,
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            lines = r.stdout
-            if frt_path_pat:
-                lines = "\n".join(ln for ln in lines.splitlines() if frt_path_pat in ln)
-            return (
-                lines[:5000]
-                if lines.strip()
-                else "No routes found" + (f" for {frt_method}" if frt_method else "")
-            )
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return find_route_handler(root, inp)
 
     # tool_enhance.md productionization pass, tool #89 (2026-08-24) — the
     # real fix (ZERO validation of `name` — a flag-injection bug, same

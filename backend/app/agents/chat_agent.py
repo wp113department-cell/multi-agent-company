@@ -159,6 +159,7 @@ from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
 from app.tools.filesystem.find_references import find_references_handler
+from app.tools.filesystem.find_route import find_route_handler
 from app.tools.filesystem.find_todos import find_todos_handler
 from app.tools.filesystem.search_imports import search_imports_handler
 from app.tools.filesystem.get_file_tree import get_file_tree_handler
@@ -3144,28 +3145,14 @@ class ChatAgent:
         # ========== BATCH 13 — Smart search ==========
 
         if tool_name == "find_route":
-            frt_method = str(inp.get("method", "")).upper()
-            frt_path_pat = str(inp.get("path_pattern", ""))
-            frt_pat = (
-                rf"@(router|app)\.{frt_method.lower()}\("
-                if frt_method
-                else r"@(router|app)\.(get|post|put|delete|patch|head|options)\("
-            )
-            frt_cmd = (
-                f"grep -rn -E {__import__('shlex').quote(frt_pat)} {repo} "
-                "--include=*.py --include=*.ts "
-                "--exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=__pycache__ 2>/dev/null || true"
-            )
-            frt_result = await asyncio.to_thread(_run_subprocess, frt_cmd, repo, 15)
-            if frt_path_pat:
-                frt_result = "\n".join(
-                    ln for ln in frt_result.splitlines() if frt_path_pat in ln
-                )
-            return (
-                frt_result[:5000]
-                if frt_result.strip()
-                else ("No routes found" + (f" for {frt_method}" if frt_method else ""))
-            )
+            # tool_enhance.md productionization pass, tool #90 (2026-08-24)
+            # — this dispatch was already correct; unified onto the
+            # shared find_route_handler() for maintainability (2 of the
+            # other 3 real implementations had a severe field-name
+            # mismatch — read a nonexistent `path` field and ignored
+            # `method` entirely). Full account in
+            # find_route_handler()'s own module docstring.
+            return await asyncio.to_thread(find_route_handler, root, inp)
 
         if tool_name == "find_api":
             # tool_enhance.md productionization pass, tool #89 (2026-08-24)
