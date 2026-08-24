@@ -164,6 +164,7 @@ from app.tools.filesystem.search_imports import search_imports_handler
 from app.tools.filesystem.get_file_tree import get_file_tree_handler
 from app.tools.filesystem.list_files import list_files_handler
 from app.tools.filesystem.list_functions import list_functions_handler
+from app.tools.filesystem.parse_ast import parse_ast_handler
 from app.tools.filesystem.search_code import search_code_handler
 from app.tools.filesystem.search_symbols import search_symbols_handler
 from app.tools.filesystem.read_file import read_file_handler
@@ -2969,11 +2970,20 @@ class ChatAgent:
         # ========== BATCH 10 — AST Engine ==========
 
         if tool_name == "parse_ast":
-            pa_rel = str(inp["path"])
-            pa_fp = root / pa_rel
-            if not pa_fp.exists():
-                return f"[ERROR] File not found: {pa_rel}"
-            return await asyncio.to_thread(_ast_engine.parse_file_ast, str(pa_fp))
+            # tool_enhance.md productionization pass, tool #83 (2026-08-24)
+            # — real finding, shared identically by all 7 real
+            # implementations (the widest-shared bug of any tool this
+            # initiative, since they're all thin one-liners around the
+            # same underlying ast_engine.parse_file_ast() utility): ZERO
+            # worktree-boundary validation — proved live,
+            # parse_ast({"path": "/tmp/outside/secret.py"}) genuinely
+            # returned a real structured AST dump (function names, args,
+            # decorators) of a host file outside the repo; also an
+            # uncaught PermissionError (proved live with a real chmod
+            # 000 parent directory). Full account in
+            # parse_ast_handler()'s own module docstring. Now delegates
+            # to that same shared, fixed handler.
+            return await asyncio.to_thread(parse_ast_handler, root, repo, inp)
 
         if tool_name == "import_graph":
             ig_rel = str(inp["path"])

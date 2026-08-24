@@ -238,6 +238,10 @@ from app.tools.filesystem.list_functions import (
     LIST_FUNCTIONS_TOOL as _LIST_FUNCTIONS_TOOL,
     list_functions_handler,
 )
+from app.tools.filesystem.parse_ast import (
+    PARSE_AST_TOOL as _PARSE_AST_TOOL,
+    parse_ast_handler,
+)
 from app.tools.filesystem.search_code import (
     SEARCH_CODE_TOOL,
     search_code_handler,
@@ -2809,24 +2813,12 @@ _SECRETS_SCAN_TOOL = {
 # ---------------------------------------------------------------------------
 
 # Batch 10 — AST Engine
-_PARSE_AST_TOOL = {
-    "name": "parse_ast",
-    "description": (
-        "Parse a Python (.py) file using the AST module and return a JSON structure "
-        "with all functions (name, line, args, decorators), classes (name, line, bases, methods), "
-        "and imports. Far more accurate than grep for code analysis."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "File path relative to repo root (must be .py)",
-            },
-        },
-        "required": ["path"],
-    },
-}
+# tool_enhance.md productionization pass, tool #83 (2026-08-24) — moved
+# to app/tools/filesystem/parse_ast.py as PARSE_AST_TOOL (imported
+# above as _PARSE_AST_TOOL to preserve every existing reference). See
+# that module's docstring — all SEVEN real implementations shared the
+# identical worktree-escape + uncaught-PermissionError bug, now
+# unified onto one shared parse_ast_handler().
 
 _IMPORT_GRAPH_TOOL = {
     "name": "import_graph",
@@ -3649,8 +3641,13 @@ def make_bug_fix_handlers(repo_path: str) -> dict[str, Any]:
     root = Path(repo_path)
     bug_fix_result: dict[str, Any] = {}
 
+    # tool_enhance.md productionization pass, tool #83 (2026-08-24) — the
+    # real fix (ZERO worktree-boundary validation + an uncaught
+    # PermissionError, same class shared by all 7 real implementations)
+    # lives in the shared parse_ast_handler() itself; see that
+    # function's own module docstring.
     def bf_parse_ast(inp: dict[str, Any]) -> str:
-        return _ast.parse_file_ast(str(root / inp["path"]))
+        return parse_ast_handler(root, repo_path, inp)
 
     def bf_call_graph(inp: dict[str, Any]) -> str:
         return _ast.build_call_graph(
@@ -3837,8 +3834,11 @@ def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
         directory = str(inp.get("directory", ""))
         return _ast.detect_dead_code(str(root / directory) if directory else str(root))
 
+    # tool_enhance.md productionization pass, tool #83 (2026-08-24) — the
+    # real fix lives in the shared parse_ast_handler(); see that
+    # function's own module docstring.
     def ar_parse_ast(inp: dict[str, Any]) -> str:
-        return _ast.parse_file_ast(str(root / inp["path"]))
+        return parse_ast_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #82 (2026-08-24) — the
     # real fix (this implementation read the wrong field — `file`
@@ -4292,8 +4292,11 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
         )
         return r.stdout[:4000] if r.stdout else f"(function '{name}' not found)"
 
+    # tool_enhance.md productionization pass, tool #83 (2026-08-24) — the
+    # real fix lives in the shared parse_ast_handler(); see that
+    # function's own module docstring.
     def rf_parse_ast(inp: dict[str, Any]) -> str:
-        return _ast.parse_file_ast(str(root / inp["path"]))
+        return parse_ast_handler(root, repo_path, inp)
 
     def rf_call_graph(inp: dict[str, Any]) -> str:
         return _ast.build_call_graph(
@@ -4371,14 +4374,15 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
 
 def make_readme_agent_handlers(repo_path: str) -> dict[str, Any]:
     """README agent: read-only + AST + write_file (*.md only) + submit_docs."""
-    from app.repo_tools import ast_engine as _ast
-
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
     docs_result: dict[str, Any] = {}
 
+    # tool_enhance.md productionization pass, tool #83 (2026-08-24) — the
+    # real fix lives in the shared parse_ast_handler(); see that
+    # function's own module docstring.
     def rm_parse_ast(inp: dict[str, Any]) -> str:
-        return _ast.parse_file_ast(str(root / inp["path"]))
+        return parse_ast_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #82 (2026-08-24) — the
     # real fix (this implementation read the wrong field — `file`
@@ -4436,8 +4440,6 @@ def make_readme_agent_handlers(repo_path: str) -> dict[str, Any]:
 
 def make_api_docs_agent_handlers(repo_path: str) -> dict[str, Any]:
     """API Docs agent: read-only + route/API finders + AST + write_file (*.md) + submit_docs."""
-    from app.repo_tools import ast_engine as _ast
-
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
     docs_result: dict[str, Any] = {}
@@ -4477,8 +4479,11 @@ def make_api_docs_agent_handlers(repo_path: str) -> dict[str, Any]:
             )
         return r.stdout[:6000] if r.stdout else "(no API handlers)"
 
+    # tool_enhance.md productionization pass, tool #83 (2026-08-24) — the
+    # real fix lives in the shared parse_ast_handler(); see that
+    # function's own module docstring.
     def ad_parse_ast(inp: dict[str, Any]) -> str:
-        return _ast.parse_file_ast(str(root / inp["path"]))
+        return parse_ast_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #82 (2026-08-24) — the
     # real fix (this implementation read the wrong field — `file`
@@ -8407,10 +8412,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     #             circular_dep_detect, rename_symbol)
     # =========================================================================
 
+    # tool_enhance.md productionization pass, tool #83 (2026-08-24) — the
+    # real fix lives in the shared parse_ast_handler(); see that
+    # function's own module docstring.
     def parse_ast_h(inp: dict[str, Any]) -> str:
-        from app.repo_tools.ast_engine import parse_file_ast
-
-        return parse_file_ast(str(root / str(inp["path"])))
+        return parse_ast_handler(root, repo_path, inp)
 
     def import_graph_h(inp: dict[str, Any]) -> str:
         from app.repo_tools.ast_engine import build_import_graph
