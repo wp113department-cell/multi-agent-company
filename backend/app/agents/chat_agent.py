@@ -157,6 +157,7 @@ from app.tools.filesystem.move_file import move_file_handler
 from app.tools.filesystem.analyze_file import analyze_file_handler
 from app.tools.filesystem.call_graph import call_graph_handler
 from app.tools.filesystem.dead_code_detect import dead_code_detect_handler
+from app.tools.filesystem.import_graph import import_graph_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -2963,11 +2964,18 @@ class ChatAgent:
             return await asyncio.to_thread(parse_ast_handler, root, repo, inp)
 
         if tool_name == "import_graph":
-            ig_rel = str(inp["path"])
-            ig_fp = root / ig_rel
-            if not ig_fp.exists():
-                return f"[ERROR] File not found: {ig_rel}"
-            return await asyncio.to_thread(_ast_engine.build_import_graph, str(ig_fp))
+            # tool_enhance.md productionization pass, tool #95 (2026-08-25)
+            # — real finding, shared identically by all 4 real
+            # implementations, the exact sibling class to tool #83's
+            # parse_ast (same underlying ast_engine module, same
+            # single-file-read shape): ZERO worktree-boundary validation
+            # — proved live, import_graph({"path": "/tmp/outside/
+            # secret.py"}) genuinely returned a real import list from a
+            # file outside the repo; also an uncaught PermissionError
+            # (proved live with a real chmod 000 parent directory). Full
+            # account in import_graph_handler()'s own module docstring.
+            # Now delegates to that same shared, fixed handler.
+            return await asyncio.to_thread(import_graph_handler, root, repo, inp)
 
         if tool_name == "call_graph":
             # tool_enhance.md productionization pass, tool #93 (2026-08-25)

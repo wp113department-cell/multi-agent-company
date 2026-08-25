@@ -238,6 +238,10 @@ from app.tools.filesystem.dead_code_detect import (
     DEAD_CODE_DETECT_TOOL,
     dead_code_detect_handler,
 )
+from app.tools.filesystem.import_graph import (
+    IMPORT_GRAPH_TOOL,
+    import_graph_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -443,10 +447,11 @@ _WEB_SEARCH_TOOL = WEB_SEARCH_TOOL
 _SUBMIT_DOCS_TOOL = SUBMIT_DOCS_TOOL
 _SEMVER_BUMP_TOOL = SEMVER_BUMP_TOOL
 _GIT_TAG_TOOL = GIT_TAG_TOOL
-# tool #93/#94 (2026-08-25) — architecture_doc_agent.py imports both
-# these names directly, checked proactively before wiring.
+# tool #93/#94/#95 (2026-08-25) — architecture_doc_agent.py imports all
+# three of these names directly, checked proactively before wiring.
 _CALL_GRAPH_TOOL = CALL_GRAPH_TOOL
 _DEAD_CODE_DETECT_TOOL = DEAD_CODE_DETECT_TOOL
+_IMPORT_GRAPH_TOOL = IMPORT_GRAPH_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2804,20 +2809,12 @@ _SECRETS_SCAN_TOOL = {
 # identical worktree-escape + uncaught-PermissionError bug, now
 # unified onto one shared parse_ast_handler().
 
-_IMPORT_GRAPH_TOOL = {
-    "name": "import_graph",
-    "description": "Show every module imported by a Python file, and which symbols are imported from each.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Path to the .py file (relative to repo root)",
-            },
-        },
-        "required": ["path"],
-    },
-}
+# tool_enhance.md productionization pass, tool #95 (2026-08-25) — moved
+# to app/tools/filesystem/import_graph.py as IMPORT_GRAPH_TOOL
+# (imported above, aliased to _IMPORT_GRAPH_TOOL after the import
+# block). Same worktree-escape + uncaught-PermissionError bug class as
+# sibling tool #83's parse_ast, proved live across all 4 real
+# implementations.
 
 # tool_enhance.md productionization pass, tool #93 (2026-08-25) — moved
 # to app/tools/filesystem/call_graph.py as CALL_GRAPH_TOOL (imported
@@ -3710,8 +3707,11 @@ def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     root = Path(repo_path)
     arch_result: dict[str, Any] = {}
 
+    # tool_enhance.md productionization pass, tool #95 (2026-08-25) — the
+    # real fix lives in the shared import_graph_handler(); see that
+    # function's own module docstring.
     def ar_import_graph(inp: dict[str, Any]) -> str:
-        return _ast.build_import_graph(str(root / inp["path"]))
+        return import_graph_handler(root, repo_path, inp)
 
     def ar_circular_dep(inp: dict[str, Any]) -> str:
         directory = str(inp.get("directory", ""))
@@ -4154,8 +4154,11 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
     def rf_call_graph(inp: dict[str, Any]) -> str:
         return call_graph_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #95 (2026-08-25) — the
+    # real fix lives in the shared import_graph_handler(); see that
+    # function's own module docstring.
     def rf_import_graph(inp: dict[str, Any]) -> str:
-        return _ast.build_import_graph(str(root / inp["path"]))
+        return import_graph_handler(root, repo_path, inp)
 
     def rf_rename_symbol(inp: dict[str, Any]) -> str:
         directory = str(inp.get("directory", ""))
@@ -8142,10 +8145,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def parse_ast_h(inp: dict[str, Any]) -> str:
         return parse_ast_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #95 (2026-08-25) — the
+    # real fix lives in the shared import_graph_handler(); see that
+    # function's own module docstring.
     def import_graph_h(inp: dict[str, Any]) -> str:
-        from app.repo_tools.ast_engine import build_import_graph
-
-        return build_import_graph(str(root / str(inp["path"])))
+        return import_graph_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #93 (2026-08-25) — the
     # real fix lives in the shared call_graph_handler(); see that
