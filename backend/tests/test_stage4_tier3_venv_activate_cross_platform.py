@@ -9,6 +9,16 @@ their own command string as `f"cd {repo_path} && source .venv/bin/activate
 `2>/dev/null` are all syntactically meaningless there. Consolidated into
 one shared `_venv_activate_snippet()` helper, applied at all 11 sites.
 
+**Updated 2026-08-25 (tool_enhance.md productionization pass, tool
+#101, `run_linter`)**: 3 of those 11 call sites (`sr_run_linter`,
+`td_run_linter`, and `run_linter` inside `make_chat_handlers`) were
+unified onto a shared `run_linter_handler()` that uses list-args
+subprocess calls exclusively (no `shell=True` at all, closing a real
+shell-injection RCE and a confirmation-bypass file-rewrite) — it
+invokes the venv's own `python` binary directly by path instead of a
+shell snippet, so it no longer needs `_venv_activate_snippet()` at
+all. 8 real call sites remain in `app/agents/tools.py` today.
+
 Windows behavior is verified by construction/string content only (this
 environment has no Windows host to actually execute `cmd.exe` against) —
 stated honestly, not silently assumed correct. The POSIX branch is
@@ -82,6 +92,12 @@ def test_real_call_sites_no_longer_hardcode_the_posix_pattern_directly() -> None
     # appears exactly once now too -- only in that same explanatory comment,
     # not at any real call site.
     assert source.count("source {repo_path}/.venv/bin/activate") == 1
+    # tool_enhance.md productionization pass, tool #101 (2026-08-25) —
+    # 3 of the original 11 real call sites were unified onto
+    # run_linter_handler(), which invokes the venv's own python binary
+    # directly (list-args, no shell=True) instead of this shell
+    # snippet -- 8 real call sites remain, verified directly by
+    # counting each surviving reference rather than assumed.
     assert (
-        source.count("_venv_activate_snippet()") >= 11 + 1
-    )  # 11 real call sites + its own def
+        source.count("_venv_activate_snippet()") >= 8 + 1
+    )  # 8 real call sites + its own def
