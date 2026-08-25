@@ -21,7 +21,6 @@ from app.agents.tool_security import (
     _mask_secret_value as _mask_secret_value,
     _redact_secrets_in_text as _redact_secrets_in_text,
     _scan_content_for_secrets as _scan_content_for_secrets,
-    _scan_directory_for_secrets as _scan_directory_for_secrets,
     _shell_metachar_reason as _shell_metachar_reason,
     _ssrf_denial_reason as _ssrf_denial_reason,
 )
@@ -266,6 +265,10 @@ from app.tools.execution.run_linter import (
     RUN_LINTER_TOOL,
     run_linter_handler,
 )
+from app.tools.filesystem.secrets_scan import (
+    SECRETS_SCAN_TOOL,
+    secrets_scan_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -482,6 +485,7 @@ _EXPLAIN_QUERY_TOOL = EXPLAIN_QUERY_TOOL
 _FIND_CONFIG_TOOL = FIND_CONFIG_TOOL
 _GENERATE_CHANGELOG_TOOL = GENERATE_CHANGELOG_TOOL
 _RUN_LINTER_TOOL = RUN_LINTER_TOOL
+_SECRETS_SCAN_TOOL = SECRETS_SCAN_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2792,20 +2796,15 @@ _DIAGNOSE_DEPLOYMENT_FAILURE_TOOL = {
 # NEW TOOL SPECS — Batch 9: Security
 # ---------------------------------------------------------------------------
 
-_SECRETS_SCAN_TOOL = {
-    "name": "secrets_scan",
-    "description": "Scan the repository for hardcoded secrets, API keys, passwords, and tokens.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "directory": {
-                "type": "string",
-                "description": "Directory to scan (default: entire repo)",
-            },
-        },
-        "required": [],
-    },
-}
+# tool_enhance.md productionization pass, tool #102 (2026-08-25) —
+# moved to app/tools/filesystem/secrets_scan.py as SECRETS_SCAN_TOOL
+# (imported above, aliased to _SECRETS_SCAN_TOOL after the import
+# block). Real findings: worktree escape + content disclosure on all
+# 3 implementations, PLUS a genuine shell-injection RCE on
+# chat_agent.py's own third, independently-drifted implementation
+# (never migrated onto the canonical scanner despite AUDIT_Q_BATCH11
+# §96 unifying the other two years earlier). See that module's own
+# docstring for the full account.
 
 # ---------------------------------------------------------------------------
 # DAY 1 TOOL SPECS — Batches 10-16
@@ -3622,13 +3621,12 @@ def make_security_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     root = Path(repo_path)
     security_result: dict[str, Any] = {}
 
+    # tool_enhance.md productionization pass, tool #102 (2026-08-25) — the
+    # real fix (ZERO worktree-boundary validation on `directory`) lives
+    # in the shared secrets_scan_handler(); see that function's own
+    # module docstring.
     def sec_secrets_scan(inp: dict[str, Any]) -> str:
-        # AUDIT_Q_BATCH11 §96 "Secret scanning" — delegates to the same
-        # canonical scanner secrets_scan() (below, make_coder_handlers) and
-        # _scan_content_for_secrets (pre-commit) now share, instead of this
-        # handler's own independently-maintained regex list.
-        directory = str(inp.get("directory", ""))
-        return _scan_directory_for_secrets(root, directory)
+        return secrets_scan_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #91 (2026-08-24) — the
     # real fix (ZERO validation of `keyword` — a flag-injection bug,
@@ -7842,15 +7840,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # BATCH 9 — Security tools
     # =========================================================================
 
+    # tool_enhance.md productionization pass, tool #102 (2026-08-25) — the
+    # real fix lives in the shared secrets_scan_handler(); see that
+    # function's own module docstring.
     def secrets_scan(inp: dict[str, Any]) -> str:
-        # AUDIT_Q_BATCH11 §96 "Secret scanning" — delegates to the same
-        # canonical scanner sec_secrets_scan() (make_security_reviewer_
-        # handlers) and _scan_content_for_secrets (pre-commit) now share,
-        # instead of this handler's own independently-maintained regex list
-        # and grep-subprocess implementation (also more portable: no
-        # dependency on a `grep` binary being on PATH).
-        ss_dir = str(inp.get("directory", ""))
-        return _scan_directory_for_secrets(root, ss_dir)
+        return secrets_scan_handler(root, repo_path, inp)
 
     handlers["edit_file"] = edit_file
     handlers["write_file"] = write_file

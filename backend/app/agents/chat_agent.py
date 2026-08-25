@@ -163,6 +163,7 @@ from app.tools.database.explain_query import explain_query_handler
 from app.tools.filesystem.find_config import find_config_handler
 from app.tools.git.generate_changelog import generate_changelog_handler
 from app.tools.execution.run_linter import run_linter_handler
+from app.tools.filesystem.secrets_scan import secrets_scan_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -2889,36 +2890,23 @@ class ChatAgent:
         # ========== BATCH 9 — Security ==========
 
         if tool_name == "secrets_scan":
-            ss_dir = str(inp.get("directory", ""))
-            ss_root = str(root / ss_dir) if ss_dir else repo
-            ss_patterns = [
-                r"(?i)(password|passwd|pwd)\s*[=:]\s*['\"][^'\"]{4,}['\"]",
-                r"(?i)(api[_-]?key|apikey)\s*[=:]\s*['\"][^'\"]{8,}['\"]",
-                r"(?i)(secret[_-]?key|secretkey)\s*[=:]\s*['\"][^'\"]{8,}['\"]",
-                r"(sk-[a-zA-Z0-9]{20,})",
-                r"(AKIA[0-9A-Z]{16})",
-                r"(ghp_[a-zA-Z0-9]{36})",
-            ]
-            ss_exclude = [
-                "--exclude-dir=node_modules",
-                "--exclude-dir=.git",
-                "--exclude-dir=.venv",
-                "--exclude-dir=__pycache__",
-                "--exclude=*.env",
-                "--exclude=.env*",
-                "--exclude=*.example",
-            ]
-            ss_findings: list[str] = []
-            for ss_pat in ss_patterns:
-                cmd_s = f"grep -rn -E {__import__('shlex').quote(ss_pat)} {ss_root} {' '.join(ss_exclude)} 2>/dev/null || true"
-                result = await asyncio.to_thread(_run_subprocess, cmd_s, repo, 15)
-                if result and result != "(no output)":
-                    ss_findings.append(result)
-            return (
-                "⚠️  Potential secrets found:\n\n" + "\n\n".join(ss_findings)[:5000]
-                if ss_findings
-                else "✅ No hardcoded secrets detected."
-            )
+            # tool_enhance.md productionization pass, tool #102 (2026-08-25)
+            # — the MOST SEVERE finding of this tool's audit: a genuine,
+            # direct shell-injection (arbitrary command execution). This
+            # dispatch maintained its OWN, third, independently-drifted
+            # regex list (never migrated onto the canonical scanner
+            # despite AUDIT_Q_BATCH11 §96 unifying the other two
+            # implementations years earlier) and interpolated ss_root
+            # (built from the LLM-controlled `directory` field)
+            # COMPLETELY UNQUOTED into a shell=True grep command — only
+            # the search PATTERN was shlex.quote()'d, never the
+            # directory. Proved live: directory="; touch /tmp/PWNED...;
+            # echo x" genuinely executed the injected command. Also had
+            # ZERO worktree-boundary validation. Full account in
+            # secrets_scan_handler()'s own module docstring. Now
+            # delegates to that same shared, fixed handler — the canonical
+            # scanner, not this dispatch's own drifted regex list.
+            return await asyncio.to_thread(secrets_scan_handler, root, repo, inp)
 
         # ========== BATCH 10 — AST Engine ==========
 
