@@ -156,6 +156,7 @@ from app.tools.filesystem.insert_before import insert_before_handler
 from app.tools.filesystem.move_file import move_file_handler
 from app.tools.filesystem.analyze_file import analyze_file_handler
 from app.tools.filesystem.call_graph import call_graph_handler
+from app.tools.filesystem.dead_code_detect import dead_code_detect_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -2983,9 +2984,21 @@ class ChatAgent:
             return await asyncio.to_thread(call_graph_handler, root, repo, inp)
 
         if tool_name == "dead_code_detect":
-            dcd_d = str(inp.get("directory", ""))
-            dcd_target = str(root / dcd_d) if dcd_d else repo
-            return await asyncio.to_thread(_ast_engine.detect_dead_code, dcd_target)
+            # tool_enhance.md productionization pass, tool #94 (2026-08-25)
+            # — real finding, shared identically by all 4 real
+            # implementations: ZERO worktree-boundary validation —
+            # proved live, dead_code_detect({"directory": "/tmp/
+            # outside"}) genuinely returned real function names/line
+            # references from a directory outside the repo. An uncaught
+            # PermissionError (the class established by sibling tools
+            # #83/#93) was checked and confirmed NOT reproducible here
+            # — pathlib's rglob() silently swallows it during traversal.
+            # Full account in dead_code_detect_handler()'s own module
+            # docstring. Now delegates to that same shared, fixed
+            # handler.
+            return await asyncio.to_thread(
+                dead_code_detect_handler, root, repo, inp
+            )
 
         if tool_name == "circular_dep_detect":
             cdd_d = str(inp.get("directory", ""))

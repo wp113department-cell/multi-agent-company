@@ -234,6 +234,10 @@ from app.tools.filesystem.call_graph import (
     CALL_GRAPH_TOOL,
     call_graph_handler,
 )
+from app.tools.filesystem.dead_code_detect import (
+    DEAD_CODE_DETECT_TOOL,
+    dead_code_detect_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -439,9 +443,10 @@ _WEB_SEARCH_TOOL = WEB_SEARCH_TOOL
 _SUBMIT_DOCS_TOOL = SUBMIT_DOCS_TOOL
 _SEMVER_BUMP_TOOL = SEMVER_BUMP_TOOL
 _GIT_TAG_TOOL = GIT_TAG_TOOL
-# tool #93 (2026-08-25) — architecture_doc_agent.py imports this name
-# directly, checked proactively before wiring.
+# tool #93/#94 (2026-08-25) — architecture_doc_agent.py imports both
+# these names directly, checked proactively before wiring.
 _CALL_GRAPH_TOOL = CALL_GRAPH_TOOL
+_DEAD_CODE_DETECT_TOOL = DEAD_CODE_DETECT_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2821,23 +2826,13 @@ _IMPORT_GRAPH_TOOL = {
 # + uncaught PermissionError) proved independently on all 5 real
 # implementations, same underlying ast_engine module.
 
-_DEAD_CODE_DETECT_TOOL = {
-    "name": "dead_code_detect",
-    "description": (
-        "Heuristically detect public Python functions defined in a directory that are never called "
-        "anywhere in that directory. Results are indicative — external callers are not visible."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "directory": {
-                "type": "string",
-                "description": "Directory to scan (relative to repo root, default: repo root)",
-            },
-        },
-        "required": [],
-    },
-}
+# tool_enhance.md productionization pass, tool #94 (2026-08-25) — moved
+# to app/tools/filesystem/dead_code_detect.py as DEAD_CODE_DETECT_TOOL
+# (imported above, aliased to _DEAD_CODE_DETECT_TOOL after the import
+# block). Worktree escape on all 4 real implementations, proved live —
+# an uncaught PermissionError (the class established by sibling tools
+# #83/#93) was checked and confirmed NOT reproducible here, since
+# pathlib's rglob() silently swallows PermissionError during traversal.
 
 _CIRCULAR_DEP_DETECT_TOOL = {
     "name": "circular_dep_detect",
@@ -3724,9 +3719,11 @@ def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
             str(root / directory) if directory else str(root)
         )
 
+    # tool_enhance.md productionization pass, tool #94 (2026-08-25) — the
+    # real fix lives in the shared dead_code_detect_handler(); see that
+    # function's own module docstring.
     def ar_dead_code(inp: dict[str, Any]) -> str:
-        directory = str(inp.get("directory", ""))
-        return _ast.detect_dead_code(str(root / directory) if directory else str(root))
+        return dead_code_detect_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #83 (2026-08-24) — the
     # real fix lives in the shared parse_ast_handler(); see that
@@ -5643,14 +5640,11 @@ def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
         "python -m mypy",
     )
 
+    # tool_enhance.md productionization pass, tool #94 (2026-08-25) — the
+    # real fix lives in the shared dead_code_detect_handler(); see that
+    # function's own module docstring.
     def cu_dead_code_detect(inp: dict[str, Any]) -> str:
-        cu_dir = str(inp.get("directory", "."))
-        try:
-            from app.repo_tools import ast_engine as _ae
-
-            return _ae.detect_dead_code(str(root / cu_dir))
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return dead_code_detect_handler(root, repo_path, inp)
 
     def cu_find_todos(inp: dict[str, Any]) -> str:
         results: list[str] = []
@@ -8159,11 +8153,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def call_graph_h(inp: dict[str, Any]) -> str:
         return call_graph_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #94 (2026-08-25) — the
+    # real fix lives in the shared dead_code_detect_handler(); see that
+    # function's own module docstring.
     def dead_code_detect_h(inp: dict[str, Any]) -> str:
-        from app.repo_tools.ast_engine import detect_dead_code
-
-        dcd_d = str(inp.get("directory", ""))
-        return detect_dead_code(str(root / dcd_d) if dcd_d else repo_path)
+        return dead_code_detect_handler(root, repo_path, inp)
 
     def circular_dep_detect_h(inp: dict[str, Any]) -> str:
         from app.repo_tools.ast_engine import detect_circular_imports
