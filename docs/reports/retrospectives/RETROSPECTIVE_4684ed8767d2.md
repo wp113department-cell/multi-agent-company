@@ -1,7 +1,7 @@
-# Release Retrospective — adc40f93991d
+# Release Retrospective — 4684ed8767d2
 
-Period: 2026-08-13T10:45:13.497385+00:00 .. 2026-08-20T10:45:13.510343+00:00
-Commit range: `b684cc5b7c02..adc40f93991d`
+Period: 2026-08-18T06:17:26.670876+00:00 .. 2026-08-25T06:17:26.687798+00:00
+Commit range: `664d5a975925..4684ed8767d2`
 
 ## What went well
 - 0 task(s) completed successfully (n/a of 0 closed this period).
