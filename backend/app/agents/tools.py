@@ -277,6 +277,10 @@ from app.tools.execution.coverage_report import (
     COVERAGE_REPORT_TOOL,
     coverage_report_handler,
 )
+from app.tools.execution.cpu_usage import (
+    CPU_USAGE_TOOL,
+    cpu_usage_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -496,6 +500,7 @@ _RUN_LINTER_TOOL = RUN_LINTER_TOOL
 _SECRETS_SCAN_TOOL = SECRETS_SCAN_TOOL
 _CHECK_LICENSE_COMPLIANCE_TOOL = CHECK_LICENSE_COMPLIANCE_TOOL
 _COVERAGE_REPORT_TOOL = COVERAGE_REPORT_TOOL
+_CPU_USAGE_TOOL = CPU_USAGE_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2945,15 +2950,14 @@ _FIND_TEST_TOOL = {
 # docstring for the full account.
 
 # Batch 14 — Monitoring
-_CPU_USAGE_TOOL = {
-    "name": "cpu_usage",
-    "description": "Get current CPU usage percentage from /proc/stat or the `top` command.",
-    "input_schema": {
-        "type": "object",
-        "properties": {},
-        "required": [],
-    },
-}
+# tool_enhance.md productionization pass, tool #105 (2026-08-25) —
+# moved to app/tools/execution/cpu_usage.py as CPU_USAGE_TOOL
+# (imported above, aliased to _CPU_USAGE_TOOL after the import block).
+# Real finding: a single /proc/stat read was mislabeled as "current"
+# CPU usage on 2 of 3 implementations — proved live, a real two-sample
+# delta read reported a genuinely different number (9.6% vs 22.4%) at
+# the exact same moment. See that module's own docstring for the full
+# account.
 
 _MEMORY_USAGE_TOOL = {
     "name": "memory_usage",
@@ -4424,12 +4428,13 @@ def make_monitoring_agent_handlers(repo_path: str) -> dict[str, Any]:
     root = Path(repo_path)
     monitoring_result: dict[str, Any] = {}
 
+    # tool_enhance.md productionization pass, tool #105 (2026-08-25) — the
+    # real fix (this implementation had no try/except around the top
+    # subprocess call, an uncaught FileNotFoundError if top is missing)
+    # lives in the shared cpu_usage_handler(); see that function's own
+    # module docstring.
     def mon_cpu_usage(inp: dict[str, Any]) -> str:
-        r = subprocess.run(["top", "-bn1"], capture_output=True, text=True, timeout=10)
-        for line in r.stdout.splitlines():
-            if "%Cpu" in line or "Cpu(s)" in line:
-                return line.strip()
-        return r.stdout[:500] or "[ERROR] Could not read CPU"
+        return cpu_usage_handler()
 
     def mon_memory_usage(inp: dict[str, Any]) -> str:
         r = subprocess.run(["free", "-h"], capture_output=True, text=True, timeout=5)
@@ -8188,27 +8193,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # BATCH 14 — Monitoring (cpu_usage, memory_usage, disk_usage, health_check, task_progress)
     # =========================================================================
 
+    # tool_enhance.md productionization pass, tool #105 (2026-08-25) — the
+    # real fix (a single /proc/stat read was mislabeled as "current"
+    # CPU usage — it can only ever measure the average since boot,
+    # proved live: 22.4% single-read vs 9.6% real delta-based usage at
+    # the exact same moment) lives in the shared cpu_usage_handler();
+    # see that function's own module docstring.
     def cpu_usage_h(inp: dict[str, Any]) -> str:
-        try:
-            proc_stat = Path("/proc/stat")
-            if proc_stat.exists():
-                lines = proc_stat.read_text().splitlines()
-                cpu_line = lines[0] if lines else ""
-                fields = cpu_line.split()
-                if len(fields) >= 5:
-                    total = sum(int(f) for f in fields[1:])
-                    idle = int(fields[4])
-                    used_pct = round((total - idle) / total * 100, 1) if total else 0
-                    return f"CPU: {used_pct}% used  (raw: {cpu_line})"
-            r = subprocess.run(
-                ["top", "-bn1"], capture_output=True, text=True, timeout=5
-            )
-            for ln in r.stdout.splitlines():
-                if "Cpu" in ln or "cpu" in ln:
-                    return f"CPU: {ln.strip()}"
-            return "(could not read CPU usage)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return cpu_usage_handler()
 
     def memory_usage_h(inp: dict[str, Any]) -> str:
         try:

@@ -166,6 +166,7 @@ from app.tools.execution.run_linter import run_linter_handler
 from app.tools.filesystem.secrets_scan import secrets_scan_handler
 from app.tools.execution.check_license_compliance import check_license_compliance_handler
 from app.tools.execution.coverage_report import coverage_report_handler
+from app.tools.execution.cpu_usage import cpu_usage_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -3215,21 +3216,16 @@ class ChatAgent:
         # ========== BATCH 14 — Monitoring ==========
 
         if tool_name == "cpu_usage":
-            cpu_cmd = "cat /proc/stat 2>/dev/null | head -1 || top -bn1 2>/dev/null | grep -i cpu | head -3"
-            cpu_raw = await asyncio.to_thread(_run_subprocess, cpu_cmd, repo, 5)
-            # Parse /proc/stat if available
-            if cpu_raw.startswith("cpu "):
-                cpu_fields = cpu_raw.split()
-                if len(cpu_fields) >= 5:
-                    cpu_total = sum(int(f) for f in cpu_fields[1:] if f.isdigit())
-                    cpu_idle = int(cpu_fields[4])
-                    cpu_pct = (
-                        round((cpu_total - cpu_idle) / cpu_total * 100, 1)
-                        if cpu_total
-                        else 0
-                    )
-                    return f"CPU: {cpu_pct}% used"
-            return f"CPU: {cpu_raw[:300]}"
+            # tool_enhance.md productionization pass, tool #105 (2026-08-25)
+            # — real finding, shared with cpu_usage_h: a SINGLE read of
+            # /proc/stat was mislabeled as "current" CPU usage — it only
+            # measures the average since boot. Proved live: a real
+            # two-sample delta read reported a genuinely different
+            # number (9.6%) than this single-read formula (22.4%) at
+            # the exact same moment. Full account in
+            # cpu_usage_handler()'s own module docstring. Now delegates
+            # to that same shared, fixed handler.
+            return await asyncio.to_thread(cpu_usage_handler)
 
         if tool_name == "memory_usage":
             memus_cmd = "cat /proc/meminfo 2>/dev/null | head -8 || free -h 2>/dev/null"
