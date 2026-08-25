@@ -269,6 +269,10 @@ from app.tools.filesystem.secrets_scan import (
     SECRETS_SCAN_TOOL,
     secrets_scan_handler,
 )
+from app.tools.execution.check_license_compliance import (
+    CHECK_LICENSE_COMPLIANCE_TOOL,
+    check_license_compliance_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -486,6 +490,7 @@ _FIND_CONFIG_TOOL = FIND_CONFIG_TOOL
 _GENERATE_CHANGELOG_TOOL = GENERATE_CHANGELOG_TOOL
 _RUN_LINTER_TOOL = RUN_LINTER_TOOL
 _SECRETS_SCAN_TOOL = SECRETS_SCAN_TOOL
+_CHECK_LICENSE_COMPLIANCE_TOOL = CHECK_LICENSE_COMPLIANCE_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -6171,21 +6176,15 @@ _DEPS_OUTDATED_TOOL: dict[str, Any] = {
         "required": [],
     },
 }
-_CHECK_LICENSE_COMPLIANCE_TOOL: dict[str, Any] = {
-    "name": "check_license_compliance",
-    "description": (
-        "Scan every installed Python package's license against SPDX identifiers "
-        "(PEP 639 License-Expression, PyPI trove classifiers, or a short License "
-        "metadata field) and classify each as allowed (permissive), review (weak "
-        "copyleft — LGPL/MPL), disallowed (strong copyleft — GPL/AGPL/SSPL), or "
-        "unknown (no determinable license). Real dependency metadata, not a guess."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {},
-        "required": [],
-    },
-}
+# tool_enhance.md productionization pass, tool #103 (2026-08-25) —
+# moved to app/tools/execution/check_license_compliance.py as
+# CHECK_LICENSE_COMPLIANCE_TOOL (imported above, aliased to
+# _CHECK_LICENSE_COMPLIANCE_TOOL after the import block). Real
+# finding: advertised in CHAT_TOOLS but never dispatched by
+# chat_agent.py — same class as tools #4/#6/#22/#25/#33/#44/#45/#46/
+# #48/#100. No LLM-controlled input reaches this tool (empty schema),
+# so no worktree/injection surface exists. See that module's own
+# docstring for the full account.
 _LOC_STATS_TOOL: dict[str, Any] = {
     "name": "loc_stats",
     "description": "Lines-of-code statistics for the repo broken down by file extension/language.",
@@ -9858,20 +9857,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] deps_outdated: {e}"
 
+    # tool_enhance.md productionization pass, tool #103 (2026-08-25) — the
+    # real fix (this tool was advertised in CHAT_TOOLS but chat_agent.py
+    # had ZERO dispatch — same class as tools #4/#6/#22/#25/#33/#44/
+    # #45/#46/#48/#100) lives in the shared
+    # check_license_compliance_handler(); see that function's own
+    # module docstring.
     def check_license_compliance_h(inp: dict[str, Any]) -> str:
-        # AUDIT_Q_BATCH11 §85 "Licensing policy enforcement" — real SPDX-
-        # based classification of every installed package's license
-        # (app/policy/license_check.py), not a placeholder.
-        from app.policy.license_check import (
-            format_report,
-            scan_installed_package_licenses,
-        )
-
-        try:
-            report = scan_installed_package_licenses()
-            return format_report(report)
-        except Exception as e:
-            return f"[ERROR] check_license_compliance: {e}"
+        return check_license_compliance_handler()
 
     def loc_stats_h(inp: dict[str, Any]) -> str:
         directory = str(inp.get("directory", "."))

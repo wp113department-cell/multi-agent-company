@@ -164,6 +164,7 @@ from app.tools.filesystem.find_config import find_config_handler
 from app.tools.git.generate_changelog import generate_changelog_handler
 from app.tools.execution.run_linter import run_linter_handler
 from app.tools.filesystem.secrets_scan import secrets_scan_handler
+from app.tools.execution.check_license_compliance import check_license_compliance_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -3420,6 +3421,21 @@ class ChatAgent:
             # ignores any repo_path override and validates from_ref/
             # to_ref aren't flag-shaped.
             return await asyncio.to_thread(generate_changelog_handler, root, inp)
+
+        if tool_name == "check_license_compliance":
+            # tool_enhance.md productionization pass, tool #103
+            # (2026-08-25) — this tool was "advertised but never
+            # dispatched" (same class as tools #4/#6/#22/#25/#33/#44/
+            # #45/#46/#48/#100): zero chat_agent.py dispatch existed
+            # despite being fully advertised in CHAT_TOOLS. No
+            # LLM-controlled input reaches this tool at all (its schema
+            # accepts no arguments), so there is no injection/worktree
+            # surface to close here — the only real fix is wiring the
+            # dispatch to the existing, already-correct
+            # check_license_compliance_handler() (real SPDX-based
+            # scanning of installed package licenses, per AUDIT_Q_BATCH11
+            # §85).
+            return await asyncio.to_thread(check_license_compliance_handler)
 
         # ========== AUDIT_Q_BATCH07 §13 — Human interaction ==========
 
