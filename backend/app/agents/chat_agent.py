@@ -158,6 +158,7 @@ from app.tools.filesystem.analyze_file import analyze_file_handler
 from app.tools.filesystem.call_graph import call_graph_handler
 from app.tools.filesystem.dead_code_detect import dead_code_detect_handler
 from app.tools.filesystem.import_graph import import_graph_handler
+from app.tools.database.inspect_schema import inspect_schema_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -2636,29 +2637,27 @@ class ChatAgent:
             return await asyncio.to_thread(run_sql_handler, rs_db_url, inp)
 
         if tool_name == "inspect_schema":
+            # tool_enhance.md productionization pass, tool #96 (2026-08-25)
+            # — real, proven SQL injection, same class as tool #15's
+            # run_sql, shared by all 5 real implementations — proved
+            # live against the real project database (safe, read-only,
+            # statement-stacking marker proof): a `table` value closing
+            # the intended string literal early let a second,
+            # attacker-controlled SQL statement execute. This dispatch's
+            # own shlex.quote(is_q) did NOT help — it only protects the
+            # SHELL from misinterpreting the string, not psql's own SQL
+            # parser from the malicious SQL already embedded inside it
+            # (the same shlex.quote()-is-not-enough class already seen
+            # in find_api/find_route/find_sql's chat_agent.py dispatches).
+            # Full account in inspect_schema_handler()'s own module
+            # docstring. Now delegates to that same shared, fixed
+            # handler, which no longer shells out to psql at all — real
+            # psycopg2 parameter binding instead, matching run_sql's own
+            # tool #15 precedent.
             from app.config import get_settings as _get_settings
 
-            is_table = str(inp.get("table", ""))
-            is_db_url = str(getattr(_get_settings(), "database_url", ""))
-            if not is_db_url:
-                return "[ERROR] DATABASE_URL not configured"
-            if is_table:
-                is_q = (
-                    "SELECT column_name, data_type, is_nullable, column_default "
-                    "FROM information_schema.columns "
-                    f"WHERE table_name = '{is_table}' ORDER BY ordinal_position"
-                )
-            else:
-                is_q = (
-                    "SELECT table_name FROM information_schema.tables "
-                    "WHERE table_schema = 'public' ORDER BY table_name"
-                )
-            return await asyncio.to_thread(
-                _run_subprocess,
-                f"psql '{is_db_url}' -c {__import__('shlex').quote(is_q)} --no-password 2>&1",
-                repo,
-                10,
-            )
+            is_db_url = str(getattr(_get_settings(), "database_url", "") or "")
+            return await asyncio.to_thread(inspect_schema_handler, is_db_url, inp)
 
         # ========== BATCH 8 — Docker tools ==========
 

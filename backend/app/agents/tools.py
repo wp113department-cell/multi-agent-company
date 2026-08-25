@@ -242,6 +242,10 @@ from app.tools.filesystem.import_graph import (
     IMPORT_GRAPH_TOOL,
     import_graph_handler,
 )
+from app.tools.database.inspect_schema import (
+    INSPECT_SCHEMA_TOOL,
+    inspect_schema_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -452,6 +456,7 @@ _GIT_TAG_TOOL = GIT_TAG_TOOL
 _CALL_GRAPH_TOOL = CALL_GRAPH_TOOL
 _DEAD_CODE_DETECT_TOOL = DEAD_CODE_DETECT_TOOL
 _IMPORT_GRAPH_TOOL = IMPORT_GRAPH_TOOL
+_INSPECT_SCHEMA_TOOL = INSPECT_SCHEMA_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2703,20 +2708,13 @@ _ANALYZE_ERROR_TOOL = {
 # moved to app/tools/database/sql.py as RUN_SQL_TOOL —
 # tool_enhance.md productionization pass, tool #15 (2026-08-17).
 
-_INSPECT_SCHEMA_TOOL = {
-    "name": "inspect_schema",
-    "description": "Show the PostgreSQL database schema: tables, columns, types, and constraints.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "table": {
-                "type": "string",
-                "description": "Specific table name to inspect (default: list all tables)",
-            },
-        },
-        "required": [],
-    },
-}
+# tool_enhance.md productionization pass, tool #96 (2026-08-25) — moved
+# to app/tools/database/inspect_schema.py as INSPECT_SCHEMA_TOOL
+# (imported above, aliased to _INSPECT_SCHEMA_TOOL after the import
+# block). Real, proven SQL injection via `table` on all 5 real
+# implementations, same class as tool #15's run_sql — fixed by full
+# replacement with real psycopg2 parameter binding, no more psql
+# subprocess. See that module's own docstring for the full account.
 
 # ---------------------------------------------------------------------------
 # NEW TOOL SPECS — Batch 8: Docker tools
@@ -3797,35 +3795,12 @@ def make_sql_agent_handlers(repo_path: str) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # tool_enhance.md productionization pass, tool #96 (2026-08-25) — the
+    # real fix lives in the shared inspect_schema_handler(); see that
+    # function's own module docstring.
     def sq_inspect_schema(inp: dict[str, Any]) -> str:
-        is_table = str(inp.get("table", ""))
-        is_settings = get_settings()
-        is_db_url = getattr(is_settings, "database_url", None)
-        if not is_db_url:
-            return "[ERROR] DATABASE_URL not configured"
-        if is_table:
-            is_query = (
-                "SELECT column_name, data_type, is_nullable "
-                "FROM information_schema.columns "
-                f"WHERE table_name = '{is_table}' ORDER BY ordinal_position"
-            )
-        else:
-            is_query = (
-                "SELECT table_name FROM information_schema.tables "
-                "WHERE table_schema='public' ORDER BY table_name"
-            )
-        try:
-            r = subprocess.run(
-                ["psql", str(is_db_url), "-c", is_query, "--no-password"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            return (r.stdout + r.stderr)[:5000] or "(empty)"
-        except FileNotFoundError:
-            return "[ERROR] psql not found"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        is_db_url = str(getattr(get_settings(), "database_url", "") or "")
+        return inspect_schema_handler(is_db_url, inp)
 
     # tool_enhance.md productionization pass, tool #91 (2026-08-24) — the
     # real fix lives in the shared find_sql_handler(); see that
@@ -5383,23 +5358,12 @@ def make_migration_agent_handlers(repo_path: str) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # tool_enhance.md productionization pass, tool #96 (2026-08-25) — the
+    # real fix lives in the shared inspect_schema_handler(); see that
+    # function's own module docstring.
     def mg_inspect_schema(inp: dict[str, Any]) -> str:
-        settings = _gs()
-        db_url = getattr(settings, "database_url", "")
-        if not db_url:
-            return "[ERROR] DATABASE_URL not set"
-        tbl = inp.get("table")
-        sql = f"\\d+ {tbl}" if tbl else "\\dt+"
-        try:
-            r = _sp.run(
-                ["psql", db_url, "-c", sql, "--no-psqlrc"],
-                capture_output=True,
-                text=True,
-                timeout=20,
-            )
-            return (r.stdout + r.stderr).strip() or "(no output)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        db_url = str(getattr(_gs(), "database_url", "") or "")
+        return inspect_schema_handler(db_url, inp)
 
     def mg_write_file(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
@@ -5496,23 +5460,12 @@ def make_schema_agent_handlers(repo_path: str) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # tool_enhance.md productionization pass, tool #96 (2026-08-25) — the
+    # real fix lives in the shared inspect_schema_handler(); see that
+    # function's own module docstring.
     def sa_inspect_schema(inp: dict[str, Any]) -> str:
-        settings = _gs()
-        db_url = getattr(settings, "database_url", "")
-        if not db_url:
-            return "[ERROR] DATABASE_URL not set"
-        tbl = inp.get("table")
-        sql = f"\\d+ {tbl}" if tbl else "\\dt+"
-        try:
-            r = _sp.run(
-                ["psql", db_url, "-c", sql, "--no-psqlrc"],
-                capture_output=True,
-                text=True,
-                timeout=20,
-            )
-            return (r.stdout + r.stderr).strip() or "(no output)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        db_url = str(getattr(_gs(), "database_url", "") or "")
+        return inspect_schema_handler(db_url, inp)
 
     def sa_write_file(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
@@ -7811,36 +7764,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         rs_db_url = str(getattr(rs_settings, "database_url", "") or "")
         return run_sql_handler(rs_db_url, inp)
 
+    # tool_enhance.md productionization pass, tool #96 (2026-08-25) — the
+    # real fix lives in the shared inspect_schema_handler(); see that
+    # function's own module docstring.
     def inspect_schema(inp: dict[str, Any]) -> str:
-        is_table = str(inp.get("table", ""))
-        is_settings = get_settings()
-        is_db_url = getattr(is_settings, "database_url", None)
-        if not is_db_url:
-            return "[ERROR] DATABASE_URL not configured"
-        if is_table:
-            is_query = (
-                "SELECT column_name, data_type, is_nullable, column_default "
-                "FROM information_schema.columns "
-                f"WHERE table_name = '{is_table}' ORDER BY ordinal_position"
-            )
-        else:
-            is_query = (
-                "SELECT table_name, pg_size_pretty(pg_total_relation_size(table_name::regclass)) AS size "
-                "FROM information_schema.tables "
-                "WHERE table_schema = 'public' ORDER BY table_name"
-            )
-        try:
-            r = subprocess.run(
-                ["psql", str(is_db_url), "-c", is_query, "--no-password"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            return (r.stdout + r.stderr)[:5000] or "(empty schema)"
-        except FileNotFoundError:
-            return "[ERROR] psql not found"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        is_db_url = str(getattr(get_settings(), "database_url", "") or "")
+        return inspect_schema_handler(is_db_url, inp)
 
     # =========================================================================
     # BATCH 8 — Docker tools
