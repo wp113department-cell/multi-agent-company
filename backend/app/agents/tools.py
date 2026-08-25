@@ -281,6 +281,10 @@ from app.tools.execution.cpu_usage import (
     CPU_USAGE_TOOL,
     cpu_usage_handler,
 )
+from app.tools.execution.diagnose_deployment_failure import (
+    DIAGNOSE_DEPLOYMENT_FAILURE_TOOL,
+    gather_deployment_diagnostics,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -501,6 +505,7 @@ _SECRETS_SCAN_TOOL = SECRETS_SCAN_TOOL
 _CHECK_LICENSE_COMPLIANCE_TOOL = CHECK_LICENSE_COMPLIANCE_TOOL
 _COVERAGE_REPORT_TOOL = COVERAGE_REPORT_TOOL
 _CPU_USAGE_TOOL = CPU_USAGE_TOOL
+_DIAGNOSE_DEPLOYMENT_FAILURE_TOOL = DIAGNOSE_DEPLOYMENT_FAILURE_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2776,24 +2781,16 @@ _DOCKER_LOGS_TOOL = {
 # moved to app/tools/execution/docker_compose.py as DOCKER_COMPOSE_TOOL —
 # tool_enhance.md productionization pass, tool #19 (2026-08-17).
 
-_DIAGNOSE_DEPLOYMENT_FAILURE_TOOL = {
-    "name": "diagnose_deployment_failure",
-    "description": "Diagnose a real deployment/container failure: gathers real docker ps -a state, docker logs, and docker inspect (exit code, OOMKilled, restart count, error) for the given container — or just the overall container state if none is given — then adds an LLM root-cause diagnosis grounded strictly in that gathered evidence. Distinct from docker_logs, which only returns raw/pattern-flagged log text with no diagnosis.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "container": {
-                "type": "string",
-                "description": "Container name or ID to diagnose (omit to just diagnose overall docker ps -a state)",
-            },
-            "lines": {
-                "type": "integer",
-                "description": "Number of log lines to gather when container is given (default: 100)",
-            },
-        },
-        "required": [],
-    },
-}
+# tool_enhance.md productionization pass, tool #106 (2026-08-25) —
+# moved to app/tools/execution/diagnose_deployment_failure.py as
+# DIAGNOSE_DEPLOYMENT_FAILURE_TOOL (imported above, aliased to
+# _DIAGNOSE_DEPLOYMENT_FAILURE_TOOL after the import block). Real,
+# severe finding: a genuine shell-injection RCE on chat_agent.py's
+# dispatch, plus a flag-collision on `container` and an uncaught
+# ValueError on `lines`, across all 3 real implementations. See that
+# module's own docstring for the full account, including why the LLM
+# diagnosis step (_llm_diagnose_deployment_failure, below) deliberately
+# stays in this file.
 
 # ---------------------------------------------------------------------------
 # NEW TOOL SPECS — Batch 9: Security
@@ -3901,80 +3898,17 @@ def make_docker_agent_handlers(repo_path: str) -> dict[str, Any]:
         )
         return (r.stdout + r.stderr).strip() or f"Restarted {dr_container}"
 
+    # tool_enhance.md productionization pass, tool #106 (2026-08-25) — the
+    # real fix (flag-collision on `container` + uncaught ValueError on a
+    # non-numeric `lines`) lives in the shared
+    # gather_deployment_diagnostics(); see that function's own module
+    # docstring. _llm_diagnose_deployment_failure() itself is unchanged
+    # and still called here directly — no bug found in the diagnosis
+    # step itself, only in how the evidence was gathered.
     def dk_diagnose_deployment_failure(inp: dict[str, Any]) -> str:
-        # AUDIT_Q_BATCH10 §19 "Diagnose deployment failures: NO — no
-        # dedicated failure-analysis tool/agent beyond the log pattern
-        # summarizer". Gathers real docker state (ps -a, logs, inspect
-        # State) — never guessed — then adds a real LLM diagnosis layer on
-        # top of it, distinct from _summarize_docker_log_patterns's
-        # keyword-only detection.
-        dd_container = str(inp.get("container", "")).strip()
-        dd_lines = int(inp.get("lines", 100))
-        parts: list[str] = []
-        ps_r = subprocess.run(
-            [
-                "docker",
-                "ps",
-                "-a",
-                "--format",
-                "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Names}}",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        parts.append(
-            "=== docker ps -a ===\n" + (ps_r.stdout or ps_r.stderr or "(no containers)")
-        )
-        if dd_container:
-            logs_r = subprocess.run(
-                ["docker", "logs", "--tail", str(dd_lines), dd_container],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            raw_logs = (logs_r.stdout + logs_r.stderr)[:6000]
-            parts.append(
-                f"=== docker logs --tail {dd_lines} {dd_container} ===\n"
-                + (
-                    _summarize_docker_log_patterns(raw_logs) + raw_logs
-                    if raw_logs
-                    else "(no logs)"
-                )
-            )
-            inspect_r = subprocess.run(
-                ["docker", "inspect", dd_container],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            if inspect_r.returncode == 0:
-                import json as _json
-
-                try:
-                    data = _json.loads(inspect_r.stdout)
-                    state = (data[0] if data else {}).get("State", {})
-                    inspect_summary = {
-                        "Status": state.get("Status"),
-                        "ExitCode": state.get("ExitCode"),
-                        "Error": state.get("Error"),
-                        "OOMKilled": state.get("OOMKilled"),
-                        "RestartCount": (data[0] if data else {}).get("RestartCount"),
-                        "StartedAt": state.get("StartedAt"),
-                        "FinishedAt": state.get("FinishedAt"),
-                    }
-                    parts.append(
-                        "=== docker inspect (State) ===\n"
-                        + _json.dumps(inspect_summary, indent=2)
-                    )
-                except Exception:
-                    parts.append("=== docker inspect ===\n" + inspect_r.stdout[:2000])
-            else:
-                parts.append(
-                    f"[ERROR] docker inspect {dd_container} failed: "
-                    f"{(inspect_r.stderr or '')[:500]}"
-                )
-        context = "\n\n".join(parts)
+        context = gather_deployment_diagnostics(inp)
+        if context.startswith("[ERROR]") or context.startswith("[POLICY DENIED]"):
+            return context
         diagnosis = _llm_diagnose_deployment_failure(context)
         return f"{context}\n\n=== Diagnosis ===\n{diagnosis}"
 
@@ -7732,74 +7666,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # tool_enhance.md productionization pass, tool #106 (2026-08-25) — the
+    # real fix lives in the shared gather_deployment_diagnostics(); see
+    # that function's own module docstring. _llm_diagnose_deployment_
+    # failure() itself is unchanged and still called here directly.
     def diagnose_deployment_failure(inp: dict[str, Any]) -> str:
-        dd_container = str(inp.get("container", "")).strip()
-        dd_lines = int(inp.get("lines", 100))
-        parts: list[str] = []
-        ps_r = subprocess.run(
-            [
-                "docker",
-                "ps",
-                "-a",
-                "--format",
-                "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Names}}",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        parts.append(
-            "=== docker ps -a ===\n" + (ps_r.stdout or ps_r.stderr or "(no containers)")
-        )
-        if dd_container:
-            logs_r = subprocess.run(
-                ["docker", "logs", "--tail", str(dd_lines), dd_container],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            raw_logs = (logs_r.stdout + logs_r.stderr)[:6000]
-            parts.append(
-                f"=== docker logs --tail {dd_lines} {dd_container} ===\n"
-                + (
-                    _summarize_docker_log_patterns(raw_logs) + raw_logs
-                    if raw_logs
-                    else "(no logs)"
-                )
-            )
-            inspect_r = subprocess.run(
-                ["docker", "inspect", dd_container],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            if inspect_r.returncode == 0:
-                import json as _json
-
-                try:
-                    data = _json.loads(inspect_r.stdout)
-                    state = (data[0] if data else {}).get("State", {})
-                    inspect_summary = {
-                        "Status": state.get("Status"),
-                        "ExitCode": state.get("ExitCode"),
-                        "Error": state.get("Error"),
-                        "OOMKilled": state.get("OOMKilled"),
-                        "RestartCount": (data[0] if data else {}).get("RestartCount"),
-                        "StartedAt": state.get("StartedAt"),
-                        "FinishedAt": state.get("FinishedAt"),
-                    }
-                    parts.append(
-                        "=== docker inspect (State) ===\n"
-                        + _json.dumps(inspect_summary, indent=2)
-                    )
-                except Exception:
-                    parts.append("=== docker inspect ===\n" + inspect_r.stdout[:2000])
-            else:
-                parts.append(
-                    f"[ERROR] docker inspect {dd_container} failed: "
-                    f"{(inspect_r.stderr or '')[:500]}"
-                )
-        context = "\n\n".join(parts)
+        context = gather_deployment_diagnostics(inp)
+        if context.startswith("[ERROR]") or context.startswith("[POLICY DENIED]"):
+            return context
         diagnosis = _llm_diagnose_deployment_failure(context)
         return f"{context}\n\n=== Diagnosis ===\n{diagnosis}"
 

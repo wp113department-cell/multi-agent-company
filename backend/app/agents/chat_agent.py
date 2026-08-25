@@ -167,6 +167,7 @@ from app.tools.filesystem.secrets_scan import secrets_scan_handler
 from app.tools.execution.check_license_compliance import check_license_compliance_handler
 from app.tools.execution.coverage_report import coverage_report_handler
 from app.tools.execution.cpu_usage import cpu_usage_handler
+from app.tools.execution.diagnose_deployment_failure import gather_deployment_diagnostics
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -2833,54 +2834,24 @@ class ChatAgent:
             return await asyncio.to_thread(_run_pip_install)
 
         if tool_name == "diagnose_deployment_failure":
-            dd_container = str(inp.get("container", "")).strip()
-            dd_lines = int(inp.get("lines", 100))
-            dd_ps = await asyncio.to_thread(
-                _run_subprocess,
-                "docker ps -a --format 'table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Names}}'",
-                repo,
-                10,
-            )
-            dd_parts = [f"=== docker ps -a ===\n{dd_ps}"]
-            if dd_container:
-                dd_logs = await asyncio.to_thread(
-                    _run_subprocess,
-                    f"docker logs --tail {dd_lines} {dd_container} 2>&1",
-                    repo,
-                    15,
-                )
-                dd_parts.append(
-                    f"=== docker logs --tail {dd_lines} {dd_container} ===\n{dd_logs or '(no logs)'}"
-                )
-                dd_inspect = await asyncio.to_thread(
-                    _run_subprocess,
-                    f"docker inspect {dd_container} 2>&1",
-                    repo,
-                    15,
-                )
-                import json as _json_dd
-
-                try:
-                    dd_data = _json_dd.loads(dd_inspect)
-                    dd_state = (dd_data[0] if dd_data else {}).get("State", {})
-                    dd_summary = {
-                        "Status": dd_state.get("Status"),
-                        "ExitCode": dd_state.get("ExitCode"),
-                        "Error": dd_state.get("Error"),
-                        "OOMKilled": dd_state.get("OOMKilled"),
-                        "RestartCount": (dd_data[0] if dd_data else {}).get(
-                            "RestartCount"
-                        ),
-                        "StartedAt": dd_state.get("StartedAt"),
-                        "FinishedAt": dd_state.get("FinishedAt"),
-                    }
-                    dd_parts.append(
-                        "=== docker inspect (State) ===\n"
-                        + _json_dd.dumps(dd_summary, indent=2)
-                    )
-                except Exception:
-                    dd_parts.append("=== docker inspect ===\n" + dd_inspect[:2000])
-            dd_context = "\n\n".join(dd_parts)
+            # tool_enhance.md productionization pass, tool #106 (2026-08-25)
+            # — the MOST SEVERE finding of this tool's audit: a genuine,
+            # direct shell-injection (arbitrary command execution) —
+            # dd_container was interpolated COMPLETELY UNQUOTED into TWO
+            # separate f-string shell=True commands. Proved live:
+            # container="; touch /tmp/PWNED...; echo x" genuinely
+            # executed the injected command. Also found a flag-collision
+            # on container and an uncaught ValueError on a non-numeric
+            # lines. Full account in gather_deployment_diagnostics()'s
+            # own module docstring. Now delegates to that same shared,
+            # fixed gathering function — list-args only, shell=True
+            # dropped entirely — then calls the existing, unmodified
+            # _llm_diagnose_deployment_failure() exactly as before.
+            dd_context = await asyncio.to_thread(gather_deployment_diagnostics, inp)
+            if dd_context.startswith("[ERROR]") or dd_context.startswith(
+                "[POLICY DENIED]"
+            ):
+                return dd_context
             dd_diagnosis = await asyncio.to_thread(
                 _llm_diagnose_deployment_failure, dd_context
             )
