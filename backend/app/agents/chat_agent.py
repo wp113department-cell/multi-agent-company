@@ -169,6 +169,7 @@ from app.tools.execution.coverage_report import coverage_report_handler
 from app.tools.execution.cpu_usage import cpu_usage_handler
 from app.tools.execution.diagnose_deployment_failure import gather_deployment_diagnostics
 from app.tools.execution.disk_usage import disk_usage_handler
+from app.tools.execution.docker_logs import docker_logs_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -2648,14 +2649,20 @@ class ChatAgent:
             return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 10)
 
         if tool_name == "docker_logs":
-            dl_container = str(inp["container"])
-            dock_lines = int(inp.get("lines", 50))
-            return await asyncio.to_thread(
-                _run_subprocess,
-                f"docker logs --tail {dock_lines} {dl_container} 2>&1",
-                repo,
-                15,
-            )
+            # tool_enhance.md productionization pass, tool #108 (2026-08-25)
+            # — real finding: a genuine, direct shell-injection
+            # (arbitrary command execution) — dl_container was
+            # interpolated COMPLETELY UNQUOTED into an f-string
+            # shell=True command. Proved live: container="; touch
+            # /tmp/PWNED_DOCKER_LOGS; echo x" genuinely executed the
+            # injected command. This dispatch was also missing the
+            # log-pattern analysis step (_summarize_docker_log_patterns)
+            # its two siblings already had — a real functionality gap,
+            # now closed too. Full account in docker_logs_handler()'s
+            # own module docstring. Now delegates to that same shared,
+            # fixed handler — list-args only, shell=True dropped
+            # entirely.
+            return await asyncio.to_thread(docker_logs_handler, inp)
 
         if tool_name == "docker_exec":
             de_container = str(inp["container"])

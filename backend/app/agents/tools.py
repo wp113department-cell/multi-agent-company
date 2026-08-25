@@ -23,6 +23,7 @@ from app.agents.tool_security import (
     _scan_content_for_secrets as _scan_content_for_secrets,
     _shell_metachar_reason as _shell_metachar_reason,
     _ssrf_denial_reason as _ssrf_denial_reason,
+    _summarize_docker_log_patterns as _summarize_docker_log_patterns,
 )
 from app.config import get_settings
 from app.policy.engine import (
@@ -289,6 +290,10 @@ from app.tools.execution.disk_usage import (
     DISK_USAGE_TOOL,
     disk_usage_handler,
 )
+from app.tools.execution.docker_logs import (
+    DOCKER_LOGS_TOOL,
+    docker_logs_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -511,6 +516,7 @@ _COVERAGE_REPORT_TOOL = COVERAGE_REPORT_TOOL
 _CPU_USAGE_TOOL = CPU_USAGE_TOOL
 _DIAGNOSE_DEPLOYMENT_FAILURE_TOOL = DIAGNOSE_DEPLOYMENT_FAILURE_TOOL
 _DISK_USAGE_TOOL = DISK_USAGE_TOOL
+_DOCKER_LOGS_TOOL = DOCKER_LOGS_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -549,66 +555,14 @@ def _venv_activate_snippet() -> str:
     return "source .venv/bin/activate 2>/dev/null || true"
 
 
-# Stage 4 Tier 3 (2026-08-05, answer2.md Q17) — real, bounded structured
-# pattern-detection over raw docker_logs output (previously returned
-# completely unparsed, per that finding). Mirrors this same file's own
-# established analyze_error() convention exactly (real pattern list,
-# "=== X Analysis ===" formatted summary prepended to the real content, not
-# replacing it). Docker containers run arbitrary applications with no fixed
-# log schema, so this is deliberately pattern/keyword detection, not a
-# claim of full structured (e.g. JSON) log parsing for every possible
-# container.
-_DOCKER_LOG_ERROR_PATTERNS = (
-    "error",
-    "exception",
-    "fatal",
-    "panic",
-    "traceback",
-    "failed",
-)
-_DOCKER_LOG_WARNING_PATTERNS = ("warn",)
-_DOCKER_LOG_CRASH_PATTERNS = (
-    "oomkilled",
-    "out of memory",
-    "sigkill",
-    "sigsegv",
-    "segmentation fault",
-    "core dumped",
-    "exit code 1",
-    "exit code 137",
-)
-
-
-def _summarize_docker_log_patterns(raw_log: str) -> str:
-    lines = raw_log.splitlines()
-    error_lines = [
-        ln for ln in lines if any(p in ln.lower() for p in _DOCKER_LOG_ERROR_PATTERNS)
-    ]
-    warning_lines = [
-        ln
-        for ln in lines
-        if any(p in ln.lower() for p in _DOCKER_LOG_WARNING_PATTERNS)
-        and ln not in error_lines
-    ]
-    crash_lines = [
-        ln for ln in lines if any(p in ln.lower() for p in _DOCKER_LOG_CRASH_PATTERNS)
-    ]
-
-    if not error_lines and not warning_lines and not crash_lines:
-        return ""
-
-    parts = ["=== Docker Log Analysis ==="]
-    if crash_lines:
-        parts.append(f"Crash/OOM signatures ({len(crash_lines)}):")
-        parts.extend(f"  {ln.strip()}" for ln in crash_lines[:5])
-    if error_lines:
-        parts.append(f"Error/exception lines ({len(error_lines)}):")
-        parts.extend(f"  {ln.strip()}" for ln in error_lines[:5])
-    if warning_lines:
-        parts.append(f"Warning lines ({len(warning_lines)}):")
-        parts.extend(f"  {ln.strip()}" for ln in warning_lines[:5])
-    parts.append("--- raw log below ---\n")
-    return "\n".join(parts)
+# tool_enhance.md productionization pass, tool #108 (2026-08-25) —
+# _DOCKER_LOG_ERROR_PATTERNS / _DOCKER_LOG_WARNING_PATTERNS /
+# _DOCKER_LOG_CRASH_PATTERNS / _summarize_docker_log_patterns() moved
+# to app/agents/tool_security.py (imported below, re-exported here for
+# backward compatibility) so both docker_logs (this tool) and
+# diagnose_deployment_failure (tool #106, which also needs this
+# function) can import it from a neutral, lower-level module without
+# either a circular import or a lazy in-function import.
 
 
 # ---------------------------------------------------------------------------
@@ -2764,21 +2718,16 @@ _DOCKER_PS_TOOL = {
     },
 }
 
-_DOCKER_LOGS_TOOL = {
-    "name": "docker_logs",
-    "description": "Get recent logs from a Docker container by name or ID.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "container": {"type": "string", "description": "Container name or ID"},
-            "lines": {
-                "type": "integer",
-                "description": "Number of recent log lines (default: 50)",
-            },
-        },
-        "required": ["container"],
-    },
-}
+# tool_enhance.md productionization pass, tool #108 (2026-08-25) —
+# moved to app/tools/execution/docker_logs.py as DOCKER_LOGS_TOOL
+# (imported above, aliased to _DOCKER_LOGS_TOOL after the import
+# block — app/agents/monitoring_agent.py imports this name directly,
+# checked proactively before wiring). Real, severe finding: a genuine
+# shell-injection RCE on chat_agent.py's dispatch (also missing the
+# log-pattern analysis step its siblings have), plus a flag-collision
+# on `container` and an uncaught ValueError on `lines`, across all 3
+# real implementations. See that module's own docstring for the full
+# account.
 
 # moved to app/tools/execution/docker_exec.py as DOCKER_EXEC_TOOL —
 # tool_enhance.md productionization pass, tool #20 (2026-08-17).
@@ -3824,19 +3773,12 @@ def make_docker_agent_handlers(repo_path: str) -> dict[str, Any]:
         )
         return r.stdout or r.stderr or "(no containers)"
 
+    # tool_enhance.md productionization pass, tool #108 (2026-08-25) — the
+    # real fix (flag-collision on `container` + uncaught ValueError on a
+    # non-numeric `lines`) lives in the shared docker_logs_handler();
+    # see that function's own module docstring.
     def dk_docker_logs(inp: dict[str, Any]) -> str:
-        dl_container = str(inp["container"])
-        dl_n = int(inp.get("lines", 50))
-        r = subprocess.run(
-            ["docker", "logs", "--tail", str(dl_n), dl_container],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        raw = (r.stdout + r.stderr)[:6000]
-        if not raw:
-            return "(no logs)"
-        return _summarize_docker_log_patterns(raw) + raw
+        return docker_logs_handler(inp)
 
     def dk_docker_exec(inp: dict[str, Any]) -> str:
         de_container = str(inp["container"])
@@ -7566,24 +7508,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # tool_enhance.md productionization pass, tool #108 (2026-08-25) — the
+    # real fix lives in the shared docker_logs_handler(); see that
+    # function's own module docstring.
     def docker_logs(inp: dict[str, Any]) -> str:
-        dl_container = str(inp["container"])
-        dl_lines = int(inp.get("lines", 50))
-        try:
-            r = subprocess.run(
-                ["docker", "logs", "--tail", str(dl_lines), dl_container],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            raw = (r.stdout + r.stderr)[:5000]
-            if not raw:
-                return "(no logs)"
-            return _summarize_docker_log_patterns(raw) + raw
-        except FileNotFoundError:
-            return "[ERROR] docker not found"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return docker_logs_handler(inp)
 
     def docker_exec(inp: dict[str, Any]) -> str:
         de_container = str(inp["container"])

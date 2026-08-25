@@ -542,3 +542,73 @@ def verify_file_line_citations(
                     )
 
     return {"checked": checked, "unverified": unverified}
+
+
+# Stage 4 Tier 3 (2026-08-05, answer2.md Q17) — real, bounded structured
+# pattern-detection over raw docker_logs output (previously returned
+# completely unparsed, per that finding). Mirrors this same codebase's own
+# established analyze_error() convention exactly (real pattern list,
+# "=== X Analysis ===" formatted summary prepended to the real content, not
+# replacing it). Docker containers run arbitrary applications with no fixed
+# log schema, so this is deliberately pattern/keyword detection, not a
+# claim of full structured (e.g. JSON) log parsing for every possible
+# container.
+#
+# tool_enhance.md productionization pass, tool #108 (2026-08-25) —
+# relocated here from app/agents/tools.py so both `docker_logs` (this
+# tool) and `diagnose_deployment_failure` (tool #106, which also needs
+# it) can import it from a neutral, lower-level module without either
+# creating a circular import or resorting to a lazy in-function import.
+# tools.py re-exports this name for backward compatibility with any
+# other existing reference.
+_DOCKER_LOG_ERROR_PATTERNS = (
+    "error",
+    "exception",
+    "fatal",
+    "panic",
+    "traceback",
+    "failed",
+)
+_DOCKER_LOG_WARNING_PATTERNS = ("warn",)
+_DOCKER_LOG_CRASH_PATTERNS = (
+    "oomkilled",
+    "out of memory",
+    "sigkill",
+    "sigsegv",
+    "segmentation fault",
+    "core dumped",
+    "exit code 1",
+    "exit code 137",
+)
+
+
+def _summarize_docker_log_patterns(raw_log: str) -> str:
+    lines = raw_log.splitlines()
+    error_lines = [
+        ln for ln in lines if any(p in ln.lower() for p in _DOCKER_LOG_ERROR_PATTERNS)
+    ]
+    warning_lines = [
+        ln
+        for ln in lines
+        if any(p in ln.lower() for p in _DOCKER_LOG_WARNING_PATTERNS)
+        and ln not in error_lines
+    ]
+    crash_lines = [
+        ln for ln in lines if any(p in ln.lower() for p in _DOCKER_LOG_CRASH_PATTERNS)
+    ]
+
+    if not error_lines and not warning_lines and not crash_lines:
+        return ""
+
+    parts = ["=== Docker Log Analysis ==="]
+    if crash_lines:
+        parts.append(f"Crash/OOM signatures ({len(crash_lines)}):")
+        parts.extend(f"  {ln.strip()}" for ln in crash_lines[:5])
+    if error_lines:
+        parts.append(f"Error/exception lines ({len(error_lines)}):")
+        parts.extend(f"  {ln.strip()}" for ln in error_lines[:5])
+    if warning_lines:
+        parts.append(f"Warning lines ({len(warning_lines)}):")
+        parts.extend(f"  {ln.strip()}" for ln in warning_lines[:5])
+    parts.append("--- raw log below ---\n")
+    return "\n".join(parts)

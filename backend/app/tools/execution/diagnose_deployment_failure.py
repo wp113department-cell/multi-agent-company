@@ -51,10 +51,13 @@ before `_llm_generate_text`/`_llm_diagnose_deployment_failure` are
 even defined). Splitting responsibility this way — this module gathers
 evidence safely, the existing caller-side helper diagnoses it — avoids
 both problems with zero behavior change to the diagnosis step itself.
-`_summarize_docker_log_patterns()` is imported lazily (inside the
-function body, not at module load time) for the identical reason: it
-is also shared with the out-of-scope `docker_logs` tool (tool #108,
-elsewhere in this same batch) and defined in `tools.py` itself.
+`_summarize_docker_log_patterns()` is imported normally, at module
+load time, from `app.agents.tool_security` — it used to live in
+`tools.py` itself (which would have forced a lazy, in-function import
+here to avoid a circular dependency), but tool #108's own turn
+(`docker_logs`, elsewhere in this same batch, also needs this exact
+function) relocated it to this neutral, lower-level module instead, so
+both tools can import it cleanly.
 
 Two real, empirically-verified findings.
 
@@ -89,6 +92,8 @@ from __future__ import annotations
 import json
 import subprocess
 from typing import Any
+
+from app.agents.tool_security import _summarize_docker_log_patterns
 
 
 def gather_deployment_diagnostics(inp: dict[str, Any]) -> str:
@@ -131,8 +136,6 @@ def gather_deployment_diagnostics(inp: dict[str, Any]) -> str:
     )
 
     if container:
-        from app.agents.tools import _summarize_docker_log_patterns
-
         logs_r = subprocess.run(
             ["docker", "logs", "--tail", str(lines), container],
             capture_output=True,
