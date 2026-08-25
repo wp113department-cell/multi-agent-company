@@ -159,6 +159,7 @@ from app.tools.filesystem.call_graph import call_graph_handler
 from app.tools.filesystem.dead_code_detect import dead_code_detect_handler
 from app.tools.filesystem.import_graph import import_graph_handler
 from app.tools.database.inspect_schema import inspect_schema_handler
+from app.tools.filesystem.circular_dep_detect import circular_dep_detect_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -3008,10 +3009,20 @@ class ChatAgent:
             )
 
         if tool_name == "circular_dep_detect":
-            cdd_d = str(inp.get("directory", ""))
-            cdd_target = str(root / cdd_d) if cdd_d else repo
+            # tool_enhance.md productionization pass, tool #97 (2026-08-25)
+            # — real finding, shared identically by all 3 real
+            # implementations, the exact sibling class to tool #94's
+            # dead_code_detect (same ast_engine module, same directory-
+            # rglob-walk shape): ZERO worktree-boundary validation —
+            # proved live, a directory outside the repo containing a real
+            # circular-import pair produced a real, correctly-detected
+            # cycle report. Checked for the PermissionError-swallowing
+            # behavior established by tool #94 and confirmed it
+            # reproduces here too (not raised). Full account in
+            # circular_dep_detect_handler()'s own module docstring. Now
+            # delegates to that same shared, fixed handler.
             return await asyncio.to_thread(
-                _ast_engine.detect_circular_imports, cdd_target
+                circular_dep_detect_handler, root, repo, inp
             )
 
         if tool_name == "rename_symbol":

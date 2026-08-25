@@ -246,6 +246,10 @@ from app.tools.database.inspect_schema import (
     INSPECT_SCHEMA_TOOL,
     inspect_schema_handler,
 )
+from app.tools.filesystem.circular_dep_detect import (
+    CIRCULAR_DEP_DETECT_TOOL,
+    circular_dep_detect_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -457,6 +461,7 @@ _CALL_GRAPH_TOOL = CALL_GRAPH_TOOL
 _DEAD_CODE_DETECT_TOOL = DEAD_CODE_DETECT_TOOL
 _IMPORT_GRAPH_TOOL = IMPORT_GRAPH_TOOL
 _INSPECT_SCHEMA_TOOL = INSPECT_SCHEMA_TOOL
+_CIRCULAR_DEP_DETECT_TOOL = CIRCULAR_DEP_DETECT_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2829,20 +2834,13 @@ _SECRETS_SCAN_TOOL = {
 # #83/#93) was checked and confirmed NOT reproducible here, since
 # pathlib's rglob() silently swallows PermissionError during traversal.
 
-_CIRCULAR_DEP_DETECT_TOOL = {
-    "name": "circular_dep_detect",
-    "description": "Detect circular local import chains in a Python package directory.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "directory": {
-                "type": "string",
-                "description": "Directory to scan (default: repo root)",
-            },
-        },
-        "required": [],
-    },
-}
+# tool_enhance.md productionization pass, tool #97 (2026-08-25) — moved
+# to app/tools/filesystem/circular_dep_detect.py as
+# CIRCULAR_DEP_DETECT_TOOL (imported above, aliased to
+# _CIRCULAR_DEP_DETECT_TOOL after the import block). Same worktree-
+# escape finding + PermissionError-swallowing shape as sibling tool
+# #94's dead_code_detect (same ast_engine module), proved live across
+# all 3 real implementations.
 
 # moved to app/tools/refactor/rename_symbol.py as RENAME_SYMBOL_TOOL —
 # tool_enhance.md productionization pass, tool #23 (2026-08-18).
@@ -3699,8 +3697,6 @@ def make_security_reviewer_handlers(repo_path: str) -> dict[str, Any]:
 
 def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     """Architecture reviewer: read-only + AST analysis + submit_arch_review."""
-    from app.repo_tools import ast_engine as _ast
-
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
     arch_result: dict[str, Any] = {}
@@ -3711,11 +3707,11 @@ def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     def ar_import_graph(inp: dict[str, Any]) -> str:
         return import_graph_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #97 (2026-08-25) — the
+    # real fix lives in the shared circular_dep_detect_handler(); see
+    # that function's own module docstring.
     def ar_circular_dep(inp: dict[str, Any]) -> str:
-        directory = str(inp.get("directory", ""))
-        return _ast.detect_circular_imports(
-            str(root / directory) if directory else str(root)
-        )
+        return circular_dep_detect_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #94 (2026-08-25) — the
     # real fix lives in the shared dead_code_detect_handler(); see that
@@ -8092,11 +8088,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def dead_code_detect_h(inp: dict[str, Any]) -> str:
         return dead_code_detect_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #97 (2026-08-25) — the
+    # real fix lives in the shared circular_dep_detect_handler(); see
+    # that function's own module docstring.
     def circular_dep_detect_h(inp: dict[str, Any]) -> str:
-        from app.repo_tools.ast_engine import detect_circular_imports
-
-        cdd_d = str(inp.get("directory", ""))
-        return detect_circular_imports(str(root / cdd_d) if cdd_d else repo_path)
+        return circular_dep_detect_handler(root, repo_path, inp)
 
     def rename_symbol_h(inp: dict[str, Any]) -> str:
         from app.repo_tools.ast_engine import rename_symbol as _rsym
