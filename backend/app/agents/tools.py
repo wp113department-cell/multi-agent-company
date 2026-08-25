@@ -230,6 +230,10 @@ from app.tools.filesystem.find_sql import (
     FIND_SQL_TOOL as _FIND_SQL_TOOL,
     find_sql_handler,
 )
+from app.tools.filesystem.call_graph import (
+    CALL_GRAPH_TOOL,
+    call_graph_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -435,6 +439,9 @@ _WEB_SEARCH_TOOL = WEB_SEARCH_TOOL
 _SUBMIT_DOCS_TOOL = SUBMIT_DOCS_TOOL
 _SEMVER_BUMP_TOOL = SEMVER_BUMP_TOOL
 _GIT_TAG_TOOL = GIT_TAG_TOOL
+# tool #93 (2026-08-25) — architecture_doc_agent.py imports this name
+# directly, checked proactively before wiring.
+_CALL_GRAPH_TOOL = CALL_GRAPH_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2807,24 +2814,12 @@ _IMPORT_GRAPH_TOOL = {
     },
 }
 
-_CALL_GRAPH_TOOL = {
-    "name": "call_graph",
-    "description": (
-        "Show what functions each function calls inside a Python file. "
-        "Optionally limit to a single function by name."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string", "description": "Path to the .py file"},
-            "function_name": {
-                "type": "string",
-                "description": "Name of function to inspect (empty = all functions)",
-            },
-        },
-        "required": ["path"],
-    },
-}
+# tool_enhance.md productionization pass, tool #93 (2026-08-25) — moved
+# to app/tools/filesystem/call_graph.py as CALL_GRAPH_TOOL (imported
+# above, aliased to _CALL_GRAPH_TOOL after the import block). Sibling
+# tool to tool #83's parse_ast, same finding classes (worktree escape
+# + uncaught PermissionError) proved independently on all 5 real
+# implementations, same underlying ast_engine module.
 
 _DEAD_CODE_DETECT_TOOL = {
     "name": "dead_code_detect",
@@ -3574,8 +3569,6 @@ def _make_git_diff_handler(repo_path: str) -> Any:
 
 def make_bug_fix_handlers(repo_path: str) -> dict[str, Any]:
     """Bug Fix agent: read-only + AST analysis + direct file writes + submit_bug_fix."""
-    from app.repo_tools import ast_engine as _ast
-
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
     bug_fix_result: dict[str, Any] = {}
@@ -3588,10 +3581,11 @@ def make_bug_fix_handlers(repo_path: str) -> dict[str, Any]:
     def bf_parse_ast(inp: dict[str, Any]) -> str:
         return parse_ast_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #93 (2026-08-25) — the
+    # real fix lives in the shared call_graph_handler(); see that
+    # function's own module docstring.
     def bf_call_graph(inp: dict[str, Any]) -> str:
-        return _ast.build_call_graph(
-            str(root / inp["path"]), inp.get("function_name", "")
-        )
+        return call_graph_handler(root, repo_path, inp)
 
     def bf_find_function_body(inp: dict[str, Any]) -> str:
         name = str(inp["name"])
@@ -3757,10 +3751,11 @@ def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     def ar_list_classes(inp: dict[str, Any]) -> str:
         return list_classes_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #93 (2026-08-25) — the
+    # real fix lives in the shared call_graph_handler(); see that
+    # function's own module docstring.
     def ar_call_graph(inp: dict[str, Any]) -> str:
-        return _ast.build_call_graph(
-            str(root / inp["path"]), inp.get("function_name", "")
-        )
+        return call_graph_handler(root, repo_path, inp)
 
     def ar_submit(inp: dict[str, Any]) -> str:
         arch_result.update(inp)
@@ -4156,10 +4151,11 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
     def rf_parse_ast(inp: dict[str, Any]) -> str:
         return parse_ast_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #93 (2026-08-25) — the
+    # real fix lives in the shared call_graph_handler(); see that
+    # function's own module docstring.
     def rf_call_graph(inp: dict[str, Any]) -> str:
-        return _ast.build_call_graph(
-            str(root / inp["path"]), inp.get("function_name", "")
-        )
+        return call_graph_handler(root, repo_path, inp)
 
     def rf_import_graph(inp: dict[str, Any]) -> str:
         return _ast.build_import_graph(str(root / inp["path"]))
@@ -8157,12 +8153,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
         return build_import_graph(str(root / str(inp["path"])))
 
+    # tool_enhance.md productionization pass, tool #93 (2026-08-25) — the
+    # real fix lives in the shared call_graph_handler(); see that
+    # function's own module docstring.
     def call_graph_h(inp: dict[str, Any]) -> str:
-        from app.repo_tools.ast_engine import build_call_graph
-
-        return build_call_graph(
-            str(root / str(inp["path"])), str(inp.get("function_name", ""))
-        )
+        return call_graph_handler(root, repo_path, inp)
 
     def dead_code_detect_h(inp: dict[str, Any]) -> str:
         from app.repo_tools.ast_engine import detect_dead_code

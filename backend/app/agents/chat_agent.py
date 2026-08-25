@@ -155,6 +155,7 @@ from app.tools.filesystem.insert_at_line import insert_at_line_handler
 from app.tools.filesystem.insert_before import insert_before_handler
 from app.tools.filesystem.move_file import move_file_handler
 from app.tools.filesystem.analyze_file import analyze_file_handler
+from app.tools.filesystem.call_graph import call_graph_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -2968,14 +2969,18 @@ class ChatAgent:
             return await asyncio.to_thread(_ast_engine.build_import_graph, str(ig_fp))
 
         if tool_name == "call_graph":
-            cg_rel = str(inp["path"])
-            cg_fn = str(inp.get("function_name", ""))
-            cg_fp = root / cg_rel
-            if not cg_fp.exists():
-                return f"[ERROR] File not found: {cg_rel}"
-            return await asyncio.to_thread(
-                _ast_engine.build_call_graph, str(cg_fp), cg_fn
-            )
+            # tool_enhance.md productionization pass, tool #93 (2026-08-25)
+            # — real finding, shared identically by all 5 real
+            # implementations (the sibling tool to #83's parse_ast, same
+            # underlying ast_engine module): ZERO worktree-boundary
+            # validation — proved live, call_graph({"path": "/tmp/
+            # outside/secret.py"}) genuinely returned a real call graph
+            # of a host file outside the repo; also an uncaught
+            # PermissionError (proved live with a real chmod 000 parent
+            # directory). Full account in call_graph_handler()'s own
+            # module docstring. Now delegates to that same shared, fixed
+            # handler.
+            return await asyncio.to_thread(call_graph_handler, root, repo, inp)
 
         if tool_name == "dead_code_detect":
             dcd_d = str(inp.get("directory", ""))
