@@ -161,6 +161,7 @@ from app.tools.filesystem.import_graph import import_graph_handler
 from app.tools.database.inspect_schema import inspect_schema_handler
 from app.tools.filesystem.circular_dep_detect import circular_dep_detect_handler
 from app.tools.database.explain_query import explain_query_handler
+from app.tools.filesystem.find_config import find_config_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -3234,30 +3235,23 @@ class ChatAgent:
             )
 
         if tool_name == "find_config":
-            fcfg_key = str(inp["key"])
-            fcfg_pat = fcfg_key.upper()
-            fcfg_cmd = (
-                f"grep -rn {__import__('shlex').quote(fcfg_pat)} {repo} "
-                "--include=*.env* --include=.env* --include=*.yaml --include=*.yml "
-                "--include=*.toml --include=config.py --include=settings.py "
-                "--exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=__pycache__ 2>/dev/null || true"
-            )
-            fcfg_result = await asyncio.to_thread(_run_subprocess, fcfg_cmd, repo, 15)
-            if not fcfg_result.strip():
-                # Try lowercase too
-                fcfg_cmd2 = (
-                    f"grep -rn {__import__('shlex').quote(fcfg_key.lower())} {repo} "
-                    "--include=*.yaml --include=*.yml --include=*.toml "
-                    "--exclude-dir=node_modules --exclude-dir=.venv 2>/dev/null || true"
-                )
-                fcfg_result = await asyncio.to_thread(
-                    _run_subprocess, fcfg_cmd2, repo, 15
-                )
-            return (
-                fcfg_result[:5000]
-                if fcfg_result.strip()
-                else f"'{fcfg_key}' not found in config files"
-            )
+            # tool_enhance.md productionization pass, tool #99 (2026-08-25)
+            # — real finding, shared with find_config_h: ZERO validation
+            # of `key` — a flag-collision bug, same class as tools
+            # #69/#89/#90/#91. Proved live: key="-f" was silently
+            # consumed as grep's own -f flag (consuming the search
+            # directory as its pattern-file argument instead — zero real
+            # search performed); key="--include=*" was consumed as
+            # grep's own --include flag, leaving grep with no directory
+            # to search — it fell back to reading stdin and HUNG until
+            # timeout, a real resource-exhaustion vector. This dispatch's
+            # own shlex.quote(fcfg_pat) did NOT help — shell-safety
+            # only, not grep's-own-flag-parser-safety, same class
+            # already seen in find_api/find_route/find_sql/
+            # inspect_schema/explain_query's dispatches. Full account in
+            # find_config_handler()'s own module docstring. Now
+            # delegates to that same shared, fixed handler.
+            return await asyncio.to_thread(find_config_handler, root, inp)
 
         # ========== BATCH 14 — Monitoring ==========
 

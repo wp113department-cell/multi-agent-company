@@ -254,6 +254,10 @@ from app.tools.database.explain_query import (
     EXPLAIN_QUERY_TOOL,
     explain_query_handler,
 )
+from app.tools.filesystem.find_config import (
+    FIND_CONFIG_TOOL,
+    find_config_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -467,6 +471,7 @@ _IMPORT_GRAPH_TOOL = IMPORT_GRAPH_TOOL
 _INSPECT_SCHEMA_TOOL = INSPECT_SCHEMA_TOOL
 _CIRCULAR_DEP_DETECT_TOOL = CIRCULAR_DEP_DETECT_TOOL
 _EXPLAIN_QUERY_TOOL = EXPLAIN_QUERY_TOOL
+_FIND_CONFIG_TOOL = FIND_CONFIG_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2937,20 +2942,13 @@ _FIND_TEST_TOOL = {
     },
 }
 
-_FIND_CONFIG_TOOL = {
-    "name": "find_config",
-    "description": "Search for a configuration key across all config files (.env.example, config.py, settings files, YAML).",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "key": {
-                "type": "string",
-                "description": "Config key to find (e.g. 'DATABASE_URL', 'API_KEY', 'debug')",
-            },
-        },
-        "required": ["key"],
-    },
-}
+# tool_enhance.md productionization pass, tool #99 (2026-08-25) — moved
+# to app/tools/filesystem/find_config.py as FIND_CONFIG_TOOL (imported
+# above, aliased to _FIND_CONFIG_TOOL after the import block). Real
+# findings: a flag-collision class (same as tools #69/#89/#90/#91) on
+# 2 of 3 implementations, plus sec_find_config ignoring `key` entirely
+# and running a fixed hardcoded regex instead. See that module's own
+# docstring for the full account.
 
 # Batch 14 — Monitoring
 _CPU_USAGE_TOOL = {
@@ -3643,24 +3641,13 @@ def make_security_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     def sec_find_sql(inp: dict[str, Any]) -> str:
         return find_sql_handler(root, inp)
 
+    # tool_enhance.md productionization pass, tool #99 (2026-08-25) — the
+    # real fix (this implementation IGNORED `key` entirely — it read a
+    # nonexistent `file_pattern` field and ran a fixed, hardcoded regex)
+    # lives in the shared find_config_handler(); see that function's own
+    # module docstring.
     def sec_find_config(inp: dict[str, Any]) -> str:
-        fp = str(inp.get("file_pattern", "*.py"))
-        r = subprocess.run(
-            [
-                "grep",
-                "-rn",
-                "-i",
-                "-E",
-                r"(host|port|database|db_url|dsn|connection_string)\s*=",
-                "--include",
-                fp,
-                str(root),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        return r.stdout[:6000] if r.stdout else "(no config patterns found)"
+        return find_config_handler(root, inp)
 
     # tool_enhance.md productionization pass, tool #89 (2026-08-24) — the
     # real fix (ZERO validation of `name` — a flag-injection bug, same
@@ -8304,46 +8291,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             else f"No tests found for '{ftest_fn}'"
         )
 
+    # tool_enhance.md productionization pass, tool #99 (2026-08-25) — the
+    # real fix lives in the shared find_config_handler(); see that
+    # function's own module docstring.
     def find_config_h(inp: dict[str, Any]) -> str:
-        fcfg_key = str(inp["key"])
-        patterns_to_try = [fcfg_key, fcfg_key.upper(), fcfg_key.lower()]
-        include_globs = [
-            "--include=*.env*",
-            "--include=.env*",
-            "--include=*.yaml",
-            "--include=*.yml",
-            "--include=*.toml",
-            "--include=*.cfg",
-            "--include=*.ini",
-            "--include=config.py",
-            "--include=settings.py",
-        ]
-        exclude = [
-            "--exclude-dir=node_modules",
-            "--exclude-dir=.venv",
-            "--exclude-dir=__pycache__",
-        ]
-        fcfg_out: list[str] = []
-        seen: set[str] = set()
-        for pt in patterns_to_try:
-            try:
-                r = subprocess.run(
-                    ["grep", "-rn", pt, repo_path] + include_globs + exclude,
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                )
-                for ln in r.stdout.splitlines():
-                    if ln not in seen:
-                        seen.add(ln)
-                        fcfg_out.append(ln)
-            except Exception:
-                pass
-        return (
-            "\n".join(fcfg_out)[:5000]
-            if fcfg_out
-            else f"'{fcfg_key}' not found in config files"
-        )
+        return find_config_handler(root, inp)
 
     handlers["find_route"] = find_route_h
     handlers["find_api"] = find_api_h
