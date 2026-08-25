@@ -258,6 +258,10 @@ from app.tools.filesystem.find_config import (
     FIND_CONFIG_TOOL,
     find_config_handler,
 )
+from app.tools.git.generate_changelog import (
+    GENERATE_CHANGELOG_TOOL,
+    generate_changelog_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -472,6 +476,7 @@ _INSPECT_SCHEMA_TOOL = INSPECT_SCHEMA_TOOL
 _CIRCULAR_DEP_DETECT_TOOL = CIRCULAR_DEP_DETECT_TOOL
 _EXPLAIN_QUERY_TOOL = EXPLAIN_QUERY_TOOL
 _FIND_CONFIG_TOOL = FIND_CONFIG_TOOL
+_GENERATE_CHANGELOG_TOOL = GENERATE_CHANGELOG_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -4718,25 +4723,16 @@ _FIND_WORKER_TOOL: dict[str, Any] = {
 
 # --- Day 2 Gap: Documentation generation tools ---
 
-_GENERATE_CHANGELOG_TOOL: dict[str, Any] = {
-    "name": "generate_changelog",
-    "description": "Generate a CHANGELOG.md entry from git log between two refs (Keep-a-Changelog format). Returns the changelog text.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "from_ref": {
-                "type": "string",
-                "description": "Starting git ref (tag or commit). Defaults to previous tag.",
-            },
-            "to_ref": {
-                "type": "string",
-                "description": "Ending git ref (default: HEAD)",
-            },
-            "repo_path": {"type": "string", "description": "Repo root (optional)"},
-        },
-        "required": [],
-    },
-}
+# tool_enhance.md productionization pass, tool #100 (2026-08-25) —
+# moved to app/tools/git/generate_changelog.py as
+# GENERATE_CHANGELOG_TOOL (imported above, aliased to
+# _GENERATE_CHANGELOG_TOOL after the import block). Real, severe
+# finding: a silent arbitrary-file-write via `--output=<path>` flag-
+# collision on to_ref (same class as tool #80's git_show), PLUS an
+# LLM-controlled `repo_path` override disclosing commit history from
+# ANY host git repo, PLUS "advertised but never dispatched" (no
+# chat_agent.py dispatch existed). See that module's own docstring for
+# the full account.
 
 _SUMMARIZE_REPO_TOOL: dict[str, Any] = {
     "name": "summarize_repo",
@@ -9000,74 +8996,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def delete_block_h(inp: dict[str, Any]) -> str:
         return delete_block_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #100 (2026-08-25) — the
+    # real fix lives in the shared generate_changelog_handler(); see
+    # that function's own module docstring.
     def generate_changelog_h(inp: dict[str, Any]) -> str:
-        _rp = str(inp.get("repo_path", repo_path))
-        from_ref = str(inp.get("from_ref", ""))
-        to_ref = str(inp.get("to_ref", "HEAD"))
-        try:
-            if not from_ref:
-                tags = subprocess.run(
-                    ["git", "-C", _rp, "tag", "--sort=-version:refname"],
-                    capture_output=True,
-                    text=True,
-                )
-                tag_list = [t for t in tags.stdout.strip().splitlines() if t]
-                from_ref = (
-                    tag_list[1]
-                    if len(tag_list) >= 2
-                    else tag_list[0]
-                    if tag_list
-                    else ""
-                )
-            ref_range = f"{from_ref}..{to_ref}" if from_ref else to_ref
-            log = subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    _rp,
-                    "log",
-                    ref_range,
-                    "--pretty=format:%s (%an)",
-                    "--no-merges",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            commits = log.stdout.strip().splitlines()
-            if not commits:
-                return f"No commits found between {from_ref or 'start'} and {to_ref}"
-            sections: dict[str, list[str]] = {
-                "Added": [],
-                "Changed": [],
-                "Fixed": [],
-                "Other": [],
-            }
-            for c in commits:
-                cl = c.lower()
-                if cl.startswith(("feat:", "add ", "new ")):
-                    sections["Added"].append(f"- {c}")
-                elif cl.startswith(("fix:", "bug ", "patch ")):
-                    sections["Fixed"].append(f"- {c}")
-                elif cl.startswith(("refactor:", "chore:", "update ", "change ")):
-                    sections["Changed"].append(f"- {c}")
-                else:
-                    sections["Other"].append(f"- {c}")
-            import datetime as _dt
-
-            lines_out = [
-                f"## [Unreleased] — {_dt.date.today().isoformat()}",
-                f"Changes from {from_ref or 'start'} to {to_ref}",
-                "",
-            ]
-            for sec, items in sections.items():
-                if items:
-                    lines_out.append(f"### {sec}")
-                    lines_out.extend(items)
-                    lines_out.append("")
-            return "\n".join(lines_out)
-        except Exception as e:
-            return f"[ERROR] generate_changelog: {e}"
+        return generate_changelog_handler(root, inp)
 
     def summarize_repo_h(inp: dict[str, Any]) -> str:
         _rp = str(inp.get("repo_path", repo_path))

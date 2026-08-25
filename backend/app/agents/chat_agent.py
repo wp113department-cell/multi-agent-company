@@ -162,6 +162,7 @@ from app.tools.database.inspect_schema import inspect_schema_handler
 from app.tools.filesystem.circular_dep_detect import circular_dep_detect_handler
 from app.tools.database.explain_query import explain_query_handler
 from app.tools.filesystem.find_config import find_config_handler
+from app.tools.git.generate_changelog import generate_changelog_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -3435,6 +3436,30 @@ class ChatAgent:
                 f"{activate} && cd {rmig_backend} && alembic {rmig_dir} {rmig_rev} 2>&1"
             )
             return await asyncio.to_thread(_run_subprocess, rmig_cmd, rmig_backend, 120)
+
+        if tool_name == "generate_changelog":
+            # tool_enhance.md productionization pass, tool #100
+            # (2026-08-25) — this tool was "advertised but never
+            # dispatched" (same class as tools #4/#6/#22/#25/#33/#44/
+            # #45/#46/#48): zero chat_agent.py dispatch existed despite
+            # being fully advertised in CHAT_TOOLS. While wiring a real
+            # dispatch, found the most severe finding class of this
+            # initiative — a silent arbitrary-file-write, same class as
+            # tool #80's git_show: to_ref (LLM-controlled) becomes the
+            # entire ref_range argv element handed to `git log` with no
+            # validation; git log accepts a generic --output=<path>
+            # flag. Proved live: to_ref="--output=/tmp/PWNED..." (with
+            # from_ref empty) genuinely wrote a real file, with ZERO
+            # indication in the tool's own returned text. Also found:
+            # an LLM-controlled `repo_path` field let the caller
+            # redirect ALL git operations at an arbitrary host
+            # directory, disclosing that other repo's full commit
+            # history — proved live against a real second repo. Full
+            # account in generate_changelog_handler()'s own module
+            # docstring. Delegates to that shared handler, which
+            # ignores any repo_path override and validates from_ref/
+            # to_ref aren't flag-shaped.
+            return await asyncio.to_thread(generate_changelog_handler, root, inp)
 
         # ========== AUDIT_Q_BATCH07 §13 — Human interaction ==========
 
