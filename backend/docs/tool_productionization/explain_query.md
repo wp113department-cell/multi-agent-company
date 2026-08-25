@@ -104,8 +104,9 @@ Per the user's 2026-08-25 cadence correction, the full suite is run
 once per 5-tool batch rather than per tool — see
 `feedback_tool_enhance_batch_full_suite` memory. This tool (#98) is
 tool 5 of the current batch (#94-#98) — the final one — so the full
-suite is now run to close out the batch, covering tools #94-#98
-together.
+suite was run to close out the batch, covering tools #94-#98 together:
+**5864 passed, 52 skipped, 18 deselected, 0 failed** (up from 5785
+before this batch started).
 
 This turn was also verified via a comprehensive `mypy
 --ignore-missing-imports app/agents/ app/tools/database/
