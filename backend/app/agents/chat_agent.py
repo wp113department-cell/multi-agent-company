@@ -165,6 +165,7 @@ from app.tools.git.generate_changelog import generate_changelog_handler
 from app.tools.execution.run_linter import run_linter_handler
 from app.tools.filesystem.secrets_scan import secrets_scan_handler
 from app.tools.execution.check_license_compliance import check_license_compliance_handler
+from app.tools.execution.coverage_report import coverage_report_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -2360,23 +2361,19 @@ class ChatAgent:
             )
 
         if tool_name == "coverage_report":
-            cov_path = str(inp.get("path", "backend/tests/"))
-            cov_source = str(inp.get("source", "backend/app/"))
-            cov_min = inp.get("min_coverage")
-            # AUDIT_Q_BATCH01 §1 "Windows terminal support" — was hardcoded
-            # POSIX `source`, silently never activating the venv on Windows
-            # (relative path is safe here: _run_subprocess always passes
-            # cwd=repo, so the shell's starting directory is already repo,
-            # matching this line's previous absolute-path behavior exactly
-            # on POSIX while adding a real Windows branch).
-            activate = _venv_activate_snippet()
-            cov_min_flag = f"--cov-fail-under={cov_min}" if cov_min else ""
-            cmd_s = (
-                f"{activate} && python -m pytest {cov_path} "
-                f"--cov={cov_source} --cov-report=term-missing {cov_min_flag} "
-                f"--tb=no -q 2>&1 | tail -50"
-            )
-            return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 180)
+            # tool_enhance.md productionization pass, tool #104 (2026-08-25)
+            # — the MOST SEVERE finding of this tool's audit: a genuine,
+            # direct shell-injection (arbitrary command execution) —
+            # cov_path/cov_source/cov_min were interpolated COMPLETELY
+            # UNQUOTED into an f-string shell=True command. Proved live:
+            # path="; touch /tmp/PWNED...; echo x" genuinely executed the
+            # injected command. Also found: pytest-cov was never an
+            # installed project dependency at all — every real call here
+            # hard-failed with a pytest usage error before this fix. Full
+            # account in coverage_report_handler()'s own module
+            # docstring. Now delegates to that same shared, fixed
+            # handler — list-args only, shell=True dropped entirely.
+            return await asyncio.to_thread(coverage_report_handler, root, repo, inp)
 
         if tool_name == "type_check":
             tc_path = str(inp.get("path", ""))

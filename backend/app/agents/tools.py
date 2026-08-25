@@ -273,6 +273,10 @@ from app.tools.execution.check_license_compliance import (
     CHECK_LICENSE_COMPLIANCE_TOOL,
     check_license_compliance_handler,
 )
+from app.tools.execution.coverage_report import (
+    COVERAGE_REPORT_TOOL,
+    coverage_report_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -491,6 +495,7 @@ _GENERATE_CHANGELOG_TOOL = GENERATE_CHANGELOG_TOOL
 _RUN_LINTER_TOOL = RUN_LINTER_TOOL
 _SECRETS_SCAN_TOOL = SECRETS_SCAN_TOOL
 _CHECK_LICENSE_COMPLIANCE_TOOL = CHECK_LICENSE_COMPLIANCE_TOOL
+_COVERAGE_REPORT_TOOL = COVERAGE_REPORT_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2591,28 +2596,16 @@ _REVIEW_DIFF_TOOL = {
 # side effect genuinely running.
 _RUN_SINGLE_TEST_TOOL = RUN_SINGLE_TEST_TOOL
 
-_COVERAGE_REPORT_TOOL = {
-    "name": "coverage_report",
-    "description": "Run pytest with coverage and return a summary showing which lines are uncovered.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Path to run tests on (default: backend/tests/)",
-            },
-            "source": {
-                "type": "string",
-                "description": "Source directory to measure coverage for (default: backend/app/)",
-            },
-            "min_coverage": {
-                "type": "integer",
-                "description": "Fail if coverage is below this percentage (optional)",
-            },
-        },
-        "required": [],
-    },
-}
+# tool_enhance.md productionization pass, tool #104 (2026-08-25) —
+# moved to app/tools/execution/coverage_report.py as
+# COVERAGE_REPORT_TOOL (imported above, aliased to
+# _COVERAGE_REPORT_TOOL after the import block). Real, severe finding:
+# pytest-cov was never an installed project dependency at all — 2 of 3
+# implementations hard-failed every real call, the 3rd silently
+# returned a test-collection list instead of coverage data. Also a
+# genuine shell-injection RCE on chat_agent.py's dispatch, plus a
+# flag-collision + worktree escape on `path`. See that module's own
+# docstring for the full account.
 
 _TYPE_CHECK_TOOL = {
     "name": "type_check",
@@ -5620,8 +5613,6 @@ def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
 
 def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
     """Handler factory for Technical Debt Agent."""
-    import subprocess as _sp
-
     root = Path(repo_path)
     handlers = make_read_only_handlers(repo_path)
     tech_debt_result: dict[str, Any] = {}
@@ -5662,18 +5653,15 @@ def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
     def td_run_linter(inp: dict[str, Any]) -> str:
         return run_linter_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #104 (2026-08-25) — the
+    # real fix (this implementation didn't even attempt coverage
+    # measurement — it ran `pytest --collect-only`, silently returning a
+    # bare test list instead of coverage data, and ignored path/source/
+    # min_coverage entirely) lives in the shared
+    # coverage_report_handler(); see that function's own module
+    # docstring.
     def td_coverage_report(inp: dict[str, Any]) -> str:
-        try:
-            r = _sp.run(
-                ["python", "-m", "pytest", "--co", "-q", "--no-header"],
-                capture_output=True,
-                text=True,
-                cwd=str(root),
-                timeout=60,
-            )
-            return (r.stdout + r.stderr).strip() or "(no output)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return coverage_report_handler(root, repo_path, inp)
 
     def td_submit(inp: dict[str, Any]) -> str:
         tech_debt_result.update(inp)
@@ -7370,40 +7358,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             repo_path, inp, activate_snippet=_venv_activate_snippet()
         )
 
+    # tool_enhance.md productionization pass, tool #104 (2026-08-25) — the
+    # real fix lives in the shared coverage_report_handler(); see that
+    # function's own module docstring. Real, severe findings: pytest-cov
+    # was never an installed dependency (every real call hard-failed
+    # with a usage error), `path` was protected only by shlex.quote()
+    # (shell-safety, not pytest's-own-flag-parser-safety), and no
+    # worktree-boundary check existed at all.
     def coverage_report(inp: dict[str, Any]) -> str:
-        import shlex as _shlex
-
-        cov_path = str(inp.get("path", "backend/tests/"))
-        cov_source = str(inp.get("source", "backend/app/"))
-        cov_min = inp.get("min_coverage")
-        activate = (
-            _venv_activate_snippet()
-        )  # cwd=repo_path is passed to subprocess.run below
-        min_flag = ""
-        if cov_min:
-            try:
-                min_flag = f"--cov-fail-under={int(cov_min)}"
-            except (TypeError, ValueError):
-                return f"[ERROR] min_coverage must be a number, got: {cov_min!r}"
-        cmd = (
-            f"{activate} && python -m pytest {_shlex.quote(cov_path)} "
-            f"--cov={_shlex.quote(cov_source)} --cov-report=term-missing {min_flag} "
-            f"--tb=no -q 2>&1 | tail -50"
-        )
-        try:
-            r = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                cwd=repo_path,
-                timeout=180,
-            )
-            return (r.stdout + r.stderr)[:5000] or "(no output)"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] Coverage run timed out"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return coverage_report_handler(root, repo_path, inp)
 
     def type_check(inp: dict[str, Any]) -> str:
         import shlex as _shlex
