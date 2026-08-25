@@ -262,6 +262,10 @@ from app.tools.git.generate_changelog import (
     GENERATE_CHANGELOG_TOOL,
     generate_changelog_handler,
 )
+from app.tools.execution.run_linter import (
+    RUN_LINTER_TOOL,
+    run_linter_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -477,6 +481,7 @@ _CIRCULAR_DEP_DETECT_TOOL = CIRCULAR_DEP_DETECT_TOOL
 _EXPLAIN_QUERY_TOOL = EXPLAIN_QUERY_TOOL
 _FIND_CONFIG_TOOL = FIND_CONFIG_TOOL
 _GENERATE_CHANGELOG_TOOL = GENERATE_CHANGELOG_TOOL
+_RUN_LINTER_TOOL = RUN_LINTER_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2254,29 +2259,16 @@ _GIT_FETCH_TOOL = {
 # moved to app/tools/execution/run_tests.py as RUN_TESTS_TOOL —
 # tool_enhance.md productionization pass, tool #16 (2026-08-17).
 
-_RUN_LINTER_TOOL = {
-    "name": "run_linter",
-    "description": "Run linting and type-checking tools. Returns errors and warnings. Fix these before declaring a task complete.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "tool": {
-                "type": "string",
-                "enum": ["ruff", "mypy", "tsc", "eslint", "black", "all"],
-                "description": "Linter to run (default: all — runs ruff + mypy for Python, tsc for TypeScript)",
-            },
-            "path": {
-                "type": "string",
-                "description": "Path to lint (default: backend/ or apps/web/)",
-            },
-            "fix": {
-                "type": "boolean",
-                "description": "Auto-fix issues where possible (ruff only, default: false)",
-            },
-        },
-        "required": [],
-    },
-}
+# tool_enhance.md productionization pass, tool #101 (2026-08-25) —
+# moved to app/tools/execution/run_linter.py as RUN_LINTER_TOOL
+# (imported above, aliased to _RUN_LINTER_TOOL after the import
+# block). Real, severe findings across all 4 real implementations: a
+# direct shell-injection RCE on chat_agent.py's dispatch, a
+# confirmation-bypass file-rewrite via flag-collision on path (same
+# shlex.quote()-is-not-enough class seen repeatedly this window), two
+# implementations totally broken by an invalid ruff CLI flag, and a
+# documented-but-never-implemented eslint gap. See that module's own
+# docstring for the full account.
 
 # _BACKGROUND_PROCESSES used to be a module-level dict (shared across all sessions).
 # It is now a per-session dict created inside make_chat_handlers() so that one session
@@ -5149,25 +5141,17 @@ def make_performance_reviewer_handlers(repo_path: str) -> dict[str, Any]:
 
 def make_style_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     """Handler factory for Style Reviewer agent."""
-    import subprocess as _sp
-
     root = Path(repo_path)
     handlers = make_read_only_handlers(repo_path)
     style_result: dict[str, Any] = {}
 
+    # tool_enhance.md productionization pass, tool #101 (2026-08-25) — the
+    # real fix (this implementation was completely broken for every real
+    # call — an invalid ruff --output-format value — AND ignored the
+    # tool/fix fields entirely) lives in the shared run_linter_handler();
+    # see that function's own module docstring.
     def sr_run_linter(inp: dict[str, Any]) -> str:
-        sr_path = str(inp.get("path", "."))
-        try:
-            r = _sp.run(
-                ["python", "-m", "ruff", "check", sr_path, "--output-format=text"],
-                capture_output=True,
-                text=True,
-                cwd=str(root),
-                timeout=60,
-            )
-            return (r.stdout + r.stderr).strip() or "(no linting issues)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return run_linter_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #82 (2026-08-24) — the
     # real fix (this implementation had ZERO worktree-boundary
@@ -5669,19 +5653,11 @@ def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
                 continue
         return "\n".join(results[:80]) or "(none found)"
 
+    # tool_enhance.md productionization pass, tool #101 (2026-08-25) — the
+    # real fix lives in the shared run_linter_handler(); see that
+    # function's own module docstring.
     def td_run_linter(inp: dict[str, Any]) -> str:
-        td_path = str(inp.get("path", "."))
-        try:
-            r = _sp.run(
-                ["python", "-m", "ruff", "check", td_path, "--output-format=text"],
-                capture_output=True,
-                text=True,
-                cwd=str(root),
-                timeout=60,
-            )
-            return (r.stdout + r.stderr).strip() or "(no linting issues)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return run_linter_handler(root, repo_path, inp)
 
     def td_coverage_report(inp: dict[str, Any]) -> str:
         try:
@@ -6947,61 +6923,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         )
 
     # ---- run_linter ----
+    # tool_enhance.md productionization pass, tool #101 (2026-08-25) — the
+    # real fix lives in the shared run_linter_handler(); see that
+    # function's own module docstring. Real, severe finding: `path` was
+    # protected only by shlex.quote() (shell-safety, not ruff's-own-
+    # flag-parser-safety) — path="--fix" bypassed the fix=False default
+    # and genuinely rewrote a real file on disk, proved live.
     def run_linter(inp: dict[str, Any]) -> str:
-        import shlex as _shlex
-
-        tool = str(inp.get("tool", "all"))
-        path = str(inp.get("path", ""))
-        fix = bool(inp.get("fix", False))
-        results: list[str] = []
-        qpath = _shlex.quote(path) if path else ""
-
-        if tool in ("ruff", "all"):
-            target = qpath or f"{repo_path}"
-            fix_flag = "--fix" if fix else ""
-            cmd = f"cd {repo_path} && {_venv_activate_snippet()} && python -m ruff check {target} {fix_flag} 2>&1 | head -50"
-            r = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, timeout=60
-            )
-            ruff_out = (r.stdout + r.stderr)[:2000] or "clean"
-            ruff_summary = parse_diagnostic_summary(ruff_out, "ruff")
-            results.append(
-                f"=== ruff ==={f' {ruff_summary}' if ruff_summary else ''}\n{ruff_out}"
-            )
-
-        if tool in ("mypy", "all"):
-            target = qpath or f"{repo_path}"
-            cmd = f"cd {repo_path} && {_venv_activate_snippet()} && python -m mypy {target} --ignore-missing-imports 2>&1 | head -50"
-            r = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, timeout=90
-            )
-            mypy_out = (r.stdout + r.stderr)[:2000] or "clean"
-            mypy_summary = parse_diagnostic_summary(mypy_out, "mypy")
-            results.append(
-                f"=== mypy ==={f' {mypy_summary}' if mypy_summary else ''}\n{mypy_out}"
-            )
-
-        if tool in ("tsc", "all"):
-            web = str(root.parent / "apps" / "web")
-            cmd = f"cd {web} && npx tsc --noEmit 2>&1 | head -50"
-            r = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, timeout=90
-            )
-            tsc_out = (r.stdout + r.stderr)[:2000] or "clean"
-            tsc_summary = parse_diagnostic_summary(tsc_out, "tsc")
-            results.append(
-                f"=== tsc ==={f' {tsc_summary}' if tsc_summary else ''}\n{tsc_out}"
-            )
-
-        if tool == "black":
-            target = qpath or f"{repo_path}"
-            cmd = f"cd {repo_path} && {_venv_activate_snippet()} && python -m black {'--check' if not fix else ''} {target} 2>&1 | head -50"
-            r = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, timeout=60
-            )
-            results.append(f"=== black ===\n{(r.stdout + r.stderr)[:2000]}")
-
-        return "\n\n".join(results) if results else f"[ERROR] Unknown linter: {tool}"
+        return run_linter_handler(root, repo_path, inp)
 
     # =========================================================================
     # BATCH 1 — File / Editing extras

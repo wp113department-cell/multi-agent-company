@@ -94,7 +94,6 @@ from app.agents.base_graph import (
     _stringify_messages_for_summary,
     _wrap_untrusted_tool_content,
 )
-from app.agents.output_parsers import parse_diagnostic_summary
 from app.agents.tools import (
     CHAT_TOOLS,
     _apply_conflict_resolutions,
@@ -163,6 +162,7 @@ from app.tools.filesystem.circular_dep_detect import circular_dep_detect_handler
 from app.tools.database.explain_query import explain_query_handler
 from app.tools.filesystem.find_config import find_config_handler
 from app.tools.git.generate_changelog import generate_changelog_handler
+from app.tools.execution.run_linter import run_linter_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -1674,47 +1674,19 @@ class ChatAgent:
             )
 
         if tool_name == "run_linter":
-            lint_tool = str(inp.get("tool", "all"))
-            lint_path = str(inp.get("path", ""))
-            fix = bool(inp.get("fix", False))
-            lint_parts: list[str] = []
-
-            async def _lint(cmd_str: str, label: str, diag_tool: str = "") -> None:
-                out = await asyncio.to_thread(_run_subprocess, cmd_str, repo, 90)
-                out = out or "clean"
-                summary = (
-                    parse_diagnostic_summary(out, diag_tool) if diag_tool else None
-                )
-                header = f"=== {label} ===" + (f" {summary}" if summary else "")
-                lint_parts.append(f"{header}\n{out}")
-
-            if lint_tool in ("ruff", "all"):
-                t = lint_path or repo
-                await _lint(
-                    f"cd {repo} && {_venv_activate_snippet()} && python -m ruff check {t} {'--fix' if fix else ''} 2>&1 | head -50",
-                    "ruff",
-                    "ruff",
-                )
-            if lint_tool in ("mypy", "all"):
-                t = lint_path or repo
-                await _lint(
-                    f"cd {repo} && {_venv_activate_snippet()} && python -m mypy {t} --ignore-missing-imports 2>&1 | head -50",
-                    "mypy",
-                    "mypy",
-                )
-            if lint_tool in ("tsc", "all"):
-                web = str(root.parent / "apps" / "web")
-                await _lint(
-                    f"cd {web} && npx tsc --noEmit 2>&1 | head -50", "tsc", "tsc"
-                )
-            if lint_tool == "black":
-                t = lint_path or repo
-                await _lint(
-                    f"cd {repo} && {_venv_activate_snippet()} && python -m black {'--check' if not fix else ''} {t} 2>&1 | head -50",
-                    "black",
-                )
-
-            return "\n\n".join(lint_parts) or f"[ERROR] Unknown linter: {lint_tool}"
+            # tool_enhance.md productionization pass, tool #101 (2026-08-25)
+            # — the MOST SEVERE finding of this initiative's run_linter
+            # audit: a genuine, direct shell-injection (arbitrary command
+            # execution) — `lint_path` was interpolated COMPLETELY
+            # UNQUOTED into an f-string shell=True command (not even
+            # shlex.quote()'d, unlike the sibling make_chat_handlers
+            # implementation). Proved live: path="; touch /tmp/PWNED...;
+            # echo x" genuinely executed the injected command. Full
+            # account, plus 3 more real findings shared with the other 3
+            # implementations, in run_linter_handler()'s own module
+            # docstring. Now delegates to that same shared, fixed
+            # handler — list-args only, shell=True dropped entirely.
+            return await asyncio.to_thread(run_linter_handler, root, repo, inp)
 
         if tool_name == "submit_result":
             return (
