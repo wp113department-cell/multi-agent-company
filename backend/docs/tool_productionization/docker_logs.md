@@ -96,9 +96,17 @@ and confirmed passing unchanged (10 tests).
 
 This tool is the final one (5) of the current #104-#108 batch. Its own
 new hardening tests (13/13 pass) and directly-referencing existing
-tests (10/10 pass) are the per-tool verification gate; the full suite
-now runs to close out the whole batch, per
-`feedback_tool_enhance_batch_full_suite` memory.
+tests (10/10 pass) are the per-tool verification gate. The full suite
+was run to close out the batch: the first pass showed 313 failed / 11
+errors, but investigation traced every one of them to the project's
+dev Postgres being down for most of that run (the user brought it back
+up partway through) — confirmed by re-running exactly the failed
+tests (`pytest --lf`) once the database was reachable again: **320
+passed, 0 failed**. None of tools #99-#108's own changes touch the
+database. Separately, `docker logs` on the `crr2906-migrate-1`
+container surfaced a real, unrelated infra issue (a stale Docker image
+missing migration revision `048`, which exists in the source tree) —
+flagged to the user directly, out of scope for this tool's own fix.
 
 This turn was also verified via a comprehensive `mypy
 --ignore-missing-imports app/agents/ app/tools/execution/
