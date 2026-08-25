@@ -160,6 +160,7 @@ from app.tools.filesystem.dead_code_detect import dead_code_detect_handler
 from app.tools.filesystem.import_graph import import_graph_handler
 from app.tools.database.inspect_schema import inspect_schema_handler
 from app.tools.filesystem.circular_dep_detect import circular_dep_detect_handler
+from app.tools.database.explain_query import explain_query_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -3380,15 +3381,28 @@ class ChatAgent:
         # ========== BATCH 16 — DB extras ==========
 
         if tool_name == "explain_query":
-            expq_sql = str(inp["query"]).strip().rstrip(";")
+            # tool_enhance.md productionization pass, tool #98 (2026-08-25)
+            # — real, severe finding, shared by all 4 real
+            # implementations: this tool's own schema explicitly promises
+            # "Read-only (EXPLAIN does not modify data)" — proved FALSE
+            # two separate ways against the real project database (safe,
+            # a disposable table never part of real project data): (1)
+            # statement stacking — a query value closing with a second,
+            # attacker-controlled statement genuinely executed it (same
+            # multi-statement mechanism as tools #15/#96); (2) a single,
+            # non-stacked non-SELECT query (e.g. a bare INSERT) is
+            # genuinely EXECUTED by EXPLAIN ANALYZE — documented core
+            # Postgres behavior this tool never guarded against. This
+            # dispatch's own shlex.quote(expq_full) did NOT help — shell-
+            # safety only, not SQL-safety, same class already seen in
+            # find_api/find_route/find_sql/inspect_schema's dispatches.
+            # Full account in explain_query_handler()'s own module
+            # docstring. Now delegates to that same shared, fixed
+            # handler, which no longer shells out to psql at all.
             from app.config import get_settings as _gs4
 
-            expq_db = getattr(_gs4(), "database_url", "")
-            if not expq_db:
-                return "[ERROR] DATABASE_URL not set"
-            expq_full = f"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {expq_sql};"
-            expq_cmd = f"psql '{expq_db}' -c {__import__('shlex').quote(expq_full)} --no-psqlrc 2>&1"
-            return await asyncio.to_thread(_run_subprocess, expq_cmd, repo, 30)
+            expq_db = str(getattr(_gs4(), "database_url", "") or "")
+            return await asyncio.to_thread(explain_query_handler, expq_db, inp)
 
         if tool_name == "run_migration":
             rmig_dir = str(inp.get("direction", "upgrade"))

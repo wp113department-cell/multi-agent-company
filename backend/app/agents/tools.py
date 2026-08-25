@@ -250,6 +250,10 @@ from app.tools.filesystem.circular_dep_detect import (
     CIRCULAR_DEP_DETECT_TOOL,
     circular_dep_detect_handler,
 )
+from app.tools.database.explain_query import (
+    EXPLAIN_QUERY_TOOL,
+    explain_query_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -462,6 +466,7 @@ _DEAD_CODE_DETECT_TOOL = DEAD_CODE_DETECT_TOOL
 _IMPORT_GRAPH_TOOL = IMPORT_GRAPH_TOOL
 _INSPECT_SCHEMA_TOOL = INSPECT_SCHEMA_TOOL
 _CIRCULAR_DEP_DETECT_TOOL = CIRCULAR_DEP_DETECT_TOOL
+_EXPLAIN_QUERY_TOOL = EXPLAIN_QUERY_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -3065,23 +3070,15 @@ _GENERATE_PATCH_TOOL = {
 }
 
 # Batch 16 — DB extras
-_EXPLAIN_QUERY_TOOL = {
-    "name": "explain_query",
-    "description": (
-        "Run EXPLAIN ANALYZE on a SQL query against the configured DATABASE_URL. "
-        "Shows query plan and execution times. Read-only (EXPLAIN does not modify data)."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "SQL SELECT query to analyse (no trailing semicolon needed)",
-            },
-        },
-        "required": ["query"],
-    },
-}
+# tool_enhance.md productionization pass, tool #98 (2026-08-25) — moved
+# to app/tools/database/explain_query.py as EXPLAIN_QUERY_TOOL
+# (imported above, aliased to _EXPLAIN_QUERY_TOOL after the import
+# block). Real, severe finding: this tool's own schema promises
+# "Read-only (EXPLAIN does not modify data)" — proved FALSE two ways
+# (statement stacking AND a single non-SELECT statement both genuinely
+# mutated real data via EXPLAIN ANALYZE) across all 4 real
+# implementations. See that module's own docstring for the full
+# account.
 
 # _RUN_MIGRATION_TOOL moved to app/tools/database/migration.py as
 # RUN_MIGRATION_TOOL — tool_enhance.md productionization pass, tool #8
@@ -3804,30 +3801,12 @@ def make_sql_agent_handlers(repo_path: str) -> dict[str, Any]:
     def sq_find_sql(inp: dict[str, Any]) -> str:
         return find_sql_handler(root, inp)
 
+    # tool_enhance.md productionization pass, tool #98 (2026-08-25) — the
+    # real fix lives in the shared explain_query_handler(); see that
+    # function's own module docstring.
     def sq_explain_query(inp: dict[str, Any]) -> str:
-        eq_query = str(inp.get("query", ""))
-        eq_settings = get_settings()
-        eq_db_url = getattr(eq_settings, "database_url", None)
-        if not eq_db_url:
-            return "[ERROR] DATABASE_URL not configured"
-        try:
-            r = subprocess.run(
-                [
-                    "psql",
-                    str(eq_db_url),
-                    "-c",
-                    f"EXPLAIN ANALYZE {eq_query}",
-                    "--no-password",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            return (r.stdout + r.stderr)[:5000] or "(no plan)"
-        except FileNotFoundError:
-            return "[ERROR] psql not found"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        eq_db_url = str(getattr(get_settings(), "database_url", "") or "")
+        return explain_query_handler(eq_db_url, inp)
 
     def sq_submit(inp: dict[str, Any]) -> str:
         sql_result.update(inp)
@@ -5155,28 +5134,12 @@ def make_performance_reviewer_handlers(repo_path: str) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # tool_enhance.md productionization pass, tool #98 (2026-08-25) — the
+    # real fix lives in the shared explain_query_handler(); see that
+    # function's own module docstring.
     def pr_explain_query(inp: dict[str, Any]) -> str:
-        sql = str(inp["query"]).strip().rstrip(";")
-        settings = _gs()
-        db_url = getattr(settings, "database_url", "")
-        if not db_url:
-            return "[ERROR] DATABASE_URL not set"
-        try:
-            r = _sp.run(
-                [
-                    "psql",
-                    db_url,
-                    "-c",
-                    f"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {sql};",
-                    "--no-psqlrc",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            return (r.stdout + r.stderr).strip() or "(no output)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        db_url = str(getattr(_gs(), "database_url", "") or "")
+        return explain_query_handler(db_url, inp)
 
     # tool_enhance.md productionization pass, tool #82 (2026-08-24) — the
     # real fix (this implementation had ZERO worktree-boundary
@@ -8573,23 +8536,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # BATCH 16 — DB extras (explain_query, run_migration, seed_database)
     # =========================================================================
 
+    # tool_enhance.md productionization pass, tool #98 (2026-08-25) — the
+    # real fix lives in the shared explain_query_handler(); see that
+    # function's own module docstring.
     def explain_query_h(inp: dict[str, Any]) -> str:
-        expq_sql = str(inp["query"]).strip().rstrip(";")
-        settings = get_settings()
-        expq_db = getattr(settings, "database_url", "")
-        if not expq_db:
-            return "[ERROR] DATABASE_URL not set"
-        full_sql = f"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {expq_sql};"
-        try:
-            r = subprocess.run(
-                ["psql", expq_db, "-c", full_sql, "--no-psqlrc"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            return (r.stdout + r.stderr).strip() or "(no output)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        expq_db = str(getattr(get_settings(), "database_url", "") or "")
+        return explain_query_handler(expq_db, inp)
 
     # run_migration_h removed — tool_enhance.md productionization pass,
     # tool #8 (2026-08-16). Now registered directly against
