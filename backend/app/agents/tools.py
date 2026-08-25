@@ -285,6 +285,10 @@ from app.tools.execution.diagnose_deployment_failure import (
     DIAGNOSE_DEPLOYMENT_FAILURE_TOOL,
     gather_deployment_diagnostics,
 )
+from app.tools.execution.disk_usage import (
+    DISK_USAGE_TOOL,
+    disk_usage_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -506,6 +510,7 @@ _CHECK_LICENSE_COMPLIANCE_TOOL = CHECK_LICENSE_COMPLIANCE_TOOL
 _COVERAGE_REPORT_TOOL = COVERAGE_REPORT_TOOL
 _CPU_USAGE_TOOL = CPU_USAGE_TOOL
 _DIAGNOSE_DEPLOYMENT_FAILURE_TOOL = DIAGNOSE_DEPLOYMENT_FAILURE_TOOL
+_DISK_USAGE_TOOL = DISK_USAGE_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2966,20 +2971,15 @@ _MEMORY_USAGE_TOOL = {
     },
 }
 
-_DISK_USAGE_TOOL = {
-    "name": "disk_usage",
-    "description": "Get disk usage (total, used, free) for a path using shutil.disk_usage (stdlib).",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Path to check (default: repo root)",
-            },
-        },
-        "required": [],
-    },
-}
+# tool_enhance.md productionization pass, tool #107 (2026-08-25) —
+# moved to app/tools/execution/disk_usage.py as DISK_USAGE_TOOL
+# (imported above, aliased to _DISK_USAGE_TOOL after the import
+# block). Real findings: mon_disk_usage diverged from this tool's own
+# documented contract (used `df` instead of the documented
+# shutil.disk_usage, defaulted to "/" instead of the documented repo
+# root), plus zero worktree-boundary validation on all 3
+# implementations. See that module's own docstring for the full
+# account.
 
 _HEALTH_CHECK_TOOL = {
     "name": "health_check",
@@ -4374,12 +4374,15 @@ def make_monitoring_agent_handlers(repo_path: str) -> dict[str, Any]:
         r = subprocess.run(["free", "-h"], capture_output=True, text=True, timeout=5)
         return r.stdout.strip() or "[ERROR] Could not read memory"
 
+    # tool_enhance.md productionization pass, tool #107 (2026-08-25) — the
+    # real fix (this implementation diverged from the tool's own
+    # documented contract two ways — used `df` instead of the
+    # documented shutil.disk_usage, and defaulted to "/" instead of the
+    # documented repo root — plus had zero worktree-boundary
+    # validation) lives in the shared disk_usage_handler(); see that
+    # function's own module docstring.
     def mon_disk_usage(inp: dict[str, Any]) -> str:
-        du_path = str(inp.get("path", "/"))
-        r = subprocess.run(
-            ["df", "-h", du_path], capture_output=True, text=True, timeout=5
-        )
-        return r.stdout.strip() or "[ERROR] Could not read disk"
+        return disk_usage_handler(root, repo_path, inp)
 
     def mon_health_check(inp: dict[str, Any]) -> str:
         hc_url = str(inp.get("url", "http://localhost:8000/health"))
@@ -8089,22 +8092,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # tool_enhance.md productionization pass, tool #107 (2026-08-25) — the
+    # real fix (zero worktree-boundary validation on `path`) lives in
+    # the shared disk_usage_handler(); see that function's own module
+    # docstring.
     def disk_usage_h(inp: dict[str, Any]) -> str:
-        import shutil as _shu
-
-        dsk_path = str(inp.get("path", "")) or repo_path
-        try:
-            u = _shu.disk_usage(dsk_path)
-            gb = 1024**3
-            pct = round(u.used / u.total * 100, 1) if u.total else 0
-            return (
-                f"Disk usage for {dsk_path}:\n"
-                f"  Total: {u.total / gb:.1f} GB\n"
-                f"  Used:  {u.used / gb:.1f} GB  ({pct}%)\n"
-                f"  Free:  {u.free / gb:.1f} GB"
-            )
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return disk_usage_handler(root, repo_path, inp)
 
     def health_check_h(inp: dict[str, Any]) -> str:
         hc_svc = str(inp.get("service", "all"))

@@ -168,6 +168,7 @@ from app.tools.execution.check_license_compliance import check_license_complianc
 from app.tools.execution.coverage_report import coverage_report_handler
 from app.tools.execution.cpu_usage import cpu_usage_handler
 from app.tools.execution.diagnose_deployment_failure import gather_deployment_diagnostics
+from app.tools.execution.disk_usage import disk_usage_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -3203,21 +3204,15 @@ class ChatAgent:
             return await asyncio.to_thread(_run_subprocess, memus_cmd, repo, 5)
 
         if tool_name == "disk_usage":
-            import shutil as _shu2
-
-            disk_path = str(inp.get("path", "")) or repo
-            try:
-                dsk_u = _shu2.disk_usage(disk_path)
-                dsk_gb = 1024**3
-                dsk_pct = round(dsk_u.used / dsk_u.total * 100, 1) if dsk_u.total else 0
-                return (
-                    f"Disk usage for {disk_path}:\n"
-                    f"  Total: {dsk_u.total / dsk_gb:.1f} GB\n"
-                    f"  Used:  {dsk_u.used / dsk_gb:.1f} GB  ({dsk_pct}%)\n"
-                    f"  Free:  {dsk_u.free / dsk_gb:.1f} GB"
-                )
-            except Exception as dsk_e:
-                return f"[ERROR] {dsk_e}"
+            # tool_enhance.md productionization pass, tool #107 (2026-08-25)
+            # — real finding, shared identically by all 3 real
+            # implementations: ZERO worktree-boundary validation —
+            # proved live, disk_usage({"path": "/etc"}) genuinely
+            # returned real host filesystem statistics for a directory
+            # outside the repo. Full account in disk_usage_handler()'s
+            # own module docstring. Now delegates to that same shared,
+            # fixed handler.
+            return await asyncio.to_thread(disk_usage_handler, root, repo, inp)
 
         if tool_name == "health_check":
             from app.config import get_settings as _gs2
