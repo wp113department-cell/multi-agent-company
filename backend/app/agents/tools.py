@@ -92,6 +92,10 @@ from app.tools.agents.record_learning import (
     RECORD_LEARNING_TOOL as RECORD_LEARNING_TOOL,
     make_record_learning_handler as make_record_learning_handler,
 )
+from app.tools.agents.request_clarification import (
+    REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
+    make_request_clarification_handler as make_request_clarification_handler,
+)
 from app.tools.agents.submit_docs import (
     SUBMIT_DOCS_TOOL,
     make_submit_docs_handler,
@@ -905,110 +909,12 @@ def make_record_preference_handler(
     return _handler
 
 
-# ---------------------------------------------------------------------------
-# request_clarification — MASTER_AGENT_v2.md Phase 5.3. Real, but scoped to
-# what base_graph.py (the graph every worker agent besides pm/architect/
-# decomposer runs on) can actually support today: it has no checkpointer or
-# interrupt()/Command(resume=...) machinery of its own (that only exists in
-# app/pipeline/graph.py's separate pm->architect->decomposer pipeline — a
-# genuinely different graph). A true mid-run pause/resume for base_graph.py
-# agents is graph-level work (Phase 5.1/5.5's territory, not a single tool).
-# This is the real, working version that fits the existing shape instead:
-# the agent ends its run cleanly (status="needs_clarification", not a silent
-# hang or a crash) after recording a real PendingApproval row through the
-# same table/mechanism app/fleet/approval_gate.py already uses for the
-# pm/architect/decomposer pipeline's own human_review pause — a caller that
-# re-dispatches the agent with the human's answer folded into a fresh
-# initial_message is how "resume" works for this graph shape.
-# ---------------------------------------------------------------------------
-
-REQUEST_CLARIFICATION_TOOL: dict[str, Any] = {
-    "name": "request_clarification",
-    "description": (
-        "Use ONLY when the task is genuinely underspecified and continuing would "
-        "mean guessing at something a human should decide — not for every minor "
-        "judgment call (a reasonable, disclosed assumption is almost always "
-        "better than stopping to ask). Ends this run; a human or upstream agent "
-        "answers, and a future run receives that answer in its task context."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "question": {
-                "type": "string",
-                "description": "The specific, genuine blocker — not a vague 'is this ok?'",
-            },
-            "context": {
-                "type": "string",
-                "description": "What you already tried/considered, so the answer doesn't have to re-derive it.",
-            },
-            # AUDIT_Q_BATCH07 §13 gap-closure (2026-08-11) — "Present options
-            # (multi-choice): NO" / "Recommend choices: PARTIAL — no
-            # structured recommendation field." Optional and additive: a
-            # human/upstream-agent reviewer answering via
-            # app.fleet.approval_gate's existing PendingApproval row now
-            # sees these as structured fields (not just prose buried in
-            # `context`), without changing this tool's "ends the run, a
-            # future run receives the answer" scope at all.
-            "options": {
-                "type": "array",
-                "description": "Optional: 2-5 distinct choices, if the blocker is genuinely 'pick one of these'.",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "id": {"type": "string"},
-                        "label": {"type": "string"},
-                    },
-                    "required": ["id", "label"],
-                },
-            },
-            "recommended_option": {
-                "type": "string",
-                "description": "Optional: id of the option you'd recommend, if any.",
-            },
-        },
-        "required": ["question"],
-    },
-}
-
-
-def make_request_clarification_handler(
-    agent_name: str, task_id: str = ""
-) -> Callable[[dict[str, Any]], str]:
-    """Build the sync tool handler for request_clarification, scoped to the
-    calling agent's own name and task so the recorded row is correctly
-    attributed and findable by a real human/upstream-agent review flow."""
-
-    def _handler(inp: dict[str, Any]) -> str:
-        question = str(inp.get("question", "")).strip()
-        if not question:
-            return "[ERROR] question is required."
-        context = str(inp.get("context", "")).strip()
-        options = inp.get("options") or None
-        recommended_option = inp.get("recommended_option") or None
-
-        from app.fleet.approval_gate import request_human_input
-
-        try:
-            request_human_input(
-                kind="clarification",
-                details={
-                    "question": question,
-                    "context": context,
-                    "options": options,
-                    "recommended_option": recommended_option,
-                },
-                agent_name=agent_name,
-                thread_id=f"clarify-{task_id or 'notask'}-{agent_name}",
-                task_id=int(task_id) if str(task_id).isdigit() else None,
-                blocking=False,
-                description=f"{agent_name} requested clarification: {question[:200]}",
-            )
-        except Exception as exc:
-            return f"[ERROR] failed to record clarification request: {exc}"
-        return "Clarification request recorded. Ending this run to await an answer."
-
-    return _handler
+# moved to app/tools/agents/request_clarification.py — tool_enhance.md
+# productionization pass, tool #117 (2026-08-26). No fix required (see
+# that module's own docstring for the full audit) — pure
+# modularization. REQUEST_CLARIFICATION_TOOL /
+# make_request_clarification_handler imported below, same names, so
+# every existing reference in this file keeps working unchanged.
 
 
 CODER_TOOLS = READ_ONLY_TOOLS + [
