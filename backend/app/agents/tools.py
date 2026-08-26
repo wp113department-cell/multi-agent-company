@@ -342,6 +342,10 @@ from app.tools.filesystem.organize_imports import (
     ORGANIZE_IMPORTS_TOOL,
     organize_imports_handler,
 )
+from app.tools.filesystem.yaml_validate import (
+    YAML_VALIDATE_TOOL,
+    yaml_validate_handler,
+)
 from app.tools.filesystem.file_info import (
     FILE_INFO_TOOL,
     file_info_handler,
@@ -571,6 +575,7 @@ _ORGANIZE_IMPORTS_TOOL = ORGANIZE_IMPORTS_TOOL
 _READ_LOGS_TOOL = READ_LOGS_TOOL
 _TASK_HISTORY_QUERY_TOOL = TASK_HISTORY_QUERY_TOOL
 _TASK_PROGRESS_TOOL = TASK_PROGRESS_TOOL
+_YAML_VALIDATE_TOOL = YAML_VALIDATE_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -5584,29 +5589,10 @@ _JSON_QUERY_TOOL: dict[str, Any] = {
         "required": ["path", "query"],
     },
 }
-_YAML_VALIDATE_TOOL: dict[str, Any] = {
-    "name": "yaml_validate",
-    "description": (
-        "Validate a YAML file for syntax errors. Returns 'valid' or the parse "
-        "error with line number. If schema_path (a JSON Schema file, itself "
-        "JSON or YAML) is given, also validates the parsed document against "
-        "that JSON Schema."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "YAML file path (relative to repo root)",
-            },
-            "schema_path": {
-                "type": "string",
-                "description": "Optional: path to a JSON Schema file (.json or .yaml) to validate the document against",
-            },
-        },
-        "required": ["path"],
-    },
-}
+# moved to app/tools/filesystem/yaml_validate.py as
+# YAML_VALIDATE_TOOL / yaml_validate_handler() — tool_enhance.md
+# productionization pass, tool #120 (2026-08-26).
+
 _JSON_VALIDATE_TOOL: dict[str, Any] = {
     "name": "json_validate",
     "description": (
@@ -8713,29 +8699,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] {schema_rel} is not a valid JSON Schema: {e.message}"
         return None
 
+    # tool_enhance.md productionization pass, tool #120 (2026-08-26) —
+    # was a worktree-escape arbitrary file READ on both `path` and
+    # `schema_path` (`root / ...` never validated). Now delegates to
+    # the shared, worktree-validated handler.
     def yaml_validate_h(inp: dict[str, Any]) -> str:
-        # AUDIT_Q_BATCH09 §16 gap-closure — this used to be syntax-only despite
-        # jsonschema already being a pinned, production-used dependency
-        # (app/agents/base_graph.py's tool-submission validation). schema_path
-        # is optional and backward compatible: omitting it preserves the
-        # original syntax-only behavior exactly.
-        fpath = root / str(inp["path"])
-        try:
-            import yaml as _yaml
-
-            with open(fpath, encoding="utf-8") as f:
-                doc = _yaml.safe_load(f)
-        except ImportError:
-            return "(pyyaml not available in this environment)"
-        except Exception as e:
-            return f"[INVALID YAML] {inp['path']}: {e}"
-        schema_rel = inp.get("schema_path")
-        if schema_rel:
-            err = _validate_against_schema(str(inp["path"]), doc, str(schema_rel))
-            if err:
-                return err
-            return f"✅ {inp['path']} is valid YAML and matches schema {schema_rel}"
-        return f"✅ {inp['path']} is valid YAML"
+        return yaml_validate_handler(root, repo_path, inp)
 
     def json_validate_h(inp: dict[str, Any]) -> str:
         import json as _json

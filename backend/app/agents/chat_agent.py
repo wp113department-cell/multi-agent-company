@@ -180,6 +180,7 @@ from app.tools.database.task_history_query import task_history_query
 from app.tools.database.task_progress import task_progress_handler
 from app.tools.execution.read_logs import read_logs_handler
 from app.tools.filesystem.organize_imports import organize_imports_handler
+from app.tools.filesystem.yaml_validate import yaml_validate_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -3459,6 +3460,16 @@ class ChatAgent:
             activate = _venv_activate_snippet()
             seeddb_cmd = f"{activate} && python3 {str(seeddb_fp)} 2>&1"
             return await asyncio.to_thread(_run_subprocess, seeddb_cmd, repo, 120)
+
+        if tool_name == "yaml_validate":
+            # tool_enhance.md productionization pass, tool #120
+            # (2026-08-26) — was advertised in CHAT_TOOLS but never
+            # dispatched here at all (every real interactive-chat call
+            # fell through to "[ERROR] Unknown tool"), same class as
+            # tools #100/#103/#110/#112/#118. Delegates to the shared,
+            # worktree-validated handler — full account in that
+            # module's own docstring.
+            return await asyncio.to_thread(yaml_validate_handler, root, repo, inp)
 
         return f"[ERROR] Unknown tool: {tool_name}"
 
