@@ -184,6 +184,7 @@ from app.tools.execution.read_logs import read_logs_handler
 from app.tools.filesystem.organize_imports import organize_imports_handler
 from app.tools.filesystem.yaml_validate import yaml_validate_handler
 from app.tools.filesystem.base64_encode import base64_encode_handler
+from app.tools.filesystem.compare_files import compare_files_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -1825,21 +1826,14 @@ class ChatAgent:
             return await asyncio.to_thread(apply_patch_handler, repo, inp)
 
         if tool_name == "compare_files":
-            rel_a = str(inp["path_a"])
-            rel_b = str(inp["path_b"])
-            context = int(inp.get("context", 3))
-            cf_a = root / rel_a
-            cf_b = root / rel_b
-            if not cf_a.exists():
-                return f"[ERROR] File not found: {rel_a}"
-            if not cf_b.exists():
-                return f"[ERROR] File not found: {rel_b}"
-            r = subprocess.run(
-                ["diff", f"-U{context}", str(cf_a), str(cf_b)],
-                capture_output=True,
-                text=True,
-            )
-            return r.stdout[:8000] or "Files are identical"
+            # tool_enhance.md productionization pass, tool #127
+            # (2026-08-26) — was a worktree-escape TWO-FILE ARBITRARY
+            # READ (`root / path_a`/`root / path_b` never validated,
+            # proved live to disclose two files' full content anywhere
+            # on the host in one call) and had an uncaught crash on a
+            # non-numeric `context`. Now delegates to the shared,
+            # worktree-validated handler.
+            return compare_files_handler(root, repo, inp)
 
         if tool_name == "sync_files":
             # tool_enhance.md productionization pass, tool #64 (2026-08-22)

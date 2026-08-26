@@ -358,6 +358,10 @@ from app.tools.filesystem.base64_encode import (
     BASE64_ENCODE_TOOL,
     base64_encode_handler,
 )
+from app.tools.filesystem.compare_files import (
+    COMPARE_FILES_TOOL,
+    compare_files_handler,
+)
 from app.tools.filesystem.file_info import (
     FILE_INFO_TOOL,
     file_info_handler,
@@ -591,6 +595,7 @@ _YAML_VALIDATE_TOOL = YAML_VALIDATE_TOOL
 _ANALYZE_ERROR_TOOL = ANALYZE_ERROR_TOOL
 _BASE64_ENCODE_TOOL = BASE64_ENCODE_TOOL
 _CHECK_URL_STATUS_TOOL = CHECK_URL_STATUS_TOOL
+_COMPARE_FILES_TOOL = COMPARE_FILES_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2292,28 +2297,9 @@ _FORMAT_FILE_TOOL = {
 # moved to app/tools/filesystem/apply_patch.py as APPLY_PATCH_TOOL —
 # tool_enhance.md productionization pass, tool #27 (2026-08-18).
 
-_COMPARE_FILES_TOOL = {
-    "name": "compare_files",
-    "description": "Show a unified diff between two files. Useful for comparing versions.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path_a": {
-                "type": "string",
-                "description": "First file path relative to repo root",
-            },
-            "path_b": {
-                "type": "string",
-                "description": "Second file path relative to repo root",
-            },
-            "context": {
-                "type": "integer",
-                "description": "Lines of context around changes (default: 3)",
-            },
-        },
-        "required": ["path_a", "path_b"],
-    },
-}
+# moved to app/tools/filesystem/compare_files.py as
+# COMPARE_FILES_TOOL / compare_files_handler() — tool_enhance.md
+# productionization pass, tool #127 (2026-08-26).
 
 # AUDIT_Q_BATCH01 §18 "Synchronize files" — no dedicated cross-file
 # synchronization tool previously existed (rename_symbol's multi-file
@@ -6648,22 +6634,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def apply_patch(inp: dict[str, Any]) -> str:
         return apply_patch_handler(repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #127 (2026-08-26) —
+    # was a worktree-escape TWO-FILE ARBITRARY READ (`root / path_a`/
+    # `root / path_b` never validated) and had an uncaught crash on a
+    # non-numeric `context`. Now delegates to the shared,
+    # worktree-validated handler.
     def compare_files(inp: dict[str, Any]) -> str:
-        rel_a = str(inp["path_a"])
-        rel_b = str(inp["path_b"])
-        context = int(inp.get("context", 3))
-        cf_a = root / rel_a
-        cf_b = root / rel_b
-        if not cf_a.exists():
-            return f"[ERROR] File not found: {rel_a}"
-        if not cf_b.exists():
-            return f"[ERROR] File not found: {rel_b}"
-        r = subprocess.run(
-            ["diff", f"-U{context}", str(cf_a), str(cf_b)],
-            capture_output=True,
-            text=True,
-        )
-        return r.stdout[:8000] or "Files are identical"
+        return compare_files_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #64 (2026-08-22) — the
     # real fix (chat_agent.py's own dispatch had zero worktree-boundary
