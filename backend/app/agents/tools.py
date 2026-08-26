@@ -314,6 +314,10 @@ from app.tools.execution.check_url_status import (
     CHECK_URL_STATUS_TOOL,
     check_url_status_handler,
 )
+from app.tools.execution.cpu_profile import (
+    CPU_PROFILE_TOOL,
+    cpu_profile_handler,
+)
 from app.tools.execution.docker_ps import (
     DOCKER_PS_TOOL,
     docker_ps_handler,
@@ -603,6 +607,7 @@ _YAML_VALIDATE_TOOL = YAML_VALIDATE_TOOL
 _ANALYZE_ERROR_TOOL = ANALYZE_ERROR_TOOL
 _BASE64_ENCODE_TOOL = BASE64_ENCODE_TOOL
 _CHECK_URL_STATUS_TOOL = CHECK_URL_STATUS_TOOL
+_CPU_PROFILE_TOOL = CPU_PROFILE_TOOL
 _COMPARE_FILES_TOOL = COMPARE_FILES_TOOL
 _COPY_FILE_TOOL = COPY_FILE_TOOL
 _COUNT_LINES_TOOL = COUNT_LINES_TOOL
@@ -5426,24 +5431,9 @@ _WAIT_FOR_PORT_TOOL: dict[str, Any] = {
 # moved to app/tools/execution/check_url_status.py as
 # CHECK_URL_STATUS_TOOL / check_url_status_handler() — tool_enhance.md
 # productionization pass, tool #126 (2026-08-26).
-_CPU_PROFILE_TOOL: dict[str, Any] = {
-    "name": "cpu_profile",
-    "description": "Profile a Python script or module with cProfile and return the top N slowest functions.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "command": {
-                "type": "string",
-                "description": "Python command to profile, e.g. 'python -m myapp'",
-            },
-            "top": {
-                "type": "integer",
-                "description": "Number of top functions to return (default: 20)",
-            },
-        },
-        "required": ["command"],
-    },
-}
+# moved to app/tools/execution/cpu_profile.py as CPU_PROFILE_TOOL /
+# cpu_profile_handler() — tool_enhance.md productionization pass, tool
+# #130 (2026-08-26).
 
 # -- File ops --
 _ZIP_FILES_TOOL: dict[str, Any] = {
@@ -8382,22 +8372,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def check_url_status_h(inp: dict[str, Any]) -> str:
         return check_url_status_handler(inp)
 
+    # tool_enhance.md productionization pass, tool #130 (2026-08-26) —
+    # was silently broken for any `command` not literally prefixed
+    # with the word "python" (unconditionally dropped the first
+    # token, destroying the target script's own name for any other
+    # input) and had an uncaught crash on a non-numeric `top`. Now
+    # delegates to the shared, fixed handler.
     def cpu_profile_h(inp: dict[str, Any]) -> str:
-        command = str(inp["command"])
-        top = int(inp.get("top", 20))
-        try:
-            profiled = f"python -m cProfile -s cumulative -c 'import subprocess; subprocess.run({command!r}.split(), check=True)'"  # noqa: F841
-            r = subprocess.run(
-                ["python", "-m", "cProfile", "-s", "cumulative"] + command.split()[1:],
-                capture_output=True,
-                text=True,
-                cwd=repo_path,
-                timeout=60,
-            )
-            lines = (r.stdout + r.stderr).strip().splitlines()
-            return "\n".join(lines[: top + 10])
-        except Exception as e:
-            return f"[ERROR] cpu_profile: {e}"
+        return cpu_profile_handler(repo_path, inp)
 
     def zip_files_h(inp: dict[str, Any]) -> str:
         import zipfile as _zf

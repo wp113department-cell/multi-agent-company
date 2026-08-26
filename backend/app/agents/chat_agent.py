@@ -180,6 +180,7 @@ from app.tools.database.task_history_query import task_history_query
 from app.tools.database.task_progress import task_progress_handler
 from app.tools.execution.analyze_error import analyze_error_handler
 from app.tools.execution.check_url_status import check_url_status_handler
+from app.tools.execution.cpu_profile import cpu_profile_handler
 from app.tools.execution.read_logs import read_logs_handler
 from app.tools.filesystem.organize_imports import organize_imports_handler
 from app.tools.filesystem.yaml_validate import yaml_validate_handler
@@ -3440,6 +3441,18 @@ class ChatAgent:
             # class as tools #100/#103/#110/#112/#118/#120/#122/#126.
             # Delegates to the shared, worktree-validated handler.
             return await asyncio.to_thread(count_lines_handler, root, repo, inp)
+
+        if tool_name == "cpu_profile":
+            # tool_enhance.md productionization pass, tool #130
+            # (2026-08-26) — was silently broken for any `command` not
+            # literally prefixed with the word "python" (unconditionally
+            # dropped the first token, destroying the target script's
+            # own name for any other input, proved live) AND advertised
+            # in CHAT_TOOLS but never dispatched here at all, same
+            # dispatch class as tools
+            # #100/#103/#110/#112/#118/#120/#122/#126/#129. Delegates to
+            # the shared, fixed handler.
+            return await asyncio.to_thread(cpu_profile_handler, repo, inp)
 
         return f"[ERROR] Unknown tool: {tool_name}"
 
