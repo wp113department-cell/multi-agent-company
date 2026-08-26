@@ -173,6 +173,7 @@ from app.tools.execution.docker_logs import docker_logs_handler
 from app.tools.execution.docker_ps import docker_ps_handler
 from app.tools.execution.estimate_complexity import estimate_complexity_handler
 from app.tools.filesystem.find_function_body import find_function_body_handler
+from app.tools.git.generate_release_notes import generate_release_notes_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -3396,6 +3397,26 @@ class ChatAgent:
             # the dispatch to the existing, already-correct
             # estimate_complexity_handler().
             return await asyncio.to_thread(estimate_complexity_handler, inp)
+
+        if tool_name == "generate_release_notes":
+            # tool_enhance.md productionization pass, tool #112
+            # (2026-08-26) — this tool was "advertised but never
+            # dispatched" (same class as tools #4/#6/#22/#25/#33/#44/
+            # #45/#46/#48/#100/#103/#110). While wiring a real dispatch,
+            # found the same real, severe finding class as tool #100's
+            # generate_changelog: a silent arbitrary-file-write via git
+            # log's generic --output=<path> flag on from_ref — proved
+            # live, from_ref="--output=/tmp/PWNED..." genuinely wrote a
+            # real file, with ZERO indication in the tool's own returned
+            # text. Also found an LLM-controlled repo_path field
+            # letting the caller redirect ALL git operations at an
+            # arbitrary host directory, disclosing that other repo's
+            # commit history — proved live. Full account in
+            # generate_release_notes_handler()'s own module docstring.
+            # Delegates to that shared handler, which ignores any
+            # repo_path override and validates from_ref isn't
+            # flag-shaped.
+            return await asyncio.to_thread(generate_release_notes_handler, root, inp)
 
         # ========== AUDIT_Q_BATCH07 §13 — Human interaction ==========
 

@@ -306,6 +306,10 @@ from app.tools.filesystem.find_function_body import (
     FIND_FUNCTION_BODY_TOOL,
     find_function_body_handler,
 )
+from app.tools.git.generate_release_notes import (
+    GENERATE_RELEASE_NOTES_TOOL,
+    generate_release_notes_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -532,6 +536,7 @@ _DOCKER_LOGS_TOOL = DOCKER_LOGS_TOOL
 _DOCKER_PS_TOOL = DOCKER_PS_TOOL
 _ESTIMATE_COMPLEXITY_TOOL = ESTIMATE_COMPLEXITY_TOOL
 _FIND_FUNCTION_BODY_TOOL = FIND_FUNCTION_BODY_TOOL
+_GENERATE_RELEASE_NOTES_TOOL = GENERATE_RELEASE_NOTES_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -4600,25 +4605,15 @@ _SUMMARIZE_REPO_TOOL: dict[str, Any] = {
     },
 }
 
-_GENERATE_RELEASE_NOTES_TOOL: dict[str, Any] = {
-    "name": "generate_release_notes",
-    "description": "Generate a formatted release notes document from git history between two version tags.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "version": {
-                "type": "string",
-                "description": "New version number (e.g. v1.2.0)",
-            },
-            "from_ref": {
-                "type": "string",
-                "description": "Previous version tag or commit",
-            },
-            "repo_path": {"type": "string", "description": "Repo root (optional)"},
-        },
-        "required": ["version"],
-    },
-}
+# tool_enhance.md productionization pass, tool #112 (2026-08-26) —
+# moved to app/tools/git/generate_release_notes.py as
+# GENERATE_RELEASE_NOTES_TOOL (imported above, aliased to
+# _GENERATE_RELEASE_NOTES_TOOL after the import block). Same real,
+# severe finding class as tool #100's generate_changelog: a silent
+# arbitrary-file-write via git log's --output=<path> flag on
+# `from_ref`, an LLM-controlled `repo_path` override, and "advertised
+# but never dispatched" (no chat_agent.py dispatch existed). See that
+# module's own docstring for the full account.
 
 # --- Day 2 Gap: File type tools ---
 
@@ -8655,50 +8650,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] summarize_repo: {e}"
 
+    # tool_enhance.md productionization pass, tool #112 (2026-08-26) — the
+    # real fix lives in the shared generate_release_notes_handler(); see
+    # that function's own module docstring. Real, severe finding
+    # (same class as tool #100's generate_changelog): a silent
+    # arbitrary-file-write via git log's generic --output=<path> flag
+    # on from_ref, PLUS an LLM-controlled repo_path override
+    # disclosing commit history from ANY host git repo.
     def generate_release_notes_h(inp: dict[str, Any]) -> str:
-        version = str(inp["version"])
-        _rp = str(inp.get("repo_path", repo_path))
-        from_ref = str(inp.get("from_ref", ""))
-        try:
-            if not from_ref:
-                tags = subprocess.run(
-                    ["git", "-C", _rp, "tag", "--sort=-version:refname"],
-                    capture_output=True,
-                    text=True,
-                )
-                tag_list = [t for t in tags.stdout.strip().splitlines() if t]
-                from_ref = tag_list[0] if tag_list else ""
-            ref_range = f"{from_ref}..HEAD" if from_ref else "HEAD"
-            log = subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    _rp,
-                    "log",
-                    ref_range,
-                    "--pretty=format:* %s",
-                    "--no-merges",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            commits = log.stdout.strip()
-            import datetime as _dt_rn
-
-            notes = [
-                f"# Release Notes — {version}",
-                f"Released: {_dt_rn.date.today().isoformat()}",
-                "",
-                "## What's Changed",
-                "",
-                commits or "No commits found.",
-                "",
-                f"**Full Changelog:** {from_ref}...{version}" if from_ref else "",
-            ]
-            return "\n".join(notes)
-        except Exception as e:
-            return f"[ERROR] generate_release_notes: {e}"
+        return generate_release_notes_handler(root, inp)
 
     def read_pdf_h(inp: dict[str, Any]) -> str:
         path = str(inp["path"])
