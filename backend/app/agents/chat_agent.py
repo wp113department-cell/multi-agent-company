@@ -172,6 +172,7 @@ from app.tools.execution.disk_usage import disk_usage_handler
 from app.tools.execution.docker_logs import docker_logs_handler
 from app.tools.execution.docker_ps import docker_ps_handler
 from app.tools.execution.estimate_complexity import estimate_complexity_handler
+from app.tools.filesystem.find_function_body import find_function_body_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -2455,41 +2456,16 @@ class ChatAgent:
             return await asyncio.to_thread(list_classes_handler, root, repo, inp)
 
         if tool_name == "find_function_body":
-            rel = str(inp["path"])
-            ffb_name = str(inp["function_name"])
-            ffb_fp = root / rel
-            if not ffb_fp.exists():
-                return f"[ERROR] File not found: {rel}"
-            ffb_lines = ffb_fp.read_text(encoding="utf-8", errors="replace").splitlines(
-                keepends=True
-            )
-            ffb_start: int | None = None
-            ffb_base = 0
-            for ffb_i, ffb_line in enumerate(ffb_lines):
-                s = ffb_line.strip()
-                if s.startswith(f"def {ffb_name}(") or s.startswith(
-                    f"async def {ffb_name}("
-                ):
-                    ffb_start = ffb_i
-                    ffb_base = len(ffb_line) - len(ffb_line.lstrip())
-                    break
-            if ffb_start is None:
-                return f"[ERROR] Function '{ffb_name}' not found in {rel}"
-            ffb_end = len(ffb_lines)
-            for ffb_j in range(ffb_start + 1, len(ffb_lines)):
-                ffb_jl = ffb_lines[ffb_j]
-                if ffb_jl.strip() == "":
-                    continue
-                ffb_jind = len(ffb_jl) - len(ffb_jl.lstrip())
-                if (
-                    ffb_jind <= ffb_base
-                    and ffb_jl.strip()
-                    and not ffb_jl.strip().startswith(("@", "#"))
-                ):
-                    ffb_end = ffb_j
-                    break
-            body = "".join(ffb_lines[ffb_start:ffb_end])
-            return f"=== {ffb_name} (lines {ffb_start + 1}-{ffb_end}) ===\n{body}"
+            # tool_enhance.md productionization pass, tool #111 (2026-08-26)
+            # — real finding, shared identically by all 4 real
+            # implementations: ZERO worktree-boundary validation on
+            # `path` — proved live, find_function_body({"path": "/tmp/
+            # outside/secret.py", "function_name": "..."}) genuinely
+            # read and returned the complete source of a function from
+            # a file outside the repo. Full account in
+            # find_function_body_handler()'s own module docstring. Now
+            # delegates to that same shared, fixed handler.
+            return await asyncio.to_thread(find_function_body_handler, root, repo, inp)
 
         # ========== BATCH 6 — Debug tools ==========
 

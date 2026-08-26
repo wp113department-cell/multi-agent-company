@@ -302,6 +302,10 @@ from app.tools.execution.estimate_complexity import (
     ESTIMATE_COMPLEXITY_TOOL,
     estimate_complexity_handler,
 )
+from app.tools.filesystem.find_function_body import (
+    FIND_FUNCTION_BODY_TOOL,
+    find_function_body_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -527,6 +531,7 @@ _DISK_USAGE_TOOL = DISK_USAGE_TOOL
 _DOCKER_LOGS_TOOL = DOCKER_LOGS_TOOL
 _DOCKER_PS_TOOL = DOCKER_PS_TOOL
 _ESTIMATE_COMPLEXITY_TOOL = ESTIMATE_COMPLEXITY_TOOL
+_FIND_FUNCTION_BODY_TOOL = FIND_FUNCTION_BODY_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2632,24 +2637,16 @@ _TYPE_CHECK_TOOL = {
 # single-file-vs-subtree design mismatch across all 5.
 _LIST_CLASSES_TOOL = LIST_CLASSES_TOOL
 
-_FIND_FUNCTION_BODY_TOOL = {
-    "name": "find_function_body",
-    "description": "Extract the complete source code of a named function or method, including its body.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "File path relative to repo root",
-            },
-            "function_name": {
-                "type": "string",
-                "description": "Name of the function or method to extract",
-            },
-        },
-        "required": ["path", "function_name"],
-    },
-}
+# tool_enhance.md productionization pass, tool #111 (2026-08-26) —
+# moved to app/tools/filesystem/find_function_body.py as
+# FIND_FUNCTION_BODY_TOOL (imported above, aliased to
+# _FIND_FUNCTION_BODY_TOOL after the import block). Real, severe
+# findings: bf_/rf_find_function_body read a nonexistent `name` field
+# (schema declares `function_name`) — a 100% KeyError crash rate — and
+# also ignored `path`/never extracted a real body; the two already-
+# correct implementations had zero worktree-boundary validation,
+# proved live to read an arbitrary host file's complete source. See
+# that module's own docstring for the full account.
 
 # ---------------------------------------------------------------------------
 # NEW TOOL SPECS — Batch 6: Debug tools
@@ -3517,15 +3514,16 @@ def make_bug_fix_handlers(repo_path: str) -> dict[str, Any]:
     def bf_call_graph(inp: dict[str, Any]) -> str:
         return call_graph_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #111 (2026-08-26) — the
+    # real fix (this implementation read a nonexistent `name` field —
+    # the schema declares `function_name` — a 100% KeyError crash rate
+    # on every real, schema-conformant call; it also ignored `path`
+    # entirely and never actually extracted a function body, just raw
+    # grep match lines) lives in the shared
+    # find_function_body_handler(); see that function's own module
+    # docstring.
     def bf_find_function_body(inp: dict[str, Any]) -> str:
-        name = str(inp["name"])
-        r = subprocess.run(
-            ["grep", "-rn", f"def {name}", str(root)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return r.stdout[:4000] if r.stdout else f"(function '{name}' not found)"
+        return find_function_body_handler(root, repo_path, inp)
 
     def bf_analyze_error(inp: dict[str, Any]) -> str:
         tb = str(inp.get("traceback", ""))
@@ -3940,15 +3938,11 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
     def rf_list_classes(inp: dict[str, Any]) -> str:
         return list_classes_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #111 (2026-08-26) — the
+    # real fix lives in the shared find_function_body_handler(); see
+    # that function's own module docstring.
     def rf_find_function_body(inp: dict[str, Any]) -> str:
-        name = str(inp["name"])
-        r = subprocess.run(
-            ["grep", "-rn", f"def {name}", str(root)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return r.stdout[:4000] if r.stdout else f"(function '{name}' not found)"
+        return find_function_body_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #83 (2026-08-24) — the
     # real fix lives in the shared parse_ast_handler(); see that
@@ -7293,42 +7287,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def list_classes(inp: dict[str, Any]) -> str:
         return list_classes_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #111 (2026-08-26) — the
+    # real fix (ZERO worktree-boundary validation on `path`) lives in
+    # the shared find_function_body_handler(); see that function's own
+    # module docstring.
     def find_function_body(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        ffb_name = str(inp["function_name"])
-        ffb_fp = root / rel
-        if not ffb_fp.exists():
-            return f"[ERROR] File not found: {rel}"
-        ffb_lines = ffb_fp.read_text(encoding="utf-8", errors="replace").splitlines(
-            keepends=True
-        )
-        ffb_start: int | None = None
-        ffb_base = 0
-        for ffb_i, ffb_line in enumerate(ffb_lines):
-            s = ffb_line.strip()
-            if s.startswith(f"def {ffb_name}(") or s.startswith(
-                f"async def {ffb_name}("
-            ):
-                ffb_start = ffb_i
-                ffb_base = len(ffb_line) - len(ffb_line.lstrip())
-                break
-        if ffb_start is None:
-            return f"[ERROR] Function '{ffb_name}' not found in {rel}"
-        ffb_end = len(ffb_lines)
-        for ffb_j in range(ffb_start + 1, len(ffb_lines)):
-            ffb_jline = ffb_lines[ffb_j]
-            if ffb_jline.strip() == "":
-                continue
-            ffb_jind = len(ffb_jline) - len(ffb_jline.lstrip())
-            if (
-                ffb_jind <= ffb_base
-                and ffb_jline.strip()
-                and not ffb_jline.strip().startswith(("@", "#"))
-            ):
-                ffb_end = ffb_j
-                break
-        body = "".join(ffb_lines[ffb_start:ffb_end])
-        return f"=== {ffb_name} (lines {ffb_start + 1}-{ffb_end}) ===\n{body}"
+        return find_function_body_handler(root, repo_path, inp)
 
     # =========================================================================
     # BATCH 6 — Debug tools
