@@ -176,6 +176,7 @@ from app.tools.filesystem.find_function_body import find_function_body_handler
 from app.tools.git.generate_release_notes import generate_release_notes_handler
 from app.tools.execution.health_check import health_check_handler
 from app.tools.execution.memory_usage import memory_usage_handler
+from app.tools.database.task_history_query import task_history_query
 from app.tools.execution.read_logs import read_logs_handler
 from app.tools.filesystem.organize_imports import organize_imports_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -2544,6 +2545,20 @@ class ChatAgent:
                 ae_result.append("\nSuggestions:")
                 ae_result.extend(suggestions)
             return "\n".join(ae_result)
+
+        if tool_name == "task_history_query":
+            # tool_enhance.md productionization pass, tool #118
+            # (2026-08-26) — was advertised in CHAT_TOOLS but never
+            # dispatched here at all (every real interactive-chat call
+            # fell through to "[ERROR] Unknown tool"), same class as
+            # tools #100/#103/#110/#112. The underlying implementation
+            # also had two real bugs of its own now closed: a wrong
+            # table name (`task_logs` has no `status` column; the real
+            # query needed is against `dev_tasks`) and a genuine SQL
+            # injection via `status`, same class as tools #15/#96.
+            # Full account in this shared function's own module
+            # docstring.
+            return await asyncio.to_thread(task_history_query, inp)
 
         # ========== BATCH 7 — Database tools ==========
 

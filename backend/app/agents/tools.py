@@ -258,6 +258,10 @@ from app.tools.database.explain_query import (
     EXPLAIN_QUERY_TOOL,
     explain_query_handler,
 )
+from app.tools.database.task_history_query import (
+    TASK_HISTORY_QUERY_TOOL,
+    task_history_query as task_history_query,
+)
 from app.tools.filesystem.find_config import (
     FIND_CONFIG_TOOL,
     find_config_handler,
@@ -561,6 +565,7 @@ _HEALTH_CHECK_TOOL = HEALTH_CHECK_TOOL
 _MEMORY_USAGE_TOOL = MEMORY_USAGE_TOOL
 _ORGANIZE_IMPORTS_TOOL = ORGANIZE_IMPORTS_TOOL
 _READ_LOGS_TOOL = READ_LOGS_TOOL
+_TASK_HISTORY_QUERY_TOOL = TASK_HISTORY_QUERY_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -4317,24 +4322,9 @@ _DECISION_LOG_APPEND_TOOL: dict[str, Any] = {
     },
 }
 
-_TASK_HISTORY_QUERY_TOOL: dict[str, Any] = {
-    "name": "task_history_query",
-    "description": "Query recent task history from the task_logs table.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "limit": {
-                "type": "integer",
-                "description": "Max records to return (default 20)",
-            },
-            "status": {
-                "type": "string",
-                "description": "Filter by status: completed, failed, blocked (optional)",
-            },
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/database/task_history_query.py as
+# TASK_HISTORY_QUERY_TOOL / task_history_query() — tool_enhance.md
+# productionization pass, tool #118 (2026-08-26).
 
 _KNOWN_ISSUES_READ_TOOL: dict[str, Any] = {
     "name": "known_issues_read",
@@ -6269,30 +6259,6 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     # AUDIT_Q_BATCH07 §13 — Human interaction
     _ASK_HUMAN_TO_CHOOSE_TOOL,
 ]
-
-
-def task_history_query(inp: dict[str, Any]) -> str:
-    """Query recent task history from task_logs. Standalone (not repo-scoped) so any
-    agent can reuse it, not just chat."""
-    db_url = getattr(get_settings(), "database_url", "")
-    if not db_url:
-        return "[ERROR] DATABASE_URL not set"
-    limit = int(inp.get("limit", 20))
-    status_filter = inp.get("status")
-    sql = "SELECT id, status, created_at FROM task_logs"
-    if status_filter:
-        sql += f" WHERE status = '{status_filter}'"
-    sql += f" ORDER BY created_at DESC LIMIT {limit};"
-    try:
-        r = subprocess.run(
-            ["psql", db_url, "-c", sql, "--no-psqlrc"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        return (r.stdout + r.stderr).strip() or "(no output)"
-    except Exception as e:
-        return f"[ERROR] {e}"
 
 
 def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
