@@ -182,6 +182,7 @@ from app.tools.execution.analyze_error import analyze_error_handler
 from app.tools.execution.read_logs import read_logs_handler
 from app.tools.filesystem.organize_imports import organize_imports_handler
 from app.tools.filesystem.yaml_validate import yaml_validate_handler
+from app.tools.filesystem.base64_encode import base64_encode_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -3414,6 +3415,16 @@ class ChatAgent:
             # worktree-validated handler — full account in that
             # module's own docstring.
             return await asyncio.to_thread(yaml_validate_handler, root, repo, inp)
+
+        if tool_name == "base64_encode":
+            # tool_enhance.md productionization pass, tool #122
+            # (2026-08-26) — was advertised in CHAT_TOOLS but never
+            # dispatched here at all (every real interactive-chat call
+            # fell through to "[ERROR] Unknown tool"), same class as
+            # tools #100/#103/#110/#112/#118/#120. Delegates to the
+            # shared, worktree-validated handler — full account in
+            # that module's own docstring.
+            return await asyncio.to_thread(base64_encode_handler, root, repo, inp)
 
         return f"[ERROR] Unknown tool: {tool_name}"
 

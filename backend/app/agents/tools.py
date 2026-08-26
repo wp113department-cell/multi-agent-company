@@ -350,6 +350,10 @@ from app.tools.filesystem.yaml_validate import (
     YAML_VALIDATE_TOOL,
     yaml_validate_handler,
 )
+from app.tools.filesystem.base64_encode import (
+    BASE64_ENCODE_TOOL,
+    base64_encode_handler,
+)
 from app.tools.filesystem.file_info import (
     FILE_INFO_TOOL,
     file_info_handler,
@@ -581,6 +585,7 @@ _TASK_HISTORY_QUERY_TOOL = TASK_HISTORY_QUERY_TOOL
 _TASK_PROGRESS_TOOL = TASK_PROGRESS_TOOL
 _YAML_VALIDATE_TOOL = YAML_VALIDATE_TOOL
 _ANALYZE_ERROR_TOOL = ANALYZE_ERROR_TOOL
+_BASE64_ENCODE_TOOL = BASE64_ENCODE_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -5913,28 +5918,9 @@ _HTTP_REQUEST_TOOL: dict[str, Any] = {
         "required": ["method", "url"],
     },
 }
-_BASE64_ENCODE_TOOL: dict[str, Any] = {
-    "name": "base64_encode",
-    "description": "Base64-encode a string or a file's contents. Useful for embedding assets or sending binary data.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "text": {
-                "type": "string",
-                "description": "Text string to encode (mutually exclusive with path)",
-            },
-            "path": {
-                "type": "string",
-                "description": "File path to encode (relative to repo root)",
-            },
-            "decode": {
-                "type": "boolean",
-                "description": "If true, decode base64 instead of encoding (default: false)",
-            },
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/filesystem/base64_encode.py as
+# BASE64_ENCODE_TOOL / base64_encode_handler() — tool_enhance.md
+# productionization pass, tool #122 (2026-08-26).
 _TEMPLATE_RENDER_TOOL: dict[str, Any] = {
     "name": "template_render",
     "description": "Render a Jinja2 template string or file with provided variables. Returns the rendered output.",
@@ -9208,27 +9194,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] http_request: {e}"
 
+    # tool_enhance.md productionization pass, tool #122 (2026-08-26) —
+    # was a worktree-escape arbitrary file READ (`root / path` never
+    # validated). Now delegates to the shared, worktree-validated
+    # handler.
     def base64_encode_h(inp: dict[str, Any]) -> str:
-        import base64 as _b64
-
-        decode = bool(inp.get("decode", False))
-        text = inp.get("text")
-        path = inp.get("path")
-        try:
-            if path:
-                raw = (root / str(path)).read_bytes()
-                if decode:
-                    return _b64.b64decode(raw).decode("utf-8", errors="replace")
-                return _b64.b64encode(raw).decode("ascii")
-            if text:
-                if decode:
-                    return _b64.b64decode(str(text).encode("utf-8")).decode(
-                        "utf-8", errors="replace"
-                    )
-                return _b64.b64encode(str(text).encode("utf-8")).decode("ascii")
-            return "[ERROR] Provide either text or path"
-        except Exception as e:
-            return f"[ERROR] base64_encode: {e}"
+        return base64_encode_handler(root, repo_path, inp)
 
     def template_render_h(inp: dict[str, Any]) -> str:
         template_str = inp.get("template")
