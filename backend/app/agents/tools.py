@@ -310,6 +310,10 @@ from app.tools.execution.analyze_error import (
     ANALYZE_ERROR_TOOL,
     analyze_error_handler,
 )
+from app.tools.execution.check_url_status import (
+    CHECK_URL_STATUS_TOOL,
+    check_url_status_handler,
+)
 from app.tools.execution.docker_ps import (
     DOCKER_PS_TOOL,
     docker_ps_handler,
@@ -586,6 +590,7 @@ _TASK_PROGRESS_TOOL = TASK_PROGRESS_TOOL
 _YAML_VALIDATE_TOOL = YAML_VALIDATE_TOOL
 _ANALYZE_ERROR_TOOL = ANALYZE_ERROR_TOOL
 _BASE64_ENCODE_TOOL = BASE64_ENCODE_TOOL
+_CHECK_URL_STATUS_TOOL = CHECK_URL_STATUS_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -5437,15 +5442,9 @@ _WAIT_FOR_PORT_TOOL: dict[str, Any] = {
         "required": ["port"],
     },
 }
-_CHECK_URL_STATUS_TOOL: dict[str, Any] = {
-    "name": "check_url_status",
-    "description": "Check the HTTP status code of a URL. Returns status code, redirect chain, and response time. Does NOT return body.",
-    "input_schema": {
-        "type": "object",
-        "properties": {"url": {"type": "string", "description": "URL to check"}},
-        "required": ["url"],
-    },
-}
+# moved to app/tools/execution/check_url_status.py as
+# CHECK_URL_STATUS_TOOL / check_url_status_handler() — tool_enhance.md
+# productionization pass, tool #126 (2026-08-26).
 _CPU_PROFILE_TOOL: dict[str, Any] = {
     "name": "cpu_profile",
     "description": "Profile a Python script or module with cProfile and return the top N slowest functions.",
@@ -8431,18 +8430,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                 _time.sleep(0.5)
         return f"[TIMEOUT] Port {host}:{port} not open after {timeout}s"
 
+    # tool_enhance.md productionization pass, tool #126 (2026-08-26) —
+    # was a genuine, live SSRF with zero protection (proved live:
+    # connected to a real local server on 127.0.0.1). Now delegates to
+    # the shared handler, gated by the same _ssrf_denial_reason()
+    # guard fetch_url already uses.
     def check_url_status_h(inp: dict[str, Any]) -> str:
-        import urllib.request as _req
-        import time as _time
-
-        url = str(inp["url"])
-        try:
-            start = _time.time()
-            r = _req.urlopen(url, timeout=10)
-            elapsed = round((_time.time() - start) * 1000)
-            return f"HTTP {r.status} {r.reason} ({elapsed}ms) — {url}"
-        except Exception as e:
-            return f"[ERROR] check_url_status {url}: {e}"
+        return check_url_status_handler(inp)
 
     def cpu_profile_h(inp: dict[str, Any]) -> str:
         command = str(inp["command"])

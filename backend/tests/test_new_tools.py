@@ -246,9 +246,15 @@ def test_list_processes_filter(tmp_path: Path) -> None:
 
 
 def test_check_url_status_invalid(tmp_path: Path) -> None:
+    # tool_enhance.md productionization pass, tool #126 (2026-08-26) —
+    # check_url_status now has real SSRF protection (same guard
+    # fetch_url already used), so a localhost URL is correctly refused
+    # before any connection is attempted, rather than reaching a
+    # genuine connection-refused error. "POLICY DENIED" is now a third
+    # valid, correct outcome alongside "ERROR"/"HTTP".
     h = _handlers(tmp_path)
     result = h["check_url_status"]({"url": "http://localhost:19999/nonexistent"})
-    assert "ERROR" in result or "HTTP" in result
+    assert "ERROR" in result or "HTTP" in result or "POLICY DENIED" in result
 
 
 # ---- Base64 ----

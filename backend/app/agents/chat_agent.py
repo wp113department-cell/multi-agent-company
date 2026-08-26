@@ -179,6 +179,7 @@ from app.tools.execution.memory_usage import memory_usage_handler
 from app.tools.database.task_history_query import task_history_query
 from app.tools.database.task_progress import task_progress_handler
 from app.tools.execution.analyze_error import analyze_error_handler
+from app.tools.execution.check_url_status import check_url_status_handler
 from app.tools.execution.read_logs import read_logs_handler
 from app.tools.filesystem.organize_imports import organize_imports_handler
 from app.tools.filesystem.yaml_validate import yaml_validate_handler
@@ -3425,6 +3426,18 @@ class ChatAgent:
             # shared, worktree-validated handler — full account in
             # that module's own docstring.
             return await asyncio.to_thread(base64_encode_handler, root, repo, inp)
+
+        if tool_name == "check_url_status":
+            # tool_enhance.md productionization pass, tool #126
+            # (2026-08-26) — was a genuine, live SSRF with zero
+            # protection (proved live: connected to a real local
+            # server on 127.0.0.1) AND advertised in CHAT_TOOLS but
+            # never dispatched here at all (every real interactive-
+            # chat call fell through to "[ERROR] Unknown tool"), same
+            # dispatch class as tools #100/#103/#110/#112/#118/#120/
+            # #122. Delegates to the shared handler, gated by the same
+            # _ssrf_denial_reason() guard fetch_url already uses.
+            return await asyncio.to_thread(check_url_status_handler, inp)
 
         return f"[ERROR] Unknown tool: {tool_name}"
 
