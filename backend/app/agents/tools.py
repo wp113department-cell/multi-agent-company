@@ -298,6 +298,10 @@ from app.tools.execution.docker_ps import (
     DOCKER_PS_TOOL,
     docker_ps_handler,
 )
+from app.tools.execution.read_logs import (
+    READ_LOGS_TOOL,
+    read_logs_handler,
+)
 from app.tools.execution.estimate_complexity import (
     ESTIMATE_COMPLEXITY_TOOL,
     estimate_complexity_handler,
@@ -552,6 +556,7 @@ _GENERATE_RELEASE_NOTES_TOOL = GENERATE_RELEASE_NOTES_TOOL
 _HEALTH_CHECK_TOOL = HEALTH_CHECK_TOOL
 _MEMORY_USAGE_TOOL = MEMORY_USAGE_TOOL
 _ORGANIZE_IMPORTS_TOOL = ORGANIZE_IMPORTS_TOOL
+_READ_LOGS_TOOL = READ_LOGS_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2661,29 +2666,8 @@ _LIST_CLASSES_TOOL = LIST_CLASSES_TOOL
 # NEW TOOL SPECS — Batch 6: Debug tools
 # ---------------------------------------------------------------------------
 
-_READ_LOGS_TOOL = {
-    "name": "read_logs",
-    "description": "Read log files from common locations. Specify path for a log file or service name for journalctl.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Log file path, or service name (e.g. 'uvicorn', 'postgresql')",
-            },
-            "lines": {
-                "type": "integer",
-                "description": "Number of recent lines to return (default: 50)",
-            },
-            "level": {
-                "type": "string",
-                "enum": ["all", "ERROR", "WARNING", "INFO"],
-                "description": "Filter by log level (default: all)",
-            },
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/execution/read_logs.py as READ_LOGS_TOOL —
+# tool_enhance.md productionization pass, tool #116 (2026-08-26).
 
 _ANALYZE_ERROR_TOOL = {
     "name": "analyze_error",
@@ -3536,18 +3520,14 @@ def make_bug_fix_handlers(repo_path: str) -> dict[str, Any]:
         ]
         return "\n".join(lines[:40]) or "(no error markers found)"
 
+    # tool_enhance.md productionization pass, tool #116 (2026-08-26) —
+    # was a worktree-escape arbitrary file READ (`root / log_path`
+    # silently discards `root` when `log_path` is absolute — real
+    # pathlib semantics) and silently ignored the schema's own
+    # documented `level`/journalctl behavior. Now delegates to the
+    # shared, worktree-validated, full-contract handler.
     def bf_read_logs(inp: dict[str, Any]) -> str:
-        log_path = str(inp.get("path", "backend/logs/app.log"))
-        n = int(inp.get("lines", 100))
-        try:
-            p = root / log_path
-            if not p.exists():
-                return f"[ERROR] Log not found: {log_path}"
-            return "\n".join(
-                p.read_text(encoding="utf-8", errors="replace").splitlines()[-n:]
-            )
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return read_logs_handler(root, repo_path, inp)
 
     def bf_submit(inp: dict[str, Any]) -> str:
         bug_fix_result.update(inp)
@@ -4364,18 +4344,13 @@ def make_monitoring_agent_handlers(repo_path: str) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # tool_enhance.md productionization pass, tool #116 (2026-08-26) —
+    # same worktree-escape arbitrary file READ as bf_read_logs, and
+    # the same silent divergence from the schema's documented
+    # journalctl/level contract. Now delegates to the shared,
+    # worktree-validated, full-contract handler.
     def mon_read_logs(inp: dict[str, Any]) -> str:
-        rl_path = str(inp.get("path", "backend/logs/app.log"))
-        rl_n = int(inp.get("lines", 100))
-        try:
-            p = root / rl_path
-            if not p.exists():
-                return f"[ERROR] Log not found: {rl_path}"
-            return "\n".join(
-                p.read_text(encoding="utf-8", errors="replace").splitlines()[-rl_n:]
-            )
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return read_logs_handler(root, repo_path, inp)
 
     def mon_submit(inp: dict[str, Any]) -> str:
         monitoring_result.update(inp)
@@ -7273,51 +7248,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # BATCH 6 — Debug tools
     # =========================================================================
 
+    # tool_enhance.md productionization pass, tool #116 (2026-08-26) —
+    # was a worktree-escape arbitrary file READ (explicitly bypassed
+    # `root` for any absolute `path`) and was missing try/except +
+    # timeout around its file-tail subprocess call. Now delegates to
+    # the shared, worktree-validated handler.
     def read_logs(inp: dict[str, Any]) -> str:
-        rl_path = str(inp.get("path", ""))
-        rl_lines = int(inp.get("lines", 50))
-        rl_level = str(inp.get("level", "all"))
-        out = ""
-        if rl_path and ("/" in rl_path or rl_path.endswith(".log")):
-            log_file = (
-                root / rl_path if not Path(rl_path).is_absolute() else Path(rl_path)
-            )
-            if log_file.exists():
-                r = subprocess.run(
-                    ["tail", f"-{rl_lines}", str(log_file)],
-                    capture_output=True,
-                    text=True,
-                )
-                out = r.stdout
-            else:
-                return f"[ERROR] Log file not found: {rl_path}"
-        elif rl_path:
-            r = subprocess.run(
-                ["journalctl", "-u", rl_path, f"-n{rl_lines}", "--no-pager"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            out = r.stdout or r.stderr
-        else:
-            log_dirs = [root / "logs", root / "backend" / "logs", Path("/tmp")]
-            found: list[Path] = []
-            for ld in log_dirs:
-                if ld.exists():
-                    found.extend(ld.glob("*.log"))
-            if not found:
-                return "(no log files found — specify a path or service name)"
-            newest = max(found, key=lambda p: p.stat().st_mtime)
-            r = subprocess.run(
-                ["tail", f"-{rl_lines}", str(newest)], capture_output=True, text=True
-            )
-            out = f"From {newest}:\n" + r.stdout
-        if rl_level != "all":
-            filtered = [
-                line for line in out.splitlines() if rl_level.upper() in line.upper()
-            ]
-            out = "\n".join(filtered)
-        return out[:5000] or "(no log entries)"
+        return read_logs_handler(root, repo_path, inp)
 
     def analyze_error(inp: dict[str, Any]) -> str:
         ae_error = str(inp["error"])

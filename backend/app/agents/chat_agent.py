@@ -176,6 +176,7 @@ from app.tools.filesystem.find_function_body import find_function_body_handler
 from app.tools.git.generate_release_notes import generate_release_notes_handler
 from app.tools.execution.health_check import health_check_handler
 from app.tools.execution.memory_usage import memory_usage_handler
+from app.tools.execution.read_logs import read_logs_handler
 from app.tools.filesystem.organize_imports import organize_imports_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
@@ -2468,53 +2469,14 @@ class ChatAgent:
         # ========== BATCH 6 — Debug tools ==========
 
         if tool_name == "read_logs":
-            rl_path = str(inp.get("path", ""))
-            rl_lines = int(inp.get("lines", 50))
-            rl_level = str(inp.get("level", "all"))
-            out = ""
-            if rl_path and ("/" in rl_path or rl_path.endswith(".log")):
-                log_file = (
-                    root / rl_path if not Path(rl_path).is_absolute() else Path(rl_path)
-                )
-                if log_file.exists():
-                    r = subprocess.run(
-                        ["tail", f"-{rl_lines}", str(log_file)],
-                        capture_output=True,
-                        text=True,
-                    )
-                    out = r.stdout
-                else:
-                    return f"[ERROR] Log file not found: {rl_path}"
-            elif rl_path:
-                r = subprocess.run(
-                    ["journalctl", "-u", rl_path, f"-n{rl_lines}", "--no-pager"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
-                out = r.stdout or r.stderr
-            else:
-                log_dirs = [root / "logs", root / "backend" / "logs", Path("/tmp")]
-                found_logs: list[Path] = []
-                for ld in log_dirs:
-                    if ld.exists():
-                        found_logs.extend(ld.glob("*.log"))
-                if not found_logs:
-                    return "(no log files found — specify path or service name)"
-                newest = max(found_logs, key=lambda p: p.stat().st_mtime)
-                r = subprocess.run(
-                    ["tail", f"-{rl_lines}", str(newest)],
-                    capture_output=True,
-                    text=True,
-                )
-                out = f"From {newest}:\n" + r.stdout
-            if rl_level != "all":
-                out = "\n".join(
-                    line
-                    for line in out.splitlines()
-                    if rl_level.upper() in line.upper()
-                )
-            return out[:5000] or "(no log entries)"
+            # tool_enhance.md productionization pass, tool #116
+            # (2026-08-26) — was a worktree-escape arbitrary file READ
+            # (explicitly bypassed `root` for any absolute `path`,
+            # proved live to disclose files anywhere on the host) and
+            # was missing try/except + timeout around its file-tail
+            # subprocess call. Now delegates to the shared,
+            # worktree-validated handler.
+            return read_logs_handler(root, repo, inp)
 
         if tool_name == "analyze_error":
             ae_error = str(inp["error"])
