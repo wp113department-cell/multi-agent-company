@@ -170,6 +170,7 @@ from app.tools.execution.cpu_usage import cpu_usage_handler
 from app.tools.execution.diagnose_deployment_failure import gather_deployment_diagnostics
 from app.tools.execution.disk_usage import disk_usage_handler
 from app.tools.execution.docker_logs import docker_logs_handler
+from app.tools.execution.docker_ps import docker_ps_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -2641,12 +2642,15 @@ class ChatAgent:
         # ========== BATCH 8 — Docker tools ==========
 
         if tool_name == "docker_ps":
-            show_all = bool(inp.get("all", False))
-            cmd_s = (
-                "docker ps --format 'table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}'"
-                + (" -a" if show_all else "")
-            )
-            return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 10)
+            # tool_enhance.md productionization pass, tool #109 (2026-08-26)
+            # — no injection surface here (`all` is a boolean gating a
+            # fixed literal suffix, structurally immune), but simplified
+            # onto the shared, canonical handler for consistency with
+            # this initiative's list-args-only convention and to share
+            # the one real fix (dk_docker_ps ignored `all` entirely) in
+            # one place. Full account in docker_ps_handler()'s own
+            # module docstring.
+            return await asyncio.to_thread(docker_ps_handler, inp)
 
         if tool_name == "docker_logs":
             # tool_enhance.md productionization pass, tool #108 (2026-08-25)

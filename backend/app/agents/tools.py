@@ -294,6 +294,10 @@ from app.tools.execution.docker_logs import (
     DOCKER_LOGS_TOOL,
     docker_logs_handler,
 )
+from app.tools.execution.docker_ps import (
+    DOCKER_PS_TOOL,
+    docker_ps_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -517,6 +521,7 @@ _CPU_USAGE_TOOL = CPU_USAGE_TOOL
 _DIAGNOSE_DEPLOYMENT_FAILURE_TOOL = DIAGNOSE_DEPLOYMENT_FAILURE_TOOL
 _DISK_USAGE_TOOL = DISK_USAGE_TOOL
 _DOCKER_LOGS_TOOL = DOCKER_LOGS_TOOL
+_DOCKER_PS_TOOL = DOCKER_PS_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2703,20 +2708,13 @@ _ANALYZE_ERROR_TOOL = {
 # NEW TOOL SPECS — Batch 8: Docker tools
 # ---------------------------------------------------------------------------
 
-_DOCKER_PS_TOOL = {
-    "name": "docker_ps",
-    "description": "List running Docker containers. Shows ID, image, status, and ports.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "all": {
-                "type": "boolean",
-                "description": "Show all containers including stopped ones (default: false)",
-            },
-        },
-        "required": [],
-    },
-}
+# tool_enhance.md productionization pass, tool #109 (2026-08-26) —
+# moved to app/tools/execution/docker_ps.py as DOCKER_PS_TOOL
+# (imported above, aliased to _DOCKER_PS_TOOL after the import block
+# — app/agents/monitoring_agent.py imports this name directly, checked
+# proactively before wiring). Real finding: dk_docker_ps completely
+# ignored the `all` field, hiding real stopped/failed containers even
+# when explicitly requested. See that module's own docstring.
 
 # tool_enhance.md productionization pass, tool #108 (2026-08-25) —
 # moved to app/tools/execution/docker_logs.py as DOCKER_LOGS_TOOL
@@ -3759,19 +3757,14 @@ def make_docker_agent_handlers(repo_path: str) -> dict[str, Any]:
     root = Path(repo_path)
     docker_result: dict[str, Any] = {}
 
+    # tool_enhance.md productionization pass, tool #109 (2026-08-26) — the
+    # real fix (this implementation completely IGNORED the `all` field
+    # — proved live, hiding real stopped/failed containers even when
+    # explicitly requested — plus had no try/except around the
+    # subprocess call) lives in the shared docker_ps_handler(); see
+    # that function's own module docstring.
     def dk_docker_ps(inp: dict[str, Any]) -> str:
-        r = subprocess.run(
-            [
-                "docker",
-                "ps",
-                "--format",
-                "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Names}}",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return r.stdout or r.stderr or "(no containers)"
+        return docker_ps_handler(inp)
 
     # tool_enhance.md productionization pass, tool #108 (2026-08-25) — the
     # real fix (flag-collision on `container` + uncaught ValueError on a
@@ -7490,23 +7483,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # BATCH 8 — Docker tools
     # =========================================================================
 
+    # tool_enhance.md productionization pass, tool #109 (2026-08-26) — the
+    # real fix lives in the shared docker_ps_handler(); see that
+    # function's own module docstring.
     def docker_ps(inp: dict[str, Any]) -> str:
-        show_all = bool(inp.get("all", False))
-        docker_cmd = [
-            "docker",
-            "ps",
-            "--format",
-            "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}",
-        ]
-        if show_all:
-            docker_cmd.append("-a")
-        try:
-            r = subprocess.run(docker_cmd, capture_output=True, text=True, timeout=10)
-            return (r.stdout + r.stderr)[:3000] or "(no containers)"
-        except FileNotFoundError:
-            return "[ERROR] docker not found"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return docker_ps_handler(inp)
 
     # tool_enhance.md productionization pass, tool #108 (2026-08-25) — the
     # real fix lives in the shared docker_logs_handler(); see that
