@@ -366,6 +366,10 @@ from app.tools.filesystem.copy_file import (
     COPY_FILE_TOOL,
     copy_file_handler,
 )
+from app.tools.filesystem.count_lines import (
+    COUNT_LINES_TOOL,
+    count_lines_handler,
+)
 from app.tools.filesystem.file_info import (
     FILE_INFO_TOOL,
     file_info_handler,
@@ -601,6 +605,7 @@ _BASE64_ENCODE_TOOL = BASE64_ENCODE_TOOL
 _CHECK_URL_STATUS_TOOL = CHECK_URL_STATUS_TOOL
 _COMPARE_FILES_TOOL = COMPARE_FILES_TOOL
 _COPY_FILE_TOOL = COPY_FILE_TOOL
+_COUNT_LINES_TOOL = COUNT_LINES_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -5489,24 +5494,9 @@ _HASH_FILE_TOOL: dict[str, Any] = {
         "required": ["path"],
     },
 }
-_COUNT_LINES_TOOL: dict[str, Any] = {
-    "name": "count_lines",
-    "description": "Count lines in a file or all files in a directory matching a pattern.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "File or directory path (relative to repo root)",
-            },
-            "pattern": {
-                "type": "string",
-                "description": "Glob pattern for directory mode (e.g. '**/*.py')",
-            },
-        },
-        "required": ["path"],
-    },
-}
+# moved to app/tools/filesystem/count_lines.py as COUNT_LINES_TOOL /
+# count_lines_handler() — tool_enhance.md productionization pass, tool
+# #129 (2026-08-26).
 
 # -- Environment --
 _READ_ENV_VAR_TOOL: dict[str, Any] = {
@@ -8459,25 +8449,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] hash_file: {e}"
 
+    # tool_enhance.md productionization pass, tool #129 (2026-08-26) —
+    # was a worktree-escape arbitrary file/directory READ (`root /
+    # path` never validated). Now delegates to the shared,
+    # worktree-validated handler.
     def count_lines_h(inp: dict[str, Any]) -> str:
-        path = str(inp["path"])
-        pattern = str(inp.get("pattern", "**/*"))
-        target = root / path
-        try:
-            if target.is_file():
-                count = sum(1 for _ in target.open(encoding="utf-8", errors="ignore"))
-                return f"{path}: {count} lines"
-            totals: dict[str, int] = {}
-            for fp in target.glob(pattern):
-                if fp.is_file():
-                    ext = fp.suffix or "(no ext)"
-                    n = sum(1 for _ in fp.open(encoding="utf-8", errors="ignore"))
-                    totals[ext] = totals.get(ext, 0) + n
-            rows = sorted(totals.items(), key=lambda x: -x[1])
-            lines_out = "\n".join(f"{ext}: {n:,}" for ext, n in rows)
-            return f"Lines by extension in {path}:\n{lines_out}\nTotal: {sum(totals.values()):,}"
-        except Exception as e:
-            return f"[ERROR] count_lines: {e}"
+        return count_lines_handler(root, repo_path, inp)
 
     def read_env_var_h(inp: dict[str, Any]) -> str:
         name = str(inp["name"])

@@ -186,6 +186,7 @@ from app.tools.filesystem.yaml_validate import yaml_validate_handler
 from app.tools.filesystem.base64_encode import base64_encode_handler
 from app.tools.filesystem.compare_files import compare_files_handler
 from app.tools.filesystem.copy_file import copy_file_handler
+from app.tools.filesystem.count_lines import count_lines_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -3427,6 +3428,18 @@ class ChatAgent:
             # #122. Delegates to the shared handler, gated by the same
             # _ssrf_denial_reason() guard fetch_url already uses.
             return await asyncio.to_thread(check_url_status_handler, inp)
+
+        if tool_name == "count_lines":
+            # tool_enhance.md productionization pass, tool #129
+            # (2026-08-26) — was a worktree-escape arbitrary file/
+            # directory READ (`root / path` never validated, proved
+            # live to disclose a real line count for a file outside
+            # the worktree) AND advertised in CHAT_TOOLS but never
+            # dispatched here at all (every real interactive-chat call
+            # fell through to "[ERROR] Unknown tool"), same dispatch
+            # class as tools #100/#103/#110/#112/#118/#120/#122/#126.
+            # Delegates to the shared, worktree-validated handler.
+            return await asyncio.to_thread(count_lines_handler, root, repo, inp)
 
         return f"[ERROR] Unknown tool: {tool_name}"
 
