@@ -185,6 +185,7 @@ from app.tools.filesystem.organize_imports import organize_imports_handler
 from app.tools.filesystem.yaml_validate import yaml_validate_handler
 from app.tools.filesystem.base64_encode import base64_encode_handler
 from app.tools.filesystem.compare_files import compare_files_handler
+from app.tools.filesystem.copy_file import copy_file_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -1395,21 +1396,15 @@ class ChatAgent:
             return rename_file_handler(root, repo, inp)
 
         if tool_name == "copy_file":
-            import shutil as _shutil
-
-            from_rel = str(inp["from_path"])
-            to_rel = str(inp["to_path"])
-            if _is_protected_path(from_rel, repo):
-                return f"[POLICY DENIED] Protected source: {from_rel}"
-            if _is_protected_path(to_rel, repo):
-                return f"[POLICY DENIED] Protected destination: {to_rel}"
-            src = root / from_rel
-            dst = root / to_rel
-            if not src.exists():
-                return f"[ERROR] Source not found: {from_rel}"
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            _shutil.copy2(str(src), str(dst))
-            return f"Copied {from_rel} → {to_rel}"
+            # tool_enhance.md productionization pass, tool #128
+            # (2026-08-26) — was missing a try/except around
+            # dst.parent.mkdir()/shutil.copy2() that its sibling
+            # implementation already had, causing an uncaught crash
+            # on any real filesystem error (proved live via a
+            # real chmod 500 destination directory raising an
+            # unhandled PermissionError). Now delegates to the
+            # shared, already-worktree-validated handler.
+            return copy_file_handler(root, repo, inp)
 
         if tool_name == "move_file":
             # tool_enhance.md productionization pass, tool #52 (2026-08-20)

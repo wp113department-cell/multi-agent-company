@@ -362,6 +362,10 @@ from app.tools.filesystem.compare_files import (
     COMPARE_FILES_TOOL,
     compare_files_handler,
 )
+from app.tools.filesystem.copy_file import (
+    COPY_FILE_TOOL,
+    copy_file_handler,
+)
 from app.tools.filesystem.file_info import (
     FILE_INFO_TOOL,
     file_info_handler,
@@ -596,6 +600,7 @@ _ANALYZE_ERROR_TOOL = ANALYZE_ERROR_TOOL
 _BASE64_ENCODE_TOOL = BASE64_ENCODE_TOOL
 _CHECK_URL_STATUS_TOOL = CHECK_URL_STATUS_TOOL
 _COMPARE_FILES_TOOL = COMPARE_FILES_TOOL
+_COPY_FILE_TOOL = COPY_FILE_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2151,24 +2156,9 @@ _SUBMIT_RESULT_TOOL = {
 
 # moved to app/tools/filesystem/rename_file.py as RENAME_FILE_TOOL — tool_enhance.md productionization pass, tool #56 (2026-08-20).
 
-_COPY_FILE_TOOL = {
-    "name": "copy_file",
-    "description": "Copy a file to a new location within the repository.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "from_path": {
-                "type": "string",
-                "description": "Source file path relative to repo root",
-            },
-            "to_path": {
-                "type": "string",
-                "description": "Destination file path relative to repo root",
-            },
-        },
-        "required": ["from_path", "to_path"],
-    },
-}
+# moved to app/tools/filesystem/copy_file.py as COPY_FILE_TOOL /
+# copy_file_handler() — tool_enhance.md productionization pass, tool
+# #128 (2026-08-26).
 
 # moved to app/tools/git/commit.py as GIT_COMMIT_TOOL — tool_enhance.md productionization pass, tool #37 (2026-08-18).
 
@@ -6357,25 +6347,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         return rename_file_handler(root, repo_path, inp)
 
     # ---- copy_file ----
+    # tool_enhance.md productionization pass, tool #128 (2026-08-26) —
+    # worktree validation was already correct here; the real fix
+    # (chat_agent.py's sibling dispatch had no try/except) lives in
+    # the shared copy_file_handler(); see that module's own docstring.
     def copy_file(inp: dict[str, Any]) -> str:
-        import shutil
-
-        from_rel = str(inp["from_path"])
-        to_rel = str(inp["to_path"])
-        if _is_protected_path(from_rel, repo_path):
-            return f"[POLICY DENIED] Protected source: {from_rel}"
-        if _is_protected_path(to_rel, repo_path):
-            return f"[POLICY DENIED] Protected destination: {to_rel}"
-        src = root / from_rel
-        dst = root / to_rel
-        if not src.exists():
-            return f"[ERROR] Source not found: {from_rel}"
-        try:
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(src), str(dst))
-            return f"Copied {from_rel} → {to_rel}"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return copy_file_handler(root, repo_path, inp)
 
     # ---- git_commit ---- (moved to app/tools/git/commit.py — this now delegates to the shared, hardened stage_and_commit())
     def git_commit(inp: dict[str, Any]) -> str:
