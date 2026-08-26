@@ -177,6 +177,7 @@ from app.tools.git.generate_release_notes import generate_release_notes_handler
 from app.tools.execution.health_check import health_check_handler
 from app.tools.execution.memory_usage import memory_usage_handler
 from app.tools.database.task_history_query import task_history_query
+from app.tools.database.task_progress import task_progress_handler
 from app.tools.execution.read_logs import read_logs_handler
 from app.tools.filesystem.organize_imports import organize_imports_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -3205,19 +3206,12 @@ class ChatAgent:
             )
 
         if tool_name == "task_progress":
-            from app.config import get_settings as _gs3
-
-            tprog_tid = inp.get("task_id")
-            tprog_lim = int(inp.get("limit", 10))
-            tp_db_url = getattr(_gs3(), "database_url", "")
-            if not tp_db_url:
-                return "[ERROR] DATABASE_URL not set"
-            if tprog_tid is not None:
-                tprog_sql = f"SELECT id, status, created_at, updated_at FROM dev_tasks WHERE id = {int(tprog_tid)} LIMIT 1;"
-            else:
-                tprog_sql = f"SELECT id, status, created_at, updated_at FROM dev_tasks ORDER BY created_at DESC LIMIT {tprog_lim};"
-            tprog_cmd = f"psql '{tp_db_url}' -c {__import__('shlex').quote(tprog_sql)} --no-psqlrc 2>&1"
-            return await asyncio.to_thread(_run_subprocess, tprog_cmd, repo, 10)
+            # tool_enhance.md productionization pass, tool #119
+            # (2026-08-26) — was completely non-functional wherever
+            # `psql` isn't installed (proved live: "/bin/sh: 1: psql:
+            # not found" on this host). Now delegates to the shared,
+            # psycopg2-backed handler.
+            return await asyncio.to_thread(task_progress_handler, inp)
 
         # ========== BATCH 15 — Editing extras ==========
 

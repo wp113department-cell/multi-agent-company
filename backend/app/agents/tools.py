@@ -262,6 +262,10 @@ from app.tools.database.task_history_query import (
     TASK_HISTORY_QUERY_TOOL,
     task_history_query as task_history_query,
 )
+from app.tools.database.task_progress import (
+    TASK_PROGRESS_TOOL,
+    task_progress_handler,
+)
 from app.tools.filesystem.find_config import (
     FIND_CONFIG_TOOL,
     find_config_handler,
@@ -566,6 +570,7 @@ _MEMORY_USAGE_TOOL = MEMORY_USAGE_TOOL
 _ORGANIZE_IMPORTS_TOOL = ORGANIZE_IMPORTS_TOOL
 _READ_LOGS_TOOL = READ_LOGS_TOOL
 _TASK_HISTORY_QUERY_TOOL = TASK_HISTORY_QUERY_TOOL
+_TASK_PROGRESS_TOOL = TASK_PROGRESS_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2842,24 +2847,9 @@ _FIND_TEST_TOOL = {
 # checked database connectivity at all. See that module's own
 # docstring for the full account.
 
-_TASK_PROGRESS_TOOL = {
-    "name": "task_progress",
-    "description": "Query recent task status from the dev_tasks database table. Optionally filter by task ID.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "task_id": {
-                "type": "integer",
-                "description": "Specific task ID (optional; default: last 10 tasks)",
-            },
-            "limit": {
-                "type": "integer",
-                "description": "Max tasks to return (default: 10)",
-            },
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/database/task_progress.py as TASK_PROGRESS_TOOL /
+# task_progress_handler() — tool_enhance.md productionization pass,
+# tool #119 (2026-08-26).
 
 # Batch 15 — Editing extras
 # moved to app/tools/filesystem/replace_class.py as REPLACE_CLASS_TOOL — tool_enhance.md productionization pass, tool #57 (2026-08-20).
@@ -4232,28 +4222,14 @@ def make_monitoring_agent_handlers(repo_path: str) -> dict[str, Any]:
             database_url=str(getattr(hc_settings, "database_url", "") or ""),
         )
 
+    # tool_enhance.md productionization pass, tool #119 (2026-08-26) —
+    # was completely non-functional wherever `psql` isn't installed
+    # (proved live: "[ERROR] psql not found" on this host), and
+    # silently ignored the schema's own documented `limit` field
+    # (hardcoded LIMIT 10). Now delegates to the shared,
+    # psycopg2-backed, full-contract handler.
     def mon_task_progress(inp: dict[str, Any]) -> str:
-        tp_task_id = inp.get("task_id")
-        tp_settings = get_settings()
-        tp_db_url = getattr(tp_settings, "database_url", None)
-        if not tp_db_url:
-            return "[ERROR] DATABASE_URL not configured"
-        if tp_task_id:
-            query = f"SELECT id, title, status, updated_at FROM dev_tasks WHERE id={int(tp_task_id)}"
-        else:
-            query = "SELECT id, title, status, updated_at FROM dev_tasks ORDER BY updated_at DESC LIMIT 10"
-        try:
-            r = subprocess.run(
-                ["psql", str(tp_db_url), "-c", query, "--no-password"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            return (r.stdout + r.stderr)[:4000] or "(no tasks)"
-        except FileNotFoundError:
-            return "[ERROR] psql not found"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return task_progress_handler(inp)
 
     # tool_enhance.md productionization pass, tool #116 (2026-08-26) —
     # same worktree-escape arbitrary file READ as bf_read_logs, and
@@ -7746,27 +7722,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             database_url=str(getattr(settings, "database_url", "") or ""),
         )
 
+    # tool_enhance.md productionization pass, tool #119 (2026-08-26) —
+    # was completely non-functional wherever `psql` isn't installed.
+    # Now delegates to the shared, psycopg2-backed handler.
     def task_progress_h(inp: dict[str, Any]) -> str:
-        tprog_task_id = inp.get("task_id")
-        tprog_limit = int(inp.get("limit", 10))
-        settings = get_settings()
-        tp_db = getattr(settings, "database_url", "")
-        if not tp_db:
-            return "[ERROR] DATABASE_URL not set"
-        if tprog_task_id is not None:
-            sql = f"SELECT id, status, created_at, updated_at FROM dev_tasks WHERE id = {int(tprog_task_id)} LIMIT 1;"
-        else:
-            sql = f"SELECT id, status, created_at, updated_at FROM dev_tasks ORDER BY created_at DESC LIMIT {tprog_limit};"
-        try:
-            r = subprocess.run(
-                ["psql", tp_db, "-c", sql, "--no-psqlrc"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            return (r.stdout + r.stderr).strip() or "(no results)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return task_progress_handler(inp)
 
     handlers["cpu_usage"] = cpu_usage_h
     handlers["memory_usage"] = memory_usage_h
