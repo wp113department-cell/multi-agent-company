@@ -310,6 +310,10 @@ from app.tools.git.generate_release_notes import (
     GENERATE_RELEASE_NOTES_TOOL,
     generate_release_notes_handler,
 )
+from app.tools.execution.health_check import (
+    HEALTH_CHECK_TOOL,
+    health_check_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -537,6 +541,7 @@ _DOCKER_PS_TOOL = DOCKER_PS_TOOL
 _ESTIMATE_COMPLEXITY_TOOL = ESTIMATE_COMPLEXITY_TOOL
 _FIND_FUNCTION_BODY_TOOL = FIND_FUNCTION_BODY_TOOL
 _GENERATE_RELEASE_NOTES_TOOL = GENERATE_RELEASE_NOTES_TOOL
+_HEALTH_CHECK_TOOL = HEALTH_CHECK_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2935,20 +2940,14 @@ _MEMORY_USAGE_TOOL = {
 # implementations. See that module's own docstring for the full
 # account.
 
-_HEALTH_CHECK_TOOL = {
-    "name": "health_check",
-    "description": "Check if backend services are up: backend HTTP health endpoint and database connectivity.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "service": {
-                "type": "string",
-                "description": "Service to check: 'all', 'backend', 'db' (default: all)",
-            },
-        },
-        "required": [],
-    },
-}
+# tool_enhance.md productionization pass, tool #113 (2026-08-26) —
+# moved to app/tools/execution/health_check.py as HEALTH_CHECK_TOOL
+# (imported above, aliased to _HEALTH_CHECK_TOOL after the import
+# block). Real, severe finding: mon_health_check completely ignored
+# `service` (the only documented field) and read an entirely
+# undocumented `url` field instead — a real SSRF surface — and never
+# checked database connectivity at all. See that module's own
+# docstring for the full account.
 
 _TASK_PROGRESS_TOOL = {
     "name": "task_progress",
@@ -4323,23 +4322,21 @@ def make_monitoring_agent_handlers(repo_path: str) -> dict[str, Any]:
     def mon_disk_usage(inp: dict[str, Any]) -> str:
         return disk_usage_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #113 (2026-08-26) — the
+    # real fix (this implementation completely IGNORED the `service`
+    # field — the tool's only documented input — and read an entirely
+    # UNDOCUMENTED `url` field instead, a real SSRF surface since tool
+    # schemas are advisory, not enforced; it also NEVER checked
+    # database connectivity despite the tool's own description
+    # promising it) lives in the shared health_check_handler(); see
+    # that function's own module docstring.
     def mon_health_check(inp: dict[str, Any]) -> str:
-        hc_url = str(inp.get("url", "http://localhost:8000/health"))
-        r = subprocess.run(
-            [
-                "curl",
-                "-s",
-                "-o",
-                "/dev/null",
-                "-w",
-                "%{http_code} %{time_total}s",
-                hc_url,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
+        hc_settings = get_settings()
+        return health_check_handler(
+            inp,
+            port=getattr(hc_settings, "port", 8000),
+            database_url=str(getattr(hc_settings, "database_url", "") or ""),
         )
-        return r.stdout.strip() or r.stderr.strip() or "[ERROR] curl failed"
 
     def mon_task_progress(inp: dict[str, Any]) -> str:
         tp_task_id = inp.get("task_id")
@@ -7953,52 +7950,16 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def disk_usage_h(inp: dict[str, Any]) -> str:
         return disk_usage_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #113 (2026-08-26) — the
+    # real fix lives in the shared health_check_handler(); see that
+    # function's own module docstring.
     def health_check_h(inp: dict[str, Any]) -> str:
-        hc_svc = str(inp.get("service", "all"))
         settings = get_settings()
-        hc_results: list[str] = []
-        if hc_svc in ("all", "backend"):
-            hc_port = getattr(settings, "port", 8000)
-            try:
-                r = subprocess.run(
-                    [
-                        "curl",
-                        "-s",
-                        "-o",
-                        "/dev/null",
-                        "-w",
-                        "%{http_code}",
-                        f"http://localhost:{hc_port}/health",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                code = r.stdout.strip()
-                hc_results.append(
-                    f"Backend (:{hc_port}/health): {'✅ UP' if code == '200' else f'⚠️ HTTP {code}'}"
-                )
-            except Exception:
-                hc_port2 = getattr(settings, "port", 8000)
-                hc_results.append(f"Backend (:{hc_port2}/health): ❌ unreachable")
-        if hc_svc in ("all", "db"):
-            db_url = getattr(settings, "database_url", "")
-            if db_url:
-                try:
-                    r = subprocess.run(
-                        ["pg_isready", "-d", db_url],
-                        capture_output=True,
-                        text=True,
-                        timeout=5,
-                    )
-                    hc_results.append(
-                        f"Database: {'✅ UP' if r.returncode == 0 else '❌ DOWN'}"
-                    )
-                except Exception:
-                    hc_results.append("Database: ❓ pg_isready not available")
-            else:
-                hc_results.append("Database: (DATABASE_URL not configured)")
-        return "\n".join(hc_results) if hc_results else "No services checked"
+        return health_check_handler(
+            inp,
+            port=getattr(settings, "port", 8000),
+            database_url=str(getattr(settings, "database_url", "") or ""),
+        )
 
     def task_progress_h(inp: dict[str, Any]) -> str:
         tprog_task_id = inp.get("task_id")

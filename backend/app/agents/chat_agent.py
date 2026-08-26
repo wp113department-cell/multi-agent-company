@@ -174,6 +174,7 @@ from app.tools.execution.docker_ps import docker_ps_handler
 from app.tools.execution.estimate_complexity import estimate_complexity_handler
 from app.tools.filesystem.find_function_body import find_function_body_handler
 from app.tools.git.generate_release_notes import generate_release_notes_handler
+from app.tools.execution.health_check import health_check_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -3204,32 +3205,25 @@ class ChatAgent:
             return await asyncio.to_thread(disk_usage_handler, root, repo, inp)
 
         if tool_name == "health_check":
+            # tool_enhance.md productionization pass, tool #113 (2026-08-26)
+            # — no injection surface here (`service` only selects a
+            # fixed branch, port/database_url come from settings, never
+            # the LLM), but simplified onto the shared, canonical
+            # handler for consistency with this initiative's list-args-
+            # only convention and to share the one real fix
+            # (mon_health_check ignored `service` and read an
+            # undocumented `url` field, a real SSRF surface) in one
+            # place. Full account in health_check_handler()'s own
+            # module docstring.
             from app.config import get_settings as _gs2
 
-            hc_svc = str(inp.get("service", "all"))
             hc_settings = _gs2()
-            hc_port = getattr(hc_settings, "port", 8000)
-            hc_res: list[str] = []
-            if hc_svc in ("all", "backend"):
-                hc_curl = f"curl -s -o /dev/null -w '%{{http_code}}' http://localhost:{hc_port}/health 2>/dev/null || echo 000"
-                hc_code = (
-                    await asyncio.to_thread(_run_subprocess, hc_curl, repo, 5)
-                ).strip()
-                hc_res.append(
-                    f"Backend (:{hc_port}/health): {'✅ UP' if hc_code == '200' else f'⚠️ HTTP {hc_code}'}"
-                )
-            if hc_svc in ("all", "db"):
-                hc_db_url = getattr(hc_settings, "database_url", "")
-                if hc_db_url:
-                    hc_pg = await asyncio.to_thread(
-                        _run_subprocess, f"pg_isready -d '{hc_db_url}' 2>&1", repo, 5
-                    )
-                    hc_res.append(
-                        f"Database: {'✅ UP' if 'accepting' in hc_pg else f'❌ {hc_pg[:80]}'}"
-                    )
-                else:
-                    hc_res.append("Database: (DATABASE_URL not configured)")
-            return "\n".join(hc_res) if hc_res else "No services checked"
+            return await asyncio.to_thread(
+                health_check_handler,
+                inp,
+                getattr(hc_settings, "port", 8000),
+                str(getattr(hc_settings, "database_url", "") or ""),
+            )
 
         if tool_name == "task_progress":
             from app.config import get_settings as _gs3
