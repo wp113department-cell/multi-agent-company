@@ -178,6 +178,7 @@ from app.tools.execution.health_check import health_check_handler
 from app.tools.execution.memory_usage import memory_usage_handler
 from app.tools.database.task_history_query import task_history_query
 from app.tools.database.task_progress import task_progress_handler
+from app.tools.execution.analyze_error import analyze_error_handler
 from app.tools.execution.read_logs import read_logs_handler
 from app.tools.filesystem.organize_imports import organize_imports_handler
 from app.tools.filesystem.yaml_validate import yaml_validate_handler
@@ -2482,71 +2483,14 @@ class ChatAgent:
             return read_logs_handler(root, repo, inp)
 
         if tool_name == "analyze_error":
-            ae_error = str(inp["error"])
-            ae_lines = ae_error.strip().splitlines()
-            exception_line = ""
-            for ae_line in reversed(ae_lines):
-                if any(
-                    x in ae_line
-                    for x in ("Error:", "Exception:", "Warning:", "Traceback")
-                ):
-                    exception_line = ae_line
-                    break
-            ae_frames: list[str] = []
-            ae_i = 0
-            while ae_i < len(ae_lines):
-                ae_line = ae_lines[ae_i]
-                if ae_line.strip().startswith("File ") and "line " in ae_line:
-                    if not any(
-                        x in ae_line for x in ("site-packages", ".venv", "lib/python")
-                    ):
-                        code_line = (
-                            ae_lines[ae_i + 1].strip()
-                            if ae_i + 1 < len(ae_lines)
-                            else ""
-                        )
-                        ae_frames.append(f"  {ae_line.strip()}\n    → {code_line}")
-                    ae_i += 2
-                else:
-                    ae_i += 1
-            ae_result = ["=== Error Analysis ==="]
-            if exception_line:
-                ae_result.append(f"Exception: {exception_line.strip()}")
-            if ae_frames:
-                ae_result.append(f"\nRelevant frames ({len(ae_frames)}):")
-                ae_result.extend(ae_frames[-5:])
-            ae_low = ae_error.lower()
-            suggestions: list[str] = []
-            if "modulenotfounderror" in ae_low or "importerror" in ae_low:
-                suggestions.append(
-                    "→ Missing dependency — run: pip install -r requirements.txt"
-                )
-            elif "attributeerror" in ae_low:
-                suggestions.append(
-                    "→ Object doesn't have this attribute — check spelling and type"
-                )
-            elif "typeerror" in ae_low:
-                suggestions.append(
-                    "→ Wrong argument type/count — check function signature"
-                )
-            elif "keyerror" in ae_low:
-                suggestions.append("→ Key not found — use .get() or check key exists")
-            elif "filenotfounderror" in ae_low:
-                suggestions.append(
-                    "→ Path doesn't exist — verify path and working directory"
-                )
-            elif "connectionrefusederror" in ae_low or "connection refused" in ae_low:
-                suggestions.append(
-                    "→ Service not running — check if DB/Redis/backend is started"
-                )
-            elif "syntaxerror" in ae_low:
-                suggestions.append(
-                    "→ Python syntax error — check brackets, colons, indentation"
-                )
-            if suggestions:
-                ae_result.append("\nSuggestions:")
-                ae_result.extend(suggestions)
-            return "\n".join(ae_result)
+            # tool_enhance.md productionization pass, tool #121
+            # (2026-08-26) — the real fix (a sibling implementation's
+            # severe field-name mismatch) lives in the shared
+            # analyze_error_handler(); this dispatch was already
+            # correct but a near-duplicate of that same logic, now
+            # unified onto the one shared version (which also picks up
+            # a "valueerror" suggestion branch this copy was missing).
+            return analyze_error_handler(inp)
 
         if tool_name == "task_history_query":
             # tool_enhance.md productionization pass, tool #118

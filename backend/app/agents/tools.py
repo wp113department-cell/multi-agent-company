@@ -306,6 +306,10 @@ from app.tools.execution.docker_logs import (
     DOCKER_LOGS_TOOL,
     docker_logs_handler,
 )
+from app.tools.execution.analyze_error import (
+    ANALYZE_ERROR_TOOL,
+    analyze_error_handler,
+)
 from app.tools.execution.docker_ps import (
     DOCKER_PS_TOOL,
     docker_ps_handler,
@@ -576,6 +580,7 @@ _READ_LOGS_TOOL = READ_LOGS_TOOL
 _TASK_HISTORY_QUERY_TOOL = TASK_HISTORY_QUERY_TOOL
 _TASK_PROGRESS_TOOL = TASK_PROGRESS_TOOL
 _YAML_VALIDATE_TOOL = YAML_VALIDATE_TOOL
+_ANALYZE_ERROR_TOOL = ANALYZE_ERROR_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2590,20 +2595,9 @@ _LIST_CLASSES_TOOL = LIST_CLASSES_TOOL
 # moved to app/tools/execution/read_logs.py as READ_LOGS_TOOL —
 # tool_enhance.md productionization pass, tool #116 (2026-08-26).
 
-_ANALYZE_ERROR_TOOL = {
-    "name": "analyze_error",
-    "description": "Parse and analyze a Python traceback or error message. Returns structured breakdown with suggestions.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "error": {
-                "type": "string",
-                "description": "Error message or full traceback to analyze",
-            },
-        },
-        "required": ["error"],
-    },
-}
+# moved to app/tools/execution/analyze_error.py as ANALYZE_ERROR_TOOL /
+# analyze_error_handler() — tool_enhance.md productionization pass,
+# tool #121 (2026-08-26).
 
 # ---------------------------------------------------------------------------
 # NEW TOOL SPECS — Batch 7: Database tools
@@ -3417,14 +3411,14 @@ def make_bug_fix_handlers(repo_path: str) -> dict[str, Any]:
     def bf_find_function_body(inp: dict[str, Any]) -> str:
         return find_function_body_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #121 (2026-08-26) —
+    # was a severe field-name mismatch (read `inp.get("traceback",
+    # "")` while the schema requires and every real caller sends
+    # `error`) causing a 100% functional-failure rate — proved live: a
+    # genuine traceback always produced "(no error markers found)".
+    # Now delegates to the shared, correct, full-contract handler.
     def bf_analyze_error(inp: dict[str, Any]) -> str:
-        tb = str(inp.get("traceback", ""))
-        lines = [
-            ln
-            for ln in tb.splitlines()
-            if "File" in ln or "Error" in ln or "Exception" in ln
-        ]
-        return "\n".join(lines[:40]) or "(no error markers found)"
+        return analyze_error_handler(inp)
 
     # tool_enhance.md productionization pass, tool #116 (2026-08-26) —
     # was a worktree-escape arbitrary file READ (`root / log_path`
@@ -7090,71 +7084,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def read_logs(inp: dict[str, Any]) -> str:
         return read_logs_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #121 (2026-08-26) —
+    # the real fix lives in the shared analyze_error_handler(); see
+    # that function's own module docstring.
     def analyze_error(inp: dict[str, Any]) -> str:
-        ae_error = str(inp["error"])
-        ae_lines = ae_error.strip().splitlines()
-        exception_line = ""
-        for ae_line in reversed(ae_lines):
-            if any(
-                x in ae_line for x in ("Error:", "Exception:", "Warning:", "Traceback")
-            ):
-                exception_line = ae_line
-                break
-        frames: list[str] = []
-        ae_i = 0
-        while ae_i < len(ae_lines):
-            ae_line = ae_lines[ae_i]
-            if ae_line.strip().startswith("File ") and "line " in ae_line:
-                if not any(
-                    x in ae_line for x in ("site-packages", ".venv", "lib/python")
-                ):
-                    code_line = (
-                        ae_lines[ae_i + 1].strip() if ae_i + 1 < len(ae_lines) else ""
-                    )
-                    frames.append(f"  {ae_line.strip()}\n    → {code_line}")
-                ae_i += 2
-            else:
-                ae_i += 1
-        ae_result = ["=== Error Analysis ==="]
-        if exception_line:
-            ae_result.append(f"Exception: {exception_line.strip()}")
-        if frames:
-            ae_result.append(f"\nRelevant frames ({len(frames)}):")
-            ae_result.extend(frames[-5:])
-        ae_low = ae_error.lower()
-        suggestions: list[str] = []
-        if "modulenotfounderror" in ae_low or "importerror" in ae_low:
-            suggestions.append(
-                "→ Missing dependency — run: pip install -r requirements.txt"
-            )
-        elif "attributeerror" in ae_low:
-            suggestions.append(
-                "→ Object doesn't have this attribute — check spelling and type"
-            )
-        elif "typeerror" in ae_low:
-            suggestions.append("→ Wrong argument type/count — check function signature")
-        elif "keyerror" in ae_low:
-            suggestions.append(
-                "→ Dictionary key not found — use .get() or check key exists"
-            )
-        elif "filenotfounderror" in ae_low:
-            suggestions.append(
-                "→ Path doesn't exist — verify path and working directory"
-            )
-        elif "connectionrefusederror" in ae_low or "connection refused" in ae_low:
-            suggestions.append(
-                "→ Service not running — check if DB/Redis/backend is started"
-            )
-        elif "syntaxerror" in ae_low:
-            suggestions.append(
-                "→ Python syntax error — check brackets, colons, indentation"
-            )
-        elif "valueerror" in ae_low:
-            suggestions.append("→ Invalid value — validate input before passing it")
-        if suggestions:
-            ae_result.append("\nSuggestions:")
-            ae_result.extend(suggestions)
-        return "\n".join(ae_result)
+        return analyze_error_handler(inp)
 
     # =========================================================================
     # BATCH 7 — Database tools

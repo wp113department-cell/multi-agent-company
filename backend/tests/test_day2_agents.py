@@ -224,9 +224,18 @@ class TestBugFixHandlers:
         assert "sample.py" in result or "hello" in result or "no calls" in result
 
     def test_analyze_error_extracts_markers(self, tmp_repo: Path) -> None:
+        # tool_enhance.md productionization pass, tool #121 (2026-08-26)
+        # — this test previously called the handler with `traceback`,
+        # matching bf_analyze_error's own (buggy) field-name mismatch
+        # rather than the tool's real schema, which requires `error`
+        # (and is what every real caller — the LLM — actually sends).
+        # That let the test pass while the real tool was 100% broken
+        # for every genuine call. Fixed to use the schema's real field
+        # name, now that bf_analyze_error delegates to the shared,
+        # correct analyze_error_handler().
         h = make_bug_fix_handlers(str(tmp_repo))
         tb = "Traceback (most recent call last):\n  File 'app.py', line 10, in run\nValueError: bad input"
-        result = h["analyze_error"]({"traceback": tb})
+        result = h["analyze_error"]({"error": tb})
         assert "ValueError" in result or "File" in result
 
     def test_submit_stores_result(self, tmp_repo: Path) -> None:
