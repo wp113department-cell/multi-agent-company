@@ -171,6 +171,7 @@ from app.tools.execution.diagnose_deployment_failure import gather_deployment_di
 from app.tools.execution.disk_usage import disk_usage_handler
 from app.tools.execution.docker_logs import docker_logs_handler
 from app.tools.execution.docker_ps import docker_ps_handler
+from app.tools.execution.estimate_complexity import estimate_complexity_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -3406,6 +3407,19 @@ class ChatAgent:
             # scanning of installed package licenses, per AUDIT_Q_BATCH11
             # §85).
             return await asyncio.to_thread(check_license_compliance_handler)
+
+        if tool_name == "estimate_complexity":
+            # tool_enhance.md productionization pass, tool #110
+            # (2026-08-26) — this tool was "advertised but never
+            # dispatched" (same class as tools #4/#6/#22/#25/#33/#44/
+            # #45/#46/#48/#100/#103): zero chat_agent.py dispatch existed
+            # despite being fully advertised in CHAT_TOOLS. No
+            # LLM-controlled input reaches disk or a subprocess here
+            # (pure word/file counting), so there is no injection/
+            # worktree surface to close — the only real fix is wiring
+            # the dispatch to the existing, already-correct
+            # estimate_complexity_handler().
+            return await asyncio.to_thread(estimate_complexity_handler, inp)
 
         # ========== AUDIT_Q_BATCH07 §13 — Human interaction ==========
 

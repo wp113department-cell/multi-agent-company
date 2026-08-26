@@ -298,6 +298,10 @@ from app.tools.execution.docker_ps import (
     DOCKER_PS_TOOL,
     docker_ps_handler,
 )
+from app.tools.execution.estimate_complexity import (
+    ESTIMATE_COMPLEXITY_TOOL,
+    estimate_complexity_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -522,6 +526,7 @@ _DIAGNOSE_DEPLOYMENT_FAILURE_TOOL = DIAGNOSE_DEPLOYMENT_FAILURE_TOOL
 _DISK_USAGE_TOOL = DISK_USAGE_TOOL
 _DOCKER_LOGS_TOOL = DOCKER_LOGS_TOOL
 _DOCKER_PS_TOOL = DOCKER_PS_TOOL
+_ESTIMATE_COMPLEXITY_TOOL = ESTIMATE_COMPLEXITY_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -4475,25 +4480,15 @@ _KNOWN_ISSUES_WRITE_TOOL: dict[str, Any] = {
 
 # --- Day 3C: Planning + docs tool specs ---
 
-_ESTIMATE_COMPLEXITY_TOOL: dict[str, Any] = {
-    "name": "estimate_complexity",
-    "description": "Estimate task complexity as XS/S/M/L/XL based on heuristics (description token count, file scope).",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "description": {
-                "type": "string",
-                "description": "Task or feature description to estimate",
-            },
-            "context_paths": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Optional list of files/dirs likely involved",
-            },
-        },
-        "required": ["description"],
-    },
-}
+# tool_enhance.md productionization pass, tool #110 (2026-08-26) —
+# moved to app/tools/execution/estimate_complexity.py as
+# ESTIMATE_COMPLEXITY_TOOL (imported above, aliased to
+# _ESTIMATE_COMPLEXITY_TOOL after the import block). Real finding:
+# advertised in CHAT_TOOLS but never dispatched by chat_agent.py —
+# same class as tools #4/#6/#22/#25/#33/#44/#45/#46/#48/#100/#103.
+# No LLM-controlled input reaches disk or a subprocess (pure word/file
+# counting), so no injection/worktree surface exists. See that
+# module's own docstring for the full account.
 
 _SUMMARIZE_FOLDER_TOOL: dict[str, Any] = {
     "name": "summarize_folder",
@@ -5073,24 +5068,14 @@ def make_sprint_planner_handlers(repo_path: str) -> dict[str, Any]:
     handlers = make_read_only_handlers(repo_path)
     sprint_result: dict[str, Any] = {}
 
+    # tool_enhance.md productionization pass, tool #110 (2026-08-26) — the
+    # real fix (this tool was advertised in CHAT_TOOLS but chat_agent.py
+    # had ZERO dispatch — same class as tools #4/#6/#22/#25/#33/#44/
+    # #45/#46/#48/#100/#103) lives in the shared
+    # estimate_complexity_handler(); see that function's own module
+    # docstring.
     def sp_estimate_complexity(inp: dict[str, Any]) -> str:
-        description = str(inp.get("description", ""))
-        context_paths = list(inp.get("context_paths", []))
-        # Heuristic: word count of description + number of context files
-        word_count = len(description.split())
-        file_count = len(context_paths)
-        score = word_count + file_count * 10
-        if score < 30:
-            size = "XS"
-        elif score < 80:
-            size = "S"
-        elif score < 200:
-            size = "M"
-        elif score < 500:
-            size = "L"
-        else:
-            size = "XL"
-        return f"Estimated complexity: {size} (word_count={word_count}, context_files={file_count}, score={score})"
+        return estimate_complexity_handler(inp)
 
     def sp_submit(inp: dict[str, Any]) -> str:
         sprint_result.update(inp)
@@ -8344,23 +8329,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # DAY 3C — Planning + docs tools
     # =========================================================================
 
+    # tool_enhance.md productionization pass, tool #110 (2026-08-26) — the
+    # real fix lives in the shared estimate_complexity_handler(); see
+    # that function's own module docstring.
     def estimate_complexity_h(inp: dict[str, Any]) -> str:
-        description = str(inp.get("description", ""))
-        context_paths = list(inp.get("context_paths", []))
-        word_count = len(description.split())
-        file_count = len(context_paths)
-        score = word_count + file_count * 10
-        if score < 30:
-            size = "XS"
-        elif score < 80:
-            size = "S"
-        elif score < 200:
-            size = "M"
-        elif score < 500:
-            size = "L"
-        else:
-            size = "XL"
-        return f"Estimated complexity: {size} (word_count={word_count}, context_files={file_count}, score={score})"
+        return estimate_complexity_handler(inp)
 
     def summarize_folder_h(inp: dict[str, Any]) -> str:
         sf_path = str(inp.get("path", "."))
