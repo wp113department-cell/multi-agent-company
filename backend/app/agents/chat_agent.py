@@ -176,6 +176,7 @@ from app.tools.filesystem.find_function_body import find_function_body_handler
 from app.tools.git.generate_release_notes import generate_release_notes_handler
 from app.tools.execution.health_check import health_check_handler
 from app.tools.execution.memory_usage import memory_usage_handler
+from app.tools.filesystem.organize_imports import organize_imports_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -1774,19 +1775,13 @@ class ChatAgent:
             return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 30)
 
         if tool_name == "organize_imports":
-            rel = str(inp["path"])
-            oi_target = root / rel
-            if not oi_target.exists():
-                return f"[ERROR] File not found: {rel}"
-            # AUDIT_Q_BATCH01 §1 "Windows terminal support" — was hardcoded
-            # POSIX `source`, silently never activating the venv on Windows
-            # (relative path is safe here: _run_subprocess always passes
-            # cwd=repo, so the shell's starting directory is already repo,
-            # matching this line's previous absolute-path behavior exactly
-            # on POSIX while adding a real Windows branch).
-            activate = _venv_activate_snippet()
-            cmd_s = f"{activate} && python -m ruff check --select I --fix {str(oi_target)} 2>&1"
-            return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 30)
+            # tool_enhance.md productionization pass, tool #115
+            # (2026-08-26) — was a genuine, direct shell-injection RCE
+            # (oi_target interpolated completely unquoted into a
+            # shell=True command) PLUS a worktree-escape arbitrary
+            # write (`root / rel` never validated). Now delegates to
+            # the shared, list-args, worktree-validated handler.
+            return organize_imports_handler(root, repo, inp)
 
         if tool_name == "insert_at_line":
             return insert_at_line_handler(root, repo, inp)

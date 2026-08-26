@@ -322,6 +322,10 @@ from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
 )
+from app.tools.filesystem.organize_imports import (
+    ORGANIZE_IMPORTS_TOOL,
+    organize_imports_handler,
+)
 from app.tools.filesystem.file_info import (
     FILE_INFO_TOOL,
     file_info_handler,
@@ -547,6 +551,7 @@ _FIND_FUNCTION_BODY_TOOL = FIND_FUNCTION_BODY_TOOL
 _GENERATE_RELEASE_NOTES_TOOL = GENERATE_RELEASE_NOTES_TOOL
 _HEALTH_CHECK_TOOL = HEALTH_CHECK_TOOL
 _MEMORY_USAGE_TOOL = MEMORY_USAGE_TOOL
+_ORGANIZE_IMPORTS_TOOL = ORGANIZE_IMPORTS_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2330,20 +2335,9 @@ _FORMAT_FILE_TOOL = {
     },
 }
 
-_ORGANIZE_IMPORTS_TOOL = {
-    "name": "organize_imports",
-    "description": "Sort and organize import statements in a Python file using ruff (isort-compatible). Also removes unused imports.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Python file path relative to repo root",
-            },
-        },
-        "required": ["path"],
-    },
-}
+# moved to app/tools/filesystem/organize_imports.py as
+# ORGANIZE_IMPORTS_TOOL — tool_enhance.md productionization pass, tool
+# #115 (2026-08-26).
 
 # moved to app/tools/filesystem/insert_at_line.py as INSERT_AT_LINE_TOOL — tool_enhance.md productionization pass, tool #47 (2026-08-19).
 
@@ -5357,8 +5351,6 @@ def make_ai_engineer_handlers(repo_path: str) -> dict[str, Any]:
 
 def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
     """Handler factory for Cleanup Agent."""
-    import subprocess as _sp
-
     root = Path(repo_path)
     handlers = make_read_only_handlers(repo_path)
     cleanup_result: dict[str, Any] = {}
@@ -5394,21 +5386,12 @@ def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
                 continue
         return "\n".join(results[:80]) or "(none found)"
 
+    # tool_enhance.md productionization pass, tool #115 (2026-08-26) —
+    # was `isort --diff` (preview-only, diverging from the schema's own
+    # promise of an actually-applied `ruff`-based fix). Now delegates
+    # to the shared, already-worktree-validated handler.
     def cu_organize_imports(inp: dict[str, Any]) -> str:
-        cu_path = str(inp["path"])
-        if _is_protected_path(cu_path, repo_path):
-            return f"[POLICY DENIED] Protected path: {cu_path}"
-        try:
-            r = _sp.run(
-                ["python", "-m", "isort", cu_path, "--diff"],
-                capture_output=True,
-                text=True,
-                cwd=str(root),
-                timeout=30,
-            )
-            return (r.stdout + r.stderr).strip() or "(no changes needed)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return organize_imports_handler(root, repo_path, inp)
 
     # moved to app/tools/filesystem/delete_file.py as delete_file_handler
     # — tool_enhance.md productionization pass, tool #17 (2026-08-17).
@@ -6846,24 +6829,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         )
         return (r.stdout + r.stderr).strip() or f"Formatted {rel}"
 
+    # tool_enhance.md productionization pass, tool #115 (2026-08-26) —
+    # was a worktree-escape arbitrary-write (`root / rel` never
+    # validated, so an absolute `rel` discarded `root` entirely) via
+    # `shell=True` (shlex.quote on the target only protects against
+    # shell metacharacters, not a path that resolves outside the
+    # worktree). Now delegates to the shared, list-args,
+    # worktree-validated handler.
     def organize_imports(inp: dict[str, Any]) -> str:
-        import shlex as _shlex
-
-        rel = str(inp["path"])
-        oi_target = root / rel
-        if not oi_target.exists():
-            return f"[ERROR] File not found: {rel}"
-        activate = (
-            _venv_activate_snippet()
-        )  # cwd=repo_path is passed to subprocess.run below
-        cmd = (
-            f"{activate} && python -m ruff check --select I --fix "
-            f"{_shlex.quote(str(oi_target))} 2>&1"
-        )
-        r = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=30
-        )
-        return (r.stdout + r.stderr).strip() or f"Imports organized in {rel}"
+        return organize_imports_handler(root, repo_path, inp)
 
     # moved to app/tools/filesystem/insert_at_line.py — this now delegates to the shared insert_at_line_handler()
     def insert_at_line(inp: dict[str, Any]) -> str:
