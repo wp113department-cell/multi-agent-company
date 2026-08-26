@@ -188,6 +188,7 @@ from app.tools.filesystem.base64_encode import base64_encode_handler
 from app.tools.filesystem.compare_files import compare_files_handler
 from app.tools.filesystem.copy_file import copy_file_handler
 from app.tools.filesystem.count_lines import count_lines_handler
+from app.tools.filesystem.create_directory import create_directory_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -3453,6 +3454,15 @@ class ChatAgent:
             # #100/#103/#110/#112/#118/#120/#122/#126/#129. Delegates to
             # the shared, fixed handler.
             return await asyncio.to_thread(cpu_profile_handler, repo, inp)
+
+        if tool_name == "create_directory":
+            # tool_enhance.md productionization pass, tool #131
+            # (2026-08-26) — worktree validation was already correct;
+            # was advertised in CHAT_TOOLS but never dispatched here at
+            # all, same dispatch class as tools
+            # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130.
+            # Delegates to the shared, already-correct handler.
+            return await asyncio.to_thread(create_directory_handler, root, repo, inp)
 
         return f"[ERROR] Unknown tool: {tool_name}"
 

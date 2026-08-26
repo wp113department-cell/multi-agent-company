@@ -374,6 +374,10 @@ from app.tools.filesystem.count_lines import (
     COUNT_LINES_TOOL,
     count_lines_handler,
 )
+from app.tools.filesystem.create_directory import (
+    CREATE_DIRECTORY_TOOL,
+    create_directory_handler,
+)
 from app.tools.filesystem.file_info import (
     FILE_INFO_TOOL,
     file_info_handler,
@@ -611,6 +615,7 @@ _CPU_PROFILE_TOOL = CPU_PROFILE_TOOL
 _COMPARE_FILES_TOOL = COMPARE_FILES_TOOL
 _COPY_FILE_TOOL = COPY_FILE_TOOL
 _COUNT_LINES_TOOL = COUNT_LINES_TOOL
+_CREATE_DIRECTORY_TOOL = CREATE_DIRECTORY_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -5835,20 +5840,9 @@ _PIP_LIST_TOOL: dict[str, Any] = {
 }
 
 # -- Utilities --
-_CREATE_DIRECTORY_TOOL: dict[str, Any] = {
-    "name": "create_directory",
-    "description": "Create a directory (and any missing parents). Equivalent to mkdir -p.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Directory path to create (relative to repo root)",
-            },
-        },
-        "required": ["path"],
-    },
-}
+# moved to app/tools/filesystem/create_directory.py as
+# CREATE_DIRECTORY_TOOL / create_directory_handler() — tool_enhance.md
+# productionization pass, tool #131 (2026-08-26).
 _HTTP_REQUEST_TOOL: dict[str, Any] = {
     "name": "http_request",
     "description": "Make an HTTP request (GET/POST/PUT/DELETE) with custom headers and body. Returns status code and response body.",
@@ -9070,16 +9064,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] pip_list: {e}"
 
+    # tool_enhance.md productionization pass, tool #131 (2026-08-26) —
+    # worktree validation was already correct here; the real fix
+    # (chat_agent.py had zero dispatch) lives in the shared handler;
+    # see that module's own docstring.
     def create_directory_h(inp: dict[str, Any]) -> str:
-        path = str(inp["path"])
-        if _is_protected_path(path, repo_path):
-            return f"[POLICY DENIED] Cannot create directory in protected path: {path}"
-        target = root / path
-        try:
-            target.mkdir(parents=True, exist_ok=True)
-            return f"Created directory: {path}"
-        except Exception as e:
-            return f"[ERROR] create_directory: {e}"
+        return create_directory_handler(root, repo_path, inp)
 
     def http_request_h(inp: dict[str, Any]) -> str:
         import urllib.request as _req
