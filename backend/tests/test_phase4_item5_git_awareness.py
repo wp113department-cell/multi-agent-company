@@ -29,6 +29,12 @@ _EXCLUDE = {
     "tools.py",
     "chat_agent.py",
     "manager.py",
+    # Internal-only engine for the bhaskar_tool fallback (app/tools/agents/
+    # bhaskar_tool.py) — no AGENT_CONTRACT, never fleet-selectable, not a
+    # real dispatchable agent. Its docstring happens to mention the string
+    # "AGENT_CONTRACT" in prose, which is why it needs an explicit
+    # exclusion rather than relying on the text-search filter below.
+    "bhaskar_agent.py",
 }
 
 

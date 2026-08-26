@@ -54,6 +54,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "write_file",
         "submit_docs",
         "record_learning",
+        "bhaskar_tool",
     ],
     "input_types": [
         "epic_title",

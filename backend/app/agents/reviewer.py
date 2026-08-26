@@ -51,6 +51,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "analyze_file",
         "submit_review",
         "record_learning",
+        "bhaskar_tool",
     ],
     "input_types": ["task_id", "subtask_id", "diff", "plan", "repo_path"],
     "output_types": ["ReviewResult"],

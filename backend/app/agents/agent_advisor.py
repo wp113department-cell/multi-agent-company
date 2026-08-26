@@ -40,6 +40,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "audit_log_read",
         "submit_enhancement_request",
         "record_learning",
+        "bhaskar_tool",
     ],
     "input_types": ["scan_trigger"],
     "output_types": ["AgentResult"],

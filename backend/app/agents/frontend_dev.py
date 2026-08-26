@@ -82,6 +82,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         # is True (see run_frontend_dev's subtask_proposal_sink parameter),
         # matching backend_dev's own identical, pre-existing pattern.
         "propose_subtask",
+        "bhaskar_tool",
     ],
     "input_types": ["task_id", "subtask_id", "plan", "worktree_path", "repo_path"],
     "output_types": ["files_changed", "tokens_in", "tokens_out"],

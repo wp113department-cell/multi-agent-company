@@ -44,6 +44,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "yaml_validate",
         "submit_runbook_generator_agent",
         "record_learning",
+        "bhaskar_tool",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],

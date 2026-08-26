@@ -77,6 +77,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         # base_graph.py's dispatch-authorization gate already refuse an
         # unadvertised/unauthorized call either way).
         "delegate_to_agent",
+        "bhaskar_tool",
     ],
     "input_types": ["task_id", "subtask_id", "plan", "worktree_path", "repo_path"],
     "output_types": ["files_changed", "tokens_in", "tokens_out"],

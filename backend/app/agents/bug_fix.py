@@ -53,6 +53,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "submit_patch",
         "record_learning",
         "delegate_to_agent",
+        "bhaskar_tool",
     ],
     "input_types": ["task_id", "error_description", "repo_path"],
     "output_types": ["AgentResult"],

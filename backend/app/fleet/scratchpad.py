@@ -24,11 +24,12 @@ not left to accumulate here indefinitely.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -141,6 +142,119 @@ async def clear_epic_scratchpad(epic_id: str, db: AsyncSession) -> int:
         return 0
 
 
+async def delete_entry(epic_id: str, key: str, db: AsyncSession) -> bool:
+    """Delete one scratchpad entry by (epic_id, key). Returns True if a row
+    was actually deleted, False if nothing matched or on any failure — never
+    raises. Generic primitive; used by write_entry_with_eviction below and
+    available standalone for any caller that needs to explicitly discard one
+    entry rather than wait for TTL/epic-completion cleanup."""
+    try:
+        result = await db.execute(
+            delete(EpicScratchpad).where(
+                EpicScratchpad.epic_id == epic_id, EpicScratchpad.key == key
+            )
+        )
+        await db.commit()
+        return bool(getattr(result, "rowcount", 0))
+    except Exception as exc:
+        logger.warning(
+            "scratchpad: delete_entry failed for epic=%s key=%s: %s",
+            epic_id,
+            key,
+            exc,
+        )
+        await db.rollback()
+        return False
+
+
+async def write_entry_with_eviction(
+    epic_id: str,
+    key: str,
+    value: Any,
+    agent_name: str,
+    db: AsyncSession,
+    *,
+    max_entries: int,
+    ttl_seconds: int,
+) -> bool:
+    """Concurrency-safe upsert for a bounded-size cache namespace within one
+    epic_id (built for bhaskar_tool's generated-script cache —
+    app/tools/agents/bhaskar_tool.py — but generically usable for any
+    caller that needs a real "keep at most N entries" invariant, which plain
+    write_entry does not provide).
+
+    Two concurrent callers racing to insert past max_entries could otherwise
+    both read the same "current count" and "oldest row", both decide to
+    evict the same row, and both insert — overshooting the bound. Serialized
+    here via a Postgres transaction-scoped advisory lock
+    (pg_advisory_xact_lock, auto-released on commit/rollback) keyed by a
+    hash of epic_id, so only one writer for the same epic_id namespace runs
+    its read-evict-insert sequence at a time. Distinct epic_id namespaces
+    never contend with each other.
+
+    Never raises — returns False on any failure, matching every other
+    function in this module."""
+    try:
+        lock_key = int.from_bytes(
+            hashlib.sha256(epic_id.encode()).digest()[:8], "big", signed=True
+        )
+        await db.execute(select(func.pg_advisory_xact_lock(lock_key)))
+
+        existing = (
+            await db.execute(
+                select(EpicScratchpad).where(
+                    EpicScratchpad.epic_id == epic_id, EpicScratchpad.key == key
+                )
+            )
+        ).scalar_one_or_none()
+
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+
+        if existing is not None:
+            existing.value = value
+            existing.agent_name = agent_name
+            existing.expires_at = expires_at
+        else:
+            now = datetime.now(timezone.utc)
+            live = (
+                (
+                    await db.execute(
+                        select(EpicScratchpad)
+                        .where(
+                            EpicScratchpad.epic_id == epic_id,
+                            EpicScratchpad.expires_at > now,
+                        )
+                        .order_by(EpicScratchpad.created_at.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if max_entries > 0 and len(live) >= max_entries:
+                for stale_row in live[: len(live) - max_entries + 1]:
+                    await db.delete(stale_row)
+            db.add(
+                EpicScratchpad(
+                    epic_id=epic_id,
+                    key=key,
+                    value=value,
+                    agent_name=agent_name,
+                    expires_at=expires_at,
+                )
+            )
+        await db.commit()
+        return True
+    except Exception as exc:
+        logger.warning(
+            "scratchpad: write_entry_with_eviction failed for epic=%s key=%s: %s",
+            epic_id,
+            key,
+            exc,
+        )
+        await db.rollback()
+        return False
+
+
 async def expire_stale_entries(db: AsyncSession) -> int:
     """Delete every scratchpad entry past its TTL, regardless of epic state
     — the backstop for an epic that stalls or is abandoned without ever
@@ -219,3 +333,63 @@ def read_entries_sync(epic_id: str, key: str | None = None) -> list[dict[str, An
     except Exception as exc:
         logger.warning("read_entries_sync failed: %s", exc)
         return []
+
+
+def delete_entry_sync(epic_id: str, key: str) -> bool:
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> bool:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                return await delete_entry(epic_id, key, session)
+        finally:
+            await engine.dispose()
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        logger.warning("delete_entry_sync failed: %s", exc)
+        return False
+
+
+def write_entry_with_eviction_sync(
+    epic_id: str,
+    key: str,
+    value: Any,
+    agent_name: str,
+    *,
+    max_entries: int,
+    ttl_seconds: int,
+) -> bool:
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> bool:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                return await write_entry_with_eviction(
+                    epic_id,
+                    key,
+                    value,
+                    agent_name,
+                    session,
+                    max_entries=max_entries,
+                    ttl_seconds=ttl_seconds,
+                )
+        finally:
+            await engine.dispose()
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        logger.warning("write_entry_with_eviction_sync failed: %s", exc)
+        return False

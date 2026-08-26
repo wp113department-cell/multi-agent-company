@@ -49,6 +49,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "git_commit_change",
         "submit_fix",
         "record_learning",
+        "bhaskar_tool",
     ],
     "input_types": ["scan_trigger", "enhancement_request_id"],
     "output_types": ["AgentResult"],

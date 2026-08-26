@@ -1440,6 +1440,41 @@ TOOL_MANIFEST: dict[str, ToolManifestEntry] = {
             "tools doesn't declare it gets it filtered out automatically."
         ),
     ),
+    "bhaskar_tool": ToolManifestEntry(
+        purpose=(
+            "Universal 'no existing tool fits' fallback (app/tools/agents/"
+            "bhaskar_tool.py). Runs a small internal LangGraph sub-agent "
+            "(app/agents/bhaskar_agent.py) that researches, writes, and "
+            "tests a one-off Python script for a task no other tool "
+            "covers, inside a hardened sandbox (app/agents/"
+            "bhaskar_sandbox.py: isolated tempdir, scrubbed environment, "
+            "kernel resource limits, per-connection SSRF-guarded network "
+            "access). Bounded by settings.bhaskar_tool_timeout_seconds, "
+            "settings.bhaskar_tool_max_retries, and settings."
+            "bhaskar_tool_max_turns — never an unbounded loop. Successful "
+            "generations are cached (settings.bhaskar_tool_cache_"
+            "max_entries entries, settings.bhaskar_tool_cache_ttl_seconds "
+            "TTL) via app.fleet.scratchpad's concurrency-safe "
+            "write_entry_with_eviction."
+        ),
+        permissions=["execute", "network"],
+        timeout_s=210,  # bhaskar_tool_timeout_seconds default (180s) + slack
+        retry_policy="none",  # bhaskar_tool_handler owns its own bounded retry
+        verification_required=True,
+        risk_level="high",
+        notes=(
+            "high risk deliberately: LLM-driven code generation AND "
+            "execution, even though execution is sandboxed. Marking it "
+            "high-risk here reinforces plan14 Day 1's dynamic-tool-"
+            "selection contract-drift check — any agent whose runtime "
+            "tool list includes this tool but whose own AgentCapability."
+            "tools doesn't declare it gets it filtered out automatically, "
+            "same reinforcement pattern as delegate_to_agent above. The "
+            "sandbox (app/agents/bhaskar_sandbox.py) is defense-in-depth, "
+            "not a hard multi-tenant boundary — see that module's own "
+            "docstring for exactly what it does and does not guarantee."
+        ),
+    ),
     "propose_subtask": ToolManifestEntry(
         purpose=(
             "plan14 follow-on #2 (Dynamic Subtask Creation) — proposes a "

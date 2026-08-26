@@ -45,6 +45,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "check_license_compliance",
         "submit_dependency_security_agent",
         "record_learning",
+        "bhaskar_tool",
     ],
     "input_types": ["task_id", "description", "repo_path"],
     "output_types": ["AgentResult"],

@@ -1561,6 +1561,67 @@ class Settings(BaseSettings):
         description="Max lifetime (seconds) of an epic_file_locks row before it's treated as expired/stale, even if the epic never explicitly completes. Default 4 hours. Locks are also released outright the moment their epic completes — this TTL only matters for an epic that stalls or crashes mid-coding.",
     )
 
+    # bhaskar_tool — universal "no existing tool fits" fallback. A small
+    # LangGraph sub-agent (app/agents/bhaskar_agent.py) that writes and runs
+    # a one-off script for a task no other tool covers, exposed to every
+    # agent via app/tools/agents/bhaskar_tool.py. Every limit below is real,
+    # enforced runtime behavior (bounded turns, wall-clock timeout, retry
+    # cap, sandbox resource limits) per tool_enhance.md's own "declared
+    # timeout metadata is NOT enough — verify actual enforcement" bar, not
+    # decorative configuration.
+    bhaskar_tool_enabled: bool = Field(
+        default=True,
+        description="Kill switch. If false, bhaskar_tool's handler refuses every call outright with a structured error, regardless of cache state.",
+    )
+    bhaskar_tool_cache_max_entries: int = Field(
+        default=4,
+        description="Max number of generated scripts kept in the bhaskar_tool cache (app/fleet/scratchpad.py's EpicScratchpad, sentinel epic_id) at once. Writing a 5th evicts the oldest — enforced atomically via write_entry_with_eviction's Postgres advisory lock so concurrent callers can never overshoot this bound.",
+    )
+    bhaskar_tool_cache_ttl_seconds: int = Field(
+        default=1200,
+        description="Lifetime (seconds) of one cached generated script — 20 minutes. Enforced the same way every other scratchpad entry's TTL is: read_entries only returns rows where expires_at > now, so an expired entry is simply invisible to a cache lookup even before any sweep deletes it.",
+    )
+    bhaskar_tool_max_turns: int = Field(
+        default=6,
+        description="max_turns passed to run_agent_graph() for the internal bhaskar_agent run. Deliberately small — this is a narrow-scope 'research + write + test one script' helper, not a general coding agent, so an LLM stuck in a loop is bounded early.",
+    )
+    bhaskar_tool_max_retries: int = Field(
+        default=1,
+        description="Max additional attempts if the internal bhaskar_agent run raises or finishes with status='failed'. Bounded, not infinite — after this many retries bhaskar_tool_handler returns a structured failure instead of trying again.",
+    )
+    bhaskar_tool_timeout_seconds: float = Field(
+        default=180.0,
+        description="Hard wall-clock bound (via asyncio.wait_for) on one bhaskar_agent attempt, independent of max_turns — a single slow turn (e.g. a hung LLM call) cannot hang the calling agent's turn past this.",
+    )
+    bhaskar_tool_sandbox_script_timeout_seconds: int = Field(
+        default=45,
+        description="Per-execution timeout for a script run inside bhaskar_tool's own sandbox (app/agents/bhaskar_sandbox.py) — both during generation (the internal agent testing its own draft) and on a cache-hit replay. Deliberately smaller than run_python_snippet's MAX_PYTHON_SNIPPET_TIMEOUT_SECONDS (300s): bhaskar-generated scripts are short, single-purpose, and run un-reviewed, so the ceiling is tighter.",
+    )
+    bhaskar_tool_sandbox_max_memory_mb: int = Field(
+        default=512,
+        description="RLIMIT_AS (address space) cap, in MB, applied to a sandboxed script's subprocess via preexec_fn on POSIX. A generated script that tries to allocate past this is killed by the kernel, not by application-level bookkeeping.",
+    )
+    bhaskar_tool_sandbox_max_output_file_mb: int = Field(
+        default=10,
+        description="RLIMIT_FSIZE cap, in MB, applied to a sandboxed script's subprocess — the kernel refuses any single file write past this size, regardless of what the generated code tries to do.",
+    )
+    bhaskar_tool_sandbox_max_output_chars: int = Field(
+        default=4000,
+        description="Max characters of captured stdout/stderr returned from a sandboxed script run — matches this codebase's existing run_python_snippet truncation convention (5000 chars) at a slightly tighter bound appropriate to a short single-purpose script.",
+    )
+    bhaskar_tool_sandbox_allow_network: bool = Field(
+        default=True,
+        description="Whether sandboxed scripts may make outbound HTTP(S) connections at all. When true, every connection attempt is still individually validated by the injected network guard (app/agents/bhaskar_sandbox.py) — resolved once, every address checked (IPv4/IPv6, including IPv4-mapped IPv6) against the same private/loopback/link-local/reserved-range denylist app/agents/tool_security.py's _ssrf_denial_reason already enforces for fetch_url/check_url_status, then connected via a pinned validated IP rather than a second DNS lookup — set false to disable network entirely for an extra-cautious deployment. Left true by default because bhaskar_tool's own stated purpose (e.g. scraping a public site) requires it; the guard itself, not this flag, is what carries the security weight.",
+    )
+    bhaskar_tool_sandbox_max_total_disk_mb: int = Field(
+        default=50,
+        description="Total sandbox-directory size cap (MB), polled live by run_sandboxed_python's watchdog and enforced by killing the process group — distinct from bhaskar_tool_sandbox_max_output_file_mb's RLIMIT_FSIZE, which only bounds any ONE file's size, not the sum of many small ones.",
+    )
+    bhaskar_tool_sandbox_max_processes: int = Field(
+        default=32,
+        description="RLIMIT_NPROC cap applied to a sandboxed script's subprocess on POSIX — stops a fork-bomb-shaped script. Kept generous: RLIMIT_NPROC counts against the real UID system-wide (this sandbox process runs as the same OS user as the rest of the app, not a separate/dropped-privilege user), so a too-low value risks unpredictable failures unrelated to the sandboxed script itself.",
+    )
+
     # Groq (optional — enables Groq as LLM backend when ANTHROPIC_API_KEY is unavailable)
     groq_api_key: str = Field(
         default="",

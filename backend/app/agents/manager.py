@@ -164,6 +164,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "plan",
         "repo_path",
         "epic_id",
+        "bhaskar_tool",
     ],
     "output_types": ["EpicApprovalPackage"],
     "side_effects": [

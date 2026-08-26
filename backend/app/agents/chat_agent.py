@@ -115,6 +115,7 @@ from app.config import get_settings
 from app.models.chat import ChatSession
 from app.policy.engine import check_command, check_path_in_worktree
 from app.repo_tools import ast_engine as _ast_engine
+from app.tools.agents.bhaskar_tool import bhaskar_tool_handler
 from app.tools.agents.memory_write import write_memory_key
 from app.tools.browser.browser_tools import (
     browser_click_handler,
@@ -3463,6 +3464,23 @@ class ChatAgent:
             # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130.
             # Delegates to the shared, already-correct handler.
             return await asyncio.to_thread(create_directory_handler, root, repo, inp)
+
+        if tool_name == "bhaskar_tool":
+            # Universal "no existing tool fits" fallback —
+            # app/tools/agents/bhaskar_tool.py. Explicit dispatch added
+            # here deliberately (not left to fall through to "Unknown
+            # tool"), matching the exact class of gap tools
+            # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131 all
+            # had to fix: being wired into CHAT_TOOLS/make_chat_handlers
+            # is not enough — chat_agent.py's own real dispatch loop
+            # requires its own explicit branch.
+            return await asyncio.to_thread(
+                bhaskar_tool_handler,
+                repo,
+                inp,
+                agent_name="chat_agent",
+                trace_id=self._current_trace_id,
+            )
 
         return f"[ERROR] Unknown tool: {tool_name}"
 

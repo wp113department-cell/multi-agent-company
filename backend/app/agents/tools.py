@@ -76,6 +76,10 @@ from app.tools.browser.browser_tools import (
     browser_screenshot_handler as browser_screenshot_handler,
     browser_type_handler as browser_type_handler,
 )
+from app.tools.agents.bhaskar_tool import (
+    BHASKAR_TOOL as BHASKAR_TOOL,
+    bhaskar_tool_handler as bhaskar_tool_handler,
+)
 from app.tools.agents.delegate import (
     DELEGATE_TO_AGENT_TOOL as _DELEGATE_TO_AGENT_TOOL,
     make_delegate_to_agent_handler as make_delegate_to_agent_handler,
@@ -881,6 +885,14 @@ READ_ONLY_TOOLS = [
     # tool where the CANONICAL implementation itself, not just
     # chat_agent.py's copy, had the worktree-escape bug.
     ANALYZE_FILE_TOOL,
+    # Universal "no existing tool fits" fallback — app/tools/agents/
+    # bhaskar_tool.py. Deliberately appended LAST: RESEARCH_TOOLS and other
+    # bundles index into READ_ONLY_TOOLS positionally (see the comment at
+    # the top of this list), so every existing index stays valid.
+    # Every agent built on READ_ONLY_TOOLS (the vast majority — see
+    # make_read_only_handlers below for the matching handler wiring)
+    # inherits it automatically.
+    BHASKAR_TOOL,
 ]
 
 # ---------------------------------------------------------------------------
@@ -1292,6 +1304,14 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
     def analyze_file(inp: dict[str, Any]) -> str:
         return analyze_file_handler(base, repo_path, inp)
 
+    # Universal fallback — see app/tools/agents/bhaskar_tool.py. agent_name
+    # is a generic marker here (make_read_only_handlers has no notion of
+    # which specific agent it's building handlers for — it's shared by ~26
+    # agent families); only used for the cached-script row's own metadata,
+    # not for any authorization decision.
+    def bhaskar_tool(inp: dict[str, Any]) -> str:
+        return bhaskar_tool_handler(repo_path, inp, agent_name="agent")
+
     return {
         "read_file": read_file,
         "read_files": read_files,
@@ -1309,6 +1329,7 @@ def make_read_only_handlers(repo_path: str) -> dict[str, Any]:
         "git_show": git_show,
         "git_blame": git_blame,
         "analyze_file": analyze_file,
+        "bhaskar_tool": bhaskar_tool,
     }
 
 
@@ -1549,6 +1570,7 @@ RESEARCH_TOOLS = [
     _WEB_SEARCH_TOOL,
     _SUBMIT_RESEARCH_TOOL,
     RECORD_LEARNING_TOOL,
+    BHASKAR_TOOL,
 ]
 
 
