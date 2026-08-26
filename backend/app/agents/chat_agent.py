@@ -175,6 +175,7 @@ from app.tools.execution.estimate_complexity import estimate_complexity_handler
 from app.tools.filesystem.find_function_body import find_function_body_handler
 from app.tools.git.generate_release_notes import generate_release_notes_handler
 from app.tools.execution.health_check import health_check_handler
+from app.tools.execution.memory_usage import memory_usage_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -3190,8 +3191,14 @@ class ChatAgent:
             return await asyncio.to_thread(cpu_usage_handler)
 
         if tool_name == "memory_usage":
-            memus_cmd = "cat /proc/meminfo 2>/dev/null | head -8 || free -h 2>/dev/null"
-            return await asyncio.to_thread(_run_subprocess, memus_cmd, repo, 5)
+            # tool_enhance.md productionization pass, tool #114 (2026-08-26)
+            # — no injection surface (empty schema), but simplified onto
+            # the shared, canonical handler for consistency with this
+            # initiative's list-args-only convention and to share the
+            # one real fix (mon_memory_usage had no try/except around
+            # its free subprocess call) in one place. Full account in
+            # memory_usage_handler()'s own module docstring.
+            return await asyncio.to_thread(memory_usage_handler)
 
         if tool_name == "disk_usage":
             # tool_enhance.md productionization pass, tool #107 (2026-08-25)

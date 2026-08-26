@@ -314,6 +314,10 @@ from app.tools.execution.health_check import (
     HEALTH_CHECK_TOOL,
     health_check_handler,
 )
+from app.tools.execution.memory_usage import (
+    MEMORY_USAGE_TOOL,
+    memory_usage_handler,
+)
 from app.tools.filesystem.file_exists import (
     FILE_EXISTS_TOOL,
     file_exists_handler,
@@ -542,6 +546,7 @@ _ESTIMATE_COMPLEXITY_TOOL = ESTIMATE_COMPLEXITY_TOOL
 _FIND_FUNCTION_BODY_TOOL = FIND_FUNCTION_BODY_TOOL
 _GENERATE_RELEASE_NOTES_TOOL = GENERATE_RELEASE_NOTES_TOOL
 _HEALTH_CHECK_TOOL = HEALTH_CHECK_TOOL
+_MEMORY_USAGE_TOOL = MEMORY_USAGE_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -2920,15 +2925,14 @@ _FIND_TEST_TOOL = {
 # the exact same moment. See that module's own docstring for the full
 # account.
 
-_MEMORY_USAGE_TOOL = {
-    "name": "memory_usage",
-    "description": "Get current RAM usage from /proc/meminfo or the `free` command.",
-    "input_schema": {
-        "type": "object",
-        "properties": {},
-        "required": [],
-    },
-}
+# tool_enhance.md productionization pass, tool #114 (2026-08-26) —
+# moved to app/tools/execution/memory_usage.py as MEMORY_USAGE_TOOL
+# (imported above, aliased to _MEMORY_USAGE_TOOL after the import
+# block). No LLM-controlled input (empty schema). Real finding:
+# mon_memory_usage had no try/except around its free subprocess call
+# — an uncaught FileNotFoundError if free is missing — and never
+# preferred /proc/meminfo like its siblings. See that module's own
+# docstring.
 
 # tool_enhance.md productionization pass, tool #107 (2026-08-25) —
 # moved to app/tools/execution/disk_usage.py as DISK_USAGE_TOOL
@@ -4308,9 +4312,14 @@ def make_monitoring_agent_handlers(repo_path: str) -> dict[str, Any]:
     def mon_cpu_usage(inp: dict[str, Any]) -> str:
         return cpu_usage_handler()
 
+    # tool_enhance.md productionization pass, tool #114 (2026-08-26) — the
+    # real fix (this implementation had no try/except around the free
+    # subprocess call, an uncaught FileNotFoundError if free is
+    # missing, and never preferred /proc/meminfo like its siblings)
+    # lives in the shared memory_usage_handler(); see that function's
+    # own module docstring.
     def mon_memory_usage(inp: dict[str, Any]) -> str:
-        r = subprocess.run(["free", "-h"], capture_output=True, text=True, timeout=5)
-        return r.stdout.strip() or "[ERROR] Could not read memory"
+        return memory_usage_handler()
 
     # tool_enhance.md productionization pass, tool #107 (2026-08-25) — the
     # real fix (this implementation diverged from the tool's own
@@ -7930,18 +7939,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def cpu_usage_h(inp: dict[str, Any]) -> str:
         return cpu_usage_handler()
 
+    # tool_enhance.md productionization pass, tool #114 (2026-08-26) — the
+    # real fix lives in the shared memory_usage_handler(); see that
+    # function's own module docstring.
     def memory_usage_h(inp: dict[str, Any]) -> str:
-        try:
-            mem_info = Path("/proc/meminfo")
-            if mem_info.exists():
-                rows = mem_info.read_text().splitlines()[:8]
-                return "\n".join(rows)
-            r = subprocess.run(
-                ["free", "-h"], capture_output=True, text=True, timeout=5
-            )
-            return r.stdout.strip() or "(no memory info)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return memory_usage_handler()
 
     # tool_enhance.md productionization pass, tool #107 (2026-08-25) — the
     # real fix (zero worktree-boundary validation on `path`) lives in
