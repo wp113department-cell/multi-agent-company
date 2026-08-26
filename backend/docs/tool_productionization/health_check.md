@@ -87,9 +87,10 @@ confirmed passing unchanged (3 tests).
 
 This tool is the final one (5) of the current #109-#113 batch. Its own
 new hardening tests (11/11 pass) and directly-referencing existing
-tests (3/3 pass) are the per-tool verification gate; the full suite
-now runs to close out the batch, per
-`feedback_tool_enhance_batch_full_suite` memory.
+tests (3/3 pass) are the per-tool verification gate. The full suite
+was run to close out the batch (with the project's dev Postgres
+confirmed reachable beforehand, avoiding the prior day's false-failure
+pattern): **6046 passed, 52 skipped, 18 deselected, 0 failed**.
 
 This turn was also verified via a comprehensive `mypy
 --ignore-missing-imports app/agents/ app/tools/execution/
