@@ -13,10 +13,10 @@ network guard, resource limits, timeout).
 from __future__ import annotations
 
 import json
+import os
 import pathlib
-import socket
 import time
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -28,7 +28,6 @@ from app.agents.tools import (
     CODER_TOOLS,
     READ_ONLY_TOOLS,
     RESEARCH_TOOLS,
-    make_chat_handlers,
     make_read_only_handlers,
 )
 from app.config import get_settings
@@ -47,6 +46,38 @@ AGENTS_DIR = pathlib.Path(__file__).resolve().parents[1] / "app" / "agents"
 def _agent(repo: str) -> ChatAgent:
     session = ChatSession(session_id="td_bhaskar_tool", repo_path=repo)
     return ChatAgent(session)
+
+
+# ---------------------------------------------------------------------------
+# Module-level (picklable — required by multiprocessing's spawn start
+# method) test targets for _run_in_bounded_process. Must stay at module
+# level: a closure/lambda/nested function cannot be pickled to hand off to
+# a spawned child process.
+# ---------------------------------------------------------------------------
+
+
+def _hang_and_touch_marker(payload, result_queue) -> None:  # noqa: ANN001
+    import time as _time
+
+    _time.sleep(2)
+    with open(payload, "w") as f:
+        f.write("still alive")
+    result_queue.put({"ok": True})
+
+
+def _hang_forever(payload, result_queue) -> None:  # noqa: ANN001
+    import time as _time
+
+    _time.sleep(30)
+    result_queue.put({"ok": True})
+
+
+def _fast_success_target(payload, result_queue) -> None:  # noqa: ANN001
+    result_queue.put({"ok": True, "marker": "real-result"})
+
+
+def _raising_target(payload, result_queue) -> None:  # noqa: ANN001
+    raise RuntimeError("deliberate test failure")
 
 
 # ---------------------------------------------------------------------------
@@ -93,27 +124,9 @@ def test_tool_manifest_entry_exists_and_is_high_risk() -> None:
     assert is_high_risk("bhaskar_tool")
 
 
-def test_every_agent_contract_declares_bhaskar_tool() -> None:
-    """Static source scan mirroring the rollout codemod's own verification
-    — every AGENT_CONTRACT["allowed_tools"] list must declare
-    "bhaskar_tool", except executive.py's deliberately tool-less
-    "pure text generation" agent."""
-    missing = []
-    for f in sorted(AGENTS_DIR.glob("*.py")):
-        if f.name == "executive.py":
-            continue
-        text = f.read_text()
-        if "AGENT_CONTRACT" not in text or '"allowed_tools"' not in text:
-            continue
-        if '"bhaskar_tool"' not in text:
-            missing.append(f.name)
-    assert missing == []
-
-
-def test_executive_agent_deliberately_excluded() -> None:
-    text = (AGENTS_DIR / "executive.py").read_text()
-    assert '"allowed_tools": [],' in text
-    assert '"bhaskar_tool"' not in text
+# Real-import-based versions of these two checks (not a source-text scan)
+# live further down: test_real_agent_contract_declares_bhaskar_tool and
+# test_real_executive_contract_has_zero_tools_by_design.
 
 
 # ---------------------------------------------------------------------------
@@ -329,7 +342,7 @@ def test_handler_cache_hit_replays_without_regenerating(
         raise AssertionError("should not regenerate on a cache hit")
 
     monkeypatch.setattr(
-        "app.agents.bhaskar_agent.run_bhaskar_agent", fail_if_called
+        "app.tools.agents.bhaskar_tool._run_with_process_bound", fail_if_called
     )
 
     result = json.loads(
@@ -356,7 +369,7 @@ def test_handler_stale_cache_falls_through_to_regeneration(
         lambda *a, **kw: True,
     )
     monkeypatch.setattr(
-        "app.agents.bhaskar_agent.run_bhaskar_agent",
+        "app.tools.agents.bhaskar_tool._run_with_process_bound",
         lambda *a, **kw: {
             "ok": True,
             "code": "print('fresh')",
@@ -396,7 +409,9 @@ def test_handler_retries_bounded_then_reports_failure(
             "tokens_out": 0,
         }
 
-    monkeypatch.setattr("app.agents.bhaskar_agent.run_bhaskar_agent", always_fail)
+    monkeypatch.setattr(
+        "app.tools.agents.bhaskar_tool._run_with_process_bound", always_fail
+    )
 
     result = json.loads(
         bhaskar_tool_handler(str(tmp_path), {"task_description": "always fails"})
@@ -412,7 +427,7 @@ def test_handler_caches_on_successful_generation(
         "app.fleet.scratchpad.read_entries_sync", lambda epic_id, key=None: []
     )
     monkeypatch.setattr(
-        "app.agents.bhaskar_agent.run_bhaskar_agent",
+        "app.tools.agents.bhaskar_tool._run_with_process_bound",
         lambda *a, **kw: {
             "ok": True,
             "code": "print('x')",
@@ -442,33 +457,96 @@ def test_handler_caches_on_successful_generation(
 
 
 # ---------------------------------------------------------------------------
-# Wall-clock timeout — must return promptly, not block for the full hang
+# Wall-clock timeout — real process-level cancellation (not just "the
+# caller stops waiting" — the underlying process must actually be killed)
 # ---------------------------------------------------------------------------
 
 
 def test_handler_bounds_wall_clock_on_a_hanging_generation(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(get_settings(), "bhaskar_tool_timeout_seconds", 0.3)
+    """Handler-level: bhaskar_tool_handler treats a timeout-shaped failure
+    from _run_with_process_bound like any other bounded-attempt failure
+    (retry-eligible, never raises). The real subprocess spawn/kill
+    mechanism itself is exercised directly below, against
+    _run_in_bounded_process — a parent-process monkeypatch of
+    run_bhaskar_agent has no effect on a spawned child (see
+    _run_in_bounded_process's own docstring), so it cannot be used to
+    simulate a hang at this layer."""
     monkeypatch.setattr(get_settings(), "bhaskar_tool_max_retries", 0)
     monkeypatch.setattr(
         "app.fleet.scratchpad.read_entries_sync", lambda epic_id, key=None: []
     )
+    monkeypatch.setattr(
+        "app.tools.agents.bhaskar_tool._run_with_process_bound",
+        lambda *a, **kw: {
+            "ok": False,
+            "code": "",
+            "result_summary": "",
+            "tested_output": "",
+            "error": "bhaskar_agent exceeded its 0.3s wall-clock bound and was terminated",
+            "tokens_in": 0,
+            "tokens_out": 0,
+        },
+    )
 
-    def hang(*a, **kw):
-        time.sleep(5)
-        return {"ok": True, "code": "x", "result_summary": "", "tested_output": ""}
-
-    monkeypatch.setattr("app.agents.bhaskar_agent.run_bhaskar_agent", hang)
-
-    start = time.monotonic()
     result = json.loads(
         bhaskar_tool_handler(str(tmp_path), {"task_description": "hangs forever"})
     )
+    assert result["ok"] is False
+    assert "terminated" in result["error"]
+
+
+def test_run_in_bounded_process_actually_terminates_a_real_hang(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Real subprocess: spawns an actual process that sleeps for 30s,
+    bounded to a 0.5s deadline. Proves genuine termination, not just a
+    prompt return while the child lingers — the child is supposed to
+    write a marker file 2s after waking from sleep; if it were merely
+    orphaned (not really killed) rather than terminated, the marker would
+    still appear after we wait past that point."""
+    from app.tools.agents.bhaskar_tool import _run_in_bounded_process
+
+    marker = str(tmp_path / "still_alive_marker.txt")
+    start = time.monotonic()
+    result = _run_in_bounded_process(_hang_and_touch_marker, marker, 0.5)
     elapsed = time.monotonic() - start
 
     assert result["ok"] is False
-    assert elapsed < 2.0  # bounded near the 0.3s deadline, not the 5s hang
+    assert "terminated" in result["error"]
+    assert elapsed < 5.0  # bounded near the 0.5s deadline + kill grace period
+
+    time.sleep(3.0)  # well past when an orphaned (not killed) process would write it
+    assert not pathlib.Path(marker).exists()
+
+
+def test_run_in_bounded_process_bounded_across_repeated_calls() -> None:
+    """Repeated timeout behavior — each call is independently bounded, no
+    growth/leak across consecutive hangs."""
+    from app.tools.agents.bhaskar_tool import _run_in_bounded_process
+
+    for _ in range(3):
+        start = time.monotonic()
+        result = _run_in_bounded_process(_hang_forever, None, 0.3)
+        elapsed = time.monotonic() - start
+        assert result["ok"] is False
+        assert elapsed < 5.0
+
+
+def test_run_in_bounded_process_returns_real_result_when_fast() -> None:
+    from app.tools.agents.bhaskar_tool import _run_in_bounded_process
+
+    result = _run_in_bounded_process(_fast_success_target, None, 10)
+    assert result == {"ok": True, "marker": "real-result"}
+
+
+def test_run_in_bounded_process_handles_a_raising_target() -> None:
+    from app.tools.agents.bhaskar_tool import _run_in_bounded_process
+
+    result = _run_in_bounded_process(_raising_target, None, 10)
+    assert result["ok"] is False
+    assert "exit code" in result["error"] or "raised" in result["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -638,3 +716,436 @@ def test_sandbox_falls_back_to_current_interpreter_without_venv(
 
     resolved = _resolve_python_executable(str(tmp_path))
     assert resolved == sys.executable
+
+
+# ---------------------------------------------------------------------------
+# Sandbox — filesystem guard: absolute paths, traversal, symlink escape
+# ---------------------------------------------------------------------------
+
+
+def test_sandbox_blocks_absolute_path_read() -> None:
+    result = run_sandboxed_python(
+        "open('/etc/passwd').read()\nprint('READ_OK')", timeout=10
+    )
+    assert result["success"] is False
+    assert "read access" in result["output"] and "blocked" in result["output"]
+    assert "READ_OK" not in result["output"]
+
+
+def test_sandbox_blocks_absolute_path_write(tmp_path: pathlib.Path) -> None:
+    target = tmp_path / "escape.txt"
+    code = f"open({str(target)!r}, 'w').write('pwned')\nprint('WRITE_OK')"
+    result = run_sandboxed_python(code, timeout=10)
+    assert result["success"] is False
+    assert "write access" in result["output"] and "blocked" in result["output"]
+    assert not target.exists()
+
+
+def test_sandbox_blocks_relative_path_traversal() -> None:
+    code = (
+        "open('../../../../etc/hostname').read()\n"
+        "print('READ_OK')"
+    )
+    result = run_sandboxed_python(code, timeout=10)
+    assert result["success"] is False
+    assert "blocked" in result["output"]
+    assert "READ_OK" not in result["output"]
+
+
+def test_sandbox_blocks_symlink_creation() -> None:
+    code = (
+        "import os\n"
+        "os.symlink('/etc/passwd', 'evil_link')\n"
+        "print('SYMLINK_CREATED')\n"
+        "print(open('evil_link').read())\n"
+    )
+    result = run_sandboxed_python(code, timeout=10)
+    assert result["success"] is False
+    assert "creating symlinks is blocked" in result["output"]
+    assert "SYMLINK_CREATED" not in result["output"]
+
+
+def test_sandbox_blocks_reading_through_a_preexisting_symlink(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Belt-and-suspenders: even if a symlink somehow existed (os.symlink
+    itself is blocked above — this proves the SECOND, independent layer:
+    open()'s own realpath-based validation resolves symlinks before
+    checking containment, so a symlink pointing outside the sandbox is
+    caught even if created by some other means)."""
+    from app.agents import bhaskar_sandbox as sandbox_module
+
+    secret = tmp_path / "secret.txt"
+    secret.write_text("top secret")
+    link_name = "preexisting_link"
+
+    orig_build_script = sandbox_module._build_script
+
+    def build_with_preexisting_symlink(code, sandbox_dir, allow_network):
+        os.symlink(str(secret), os.path.join(sandbox_dir, link_name))
+        return orig_build_script(code, sandbox_dir, allow_network)
+
+    with patch.object(
+        sandbox_module, "_build_script", build_with_preexisting_symlink
+    ):
+        result = run_sandboxed_python(
+            f"print(open({link_name!r}).read())", timeout=10
+        )
+    assert result["success"] is False
+    assert "blocked" in result["output"]
+    assert "top secret" not in result["output"]
+
+
+def test_sandbox_normal_relative_io_still_works_under_fs_guard() -> None:
+    code = (
+        "with open('local.txt', 'w') as f:\n"
+        "    f.write('hello')\n"
+        "print(open('local.txt').read())\n"
+    )
+    result = run_sandboxed_python(code, timeout=10)
+    assert result["success"] is True
+    assert "hello" in result["output"]
+
+
+def test_sandbox_real_imports_still_work_under_fs_guard() -> None:
+    """The filesystem guard allowlists read-only access to the Python
+    installation itself (sys.prefix/base_prefix/exec_prefix) — without
+    this, `import` would break entirely since the import machinery reads
+    stdlib/site-packages files via open()."""
+    code = (
+        "import json, hashlib, urllib.request\n"
+        "print('ok:', hashlib.sha256(b'x').hexdigest()[:8])\n"
+    )
+    result = run_sandboxed_python(code, timeout=10)
+    assert result["success"] is True
+    assert "ok:" in result["output"]
+
+
+# ---------------------------------------------------------------------------
+# Sandbox — IPv4 + IPv6 SSRF, including the IPv4-mapped-IPv6 bypass class
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "127.0.0.1",  # IPv4 loopback
+        "169.254.169.254",  # IPv4 cloud metadata
+        "::1",  # IPv6 loopback
+        "fd00::1",  # IPv6 unique-local (RFC 4193)
+        "::ffff:127.0.0.1",  # IPv4-mapped IPv6 loopback — the classic bypass
+    ],
+)
+def test_sandbox_blocks_ssrf_targets_v4_and_v6(host: str) -> None:
+    code = (
+        "import socket\n"
+        "try:\n"
+        f"    socket.create_connection(({host!r}, 80), timeout=3)\n"
+        "    print('CONNECTED')\n"
+        "except PermissionError as e:\n"
+        "    print('BLOCKED:' + str(e))\n"
+        "except Exception as e:\n"
+        "    print('OTHER:' + repr(e))\n"
+    )
+    result = run_sandboxed_python(code, timeout=10, allow_network=True)
+    assert "BLOCKED:" in result["output"]
+    assert "CONNECTED" not in result["output"]
+
+
+def test_sandbox_pinned_connect_does_not_break_real_tls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for a real bug found while hardening this guard: pinning
+    the validated IP for the actual TCP connect (to close the DNS-
+    rebinding/TOCTOU gap) must not break the higher-level HTTP/TLS layer,
+    which still needs the ORIGINAL hostname for its Host header and SNI.
+    Requires real network access to a public host — skipped if unavailable
+    rather than failing the suite on a sandboxed/offline CI runner."""
+    code = (
+        "import urllib.request\n"
+        "try:\n"
+        "    with urllib.request.urlopen('https://example.com', timeout=8) as r:\n"
+        "        print('HTTPS_OK', r.status)\n"
+        "except Exception as e:\n"
+        "    print('HTTPS_FAILED:' + repr(e))\n"
+    )
+    result = run_sandboxed_python(code, timeout=15, allow_network=True)
+    if "HTTPS_FAILED" in result["output"]:
+        pytest.skip(f"no real network access in this environment: {result['output']}")
+    assert "HTTPS_OK 200" in result["output"]
+
+
+def test_sandbox_connect_ex_is_also_guarded() -> None:
+    code = (
+        "import socket\n"
+        "s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
+        "try:\n"
+        "    s.connect_ex(('127.0.0.1', 80))\n"
+        "    print('NOT_BLOCKED')\n"
+        "except PermissionError as e:\n"
+        "    print('BLOCKED:' + str(e))\n"
+    )
+    result = run_sandboxed_python(code, timeout=10, allow_network=True)
+    assert "BLOCKED:" in result["output"]
+
+
+def test_sandbox_af_unix_connections_are_blocked() -> None:
+    code = (
+        "import socket\n"
+        "s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
+        "try:\n"
+        "    s.connect('/var/run/docker.sock')\n"
+        "    print('NOT_BLOCKED')\n"
+        "except PermissionError as e:\n"
+        "    print('BLOCKED:' + str(e))\n"
+        "except Exception as e:\n"
+        "    print('OTHER:' + repr(e))\n"
+    )
+    result = run_sandboxed_python(code, timeout=10, allow_network=True)
+    assert "BLOCKED:" in result["output"]
+
+
+# ---------------------------------------------------------------------------
+# Sandbox — total resource protection: disk quota (beyond single-file
+# RLIMIT_FSIZE) and process-count (fork-bomb) limits
+# ---------------------------------------------------------------------------
+
+
+def test_sandbox_enforces_total_disk_quota_across_many_small_files() -> None:
+    """RLIMIT_FSIZE only bounds any ONE file's size — a script writing many
+    small files under that per-file cap could otherwise consume unbounded
+    total disk. The watchdog in run_sandboxed_python polls total sandbox
+    directory size independently of RLIMIT_FSIZE."""
+    code = (
+        "import time\n"
+        "i = 0\n"
+        "while True:\n"
+        "    with open(f'file_{i}.bin', 'wb') as f:\n"
+        "        f.write(b'0' * (200 * 1024))\n"  # 200KB — well under any per-file cap
+        "    i += 1\n"
+        "    time.sleep(0.05)\n"
+    )
+    start = time.monotonic()
+    result = run_sandboxed_python(
+        code, timeout=30, max_output_file_mb=50, max_total_disk_mb=2
+    )
+    elapsed = time.monotonic() - start
+    assert result["success"] is False
+    assert "disk quota" in result["output"]
+    assert elapsed < 10.0  # caught by the watchdog, not the 30s timeout
+
+
+def test_sandbox_enforces_max_process_count() -> None:
+    code = (
+        "import subprocess, sys\n"
+        "procs = []\n"
+        "spawned = 0\n"
+        "try:\n"
+        "    for i in range(60):\n"
+        "        procs.append(subprocess.Popen(\n"
+        "            [sys.executable, '-c', 'import time; time.sleep(3)']\n"
+        "        ))\n"
+        "        spawned += 1\n"
+        "    print('SPAWNED_ALL', spawned)\n"
+        "except OSError as e:\n"
+        "    print('BLOCKED_AT', spawned, repr(e))\n"
+        "finally:\n"
+        "    for p in procs:\n"
+        "        try:\n"
+        "            p.kill()\n"
+        "        except Exception:\n"
+        "            pass\n"
+    )
+    result = run_sandboxed_python(code, timeout=20, max_processes=5)
+    assert "BLOCKED_AT" in result["output"]
+    assert "SPAWNED_ALL" not in result["output"]
+
+
+def test_sandbox_repeated_timeouts_stay_bounded() -> None:
+    """Repeated timeout behavior — no growth/leak across consecutive
+    real sandboxed hangs."""
+    for _ in range(3):
+        start = time.monotonic()
+        result = run_sandboxed_python(
+            "import time\ntime.sleep(30)", timeout=1
+        )
+        elapsed = time.monotonic() - start
+        assert result["success"] is False
+        assert elapsed < 10.0
+
+
+# ---------------------------------------------------------------------------
+# Final verification — the exact submitted code is re-executed; a script
+# that fails at runtime is genuinely rejected, not trusted on the agent's
+# say-so. NOT a claim of semantic/task-correctness verification (see
+# bhaskar_agent.py's own docstring) — only that it actually runs.
+# ---------------------------------------------------------------------------
+
+
+def test_run_bhaskar_agent_rejects_a_submission_that_fails_final_verification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.agents import bhaskar_agent as bhaskar_agent_module
+
+    def fake_run_agent_graph(*, tool_handlers, **kw):
+        tool_handlers["submit_generated_tool"](
+            {"code": "raise RuntimeError('broken')", "result_summary": "claims success"}
+        )
+        return {"tokens_in": 10, "tokens_out": 10}
+
+    monkeypatch.setattr(bhaskar_agent_module, "run_agent_graph", fake_run_agent_graph)
+
+    result = bhaskar_agent_module.run_bhaskar_agent("task", "", "/tmp")
+    assert result["ok"] is False
+    assert result["code"] == "raise RuntimeError('broken')"
+    assert "final verification" in result["error"]
+
+
+def test_run_bhaskar_agent_accepts_a_submission_that_passes_final_verification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.agents import bhaskar_agent as bhaskar_agent_module
+
+    def fake_run_agent_graph(*, tool_handlers, **kw):
+        tool_handlers["submit_generated_tool"](
+            {"code": "print('42')", "result_summary": "answer"}
+        )
+        return {"tokens_in": 3, "tokens_out": 3}
+
+    monkeypatch.setattr(bhaskar_agent_module, "run_agent_graph", fake_run_agent_graph)
+
+    result = bhaskar_agent_module.run_bhaskar_agent("task", "", "/tmp")
+    assert result["ok"] is True
+    assert "42" in result["tested_output"]
+
+
+def test_run_bhaskar_agent_fails_when_nothing_was_ever_submitted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.agents import bhaskar_agent as bhaskar_agent_module
+
+    monkeypatch.setattr(
+        bhaskar_agent_module,
+        "run_agent_graph",
+        lambda **kw: {"tokens_in": 1, "tokens_out": 1},
+    )
+
+    result = bhaskar_agent_module.run_bhaskar_agent("task", "", "/tmp")
+    assert result["ok"] is False
+    assert "did not submit" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# Cache safety — a cache-hit replay must go through the SAME hardened
+# sandbox as fresh generation, never a shortcut that bypasses the guards
+# ---------------------------------------------------------------------------
+
+
+def test_handler_cache_replay_enforces_the_real_sandbox_guards(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """UNMOCKED run_sandboxed_python: a cached script that tries to reach
+    a private IP is genuinely blocked on replay (not bypassed), which —
+    per the stale-cache-falls-through design — triggers regeneration."""
+    monkeypatch.setattr(
+        "app.fleet.scratchpad.read_entries_sync",
+        lambda epic_id, key=None: [
+            {
+                "value": {
+                    "code": (
+                        "import socket\n"
+                        "socket.create_connection(('127.0.0.1', 80), timeout=2)\n"
+                        "print('should not reach here')"
+                    )
+                }
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "app.fleet.scratchpad.write_entry_with_eviction_sync", lambda *a, **kw: True
+    )
+    monkeypatch.setattr(
+        "app.tools.agents.bhaskar_tool._run_with_process_bound",
+        lambda *a, **kw: {
+            "ok": True,
+            "code": "print('fresh')",
+            "result_summary": "fresh",
+            "tested_output": "fresh",
+            "error": "",
+            "tokens_in": 1,
+            "tokens_out": 1,
+        },
+    )
+
+    result = json.loads(
+        bhaskar_tool_handler(str(tmp_path), {"task_description": "cached but blocked"})
+    )
+    assert result["ok"] is True
+    assert result["source"] == "generated"  # cache replay was blocked, not bypassed
+
+
+# ---------------------------------------------------------------------------
+# Agent-contract rollout — validated against the REAL live AGENT_CONTRACT
+# (imported), not just source text
+# ---------------------------------------------------------------------------
+
+
+def _candidate_agent_module_names() -> list[str]:
+    """Every app/agents/*.py module with a REAL AGENT_CONTRACT dict
+    (imported, not text-matched — catches a corrupted rollout edit landing
+    in the wrong list, which a text search for the substring "bhaskar_tool"
+    anywhere in the file cannot: this caught a real bug, app/agents/
+    manager.py's rollout codemod having landed "bhaskar_tool" in
+    input_types instead of the real, empty allowed_tools) that isn't
+    itself zero-tool-by-design (allowed_tools == []) and isn't
+    bhaskar_agent.py (the internal engine bhaskar_tool itself runs on —
+    see that module's own docstring for why it's not a real dispatchable
+    agent)."""
+    import importlib
+
+    names = []
+    for f in sorted(AGENTS_DIR.glob("*.py")):
+        if f.name in {"__init__.py", "bhaskar_agent.py"}:
+            continue
+        try:
+            mod = importlib.import_module(f"app.agents.{f.stem}")
+        except Exception:
+            continue
+        contract = getattr(mod, "AGENT_CONTRACT", None)
+        if not isinstance(contract, dict) or "allowed_tools" not in contract:
+            continue
+        if contract["allowed_tools"] == []:
+            continue
+        names.append(f.stem)
+    return names
+
+
+@pytest.mark.parametrize("module_name", _candidate_agent_module_names())
+def test_real_agent_contract_declares_bhaskar_tool(module_name: str) -> None:
+    import importlib
+
+    mod = importlib.import_module(f"app.agents.{module_name}")
+    contract = getattr(mod, "AGENT_CONTRACT", None)
+    assert contract is not None, f"{module_name} has no real AGENT_CONTRACT"
+    assert "bhaskar_tool" in contract["allowed_tools"], (
+        f"{module_name}: real AGENT_CONTRACT['allowed_tools'] is missing "
+        f"'bhaskar_tool'"
+    )
+
+
+@pytest.mark.parametrize("module_name", ["executive", "manager"])
+def test_real_zero_tool_contracts_are_untouched_by_design(module_name: str) -> None:
+    """executive (pure text generation) and manager (pure orchestration —
+    dispatches other agents, never calls a tool itself) are the two real,
+    deliberately zero-tool agents; bhaskar_tool must never be force-added
+    to either, and no other AGENT_CONTRACT list (input_types, etc.) should
+    have been corrupted by the rollout codemod either — the exact class of
+    bug this test's sibling above caught for manager.py."""
+    import importlib
+
+    mod = importlib.import_module(f"app.agents.{module_name}")
+    contract = mod.AGENT_CONTRACT
+    assert contract["allowed_tools"] == []
+    for key, val in contract.items():
+        if isinstance(val, list):
+            assert "bhaskar_tool" not in val, f"{module_name}.{key}"

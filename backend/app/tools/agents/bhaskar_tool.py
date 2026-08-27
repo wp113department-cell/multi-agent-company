@@ -14,13 +14,14 @@ of getting stuck. This handler:
      instead of silently returning a stale/broken result.
   2. On a cache MISS (or a hit whose replay failed), runs bhaskar_agent
      (app/agents/bhaskar_agent.py) — a small LangGraph sub-agent that
-     researches, writes, and tests a one-off script — bounded by both a
-     real wall-clock timeout (settings.bhaskar_tool_timeout_seconds, via a
-     ThreadPoolExecutor + Future.result(timeout=...), which — unlike
-     asyncio.wait_for over asyncio.to_thread — actually returns to the
-     caller at the deadline regardless of caller context) and a bounded
-     retry count (settings.bhaskar_tool_max_retries) — never an unbounded
-     loop.
+     researches, writes, and tests a one-off script — in a fresh, separate
+     OS process (multiprocessing, spawn context), bounded by a real
+     wall-clock timeout (settings.bhaskar_tool_timeout_seconds) and a
+     bounded retry count (settings.bhaskar_tool_max_retries) — never an
+     unbounded loop. Unlike a thread (which Python can never forcibly
+     stop), a process that exceeds its deadline is actually terminated —
+     see _run_with_process_bound's own docstring for exactly what that
+     does and does not guarantee.
   3. On success, caches the generated script (write_entry_with_eviction_sync
      — concurrency-safe bounded-size eviction, see scratchpad.py) and
      returns a structured JSON result.
@@ -32,10 +33,12 @@ structured-error convention (see tool_enhance.md universal tool contract).
 
 from __future__ import annotations
 
-import concurrent.futures
 import hashlib
 import json
 import logging
+import multiprocessing
+import os
+import queue as _queue_module
 import re
 from typing import Any
 
@@ -58,7 +61,10 @@ BHASKAR_TOOL: dict[str, Any] = {
         "then returns the result. It is slower and more expensive than a "
         "normal tool call — never use it to avoid using a tool you already "
         "have, and never use it for tasks a normal tool already covers "
-        "(reading/writing files, git operations, running tests, etc.)."
+        "(reading/writing files, git operations, running tests, etc.). "
+        "A true `ok` only means the generated script ran without error, "
+        "not that it necessarily accomplished the task correctly — check "
+        "the returned output yourself before trusting the result."
     ),
     "input_schema": {
         "type": "object",
@@ -97,50 +103,126 @@ def _normalize_task_signature(task_description: str, context: str) -> str:
     return hashlib.sha256(normalized.encode()).hexdigest()
 
 
-def _run_with_wallclock_bound(
-    fn: Any, timeout: float
+def _failure(error: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "code": "",
+        "result_summary": "",
+        "tested_output": "",
+        "error": error,
+        "tokens_in": 0,
+        "tokens_out": 0,
+    }
+
+
+def _run_in_bounded_process(
+    target: Any, payload: Any, timeout: float
 ) -> dict[str, Any]:
-    """Run `fn()` (a zero-arg callable) bounded by a real wall-clock
-    timeout. Uses a ThreadPoolExecutor + Future.result(timeout=...) rather
-    than asyncio.wait_for: this handler is itself synchronous (matching
-    every other *_handler in this codebase) and may be invoked from either
-    a sync dispatch path or via asyncio.to_thread by an async caller — a
-    plain Future.result(timeout=...) enforces the deadline correctly
-    either way, without depending on the caller wrapping us in
-    asyncio.wait_for. Python cannot forcibly kill a running thread, so a
-    timed-out attempt's background thread keeps running briefly after we
-    return — acceptable here because run_bhaskar_agent's own internal work
-    (LLM calls, sandboxed subprocess runs) is itself bounded by its own
-    real timeouts, so the orphaned thread terminates on its own shortly
-    after; this wrapper's job is only to make sure the CALLER is never
-    blocked past the deadline."""
-    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    future = pool.submit(fn)
+    """Run `target(payload, result_queue)` — a module-level (picklable —
+    required by multiprocessing's spawn start method), NOT a lambda/
+    closure — in a fresh, separately-killable OS process (spawn context;
+    never fork, since this handler runs inside an already multi-threaded,
+    async app, and spawn avoids inheriting any of its open connections/
+    locks/event-loop state into the child), bounded by a real wall-clock
+    timeout.
+
+    Unlike a thread (which Python can never forcibly stop — the previous
+    implementation here), a process that exceeds its deadline is actually
+    terminated: SIGTERM, then SIGKILL after a grace period if still alive.
+    This reliably reclaims the child's own memory/fds immediately.
+
+    A generic primitive (used for the real bhaskar_agent entry point below
+    and, in tests, for lightweight test-only targets) so the actual
+    subprocess/timeout/kill mechanism can be exercised directly without
+    needing to mock across a process boundary — spawn re-imports the
+    target module fresh in the child, so a parent-process monkeypatch of
+    e.g. run_bhaskar_agent would silently have no effect there; tests
+    instead pass in their own real, fast, module-level targets."""
+    ctx = multiprocessing.get_context("spawn")
+    result_queue: "multiprocessing.Queue[dict[str, Any]]" = ctx.Queue()
+    proc = ctx.Process(target=target, args=(payload, result_queue), daemon=True)
+    proc.start()
+    proc.join(timeout=timeout)
+
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(timeout=5)
+        if proc.is_alive():
+            proc.kill()
+            proc.join(timeout=5)
+        result_queue.close()
+        return _failure(
+            f"bhaskar_agent exceeded its {timeout}s wall-clock bound and was terminated"
+        )
+
     try:
-        result: dict[str, Any] = future.result(timeout=timeout)
-        return result
-    except concurrent.futures.TimeoutError:
-        return {
-            "ok": False,
-            "code": "",
-            "result_summary": "",
-            "tested_output": "",
-            "error": f"bhaskar_agent exceeded its {timeout}s wall-clock bound",
-            "tokens_in": 0,
-            "tokens_out": 0,
-        }
-    except Exception as exc:
-        return {
-            "ok": False,
-            "code": "",
-            "result_summary": "",
-            "tested_output": "",
-            "error": f"bhaskar_agent run raised: {exc}",
-            "tokens_in": 0,
-            "tokens_out": 0,
-        }
+        result: dict[str, Any] = result_queue.get_nowait()
+    except _queue_module.Empty:
+        result = _failure(
+            "bhaskar_agent process exited without returning a result "
+            f"(exit code {proc.exitcode})"
+        )
     finally:
-        pool.shutdown(wait=False)
+        result_queue.close()
+    return result
+
+
+def _bhaskar_agent_subprocess_entry(
+    payload: tuple[str, str, str, str],
+    result_queue: "multiprocessing.Queue[dict[str, Any]]",
+) -> None:
+    """Module-level (picklable) entry point run in a fresh, separate
+    process by _run_with_process_bound, via _run_in_bounded_process.
+    os.setsid() makes this its own session/process-group leader (POSIX) —
+    harmless if run_bhaskar_agent never spawns a direct child of its own,
+    and a real backstop if it ever does beyond app/agents/bhaskar_sandbox.
+    py's own sandboxed subprocess calls (which already detach into THEIR
+    OWN session — see _run_with_process_bound's docstring for that
+    residual edge case)."""
+    task_description, context, repo_path, trace_id = payload
+    if hasattr(os, "setsid"):
+        try:
+            os.setsid()
+        except Exception:
+            pass
+
+    from app.agents.bhaskar_agent import run_bhaskar_agent
+
+    try:
+        result = run_bhaskar_agent(
+            task_description, context, repo_path, trace_id=trace_id
+        )
+    except Exception as exc:
+        result = _failure(f"bhaskar_agent run raised: {exc}")
+    try:
+        result_queue.put(result)
+    except Exception:
+        pass
+
+
+def _run_with_process_bound(
+    task_description: str,
+    context: str,
+    repo_path: str,
+    trace_id: str,
+    timeout: float,
+) -> dict[str, Any]:
+    """Residual edge case, disclosed rather than hidden: if the deadline
+    lands while this process is itself mid-execution of a sandboxed script
+    (app/agents/bhaskar_sandbox.py's run_sandboxed_python, which — on
+    POSIX — deliberately puts EACH sandboxed script in its OWN new session
+    via start_new_session=True), that grandchild is not reachable through
+    this process's own process group and is not directly killed here. It
+    is not left unbounded, though: that sandboxed subprocess already
+    carries its own kernel-enforced RLIMIT_CPU (set to its own, smaller
+    settings.bhaskar_tool_sandbox_script_timeout_seconds), so it
+    self-terminates on its own regardless of whether this supervising
+    process is still alive."""
+    return _run_in_bounded_process(
+        _bhaskar_agent_subprocess_entry,
+        (task_description, context, repo_path, trace_id),
+        timeout,
+    )
 
 
 def bhaskar_tool_handler(
@@ -203,23 +285,16 @@ def bhaskar_tool_handler(
             )
 
     # --- 2. Generate, bounded by wall-clock timeout + retry cap. ---
-    from app.agents.bhaskar_agent import BhaskarRecursionError, run_bhaskar_agent
-
     attempts = max(1, settings.bhaskar_tool_max_retries + 1)
     last_error = "no attempt made"
     for attempt in range(1, attempts + 1):
-        try:
-            gen = _run_with_wallclock_bound(
-                lambda: run_bhaskar_agent(
-                    task_description, context, repo_path, trace_id=trace_id
-                ),
-                settings.bhaskar_tool_timeout_seconds,
-            )
-        except BhaskarRecursionError as exc:
-            # Structurally should never happen (see bhaskar_agent.py's
-            # module docstring) — refuse rather than let it propagate as an
-            # unhandled exception out of a tool handler.
-            return json.dumps({"ok": False, "error": f"refused: {exc}"})
+        gen = _run_with_process_bound(
+            task_description,
+            context,
+            repo_path,
+            trace_id,
+            settings.bhaskar_tool_timeout_seconds,
+        )
 
         if gen.get("ok"):
             scratchpad.write_entry_with_eviction_sync(

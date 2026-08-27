@@ -115,9 +115,23 @@ def run_bhaskar_agent(
          "tokens_in": int, "tokens_out": int}
 
     `ok` reflects a real, independently re-executed verification run of the
-    submitted code (below) — never just the agent's own self-report that it
-    "works", matching this codebase's existing "verify deterministically,
-    don't trust the LLM's claim" convention.
+    EXACT submitted code (below, via run_sandboxed_python again — never
+    the agent's own last in-loop test result, in case the final
+    submit_generated_tool call didn't match what was last tested) — never
+    just the agent's own self-report that it "works", matching this
+    codebase's existing "verify deterministically, don't trust the LLM's
+    claim" convention.
+
+    IMPORTANT LIMITATION, not silently glossed over: this only proves the
+    script RUNS without error (a real, syntactic/runtime check) — it does
+    NOT prove the script actually accomplishes the requested task
+    (semantic/task correctness). A script that runs cleanly but produces
+    the wrong answer will still get ok=True here. Judging semantic
+    correctness would need its own LLM-graded verification step, which
+    this deliberately does not fake by returning a false sense of
+    certainty; `tested_output` and `result_summary` are returned so the
+    CALLING agent — which has the actual task context — can judge that
+    for itself.
     """
     if bhaskar_agent_active.get():
         raise BhaskarRecursionError(
