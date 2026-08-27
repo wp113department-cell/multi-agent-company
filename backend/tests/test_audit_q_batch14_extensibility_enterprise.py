@@ -82,6 +82,35 @@ class TestExtensibilityDynamicRegistry:
         assert "tools" not in names
         assert "manager" not in names
 
+    def test_runtime_registered_agent_dispatchable_via_fallback(self) -> None:
+        """barot_agent gap-closure — a temporary_agent instance is neither
+        in the static _REGISTRY nor a real module on disk (it's registered
+        at runtime via app.fleet.dynamic_agent_runtime); both
+        _agent_is_dispatchable and _load_agent_fn must fall back to it
+        rather than 404/ValueError-ing a genuinely resolvable agent."""
+        from app.api import specialized_agents as sa
+        from app.fleet.dynamic_agent_runtime import (
+            register_runtime_agent_fn,
+            unregister_runtime_agent_fn,
+        )
+
+        def _fake_fn(task_id: int, description: str, repo_path: str) -> str:
+            return "ok"
+
+        name = "temporary_agent-runtime-fallback-test"
+        assert sa._agent_is_dispatchable(name) is False
+        register_runtime_agent_fn(name, _fake_fn)
+        try:
+            assert sa._agent_is_dispatchable(name) is True
+            resolved = sa._load_agent_fn(name)
+            assert resolved is _fake_fn
+        finally:
+            unregister_runtime_agent_fn(name)
+
+        assert sa._agent_is_dispatchable(name) is False
+        with pytest.raises(ValueError):
+            sa._load_agent_fn(name)
+
 
 class TestFleetDispatchClosesLifecycleLoop:
     def test_run_specialized_agent_bg_marks_agent_running_then_sleeping(self) -> None:

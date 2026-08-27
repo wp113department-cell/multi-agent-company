@@ -1895,6 +1895,43 @@ class Settings(BaseSettings):
         description="Hours between automatic SCAN-phase runs of the 5 fleet-enhancement agents (background loop). Set to 0 to disable the background loop entirely.",
     )
 
+    # barot_agent — just-in-time meta-agent. When fleet_manager.select() finds
+    # no static agent for a required capability, barot_agent may synthesize a
+    # short-lived temporary_agent to fill the gap. See app/agents/barot_agent.py
+    # and app/agents/temporary_agent.py.
+    barot_agent_enabled: bool = Field(
+        default=True,
+        description="Kill switch for the barot_agent just-in-time meta-agent. When False, fleet_manager.select() falls straight back to returning None on a capability gap, exactly as before this feature existed — zero code change needed to disable.",
+    )
+    barot_agent_model: str = Field(
+        default="claude-sonnet-5",
+        description="Model barot_agent uses both for its own planning calls (deciding a temporary_agent's tool profile) and, via ModelRouter.set_override, for the temporary_agent instances it spawns.",
+    )
+    barot_agent_fallback_models: list[str] = Field(
+        default_factory=list,
+        description="Ordered fallback models tried if barot_agent_model's planning call fails (empty response or an API error not already retried by the SDK/circuit breaker).",
+    )
+    barot_agent_max_concurrent_temp_agents: int = Field(
+        default=3,
+        description="Max live temporary_agent instances barot_agent may have at once. A gap task arriving at capacity is declined (falls through to fleet_manager.select()'s existing None-return) — never queued.",
+    )
+    barot_agent_temp_agent_ttl_minutes: float = Field(
+        default=20.0,
+        description="Wall-clock TTL per temporary_agent instance, enforced by the TTL sweep loop. An instance is torn down at task completion or this TTL, whichever is first — see TemporaryAgentPool.",
+    )
+    barot_agent_ttl_sweep_interval_seconds: float = Field(
+        default=60.0,
+        description="How often the background loop checks for expired temporary_agent instances. Set to 0 to disable the sweep loop entirely (TTL is then only enforced lazily, on the next pool interaction) — same '0 disables' idiom as fleet_scan_interval_hours.",
+    )
+    barot_agent_temp_agent_naming_pattern: str = Field(
+        default="temporary_agent-{task_id}-{short_uuid}",
+        description="str.format()-style pattern for spawned temporary_agent names/role_names. Must produce a value safe as a dict key, a role-file stem, and an AgentRun.agent_type string (no '/'). Available fields: task_id, short_uuid, capability.",
+    )
+    barot_agent_default_tool_scope: str = Field(
+        default="planned",
+        description="'planned' (only value implemented in this version): temporary_agent instances only ever get the read-only tool subset barot_agent's planning call selected. 'full' (write/bash tools backed by a real ephemeral git worktree) is accepted here but raises NotImplementedError at spawn time until a follow-up build adds worktree lifecycle wiring.",
+    )
+
 
 _settings: Settings | None = None
 

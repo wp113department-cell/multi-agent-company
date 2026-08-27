@@ -627,6 +627,31 @@ async def health_report(
     return report
 
 
+@router.get("/reports/barot-agent-pool")
+async def barot_agent_pool_report(
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
+    """Live, in-process TemporaryAgentPool state (app/agents/temporary_agent.py)
+    — how many of barot_agent's N concurrency slots are in use right now,
+    and the live slots themselves. Not DB-backed (unlike this router's
+    other /reports/* endpoints): the pool is deliberately per-process,
+    in-memory state, matching capability_registry.py/agent_registry.py's
+    own established design — see barot_agent's plan doc for why."""
+    from app.agents.temporary_agent import get_temporary_agent_pool
+    from app.config import get_settings
+
+    pool = get_temporary_agent_pool()
+    slots = pool.snapshot()
+    max_concurrent = pool._max_concurrent()
+    return {
+        "enabled": get_settings().barot_agent_enabled,
+        "maxConcurrent": max_concurrent,
+        "slotsUsed": len(slots),
+        "slotsFree": max(0, max_concurrent - len(slots)),
+        "slots": slots,
+    }
+
+
 @router.get("/reports/repair-patterns")
 async def repair_patterns_report(
     limit: int = Query(default=20, ge=1, le=100),

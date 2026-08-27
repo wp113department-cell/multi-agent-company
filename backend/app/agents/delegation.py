@@ -225,7 +225,12 @@ def delegate(request: DelegationRequest) -> DelegationResult:
     )
     from app.fleet.fleet_manager import get_fleet_manager
 
-    plan = get_fleet_manager().select(request.target_capability)
+    plan = get_fleet_manager().select(
+        request.target_capability,
+        task_id=request.task_id,
+        task_description=request.objective,
+        repo_path=request.repo_path,
+    )
     if plan is None:
         raise DelegationTargetUnavailableError(
             f"No available agent covers capability {request.target_capability!r}"
@@ -247,10 +252,22 @@ def delegate(request: DelegationRequest) -> DelegationResult:
     adapters = _build_adapter_registry()
     adapter = adapters.get(target_agent_name)
     if adapter is None:
+        # Falls back to a runtime-registered agent (today, exclusively a
+        # barot_agent-spawned temporary_agent — see
+        # app/fleet/dynamic_agent_runtime.py) before giving up. The static
+        # adapter dict above only ever covers the 4 curated real agents;
+        # this is the one place a dynamically-synthesized agent becomes
+        # actually invocable through the delegation path, not just
+        # selectable.
+        from app.fleet.dynamic_agent_runtime import resolve_runtime_agent_fn
+
+        adapter = resolve_runtime_agent_fn(target_agent_name)
+    if adapter is None:
         raise DelegationTargetUnavailableError(
             f"{target_agent_name!r} was resolved for capability "
             f"{request.target_capability!r} but has no real delegation adapter "
-            f"registered (adapter registry: {sorted(adapters)})"
+            f"registered (adapter registry: {sorted(adapters)}) and no "
+            f"runtime-registered agent function either"
         )
 
     trace_id = request.trace_id or request.task_id or "delegation"

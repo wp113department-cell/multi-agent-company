@@ -327,3 +327,59 @@ class TestGetModelRouter:
         router = get_model_router()
         cfg = router.route("any_agent")
         assert cfg.model == "claude-override"
+
+
+# ---------------------------------------------------------------------------
+# set_override / clear_override — added for barot_agent's temporary_agent
+# instances, whose unique per-spawn names never appear in agent_models.json.
+# ---------------------------------------------------------------------------
+
+
+class TestModelRouterOverride:
+    def test_override_wins_over_default(self):
+        router = ModelRouter()
+        router.set_override("temporary_agent-1-abc", model="test-override-model")
+        cfg = router.route("temporary_agent-1-abc")
+        assert cfg.model == "test-override-model"
+        assert cfg.provider == "anthropic"
+        assert cfg.tier == "sonnet"
+
+    def test_override_wins_over_static_table_entry(self):
+        """Even an agent_name that DOES exist in the static table defers to
+        an active override — proves override precedence, not just
+        fallback-only behavior."""
+        router = ModelRouter()
+        assert router.route("architect").tier == "opus"
+        router.set_override("architect", model="temp-override", tier="haiku")
+        cfg = router.route("architect")
+        assert cfg.model == "temp-override"
+        assert cfg.tier == "haiku"
+
+    def test_override_respects_custom_provider_and_tier(self):
+        router = ModelRouter()
+        router.set_override(
+            "temp_x", model="gpt-test", provider="openai", tier="gpt"
+        )
+        cfg = router.route("temp_x")
+        assert cfg.provider == "openai"
+        assert cfg.tier == "gpt"
+        assert cfg.max_tokens == 4096  # gpt tier's real tier_cfg
+
+    def test_clear_override_restores_previous_behavior(self):
+        router = ModelRouter()
+        router.set_override("temporary_agent-2-def", model="test-override-model")
+        router.clear_override("temporary_agent-2-def")
+        cfg = router.route("temporary_agent-2-def")
+        # Falls back to DEFAULT since this name was never in the static table.
+        assert cfg.model != "test-override-model"
+
+    def test_clear_override_missing_is_noop(self):
+        router = ModelRouter()
+        router.clear_override("never_overridden")  # must not raise
+
+    def test_override_is_per_agent_name(self):
+        router = ModelRouter()
+        router.set_override("temp_a", model="model-a")
+        router.set_override("temp_b", model="model-b")
+        assert router.route("temp_a").model == "model-a"
+        assert router.route("temp_b").model == "model-b"

@@ -37,6 +37,16 @@ _EXCLUDE = {
     # "AGENT_CONTRACT" in prose, which is why it needs an explicit
     # exclusion rather than relying on the text-search filter below.
     "bhaskar_agent.py",
+    # barot_agent build (2026-08-27) — same category as bhaskar_agent.py
+    # above: temporary_agent.py has no fixed AGENT_CONTRACT (each
+    # barot_agent-spawned instance gets its own unique, runtime-registered
+    # AgentCapability — there is no single "temporary_agent" capability
+    # entry, see the module's own docstring), it's shared infrastructure a
+    # real agent (barot_agent.py) spawns from, not itself a fleet-
+    # selectable agent. Its module docstring happens to mention the string
+    # "AGENT_CONTRACT" in prose (explaining its own absence), which is why
+    # it needs the same explicit exclusion as bhaskar_agent.py.
+    "temporary_agent.py",
 }
 
 

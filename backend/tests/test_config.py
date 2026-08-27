@@ -43,6 +43,54 @@ def test_config_defaults():
         cfg_module._settings = None
 
 
+def test_config_barot_agent_defaults():
+    env = {
+        "DATABASE_URL": "postgresql+asyncpg://user:pass@localhost/testdb",
+        "ANTHROPIC_API_KEY": "sk-ant-test-key",
+    }
+    with patch.dict(os.environ, env, clear=False):
+        import app.config as cfg_module
+
+        cfg_module._settings = None
+        from app.config import Settings
+
+        s = Settings()
+        assert s.barot_agent_enabled is True
+        assert s.barot_agent_model == s.model_coder
+        assert s.barot_agent_fallback_models == []
+        assert s.barot_agent_max_concurrent_temp_agents == 3
+        assert s.barot_agent_temp_agent_ttl_minutes == 20.0
+        assert s.barot_agent_ttl_sweep_interval_seconds == 60.0
+        assert s.barot_agent_temp_agent_naming_pattern == (
+            "temporary_agent-{task_id}-{short_uuid}"
+        )
+        assert s.barot_agent_default_tool_scope == "planned"
+        cfg_module._settings = None
+
+
+def test_config_barot_agent_overridable_via_env():
+    env = {
+        "DATABASE_URL": "postgresql+asyncpg://user:pass@localhost/testdb",
+        "ANTHROPIC_API_KEY": "sk-ant-test-key",
+        "BAROT_AGENT_ENABLED": "false",
+        "BAROT_AGENT_MAX_CONCURRENT_TEMP_AGENTS": "7",
+        "BAROT_AGENT_TEMP_AGENT_TTL_MINUTES": "5.5",
+        "BAROT_AGENT_MODEL": "test-marker-model",
+    }
+    with patch.dict(os.environ, env, clear=False):
+        import app.config as cfg_module
+
+        cfg_module._settings = None
+        from app.config import Settings
+
+        s = Settings()
+        assert s.barot_agent_enabled is False
+        assert s.barot_agent_max_concurrent_temp_agents == 7
+        assert s.barot_agent_temp_agent_ttl_minutes == 5.5
+        assert s.barot_agent_model == "test-marker-model"
+        cfg_module._settings = None
+
+
 def test_config_model_tier_overridable():
     env = {
         "DATABASE_URL": "postgresql+asyncpg://user:pass@localhost/testdb",

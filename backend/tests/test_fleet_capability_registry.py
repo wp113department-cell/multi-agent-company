@@ -147,3 +147,77 @@ def test_qa_contract_no_write_tools() -> None:
     assert "write_file" not in cap.tools
     assert "edit_file" not in cap.tools
     assert "qa_verification" in cap.capabilities
+
+
+# ---- deregister() — added for barot_agent's temporary_agent teardown ----
+
+
+def test_deregister_removes_entry() -> None:
+    r = CapabilityRegistry()
+    r.register(
+        AgentCapability(
+            name="temp1",
+            description="",
+            tools=[],
+            input_types=[],
+            output_types=[],
+            capabilities=[],
+        )
+    )
+    assert r.deregister("temp1") is True
+    assert r.get("temp1") is None
+
+
+def test_deregister_missing_returns_false() -> None:
+    r = CapabilityRegistry()
+    assert r.deregister("never_registered") is False
+
+
+def test_deregister_is_idempotent() -> None:
+    r = CapabilityRegistry()
+    r.register(
+        AgentCapability(
+            name="temp2",
+            description="",
+            tools=[],
+            input_types=[],
+            output_types=[],
+            capabilities=[],
+        )
+    )
+    assert r.deregister("temp2") is True
+    assert r.deregister("temp2") is False
+
+
+def test_deregister_does_not_affect_reference_agents() -> None:
+    r = get_capability_registry()
+    r.register(
+        AgentCapability(
+            name="temp3",
+            description="",
+            tools=[],
+            input_types=[],
+            output_types=[],
+            capabilities=[],
+        )
+    )
+    r.deregister("temp3")
+    for name in ("pm", "bug_fix", "qa"):
+        assert r.get(name) is not None
+
+
+def test_module_level_deregister_wrapper() -> None:
+    from app.fleet.capability_registry import deregister, register
+
+    register(
+        AgentCapability(
+            name="temp4",
+            description="",
+            tools=[],
+            input_types=[],
+            output_types=[],
+            capabilities=[],
+        )
+    )
+    assert deregister("temp4") is True
+    assert get_capability_registry().get("temp4") is None

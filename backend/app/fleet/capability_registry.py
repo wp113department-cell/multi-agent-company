@@ -56,6 +56,17 @@ class CapabilityRegistry:
         with self._lock:
             self._entries[entry.name] = entry
 
+    def deregister(self, name: str) -> bool:
+        """Real removal, distinct from register()'s write-once/update-in-place
+        semantics. The 86 real agent modules never call this — their entries
+        are meant to live for the process's lifetime. Exclusively for
+        barot_agent's temporary_agent teardown, where an ever-growing dict of
+        one-shot entries would otherwise leak indefinitely. Returns False
+        (no-op) if name isn't registered — teardown paths call this
+        idempotently and must never raise on a double-call."""
+        with self._lock:
+            return self._entries.pop(name, None) is not None
+
     def update_success_rate(self, name: str, success_rate: float) -> bool:
         """AUDIT_Q_BATCH15 §37 gap-closure (2026-08-11) — this module's own
         docstring claimed a DB merge happens "at query time"; no such merge
@@ -115,6 +126,10 @@ def get_capability_registry() -> CapabilityRegistry:
 
 def register(entry: AgentCapability) -> None:
     _registry.register(entry)
+
+
+def deregister(name: str) -> bool:
+    return _registry.deregister(name)
 
 
 # ---------------------------------------------------------------------------

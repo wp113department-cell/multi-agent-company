@@ -681,6 +681,41 @@ async def _lesson_store_refresh_loop() -> None:
             logger.warning("Lesson store refresh loop iteration failed: %s", exc)
 
 
+async def _barot_temp_agent_ttl_loop() -> None:
+    """barot_agent (app/agents/barot_agent.py) — reaps temporary_agent
+    instances (app/agents/temporary_agent.py) whose configured TTL has
+    elapsed. Deliberately runs on EVERY backend instance independently, same
+    reasoning as _lesson_store_refresh_loop above: TemporaryAgentPool is a
+    genuinely per-process, in-memory singleton (matching
+    capability_registry.py/agent_registry.py's own established in-process
+    design), not a shared/cluster-wide job — there is nothing for a leader
+    election to coordinate here. Set BAROT_AGENT_TTL_SWEEP_INTERVAL_
+    SECONDS=0 to disable (TTL is then only enforced lazily, on the next
+    pool interaction, per that setting's own docstring)."""
+    interval_seconds = get_settings().barot_agent_ttl_sweep_interval_seconds
+    if interval_seconds <= 0:
+        logger.info(
+            "barot_agent TTL sweep loop disabled "
+            "(BAROT_AGENT_TTL_SWEEP_INTERVAL_SECONDS=0)"
+        )
+        return
+
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            from app.agents.temporary_agent import get_temporary_agent_pool
+
+            expired = get_temporary_agent_pool().sweep_expired()
+            if expired:
+                logger.info(
+                    "barot_agent TTL sweep reaped %d temporary agent(s): %s",
+                    len(expired),
+                    expired,
+                )
+        except Exception as exc:
+            logger.warning("barot_agent TTL sweep loop iteration failed: %s", exc)
+
+
 async def _agents_score_compute_loop() -> None:
     """AUDIT_Q_BATCH15 §117 gap-closure (2026-08-11) — quality_score.py's
     "agents" category needs a real, persisted, repo-scoped score row to
@@ -1176,6 +1211,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # deliberately not leader-gated (per-process cache refresh, not a
     # cluster-wide job).
     lesson_store_refresh_task = asyncio.create_task(_lesson_store_refresh_loop())
+    # barot_agent — see _barot_temp_agent_ttl_loop's own docstring for why
+    # this, too, is deliberately not leader-gated (TemporaryAgentPool is a
+    # per-process in-memory singleton, not a cluster-wide job).
+    barot_temp_agent_ttl_task = asyncio.create_task(_barot_temp_agent_ttl_loop())
 
     await init_active_repo()
     await init_checkpointer(settings.database_url)
@@ -1386,6 +1425,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     enhancement_quality_monitor_task.cancel()
     bg_process_liveness_task.cancel()
     lesson_store_refresh_task.cancel()
+    barot_temp_agent_ttl_task.cancel()
     agent_historical_performance_rollup_task.cancel()
     for task in (
         reindex_task,
@@ -1404,6 +1444,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         enhancement_quality_monitor_task,
         bg_process_liveness_task,
         lesson_store_refresh_task,
+        barot_temp_agent_ttl_task,
         agent_historical_performance_rollup_task,
     ):
         try:

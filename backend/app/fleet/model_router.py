@@ -94,7 +94,42 @@ class ModelRouter:
         self._table: dict[str, dict[str, Any]] = {}
         self._tiers: dict[str, dict[str, Any]] = {}
         self._default: dict[str, Any] = {}
+        # In-memory, per-agent-name override — checked before _table in
+        # route(). Not persisted to agent_models.json. Exists because
+        # barot_agent's temporary_agent instances get a fresh, unique
+        # agent_name per spawn (never present in the static JSON file), so
+        # without this, route() would silently fall back to DEFAULT and
+        # discard whatever model the caller (run_agent_graph's own model=
+        # kwarg) actually asked for — see run_agent_graph's own comment
+        # that "ModelRouter wins over passed-in model". Set at spawn time,
+        # cleared at teardown; guarded by the same lock as _table.
+        self._overrides: dict[str, dict[str, Any]] = {}
         self._load(json_path)
+
+    def set_override(
+        self,
+        agent_name: str,
+        *,
+        model: str,
+        provider: str = "anthropic",
+        tier: str = "sonnet",
+    ) -> None:
+        """Register a per-agent-name model override that route() consults
+        before the static table. Intended for runtime-registered agents
+        (e.g. barot_agent's temporary_agent instances) whose name will never
+        appear in agent_models.json."""
+        with self._lock:
+            self._overrides[agent_name] = {
+                "model": model,
+                "provider": provider,
+                "tier": tier,
+            }
+
+    def clear_override(self, agent_name: str) -> None:
+        """Remove a previously-set override. No-op if absent — safe to call
+        unconditionally during teardown."""
+        with self._lock:
+            self._overrides.pop(agent_name, None)
 
     def _fallback_default(self) -> dict[str, Any]:
         """Last-resort default when agent_models.json is missing/unreadable —
@@ -150,8 +185,12 @@ class ModelRouter:
             self._load(json_path)
 
     def route(self, agent_name: str) -> RouteConfig:
-        """Return routing config for agent_name. Falls back to DEFAULT if not found."""
-        entry = self._table.get(agent_name, self._default)
+        """Return routing config for agent_name. Checks the in-memory
+        override table first (see set_override), then the static
+        agent_models.json table, then falls back to DEFAULT."""
+        entry = self._overrides.get(agent_name) or self._table.get(
+            agent_name, self._default
+        )
         tier = entry.get("tier", "sonnet")
         tier_cfg = self._tiers.get(tier, _DEFAULT_TIERS["sonnet"])
         return RouteConfig(

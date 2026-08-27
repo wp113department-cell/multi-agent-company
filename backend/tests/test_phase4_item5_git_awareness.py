@@ -35,6 +35,14 @@ _EXCLUDE = {
     # "AGENT_CONTRACT" in prose, which is why it needs an explicit
     # exclusion rather than relying on the text-search filter below.
     "bhaskar_agent.py",
+    # barot_agent build (2026-08-27) — same category as bhaskar_agent.py
+    # above: temporary_agent.py has no fixed AGENT_CONTRACT (each
+    # barot_agent-spawned instance gets its own unique, runtime-registered
+    # AgentCapability), it's shared infrastructure a real agent
+    # (barot_agent.py) spawns from, not itself a fleet-selectable agent.
+    # Its module docstring happens to mention the string "AGENT_CONTRACT"
+    # in prose (explaining its own absence).
+    "temporary_agent.py",
 }
 
 
@@ -60,9 +68,16 @@ def _has_any_git_tool(module_name: str) -> bool:
     return False
 
 
-def test_only_two_agents_lack_git_tools_and_both_are_confirmed_exceptions() -> None:
+def test_only_three_agents_lack_git_tools_and_all_are_confirmed_exceptions() -> None:
+    # barot_agent (added 2026-08-27) is a legitimate third exception: it
+    # declares allowed_tools=[] and never itself touches a repo — it only
+    # plans a tool profile for, and spawns, a temporary_agent (which
+    # inherits real git tools via READ_ONLY_TOOLS, same as every other
+    # agent — see app/agents/temporary_agent.py's make_temporary_agent_
+    # tools_and_handlers). Judged, not defaulted: barot_agent's own role
+    # has no more need for git awareness than executive/research's do.
     no_git = [n for n in _all_agent_module_names() if not _has_any_git_tool(n)]
-    assert set(no_git) == {"executive", "research"}, (
+    assert set(no_git) == {"executive", "research", "barot_agent"}, (
         f"git-tool coverage changed: {no_git} — if this is a NEW agent lacking "
         f"git tools, judge whether its role genuinely needs them (don't just "
         f"update this set)"

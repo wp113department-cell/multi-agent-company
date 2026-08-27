@@ -309,3 +309,59 @@ def test_reference_agents_pre_registered_in_sleep() -> None:
         inst = r.get(name)
         assert inst is not None, f"{name} not pre-registered"
         assert inst.state == AgentState.SLEEP
+
+
+# ---- deregister() — added for barot_agent's temporary_agent teardown ----
+
+
+def test_deregister_removes_instance() -> None:
+    r = _fresh()
+    r.register("temp1")
+    removed = r.deregister("temp1")
+    assert removed is not None
+    assert removed.name == "temp1"
+    assert r.get("temp1") is None
+
+
+def test_deregister_missing_returns_none() -> None:
+    r = _fresh()
+    assert r.deregister("never_registered") is None
+
+
+def test_deregister_is_idempotent() -> None:
+    r = _fresh()
+    r.register("temp2")
+    assert r.deregister("temp2") is not None
+    assert r.deregister("temp2") is None
+
+
+def test_deregister_does_not_publish_lifecycle_event(monkeypatch) -> None:
+    """A scrapped temp agent is routine cleanup, not a governance event —
+    unlike disable()/retire(), deregister() must never fire the lifecycle
+    notification/event path."""
+    import app.fleet.agent_registry as agent_registry_module
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        agent_registry_module,
+        "_publish_lifecycle_event",
+        lambda name, inst: calls.append(name),
+    )
+    monkeypatch.setattr(
+        agent_registry_module,
+        "_notify_agent_retired",
+        lambda name, reason: calls.append(name),
+    )
+
+    r = _fresh()
+    r.register("temp3")
+    r.deregister("temp3")
+    assert calls == []
+
+
+def test_deregister_does_not_affect_reference_agents() -> None:
+    r = get_agent_registry()
+    r.register("temp4")
+    r.deregister("temp4")
+    for name in ("pm", "bug_fix", "qa"):
+        assert r.get(name) is not None

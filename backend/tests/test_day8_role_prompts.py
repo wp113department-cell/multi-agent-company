@@ -53,7 +53,7 @@ _REQUIRED_ROLE_SPECIFIC_SECTIONS = (
 )
 
 
-def test_role_file_count_is_84() -> None:
+def test_role_file_count_is_85() -> None:
     # 67 from Day 0-8 (68 agent_models.json entries minus groq_adapter, which has no role
     # file) + 5 Day 9 fleet-enhancement agents (agent_performance_reviewer, agent_debugger,
     # agent_advisor, knowledge_curator, quality_auditor) = 72.
@@ -70,7 +70,13 @@ def test_role_file_count_is_84() -> None:
     # roadmap_agent, ux_design_agent, tech_advisor_agent — each new agent's
     # role file created in the same change as its AGENT_CONTRACT, never left
     # dangling. = 84.
-    assert len(_ROLE_NAMES) == 84, f"expected 84 role files, found {len(_ROLE_NAMES)}"
+    # + 1 (barot_agent build, 2026-08-27): temporary_agent — the single,
+    # static, human-reviewed role template every barot_agent-spawned
+    # temporary_agent instance's ephemeral per-spawn role file is copied
+    # from (app/agents/temporary_agent.py's TemporaryAgentPool._write_role_
+    # file); barot_agent.py itself has no role file (it never calls
+    # load_role() / run_agent_graph() — it only plans and spawns). = 85.
+    assert len(_ROLE_NAMES) == 85, f"expected 85 role files, found {len(_ROLE_NAMES)}"
 
 
 def test_global_standards_file_exists() -> None:

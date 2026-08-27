@@ -78,10 +78,24 @@ class FleetManager:
         requested_side_effects: list[str] | None = None,
         prefer_low_risk: bool = False,
         verify_tool_availability: bool = False,
+        task_id: str = "",
+        task_description: str = "",
+        repo_path: str = "",
     ) -> DispatchPlan | None:
         """Find the best available agent for the requested capability.
 
         Returns None if no healthy available agent can handle the request.
+
+        task_id / task_description / repo_path (barot_agent gap-fill,
+        additive — every existing caller that omits these keeps its exact
+        current behavior): when a real task_id/task_description are
+        supplied and this method is about to return None, the gap is
+        offered to app.agents.barot_agent.try_fill_capability_gap() before
+        giving up — see _decline_or_fill_gap()'s own docstring for exactly
+        what that does and doesn't do. repo_path may legitimately be empty
+        here (some real callers don't know it yet at select()-time); a
+        spawned temporary_agent's own execution-time repo_path is resolved
+        separately by whoever actually invokes it, same as any other agent.
 
         verify_tool_availability (gap-closure, 2026-07-21): Day 10 built
         tool_discovery.py (a thin index over tool_manifest.py +
@@ -156,7 +170,9 @@ class FleetManager:
             logger.warning(
                 "No agents registered for capability %r", required_capability
             )
-            return None
+            return self._decline_or_fill_gap(
+                required_capability, requested_side_effects, task_id, task_description, repo_path
+            )
 
         side_effects = requested_side_effects or []
         scored: list[tuple[float, AgentCapability, AgentInstance]] = []
@@ -278,7 +294,9 @@ class FleetManager:
                 required_capability,
                 [c.name for c in candidates],
             )
-            return None
+            return self._decline_or_fill_gap(
+                required_capability, requested_side_effects, task_id, task_description, repo_path
+            )
 
         scored.sort(key=lambda t: t[0], reverse=True)
         best_score, best_cap, best_instance = scored[0]
@@ -294,6 +312,55 @@ class FleetManager:
             ),
         )
 
+    def _decline_or_fill_gap(
+        self,
+        required_capability: str,
+        requested_side_effects: list[str] | None,
+        task_id: str,
+        task_description: str,
+        repo_path: str,
+    ) -> DispatchPlan | None:
+        """Called from both of select()'s "give up" points, right before it
+        would otherwise return None. Offers the gap to barot_agent; if it
+        successfully synthesizes and registers a temporary_agent, re-runs
+        select() ONCE to find it through the normal registry-lookup path
+        above — bounded to depth 1 by construction, since barot_agent
+        itself declares capabilities=[] (capability_registry.py) and can
+        therefore never be selected as a gap-filler for its own gap, and
+        the freshly-registered temp agent is what satisfies
+        find_by_capability() on the retry, not another gap.
+
+        If barot_agent declines or fails for any reason (disabled via
+        settings.barot_agent_enabled, at capacity, missing task context,
+        planning failure, spawn failure), this returns None exactly as
+        select() always has — the existing capability_gap.py/agent_advisor.py
+        advisory scan is untouched and keeps running on its own independent
+        schedule regardless (there is no synchronous link between the two;
+        see app/agents/barot_agent.py's module docstring)."""
+        from app.config import get_settings
+
+        if not get_settings().barot_agent_enabled:
+            return None
+
+        from app.agents.barot_agent import try_fill_capability_gap
+
+        decision = try_fill_capability_gap(
+            required_capability=required_capability,
+            task_id=task_id,
+            task_description=task_description,
+            repo_path=repo_path,
+            requested_side_effects=requested_side_effects,
+        )
+        if not decision.success:
+            return None
+
+        return self.select(
+            required_capability,
+            requested_side_effects,
+            prefer_low_risk=False,
+            verify_tool_availability=False,
+        )
+
     def dispatch(
         self,
         required_capability: str,
@@ -306,7 +373,13 @@ class FleetManager:
         Does NOT actually call the agent — that is the caller's responsibility.
         This function's job is purely: select → validate → mark running → return plan.
         """
-        plan = self.select(required_capability, requested_side_effects)
+        plan = self.select(
+            required_capability,
+            requested_side_effects,
+            task_id=task_id,
+            task_description=str(task_payload.get("description", "")),
+            repo_path=str(task_payload.get("repo_path", "")),
+        )
         if plan is None:
             return {
                 "status": "no_agent_available",
@@ -339,12 +412,27 @@ class FleetManager:
         self._agents.fail_task(agent_name, reason)
 
     def status(self) -> dict[str, Any]:
+        barot_agent_pool: dict[str, Any] = {}
+        try:
+            from app.agents.temporary_agent import get_temporary_agent_pool
+            from app.config import get_settings
+
+            pool = get_temporary_agent_pool()
+            barot_agent_pool = {
+                "enabled": get_settings().barot_agent_enabled,
+                "max_concurrent": pool._max_concurrent(),
+                "slots": pool.snapshot(),
+            }
+        except Exception:
+            logger.debug("FleetManager.status(): barot_agent pool unavailable", exc_info=True)
+
         return {
             "registered_capabilities": self._caps.count(),
             "agent_instances": len(self._agents.all()),
             "available": len(self._agents.available()),
             "running": len(self._agents.running()),
             "snapshot": self._agents.snapshot(),
+            "barot_agent": barot_agent_pool,
         }
 
 

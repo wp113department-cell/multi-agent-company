@@ -228,6 +228,18 @@ class AgentRegistry:
         with self._lock:
             return self._instances.get(name)
 
+    def deregister(self, name: str) -> AgentInstance | None:
+        """Real removal, distinct from disable()/retire() (both of which
+        intentionally keep the entry forever for the 86 real agents, and
+        both publish a lifecycle event for a human to see — a governance
+        signal). A scrapped temporary_agent instance isn't a governance
+        event, it's routine cleanup, so this deliberately does NOT call
+        _publish_lifecycle_event/_notify_agent_retired. Returns the removed
+        instance (or None if it wasn't present — idempotent, safe to call
+        twice from a racing TTL-sweep vs. natural-completion path)."""
+        with self._lock:
+            return self._instances.pop(name, None)
+
     def available(self) -> list[AgentInstance]:
         with self._lock:
             return [i for i in self._instances.values() if i.is_available]

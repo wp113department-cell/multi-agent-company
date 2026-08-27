@@ -243,7 +243,15 @@ def _discoverable_agent_names() -> list[str]:
 
 
 def _agent_is_dispatchable(agent_name: str) -> bool:
-    return agent_name in _REGISTRY or _discover_agent_fn(agent_name) is not None
+    if agent_name in _REGISTRY or _discover_agent_fn(agent_name) is not None:
+        return True
+    # Falls back to a runtime-registered agent — today, exclusively a
+    # barot_agent-spawned temporary_agent (app/fleet/dynamic_agent_runtime.py)
+    # — so this endpoint's own pre-checks don't 404/422 a valid dynamically-
+    # synthesized agent that fleet_manager.select() just resolved.
+    from app.fleet.dynamic_agent_runtime import resolve_runtime_agent_fn
+
+    return resolve_runtime_agent_fn(agent_name) is not None
 
 
 def _load_agent_fn(agent_name: str) -> Callable[..., Any]:
@@ -258,6 +266,12 @@ def _load_agent_fn(agent_name: str) -> Callable[..., Any]:
     discovered = _discover_agent_fn(agent_name)
     if discovered is not None:
         return discovered
+
+    from app.fleet.dynamic_agent_runtime import resolve_runtime_agent_fn
+
+    runtime_fn = resolve_runtime_agent_fn(agent_name)
+    if runtime_fn is not None:
+        return runtime_fn
 
     raise ValueError(f"Unknown agent '{agent_name}'. Supported: {SUPPORTED_AGENTS}")
 

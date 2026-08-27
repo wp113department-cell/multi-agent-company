@@ -156,6 +156,14 @@ def test_no_available_agent_for_capability_raises(
         "delegation_allowed_matrix",
         {"dg_test_source_ok": ["dg_test_capability_nobody_covers"]},
     )
+    # barot_agent (app/agents/barot_agent.py) would otherwise attempt a real
+    # gap-fill for this genuinely-uncovered capability — select() now
+    # offers every miss to it before giving up. Disabled here so this stays
+    # a pure "nothing covers this, full stop" test with no live API call,
+    # matching this file's own established convention of avoiding a real
+    # LLM call except in the one test that explicitly wants it. barot_agent's
+    # own decline/failure paths are covered directly in test_barot_agent.py.
+    monkeypatch.setattr(get_settings(), "barot_agent_enabled", False)
     with pytest.raises(DelegationTargetUnavailableError):
         delegate(
             _base_request(
