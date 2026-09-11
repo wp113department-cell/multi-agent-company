@@ -193,6 +193,7 @@ from app.tools.filesystem.count_lines import count_lines_handler
 from app.tools.filesystem.create_directory import create_directory_handler
 from app.tools.filesystem.csv_preview import csv_preview_handler
 from app.tools.filesystem.env_diff import env_diff_handler
+from app.tools.git.explain_merge_conflict import explain_merge_conflict_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
@@ -2020,18 +2021,18 @@ class ChatAgent:
             return f"Resolved all {len(rmc_applied)} conflict hunk(s) in {rmc_rel}."
 
         if tool_name == "explain_merge_conflict":
-            emc_rel = str(inp["path"])
-            if _is_protected_path(emc_rel, repo):
-                return f"[POLICY DENIED] Protected path: {emc_rel}"
-            emc_target = root / emc_rel
-            if not emc_target.exists():
-                return f"[ERROR] File not found: {emc_rel}"
-            emc_text = emc_target.read_text(encoding="utf-8")
-            emc_hunks = _parse_conflict_markers(emc_text)
-            if not emc_hunks:
-                return f"No conflict markers found in {emc_rel}."
+            # tool_enhance.md productionization pass, tool #136
+            # (2026-09-11) — worktree validation was already correct;
+            # was missing a try/except around the file read, proved
+            # live via a real chmod 000 file raising an uncaught
+            # PermissionError. Now delegates to the shared,
+            # already-worktree-validated, fixed handler.
             return await asyncio.to_thread(
-                _llm_explain_conflict_hunks, emc_rel, emc_hunks
+                explain_merge_conflict_handler,
+                root,
+                repo,
+                inp,
+                _llm_explain_conflict_hunks,
             )
 
         if tool_name == "git_reset":

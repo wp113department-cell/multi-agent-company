@@ -394,6 +394,10 @@ from app.tools.filesystem.env_diff import (
     ENV_DIFF_TOOL,
     env_diff_handler,
 )
+from app.tools.git.explain_merge_conflict import (
+    EXPLAIN_MERGE_CONFLICT_TOOL,
+    explain_merge_conflict_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -639,6 +643,7 @@ _COUNT_LINES_TOOL = COUNT_LINES_TOOL
 _CREATE_DIRECTORY_TOOL = CREATE_DIRECTORY_TOOL
 _CSV_PREVIEW_TOOL = CSV_PREVIEW_TOOL
 _ENV_DIFF_TOOL = ENV_DIFF_TOOL
+_EXPLAIN_MERGE_CONFLICT_TOOL = EXPLAIN_MERGE_CONFLICT_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -2454,20 +2459,9 @@ _PARSE_MERGE_CONFLICTS_TOOL = {
     },
 }
 
-_EXPLAIN_MERGE_CONFLICT_TOOL = {
-    "name": "explain_merge_conflict",
-    "description": "Parse a file's real conflict markers (like parse_merge_conflicts) and generate a plain-English explanation of what 'ours' vs 'theirs' actually changed in each hunk and why they conflict. Does not resolve anything — read before deciding, or use standalone to understand a conflict.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Conflicted file, relative to repo root",
-            },
-        },
-        "required": ["path"],
-    },
-}
+# moved to app/tools/git/explain_merge_conflict.py as
+# EXPLAIN_MERGE_CONFLICT_TOOL / explain_merge_conflict_handler() —
+# tool_enhance.md productionization pass, tool #136 (2026-09-11).
 
 _RESOLVE_MERGE_CONFLICT_TOOL = {
     "name": "resolve_merge_conflict",
@@ -6724,19 +6718,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
         return _json.dumps({"path": rel, "hunks": hunks}, indent=2)
 
+    # tool_enhance.md productionization pass, tool #136 (2026-09-11) —
+    # worktree validation was already correct here; the real fix
+    # (missing try/except around the file read, proved live via a real
+    # chmod 000 file) lives in the shared handler; see that module's
+    # own docstring.
     def explain_merge_conflict(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        result = check_path_in_worktree(rel, repo_path)
-        if not result.allowed:
-            return f"[POLICY DENIED] {rel}: {result.reason}"
-        target = Path(repo_path) / rel
-        if not target.exists():
-            return f"[ERROR] File not found: {rel}"
-        text = target.read_text(encoding="utf-8")
-        hunks = _parse_conflict_markers(text)
-        if not hunks:
-            return f"No conflict markers found in {rel}."
-        return _llm_explain_conflict_hunks(rel, hunks)
+        return explain_merge_conflict_handler(
+            root, repo_path, inp, _llm_explain_conflict_hunks
+        )
 
     def resolve_merge_conflict(inp: dict[str, Any]) -> str:
         rel = str(inp["path"])
