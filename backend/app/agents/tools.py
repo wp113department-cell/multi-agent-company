@@ -410,6 +410,10 @@ from app.tools.filesystem.find_queue import (
     FIND_QUEUE_TOOL,
     find_queue_handler,
 )
+from app.tools.filesystem.find_test import (
+    FIND_TEST_TOOL,
+    find_test_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -659,6 +663,7 @@ _EXPLAIN_MERGE_CONFLICT_TOOL = EXPLAIN_MERGE_CONFLICT_TOOL
 _EXPORT_MARKDOWN_TOOL = EXPORT_MARKDOWN_TOOL
 _FIND_FILE_TOOL = FIND_FILE_TOOL
 _FIND_QUEUE_TOOL = FIND_QUEUE_TOOL
+_FIND_TEST_TOOL = FIND_TEST_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -2822,20 +2827,9 @@ _RUN_SCRIPT_TOOL = RUN_SCRIPT_TOOL
 # (empty keyword searched only "SELECT", not the full SQL keyword set
 # the schema promises).
 
-_FIND_TEST_TOOL = {
-    "name": "find_test",
-    "description": "Find test functions that test a specific function or feature by name.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "function_name": {
-                "type": "string",
-                "description": "Name of the function or feature to find tests for",
-            },
-        },
-        "required": ["function_name"],
-    },
-}
+# moved to app/tools/filesystem/find_test.py as FIND_TEST_TOOL /
+# find_test_handler() — tool_enhance.md productionization pass, tool
+# #140 (2026-09-11).
 
 # tool_enhance.md productionization pass, tool #99 (2026-08-25) — moved
 # to app/tools/filesystem/find_config.py as FIND_CONFIG_TOOL (imported
@@ -7377,45 +7371,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def find_sql_h(inp: dict[str, Any]) -> str:
         return find_sql_handler(root, inp)
 
+    # tool_enhance.md productionization pass, tool #140 (2026-09-11) —
+    # this implementation was already correct; the real fix (a
+    # separately-drifted, narrower reimplementation in
+    # chat_agent.py's dispatch) lives in the shared handler; see that
+    # module's own docstring.
     def find_test_h(inp: dict[str, Any]) -> str:
-        ftest_fn = str(inp["function_name"])
-        patterns = [
-            f"def test_{ftest_fn}",
-            f"def test.*{ftest_fn}",
-            f"test.*[\"'].*{ftest_fn}",
-        ]
-        exclude = [
-            "--exclude-dir=node_modules",
-            "--exclude-dir=.venv",
-            "--exclude-dir=__pycache__",
-        ]
-        ftest_out: list[str] = []
-        for pt in patterns:
-            try:
-                r = subprocess.run(
-                    [
-                        "grep",
-                        "-rn",
-                        "-E",
-                        pt,
-                        repo_path,
-                        "--include=*.py",
-                        "--include=*.ts",
-                    ]
-                    + exclude,
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                )
-                if r.stdout.strip():
-                    ftest_out.append(r.stdout[:2000])
-            except Exception:
-                pass
-        return (
-            "\n".join(ftest_out)[:5000]
-            if ftest_out
-            else f"No tests found for '{ftest_fn}'"
-        )
+        return find_test_handler(repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #99 (2026-08-25) — the
     # real fix lives in the shared find_config_handler(); see that

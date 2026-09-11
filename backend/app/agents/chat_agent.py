@@ -197,6 +197,7 @@ from app.tools.git.explain_merge_conflict import explain_merge_conflict_handler
 from app.tools.filesystem.export_markdown import export_markdown_handler
 from app.tools.filesystem.find_file import find_file_handler
 from app.tools.filesystem.find_queue import find_queue_handler
+from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
@@ -3031,19 +3032,22 @@ class ChatAgent:
             return await asyncio.to_thread(find_sql_handler, root, inp)
 
         if tool_name == "find_test":
-            ftest_fn = str(inp["function_name"])
-            ftest_pat = rf"def test_{ftest_fn}|def test.*{ftest_fn}"
-            ftest_cmd = (
-                f"grep -rn -E {__import__('shlex').quote(ftest_pat)} {repo} "
-                "--include=*.py --include=*.test.ts --include=*.spec.ts "
-                "--exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=__pycache__ 2>/dev/null || true"
-            )
-            ftest_result = await asyncio.to_thread(_run_subprocess, ftest_cmd, repo, 15)
-            return (
-                ftest_result[:5000]
-                if ftest_result.strip()
-                else f"No tests found for '{ftest_fn}'"
-            )
+            # tool_enhance.md productionization pass, tool #140
+            # (2026-09-11) — was a separately-drifted, narrower
+            # reimplementation (only 2 of the canonical 3 search
+            # patterns — missing the one that catches JS/TS
+            # test("...")-style descriptions — plus a narrower
+            # --include filter and a generic "(no output)" fallback
+            # instead of a clear "No tests found" message). Checked
+            # live and confirmed NOT shell-injection/flag-collision
+            # vulnerable (function_name always reaches grep embedded
+            # inside a literal "def test_"-prefixed pattern, never as
+            # a bare argv token, and shlex.quote() correctly
+            # neutralizes shell metacharacters — verified with a real
+            # payload, no injected command executed). Now delegates to
+            # the shared, canonical handler instead of its own
+            # drifted reimplementation.
+            return await asyncio.to_thread(find_test_handler, repo, inp)
 
         if tool_name == "find_config":
             # tool_enhance.md productionization pass, tool #99 (2026-08-25)
