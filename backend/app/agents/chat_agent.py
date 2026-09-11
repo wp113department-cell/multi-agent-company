@@ -192,6 +192,7 @@ from app.tools.filesystem.copy_file import copy_file_handler
 from app.tools.filesystem.count_lines import count_lines_handler
 from app.tools.filesystem.create_directory import create_directory_handler
 from app.tools.filesystem.csv_preview import csv_preview_handler
+from app.tools.filesystem.env_diff import env_diff_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
@@ -3499,6 +3500,18 @@ class ChatAgent:
             # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131/#132/#133.
             # Delegates to the shared, fixed handler.
             return await asyncio.to_thread(deps_outdated_handler, root, repo, inp)
+
+        if tool_name == "env_diff":
+            # tool_enhance.md productionization pass, tool #135
+            # (2026-09-11) — was a worktree-escape env-variable-NAME
+            # disclosure oracle on both `example`/`actual` (proved live
+            # to disclose a key name unique to a file outside the
+            # worktree) and had an uncaught crash on a real permission
+            # error, AND advertised in CHAT_TOOLS but never dispatched
+            # here at all, same dispatch class as tools
+            # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131/#132/#133/#134.
+            # Delegates to the shared, worktree-validated handler.
+            return await asyncio.to_thread(env_diff_handler, root, repo, inp)
 
         if tool_name == "bhaskar_tool":
             # Universal "no existing tool fits" fallback —

@@ -390,6 +390,10 @@ from app.tools.filesystem.csv_preview import (
     CSV_PREVIEW_TOOL,
     csv_preview_handler,
 )
+from app.tools.filesystem.env_diff import (
+    ENV_DIFF_TOOL,
+    env_diff_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -634,6 +638,7 @@ _COPY_FILE_TOOL = COPY_FILE_TOOL
 _COUNT_LINES_TOOL = COUNT_LINES_TOOL
 _CREATE_DIRECTORY_TOOL = CREATE_DIRECTORY_TOOL
 _CSV_PREVIEW_TOOL = CSV_PREVIEW_TOOL
+_ENV_DIFF_TOOL = ENV_DIFF_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -5534,24 +5539,9 @@ _LIST_ENV_VARS_TOOL: dict[str, Any] = {
     "description": "List all environment variable NAMES (not values) currently set. Use read_env_var to read a specific value.",
     "input_schema": {"type": "object", "properties": {}, "required": []},
 }
-_ENV_DIFF_TOOL: dict[str, Any] = {
-    "name": "env_diff",
-    "description": "Compare .env.example with .env (or a named env file) to find missing or extra variables.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "example": {
-                "type": "string",
-                "description": "Path to example env file (default: .env.example)",
-            },
-            "actual": {
-                "type": "string",
-                "description": "Path to actual env file (default: .env)",
-            },
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/filesystem/env_diff.py as ENV_DIFF_TOOL /
+# env_diff_handler() — tool_enhance.md productionization pass, tool
+# #135 (2026-09-11).
 
 # -- Data format tools --
 _JSON_QUERY_TOOL: dict[str, Any] = {
@@ -8426,36 +8416,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         names = sorted(os.environ.keys())
         return "\n".join(names)
 
+    # tool_enhance.md productionization pass, tool #135 (2026-09-11) —
+    # was a worktree-escape env-variable-NAME disclosure oracle on
+    # both `example`/`actual` (`root / ...` never validated) and had
+    # an uncaught crash on a real permission error. Now delegates to
+    # the shared, worktree-validated handler.
     def env_diff_h(inp: dict[str, Any]) -> str:
-        example_path = root / str(inp.get("example", ".env.example"))
-        actual_path = root / str(inp.get("actual", ".env"))
-
-        def _keys(fp: Path) -> set[str]:
-            if not fp.exists():
-                return set()
-            keys: set[str] = set()
-            for line in fp.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    keys.add(line.split("=", 1)[0].strip())
-            return keys
-
-        example_keys = _keys(example_path)
-        actual_keys = _keys(actual_path)
-        missing = sorted(example_keys - actual_keys)
-        extra = sorted(actual_keys - example_keys)
-        lines = []
-        if missing:
-            lines.append(f"Missing in {inp.get('actual', '.env')} ({len(missing)}):")
-            lines.extend(f"  - {k}" for k in missing)
-        if extra:
-            lines.append(
-                f"Extra in {inp.get('actual', '.env')} (not in example, {len(extra)}):"
-            )
-            lines.extend(f"  + {k}" for k in extra)
-        if not missing and not extra:
-            lines.append("✅ No differences — .env matches .env.example")
-        return "\n".join(lines)
+        return env_diff_handler(root, repo_path, inp)
 
     def json_query_h(inp: dict[str, Any]) -> str:
         fpath = root / str(inp["path"])
