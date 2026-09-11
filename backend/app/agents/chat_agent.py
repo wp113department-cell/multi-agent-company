@@ -190,6 +190,7 @@ from app.tools.filesystem.compare_files import compare_files_handler
 from app.tools.filesystem.copy_file import copy_file_handler
 from app.tools.filesystem.count_lines import count_lines_handler
 from app.tools.filesystem.create_directory import create_directory_handler
+from app.tools.filesystem.csv_preview import csv_preview_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
 from app.tools.filesystem.find_api import find_api_handler
@@ -3464,6 +3465,17 @@ class ChatAgent:
             # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130.
             # Delegates to the shared, already-correct handler.
             return await asyncio.to_thread(create_directory_handler, root, repo, inp)
+
+        if tool_name == "csv_preview":
+            # tool_enhance.md productionization pass, tool #132
+            # (2026-09-11) — was a worktree-escape arbitrary file READ
+            # (`root / path` never validated, proved live to disclose
+            # real CSV content outside the worktree) AND advertised in
+            # CHAT_TOOLS but never dispatched here at all, same
+            # dispatch class as tools
+            # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131.
+            # Delegates to the shared, worktree-validated handler.
+            return await asyncio.to_thread(csv_preview_handler, root, repo, inp)
 
         if tool_name == "bhaskar_tool":
             # Universal "no existing tool fits" fallback —

@@ -382,6 +382,10 @@ from app.tools.filesystem.create_directory import (
     CREATE_DIRECTORY_TOOL,
     create_directory_handler,
 )
+from app.tools.filesystem.csv_preview import (
+    CSV_PREVIEW_TOOL,
+    csv_preview_handler,
+)
 from app.tools.filesystem.file_info import (
     FILE_INFO_TOOL,
     file_info_handler,
@@ -620,6 +624,7 @@ _COMPARE_FILES_TOOL = COMPARE_FILES_TOOL
 _COPY_FILE_TOOL = COPY_FILE_TOOL
 _COUNT_LINES_TOOL = COUNT_LINES_TOOL
 _CREATE_DIRECTORY_TOOL = CREATE_DIRECTORY_TOOL
+_CSV_PREVIEW_TOOL = CSV_PREVIEW_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -5596,24 +5601,9 @@ _JSON_VALIDATE_TOOL: dict[str, Any] = {
         "required": ["path"],
     },
 }
-_CSV_PREVIEW_TOOL: dict[str, Any] = {
-    "name": "csv_preview",
-    "description": "Preview the first N rows of a CSV file, showing column names and sample data.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "CSV file path (relative to repo root)",
-            },
-            "rows": {
-                "type": "integer",
-                "description": "Number of rows to preview (default: 5)",
-            },
-        },
-        "required": ["path"],
-    },
-}
+# moved to app/tools/filesystem/csv_preview.py as CSV_PREVIEW_TOOL /
+# csv_preview_handler() — tool_enhance.md productionization pass, tool
+# #132 (2026-09-11).
 # AUDIT_Q_BATCH09 §16/§79/§80 gap-closure — real, working handlers for file
 # types/inspection capabilities that had zero support before, each following
 # the exact pattern of the existing PDF/image/CSV/YAML tools above: stdlib or
@@ -8565,28 +8555,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"✅ {inp['path']} is valid JSON and matches schema {schema_rel}"
         return f"✅ {inp['path']} is valid JSON"
 
+    # tool_enhance.md productionization pass, tool #132 (2026-09-11) —
+    # was a worktree-escape arbitrary file READ (`root / path` never
+    # validated) and had an uncaught crash on a non-numeric `rows`.
+    # Now delegates to the shared, worktree-validated handler.
     def csv_preview_h(inp: dict[str, Any]) -> str:
-        import csv as _csv
-
-        fpath = root / str(inp["path"])
-        rows_n = int(inp.get("rows", 5))
-        try:
-            with open(fpath, encoding="utf-8", errors="ignore") as f:
-                reader = _csv.reader(f)
-                rows: list[list[str]] = []
-                for i, row in enumerate(reader):
-                    if i > rows_n:
-                        break
-                    rows.append(row)
-            if not rows:
-                return "(empty CSV)"
-            header = rows[0]
-            out = ["Columns: " + ", ".join(header)]
-            for row in rows[1:]:
-                out.append(" | ".join(row))
-            return "\n".join(out)
-        except Exception as e:
-            return f"[ERROR] csv_preview: {e}"
+        return csv_preview_handler(root, repo_path, inp)
 
     def xml_validate_h(inp: dict[str, Any]) -> str:
         import xml.etree.ElementTree as _ET
