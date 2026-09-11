@@ -199,6 +199,7 @@ from app.tools.filesystem.find_file import find_file_handler
 from app.tools.filesystem.find_queue import find_queue_handler
 from app.tools.execution.find_unused_imports import find_unused_imports_handler
 from app.tools.filesystem.find_worker import find_worker_handler
+from app.tools.filesystem.format_file import format_file_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -1737,27 +1738,17 @@ class ChatAgent:
             return await asyncio.to_thread(find_file_handler, root, repo, inp)
 
         if tool_name == "format_file":
-            rel = str(inp["path"])
-            formatter = str(inp.get("formatter", "auto"))
-            fmt_target = root / rel
-            if not fmt_target.exists():
-                return f"[ERROR] File not found: {rel}"
-            if formatter == "auto":
-                formatter = "ruff" if fmt_target.suffix == ".py" else "prettier"
-            # AUDIT_Q_BATCH01 §1 "Windows terminal support" — was hardcoded
-            # POSIX `source`, silently never activating the venv on Windows
-            # (relative path is safe here: _run_subprocess always passes
-            # cwd=repo, so the shell's starting directory is already repo,
-            # matching this line's previous absolute-path behavior exactly
-            # on POSIX while adding a real Windows branch).
-            activate = _venv_activate_snippet()
-            if formatter in ("ruff", "black"):
-                cmd_s = (
-                    f"{activate} && python -m {formatter} format {str(fmt_target)} 2>&1"
-                )
-            else:
-                cmd_s = f"cd {repo} && npx prettier --write {str(fmt_target)} 2>&1"
-            return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 30)
+            # tool_enhance.md productionization pass, tool #143
+            # (2026-09-11) — was a genuine, direct shell-injection RCE
+            # (fmt_target interpolated completely unquoted into a
+            # shell=True command — worse than tools.py's own sibling
+            # implementation, which at least shlex.quote()'d it) PLUS
+            # a worktree-escape arbitrary WRITE (`root / rel` never
+            # validated — formatters mutate their target in place).
+            # Both proved live, in isolated /tmp directories. Now
+            # delegates to the shared, list-args, worktree-validated
+            # handler.
+            return await asyncio.to_thread(format_file_handler, root, repo, inp)
 
         if tool_name == "organize_imports":
             # tool_enhance.md productionization pass, tool #115

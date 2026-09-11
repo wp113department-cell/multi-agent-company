@@ -422,6 +422,10 @@ from app.tools.filesystem.find_worker import (
     FIND_WORKER_TOOL,
     find_worker_handler,
 )
+from app.tools.filesystem.format_file import (
+    FORMAT_FILE_TOOL,
+    format_file_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -674,6 +678,7 @@ _FIND_FILE_TOOL = FIND_FILE_TOOL
 _FIND_QUEUE_TOOL = FIND_QUEUE_TOOL
 _FIND_TEST_TOOL = FIND_TEST_TOOL
 _FIND_WORKER_TOOL = FIND_WORKER_TOOL
+_FORMAT_FILE_TOOL = FORMAT_FILE_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -2328,25 +2333,9 @@ _GIT_FETCH_TOOL = {
 # find_file_handler() — tool_enhance.md productionization pass, tool
 # #138 (2026-09-11).
 
-_FORMAT_FILE_TOOL = {
-    "name": "format_file",
-    "description": "Auto-format a source file using the appropriate formatter (black/ruff for Python, prettier for TS/JS).",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "File path relative to repo root",
-            },
-            "formatter": {
-                "type": "string",
-                "enum": ["auto", "black", "ruff", "prettier"],
-                "description": "Formatter to use (default: auto — detects by extension)",
-            },
-        },
-        "required": ["path"],
-    },
-}
+# moved to app/tools/filesystem/format_file.py as FORMAT_FILE_TOOL /
+# format_file_handler() — tool_enhance.md productionization pass, tool
+# #143 (2026-09-11).
 
 # moved to app/tools/filesystem/organize_imports.py as
 # ORGANIZE_IMPORTS_TOOL — tool_enhance.md productionization pass, tool
@@ -6426,30 +6415,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def find_file(inp: dict[str, Any]) -> str:
         return find_file_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #143 (2026-09-11) —
+    # was a worktree-escape ARBITRARY FILE WRITE (`root / rel` never
+    # validated — formatters mutate their target in place, proved live
+    # in an isolated /tmp directory). Now delegates to the shared,
+    # list-args, worktree-validated handler.
     def format_file(inp: dict[str, Any]) -> str:
-        import shlex as _shlex
-
-        rel = str(inp["path"])
-        formatter = str(inp.get("formatter", "auto"))
-        fmt_target = root / rel
-        if not fmt_target.exists():
-            return f"[ERROR] File not found: {rel}"
-        if formatter == "auto":
-            formatter = "ruff" if fmt_target.suffix == ".py" else "prettier"
-        activate = (
-            _venv_activate_snippet()
-        )  # cwd=repo_path is passed to subprocess.run below
-        quoted_target = _shlex.quote(str(fmt_target))
-        if formatter in ("ruff", "black"):
-            cmd = f"{activate} && python -m {formatter} format {quoted_target} 2>&1"
-        elif formatter == "prettier":
-            cmd = f"cd {repo_path} && npx prettier --write {quoted_target} 2>&1"
-        else:
-            return f"[ERROR] Unknown formatter: {formatter}"
-        r = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, cwd=repo_path, timeout=30
-        )
-        return (r.stdout + r.stderr).strip() or f"Formatted {rel}"
+        return format_file_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #115 (2026-08-26) —
     # was a worktree-escape arbitrary-write (`root / rel` never

@@ -28,6 +28,16 @@ a worktree-escape arbitrary write — it invokes the venv's own `python`
 binary directly by path, same pattern as tool #101. 7 real call sites
 remain in `app/agents/tools.py` today.
 
+**Updated 2026-09-11 (tool_enhance.md productionization pass, tool
+#143, `format_file`)**: 2 more of those 7 call sites (`format_file`
+inside `make_chat_handlers`, and `chat_agent.py`'s own dispatch — a
+genuine shell-injection RCE, worse than `tools.py`'s own copy) were
+unified onto a shared `format_file_handler()` that also uses list-args
+subprocess calls exclusively (no `shell=True`), closing both the
+shell-injection RCE and a worktree-escape arbitrary write — it invokes
+the venv's own `python` binary directly by path, same pattern as tools
+#101/#115. 5 real call sites remain in `app/agents/tools.py` today.
+
 Windows behavior is verified by construction/string content only (this
 environment has no Windows host to actually execute `cmd.exe` against) —
 stated honestly, not silently assumed correct. The POSIX branch is
@@ -101,13 +111,14 @@ def test_real_call_sites_no_longer_hardcode_the_posix_pattern_directly() -> None
     # appears exactly once now too -- only in that same explanatory comment,
     # not at any real call site.
     assert source.count("source {repo_path}/.venv/bin/activate") == 1
-    # tool_enhance.md productionization pass, tools #101 and #115
-    # (2026-08-25, 2026-08-26) — 4 of the original 11 real call sites
-    # (3 for run_linter, 1 for organize_imports) were unified onto
-    # shared handlers that invoke the venv's own python binary
-    # directly (list-args, no shell=True) instead of this shell
-    # snippet -- 7 real call sites remain, verified directly by
-    # counting each surviving reference rather than assumed.
+    # tool_enhance.md productionization pass, tools #101, #115, and
+    # #143 (2026-08-25, 2026-08-26, 2026-09-11) — 6 of the original 11
+    # real call sites (3 for run_linter, 1 for organize_imports, 2 for
+    # format_file) were unified onto shared handlers that invoke the
+    # venv's own python binary directly (list-args, no shell=True)
+    # instead of this shell snippet -- 5 real call sites remain,
+    # verified directly by counting each surviving reference rather
+    # than assumed.
     assert (
-        source.count("_venv_activate_snippet()") >= 7 + 1
-    )  # 7 real call sites + its own def
+        source.count("_venv_activate_snippet()") >= 5 + 1
+    )  # 5 real call sites + its own def
