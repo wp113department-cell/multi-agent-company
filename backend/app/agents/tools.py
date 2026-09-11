@@ -398,6 +398,10 @@ from app.tools.git.explain_merge_conflict import (
     EXPLAIN_MERGE_CONFLICT_TOOL,
     explain_merge_conflict_handler,
 )
+from app.tools.filesystem.export_markdown import (
+    EXPORT_MARKDOWN_TOOL,
+    export_markdown_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -644,6 +648,7 @@ _CREATE_DIRECTORY_TOOL = CREATE_DIRECTORY_TOOL
 _CSV_PREVIEW_TOOL = CSV_PREVIEW_TOOL
 _ENV_DIFF_TOOL = ENV_DIFF_TOOL
 _EXPLAIN_MERGE_CONFLICT_TOOL = EXPLAIN_MERGE_CONFLICT_TOOL
+_EXPORT_MARKDOWN_TOOL = EXPORT_MARKDOWN_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -5738,24 +5743,9 @@ _SUMMARIZE_OUTPUT_TOOL: dict[str, Any] = {
         "required": ["text"],
     },
 }
-_EXPORT_MARKDOWN_TOOL: dict[str, Any] = {
-    "name": "export_markdown",
-    "description": "Render a Markdown file to HTML and save it. Returns the output HTML file path.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Markdown file path (relative to repo root)",
-            },
-            "output": {
-                "type": "string",
-                "description": "Output HTML file path (default: same name + .html)",
-            },
-        },
-        "required": ["path"],
-    },
-}
+# moved to app/tools/filesystem/export_markdown.py as
+# EXPORT_MARKDOWN_TOOL / export_markdown_handler() — tool_enhance.md
+# productionization pass, tool #137 (2026-09-11).
 _FIND_UNUSED_IMPORTS_TOOL: dict[str, Any] = {
     "name": "find_unused_imports",
     "description": "Find unused imports in Python files using ruff or autoflake. Returns file:line:symbol for each unused import.",
@@ -8842,24 +8832,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         )
         return f"```mermaid\n{mermaid}\n```\n\n{note}"
 
+    # tool_enhance.md productionization pass, tool #137 (2026-09-11) —
+    # was a worktree-escape ARBITRARY FILE WRITE (not just a read) on
+    # both `path` and `output` (the default-derived `output` also
+    # escaped whenever `path` alone was absolute, proved live). Now
+    # delegates to the shared, worktree-validated handler.
     def export_markdown_h(inp: dict[str, Any]) -> str:
-        fpath = root / str(inp["path"])
-        output_name = str(inp.get("output", str(inp["path"]).replace(".md", ".html")))
-        out_path = root / output_name
-        try:
-            text = fpath.read_text(encoding="utf-8")
-            try:
-                import markdown as _md
-
-                html = _md.markdown(text, extensions=["fenced_code", "tables"])
-            except ImportError:
-                html = f"<pre>{text}</pre>"
-            out_path.write_text(
-                f"<!DOCTYPE html><html><body>{html}</body></html>", encoding="utf-8"
-            )
-            return f"Exported to {output_name}"
-        except Exception as e:
-            return f"[ERROR] export_markdown: {e}"
+        return export_markdown_handler(root, repo_path, inp)
 
     def find_unused_imports_h(inp: dict[str, Any]) -> str:
         path = str(inp.get("path", "."))
