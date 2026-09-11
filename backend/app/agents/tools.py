@@ -418,6 +418,10 @@ from app.tools.filesystem.find_test import (
     FIND_TEST_TOOL,
     find_test_handler,
 )
+from app.tools.filesystem.find_worker import (
+    FIND_WORKER_TOOL,
+    find_worker_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -669,6 +673,7 @@ _EXPORT_MARKDOWN_TOOL = EXPORT_MARKDOWN_TOOL
 _FIND_FILE_TOOL = FIND_FILE_TOOL
 _FIND_QUEUE_TOOL = FIND_QUEUE_TOOL
 _FIND_TEST_TOOL = FIND_TEST_TOOL
+_FIND_WORKER_TOOL = FIND_WORKER_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -4414,20 +4419,9 @@ _MERMAID_FROM_SCHEMA_TOOL: dict[str, Any] = {
 # find_queue_handler() — tool_enhance.md productionization pass, tool
 # #139 (2026-09-11).
 
-_FIND_WORKER_TOOL: dict[str, Any] = {
-    "name": "find_worker",
-    "description": "Search the codebase for Worker / consumer patterns (Worker class, @worker, celery worker, RQ worker). Returns file:line matches.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "repo_path": {
-                "type": "string",
-                "description": "Repo root to search (optional)",
-            }
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/filesystem/find_worker.py as FIND_WORKER_TOOL /
+# find_worker_handler() — tool_enhance.md productionization pass, tool
+# #142 (2026-09-11).
 
 # --- Day 2 Gap: Advanced editing tools ---
 
@@ -7906,34 +7900,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def find_queue_h(inp: dict[str, Any]) -> str:
         return find_queue_handler(repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #142 (2026-09-11) —
+    # same finding class as sibling tool #139's find_queue: was a
+    # worktree-escape FULL FILE CONTENT disclosure oracle (`repo_path`
+    # used completely unanchored/unvalidated, proved live to disclose
+    # real content lines from a directory outside the worktree). Now
+    # delegates to the shared, worktree-validated handler.
     def find_worker_h(inp: dict[str, Any]) -> str:
-        _rp = str(inp.get("repo_path", repo_path))
-        try:
-            pat = r"class.*Worker|@worker|celery\.task|\.delay\(|rq.*worker|dramatiq\.actor|Consumer"
-            out = subprocess.run(
-                [
-                    "grep",
-                    "-rn",
-                    "--include=*.py",
-                    "--include=*.ts",
-                    "--include=*.js",
-                    "-E",
-                    pat,
-                    _rp,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            lines = out.stdout.strip().splitlines()
-            results = [
-                ln for ln in lines if ".venv/" not in ln and "node_modules/" not in ln
-            ][:30]
-        except Exception as e:
-            return f"[ERROR] find_worker: {e}"
-        if not results:
-            return "No worker patterns found."
-        return "\n".join(results)
+        return find_worker_handler(repo_path, inp)
 
     # moved to app/tools/filesystem/insert_before.py — this now delegates to the shared insert_before_handler()
     def insert_before_h(inp: dict[str, Any]) -> str:

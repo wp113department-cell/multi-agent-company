@@ -198,6 +198,7 @@ from app.tools.filesystem.export_markdown import export_markdown_handler
 from app.tools.filesystem.find_file import find_file_handler
 from app.tools.filesystem.find_queue import find_queue_handler
 from app.tools.execution.find_unused_imports import find_unused_imports_handler
+from app.tools.filesystem.find_worker import find_worker_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -3528,6 +3529,19 @@ class ChatAgent:
             return await asyncio.to_thread(
                 find_unused_imports_handler, root, repo, inp
             )
+
+        if tool_name == "find_worker":
+            # tool_enhance.md productionization pass, tool #142
+            # (2026-09-11) — same finding class as sibling tool #139's
+            # find_queue: was a worktree-escape FULL FILE CONTENT
+            # disclosure oracle (`repo_path` used completely
+            # unanchored/unvalidated, proved live to disclose real
+            # content lines from a directory outside the worktree) AND
+            # advertised in CHAT_TOOLS but never dispatched here at
+            # all, same dispatch class as tools
+            # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131/#132/#133/#134/#135/#136/#137/#138/#139/#140/#141.
+            # Delegates to the shared, worktree-validated handler.
+            return await asyncio.to_thread(find_worker_handler, repo, inp)
 
         if tool_name == "bhaskar_tool":
             # Universal "no existing tool fits" fallback —
