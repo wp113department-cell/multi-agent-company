@@ -406,6 +406,10 @@ from app.tools.filesystem.find_file import (
     FIND_FILE_TOOL,
     find_file_handler,
 )
+from app.tools.filesystem.find_queue import (
+    FIND_QUEUE_TOOL,
+    find_queue_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -654,6 +658,7 @@ _ENV_DIFF_TOOL = ENV_DIFF_TOOL
 _EXPLAIN_MERGE_CONFLICT_TOOL = EXPLAIN_MERGE_CONFLICT_TOOL
 _EXPORT_MARKDOWN_TOOL = EXPORT_MARKDOWN_TOOL
 _FIND_FILE_TOOL = FIND_FILE_TOOL
+_FIND_QUEUE_TOOL = FIND_QUEUE_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -4406,20 +4411,9 @@ _MERMAID_FROM_SCHEMA_TOOL: dict[str, Any] = {
 
 # --- Day 2 Gap: Smart search tools ---
 
-_FIND_QUEUE_TOOL: dict[str, Any] = {
-    "name": "find_queue",
-    "description": "Search the codebase for Queue / task-queue patterns (asyncio.Queue, BullMQ, RQ, Celery). Returns file:line matches.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "repo_path": {
-                "type": "string",
-                "description": "Repo root to search (optional, defaults to current repo)",
-            }
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/filesystem/find_queue.py as FIND_QUEUE_TOOL /
+# find_queue_handler() — tool_enhance.md productionization pass, tool
+# #139 (2026-09-11).
 
 _FIND_WORKER_TOOL: dict[str, Any] = {
     "name": "find_worker",
@@ -7947,43 +7941,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     # ── Day 2 Gap handlers ─────────────────────────────────────────────────────
 
+    # tool_enhance.md productionization pass, tool #139 (2026-09-11) —
+    # was a worktree-escape FULL FILE CONTENT disclosure oracle
+    # (`repo_path` used completely unanchored/unvalidated, proved live
+    # to disclose real content lines from a directory outside the
+    # worktree). Now delegates to the shared, worktree-validated
+    # handler.
     def find_queue_h(inp: dict[str, Any]) -> str:
-        _rp = str(inp.get("repo_path", repo_path))
-        patterns = [  # noqa: F841
-            r"asyncio\.Queue",
-            r"class.*Queue",
-            r"BullMQ\|rq\.Queue\|celery\|dramatiq\|huey",
-            r"Queue\(",
-        ]
-        results: list[str] = []
-        try:
-            pat = (
-                r"asyncio\.Queue|class.*Queue|rq\.Queue|Queue\(|BullMQ|celery|dramatiq"
-            )
-            out = subprocess.run(
-                [
-                    "grep",
-                    "-rn",
-                    "--include=*.py",
-                    "--include=*.ts",
-                    "--include=*.js",
-                    "-E",
-                    pat,
-                    _rp,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            lines = out.stdout.strip().splitlines()
-            results = [
-                ln for ln in lines if ".venv/" not in ln and "node_modules/" not in ln
-            ][:30]
-        except Exception as e:
-            return f"[ERROR] find_queue: {e}"
-        if not results:
-            return "No queue patterns found."
-        return "\n".join(results)
+        return find_queue_handler(repo_path, inp)
 
     def find_worker_h(inp: dict[str, Any]) -> str:
         _rp = str(inp.get("repo_path", repo_path))
