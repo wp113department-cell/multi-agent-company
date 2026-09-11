@@ -386,6 +386,10 @@ from app.tools.filesystem.csv_preview import (
     CSV_PREVIEW_TOOL,
     csv_preview_handler,
 )
+from app.tools.agents.decision_log_append import (
+    DECISION_LOG_APPEND_TOOL,
+    decision_log_append_handler,
+)
 from app.tools.filesystem.file_info import (
     FILE_INFO_TOOL,
     file_info_handler,
@@ -625,6 +629,7 @@ _COPY_FILE_TOOL = COPY_FILE_TOOL
 _COUNT_LINES_TOOL = COUNT_LINES_TOOL
 _CREATE_DIRECTORY_TOOL = CREATE_DIRECTORY_TOOL
 _CSV_PREVIEW_TOOL = CSV_PREVIEW_TOOL
+_DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
 # ---------------------------------------------------------------------------
@@ -4308,22 +4313,9 @@ _MEMORY_READ_TOOL: dict[str, Any] = {
 
 # moved to app/tools/agents/memory_write.py as MEMORY_WRITE_TOOL — tool_enhance.md productionization pass, tool #51 (2026-08-20).
 
-_DECISION_LOG_APPEND_TOOL: dict[str, Any] = {
-    "name": "decision_log_append",
-    "description": "Append a design decision with rationale to the project decision log.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "decision": {"type": "string", "description": "The decision made"},
-            "reason": {"type": "string", "description": "Why this decision was made"},
-            "alternatives": {
-                "type": "string",
-                "description": "What alternatives were considered (optional)",
-            },
-        },
-        "required": ["decision", "reason"],
-    },
-}
+# moved to app/tools/agents/decision_log_append.py as
+# DECISION_LOG_APPEND_TOOL / decision_log_append_handler() —
+# tool_enhance.md productionization pass, tool #133 (2026-09-11).
 
 # moved to app/tools/database/task_history_query.py as
 # TASK_HISTORY_QUERY_TOOL / task_history_query() — tool_enhance.md
@@ -7765,23 +7757,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         value = str(inp["value"])
         return write_memory_key(repo_path, key, value)
 
+    # tool_enhance.md productionization pass, tool #133 (2026-09-11) —
+    # no vulnerability in this handler itself (no LLM-controlled path,
+    # fixed deterministic target file); the real fix (chat_agent.py had
+    # zero dispatch) lives in the shared handler; see that module's own
+    # docstring.
     def decision_log_append_h(inp: dict[str, Any]) -> str:
-        import datetime as _dt
-
-        entry = {
-            "timestamp": _dt.datetime.utcnow().isoformat(),
-            "decision": str(inp["decision"]),
-            "reason": str(inp["reason"]),
-            "alternatives": str(inp.get("alternatives", "")),
-        }
-        try:
-            with open(_mem_decisions_path, "a", encoding="utf-8") as _fh:
-                _mem_lock(_fh)
-                _fh.write(_json_mem.dumps(entry) + "\n")
-                _mem_unlock(_fh)
-            return f"Decision logged: {entry['decision'][:80]}"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return decision_log_append_handler(repo_path, inp)
 
     task_history_query_h = task_history_query
 
