@@ -182,6 +182,7 @@ from app.tools.database.task_progress import task_progress_handler
 from app.tools.execution.analyze_error import analyze_error_handler
 from app.tools.execution.check_url_status import check_url_status_handler
 from app.tools.execution.cpu_profile import cpu_profile_handler
+from app.tools.execution.deps_outdated import deps_outdated_handler
 from app.tools.execution.read_logs import read_logs_handler
 from app.tools.filesystem.organize_imports import organize_imports_handler
 from app.tools.filesystem.yaml_validate import yaml_validate_handler
@@ -3487,6 +3488,17 @@ class ChatAgent:
             # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131/#132.
             # Delegates to the shared, already-safe handler.
             return await asyncio.to_thread(decision_log_append_handler, repo, inp)
+
+        if tool_name == "deps_outdated":
+            # tool_enhance.md productionization pass, tool #134
+            # (2026-09-11) — was a worktree-escape (`directory` reached
+            # a subprocess `cwd` unvalidated, proved live via a fake
+            # npm script reporting its real cwd) AND advertised in
+            # CHAT_TOOLS but never dispatched here at all, same
+            # dispatch class as tools
+            # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131/#132/#133.
+            # Delegates to the shared, fixed handler.
+            return await asyncio.to_thread(deps_outdated_handler, root, repo, inp)
 
         if tool_name == "bhaskar_tool":
             # Universal "no existing tool fits" fallback —

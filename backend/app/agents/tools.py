@@ -322,6 +322,10 @@ from app.tools.execution.cpu_profile import (
     CPU_PROFILE_TOOL,
     cpu_profile_handler,
 )
+from app.tools.execution.deps_outdated import (
+    DEPS_OUTDATED_TOOL,
+    deps_outdated_handler,
+)
 from app.tools.execution.docker_ps import (
     DOCKER_PS_TOOL,
     docker_ps_handler,
@@ -624,6 +628,7 @@ _ANALYZE_ERROR_TOOL = ANALYZE_ERROR_TOOL
 _BASE64_ENCODE_TOOL = BASE64_ENCODE_TOOL
 _CHECK_URL_STATUS_TOOL = CHECK_URL_STATUS_TOOL
 _CPU_PROFILE_TOOL = CPU_PROFILE_TOOL
+_DEPS_OUTDATED_TOOL = DEPS_OUTDATED_TOOL
 _COMPARE_FILES_TOOL = COMPARE_FILES_TOOL
 _COPY_FILE_TOOL = COPY_FILE_TOOL
 _COUNT_LINES_TOOL = COUNT_LINES_TOOL
@@ -5781,25 +5786,9 @@ _FIND_UNUSED_IMPORTS_TOOL: dict[str, Any] = {
         "required": [],
     },
 }
-_DEPS_OUTDATED_TOOL: dict[str, Any] = {
-    "name": "deps_outdated",
-    "description": "Check for outdated pip or npm dependencies. Returns package name, current version, and latest version.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "manager": {
-                "type": "string",
-                "enum": ["pip", "npm", "auto"],
-                "description": "Package manager (default: auto-detect)",
-            },
-            "directory": {
-                "type": "string",
-                "description": "Directory to check (default: repo root)",
-            },
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/execution/deps_outdated.py as DEPS_OUTDATED_TOOL
+# / deps_outdated_handler() — tool_enhance.md productionization pass,
+# tool #134 (2026-09-11).
 # tool_enhance.md productionization pass, tool #103 (2026-08-25) —
 # moved to app/tools/execution/check_license_compliance.py as
 # CHECK_LICENSE_COMPLIANCE_TOOL (imported above, aliased to
@@ -8930,35 +8919,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] find_unused_imports: {e}"
 
+    # tool_enhance.md productionization pass, tool #134 (2026-09-11) —
+    # was a worktree-escape (`directory` reached a subprocess `cwd`
+    # unvalidated, proved live via a fake npm script) and a dead
+    # `has_npm` variable causing a misleading "up to date" false
+    # positive when no package manager was present. Now delegates to
+    # the shared, fixed handler.
     def deps_outdated_h(inp: dict[str, Any]) -> str:
-        manager = str(inp.get("manager", "auto"))
-        directory = str(inp.get("directory", "."))
-        target_dir = str(root / directory)
-        if manager == "auto":
-            has_pip = (root / "requirements.txt").exists() or (
-                root / "pyproject.toml"
-            ).exists()
-            has_npm = (root / "package.json").exists()  # noqa: F841
-            manager = "pip" if has_pip else "npm"
-        try:
-            if manager == "pip":
-                r = subprocess.run(
-                    ["pip", "list", "--outdated", "--format=columns"],
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                )
-            else:
-                r = subprocess.run(
-                    ["npm", "outdated"],
-                    capture_output=True,
-                    text=True,
-                    cwd=target_dir,
-                    timeout=60,
-                )
-            return r.stdout.strip() or "✅ All dependencies are up to date"
-        except Exception as e:
-            return f"[ERROR] deps_outdated: {e}"
+        return deps_outdated_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #103 (2026-08-25) — the
     # real fix (this tool was advertised in CHAT_TOOLS but chat_agent.py
