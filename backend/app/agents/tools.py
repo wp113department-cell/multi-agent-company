@@ -402,6 +402,10 @@ from app.tools.filesystem.export_markdown import (
     EXPORT_MARKDOWN_TOOL,
     export_markdown_handler,
 )
+from app.tools.filesystem.find_file import (
+    FIND_FILE_TOOL,
+    find_file_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -649,6 +653,7 @@ _CSV_PREVIEW_TOOL = CSV_PREVIEW_TOOL
 _ENV_DIFF_TOOL = ENV_DIFF_TOOL
 _EXPLAIN_MERGE_CONFLICT_TOOL = EXPLAIN_MERGE_CONFLICT_TOOL
 _EXPORT_MARKDOWN_TOOL = EXPORT_MARKDOWN_TOOL
+_FIND_FILE_TOOL = FIND_FILE_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -2299,24 +2304,9 @@ _GIT_FETCH_TOOL = {
 # NEW TOOL SPECS — Batch 1: File / Editing extras
 # ---------------------------------------------------------------------------
 
-_FIND_FILE_TOOL = {
-    "name": "find_file",
-    "description": "Find files by name or glob pattern across the repository. Faster than list_files when you know the filename.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "name": {
-                "type": "string",
-                "description": "Filename or pattern to find (e.g. 'config.py', '*.json', 'test_*.py')",
-            },
-            "directory": {
-                "type": "string",
-                "description": "Directory to search (default: repo root)",
-            },
-        },
-        "required": ["name"],
-    },
-}
+# moved to app/tools/filesystem/find_file.py as FIND_FILE_TOOL /
+# find_file_handler() — tool_enhance.md productionization pass, tool
+# #138 (2026-09-11).
 
 _FORMAT_FILE_TOOL = {
     "name": "format_file",
@@ -6453,48 +6443,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # BATCH 1 — File / Editing extras
     # =========================================================================
 
+    # tool_enhance.md productionization pass, tool #138 (2026-09-11) —
+    # was a worktree-escape filename/directory-structure disclosure
+    # oracle via `directory` (`root / ff_dir` never validated). Now
+    # delegates to the shared, worktree-validated handler.
     def find_file(inp: dict[str, Any]) -> str:
-        name = str(inp["name"])
-        ff_dir = str(inp.get("directory", ""))
-        ff_root = root / ff_dir if ff_dir else root
-        try:
-            r = subprocess.run(
-                [
-                    "find",
-                    str(ff_root),
-                    "-name",
-                    name,
-                    "-not",
-                    "-path",
-                    "*/node_modules/*",
-                    "-not",
-                    "-path",
-                    "*/__pycache__/*",
-                    "-not",
-                    "-path",
-                    "*/.git/*",
-                    "-not",
-                    "-path",
-                    "*/.venv/*",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            found = [ln for ln in r.stdout.splitlines() if ln.strip()]
-            if not found:
-                return f"(no files matching '{name}')"
-            rel_paths = []
-            for p in found[:100]:
-                try:
-                    rel_paths.append(str(Path(p).relative_to(root)))
-                except ValueError:
-                    rel_paths.append(p)
-            return "\n".join(rel_paths)
-        except subprocess.TimeoutExpired:
-            return "[ERROR] find timed out"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return find_file_handler(root, repo_path, inp)
 
     def format_file(inp: dict[str, Any]) -> str:
         import shlex as _shlex

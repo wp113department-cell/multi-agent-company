@@ -195,6 +195,7 @@ from app.tools.filesystem.csv_preview import csv_preview_handler
 from app.tools.filesystem.env_diff import env_diff_handler
 from app.tools.git.explain_merge_conflict import explain_merge_conflict_handler
 from app.tools.filesystem.export_markdown import export_markdown_handler
+from app.tools.filesystem.find_file import find_file_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
 from app.tools.filesystem.file_info import file_info_handler
@@ -1723,46 +1724,13 @@ class ChatAgent:
         # ========== BATCH 1 — File / Editing extras ==========
 
         if tool_name == "find_file":
-            name = str(inp["name"])
-            ff_dir = str(inp.get("directory", ""))
-            ff_root = root / ff_dir if ff_dir else root
-            try:
-                r = await asyncio.to_thread(
-                    subprocess.run,
-                    [
-                        "find",
-                        str(ff_root),
-                        "-name",
-                        name,
-                        "-not",
-                        "-path",
-                        "*/node_modules/*",
-                        "-not",
-                        "-path",
-                        "*/__pycache__/*",
-                        "-not",
-                        "-path",
-                        "*/.git/*",
-                        "-not",
-                        "-path",
-                        "*/.venv/*",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                )
-                found = [ln for ln in r.stdout.splitlines() if ln.strip()]
-                if not found:
-                    return f"(no files matching '{name}')"
-                ff_rel_paths: list[str] = []
-                for ff_path in found[:100]:
-                    try:
-                        ff_rel_paths.append(str(Path(ff_path).relative_to(root)))
-                    except ValueError:
-                        ff_rel_paths.append(ff_path)
-                return "\n".join(ff_rel_paths)
-            except Exception as e:
-                return f"[ERROR] {e}"
+            # tool_enhance.md productionization pass, tool #138
+            # (2026-09-11) — was a worktree-escape filename/directory-
+            # structure disclosure oracle via `directory` (`root /
+            # ff_dir` never validated, proved live to disclose a real
+            # file's full path outside the worktree). Now delegates to
+            # the shared, worktree-validated handler.
+            return await asyncio.to_thread(find_file_handler, root, repo, inp)
 
         if tool_name == "format_file":
             rel = str(inp["path"])
