@@ -326,6 +326,10 @@ from app.tools.execution.deps_outdated import (
     DEPS_OUTDATED_TOOL,
     deps_outdated_handler,
 )
+from app.tools.execution.find_unused_imports import (
+    FIND_UNUSED_IMPORTS_TOOL,
+    find_unused_imports_handler,
+)
 from app.tools.execution.docker_ps import (
     DOCKER_PS_TOOL,
     docker_ps_handler,
@@ -653,6 +657,7 @@ _BASE64_ENCODE_TOOL = BASE64_ENCODE_TOOL
 _CHECK_URL_STATUS_TOOL = CHECK_URL_STATUS_TOOL
 _CPU_PROFILE_TOOL = CPU_PROFILE_TOOL
 _DEPS_OUTDATED_TOOL = DEPS_OUTDATED_TOOL
+_FIND_UNUSED_IMPORTS_TOOL = FIND_UNUSED_IMPORTS_TOOL
 _COMPARE_FILES_TOOL = COMPARE_FILES_TOOL
 _COPY_FILE_TOOL = COPY_FILE_TOOL
 _COUNT_LINES_TOOL = COUNT_LINES_TOOL
@@ -5724,20 +5729,9 @@ _SUMMARIZE_OUTPUT_TOOL: dict[str, Any] = {
 # moved to app/tools/filesystem/export_markdown.py as
 # EXPORT_MARKDOWN_TOOL / export_markdown_handler() — tool_enhance.md
 # productionization pass, tool #137 (2026-09-11).
-_FIND_UNUSED_IMPORTS_TOOL: dict[str, Any] = {
-    "name": "find_unused_imports",
-    "description": "Find unused imports in Python files using ruff or autoflake. Returns file:line:symbol for each unused import.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "File or directory to check (default: repo root)",
-            },
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/execution/find_unused_imports.py as
+# FIND_UNUSED_IMPORTS_TOOL / find_unused_imports_handler() —
+# tool_enhance.md productionization pass, tool #141 (2026-09-11).
 # moved to app/tools/execution/deps_outdated.py as DEPS_OUTDATED_TOOL
 # / deps_outdated_handler() — tool_enhance.md productionization pass,
 # tool #134 (2026-09-11).
@@ -8721,20 +8715,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def export_markdown_h(inp: dict[str, Any]) -> str:
         return export_markdown_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #141 (2026-09-11) —
+    # was a worktree-escape partial SOURCE CODE disclosure oracle
+    # (`root / path` never validated; ruff's diagnostic output
+    # includes real surrounding source lines, proved live to disclose
+    # real code from a file outside the worktree). Now delegates to
+    # the shared, worktree-validated handler.
     def find_unused_imports_h(inp: dict[str, Any]) -> str:
-        path = str(inp.get("path", "."))
-        target = str(root / path)
-        try:
-            r = subprocess.run(
-                ["python", "-m", "ruff", "check", "--select=F401", target],
-                capture_output=True,
-                text=True,
-                cwd=repo_path,
-                timeout=30,
-            )
-            return r.stdout.strip() or "✅ No unused imports found"
-        except Exception as e:
-            return f"[ERROR] find_unused_imports: {e}"
+        return find_unused_imports_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #134 (2026-09-11) —
     # was a worktree-escape (`directory` reached a subprocess `cwd`
