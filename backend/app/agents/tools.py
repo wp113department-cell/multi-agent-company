@@ -466,6 +466,10 @@ from app.tools.git.github_list_prs import (
     GITHUB_LIST_PRS_TOOL,
     github_list_prs_handler,
 )
+from app.tools.filesystem.hash_file import (
+    HASH_FILE_TOOL,
+    hash_file_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -729,6 +733,7 @@ _GIT_LOG_FILE_TOOL = GIT_LOG_FILE_TOOL
 _GIT_STASH_LIST_TOOL = GIT_STASH_LIST_TOOL
 _GITHUB_INSPECT_REPO_TOOL = GITHUB_INSPECT_REPO_TOOL
 _GITHUB_LIST_PRS_TOOL = GITHUB_LIST_PRS_TOOL
+_HASH_FILE_TOOL = HASH_FILE_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -5419,17 +5424,9 @@ _UNZIP_FILES_TOOL: dict[str, Any] = {
     },
 }
 # moved to app/tools/filesystem/move_file.py as MOVE_FILE_TOOL — tool_enhance.md productionization pass, tool #52 (2026-08-20).
-_HASH_FILE_TOOL: dict[str, Any] = {
-    "name": "hash_file",
-    "description": "Compute the SHA-256 hash of a file. Useful for integrity checking.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string", "description": "File path relative to repo root"}
-        },
-        "required": ["path"],
-    },
-}
+    # moved to app/tools/filesystem/hash_file.py as HASH_FILE_TOOL /
+    # hash_file_handler() — tool_enhance.md productionization pass,
+    # tool #154 (2026-09-14).
 # moved to app/tools/filesystem/count_lines.py as COUNT_LINES_TOOL /
 # count_lines_handler() — tool_enhance.md productionization pass, tool
 # #129 (2026-08-26).
@@ -7973,18 +7970,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def move_file_h(inp: dict[str, Any]) -> str:
         return move_file_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #154 (2026-09-14) —
+    # was a worktree-escape SHA-256 HASH DISCLOSURE oracle (`path`
+    # never validated, proved live) and a missing chat_agent.py
+    # dispatch. Now delegates to the shared, worktree-validated
+    # handler.
     def hash_file_h(inp: dict[str, Any]) -> str:
-        import hashlib as _hl
-
-        fpath = root / str(inp["path"])
-        try:
-            h = _hl.sha256()
-            with open(fpath, "rb") as f:
-                for chunk in iter(lambda: f.read(65536), b""):
-                    h.update(chunk)
-            return f"SHA-256 {inp['path']}: {h.hexdigest()}"
-        except Exception as e:
-            return f"[ERROR] hash_file: {e}"
+        return hash_file_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #129 (2026-08-26) —
     # was a worktree-escape arbitrary file/directory READ (`root /

@@ -212,6 +212,7 @@ from app.tools.git.log_file import git_log_file_handler
 from app.tools.git.stash_list import git_stash_list_handler
 from app.tools.integrations.github_inspect_repo import github_inspect_repo_handler
 from app.tools.git.github_list_prs import github_list_prs_handler
+from app.tools.filesystem.hash_file import hash_file_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -3445,6 +3446,15 @@ class ChatAgent:
             # class as tools #100/#103/#110/#112/#118/#120/#122/#126.
             # Delegates to the shared, worktree-validated handler.
             return await asyncio.to_thread(count_lines_handler, root, repo, inp)
+
+        if tool_name == "hash_file":
+            # tool_enhance.md productionization pass, tool #154
+            # (2026-09-14) — was a worktree-escape SHA-256 HASH
+            # DISCLOSURE oracle (`path` never validated, proved live)
+            # and a missing chat_agent.py dispatch (this tool was
+            # never reachable from interactive chat at all). Now
+            # delegates to the shared, worktree-validated handler.
+            return await asyncio.to_thread(hash_file_handler, root, repo, inp)
 
         if tool_name == "cpu_profile":
             # tool_enhance.md productionization pass, tool #130
