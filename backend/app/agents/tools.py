@@ -442,6 +442,10 @@ from app.tools.filesystem.generate_patch import (
     GENERATE_PATCH_TOOL,
     generate_patch_handler,
 )
+from app.tools.git.branch import (
+    GIT_BRANCH_TOOL,
+    git_branch_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -699,6 +703,7 @@ _GENERATE_API_DOCS_TEXT_TOOL = GENERATE_API_DOCS_TEXT_TOOL
 _GENERATE_COMMIT_MSG_TOOL = GENERATE_COMMIT_MSG_TOOL
 _GENERATE_DIAGRAM_TOOL = GENERATE_DIAGRAM_TOOL
 _GENERATE_PATCH_TOOL = GENERATE_PATCH_TOOL
+_GIT_BRANCH_TOOL = GIT_BRANCH_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -2279,25 +2284,9 @@ _SUBMIT_RESULT_TOOL = {
 
 # moved to app/tools/git/commit.py as GIT_COMMIT_TOOL — tool_enhance.md productionization pass, tool #37 (2026-08-18).
 
-_GIT_BRANCH_TOOL = {
-    "name": "git_branch",
-    "description": "List all branches, or create a new branch. To switch branches use git_checkout.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "action": {
-                "type": "string",
-                "enum": ["list", "create", "delete"],
-                "description": "Action to perform (default: list)",
-            },
-            "name": {
-                "type": "string",
-                "description": "Branch name (required for create/delete)",
-            },
-        },
-        "required": [],
-    },
-}
+    # moved to app/tools/git/branch.py as GIT_BRANCH_TOOL /
+    # git_branch_handler() — tool_enhance.md productionization pass,
+    # tool #148 (2026-09-14).
 
 # moved to app/tools/git/checkout.py as GIT_CHECKOUT_TOOL —
 # tool_enhance.md productionization pass, tool #35 (2026-08-18).
@@ -6203,41 +6192,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         return stage_and_commit(repo_path, message, files)
 
     # ---- git_branch ----
+    # tool_enhance.md productionization pass, tool #148 (2026-09-14) —
+    # was a flag-collision bug on the `create` action (same class as
+    # tools #5/#32): a flag-shaped `name` (e.g. "--list") silently ran
+    # a completely different git-branch subcommand with no error,
+    # proved live. Now delegates to the shared, validated handler.
     def git_branch(inp: dict[str, Any]) -> str:
-        action = str(inp.get("action", "list"))
-        name = inp.get("name", "")
-        try:
-            if action == "list":
-                r = subprocess.run(
-                    ["git", "branch", "-a"],
-                    cwd=repo_path,
-                    capture_output=True,
-                    text=True,
-                )
-                return r.stdout or "(no branches)"
-            elif action == "create":
-                if not name:
-                    return "[ERROR] name required for create"
-                r = subprocess.run(
-                    ["git", "branch", name],
-                    cwd=repo_path,
-                    capture_output=True,
-                    text=True,
-                )
-                return r.stdout + r.stderr or f"Branch '{name}' created"
-            elif action == "delete":
-                if not name:
-                    return "[ERROR] name required for delete"
-                r = subprocess.run(
-                    ["git", "branch", "-d", name],
-                    cwd=repo_path,
-                    capture_output=True,
-                    text=True,
-                )
-                return r.stdout + r.stderr or f"Branch '{name}' deleted"
-            return f"[ERROR] Unknown action: {action}"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return git_branch_handler(repo_path, inp)
 
     # ---- git_checkout ----
     def git_checkout(inp: dict[str, Any]) -> str:

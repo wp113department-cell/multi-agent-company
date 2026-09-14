@@ -206,6 +206,7 @@ from app.tools.filesystem.generate_api_docs_text import (
 from app.tools.git.generate_commit_msg import generate_commit_msg_handler
 from app.tools.filesystem.generate_diagram import generate_diagram_handler
 from app.tools.filesystem.generate_patch import generate_patch_handler
+from app.tools.git.branch import git_branch_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -1479,23 +1480,13 @@ class ChatAgent:
             )
 
         if tool_name == "git_branch":
-            action = str(inp.get("action", "list"))
-            bname = str(inp.get("name", ""))
-            if action == "list":
-                return _git(["branch", "-a"], repo)
-            if action == "create":
-                return (
-                    "[ERROR] name required"
-                    if not bname
-                    else _git(["branch", bname], repo) or f"Branch '{bname}' created"
-                )
-            if action == "delete":
-                return (
-                    "[ERROR] name required"
-                    if not bname
-                    else _git(["branch", "-d", bname], repo)
-                )
-            return f"[ERROR] Unknown action: {action}"
+            # tool_enhance.md productionization pass, tool #148
+            # (2026-09-14) — was a flag-collision bug on the `create`
+            # action (same class as tools #5/#32): a flag-shaped
+            # `name` (e.g. "--list") silently ran a completely
+            # different git-branch subcommand with no error, proved
+            # live. Now delegates to the shared, validated handler.
+            return await asyncio.to_thread(git_branch_handler, repo, inp)
 
         if tool_name == "create_branch":
             bname = str(inp["name"])
