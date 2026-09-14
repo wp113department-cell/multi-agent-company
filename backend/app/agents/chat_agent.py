@@ -210,6 +210,7 @@ from app.tools.git.branch import git_branch_handler
 from app.tools.git.fetch import git_fetch_handler
 from app.tools.git.log_file import git_log_file_handler
 from app.tools.git.stash_list import git_stash_list_handler
+from app.tools.integrations.github_inspect_repo import github_inspect_repo_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -2253,6 +2254,15 @@ class ChatAgent:
                 return "[ERROR] gh CLI not found — install GitHub CLI"
             except Exception as e:
                 return f"[ERROR] {e}"
+
+        if tool_name == "github_inspect_repo":
+            # tool_enhance.md productionization pass, tool #152
+            # (2026-09-14) — existing owner/repo/path validation
+            # checked and confirmed already safe (proved live); the
+            # real fix was a missing chat_agent.py dispatch (this tool
+            # was never reachable from interactive chat at all,
+            # proved live). Now delegates to the shared handler.
+            return await asyncio.to_thread(github_inspect_repo_handler, inp)
 
         if tool_name == "linear_create_issue":
             # tool_enhance.md productionization pass, tool #50 (2026-08-20)

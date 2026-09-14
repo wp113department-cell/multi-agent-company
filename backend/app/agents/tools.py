@@ -458,6 +458,10 @@ from app.tools.git.stash_list import (
     GIT_STASH_LIST_TOOL,
     git_stash_list_handler,
 )
+from app.tools.integrations.github_inspect_repo import (
+    GITHUB_INSPECT_REPO_TOOL,
+    github_inspect_repo_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -719,6 +723,7 @@ _GIT_BRANCH_TOOL = GIT_BRANCH_TOOL
 _GIT_FETCH_TOOL = GIT_FETCH_TOOL
 _GIT_LOG_FILE_TOOL = GIT_LOG_FILE_TOOL
 _GIT_STASH_LIST_TOOL = GIT_STASH_LIST_TOOL
+_GITHUB_INSPECT_REPO_TOOL = GITHUB_INSPECT_REPO_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -5569,22 +5574,9 @@ _PARSE_DOCKER_COMPOSE_TOOL: dict[str, Any] = {
         "required": [],
     },
 }
-_GITHUB_INSPECT_REPO_TOOL: dict[str, Any] = {
-    "name": "github_inspect_repo",
-    "description": "Inspect an arbitrary external GitHub repository (not the local checkout) via the public GitHub REST API: metadata (description, default branch, stars, language) and top-level file listing. Works for any public repo; unauthenticated (rate-limited).",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "owner": {"type": "string", "description": "Repository owner/org"},
-            "repo": {"type": "string", "description": "Repository name"},
-            "path": {
-                "type": "string",
-                "description": "Optional subdirectory to list within the repo (default: repo root)",
-            },
-        },
-        "required": ["owner", "repo"],
-    },
-}
+    # moved to app/tools/integrations/github_inspect_repo.py as
+    # GITHUB_INSPECT_REPO_TOOL / github_inspect_repo_handler() —
+    # tool_enhance.md productionization pass, tool #152 (2026-09-14).
 _OPENAPI_INSPECT_TOOL: dict[str, Any] = {
     "name": "openapi_inspect",
     "description": "Parse a local OpenAPI/Swagger spec (JSON or YAML) and summarize its API surface: title/version, and every path with its HTTP methods, summary, and parameter count.",
@@ -8244,66 +8236,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                     out.append(f"    {key}: {val}")
         return "\n".join(out)
 
+    # tool_enhance.md productionization pass, tool #152 (2026-09-14) —
+    # existing owner/repo/path validation checked and confirmed
+    # already safe (proved live); the real fix was a missing
+    # chat_agent.py dispatch (this tool was never reachable from
+    # interactive chat at all, proved live). Now delegates to the
+    # shared handler.
     def github_inspect_repo_h(inp: dict[str, Any]) -> str:
-        import json as _json
-        import re as _re
-        import urllib.error as _urlerr
-        import urllib.request as _req
-
-        owner = str(inp["owner"])
-        repo_name = str(inp["repo"])
-        sub_path = str(inp.get("path", "")).strip("/")
-        valid = _re.compile(r"^[A-Za-z0-9._-]+$")
-        if not valid.match(owner) or not valid.match(repo_name):
-            return "[ERROR] owner/repo must contain only letters, digits, '.', '_', '-'"
-        sub_segments = [seg for seg in sub_path.split("/") if seg]
-        if sub_path and (
-            not all(valid.match(seg) for seg in sub_segments)
-            or any(seg in (".", "..") for seg in sub_segments)
-        ):
-            return (
-                "[ERROR] path segments must contain only letters, digits, "
-                "'.', '_', '-' and must not be '.' or '..'"
-            )
-
-        def _get(url: str) -> Any:
-            req = _req.Request(
-                url,
-                headers={
-                    "User-Agent": "Gridiron-Agent/1.0",
-                    "Accept": "application/vnd.github+json",
-                },
-            )
-            with _req.urlopen(req, timeout=15) as resp:
-                return _json.loads(resp.read().decode("utf-8"))
-
-        try:
-            meta = _get(f"https://api.github.com/repos/{owner}/{repo_name}")
-        except _urlerr.HTTPError as e:
-            return f"[ERROR] GitHub API {e.code}: {owner}/{repo_name} — {e.reason}"
-        except Exception as e:
-            return f"[ERROR] github_inspect_repo: {e}"
-
-        lines = [
-            str(meta.get("full_name", f"{owner}/{repo_name}")),
-            f"Description: {meta.get('description') or '(none)'}",
-            f"Default branch: {meta.get('default_branch', '?')}",
-            f"Language: {meta.get('language') or '?'} | Stars: {meta.get('stargazers_count', 0)} | Forks: {meta.get('forks_count', 0)}",
-            f"URL: {meta.get('html_url', '')}",
-        ]
-        try:
-            contents = _get(
-                f"https://api.github.com/repos/{owner}/{repo_name}/contents/{sub_path}"
-            )
-            if isinstance(contents, list):
-                lines.append(
-                    f"\nFiles at /{sub_path}:" if sub_path else "\nFiles at repo root:"
-                )
-                for item in contents[:100]:
-                    lines.append(f"  [{item.get('type', '?')}] {item.get('name', '?')}")
-        except Exception as e:
-            lines.append(f"\n[WARN] Could not list contents: {e}")
-        return "\n".join(lines)
+        return github_inspect_repo_handler(inp)
 
     def openapi_inspect_h(inp: dict[str, Any]) -> str:
         import json as _json
