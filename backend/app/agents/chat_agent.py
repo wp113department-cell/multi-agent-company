@@ -200,6 +200,9 @@ from app.tools.filesystem.find_queue import find_queue_handler
 from app.tools.execution.find_unused_imports import find_unused_imports_handler
 from app.tools.filesystem.find_worker import find_worker_handler
 from app.tools.filesystem.format_file import format_file_handler
+from app.tools.filesystem.generate_api_docs_text import (
+    generate_api_docs_text_handler,
+)
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -3533,6 +3536,20 @@ class ChatAgent:
             # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131/#132/#133/#134/#135/#136/#137/#138/#139/#140/#141.
             # Delegates to the shared, worktree-validated handler.
             return await asyncio.to_thread(find_worker_handler, repo, inp)
+
+        if tool_name == "generate_api_docs_text":
+            # tool_enhance.md productionization pass, tool #144
+            # (2026-09-14) — was a worktree-escape route/function-name
+            # disclosure oracle (`root / route_path` never validated,
+            # proved live to disclose real route + function names from
+            # a file outside the worktree) AND advertised in
+            # CHAT_TOOLS but never dispatched here at all, same
+            # dispatch class as tools
+            # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131/#132/#133/#134/#135/#136/#137/#138/#139/#140/#141/#142.
+            # Delegates to the shared, worktree-validated handler.
+            return await asyncio.to_thread(
+                generate_api_docs_text_handler, root, repo, inp
+            )
 
         if tool_name == "bhaskar_tool":
             # Universal "no existing tool fits" fallback —

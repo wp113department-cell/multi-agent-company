@@ -426,6 +426,10 @@ from app.tools.filesystem.format_file import (
     FORMAT_FILE_TOOL,
     format_file_handler,
 )
+from app.tools.filesystem.generate_api_docs_text import (
+    GENERATE_API_DOCS_TEXT_TOOL,
+    generate_api_docs_text_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -679,6 +683,7 @@ _FIND_QUEUE_TOOL = FIND_QUEUE_TOOL
 _FIND_TEST_TOOL = FIND_TEST_TOOL
 _FIND_WORKER_TOOL = FIND_WORKER_TOOL
 _FORMAT_FILE_TOOL = FORMAT_FILE_TOOL
+_GENERATE_API_DOCS_TEXT_TOOL = GENERATE_API_DOCS_TEXT_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -4372,20 +4377,9 @@ _SUMMARIZE_FOLDER_TOOL: dict[str, Any] = {
     },
 }
 
-_GENERATE_API_DOCS_TEXT_TOOL: dict[str, Any] = {
-    "name": "generate_api_docs_text",
-    "description": "Parse a FastAPI route file and return a structured markdown template of all endpoints.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "route_path": {
-                "type": "string",
-                "description": "Relative path to the FastAPI router file",
-            }
-        },
-        "required": ["route_path"],
-    },
-}
+# moved to app/tools/filesystem/generate_api_docs_text.py as
+# GENERATE_API_DOCS_TEXT_TOOL / generate_api_docs_text_handler() —
+# tool_enhance.md productionization pass, tool #144 (2026-09-14).
 
 _MERMAID_FROM_SCHEMA_TOOL: dict[str, Any] = {
     "name": "mermaid_from_schema",
@@ -7692,39 +7686,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             count += 1
         return "\n".join(results) if results else "(no matching files)"
 
+    # tool_enhance.md productionization pass, tool #144 (2026-09-14) —
+    # was a worktree-escape route/function-name disclosure oracle
+    # (`root / route_path` never validated, proved live to disclose
+    # real route + function names from a file outside the worktree).
+    # Now delegates to the shared, worktree-validated handler.
     def generate_api_docs_text_h(inp: dict[str, Any]) -> str:
-        import re as _re_docs
-
-        route_path = str(inp["route_path"])
-        fp = root / route_path
-        if not fp.exists():
-            return f"[ERROR] File not found: {route_path}"
-        try:
-            text = fp.read_text(encoding="utf-8")
-        except Exception as e:
-            return f"[ERROR] {e}"
-        lines = text.splitlines()
-        endpoints: list[str] = []
-        for i, line in enumerate(lines):
-            m = _re_docs.match(
-                r'\s*@\w+\.(get|post|put|patch|delete|options|head)\s*\("([^"]+)"', line
-            )
-            if m:
-                method = m.group(1).upper()
-                path_val = m.group(2)
-                # Find the next def line
-                func_name = ""
-                for j in range(i + 1, min(i + 5, len(lines))):
-                    fm = _re_docs.match(r"\s*(?:async\s+)?def\s+(\w+)", lines[j])
-                    if fm:
-                        func_name = fm.group(1)
-                        break
-                endpoints.append(
-                    f"### {method} {path_val}\n**Function:** `{func_name}`\n\n**Description:** _TODO_\n\n**Request:** _TODO_\n\n**Response:** _TODO_\n"
-                )
-        if not endpoints:
-            return "(no FastAPI route decorators found)"
-        return "\n".join(endpoints)
+        return generate_api_docs_text_handler(root, repo_path, inp)
 
     def mermaid_from_schema_h(inp: dict[str, Any]) -> str:
         import subprocess as _sp_merm
