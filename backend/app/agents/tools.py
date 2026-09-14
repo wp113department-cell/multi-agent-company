@@ -438,6 +438,10 @@ from app.tools.filesystem.generate_diagram import (
     GENERATE_DIAGRAM_TOOL,
     generate_diagram_handler,
 )
+from app.tools.filesystem.generate_patch import (
+    GENERATE_PATCH_TOOL,
+    generate_patch_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -694,6 +698,7 @@ _FORMAT_FILE_TOOL = FORMAT_FILE_TOOL
 _GENERATE_API_DOCS_TEXT_TOOL = GENERATE_API_DOCS_TEXT_TOOL
 _GENERATE_COMMIT_MSG_TOOL = GENERATE_COMMIT_MSG_TOOL
 _GENERATE_DIAGRAM_TOOL = GENERATE_DIAGRAM_TOOL
+_GENERATE_PATCH_TOOL = GENERATE_PATCH_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -2905,31 +2910,9 @@ _UNDO_CHANGES_TOOL = {
     },
 }
 
-_GENERATE_PATCH_TOOL = {
-    "name": "generate_patch",
-    "description": (
-        "Generate a unified diff patch from two text contents using Python's difflib. "
-        "Useful for previewing changes before applying them. Does NOT modify any files."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "content_a": {
-                "type": "string",
-                "description": "Original file content (the 'before' version)",
-            },
-            "content_b": {
-                "type": "string",
-                "description": "New file content (the 'after' version)",
-            },
-            "filename": {
-                "type": "string",
-                "description": "Filename shown in the patch header (default: 'file')",
-            },
-        },
-        "required": ["content_a", "content_b"],
-    },
-}
+    # moved to app/tools/filesystem/generate_patch.py as
+    # GENERATE_PATCH_TOOL / generate_patch_handler() —
+    # tool_enhance.md productionization pass, tool #147 (2026-09-14).
 
 # Batch 16 — DB extras
 # tool_enhance.md productionization pass, tool #98 (2026-08-25) — moved
@@ -7374,21 +7357,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         # of dead async plumbing that could never execute.
         return "[BLOCKED] undo_changes requires interactive session for safety confirmation"
 
+    # tool_enhance.md productionization pass, tool #147 (2026-09-14) —
+    # no real bug found (no filesystem access, no subprocess — pure
+    # in-memory difflib); consolidated the two independently-hand-
+    # maintained duplicate implementations into one shared handler per
+    # the mandatory modularization rule.
     def generate_patch_h(inp: dict[str, Any]) -> str:
-        import difflib
-
-        gp_a = str(inp.get("content_a", ""))
-        gp_b = str(inp.get("content_b", ""))
-        gp_fn = str(inp.get("filename", "file"))
-        diff = list(
-            difflib.unified_diff(
-                gp_a.splitlines(keepends=True),
-                gp_b.splitlines(keepends=True),
-                fromfile=f"a/{gp_fn}",
-                tofile=f"b/{gp_fn}",
-            )
-        )
-        return "".join(diff) if diff else "(no differences)"
+        return generate_patch_handler(inp)
 
     handlers["replace_class"] = replace_class_h
     handlers["undo_changes"] = undo_changes_h

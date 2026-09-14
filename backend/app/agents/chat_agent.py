@@ -205,6 +205,7 @@ from app.tools.filesystem.generate_api_docs_text import (
 )
 from app.tools.git.generate_commit_msg import generate_commit_msg_handler
 from app.tools.filesystem.generate_diagram import generate_diagram_handler
+from app.tools.filesystem.generate_patch import generate_patch_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -3149,20 +3150,13 @@ class ChatAgent:
             return await asyncio.to_thread(_git, ["checkout", "--", undo_rel], repo, 15)
 
         if tool_name == "generate_patch":
-            import difflib as _dl
-
-            gpatch_a = str(inp.get("content_a", ""))
-            gpatch_b = str(inp.get("content_b", ""))
-            gpatch_fn = str(inp.get("filename", "file"))
-            gpatch_diff = list(
-                _dl.unified_diff(
-                    gpatch_a.splitlines(keepends=True),
-                    gpatch_b.splitlines(keepends=True),
-                    fromfile=f"a/{gpatch_fn}",
-                    tofile=f"b/{gpatch_fn}",
-                )
-            )
-            return "".join(gpatch_diff) if gpatch_diff else "(no differences)"
+            # tool_enhance.md productionization pass, tool #147
+            # (2026-09-14) — no real bug found (no filesystem access,
+            # no subprocess — pure in-memory difflib); consolidated
+            # this dispatch's own independently-hand-maintained copy
+            # into the shared handler per the mandatory modularization
+            # rule.
+            return await asyncio.to_thread(generate_patch_handler, inp)
 
         # ========== BATCH 16 — DB extras ==========
 
