@@ -462,6 +462,10 @@ from app.tools.integrations.github_inspect_repo import (
     GITHUB_INSPECT_REPO_TOOL,
     github_inspect_repo_handler,
 )
+from app.tools.git.github_list_prs import (
+    GITHUB_LIST_PRS_TOOL,
+    github_list_prs_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -724,6 +728,7 @@ _GIT_FETCH_TOOL = GIT_FETCH_TOOL
 _GIT_LOG_FILE_TOOL = GIT_LOG_FILE_TOOL
 _GIT_STASH_LIST_TOOL = GIT_STASH_LIST_TOOL
 _GITHUB_INSPECT_REPO_TOOL = GITHUB_INSPECT_REPO_TOOL
+_GITHUB_LIST_PRS_TOOL = GITHUB_LIST_PRS_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -4472,20 +4477,9 @@ _READ_IMAGE_TOOL: dict[str, Any] = {
 
 # moved to app/tools/git/github_create_issue.py as GITHUB_CREATE_ISSUE_TOOL — tool_enhance.md productionization pass, tool #45 (2026-08-19).
 
-_GITHUB_LIST_PRS_TOOL: dict[str, Any] = {
-    "name": "github_list_prs",
-    "description": "List GitHub pull requests using the gh CLI.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "state": {
-                "type": "string",
-                "description": "open / closed / merged (default: open)",
-            }
-        },
-        "required": [],
-    },
-}
+    # moved to app/tools/git/github_list_prs.py as
+    # GITHUB_LIST_PRS_TOOL / github_list_prs_handler() —
+    # tool_enhance.md productionization pass, tool #153 (2026-09-14).
 
 # moved to app/tools/git/github_comment.py as GITHUB_COMMENT_TOOL — tool_enhance.md productionization pass, tool #44 (2026-08-19).
 
@@ -7612,29 +7606,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
+    # tool_enhance.md productionization pass, tool #153 (2026-09-14) —
+    # `state`'s flag-collision resistance checked and confirmed
+    # already safe (proved live: `gh`'s own CLI strictly enforces a
+    # hard enum on --state); the real fix was a missing chat_agent.py
+    # dispatch (this tool was never reachable from interactive chat at
+    # all, proved live). Now delegates to the shared handler.
     def github_list_prs_h(inp: dict[str, Any]) -> str:
-        state = str(inp.get("state", "open"))
-        try:
-            r = _sp_mcp.run(
-                [
-                    "gh",
-                    "pr",
-                    "list",
-                    "--state",
-                    state,
-                    "--json",
-                    "number,title,state,author",
-                ],
-                capture_output=True,
-                text=True,
-                cwd=str(root),
-                timeout=30,
-            )
-            return (r.stdout + r.stderr).strip() or "(no output)"
-        except FileNotFoundError:
-            return "[ERROR] gh CLI not found"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return github_list_prs_handler(root, inp)
 
     # moved to app/tools/git/github_comment.py — command-building now shared via github_comment_command()
     def github_comment_h(inp: dict[str, Any]) -> str:
