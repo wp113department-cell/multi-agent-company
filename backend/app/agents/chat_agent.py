@@ -203,6 +203,7 @@ from app.tools.filesystem.format_file import format_file_handler
 from app.tools.filesystem.generate_api_docs_text import (
     generate_api_docs_text_handler,
 )
+from app.tools.git.generate_commit_msg import generate_commit_msg_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -2123,27 +2124,13 @@ class ChatAgent:
             return await asyncio.to_thread(_run_subprocess, cmd_s, repo, 30)
 
         if tool_name == "generate_commit_msg":
-            gcm_staged = bool(inp.get("staged_only", True))
-            gcm_diff_args = ["diff", "--cached"] if gcm_staged else ["diff"]
-            gcm_stat = _git(gcm_diff_args + ["--stat"], repo)
-            gcm_diff = _git(gcm_diff_args, repo)[:3000]
-            if not gcm_stat.strip():
-                return "[ERROR] No staged changes. Stage files first."
-            gcm_generated = await asyncio.to_thread(
-                _llm_generate_commit_message, gcm_stat, gcm_diff
-            )
-            if gcm_generated:
-                return (
-                    f"=== Generated commit message ===\n{gcm_generated}\n\n"
-                    f"=== Changed files ===\n{gcm_stat}\n\n"
-                    f"=== Diff (truncated) ===\n{gcm_diff}"
-                )
-            return (
-                f"=== Changed files ===\n{gcm_stat}\n\n"
-                f"=== Diff (truncated) ===\n{gcm_diff}\n\n"
-                "Write a conventional commit message:\n"
-                "Format: <type>(<scope>): <description>\n"
-                "Types: feat, fix, docs, refactor, test, chore, style, perf"
+            # tool_enhance.md productionization pass, tool #145
+            # (2026-09-14) — was a message-accuracy bug (the "no changes"
+            # error always said "No staged changes" even in
+            # staged_only=False mode, proved live against a real clean
+            # repo). Now delegates to the shared, fixed handler.
+            return await asyncio.to_thread(
+                generate_commit_msg_handler, repo, inp, _llm_generate_commit_message
             )
 
         if tool_name == "review_diff":

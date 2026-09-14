@@ -430,6 +430,10 @@ from app.tools.filesystem.generate_api_docs_text import (
     GENERATE_API_DOCS_TEXT_TOOL,
     generate_api_docs_text_handler,
 )
+from app.tools.git.generate_commit_msg import (
+    GENERATE_COMMIT_MSG_TOOL,
+    generate_commit_msg_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -684,6 +688,7 @@ _FIND_TEST_TOOL = FIND_TEST_TOOL
 _FIND_WORKER_TOOL = FIND_WORKER_TOOL
 _FORMAT_FILE_TOOL = FORMAT_FILE_TOOL
 _GENERATE_API_DOCS_TEXT_TOOL = GENERATE_API_DOCS_TEXT_TOOL
+_GENERATE_COMMIT_MSG_TOOL = GENERATE_COMMIT_MSG_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -2517,20 +2522,9 @@ _RESOLVE_MERGE_CONFLICT_TOOL = {
 # (imported near the top of this file as _CREATE_PR_TOOL) —
 # tool_enhance.md productionization pass, tool #2 (2026-08-15).
 
-_GENERATE_COMMIT_MSG_TOOL = {
-    "name": "generate_commit_msg",
-    "description": "Generate a conventional commit message via LLM from the real staged diff, plus the raw diff summary it was grounded in. Falls back to just the raw diff summary if generation is unavailable.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "staged_only": {
-                "type": "boolean",
-                "description": "Use only staged changes (default: true)",
-            },
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/git/generate_commit_msg.py as
+# GENERATE_COMMIT_MSG_TOOL / generate_commit_msg_handler() —
+# tool_enhance.md productionization pass, tool #145 (2026-09-14).
 
 _REVIEW_DIFF_TOOL = {
     "name": "review_diff",
@@ -6691,33 +6685,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         # REPORT for the full consumer audit.
         return create_pr_handler(repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #145 (2026-09-14) —
+    # was a message-accuracy bug (the "no changes" error always said
+    # "No staged changes" even in staged_only=False mode, proved live
+    # against a real clean repo). Now delegates to the shared, fixed
+    # handler.
     def generate_commit_msg(inp: dict[str, Any]) -> str:
-        gcm_staged = bool(inp.get("staged_only", True))
-        diff_args = ["diff", "--cached"] if gcm_staged else ["diff"]
-        stat_args = diff_args + ["--stat"]
-        r_stat = subprocess.run(
-            ["git"] + stat_args, cwd=repo_path, capture_output=True, text=True
-        )
-        r_diff = subprocess.run(
-            ["git"] + diff_args, cwd=repo_path, capture_output=True, text=True
-        )
-        stat = r_stat.stdout.strip()
-        diff = r_diff.stdout[:3000]
-        if not stat:
-            return "[ERROR] No staged changes. Stage files with git_commit or git add first."
-        generated = _llm_generate_commit_message(stat, diff)
-        if generated:
-            return (
-                f"=== Generated commit message ===\n{generated}\n\n"
-                f"=== Changed files ===\n{stat}\n\n"
-                f"=== Diff (truncated to 3000 chars) ===\n{diff}"
-            )
-        return (
-            f"=== Changed files ===\n{stat}\n\n"
-            f"=== Diff (truncated to 3000 chars) ===\n{diff}\n\n"
-            "Analyze the diff above and write a conventional commit message:\n"
-            "Format: <type>(<scope>): <description>\n"
-            "Types: feat, fix, docs, refactor, test, chore, style, perf"
+        return generate_commit_msg_handler(
+            repo_path, inp, _llm_generate_commit_message
         )
 
     def review_diff(inp: dict[str, Any]) -> str:
