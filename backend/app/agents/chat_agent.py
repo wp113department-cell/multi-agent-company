@@ -204,6 +204,7 @@ from app.tools.filesystem.generate_api_docs_text import (
     generate_api_docs_text_handler,
 )
 from app.tools.git.generate_commit_msg import generate_commit_msg_handler
+from app.tools.filesystem.generate_diagram import generate_diagram_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -2131,6 +2132,18 @@ class ChatAgent:
             # repo). Now delegates to the shared, fixed handler.
             return await asyncio.to_thread(
                 generate_commit_msg_handler, repo, inp, _llm_generate_commit_message
+            )
+
+        if tool_name == "generate_diagram":
+            # tool_enhance.md productionization pass, tool #146
+            # (2026-09-14) — was a worktree-escape CLASS/METHOD/
+            # FUNCTION-NAME disclosure oracle (`root / file_path` never
+            # validated, proved live) and a missing chat_agent.py
+            # dispatch (this tool was never reachable from interactive
+            # chat at all). Now delegates to the shared, worktree-
+            # validated handler.
+            return await asyncio.to_thread(
+                generate_diagram_handler, root, repo, inp
             )
 
         if tool_name == "review_diff":

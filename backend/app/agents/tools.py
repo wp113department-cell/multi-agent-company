@@ -434,6 +434,10 @@ from app.tools.git.generate_commit_msg import (
     GENERATE_COMMIT_MSG_TOOL,
     generate_commit_msg_handler,
 )
+from app.tools.filesystem.generate_diagram import (
+    GENERATE_DIAGRAM_TOOL,
+    generate_diagram_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -689,6 +693,7 @@ _FIND_WORKER_TOOL = FIND_WORKER_TOOL
 _FORMAT_FILE_TOOL = FORMAT_FILE_TOOL
 _GENERATE_API_DOCS_TEXT_TOOL = GENERATE_API_DOCS_TEXT_TOOL
 _GENERATE_COMMIT_MSG_TOOL = GENERATE_COMMIT_MSG_TOOL
+_GENERATE_DIAGRAM_TOOL = GENERATE_DIAGRAM_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -5641,39 +5646,9 @@ _OPENAPI_INSPECT_TOOL: dict[str, Any] = {
 }
 
 # -- Code / Docs tools --
-_GENERATE_DIAGRAM_TOOL: dict[str, Any] = {
-    "name": "generate_diagram",
-    "description": (
-        "Generate a Mermaid diagram. For kind='classDiagram' or 'flowchart', pass "
-        "`path` (a real .py file relative to repo root) to get a diagram built from "
-        "that file's actual classes/bases (classDiagram) or function call edges "
-        "(flowchart) via AST analysis — not a placeholder. Without `path` (or for "
-        "kind='sequence'/'erDiagram', which aren't derivable from static analysis "
-        "alone), returns a labeled starter template instead."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "description": {
-                "type": "string",
-                "description": "What to diagram — components, flow, or relationships",
-            },
-            "kind": {
-                "type": "string",
-                "enum": ["flowchart", "sequence", "erDiagram", "classDiagram"],
-                "description": "Diagram type (default: flowchart)",
-            },
-            "path": {
-                "type": "string",
-                "description": (
-                    "Real .py file (relative to repo root) to derive the diagram "
-                    "from via AST analysis. Only used by classDiagram/flowchart."
-                ),
-            },
-        },
-        "required": ["description"],
-    },
-}
+    # moved to app/tools/filesystem/generate_diagram.py as
+    # GENERATE_DIAGRAM_TOOL / generate_diagram_handler() —
+    # tool_enhance.md productionization pass, tool #146 (2026-09-14).
 _SUMMARIZE_OUTPUT_TOOL: dict[str, Any] = {
     "name": "summarize_output",
     "description": (
@@ -8506,95 +8481,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             )
         return summary
 
-    def _real_class_diagram(file_path: str) -> str | None:
-        """AUDIT_Q_BATCH14 §99 gap-closure — real classes/bases from
-        parse_file_ast (app/repo_tools/ast_engine.py), not a fake
-        MyClass/method() skeleton. Returns None (never a guess) when the
-        file can't be parsed or declares no classes, so the caller falls
-        back to the labeled template instead of fabricating content."""
-        import json
-
-        from app.repo_tools.ast_engine import parse_file_ast
-
-        raw = parse_file_ast(str(root / file_path))
-        if raw.startswith("[ERROR]"):
-            return None
-        classes = json.loads(raw).get("classes", [])
-        if not classes:
-            return None
-
-        lines = ["classDiagram"]
-        for cls in classes:
-            name = cls["name"]
-            for method in cls["methods"][:15]:
-                lines.append(f"    {name} : +{method}()")
-            for base in cls["bases"]:
-                # Mermaid inheritance arrow: subclass --|> superclass.
-                # ast.unparse() can return a dotted expr (e.g. "abc.ABC") —
-                # Mermaid class names can't contain '.', so the last
-                # component is used, matching build_class_graph's own
-                # identifier-name-matching convention (cross_file_graph.py).
-                base_name = base.rsplit(".", 1)[-1]
-                lines.append(f"    {base_name} <|-- {name}")
-        return "\n".join(lines)
-
-    def _real_call_flowchart(file_path: str, description: str) -> str | None:
-        """AUDIT_Q_BATCH14 §99 gap-closure — real function call edges from
-        get_call_edges (app/repo_tools/ast_engine.py), not a fake
-        Start/Process/Decision/End skeleton. Returns None when the file has
-        no functions or can't be parsed."""
-        from app.repo_tools.ast_engine import get_call_edges
-
-        edges = get_call_edges(str(root / file_path))
-        if isinstance(edges, str) or not edges:
-            return None
-
-        known_functions = {e["caller"] for e in edges}
-        lines = [f"flowchart TD\n    %% {description}"]
-        seen_edges: set[tuple[str, str]] = set()
-        for edge in edges:
-            caller = edge["caller"]
-            # Only draw edges to functions actually defined in this same
-            # file — an edge to an unknown external call would be a real
-            # name but a misleading, unverifiable diagram node.
-            for callee in edge["calls"]:
-                target = callee.rsplit(".", 1)[-1]
-                if target in known_functions and (caller, target) not in seen_edges:
-                    lines.append(f"    {caller} --> {target}")
-                    seen_edges.add((caller, target))
-        if len(lines) == 1:
-            return None
-        return "\n".join(lines)
-
+    # tool_enhance.md productionization pass, tool #146 (2026-09-14) —
+    # was a worktree-escape CLASS/METHOD/FUNCTION-NAME disclosure
+    # oracle (`root / file_path` never validated, proved live) and a
+    # missing chat_agent.py dispatch. Now delegates to the shared,
+    # worktree-validated handler.
     def generate_diagram_h(inp: dict[str, Any]) -> str:
-        description = str(inp["description"])
-        kind = str(inp.get("kind", "flowchart"))
-        path_in = inp.get("path")
-
-        if path_in:
-            real: str | None = None
-            if kind == "classDiagram":
-                real = _real_class_diagram(str(path_in))
-            elif kind == "flowchart":
-                real = _real_call_flowchart(str(path_in), description)
-            if real is not None:
-                return f"```mermaid\n{real}\n```"
-
-        templates = {
-            "flowchart": f"flowchart TD\n    %% {description}\n    A[Start] --> B[Process]\n    B --> C{{Decision}}\n    C -->|Yes| D[End]\n    C -->|No| B",
-            "sequence": f"sequenceDiagram\n    %% {description}\n    participant A\n    participant B\n    A->>B: Request\n    B-->>A: Response",
-            "erDiagram": f"erDiagram\n    %% {description}\n    ENTITY1 {{string id}}\n    ENTITY2 {{string id}}\n    ENTITY1 ||--o{{ ENTITY2 : has",
-            "classDiagram": f"classDiagram\n    %% {description}\n    class MyClass {{\n        +String name\n        +method()\n    }}",
-        }
-        mermaid = templates.get(kind, templates["flowchart"])
-        note = (
-            f"Note: pass `path` (a real .py file) with kind='{kind}' to derive this "
-            f"from actual code instead."
-            if kind in ("classDiagram", "flowchart")
-            else f"Note: customize the template above to match your actual {kind} structure "
-            "— sequence/ER diagrams aren't derivable from static analysis alone."
-        )
-        return f"```mermaid\n{mermaid}\n```\n\n{note}"
+        return generate_diagram_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #137 (2026-09-11) —
     # was a worktree-escape ARBITRARY FILE WRITE (not just a read) on
