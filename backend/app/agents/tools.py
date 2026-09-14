@@ -454,6 +454,10 @@ from app.tools.git.log_file import (
     GIT_LOG_FILE_TOOL,
     git_log_file_handler,
 )
+from app.tools.git.stash_list import (
+    GIT_STASH_LIST_TOOL,
+    git_stash_list_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -714,6 +718,7 @@ _GENERATE_PATCH_TOOL = GENERATE_PATCH_TOOL
 _GIT_BRANCH_TOOL = GIT_BRANCH_TOOL
 _GIT_FETCH_TOOL = GIT_FETCH_TOOL
 _GIT_LOG_FILE_TOOL = GIT_LOG_FILE_TOOL
+_GIT_STASH_LIST_TOOL = GIT_STASH_LIST_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -5330,11 +5335,9 @@ def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
     # pass, tool #150 (2026-09-14).
 # moved to app/tools/filesystem/semver_bump.py as SEMVER_BUMP_TOOL —
 # tool_enhance.md productionization pass, tool #25 (2026-08-18).
-_GIT_STASH_LIST_TOOL: dict[str, Any] = {
-    "name": "git_stash_list",
-    "description": "List all git stashes with their index and description.",
-    "input_schema": {"type": "object", "properties": {}, "required": []},
-}
+    # moved to app/tools/git/stash_list.py as GIT_STASH_LIST_TOOL /
+    # git_stash_list_handler() — tool_enhance.md productionization
+    # pass, tool #151 (2026-09-14).
 
 # -- Process / System --
 _LIST_PROCESSES_TOOL: dict[str, Any] = {
@@ -7891,18 +7894,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def semver_bump_h(inp: dict[str, Any]) -> str:
         return semver_bump_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #151 (2026-09-14) —
+    # was a missing chat_agent.py dispatch (this tool was never
+    # reachable from interactive chat at all, proved live). Now
+    # delegates to the shared handler.
     def git_stash_list_h(inp: dict[str, Any]) -> str:
-        try:
-            r = subprocess.run(
-                ["git", "stash", "list"],
-                capture_output=True,
-                text=True,
-                cwd=repo_path,
-                timeout=15,
-            )
-            return r.stdout.strip() or "(no stashes)"
-        except Exception as e:
-            return f"[ERROR] git_stash_list: {e}"
+        return git_stash_list_handler(repo_path)
 
     def list_processes_h(inp: dict[str, Any]) -> str:
         name_filter = str(inp.get("filter", ""))

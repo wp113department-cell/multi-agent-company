@@ -209,6 +209,7 @@ from app.tools.filesystem.generate_patch import generate_patch_handler
 from app.tools.git.branch import git_branch_handler
 from app.tools.git.fetch import git_fetch_handler
 from app.tools.git.log_file import git_log_file_handler
+from app.tools.git.stash_list import git_stash_list_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -1527,6 +1528,13 @@ class ChatAgent:
             if gst_action == "push" and gst_msg:
                 return _git(["stash", "push", "-m", gst_msg], repo)
             return _git(["stash", gst_action], repo)
+
+        if tool_name == "git_stash_list":
+            # tool_enhance.md productionization pass, tool #151
+            # (2026-09-14) — was a missing chat_agent.py dispatch
+            # (this tool was never reachable from interactive chat at
+            # all, proved live). Now delegates to the shared handler.
+            return await asyncio.to_thread(git_stash_list_handler, repo)
 
         if tool_name == "git_pull":
             gp_remote = str(inp.get("remote", "origin"))
