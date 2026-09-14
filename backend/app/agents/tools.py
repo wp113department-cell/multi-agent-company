@@ -446,6 +446,10 @@ from app.tools.git.branch import (
     GIT_BRANCH_TOOL,
     git_branch_handler,
 )
+from app.tools.git.fetch import (
+    GIT_FETCH_TOOL,
+    git_fetch_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -704,6 +708,7 @@ _GENERATE_COMMIT_MSG_TOOL = GENERATE_COMMIT_MSG_TOOL
 _GENERATE_DIAGRAM_TOOL = GENERATE_DIAGRAM_TOOL
 _GENERATE_PATCH_TOOL = GENERATE_PATCH_TOOL
 _GIT_BRANCH_TOOL = GIT_BRANCH_TOOL
+_GIT_FETCH_TOOL = GIT_FETCH_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -2295,24 +2300,9 @@ _SUBMIT_RESULT_TOOL = {
 
 # moved to app/tools/git/pull.py as GIT_PULL_TOOL — tool_enhance.md productionization pass, tool #39 (2026-08-18).
 
-_GIT_FETCH_TOOL = {
-    "name": "git_fetch",
-    "description": "Fetch latest refs from remote without merging. Safe read-only remote operation.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "remote": {
-                "type": "string",
-                "description": "Remote name (default: origin)",
-            },
-            "prune": {
-                "type": "boolean",
-                "description": "Remove stale remote-tracking refs (default: false)",
-            },
-        },
-        "required": [],
-    },
-}
+    # moved to app/tools/git/fetch.py as GIT_FETCH_TOOL /
+    # git_fetch_handler() — tool_enhance.md productionization pass,
+    # tool #149 (2026-09-14).
 
 # moved to app/tools/git/restore.py as GIT_RESTORE_TOOL — tool_enhance.md productionization pass, tool #41 (2026-08-19).
 
@@ -6266,21 +6256,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] {e}"
 
     # ---- git_fetch ----
+    # tool_enhance.md productionization pass, tool #149 (2026-09-14) —
+    # was a flag-collision bug (same class as tools #5/#32/#148): a
+    # flag-shaped `remote` (e.g. "--all") silently fetched from every
+    # configured remote instead of just the one named, proved live.
+    # Now delegates to the shared, validated handler.
     def git_fetch(inp: dict[str, Any]) -> str:
-        remote = str(inp.get("remote", "origin"))
-        prune = bool(inp.get("prune", False))
-        cmd = ["git", "fetch", remote]
-        if prune:
-            cmd.append("--prune")
-        try:
-            r = subprocess.run(
-                cmd, cwd=repo_path, capture_output=True, text=True, timeout=60
-            )
-            return (r.stdout + r.stderr).strip() or "Fetch complete"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] git fetch timed out"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        return git_fetch_handler(repo_path, inp)
 
     # ---- git_restore ----
     # moved to app/tools/git/restore.py — like undo_changes_h, this has no real,
