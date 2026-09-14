@@ -482,6 +482,10 @@ from app.tools.integrations.inspect_openapi_spec import (
     INSPECT_OPENAPI_SPEC_TOOL,
     inspect_openapi_spec_handler,
 )
+from app.tools.filesystem.json_query import (
+    JSON_QUERY_TOOL,
+    json_query_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -749,6 +753,7 @@ _HASH_FILE_TOOL = HASH_FILE_TOOL
 _HTTP_REQUEST_TOOL = HTTP_REQUEST_TOOL
 _INSPECT_GITHUB_REPO_TOOL = INSPECT_GITHUB_REPO_TOOL
 _INSPECT_OPENAPI_SPEC_TOOL = INSPECT_OPENAPI_SPEC_TOOL
+_JSON_QUERY_TOOL = JSON_QUERY_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -5277,24 +5282,9 @@ _LIST_ENV_VARS_TOOL: dict[str, Any] = {
 # #135 (2026-09-11).
 
 # -- Data format tools --
-_JSON_QUERY_TOOL: dict[str, Any] = {
-    "name": "json_query",
-    "description": "Run a jq expression on a JSON file and return the result.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "JSON file path (relative to repo root)",
-            },
-            "query": {
-                "type": "string",
-                "description": "jq expression, e.g. '.users[].name'",
-            },
-        },
-        "required": ["path", "query"],
-    },
-}
+    # moved to app/tools/filesystem/json_query.py as JSON_QUERY_TOOL /
+    # json_query_handler() — tool_enhance.md productionization pass,
+    # tool #158 (2026-09-14).
 # moved to app/tools/filesystem/yaml_validate.py as
 # YAML_VALIDATE_TOOL / yaml_validate_handler() — tool_enhance.md
 # productionization pass, tool #120 (2026-08-26).
@@ -7807,23 +7797,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def env_diff_h(inp: dict[str, Any]) -> str:
         return env_diff_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #158 (2026-09-14) —
+    # was a worktree-escape ARBITRARY FILE CONTENT DISCLOSURE oracle
+    # (`path` never validated, proved live to disclose real file
+    # content from outside the worktree), a flag-collision bug on
+    # `query` (same class as tools #5/#32/#148/#149, proved live), and
+    # a missing chat_agent.py dispatch. Now delegates to the shared,
+    # validated handler.
     def json_query_h(inp: dict[str, Any]) -> str:
-        fpath = root / str(inp["path"])
-        query = str(inp["query"])
-        try:
-            r = subprocess.run(
-                ["jq", query, str(fpath)], capture_output=True, text=True, timeout=10
-            )
-            if r.returncode != 0:
-                return f"[ERROR] jq: {r.stderr.strip()}"
-            return r.stdout.strip()
-        except FileNotFoundError:
-            import json as _json
-
-            data = _json.loads(fpath.read_text(encoding="utf-8"))
-            return f"(jq not installed) Raw JSON keys: {list(data.keys()) if isinstance(data, dict) else type(data).__name__}"
-        except Exception as e:
-            return f"[ERROR] json_query: {e}"
+        return json_query_handler(root, repo_path, inp)
 
     def _load_schema_doc(schema_rel: str) -> Any:
         """Load a JSON Schema from a .json or .yaml/.yml file at schema_rel."""

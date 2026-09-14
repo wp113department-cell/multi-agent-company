@@ -214,6 +214,7 @@ from app.tools.filesystem.hash_file import hash_file_handler
 from app.tools.integrations.http_request import http_request_handler
 from app.tools.integrations.inspect_github_repo import inspect_github_repo_handler
 from app.tools.integrations.inspect_openapi_spec import inspect_openapi_spec_handler
+from app.tools.filesystem.json_query import json_query_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -3441,6 +3442,17 @@ class ChatAgent:
             # worktree-validated handler — full account in that
             # module's own docstring.
             return await asyncio.to_thread(yaml_validate_handler, root, repo, inp)
+
+        if tool_name == "json_query":
+            # tool_enhance.md productionization pass, tool #158
+            # (2026-09-14) — was a worktree-escape ARBITRARY FILE
+            # CONTENT DISCLOSURE oracle (`path` never validated,
+            # proved live), a flag-collision bug on `query` (same
+            # class as tools #5/#32/#148/#149, proved live), and a
+            # missing chat_agent.py dispatch (this tool was never
+            # reachable from interactive chat at all). Now delegates
+            # to the shared, validated handler.
+            return await asyncio.to_thread(json_query_handler, root, repo, inp)
 
         if tool_name == "base64_encode":
             # tool_enhance.md productionization pass, tool #122
