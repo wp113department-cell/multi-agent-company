@@ -108,7 +108,6 @@ from app.agents.tools import (
     _redact_secrets_in_text,
     _run_bash_command,
     _venv_activate_snippet,
-    inspect_github_repo as _inspect_github_repo,
     inspect_openapi_spec as _inspect_openapi_spec,
 )
 from app.config import get_settings
@@ -214,6 +213,7 @@ from app.tools.integrations.github_inspect_repo import github_inspect_repo_handl
 from app.tools.git.github_list_prs import github_list_prs_handler
 from app.tools.filesystem.hash_file import hash_file_handler
 from app.tools.integrations.http_request import http_request_handler
+from app.tools.integrations.inspect_github_repo import inspect_github_repo_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -2360,7 +2360,13 @@ class ChatAgent:
             return await asyncio.to_thread(send_slack_message, ssm_webhook_url, ssm_text)
 
         if tool_name == "inspect_github_repo":
-            return await asyncio.to_thread(_inspect_github_repo, inp)
+            # tool_enhance.md productionization pass, tool #156
+            # (2026-09-14) — no real bug found (audited thoroughly:
+            # owner/repo/path validation confirmed safe live, no
+            # duplication risk since this dispatch already called the
+            # same single real implementation). Modularization only —
+            # now delegates to the shared handler directly.
+            return await asyncio.to_thread(inspect_github_repo_handler, inp)
 
         if tool_name == "inspect_openapi_spec":
             return await asyncio.to_thread(_inspect_openapi_spec, inp)

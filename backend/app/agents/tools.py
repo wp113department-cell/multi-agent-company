@@ -474,6 +474,10 @@ from app.tools.integrations.http_request import (
     HTTP_REQUEST_TOOL,
     http_request_handler,
 )
+from app.tools.integrations.inspect_github_repo import (
+    INSPECT_GITHUB_REPO_TOOL,
+    inspect_github_repo_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -739,6 +743,7 @@ _GITHUB_INSPECT_REPO_TOOL = GITHUB_INSPECT_REPO_TOOL
 _GITHUB_LIST_PRS_TOOL = GITHUB_LIST_PRS_TOOL
 _HASH_FILE_TOOL = HASH_FILE_TOOL
 _HTTP_REQUEST_TOOL = HTTP_REQUEST_TOOL
+_INSPECT_GITHUB_REPO_TOOL = INSPECT_GITHUB_REPO_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -1921,109 +1926,18 @@ def make_list_deploy_artifacts_handler(
 # above, not a repo_path-bound closure.
 # ---------------------------------------------------------------------------
 
-_INSPECT_GITHUB_REPO_TOOL = {
-    "name": "inspect_github_repo",
-    "description": "Real, read-only inspection of an arbitrary external GitHub repository via the GitHub REST API (never a write endpoint) — distinct from create_pr/github_* tools, which only operate on this project's own remote. action='info' returns real repo metadata (description, language, stars, default branch, topics); 'list_files' lists real directory contents at path; 'read_file' returns a real file's decoded content.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "owner": {"type": "string", "description": "Repository owner/org"},
-            "repo": {"type": "string", "description": "Repository name"},
-            "action": {
-                "type": "string",
-                "enum": ["info", "list_files", "read_file"],
-                "description": "What to inspect (default: info)",
-            },
-            "path": {
-                "type": "string",
-                "description": "Path within the repo (for list_files/read_file; default: repo root)",
-            },
-        },
-        "required": ["owner", "repo"],
-    },
-}
+    # moved to app/tools/integrations/inspect_github_repo.py as
+    # INSPECT_GITHUB_REPO_TOOL / inspect_github_repo_handler() —
+    # tool_enhance.md productionization pass, tool #156 (2026-09-14).
+    # NO real bug found (audited thoroughly — see that module's own
+    # docstring); this is modularization only, same as tool #147's
+    # generate_patch. `inspect_github_repo` name kept as a thin
+    # delegating wrapper for backward compatibility — existing tests
+    # import it directly from app.agents.tools.
 
 
 def inspect_github_repo(inp: dict[str, Any]) -> str:
-    import json as _json
-    import re as _re
-
-    owner = str(inp.get("owner", "")).strip()
-    repo_name = str(inp.get("repo", "")).strip()
-    action = str(inp.get("action", "info")).strip()
-    path = str(inp.get("path", "")).strip()
-    ident_re = _re.compile(r"^[A-Za-z0-9._-]+$")
-    if not owner or not repo_name:
-        return "[ERROR] owner and repo are required"
-    if not ident_re.match(owner) or not ident_re.match(repo_name):
-        return "[ERROR] owner/repo must be simple GitHub identifiers (letters, digits, '.', '_', '-')"
-
-    if action == "info":
-        endpoint = f"repos/{owner}/{repo_name}"
-    elif action in ("list_files", "read_file"):
-        clean_path = path.lstrip("/")
-        if ".." in clean_path.split("/"):
-            return "[ERROR] path may not contain '..'"
-        endpoint = f"repos/{owner}/{repo_name}/contents/{clean_path}"
-    else:
-        return (
-            f"[ERROR] Unknown action: {action!r}. Use info, list_files, or read_file."
-        )
-
-    try:
-        r = subprocess.run(
-            ["gh", "api", endpoint], capture_output=True, text=True, timeout=20
-        )
-    except FileNotFoundError:
-        return "[ERROR] gh CLI not found — install with: sudo apt install gh"
-    except subprocess.TimeoutExpired:
-        return "[ERROR] GitHub API request timed out"
-    except Exception as e:
-        return f"[ERROR] {e}"
-    if r.returncode != 0:
-        return f"[ERROR] gh api {endpoint} failed: {(r.stderr or r.stdout)[:500]}"
-
-    try:
-        data = _json.loads(r.stdout)
-    except _json.JSONDecodeError:
-        return r.stdout[:5000]
-
-    if action == "info":
-        summary = {
-            "full_name": data.get("full_name"),
-            "description": data.get("description"),
-            "default_branch": data.get("default_branch"),
-            "language": data.get("language"),
-            "stargazers_count": data.get("stargazers_count"),
-            "open_issues_count": data.get("open_issues_count"),
-            "topics": data.get("topics"),
-            "license": (data.get("license") or {}).get("name"),
-            "homepage": data.get("homepage"),
-            "archived": data.get("archived"),
-        }
-        return _json.dumps(summary, indent=2)
-    if action == "list_files":
-        if isinstance(data, list):
-            files = [
-                {"name": e.get("name"), "type": e.get("type"), "path": e.get("path")}
-                for e in data
-            ]
-            return _json.dumps(files, indent=2)
-        return _json.dumps(data, indent=2)
-    # action == "read_file"
-    if (
-        isinstance(data, dict)
-        and data.get("encoding") == "base64"
-        and data.get("content")
-    ):
-        import base64 as _b64
-
-        try:
-            content = _b64.b64decode(data["content"]).decode("utf-8", errors="replace")
-        except Exception as e:
-            return f"[ERROR] Could not decode file content: {e}"
-        return content[:20000]
-    return "[ERROR] Path is not a readable file (it may be a directory)"
+    return inspect_github_repo_handler(inp)
 
 
 # ---------------------------------------------------------------------------
