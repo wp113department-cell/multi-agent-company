@@ -450,6 +450,10 @@ from app.tools.git.fetch import (
     GIT_FETCH_TOOL,
     git_fetch_handler,
 )
+from app.tools.git.log_file import (
+    GIT_LOG_FILE_TOOL,
+    git_log_file_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -709,6 +713,7 @@ _GENERATE_DIAGRAM_TOOL = GENERATE_DIAGRAM_TOOL
 _GENERATE_PATCH_TOOL = GENERATE_PATCH_TOOL
 _GIT_BRANCH_TOOL = GIT_BRANCH_TOOL
 _GIT_FETCH_TOOL = GIT_FETCH_TOOL
+_GIT_LOG_FILE_TOOL = GIT_LOG_FILE_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -5320,24 +5325,9 @@ def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
 # -- Git extras --
 # moved to app/tools/git/tag.py as GIT_TAG_TOOL —
 # tool_enhance.md productionization pass, tool #22 (2026-08-17).
-_GIT_LOG_FILE_TOOL: dict[str, Any] = {
-    "name": "git_log_file",
-    "description": "Show git commit history for a specific file. Returns commits that touched that file.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "File path relative to repo root",
-            },
-            "limit": {
-                "type": "integer",
-                "description": "Max commits to return (default: 10)",
-            },
-        },
-        "required": ["path"],
-    },
-}
+    # moved to app/tools/git/log_file.py as GIT_LOG_FILE_TOOL /
+    # git_log_file_handler() — tool_enhance.md productionization
+    # pass, tool #150 (2026-09-14).
 # moved to app/tools/filesystem/semver_bump.py as SEMVER_BUMP_TOOL —
 # tool_enhance.md productionization pass, tool #25 (2026-08-18).
 _GIT_STASH_LIST_TOOL: dict[str, Any] = {
@@ -7888,20 +7878,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def git_tag_h(inp: dict[str, Any]) -> str:
         return git_tag_handler(repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #150 (2026-09-14) —
+    # was a worktree-escape COMMIT-HISTORY DISCLOSURE oracle (`path`
+    # never validated, proved live) and a missing chat_agent.py
+    # dispatch. Now delegates to the shared, worktree-validated
+    # handler.
     def git_log_file_h(inp: dict[str, Any]) -> str:
-        path = str(inp["path"])
-        limit = int(inp.get("limit", 10))
-        try:
-            r = subprocess.run(
-                ["git", "log", f"--max-count={limit}", "--oneline", "--", path],
-                capture_output=True,
-                text=True,
-                cwd=repo_path,
-                timeout=15,
-            )
-            return r.stdout.strip() or f"(no commits found for {path})"
-        except Exception as e:
-            return f"[ERROR] git_log_file: {e}"
+        return git_log_file_handler(repo_path, inp)
 
     # moved to app/tools/filesystem/semver_bump.py as semver_bump_handler
     # — tool_enhance.md productionization pass, tool #25 (2026-08-18).

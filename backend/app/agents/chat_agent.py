@@ -208,6 +208,7 @@ from app.tools.filesystem.generate_diagram import generate_diagram_handler
 from app.tools.filesystem.generate_patch import generate_patch_handler
 from app.tools.git.branch import git_branch_handler
 from app.tools.git.fetch import git_fetch_handler
+from app.tools.git.log_file import git_log_file_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -1550,6 +1551,15 @@ class ChatAgent:
             # just the one named, proved live. Now delegates to the
             # shared, validated handler.
             return await asyncio.to_thread(git_fetch_handler, repo, inp)
+
+        if tool_name == "git_log_file":
+            # tool_enhance.md productionization pass, tool #150
+            # (2026-09-14) — was a worktree-escape COMMIT-HISTORY
+            # DISCLOSURE oracle (`path` never validated, proved live)
+            # and a missing chat_agent.py dispatch (this tool was
+            # never reachable from interactive chat at all). Now
+            # delegates to the shared, worktree-validated handler.
+            return await asyncio.to_thread(git_log_file_handler, repo, inp)
 
         if tool_name == "git_restore":
             gres_rel = str(inp["path"])
