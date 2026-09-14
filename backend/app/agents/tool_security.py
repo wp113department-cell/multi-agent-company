@@ -1,19 +1,56 @@
 """Tool-input security/validation guards — extracted from app/agents/tools.py
 (AUDIT_Q_BATCH05_PERFORMANCE_ARCHITECTURE.md §10 "Modularity" — tools.py was
 a 12,993-line god-module mixing all tool schemas/handlers together). These
-8 functions are pure, self-contained guards with no dependency on anything
+functions are pure, self-contained guards with no dependency on anything
 else in tools.py beyond the already-shared app.policy.engine checks, making
 this a safe extraction. Behavior is unchanged — app.agents.tools re-exports
 every name here for full backward compatibility with existing internal call
 sites and app.agents.chat_agent's own direct
 `from app.agents.tools import _is_dangerous_command, _is_protected_path`.
+
+`_ssrf_safe_opener()`/`_ssrf_safe_curl_fetch()` (2026-09-14, tool_enhance.md
+productionization pass, tool #157) — a real, empirically-verified SSRF-via-
+redirect bypass on EVERY tool that only calls `_ssrf_denial_reason()` once
+on the caller-supplied URL and then follows redirects automatically
+(`urllib.request.urlopen()`'s default redirect-following, or curl's `-L`):
+the guard validates the FIRST URL only — a malicious (or compromised)
+external server the first URL legitimately points to can issue an HTTP
+redirect to any private/internal target (the cloud metadata endpoint
+`169.254.169.254`, localhost, RFC1918 ranges), and the redirect is followed
+completely unvalidated. Proved live against a real, public redirect
+service (`https://httpbin.org/redirect-to?url=...`): both a raw
+`curl -L` invocation and this codebase's own `http_request`/
+`check_url_status` handlers (via `urllib.request.urlopen()`, which follows
+redirects by default) genuinely attempted to connect to
+`http://169.254.169.254/latest/meta-data/` after following the redirect —
+in a real cloud deployment this would successfully exfiltrate real
+instance-metadata credentials. This affected FOUR real tools: `fetch_url`
+(tool #86), `check_url_status` (tool #126), `http_request` (tool #155,
+all three already marked GREEN_FLAG before this discovery) and
+`inspect_openapi_spec` (tool #157, the tool whose audit uncovered this).
+Fixed once, here, and applied to all four: `_ssrf_safe_opener()` returns a
+`urllib.request` opener whose redirect handler re-validates every hop
+through `_ssrf_denial_reason()` before following it (`http_request`,
+`check_url_status`); `_ssrf_safe_curl_fetch()` fetches via curl WITHOUT
+`-L`, manually inspecting each response for a 3xx + `Location` header and
+re-validating that target before following it, capped at 5 hops
+(`fetch_url`, `inspect_openapi_spec`). Both were proved live to still
+block the same malicious redirect AND to still correctly follow a
+legitimate redirect to a real external site (`httpbin.org` →
+`example.com`), so no real capability was lost.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+import tempfile
+import urllib.error
+import urllib.request
+from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
 from app.policy.engine import check_command, check_path, check_path_in_worktree
 
@@ -79,6 +116,115 @@ def _ssrf_denial_reason(url: str) -> str | None:
                 "fetch (SSRF protection)"
             )
     return None
+
+
+class _SsrfSafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Re-validates every redirect hop through `_ssrf_denial_reason()`
+    before following it — closes the SSRF-via-redirect bypass
+    `urlopen()`'s default redirect-following otherwise allows."""
+
+    def redirect_request(
+        self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str
+    ) -> Any:
+        reason = _ssrf_denial_reason(newurl)
+        if reason:
+            raise urllib.error.HTTPError(
+                newurl, code, f"Redirect blocked: {reason}", headers, fp
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _ssrf_safe_opener() -> urllib.request.OpenerDirector:
+    """A `urllib.request` opener for every `urlopen()`-based outbound
+    fetch tool: the initial URL is still checked by the caller via
+    `_ssrf_denial_reason()` before calling `.open()`, and this opener
+    additionally re-validates every subsequent redirect hop the same
+    way, so a malicious/compromised server the initial URL legitimately
+    points to cannot use a redirect to reach a private/internal target."""
+    return urllib.request.build_opener(_SsrfSafeRedirectHandler())
+
+
+def _ssrf_safe_curl_fetch(
+    url: str, timeout: int = 15, max_redirects: int = 5
+) -> tuple[str, str | None]:
+    """Fetches `url` via curl WITHOUT curl's own `-L` auto-redirect-
+    following, manually validating and following each redirect hop
+    through `_ssrf_denial_reason()` instead — closes the same
+    SSRF-via-redirect bypass as `_ssrf_safe_opener()`, for the
+    curl-subprocess-based outbound-fetch tools.
+
+    Returns `(display_text, denial_reason)`. `denial_reason` is set
+    ONLY for a real SSRF policy denial (the initial URL or a redirect
+    hop) or a too-many-redirects abort — callers use this to return a
+    `[POLICY DENIED] ...` response. For every other outcome
+    (success, or an ordinary curl-level failure like a timeout or
+    connection refusal), `denial_reason` is `None` and `display_text`
+    already carries the right content to show the caller — the
+    successful response body, or curl's own stderr (falling back to
+    `[empty response]`) on failure, matching the exact fallback
+    `fetch_url_handler` already used before this fix so no error
+    information is silently lost. An empty status-line response (no
+    headers written at all) is how a curl-level transport failure —
+    as opposed to a legitimate empty-body HTTP response, which always
+    has a status line — is distinguished here."""
+    current_url = url
+    for _ in range(max_redirects):
+        reason = _ssrf_denial_reason(current_url)
+        if reason:
+            return "", reason
+
+        fd, body_path = tempfile.mkstemp()
+        os.close(fd)
+        try:
+            r = subprocess.run(
+                [
+                    "curl",
+                    "-s",
+                    "-D",
+                    "-",
+                    "-o",
+                    body_path,
+                    "--max-time",
+                    str(timeout),
+                    "--user-agent",
+                    "Gridiron-Agent/1.0",
+                    current_url,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=timeout + 5,
+            )
+            headers = r.stdout
+            body = Path(body_path).read_text(encoding="utf-8", errors="replace")
+        finally:
+            try:
+                Path(body_path).unlink()
+            except OSError:
+                pass
+
+        lines = headers.splitlines()
+        status_line = lines[0] if lines else ""
+        if not status_line:
+            # curl never completed the request (DNS/connect/TLS/
+            # timeout failure) — a real successful HTTP exchange
+            # always writes at least a status line to -D.
+            return body[:10000] or r.stderr or "[empty response]", None
+
+        location: str | None = None
+        for line in lines:
+            if line.lower().startswith("location:"):
+                location = line.split(":", 1)[1].strip()
+                break
+
+        is_redirect = any(
+            f" {code} " in f" {status_line} "
+            for code in ("301", "302", "303", "307", "308")
+        )
+        if is_redirect and location:
+            current_url = urljoin(current_url, location)
+            continue
+        return body[:10000] or "[empty response]", None
+    return "", f"Too many redirects (> {max_redirects})"
 
 
 def _is_protected_path(path: str, worktree_path: str = "") -> bool:

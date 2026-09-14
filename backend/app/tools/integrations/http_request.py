@@ -58,6 +58,19 @@ Two real, empirically-verified findings.
    real call through the real `chat_agent.py` dispatch returned
    `"[ERROR] Unknown tool: http_request"`.
 
+UPDATE (2026-09-14, tool #157's audit): the `_ssrf_denial_reason()`
+guard added below only validates the caller-supplied `url` — a real
+SSRF-via-redirect bypass was discovered while auditing sibling tool
+#157 (`inspect_openapi_spec`): `urlopen()` follows HTTP redirects by
+default with NO re-validation of the redirect target, so a malicious
+or compromised external server the initial URL legitimately points
+to could redirect the request to a private/internal target (proved
+live against the real cloud metadata endpoint via a real public
+redirect service). Now closed too, via `_ssrf_safe_opener()`
+(`app.agents.tool_security` — see that module's own docstring for the
+full cross-cutting account, which also affected `fetch_url`/
+`check_url_status`).
+
 Fixed via a shared `http_request_handler()`: `url` is now validated
 with the same, already-proven-correct `_ssrf_denial_reason()` guard
 `fetch_url`/`check_url_status` already use (direct import, not
@@ -65,8 +78,9 @@ dependency-injection, matching `check_url_status.py`'s own precedent
 — `_ssrf_denial_reason` is broadly shared, not tool-specific), closing
 finding #1 definitively (rejects non-http(s) schemes, including
 `file://`, AND resolves the hostname to deny private/loopback/
-link-local/reserved-range destinations). A new `chat_agent.py`
-dispatch branch delegates to this same shared handler, closing
+link-local/reserved-range destinations, AND — per the update above —
+every subsequent redirect hop too). A new `chat_agent.py` dispatch
+branch delegates to this same shared handler, closing
 finding #2.
 """
 
@@ -76,7 +90,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from app.agents.tool_security import _ssrf_denial_reason
+from app.agents.tool_security import _ssrf_denial_reason, _ssrf_safe_opener
 
 HTTP_REQUEST_TOOL: dict[str, Any] = {
     "name": "http_request",
@@ -107,7 +121,10 @@ HTTP_REQUEST_TOOL: dict[str, Any] = {
 def http_request_handler(inp: dict[str, Any]) -> str:
     """Core http_request logic — the one real implementation, reused
     unchanged in behavior except for the SSRF guard now applied to
-    `url` before any network access."""
+    `url` before any network access, and every subsequent redirect hop
+    now also re-validated via `_ssrf_safe_opener()` (tool #157's
+    cross-cutting SSRF-via-redirect fix — see tool_security.py's own
+    module docstring)."""
     method = str(inp["method"]).upper()
     url = str(inp["url"])
     ssrf_reason = _ssrf_denial_reason(url)
@@ -119,7 +136,7 @@ def http_request_handler(inp: dict[str, Any]) -> str:
     try:
         data = body.encode("utf-8") if body else None
         req = urllib.request.Request(url, data=data, method=method, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with _ssrf_safe_opener().open(req, timeout=15) as resp:
             raw = resp.read()
             text = raw.decode("utf-8", errors="replace")[:3000]
             return f"HTTP {resp.status} {resp.reason}\n{text}"

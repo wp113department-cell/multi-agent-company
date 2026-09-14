@@ -118,3 +118,28 @@ reachable from interactive chat for the first time — a strict
 capability increase, not a narrowing; no legitimate functionality
 lost; tool-specific regression tests clean (13/13 across new + swept
 existing tests).
+
+## UPDATE (2026-09-14, same session) — cross-cutting SSRF-via-redirect fix, tool #157's audit
+
+Shortly after this tool closed, a real SSRF-via-redirect bypass was
+discovered while auditing sibling tool #157 (`inspect_openapi_spec`):
+the `_ssrf_denial_reason()` guard above only validated the caller-
+supplied `url` — `urlopen()` follows HTTP redirects by default with
+no re-validation of the redirect target, so a malicious/compromised
+external server could redirect the request to a private/internal
+target. Proved live against a real, public redirect service:
+`urlopen()` genuinely attempted to connect to
+`http://169.254.169.254/latest/meta-data/` after following a
+redirect.
+
+Fixed via `_ssrf_safe_opener()` (new shared helper in `app/agents/
+tool_security.py` — see that module's own docstring):
+`http_request_handler()` now calls `_ssrf_safe_opener().open(req,
+timeout=15)` in place of the bare `urllib.request.urlopen(req,
+timeout=15)`. Proved live to still block the same malicious redirect
+AND to still correctly follow a legitimate redirect to a real
+external site — no capability lost.
+
+All 10 existing tests in `tests/test_http_request_hardening.py`
+re-run clean. New cross-cutting regression coverage in `tests/
+test_ssrf_redirect_bypass_cross_cutting_fix.py`.

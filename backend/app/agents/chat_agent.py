@@ -108,7 +108,6 @@ from app.agents.tools import (
     _redact_secrets_in_text,
     _run_bash_command,
     _venv_activate_snippet,
-    inspect_openapi_spec as _inspect_openapi_spec,
 )
 from app.config import get_settings
 from app.models.chat import ChatSession
@@ -214,6 +213,7 @@ from app.tools.git.github_list_prs import github_list_prs_handler
 from app.tools.filesystem.hash_file import hash_file_handler
 from app.tools.integrations.http_request import http_request_handler
 from app.tools.integrations.inspect_github_repo import inspect_github_repo_handler
+from app.tools.integrations.inspect_openapi_spec import inspect_openapi_spec_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -2369,7 +2369,15 @@ class ChatAgent:
             return await asyncio.to_thread(inspect_github_repo_handler, inp)
 
         if tool_name == "inspect_openapi_spec":
-            return await asyncio.to_thread(_inspect_openapi_spec, inp)
+            # tool_enhance.md productionization pass, tool #157
+            # (2026-09-14) — was a real SSRF-via-redirect bypass
+            # (curl -L auto-followed a redirect to a private/internal
+            # target with no re-validation, proved live; also
+            # affected sibling tools fetch_url/check_url_status/
+            # http_request, all fixed the same way — see
+            # tool_security.py's own module docstring). Now delegates
+            # to the shared, redirect-safe handler.
+            return await asyncio.to_thread(inspect_openapi_spec_handler, inp)
 
         # ========== BATCH 4 — Testing extras ==========
 

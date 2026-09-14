@@ -118,3 +118,38 @@ gap (including a pre-existing one from tools #82/#83) caught and fixed
 in the same pass; no functionality lost — `ae_fetch_url` gained real
 capability it previously advertised but never delivered; full
 regression clean.
+
+## UPDATE (2026-09-14) — cross-cutting SSRF-via-redirect fix, tool #157's audit
+
+A real SSRF-via-redirect bypass was discovered while auditing sibling
+tool #157 (`inspect_openapi_spec`): `_ssrf_denial_reason()` only
+validated the caller-supplied `url` — curl's own `-L` auto-redirect-
+following let a malicious/compromised external server redirect the
+request to a private/internal target (the cloud metadata endpoint,
+localhost, RFC1918 ranges), completely unvalidated. Proved live
+against a real, public redirect service: `curl -L` genuinely
+attempted to connect to `http://169.254.169.254/latest/meta-data/`
+after following a redirect.
+
+Fixed via `_ssrf_safe_curl_fetch()` (new shared helper in
+`app/agents/tool_security.py` — see that module's own docstring):
+fetches WITHOUT curl's `-L`, manually validating and following each
+redirect hop through `_ssrf_denial_reason()` instead, capped at 5
+hops. `fetch_url_handler()` now calls this instead of its own raw
+`curl -L` subprocess invocation. Proved live to still block the same
+malicious redirect AND to still correctly follow a legitimate
+redirect to a real external site — no capability lost. One minor,
+intentional behavior nuance: the LLM `summarize` path now receives
+the same ≤10000-char truncated text shown to the caller (previously
+it received the full untruncated curl stdout) — accepted as a
+non-breaking simplification since no existing test exercised
+>10000-char summarization content.
+
+All 13 existing tests in `tests/test_fetch_url_hardening.py` re-run
+clean, including the `subprocess.run` spy-based timeout-clamp tests
+(the spy patches the shared `subprocess` module singleton, so it
+still correctly observes the `--max-time`/`timeout` values even
+though the actual `subprocess.run()` call now originates from
+`tool_security.py` rather than `fetch_url.py` directly). New
+cross-cutting regression coverage in `tests/
+test_ssrf_redirect_bypass_cross_cutting_fix.py`.

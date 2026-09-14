@@ -55,15 +55,27 @@ with the same, already-proven-correct `_ssrf_denial_reason()` guard
 using an established, reused mechanism rather than a new one. A new
 `chat_agent.py` dispatch branch delegates to this same shared handler,
 closing finding #2.
+
+UPDATE (2026-09-14, tool #157's audit): finding #1's guard only
+validated the caller-supplied `url` — a real SSRF-via-redirect bypass
+was discovered while auditing sibling tool #157
+(`inspect_openapi_spec`): `urlopen()` follows HTTP redirects by
+default with NO re-validation of the redirect target, so a malicious
+or compromised external server the initial URL legitimately points
+to could redirect the request to a private/internal target (proved
+live against the real cloud metadata endpoint via a real public
+redirect service). Now closed too, via `_ssrf_safe_opener()`
+(`app.agents.tool_security` — see that module's own docstring for the
+full cross-cutting account, which also affected `fetch_url`/
+`http_request`).
 """
 
 from __future__ import annotations
 
 import time
-import urllib.request
 from typing import Any
 
-from app.agents.tool_security import _ssrf_denial_reason
+from app.agents.tool_security import _ssrf_denial_reason, _ssrf_safe_opener
 
 CHECK_URL_STATUS_TOOL: dict[str, Any] = {
     "name": "check_url_status",
@@ -79,7 +91,10 @@ CHECK_URL_STATUS_TOOL: dict[str, Any] = {
 def check_url_status_handler(inp: dict[str, Any]) -> str:
     """Core check_url_status logic — the one real implementation,
     reused unchanged in behavior except for the SSRF guard now applied
-    to `url` before any network access."""
+    to `url` before any network access, and every subsequent redirect
+    hop now also re-validated via `_ssrf_safe_opener()` (tool #157's
+    cross-cutting SSRF-via-redirect fix — see tool_security.py's own
+    module docstring)."""
     url = str(inp["url"])
     ssrf_reason = _ssrf_denial_reason(url)
     if ssrf_reason:
@@ -87,7 +102,7 @@ def check_url_status_handler(inp: dict[str, Any]) -> str:
 
     try:
         start = time.time()
-        r = urllib.request.urlopen(url, timeout=10)
+        r = _ssrf_safe_opener().open(url, timeout=10)
         elapsed = round((time.time() - start) * 1000)
         return f"HTTP {r.status} {r.reason} ({elapsed}ms) — {url}"
     except Exception as e:

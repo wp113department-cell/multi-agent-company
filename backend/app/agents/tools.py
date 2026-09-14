@@ -478,6 +478,10 @@ from app.tools.integrations.inspect_github_repo import (
     INSPECT_GITHUB_REPO_TOOL,
     inspect_github_repo_handler,
 )
+from app.tools.integrations.inspect_openapi_spec import (
+    INSPECT_OPENAPI_SPEC_TOOL,
+    inspect_openapi_spec_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -744,6 +748,7 @@ _GITHUB_LIST_PRS_TOOL = GITHUB_LIST_PRS_TOOL
 _HASH_FILE_TOOL = HASH_FILE_TOOL
 _HTTP_REQUEST_TOOL = HTTP_REQUEST_TOOL
 _INSPECT_GITHUB_REPO_TOOL = INSPECT_GITHUB_REPO_TOOL
+_INSPECT_OPENAPI_SPEC_TOOL = INSPECT_OPENAPI_SPEC_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -1949,117 +1954,17 @@ def inspect_github_repo(inp: dict[str, Any]) -> str:
 # bound). Lists real endpoints/methods/schemas from the parsed structure.
 # ---------------------------------------------------------------------------
 
-_INSPECT_OPENAPI_SPEC_TOOL = {
-    "name": "inspect_openapi_spec",
-    "description": "Parse a real OpenAPI/Swagger spec (JSON or YAML) and summarize its endpoints (method, path, summary, operationId, parameters) and schema names — real structural parsing, never text/regex scraping. Provide url to fetch a published spec (SSRF-guarded), or spec_text with content already read (e.g. via read_file for a local spec file).",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "url": {
-                "type": "string",
-                "description": "URL of a published OpenAPI/Swagger spec to fetch",
-            },
-            "spec_text": {
-                "type": "string",
-                "description": "Raw JSON or YAML spec content (alternative to url)",
-            },
-        },
-        "required": [],
-    },
-}
+    # moved to app/tools/integrations/inspect_openapi_spec.py as
+    # INSPECT_OPENAPI_SPEC_TOOL / inspect_openapi_spec_handler() —
+    # tool_enhance.md productionization pass, tool #157 (2026-09-14).
+    # Real finding — a cross-cutting SSRF-via-redirect bypass, also
+    # retroactively fixed for fetch_url/check_url_status/http_request
+    # — see that module's own docstring. `inspect_openapi_spec` name
+    # kept as a thin delegating wrapper for backward compatibility.
 
 
 def inspect_openapi_spec(inp: dict[str, Any]) -> str:
-    import json as _json
-
-    url = str(inp.get("url", "")).strip()
-    spec_text = str(inp.get("spec_text", "")).strip()
-    if not url and not spec_text:
-        return (
-            "[ERROR] Provide either url (to fetch a published spec) or "
-            "spec_text (raw JSON/YAML content, e.g. already read via read_file)"
-        )
-    if url:
-        ssrf_reason = _ssrf_denial_reason(url)
-        if ssrf_reason:
-            return f"[POLICY DENIED] {ssrf_reason}"
-        try:
-            r = subprocess.run(
-                [
-                    "curl",
-                    "-s",
-                    "-L",
-                    "--max-time",
-                    "15",
-                    "--user-agent",
-                    "Gridiron-Agent/1.0",
-                    url,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=20,
-            )
-            spec_text = r.stdout
-        except Exception as e:
-            return f"[ERROR] {e}"
-        if not spec_text:
-            return "[ERROR] Empty response fetching spec"
-
-    spec: Any = None
-    try:
-        spec = _json.loads(spec_text)
-    except _json.JSONDecodeError:
-        try:
-            import yaml as _yaml
-
-            spec = _yaml.safe_load(spec_text)
-        except Exception as e:
-            return f"[ERROR] Could not parse as JSON or YAML: {e}"
-    if not isinstance(spec, dict):
-        return "[ERROR] Parsed content is not a valid OpenAPI/Swagger object"
-
-    version = spec.get("openapi") or spec.get("swagger")
-    if not version:
-        return (
-            "[ERROR] No 'openapi' or 'swagger' version field found — not a "
-            "recognized OpenAPI/Swagger spec"
-        )
-    info = spec.get("info") or {}
-    paths = spec.get("paths") or {}
-    _http_methods = ("get", "post", "put", "patch", "delete", "options", "head")
-    endpoints: list[dict[str, Any]] = []
-    for path, methods in paths.items():
-        if not isinstance(methods, dict):
-            continue
-        for method, op in methods.items():
-            if method.lower() not in _http_methods or not isinstance(op, dict):
-                continue
-            endpoints.append(
-                {
-                    "method": method.upper(),
-                    "path": path,
-                    "summary": op.get("summary", ""),
-                    "operationId": op.get("operationId", ""),
-                    "parameters": [
-                        p.get("name")
-                        for p in (op.get("parameters") or [])
-                        if isinstance(p, dict)
-                    ],
-                }
-            )
-    if str(version).startswith("3"):
-        schemas = list(((spec.get("components") or {}).get("schemas") or {}).keys())
-    else:
-        schemas = list((spec.get("definitions") or {}).keys())
-    result = {
-        "openapi_version": version,
-        "title": info.get("title", ""),
-        "api_version": info.get("version", ""),
-        "endpoint_count": len(endpoints),
-        "endpoints": endpoints[:100],
-        "schemas": schemas[:100],
-    }
-    return _json.dumps(result, indent=2)
+    return inspect_openapi_spec_handler(inp)
 
 
 def make_doc_generator_handlers(repo_path: str) -> dict[str, Any]:

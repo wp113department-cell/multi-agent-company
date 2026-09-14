@@ -88,7 +88,7 @@ from __future__ import annotations
 import subprocess
 from typing import Any
 
-from app.agents.tool_security import _ssrf_denial_reason
+from app.agents.tool_security import _ssrf_denial_reason, _ssrf_safe_curl_fetch
 
 MAX_FETCH_URL_TIMEOUT_SECONDS = 60
 
@@ -129,26 +129,24 @@ def fetch_url_handler(inp: dict[str, Any]) -> str:
     summarize = bool(inp.get("summarize", False))
 
     try:
-        r = subprocess.run(
-            [
-                "curl",
-                "-s",
-                "-L",
-                "--max-time",
-                str(timeout),
-                "--user-agent",
-                "Gridiron-Agent/1.0",
-                url,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=timeout + 5,
-        )
-        raw = r.stdout[:10000] or r.stderr or "[empty response]"
-        if summarize and r.stdout:
+        # tool_enhance.md productionization pass, tool #157 (2026-09-14)
+        # — was a real SSRF-via-redirect bypass: the _ssrf_denial_reason()
+        # check above only validated this initial `url`; curl's own `-L`
+        # auto-redirect-following let a malicious/compromised server this
+        # URL legitimately points to redirect the request to a private/
+        # internal target, completely unvalidated (proved live against
+        # the real cloud metadata endpoint via a real public redirect
+        # service). Now fetches via _ssrf_safe_curl_fetch(), which
+        # re-validates every redirect hop the same way instead of using
+        # curl's own -L. See tool_security.py's own module docstring for
+        # the full cross-cutting account.
+        raw, denial_reason = _ssrf_safe_curl_fetch(url, timeout=timeout)
+        if denial_reason:
+            return f"[POLICY DENIED] {denial_reason}"
+        if summarize and raw and raw != "[empty response]":
             from app.agents.tools import _llm_summarize_url_content
 
-            summary = _llm_summarize_url_content(url, r.stdout)
+            summary = _llm_summarize_url_content(url, raw)
             if summary:
                 return f"=== Summary ===\n{summary}\n\n=== Raw content ===\n{raw}"
         return raw
