@@ -470,6 +470,10 @@ from app.tools.filesystem.hash_file import (
     HASH_FILE_TOOL,
     hash_file_handler,
 )
+from app.tools.integrations.http_request import (
+    HTTP_REQUEST_TOOL,
+    http_request_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -734,6 +738,7 @@ _GIT_STASH_LIST_TOOL = GIT_STASH_LIST_TOOL
 _GITHUB_INSPECT_REPO_TOOL = GITHUB_INSPECT_REPO_TOOL
 _GITHUB_LIST_PRS_TOOL = GITHUB_LIST_PRS_TOOL
 _HASH_FILE_TOOL = HASH_FILE_TOOL
+_HTTP_REQUEST_TOOL = HTTP_REQUEST_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -5666,30 +5671,9 @@ _PIP_LIST_TOOL: dict[str, Any] = {
 # moved to app/tools/filesystem/create_directory.py as
 # CREATE_DIRECTORY_TOOL / create_directory_handler() — tool_enhance.md
 # productionization pass, tool #131 (2026-08-26).
-_HTTP_REQUEST_TOOL: dict[str, Any] = {
-    "name": "http_request",
-    "description": "Make an HTTP request (GET/POST/PUT/DELETE) with custom headers and body. Returns status code and response body.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "method": {
-                "type": "string",
-                "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"],
-                "description": "HTTP method",
-            },
-            "url": {"type": "string", "description": "Request URL"},
-            "headers": {
-                "type": "object",
-                "description": "Request headers (key-value pairs)",
-            },
-            "body": {
-                "type": "string",
-                "description": "Request body (JSON string for POST/PUT)",
-            },
-        },
-        "required": ["method", "url"],
-    },
-}
+    # moved to app/tools/integrations/http_request.py as
+    # HTTP_REQUEST_TOOL / http_request_handler() — tool_enhance.md
+    # productionization pass, tool #155 (2026-09-14).
 # moved to app/tools/filesystem/base64_encode.py as
 # BASE64_ENCODE_TOOL / base64_encode_handler() — tool_enhance.md
 # productionization pass, tool #122 (2026-08-26).
@@ -8413,25 +8397,18 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def create_directory_h(inp: dict[str, Any]) -> str:
         return create_directory_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #155 (2026-09-14) —
+    # was a real SSRF vector including local-file disclosure via the
+    # file:// URL scheme (urlopen() genuinely read a real local file's
+    # content, proved live via an isolated urllib call — only an
+    # accidental crash in unrelated response-formatting code currently
+    # prevents it reaching the caller) plus full exposure to internal-
+    # network SSRF (no protection at all, unlike sibling tools
+    # fetch_url/check_url_status), and a missing chat_agent.py
+    # dispatch. Now delegates to the shared handler, gated by the same
+    # _ssrf_denial_reason() guard those siblings already use.
     def http_request_h(inp: dict[str, Any]) -> str:
-        import urllib.request as _req
-        import urllib.error as _uerr
-
-        method = str(inp["method"]).upper()
-        url = str(inp["url"])
-        headers = dict(inp.get("headers") or {})
-        body = inp.get("body")
-        try:
-            data = body.encode("utf-8") if body else None
-            req = _req.Request(url, data=data, method=method, headers=headers)
-            with _req.urlopen(req, timeout=15) as resp:
-                raw = resp.read()
-                text = raw.decode("utf-8", errors="replace")[:3000]
-                return f"HTTP {resp.status} {resp.reason}\n{text}"
-        except _uerr.HTTPError as e:
-            return f"HTTP {e.code} {e.reason}"
-        except Exception as e:
-            return f"[ERROR] http_request: {e}"
+        return http_request_handler(inp)
 
     # tool_enhance.md productionization pass, tool #122 (2026-08-26) —
     # was a worktree-escape arbitrary file READ (`root / path` never

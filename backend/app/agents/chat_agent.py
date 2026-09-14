@@ -213,6 +213,7 @@ from app.tools.git.stash_list import git_stash_list_handler
 from app.tools.integrations.github_inspect_repo import github_inspect_repo_handler
 from app.tools.git.github_list_prs import github_list_prs_handler
 from app.tools.filesystem.hash_file import hash_file_handler
+from app.tools.integrations.http_request import http_request_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -1926,6 +1927,20 @@ class ChatAgent:
             # fetch_url_handler()'s own module docstring. Now delegates
             # to that same shared, fixed handler.
             return await asyncio.to_thread(fetch_url_handler, inp)
+
+        if tool_name == "http_request":
+            # tool_enhance.md productionization pass, tool #155
+            # (2026-09-14) — was a real SSRF vector including
+            # local-file disclosure via the file:// URL scheme
+            # (urlopen() genuinely read a real local file's content,
+            # proved live) plus full exposure to internal-network
+            # SSRF (no protection at all, unlike sibling tools
+            # fetch_url/check_url_status), and a missing dispatch here
+            # (this tool was never reachable from interactive chat at
+            # all). Now delegates to the shared handler, gated by the
+            # same _ssrf_denial_reason() guard those siblings already
+            # use.
+            return await asyncio.to_thread(http_request_handler, inp)
 
         # ========== BATCH 3 — Git extras ==========
 

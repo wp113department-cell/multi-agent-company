@@ -306,7 +306,14 @@ def test_generate_diagram_sequence(tmp_path: Path) -> None:
 def test_http_request_invalid(tmp_path: Path) -> None:
     h = _handlers(tmp_path)
     result = h["http_request"]({"method": "GET", "url": "http://localhost:19999/test"})
-    assert "ERROR" in result or "refused" in result.lower()
+    # tool_enhance.md productionization pass, tool #155 (2026-09-14) —
+    # http_request now applies the same SSRF guard fetch_url/
+    # check_url_status already use, which correctly refuses ANY
+    # loopback/private-address target (including localhost) before
+    # ever attempting the connection — a more correct outcome than
+    # the old bare connection-refused error this test originally
+    # exercised.
+    assert "ERROR" in result or "POLICY DENIED" in result or "refused" in result.lower()
 
 
 # ---- Docs ----
