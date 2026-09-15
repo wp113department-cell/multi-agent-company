@@ -227,6 +227,7 @@ from app.tools.execution.list_processes import list_processes_handler
 from app.tools.execution.loc_stats import loc_stats_handler
 from app.tools.agents.memory_read import memory_read_handler
 from app.tools.database.mermaid_from_schema import mermaid_from_schema_handler
+from app.tools.filesystem.openapi_inspect import openapi_inspect_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -2445,6 +2446,17 @@ class ChatAgent:
             # tool_security.py's own module docstring). Now delegates
             # to the shared, redirect-safe handler.
             return await asyncio.to_thread(inspect_openapi_spec_handler, inp)
+
+        if tool_name == "openapi_inspect":
+            # tool_enhance.md productionization pass, tool #169
+            # (2026-09-15) — was a worktree-escape STRUCTURED FILE
+            # CONTENT DISCLOSURE oracle (`path` never validated,
+            # proved live) and a missing chat_agent.py dispatch (this
+            # tool was never reachable from interactive chat at all).
+            # Now delegates to the shared, worktree-validated handler.
+            return await asyncio.to_thread(
+                openapi_inspect_handler, root, repo, inp
+            )
 
         # ========== BATCH 4 — Testing extras ==========
 

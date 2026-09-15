@@ -526,6 +526,10 @@ from app.tools.database.mermaid_from_schema import (
     MERMAID_FROM_SCHEMA_TOOL,
     mermaid_from_schema_handler,
 )
+from app.tools.filesystem.openapi_inspect import (
+    OPENAPI_INSPECT_TOOL,
+    openapi_inspect_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -804,6 +808,7 @@ _LIST_PROCESSES_TOOL = LIST_PROCESSES_TOOL
 _LOC_STATS_TOOL = LOC_STATS_TOOL
 _MEMORY_READ_TOOL = MEMORY_READ_TOOL
 _MERMAID_FROM_SCHEMA_TOOL = MERMAID_FROM_SCHEMA_TOOL
+_OPENAPI_INSPECT_TOOL = OPENAPI_INSPECT_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -5360,20 +5365,9 @@ _PARSE_DOCKER_COMPOSE_TOOL: dict[str, Any] = {
     # moved to app/tools/integrations/github_inspect_repo.py as
     # GITHUB_INSPECT_REPO_TOOL / github_inspect_repo_handler() —
     # tool_enhance.md productionization pass, tool #152 (2026-09-14).
-_OPENAPI_INSPECT_TOOL: dict[str, Any] = {
-    "name": "openapi_inspect",
-    "description": "Parse a local OpenAPI/Swagger spec (JSON or YAML) and summarize its API surface: title/version, and every path with its HTTP methods, summary, and parameter count.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "OpenAPI/Swagger spec file path (relative to repo root)",
-            }
-        },
-        "required": ["path"],
-    },
-}
+    # moved to app/tools/filesystem/openapi_inspect.py as
+    # OPENAPI_INSPECT_TOOL / openapi_inspect_handler() —
+    # tool_enhance.md productionization pass, tool #169 (2026-09-15).
 
 # -- Code / Docs tools --
     # moved to app/tools/filesystem/generate_diagram.py as
@@ -7859,50 +7853,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def github_inspect_repo_h(inp: dict[str, Any]) -> str:
         return github_inspect_repo_handler(inp)
 
+    # tool_enhance.md productionization pass, tool #169 (2026-09-15) —
+    # was a worktree-escape STRUCTURED FILE CONTENT DISCLOSURE oracle
+    # (`path` never validated, proved live) and a missing
+    # chat_agent.py dispatch. Now delegates to the shared,
+    # worktree-validated handler.
     def openapi_inspect_h(inp: dict[str, Any]) -> str:
-        import json as _json
-
-        import yaml as _yaml
-
-        fpath = root / str(inp["path"])
-        if not fpath.exists():
-            return f"[ERROR] File not found: {inp['path']}"
-        try:
-            text = fpath.read_text(encoding="utf-8")
-            spec = (
-                _yaml.safe_load(text)
-                if fpath.suffix in (".yaml", ".yml")
-                else _json.loads(text)
-            )
-        except Exception as e:
-            return f"[ERROR] openapi_inspect: {e}"
-        if not isinstance(spec, dict) or (
-            "openapi" not in spec and "swagger" not in spec
-        ):
-            return (
-                f"[ERROR] {inp['path']} does not look like an OpenAPI/Swagger spec "
-                "(missing 'openapi'/'swagger' key)"
-            )
-        info = spec.get("info", {}) if isinstance(spec.get("info"), dict) else {}
-        version = spec.get("openapi") or spec.get("swagger")
-        paths = spec.get("paths", {}) if isinstance(spec.get("paths"), dict) else {}
-        out = [
-            f"{info.get('title', '(untitled)')} — API version {info.get('version', '?')} (OpenAPI {version})",
-            f"{len(paths)} path(s):",
-        ]
-        http_methods = {"get", "post", "put", "patch", "delete", "options", "head"}
-        for p, methods in paths.items():
-            if not isinstance(methods, dict):
-                continue
-            for method, op in methods.items():
-                if method.lower() not in http_methods:
-                    continue
-                summary = op.get("summary", "") if isinstance(op, dict) else ""
-                params = op.get("parameters", []) if isinstance(op, dict) else []
-                out.append(
-                    f"  {method.upper():6} {p}  {summary}  ({len(params)} param(s))"
-                )
-        return "\n".join(out)
+        return openapi_inspect_handler(root, repo_path, inp)
 
     def summarize_output_h(inp: dict[str, Any]) -> str:
         """AUDIT_Q_BATCH14 §99 gap-closure — real LLM-generated output
