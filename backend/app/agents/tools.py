@@ -494,6 +494,10 @@ from app.tools.agents.known_issues_read import (
     KNOWN_ISSUES_READ_TOOL,
     known_issues_read_handler,
 )
+from app.tools.agents.known_issues_write import (
+    KNOWN_ISSUES_WRITE_TOOL,
+    known_issues_write_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -764,6 +768,7 @@ _INSPECT_OPENAPI_SPEC_TOOL = INSPECT_OPENAPI_SPEC_TOOL
 _JSON_QUERY_TOOL = JSON_QUERY_TOOL
 _JSON_VALIDATE_TOOL = JSON_VALIDATE_TOOL
 _KNOWN_ISSUES_READ_TOOL = KNOWN_ISSUES_READ_TOOL
+_KNOWN_ISSUES_WRITE_TOOL = KNOWN_ISSUES_WRITE_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -4152,21 +4157,9 @@ _MEMORY_READ_TOOL: dict[str, Any] = {
     # KNOWN_ISSUES_READ_TOOL / known_issues_read_handler() —
     # tool_enhance.md productionization pass, tool #160 (2026-09-15).
 
-_KNOWN_ISSUES_WRITE_TOOL: dict[str, Any] = {
-    "name": "known_issues_write",
-    "description": "Append a new known issue to the project known issues file.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "issue": {"type": "string", "description": "Description of the issue"},
-            "severity": {
-                "type": "string",
-                "description": "critical / high / medium / low",
-            },
-        },
-        "required": ["issue", "severity"],
-    },
-}
+    # moved to app/tools/agents/known_issues_write.py as
+    # KNOWN_ISSUES_WRITE_TOOL / known_issues_write_handler() —
+    # tool_enhance.md productionization pass, tool #161 (2026-09-15).
 
 # --- Day 3C: Planning + docs tool specs ---
 
@@ -7177,7 +7170,6 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     _mem_dir.mkdir(exist_ok=True)
     _mem_store_path = _mem_dir / f"{_mem_slug}_store.json"
     _mem_decisions_path = _mem_dir / f"{_mem_slug}_decisions.jsonl"
-    _mem_issues_path = _mem_dir / f"{_mem_slug}_known_issues.md"
 
     def _read_mem_store() -> dict[str, str]:
         if not _mem_store_path.exists():
@@ -7225,39 +7217,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def known_issues_read_h(inp: dict[str, Any]) -> str:
         return known_issues_read_handler(repo_path)
 
+    # tool_enhance.md productionization pass, tool #161 (2026-09-15) —
+    # no worktree-escape or injection surface exists (destination path
+    # is fixed, derived from repo_path alone, never from `issue`/
+    # `severity`); the real fix was a missing chat_agent.py dispatch
+    # (this tool was never reachable from interactive chat at all,
+    # proved live). Now delegates to the shared handler.
     def known_issues_write_h(inp: dict[str, Any]) -> str:
-        import datetime as _dt
-
-        issue = str(inp["issue"])
-        severity = str(inp.get("severity", "medium")).upper()
-        now = _dt.datetime.utcnow()
-        line = f"\n## [{severity}] {now.strftime('%Y-%m-%d')}\n{issue}\n"
-        try:
-            with open(_mem_issues_path, "a", encoding="utf-8") as _fh:
-                _mem_lock(_fh)
-                _fh.write(line)
-                _mem_unlock(_fh)
-        except Exception as e:
-            return f"[ERROR] {e}"
-
-        # AUDIT_Q_BATCH15 §75/§105/§112 gap-closure (2026-08-11) — the flat
-        # KNOWN_ISSUES.md-style append above is kept unchanged (nothing that
-        # reads that file today breaks); this additionally makes the same
-        # known issue searchable/retrievable via memory_hook_node, which the
-        # flat file alone never was. Best-effort — a memory-backend failure
-        # must not turn a successful known-issue write into an error.
-        try:
-            from app.memory.store import embed_bug_sync
-
-            embed_bug_sync(
-                task_id=f"known-issue-{now.strftime('%Y%m%dT%H%M%S%f')}",
-                issue=issue,
-                severity=severity.lower(),
-            )
-        except Exception:
-            pass
-
-        return f"Known issue appended (severity: {severity})"
+        return known_issues_write_handler(repo_path, inp)
 
     handlers["memory_read"] = memory_read_h
     handlers["memory_write"] = memory_write_h
