@@ -542,6 +542,10 @@ from app.tools.execution.pip_list import (
     PIP_LIST_TOOL,
     pip_list_handler,
 )
+from app.tools.execution.read_env_var import (
+    READ_ENV_VAR_TOOL,
+    read_env_var_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -5277,17 +5281,10 @@ _UNZIP_FILES_TOOL: dict[str, Any] = {
 # #129 (2026-08-26).
 
 # -- Environment --
-_READ_ENV_VAR_TOOL: dict[str, Any] = {
-    "name": "read_env_var",
-    "description": "Read the value of a specific environment variable from the running process. Returns [NOT SET] if absent.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string", "description": "Environment variable name"}
-        },
-        "required": ["name"],
-    },
-}
+    # moved to app/tools/execution/read_env_var.py as
+    # READ_ENV_VAR_TOOL / read_env_var_handler() — tool_enhance.md
+    # productionization pass, tool #173 (2026-09-15).
+_READ_ENV_VAR_TOOL: dict[str, Any] = READ_ENV_VAR_TOOL
     # moved to app/tools/execution/list_env_vars.py as
     # LIST_ENV_VARS_TOOL / list_env_vars_handler() — tool_enhance.md
     # productionization pass, tool #163 (2026-09-15).
@@ -7638,12 +7635,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def count_lines_h(inp: dict[str, Any]) -> str:
         return count_lines_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #173 (2026-09-15) —
+    # audited and confirmed already safe (values already routed
+    # through _mask_secret_value(), proved live); the real fix was a
+    # missing chat_agent.py dispatch. Now delegates to the shared
+    # handler.
     def read_env_var_h(inp: dict[str, Any]) -> str:
-        name = str(inp["name"])
-        val = os.environ.get(name)
-        if val is None:
-            return f"{name}=[NOT SET]"
-        return f"{name}={_mask_secret_value(name, val)}"
+        return read_env_var_handler(inp)
 
     # tool_enhance.md productionization pass, tool #163 (2026-09-15) —
     # no worktree-escape or injection surface exists (empty schema);

@@ -231,6 +231,7 @@ from app.tools.filesystem.openapi_inspect import openapi_inspect_handler
 from app.tools.filesystem.parse_docker_compose import parse_docker_compose_handler
 from app.tools.filesystem.parse_dockerfile import parse_dockerfile_handler
 from app.tools.execution.pip_list import pip_list_handler
+from app.tools.execution.read_env_var import read_env_var_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -2491,6 +2492,16 @@ class ChatAgent:
             # never reachable from interactive chat at all, proved
             # live). Now delegates to the shared handler.
             return await asyncio.to_thread(pip_list_handler, inp)
+
+        if tool_name == "read_env_var":
+            # tool_enhance.md productionization pass, tool #173
+            # (2026-09-15) — audited and confirmed already safe
+            # (values already routed through _mask_secret_value(),
+            # proved live); the real fix was a missing chat_agent.py
+            # dispatch (this tool was never reachable from
+            # interactive chat at all, proved live). Now delegates to
+            # the shared handler.
+            return await asyncio.to_thread(read_env_var_handler, inp)
 
         # ========== BATCH 4 — Testing extras ==========
 
