@@ -514,6 +514,10 @@ from app.tools.execution.list_processes import (
     LIST_PROCESSES_TOOL,
     list_processes_handler,
 )
+from app.tools.execution.loc_stats import (
+    LOC_STATS_TOOL,
+    loc_stats_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -789,6 +793,7 @@ _LIST_BACKGROUND_PROCESSES_TOOL = LIST_BACKGROUND_PROCESSES_TOOL
 _LIST_ENV_VARS_TOOL = LIST_ENV_VARS_TOOL
 _LIST_OPEN_PORTS_TOOL = LIST_OPEN_PORTS_TOOL
 _LIST_PROCESSES_TOOL = LIST_PROCESSES_TOOL
+_LOC_STATS_TOOL = LOC_STATS_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -5424,20 +5429,9 @@ _SUMMARIZE_OUTPUT_TOOL: dict[str, Any] = {
 # #48/#100. No LLM-controlled input reaches this tool (empty schema),
 # so no worktree/injection surface exists. See that module's own
 # docstring for the full account.
-_LOC_STATS_TOOL: dict[str, Any] = {
-    "name": "loc_stats",
-    "description": "Lines-of-code statistics for the repo broken down by file extension/language.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "directory": {
-                "type": "string",
-                "description": "Root directory to scan (default: repo root)",
-            },
-        },
-        "required": [],
-    },
-}
+    # moved to app/tools/execution/loc_stats.py as LOC_STATS_TOOL /
+    # loc_stats_handler() — tool_enhance.md productionization pass,
+    # tool #166 (2026-09-15).
 
 # -- Package management --
 # moved to app/tools/execution/npm_install.py as NPM_INSTALL_TOOL — tool_enhance.md productionization pass, tool #53 (2026-08-20).
@@ -8045,27 +8039,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def check_license_compliance_h(inp: dict[str, Any]) -> str:
         return check_license_compliance_handler()
 
+    # tool_enhance.md productionization pass, tool #166 (2026-09-15) —
+    # was a worktree-escape LINE-COUNT-STATISTICS DISCLOSURE oracle
+    # (`directory` never validated, proved live) and a missing
+    # chat_agent.py dispatch. Now delegates to the shared,
+    # worktree-validated handler.
     def loc_stats_h(inp: dict[str, Any]) -> str:
-        directory = str(inp.get("directory", "."))
-        target = root / directory
-        totals: dict[str, int] = {}
-        try:
-            for fp in target.rglob("*"):
-                if fp.is_file() and not any(
-                    p in str(fp)
-                    for p in [".git", "__pycache__", "node_modules", ".venv"]
-                ):
-                    ext = fp.suffix or "(no ext)"
-                    try:
-                        n = sum(1 for _ in fp.open(encoding="utf-8", errors="ignore"))
-                        totals[ext] = totals.get(ext, 0) + n
-                    except Exception:
-                        pass
-            rows = sorted(totals.items(), key=lambda x: -x[1])[:20]
-            out = "\n".join(f"{ext:15} {n:>8,}" for ext, n in rows)
-            return f"{'Extension':15} {'Lines':>8}\n{'-' * 25}\n{out}\n{'':15} {sum(totals.values()):>8,} total"
-        except Exception as e:
-            return f"[ERROR] loc_stats: {e}"
+        return loc_stats_handler(root, repo_path, inp)
 
     def npm_install_h(inp: dict[str, Any]) -> str:
         # tool_enhance.md productionization pass, tool #4 (2026-08-16) —

@@ -224,6 +224,7 @@ from app.tools.execution.list_background_processes import (
 from app.tools.execution.list_env_vars import list_env_vars_handler
 from app.tools.execution.list_open_ports import list_open_ports_handler
 from app.tools.execution.list_processes import list_processes_handler
+from app.tools.execution.loc_stats import loc_stats_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -1937,6 +1938,16 @@ class ChatAgent:
             # interactive chat at all, proved live). Now delegates to
             # the shared handler.
             return await asyncio.to_thread(list_processes_handler, inp)
+
+        if tool_name == "loc_stats":
+            # tool_enhance.md productionization pass, tool #166
+            # (2026-09-15) — was a worktree-escape LINE-COUNT-
+            # STATISTICS DISCLOSURE oracle (`directory` never
+            # validated, proved live) and a missing chat_agent.py
+            # dispatch (this tool was never reachable from
+            # interactive chat at all). Now delegates to the shared,
+            # worktree-validated handler.
+            return await asyncio.to_thread(loc_stats_handler, root, repo, inp)
 
         if tool_name == "run_python_snippet":
             return await asyncio.to_thread(
