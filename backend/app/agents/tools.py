@@ -502,6 +502,10 @@ from app.tools.execution.list_background_processes import (
     LIST_BACKGROUND_PROCESSES_TOOL,
     list_background_processes_handler,
 )
+from app.tools.execution.list_env_vars import (
+    LIST_ENV_VARS_TOOL,
+    list_env_vars_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -774,6 +778,7 @@ _JSON_VALIDATE_TOOL = JSON_VALIDATE_TOOL
 _KNOWN_ISSUES_READ_TOOL = KNOWN_ISSUES_READ_TOOL
 _KNOWN_ISSUES_WRITE_TOOL = KNOWN_ISSUES_WRITE_TOOL
 _LIST_BACKGROUND_PROCESSES_TOOL = LIST_BACKGROUND_PROCESSES_TOOL
+_LIST_ENV_VARS_TOOL = LIST_ENV_VARS_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -5273,11 +5278,9 @@ _READ_ENV_VAR_TOOL: dict[str, Any] = {
         "required": ["name"],
     },
 }
-_LIST_ENV_VARS_TOOL: dict[str, Any] = {
-    "name": "list_env_vars",
-    "description": "List all environment variable NAMES (not values) currently set. Use read_env_var to read a specific value.",
-    "input_schema": {"type": "object", "properties": {}, "required": []},
-}
+    # moved to app/tools/execution/list_env_vars.py as
+    # LIST_ENV_VARS_TOOL / list_env_vars_handler() — tool_enhance.md
+    # productionization pass, tool #163 (2026-09-15).
 # moved to app/tools/filesystem/env_diff.py as ENV_DIFF_TOOL /
 # env_diff_handler() — tool_enhance.md productionization pass, tool
 # #135 (2026-09-11).
@@ -7749,9 +7752,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"{name}=[NOT SET]"
         return f"{name}={_mask_secret_value(name, val)}"
 
+    # tool_enhance.md productionization pass, tool #163 (2026-09-15) —
+    # no worktree-escape or injection surface exists (empty schema);
+    # checked and confirmed the implementation already respects its
+    # own "names only, never values" safety contract, proved live.
+    # The real fix was a missing chat_agent.py dispatch (this tool
+    # was never reachable from interactive chat at all, proved live).
+    # Now delegates to the shared handler.
     def list_env_vars_h(inp: dict[str, Any]) -> str:
-        names = sorted(os.environ.keys())
-        return "\n".join(names)
+        return list_env_vars_handler()
 
     # tool_enhance.md productionization pass, tool #135 (2026-09-11) —
     # was a worktree-escape env-variable-NAME disclosure oracle on

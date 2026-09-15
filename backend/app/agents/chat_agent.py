@@ -221,6 +221,7 @@ from app.tools.agents.known_issues_write import known_issues_write_handler
 from app.tools.execution.list_background_processes import (
     list_background_processes_handler,
 )
+from app.tools.execution.list_env_vars import list_env_vars_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -1903,6 +1904,17 @@ class ChatAgent:
             # delegated to the same shared format_tracked()). This is
             # modularization only.
             return list_background_processes_handler(self._background_processes)
+
+        if tool_name == "list_env_vars":
+            # tool_enhance.md productionization pass, tool #163
+            # (2026-09-15) — no worktree-escape or injection surface
+            # exists (empty schema); checked and confirmed the
+            # implementation already respects its own "names only,
+            # never values" safety contract, proved live. The real
+            # fix was a missing chat_agent.py dispatch (this tool was
+            # never reachable from interactive chat at all, proved
+            # live). Now delegates to the shared handler.
+            return await asyncio.to_thread(list_env_vars_handler)
 
         if tool_name == "run_python_snippet":
             return await asyncio.to_thread(
