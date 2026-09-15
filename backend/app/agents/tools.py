@@ -108,6 +108,10 @@ from app.tools.agents.submit_ai_result import (
     SUBMIT_AI_RESULT_TOOL,
     submit_ai_result_handler,
 )
+from app.tools.agents.submit_arch_review import (
+    SUBMIT_ARCH_REVIEW_TOOL,
+    submit_arch_review_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -2845,61 +2849,14 @@ _SUBMIT_SECURITY_REPORT_TOOL = {
     },
 }
 
-_SUBMIT_ARCH_REVIEW_TOOL = {
-    # Gap-closure Day 48 (Stage 2) — real bug fix, not a new feature: this
-    # schema previously used {verdict, issues, summary}, a field set that
-    # matched NEITHER roles/architecture_reviewer.md's own documented
-    # "Terminal tool contract" ({structure_summary, risks, recommendations,
-    # blast_radius, import_graph_ran}) NOR what
-    # app/agents/architecture_reviewer.py::run_arch_review() reads back
-    # (raw.get("risks", []), raw.get("structure_summary", ...)) — meaning
-    # every real architecture-review finding was silently discarded
-    # (raw.get("risks", []) always returned [] since "risks" never existed
-    # in the schema the LLM was told to fill out). Corrected to match the
-    # role prompt and the consuming code exactly.
-    "name": "submit_arch_review",
-    "description": "Submit architecture review result.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "structure_summary": {"type": "string"},
-            "risks": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "severity": {
-                            "type": "string",
-                            "enum": ["critical", "high", "medium", "low"],
-                        },
-                        "description": {"type": "string"},
-                        "evidence": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "file:line — description entries from this run's real tool output",
-                        },
-                    },
-                    "required": ["severity", "description", "evidence"],
-                },
-            },
-            "recommendations": {"type": "array", "items": {"type": "string"}},
-            "blast_radius": {
-                "type": ["array", "null"],
-                "items": {"type": "string"},
-            },
-            "import_graph_ran": {
-                "type": "boolean",
-                "description": "Overridden by the real VerificationConfig graph-execution state, never trusted from the model's own claim — see run_arch_review()'s verification handling.",
-            },
-        },
-        "required": [
-            "structure_summary",
-            "risks",
-            "recommendations",
-            "import_graph_ran",
-        ],
-    },
-}
+# moved to app/tools/agents/submit_arch_review.py as
+# SUBMIT_ARCH_REVIEW_TOOL / submit_arch_review_handler() —
+# tool_enhance.md productionization pass, tool #181 (2026-09-15).
+# (Retains the Gap-closure Day 48 (Stage 2) schema fix in its new
+# home's own docstring — {structure_summary, risks, recommendations,
+# blast_radius, import_graph_ran}, matching roles/architecture_reviewer.md
+# and run_arch_review()'s own consuming code exactly.)
+_SUBMIT_ARCH_REVIEW_TOOL: dict[str, Any] = SUBMIT_ARCH_REVIEW_TOOL
 
 _SUBMIT_SQL_REPORT_TOOL = {
     "name": "submit_sql_report",
@@ -3384,7 +3341,6 @@ def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     """Architecture reviewer: read-only + AST analysis + submit_arch_review."""
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
-    arch_result: dict[str, Any] = {}
 
     # tool_enhance.md productionization pass, tool #95 (2026-08-25) — the
     # real fix lives in the shared import_graph_handler(); see that
@@ -3433,10 +3389,13 @@ def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     def ar_call_graph(inp: dict[str, Any]) -> str:
         return call_graph_handler(root, repo_path, inp)
 
-    def ar_submit(inp: dict[str, Any]) -> str:
-        arch_result.update(inp)
-        return "Architecture review submitted"
-
+    # tool_enhance.md productionization pass, tool #181 (2026-09-15) —
+    # was write-only dead-code state: `arch_result` was updated but
+    # NEVER read anywhere (confirmed via full-codebase grep) — the
+    # real result-capture mechanism lives entirely in
+    # base_graph.py's generic submit_* handling, which reads the tool
+    # call's own arguments directly, independent of this handler.
+    # Now delegates to the shared, stateless handler.
     handlers["import_graph"] = ar_import_graph
     handlers["circular_dep_detect"] = ar_circular_dep
     handlers["dead_code_detect"] = ar_dead_code
@@ -3444,8 +3403,7 @@ def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     handlers["list_functions"] = ar_list_functions
     handlers["list_classes"] = ar_list_classes
     handlers["call_graph"] = ar_call_graph
-    handlers["submit_arch_review"] = ar_submit
-    handlers["_arch_result"] = arch_result
+    handlers["submit_arch_review"] = submit_arch_review_handler
     return handlers
 
 

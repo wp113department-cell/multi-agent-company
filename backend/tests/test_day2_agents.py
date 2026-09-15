@@ -331,8 +331,18 @@ class TestArchReviewerHandlers:
         # own documented contract) — {structure_summary, risks, recommendations,
         # blast_radius, import_graph_ran}, not the previous, unused
         # {verdict, issues, summary} shape no consuming code ever read.
+        #
+        # tool_enhance.md productionization pass, tool #181 (2026-09-15) —
+        # this test previously asserted on h["_arch_result"], an internal
+        # accumulator confirmed dead (never read anywhere in production —
+        # the real result-capture mechanism lives entirely in
+        # base_graph.py's generic submit_* handling, reading the tool
+        # call's own arguments directly). Now removed. Updated to assert
+        # on the handler's real return value instead, preserving this
+        # test's actual intent (a real submission with the correct schema
+        # succeeds) without relying on dead internal state.
         h = make_arch_reviewer_handlers(str(tmp_repo))
-        h["submit_arch_review"](
+        result = h["submit_arch_review"](
             {
                 "structure_summary": "1 module, no cycles",
                 "risks": [],
@@ -341,7 +351,7 @@ class TestArchReviewerHandlers:
                 "import_graph_ran": True,
             }
         )
-        assert h["_arch_result"]["structure_summary"] == "1 module, no cycles"
+        assert result == "Architecture review submitted"
 
 
 class TestMonitoringHandlers:
