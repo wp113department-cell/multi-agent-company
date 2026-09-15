@@ -112,6 +112,10 @@ from app.tools.agents.submit_arch_review import (
     SUBMIT_ARCH_REVIEW_TOOL,
     submit_arch_review_handler,
 )
+from app.tools.agents.submit_ba_result import (
+    SUBMIT_BA_RESULT_TOOL,
+    submit_ba_result_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -4302,20 +4306,10 @@ _SUBMIT_SPRINT_PLAN_TOOL: dict[str, Any] = {
     },
 }
 
-_SUBMIT_BA_RESULT_TOOL: dict[str, Any] = {
-    "name": "submit_ba_result",
-    "description": "Submit business analysis: user stories, acceptance criteria, edge cases.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "user_stories": {"type": "array", "items": {"type": "string"}},
-            "acceptance_criteria": {"type": "array", "items": {"type": "string"}},
-            "edge_cases": {"type": "array", "items": {"type": "string"}},
-            "summary": {"type": "string"},
-        },
-        "required": ["user_stories", "summary"],
-    },
-}
+# moved to app/tools/agents/submit_ba_result.py as
+# SUBMIT_BA_RESULT_TOOL / submit_ba_result_handler() —
+# tool_enhance.md productionization pass, tool #182 (2026-09-15).
+_SUBMIT_BA_RESULT_TOOL: dict[str, Any] = SUBMIT_BA_RESULT_TOOL
 
 _SUBMIT_MIGRATION_TOOL: dict[str, Any] = {
     "name": "submit_migration",
@@ -4637,14 +4631,15 @@ def make_sprint_planner_handlers(repo_path: str) -> dict[str, Any]:
 def make_business_analyst_handlers(repo_path: str) -> dict[str, Any]:
     """Handler factory for Business Analyst agent."""
     handlers = make_read_only_handlers(repo_path)
-    ba_result: dict[str, Any] = {}
 
-    def ba_submit(inp: dict[str, Any]) -> str:
-        ba_result.update(inp)
-        return "Business analysis submitted"
-
-    handlers["submit_ba_result"] = ba_submit
-    handlers["_ba_result"] = ba_result
+    # tool_enhance.md productionization pass, tool #182 (2026-09-15) —
+    # was write-only dead-code state: `ba_result` was updated but
+    # NEVER read anywhere (confirmed via full-codebase grep) — the
+    # real result-capture mechanism lives entirely in
+    # base_graph.py's generic submit_* handling, which reads the tool
+    # call's own arguments directly, independent of this handler.
+    # Now delegates to the shared, stateless handler.
+    handlers["submit_ba_result"] = submit_ba_result_handler
     return handlers
 
 
