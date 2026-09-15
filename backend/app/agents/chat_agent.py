@@ -218,6 +218,9 @@ from app.tools.filesystem.json_query import json_query_handler
 from app.tools.filesystem.json_validate import json_validate_handler
 from app.tools.agents.known_issues_read import known_issues_read_handler
 from app.tools.agents.known_issues_write import known_issues_write_handler
+from app.tools.execution.list_background_processes import (
+    list_background_processes_handler,
+)
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -1894,9 +1897,12 @@ class ChatAgent:
             return _pm.kill(kp_pid, kp_sig_name, self._background_processes)
 
         if tool_name == "list_background_processes":
-            from app.fleet import process_manager as _pm
-
-            return _pm.format_tracked(self._background_processes)
+            # tool_enhance.md productionization pass, tool #162
+            # (2026-09-15) — no real bug found (empty schema, no
+            # LLM-controlled input; both real implementations already
+            # delegated to the same shared format_tracked()). This is
+            # modularization only.
+            return list_background_processes_handler(self._background_processes)
 
         if tool_name == "run_python_snippet":
             return await asyncio.to_thread(

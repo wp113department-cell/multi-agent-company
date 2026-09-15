@@ -498,6 +498,10 @@ from app.tools.agents.known_issues_write import (
     KNOWN_ISSUES_WRITE_TOOL,
     known_issues_write_handler,
 )
+from app.tools.execution.list_background_processes import (
+    LIST_BACKGROUND_PROCESSES_TOOL,
+    list_background_processes_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -769,6 +773,7 @@ _JSON_QUERY_TOOL = JSON_QUERY_TOOL
 _JSON_VALIDATE_TOOL = JSON_VALIDATE_TOOL
 _KNOWN_ISSUES_READ_TOOL = KNOWN_ISSUES_READ_TOOL
 _KNOWN_ISSUES_WRITE_TOOL = KNOWN_ISSUES_WRITE_TOOL
+_LIST_BACKGROUND_PROCESSES_TOOL = LIST_BACKGROUND_PROCESSES_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -2254,15 +2259,10 @@ _SYNC_FILES_TOOL = SYNC_FILES_TOOL
 # retroactive kill_process (tool #49) fix found along the way.
 _RUN_BACKGROUND_TOOL_DEF = RUN_BACKGROUND_TOOL
 
-_LIST_BACKGROUND_PROCESSES_TOOL = {
-    "name": "list_background_processes",
-    "description": "List background processes started in this session via run_background, with age and whether each is possibly hung (alive well past the expected runtime). Distinct from list_processes, which lists all OS processes.",
-    "input_schema": {
-        "type": "object",
-        "properties": {},
-        "required": [],
-    },
-}
+    # moved to app/tools/execution/list_background_processes.py as
+    # LIST_BACKGROUND_PROCESSES_TOOL /
+    # list_background_processes_handler() — tool_enhance.md
+    # productionization pass, tool #162 (2026-09-15).
 
 # AUDIT_Q_BATCH01 §58 "Concurrent command execution (fan-out)" — previously
 # zero asyncio.gather/TaskGroup usage anywhere in backend/app; every
@@ -6148,10 +6148,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         kp_sig_name = str(inp.get("signal", "TERM"))
         return _pm.kill(kp_pid, kp_sig_name, _session_bg_procs)
 
+    # tool_enhance.md productionization pass, tool #162 (2026-09-15) —
+    # no real bug found (empty schema, no LLM-controlled input; both
+    # real implementations were already correctly dispatched and
+    # already delegated to the same shared format_tracked()); this is
+    # modularization only, matching the "no bug, still extracted"
+    # precedent from tools #147/#156.
     def list_background_processes_h(inp: dict[str, Any]) -> str:
-        from app.fleet import process_manager as _pm
-
-        return _pm.format_tracked(_session_bg_procs)
+        return list_background_processes_handler(_session_bg_procs)
 
     # run_parallel_commands_h removed — tool_enhance.md productionization
     # pass, tool #9 (2026-08-16). Now registered directly against
