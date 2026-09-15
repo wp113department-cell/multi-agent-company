@@ -481,8 +481,18 @@ class TestGenerateReleaseNotesHandler:
 
 class TestReadPdfHandler:
     def test_errors_gracefully_on_nonexistent_file(self) -> None:
+        # tool_enhance.md productionization pass, tool #177 (2026-09-15)
+        # — read_pdf now validates the path stays inside the worktree
+        # before opening it (a real worktree-escape ARBITRARY PDF FILE
+        # READ oracle was found and fixed here, same class as sibling
+        # tool #174's read_image). The original absolute, out-of-
+        # worktree path this test used is now correctly rejected by
+        # that check before file-existence is ever considered — use an
+        # in-worktree nonexistent path instead, to keep testing this
+        # test's actual intent (graceful handling of a missing file,
+        # not the worktree boundary).
         h = _make_handlers()
-        result = h["read_pdf"]({"path": "/nonexistent/path.pdf"})
+        result = h["read_pdf"]({"path": "nonexistent/path.pdf"})
         assert "[ERROR]" in result
 
     def test_real_pdf_extraction(self, tmp_path: Path) -> None:

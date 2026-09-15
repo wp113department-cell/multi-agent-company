@@ -235,6 +235,7 @@ from app.tools.execution.read_env_var import read_env_var_handler
 from app.tools.filesystem.read_image import read_image_handler
 from app.tools.filesystem.read_notebook import read_notebook_handler
 from app.tools.execution.read_output import read_output_handler
+from app.tools.filesystem.read_pdf import read_pdf_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -3149,6 +3150,18 @@ class ChatAgent:
                 inp,
                 self._background_processes,
                 _read_stream_nonblocking,
+            )
+
+        if tool_name == "read_pdf":
+            # tool_enhance.md productionization pass, tool #177
+            # (2026-09-15) — was a SEVERE worktree-escape ARBITRARY
+            # PDF FILE READ oracle (explicitly bypassed `root` for
+            # absolute paths, proved live) and a missing
+            # chat_agent.py dispatch (this tool was never reachable
+            # from interactive chat at all, proved live). Now
+            # delegates to the shared, worktree-validated handler.
+            return await asyncio.to_thread(
+                read_pdf_handler, root, repo, inp
             )
 
         if tool_name == "run_node":

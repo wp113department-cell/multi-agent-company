@@ -558,6 +558,10 @@ from app.tools.execution.read_output import (
     READ_OUTPUT_TOOL,
     read_output_handler,
 )
+from app.tools.filesystem.read_pdf import (
+    READ_PDF_TOOL,
+    read_pdf_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -4298,21 +4302,10 @@ _SUMMARIZE_REPO_TOOL: dict[str, Any] = {
 
 # --- Day 2 Gap: File type tools ---
 
-_READ_PDF_TOOL: dict[str, Any] = {
-    "name": "read_pdf",
-    "description": "Extract text content from a PDF file using pdfplumber. Returns plain text, one paragraph per page.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string", "description": "Path to the PDF file"},
-            "max_pages": {
-                "type": "integer",
-                "description": "Maximum pages to extract (default: 20)",
-            },
-        },
-        "required": ["path"],
-    },
-}
+    # moved to app/tools/filesystem/read_pdf.py as READ_PDF_TOOL /
+    # read_pdf_handler() — tool_enhance.md productionization pass,
+    # tool #177 (2026-09-15).
+_READ_PDF_TOOL: dict[str, Any] = READ_PDF_TOOL
 
 # moved to app/tools/filesystem/read_image.py as READ_IMAGE_TOOL /
 # read_image_handler() — tool_enhance.md productionization pass, tool
@@ -7404,28 +7397,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def generate_release_notes_h(inp: dict[str, Any]) -> str:
         return generate_release_notes_handler(root, inp)
 
+    # tool_enhance.md productionization pass, tool #177 (2026-09-15) —
+    # was a SEVERE worktree-escape ARBITRARY PDF FILE READ oracle
+    # (explicitly bypassed `root` for absolute paths, proved live) and
+    # a missing chat_agent.py dispatch. Now delegates to the shared,
+    # worktree-validated handler.
     def read_pdf_h(inp: dict[str, Any]) -> str:
-        path = str(inp["path"])
-        max_pages = int(inp.get("max_pages", 20))
-        fpath = Path(path) if Path(path).is_absolute() else root / path
-        try:
-            import pdfplumber as _pp
-
-            pages_text: list[str] = []
-            with _pp.open(str(fpath)) as pdf:
-                for i, page in enumerate(pdf.pages[:max_pages]):
-                    text = page.extract_text() or ""
-                    if text.strip():
-                        pages_text.append(f"--- Page {i + 1} ---\n{text.strip()}")
-            if not pages_text:
-                return f"[WARN] No text extracted from {fpath} (may be image-only PDF)"
-            return "\n\n".join(pages_text)
-        except ImportError:
-            return (
-                "[ERROR] pdfplumber not installed. Run: pip install pdfplumber==0.11.10"
-            )
-        except Exception as e:
-            return f"[ERROR] read_pdf: {e}"
+        return read_pdf_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #174 (2026-09-15) —
     # was a SEVERE worktree-escape ARBITRARY IMAGE FILE READ oracle
