@@ -506,6 +506,10 @@ from app.tools.execution.list_env_vars import (
     LIST_ENV_VARS_TOOL,
     list_env_vars_handler,
 )
+from app.tools.execution.list_open_ports import (
+    LIST_OPEN_PORTS_TOOL,
+    list_open_ports_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -779,6 +783,7 @@ _KNOWN_ISSUES_READ_TOOL = KNOWN_ISSUES_READ_TOOL
 _KNOWN_ISSUES_WRITE_TOOL = KNOWN_ISSUES_WRITE_TOOL
 _LIST_BACKGROUND_PROCESSES_TOOL = LIST_BACKGROUND_PROCESSES_TOOL
 _LIST_ENV_VARS_TOOL = LIST_ENV_VARS_TOOL
+_LIST_OPEN_PORTS_TOOL = LIST_OPEN_PORTS_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -5193,11 +5198,9 @@ _LIST_PROCESSES_TOOL: dict[str, Any] = {
         "required": [],
     },
 }
-_LIST_OPEN_PORTS_TOOL: dict[str, Any] = {
-    "name": "list_open_ports",
-    "description": "List TCP ports currently listening on this machine.",
-    "input_schema": {"type": "object", "properties": {}, "required": []},
-}
+    # moved to app/tools/execution/list_open_ports.py as
+    # LIST_OPEN_PORTS_TOOL / list_open_ports_handler() —
+    # tool_enhance.md productionization pass, tool #164 (2026-09-15).
 _WAIT_FOR_PORT_TOOL: dict[str, Any] = {
     "name": "wait_for_port",
     "description": "Wait until a TCP port is open (useful after starting a server). Returns when port accepts connections or times out.",
@@ -7646,18 +7649,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] list_processes: {e}"
 
+    # tool_enhance.md productionization pass, tool #164 (2026-09-15) —
+    # no worktree-escape or injection surface exists (empty schema,
+    # fixed argv lists only); the real fix was a missing
+    # chat_agent.py dispatch (this tool was never reachable from
+    # interactive chat at all, proved live). Now delegates to the
+    # shared handler.
     def list_open_ports_h(inp: dict[str, Any]) -> str:
-        try:
-            r = subprocess.run(
-                ["ss", "-tlnp"], capture_output=True, text=True, timeout=10
-            )
-            if r.returncode != 0:
-                r = subprocess.run(
-                    ["netstat", "-tlnp"], capture_output=True, text=True, timeout=10
-                )
-            return r.stdout.strip() or "(no open ports found)"
-        except Exception as e:
-            return f"[ERROR] list_open_ports: {e}"
+        return list_open_ports_handler()
 
     def wait_for_port_h(inp: dict[str, Any]) -> str:
         import socket as _socket
