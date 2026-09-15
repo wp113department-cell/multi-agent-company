@@ -449,9 +449,20 @@ class TestCicdHandlers:
         assert "POLICY DENIED" in result
 
     def test_submit_stores_result(self, tmp_repo: Path) -> None:
+        # tool_enhance.md productionization pass, tool #183 (2026-09-15)
+        # — this test previously asserted on h["_cicd_result"], an
+        # internal accumulator confirmed dead (never read anywhere in
+        # production — the real result-capture mechanism lives
+        # entirely in base_graph.py's generic submit_* handling,
+        # reading the tool call's own arguments directly). Now
+        # removed. Updated to assert on the handler's real return
+        # value instead, preserving this test's actual intent (a real
+        # submission succeeds) without relying on dead internal state.
         h = make_cicd_agent_handlers(str(tmp_repo))
-        h["submit_cicd_report"]({"analysis": "build failed due to missing env var"})
-        assert "build failed" in h["_cicd_result"]["analysis"]
+        result = h["submit_cicd_report"](
+            {"analysis": "build failed due to missing env var"}
+        )
+        assert result == "CI/CD report submitted"
 
 
 class TestDependencyHandlers:

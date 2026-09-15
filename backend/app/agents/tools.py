@@ -116,6 +116,10 @@ from app.tools.agents.submit_ba_result import (
     SUBMIT_BA_RESULT_TOOL,
     submit_ba_result_handler,
 )
+from app.tools.agents.submit_cicd_report import (
+    SUBMIT_CICD_REPORT_TOOL,
+    submit_cicd_report_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -2890,19 +2894,10 @@ _SUBMIT_DOCKER_REPORT_TOOL = {
     },
 }
 
-_SUBMIT_CICD_REPORT_TOOL = {
-    "name": "submit_cicd_report",
-    "description": "Submit CI/CD agent analysis or workflow changes.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "analysis": {"type": "string"},
-            "files_written": {"type": "array", "items": {"type": "string"}},
-            "recommendations": {"type": "array", "items": {"type": "string"}},
-        },
-        "required": ["analysis"],
-    },
-}
+# moved to app/tools/agents/submit_cicd_report.py as
+# SUBMIT_CICD_REPORT_TOOL / submit_cicd_report_handler() —
+# tool_enhance.md productionization pass, tool #183 (2026-09-15).
+_SUBMIT_CICD_REPORT_TOOL: dict[str, Any] = SUBMIT_CICD_REPORT_TOOL
 
 _SUBMIT_REFACTOR_REPORT_TOOL = {
     "name": "submit_refactor_report",
@@ -3590,7 +3585,6 @@ def make_cicd_agent_handlers(repo_path: str) -> dict[str, Any]:
     """CI/CD agent: read-only + limited bash (git/grep only) + file writes + submit."""
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
-    cicd_result: dict[str, Any] = {}
 
     _CICD_ALLOWED = (
         "git log",
@@ -3621,15 +3615,17 @@ def make_cicd_agent_handlers(repo_path: str) -> dict[str, Any]:
             return f"[ERROR] Command timed out after {timeout}s"
         return (stdout + stderr)[:4000] or "(no output)"
 
-    def ci_submit(inp: dict[str, Any]) -> str:
-        cicd_result.update(inp)
-        return "CI/CD report submitted"
-
+    # tool_enhance.md productionization pass, tool #183 (2026-09-15) —
+    # was write-only dead-code state: `cicd_result` was updated but
+    # NEVER read anywhere (confirmed via full-codebase grep) — the
+    # real result-capture mechanism lives entirely in
+    # base_graph.py's generic submit_* handling, which reads the tool
+    # call's own arguments directly, independent of this handler.
+    # Now delegates to the shared, stateless handler.
     handlers["bash"] = ci_bash
     handlers["edit_file"] = _make_edit_file_handler(root)
     handlers["write_file"] = _make_write_file_handler(root)
-    handlers["submit_cicd_report"] = ci_submit
-    handlers["_cicd_result"] = cicd_result
+    handlers["submit_cicd_report"] = submit_cicd_report_handler
     return handlers
 
 
