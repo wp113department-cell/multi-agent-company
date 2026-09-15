@@ -546,6 +546,10 @@ from app.tools.execution.read_env_var import (
     READ_ENV_VAR_TOOL,
     read_env_var_handler,
 )
+from app.tools.filesystem.read_image import (
+    READ_IMAGE_TOOL,
+    read_image_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -4316,20 +4320,10 @@ _READ_PDF_TOOL: dict[str, Any] = {
     },
 }
 
-_READ_IMAGE_TOOL: dict[str, Any] = {
-    "name": "read_image",
-    "description": "Read an image file and return basic metadata (format, size, mode) plus a base64-encoded thumbnail for vision inspection.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Path to the image file (PNG, JPG, GIF, BMP, WebP)",
-            },
-        },
-        "required": ["path"],
-    },
-}
+# moved to app/tools/filesystem/read_image.py as READ_IMAGE_TOOL /
+# read_image_handler() — tool_enhance.md productionization pass, tool
+# #174 (2026-09-15).
+_READ_IMAGE_TOOL: dict[str, Any] = READ_IMAGE_TOOL
 
 # --- Day 2 Gap: GitHub PR tool ---
 # _GITHUB_CREATE_PR_TOOL moved to app/tools/git/pull_request.py as
@@ -7454,34 +7448,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] read_pdf: {e}"
 
+    # tool_enhance.md productionization pass, tool #174 (2026-09-15) —
+    # was a SEVERE worktree-escape ARBITRARY IMAGE FILE READ oracle
+    # (explicitly bypassed `root` for absolute paths, AND relative
+    # traversal was never validated, both proved live) and a missing
+    # chat_agent.py dispatch. Now delegates to the shared,
+    # worktree-validated handler.
     def read_image_h(inp: dict[str, Any]) -> str:
-        path = str(inp["path"])
-        fpath = Path(path) if Path(path).is_absolute() else root / path
-        try:
-            from PIL import Image as _PilImg
-            import base64 as _b64
-            import io as _io_img
-
-            img = _PilImg.open(str(fpath))
-            meta = {
-                "format": img.format,
-                "mode": img.mode,
-                "size": f"{img.width}x{img.height}",
-                "path": str(fpath),
-            }
-            # Generate a small thumbnail as base64 for inspection
-            thumb = img.copy()
-            thumb.thumbnail((256, 256))
-            buf = _io_img.BytesIO()
-            thumb.save(buf, format="PNG")
-            b64_thumb = _b64.b64encode(buf.getvalue()).decode()
-            return (
-                f"Image: {meta['path']}\n"
-                f"Format: {meta['format']} | Mode: {meta['mode']} | Size: {meta['size']}\n"
-                f"Thumbnail (base64 PNG, 256x256): {b64_thumb[:200]}…"
-            )
-        except Exception as e:
-            return f"[ERROR] read_image: {e}"
+        return read_image_handler(root, repo_path, inp)
 
     # github_create_pr_h removed — tool_enhance.md productionization
     # pass, tool #6 (2026-08-16). It was a second, separately-maintained,
