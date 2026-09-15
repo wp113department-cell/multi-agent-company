@@ -237,6 +237,7 @@ from app.tools.filesystem.read_notebook import read_notebook_handler
 from app.tools.execution.read_output import read_output_handler
 from app.tools.filesystem.read_pdf import read_pdf_handler
 from app.tools.agents.record_preference import make_record_preference_handler
+from app.tools.git.review_diff import build_review_diff_args
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -2245,14 +2246,17 @@ class ChatAgent:
             )
 
         if tool_name == "review_diff":
-            rd_staged = bool(inp.get("staged_only", True))
-            rd_base = str(inp.get("base", "")).strip()
-            if rd_base:
-                rd_diff_args = ["diff", f"{rd_base}...HEAD"]
-            elif rd_staged:
-                rd_diff_args = ["diff", "--cached"]
-            else:
-                rd_diff_args = ["diff"]
+            # tool_enhance.md productionization pass, tool #179
+            # (2026-09-15) — was a SEVERE flag-collision bug on
+            # `base`: git diff's own `--output=<path>` flag,
+            # reachable via base, wrote the real diff content to an
+            # attacker-chosen file path — proved live on this
+            # dispatch too (identical logic to the now-fixed
+            # make_chat_handlers() implementation). Now rejects
+            # flag-shaped `base` outright via the shared arg builder.
+            rd_diff_args = build_review_diff_args(inp)
+            if isinstance(rd_diff_args, str):
+                return rd_diff_args
             rd_stat = _git(rd_diff_args + ["--stat"], repo)
             rd_diff = _git(rd_diff_args, repo)[:6000]
             if not rd_stat.strip() or rd_stat.startswith("[ERROR]"):

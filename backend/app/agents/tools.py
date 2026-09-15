@@ -100,6 +100,10 @@ from app.tools.agents.record_preference import (
     RECORD_PREFERENCE_TOOL as RECORD_PREFERENCE_TOOL,
     make_record_preference_handler as make_record_preference_handler,
 )
+from app.tools.git.review_diff import (
+    REVIEW_DIFF_TOOL,
+    build_review_diff_args,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -2414,24 +2418,10 @@ _RESOLVE_MERGE_CONFLICT_TOOL = {
 # GENERATE_COMMIT_MSG_TOOL / generate_commit_msg_handler() —
 # tool_enhance.md productionization pass, tool #145 (2026-09-14).
 
-_REVIEW_DIFF_TOOL = {
-    "name": "review_diff",
-    "description": "LLM-generated structured review of a real git diff — summary, risk callouts, and notable omissions grounded strictly in the diff content. Distinct from git_diff, which returns only raw stdout.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "staged_only": {
-                "type": "boolean",
-                "description": "Review only staged changes (default: true)",
-            },
-            "base": {
-                "type": "string",
-                "description": "If set, review the diff against this ref/branch instead of staged/unstaged working-tree changes",
-            },
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/git/review_diff.py as REVIEW_DIFF_TOOL /
+# build_review_diff_args() — tool_enhance.md productionization pass,
+# tool #179 (2026-09-15).
+_REVIEW_DIFF_TOOL: dict[str, Any] = REVIEW_DIFF_TOOL
 
 # ---------------------------------------------------------------------------
 # NEW TOOL SPECS — Batch 4: Testing extras
@@ -6239,15 +6229,18 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             repo_path, inp, _llm_generate_commit_message
         )
 
+    # tool_enhance.md productionization pass, tool #179 (2026-09-15) —
+    # was a SEVERE flag-collision bug on `base`: git diff's own
+    # `--output=<path>` flag, reachable via base, wrote the real diff
+    # content to an attacker-chosen file path — proved live. Now
+    # rejects flag-shaped `base` outright via the shared arg builder,
+    # closing the vulnerability on BOTH real call sites (this one and
+    # chat_agent.py's own separate, previously-identically-vulnerable
+    # dispatch).
     def review_diff(inp: dict[str, Any]) -> str:
-        rd_staged = bool(inp.get("staged_only", True))
-        rd_base = str(inp.get("base", "")).strip()
-        if rd_base:
-            diff_args = ["diff", f"{rd_base}...HEAD"]
-        elif rd_staged:
-            diff_args = ["diff", "--cached"]
-        else:
-            diff_args = ["diff"]
+        diff_args = build_review_diff_args(inp)
+        if isinstance(diff_args, str):
+            return diff_args
         r_stat = subprocess.run(
             ["git"] + diff_args + ["--stat"],
             cwd=repo_path,
