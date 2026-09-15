@@ -522,6 +522,10 @@ from app.tools.agents.memory_read import (
     MEMORY_READ_TOOL,
     memory_read_handler,
 )
+from app.tools.database.mermaid_from_schema import (
+    MERMAID_FROM_SCHEMA_TOOL,
+    mermaid_from_schema_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -799,6 +803,7 @@ _LIST_OPEN_PORTS_TOOL = LIST_OPEN_PORTS_TOOL
 _LIST_PROCESSES_TOOL = LIST_PROCESSES_TOOL
 _LOC_STATS_TOOL = LOC_STATS_TOOL
 _MEMORY_READ_TOOL = MEMORY_READ_TOOL
+_MERMAID_FROM_SCHEMA_TOOL = MERMAID_FROM_SCHEMA_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -4214,20 +4219,9 @@ _SUMMARIZE_FOLDER_TOOL: dict[str, Any] = {
 # GENERATE_API_DOCS_TEXT_TOOL / generate_api_docs_text_handler() —
 # tool_enhance.md productionization pass, tool #144 (2026-09-14).
 
-_MERMAID_FROM_SCHEMA_TOOL: dict[str, Any] = {
-    "name": "mermaid_from_schema",
-    "description": "Convert a database schema inspection into a Mermaid ER diagram string.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "table": {
-                "type": "string",
-                "description": "Table name to focus on (optional — uses all tables if omitted)",
-            }
-        },
-        "required": [],
-    },
-}
+    # moved to app/tools/database/mermaid_from_schema.py as
+    # MERMAID_FROM_SCHEMA_TOOL / mermaid_from_schema_handler() —
+    # tool_enhance.md productionization pass, tool #168 (2026-09-15).
 
 # --- Day 2 Gap: Smart search tools ---
 
@@ -7252,42 +7246,22 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def generate_api_docs_text_h(inp: dict[str, Any]) -> str:
         return generate_api_docs_text_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #168 (2026-09-15) —
+    # was SEVERE: the tool has never actually worked in real
+    # production use (shelled out to the `psql` CLI, which the real
+    # runtime does not have installed — proved live inside the real
+    # backend container: every real call genuinely raised
+    # FileNotFoundError). A theorized SQL-injection risk via `table`
+    # (matching sibling tool #96's finding) was investigated and
+    # empirically REFUTED for this tool's specific `\d`-meta-command
+    # construction — see the new module's own docstring. Also a
+    # missing chat_agent.py dispatch. Now delegates to the shared
+    # handler, which uses real psycopg2 parameter binding instead of
+    # shelling out to psql at all — the tool genuinely works for the
+    # first time.
     def mermaid_from_schema_h(inp: dict[str, Any]) -> str:
-        import subprocess as _sp_merm
-        from app.config import get_settings as _gs_merm
-
-        settings = _gs_merm()
-        db_url = getattr(settings, "database_url", "")
-        if not db_url:
-            return "[ERROR] DATABASE_URL not set"
-        tbl = inp.get("table")
-        sql = f"\\d {tbl}" if tbl else "\\dt+"
-        try:
-            r = _sp_merm.run(
-                ["psql", db_url, "-c", sql, "--no-psqlrc"],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            raw = (r.stdout + r.stderr).strip()
-        except Exception as e:
-            return f"[ERROR] {e}"
-        # Build a basic Mermaid erDiagram from psql table listing
-        lines = ["```mermaid", "erDiagram"]
-        for row in raw.splitlines():
-            parts = row.split("|")
-            if len(parts) >= 2:
-                tname = parts[1].strip()
-                if (
-                    tname
-                    and not tname.startswith("-")
-                    and tname not in ("Name", "Schema")
-                ):
-                    lines.append(f"    {tname} {{")
-                    lines.append("        string id")
-                    lines.append("    }")
-        lines.append("```")
-        return "\n".join(lines) if len(lines) > 3 else f"(raw schema)\n{raw}"
+        mfs_db_url = str(getattr(get_settings(), "database_url", "") or "")
+        return mermaid_from_schema_handler(mfs_db_url, inp)
 
     handlers["estimate_complexity"] = estimate_complexity_h
     handlers["summarize_folder"] = summarize_folder_h

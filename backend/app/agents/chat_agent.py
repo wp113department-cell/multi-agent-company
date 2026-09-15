@@ -226,6 +226,7 @@ from app.tools.execution.list_open_ports import list_open_ports_handler
 from app.tools.execution.list_processes import list_processes_handler
 from app.tools.execution.loc_stats import loc_stats_handler
 from app.tools.agents.memory_read import memory_read_handler
+from app.tools.database.mermaid_from_schema import mermaid_from_schema_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -2652,6 +2653,28 @@ class ChatAgent:
 
             is_db_url = str(getattr(_get_settings(), "database_url", "") or "")
             return await asyncio.to_thread(inspect_schema_handler, is_db_url, inp)
+
+        if tool_name == "mermaid_from_schema":
+            # tool_enhance.md productionization pass, tool #168
+            # (2026-09-15) — was SEVERE: the tool has never actually
+            # worked in real production use (shelled out to the psql
+            # CLI, which the real runtime does not have installed —
+            # proved live inside the real backend container: every
+            # real call genuinely raised FileNotFoundError). A
+            # theorized SQL-injection risk via `table` (matching
+            # sibling tool #96's finding) was investigated and
+            # empirically REFUTED for this tool's specific
+            # \d-meta-command construction — see the new module's own
+            # docstring. Also a missing dispatch here (this tool was
+            # never reachable from interactive chat at all). Now
+            # delegates to the shared handler, which uses real
+            # psycopg2 parameter binding instead of shelling out to
+            # psql at all — the tool genuinely works for the first
+            # time.
+            mfs_db_url = str(getattr(get_settings(), "database_url", "") or "")
+            return await asyncio.to_thread(
+                mermaid_from_schema_handler, mfs_db_url, inp
+            )
 
         # ========== BATCH 8 — Docker tools ==========
 
