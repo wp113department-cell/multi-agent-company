@@ -550,6 +550,10 @@ from app.tools.filesystem.read_image import (
     READ_IMAGE_TOOL,
     read_image_handler,
 )
+from app.tools.filesystem.read_notebook import (
+    READ_NOTEBOOK_TOOL,
+    read_notebook_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -5319,24 +5323,10 @@ _XML_VALIDATE_TOOL: dict[str, Any] = {
         "required": ["path"],
     },
 }
-_READ_NOTEBOOK_TOOL: dict[str, Any] = {
-    "name": "read_notebook",
-    "description": "Read a Jupyter notebook (.ipynb), returning each cell's type, source, and any text/error output — code and markdown cells in execution order.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Notebook file path (relative to repo root)",
-            },
-            "max_cells": {
-                "type": "integer",
-                "description": "Maximum number of cells to include (default: 100)",
-            },
-        },
-        "required": ["path"],
-    },
-}
+    # moved to app/tools/filesystem/read_notebook.py as
+    # READ_NOTEBOOK_TOOL / read_notebook_handler() —
+    # tool_enhance.md productionization pass, tool #175 (2026-09-15).
+_READ_NOTEBOOK_TOOL: dict[str, Any] = READ_NOTEBOOK_TOOL
     # moved to app/tools/filesystem/parse_dockerfile.py as
     # PARSE_DOCKERFILE_TOOL / parse_dockerfile_handler() —
     # tool_enhance.md productionization pass, tool #171 (2026-09-15).
@@ -7683,50 +7673,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] xml_validate: {e}"
 
+    # tool_enhance.md productionization pass, tool #175 (2026-09-15) —
+    # was a worktree-escape STRUCTURED FILE CONTENT DISCLOSURE oracle
+    # (`path` never validated, proved live) and a missing
+    # chat_agent.py dispatch. Now delegates to the shared,
+    # worktree-validated handler.
     def read_notebook_h(inp: dict[str, Any]) -> str:
-        import json as _json
-
-        fpath = root / str(inp["path"])
-        max_cells = int(inp.get("max_cells", 100))
-        try:
-            nb = _json.loads(fpath.read_text(encoding="utf-8"))
-        except Exception as e:
-            return f"[ERROR] read_notebook: {e}"
-        cells = nb.get("cells", []) if isinstance(nb, dict) else []
-        if not isinstance(cells, list) or not cells:
-            return f"[ERROR] {inp['path']} has no readable 'cells' array (not a valid .ipynb?)"
-        parts: list[str] = []
-        for i, cell in enumerate(cells[:max_cells]):
-            ctype = cell.get("cell_type", "unknown")
-            source = cell.get("source", "")
-            if isinstance(source, list):
-                source = "".join(source)
-            block = [f"--- Cell {i} ({ctype}) ---", str(source).rstrip()]
-            for out_item in cell.get("outputs", []) or []:
-                otype = out_item.get("output_type")
-                if otype == "stream":
-                    text = out_item.get("text", "")
-                    if isinstance(text, list):
-                        text = "".join(text)
-                    block.append(f"[output] {str(text).rstrip()}")
-                elif otype == "error":
-                    block.append(
-                        f"[error] {out_item.get('ename', '')}: {out_item.get('evalue', '')}"
-                    )
-                elif otype in ("execute_result", "display_data"):
-                    text_out = out_item.get("data", {}).get("text/plain", "")
-                    if isinstance(text_out, list):
-                        text_out = "".join(text_out)
-                    if text_out:
-                        block.append(f"[result] {str(text_out).rstrip()}")
-            parts.append("\n".join(block))
-        remaining = len(cells) - min(len(cells), max_cells)
-        result = f"Notebook: {inp['path']} ({len(cells)} cells)\n\n" + "\n\n".join(
-            parts
-        )
-        if remaining > 0:
-            result += f"\n\n[NOTICE] {remaining} additional cell(s) not shown (max_cells={max_cells})"
-        return result
+        return read_notebook_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #171 (2026-09-15) —
     # was a worktree-escape STRUCTURED FILE CONTENT DISCLOSURE oracle

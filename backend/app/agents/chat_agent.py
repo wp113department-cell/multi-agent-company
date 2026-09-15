@@ -233,6 +233,7 @@ from app.tools.filesystem.parse_dockerfile import parse_dockerfile_handler
 from app.tools.execution.pip_list import pip_list_handler
 from app.tools.execution.read_env_var import read_env_var_handler
 from app.tools.filesystem.read_image import read_image_handler
+from app.tools.filesystem.read_notebook import read_notebook_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -2515,6 +2516,17 @@ class ChatAgent:
             # delegates to the shared, worktree-validated handler.
             return await asyncio.to_thread(
                 read_image_handler, root, repo, inp
+            )
+
+        if tool_name == "read_notebook":
+            # tool_enhance.md productionization pass, tool #175
+            # (2026-09-15) — was a worktree-escape STRUCTURED FILE
+            # CONTENT DISCLOSURE oracle (`path` never validated,
+            # proved live) and a missing chat_agent.py dispatch (this
+            # tool was never reachable from interactive chat at all).
+            # Now delegates to the shared, worktree-validated handler.
+            return await asyncio.to_thread(
+                read_notebook_handler, root, repo, inp
             )
 
         # ========== BATCH 4 — Testing extras ==========
