@@ -236,6 +236,7 @@ from app.tools.filesystem.read_image import read_image_handler
 from app.tools.filesystem.read_notebook import read_notebook_handler
 from app.tools.execution.read_output import read_output_handler
 from app.tools.filesystem.read_pdf import read_pdf_handler
+from app.tools.agents.record_preference import make_record_preference_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -3162,6 +3163,18 @@ class ChatAgent:
             # delegates to the shared, worktree-validated handler.
             return await asyncio.to_thread(
                 read_pdf_handler, root, repo, inp
+            )
+
+        if tool_name == "record_preference":
+            # tool_enhance.md productionization pass, tool #178
+            # (2026-09-15) — audited and confirmed already safe (no
+            # injection surface, real DB write proved live); the real
+            # fix was a missing chat_agent.py dispatch (this tool was
+            # never reachable from interactive chat — the ONE surface
+            # it was designed for, per its own module docstring —
+            # proved live). Now delegates to the shared handler.
+            return await asyncio.to_thread(
+                make_record_preference_handler(), inp
             )
 
         if tool_name == "run_node":

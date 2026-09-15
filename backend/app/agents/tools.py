@@ -96,6 +96,10 @@ from app.tools.agents.record_learning import (
     RECORD_LEARNING_TOOL as RECORD_LEARNING_TOOL,
     make_record_learning_handler as make_record_learning_handler,
 )
+from app.tools.agents.record_preference import (
+    RECORD_PREFERENCE_TOOL as RECORD_PREFERENCE_TOOL,
+    make_record_preference_handler as make_record_preference_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -1148,54 +1152,13 @@ READ_ONLY_TOOLS = [
 # wrote the preference.
 # ---------------------------------------------------------------------------
 
-RECORD_PREFERENCE_TOOL: dict[str, Any] = {
-    "name": "record_preference",
-    "description": (
-        "Record a stated human preference (coding style, naming convention, "
-        "testing approach, tooling choice, workflow) so future work in this "
-        "project applies it without being re-told. Use this only for a real "
-        "preference the user actually expressed, not an inferred guess."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "preference": {
-                "type": "string",
-                "description": "The preference itself, in the user's own terms.",
-            },
-            "scope": {
-                "type": "string",
-                "description": "Short label for what this preference governs, e.g. "
-                "'style', 'naming', 'testing', 'tooling', 'workflow'.",
-            },
-        },
-        "required": ["preference"],
-    },
-}
-
-
-def make_record_preference_handler(
-    task_id: str = "chat",
-) -> Callable[[dict[str, Any]], str]:
-    """Build the sync tool handler for record_preference. task_id defaults
-    to a synthetic "chat" marker (mirrors record_learning's "fleet-{agent}"
-    synthetic task_id convention) since a stated preference isn't tied to
-    one specific DevTask."""
-
-    def _handler(inp: dict[str, Any]) -> str:
-        preference = str(inp.get("preference", "")).strip()
-        if not preference:
-            return "[ERROR] preference is required."
-        scope = str(inp.get("scope", "")).strip() or "general"
-
-        from app.memory.store import embed_preference_sync
-
-        stored = embed_preference_sync(
-            task_id=task_id, preference=preference, scope=scope
-        )
-        return "Recorded." if stored else "[ERROR] failed to record preference."
-
-    return _handler
+# moved to app/tools/agents/record_preference.py as
+# RECORD_PREFERENCE_TOOL / make_record_preference_handler() —
+# tool_enhance.md productionization pass, tool #178 (2026-09-15).
+# Real finding: advertised in CHAT_TOOLS but never dispatched by
+# chat_agent.py — see that module's own new dispatch branch. No
+# security fix needed on the handler logic itself (audited and
+# confirmed already safe — see the new module's own docstring).
 
 
 # moved to app/tools/agents/request_clarification.py — tool_enhance.md
