@@ -534,6 +534,10 @@ from app.tools.filesystem.parse_docker_compose import (
     PARSE_DOCKER_COMPOSE_TOOL,
     parse_docker_compose_handler,
 )
+from app.tools.filesystem.parse_dockerfile import (
+    PARSE_DOCKERFILE_TOOL,
+    parse_dockerfile_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -5338,20 +5342,10 @@ _READ_NOTEBOOK_TOOL: dict[str, Any] = {
         "required": ["path"],
     },
 }
-_PARSE_DOCKERFILE_TOOL: dict[str, Any] = {
-    "name": "parse_dockerfile",
-    "description": "Parse a Dockerfile into its structural instructions: build stages, base images (FROM), exposed ports, and each instruction with its line number.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Dockerfile path (relative to repo root, default: Dockerfile)",
-            }
-        },
-        "required": [],
-    },
-}
+    # moved to app/tools/filesystem/parse_dockerfile.py as
+    # PARSE_DOCKERFILE_TOOL / parse_dockerfile_handler() —
+    # tool_enhance.md productionization pass, tool #171 (2026-09-15).
+_PARSE_DOCKERFILE_TOOL: dict[str, Any] = PARSE_DOCKERFILE_TOOL
     # moved to app/tools/filesystem/parse_docker_compose.py as
     # PARSE_DOCKER_COMPOSE_TOOL / parse_docker_compose_handler() —
     # tool_enhance.md productionization pass, tool #170 (2026-09-15).
@@ -7768,48 +7762,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             result += f"\n\n[NOTICE] {remaining} additional cell(s) not shown (max_cells={max_cells})"
         return result
 
+    # tool_enhance.md productionization pass, tool #171 (2026-09-15) —
+    # was a worktree-escape STRUCTURED FILE CONTENT DISCLOSURE oracle
+    # (`path` never validated, proved live) and a missing
+    # chat_agent.py dispatch. Now delegates to the shared,
+    # worktree-validated handler.
     def parse_dockerfile_h(inp: dict[str, Any]) -> str:
-        path = str(inp.get("path", "Dockerfile"))
-        fpath = root / path
-        if not fpath.exists():
-            return f"[ERROR] File not found: {path}"
-        try:
-            lines = fpath.read_text(encoding="utf-8").splitlines()
-        except Exception as e:
-            return f"[ERROR] parse_dockerfile: {e}"
-        stages: list[str] = []
-        exposed_ports: list[str] = []
-        instructions: list[str] = []
-        pending = ""
-        for lineno, raw_line in enumerate(lines, start=1):
-            line = raw_line.strip()
-            if pending:
-                line = f"{pending} {line}"
-                pending = ""
-            if not line or line.startswith("#"):
-                continue
-            if line.endswith("\\"):
-                pending = line[:-1].strip()
-                continue
-            head, _, rest = line.partition(" ")
-            instr = head.upper()
-            rest = rest.strip()
-            instructions.append(f"{lineno}: {instr} {rest}".rstrip())
-            if instr == "FROM":
-                stages.append(rest)
-            elif instr == "EXPOSE":
-                exposed_ports.append(rest)
-        if not instructions:
-            return f"(empty or unparseable Dockerfile: {path})"
-        out = [
-            f"Dockerfile: {path}",
-            f"Stages/base images: {', '.join(stages) or '(none)'}",
-            f"Exposed ports: {', '.join(exposed_ports) or '(none)'}",
-            "",
-            "Instructions:",
-            *instructions,
-        ]
-        return "\n".join(out)
+        return parse_dockerfile_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #170 (2026-09-15) —
     # was a worktree-escape STRUCTURED FILE CONTENT DISCLOSURE oracle

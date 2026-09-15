@@ -229,6 +229,7 @@ from app.tools.agents.memory_read import memory_read_handler
 from app.tools.database.mermaid_from_schema import mermaid_from_schema_handler
 from app.tools.filesystem.openapi_inspect import openapi_inspect_handler
 from app.tools.filesystem.parse_docker_compose import parse_docker_compose_handler
+from app.tools.filesystem.parse_dockerfile import parse_dockerfile_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -2468,6 +2469,17 @@ class ChatAgent:
             # Now delegates to the shared, worktree-validated handler.
             return await asyncio.to_thread(
                 parse_docker_compose_handler, root, repo, inp
+            )
+
+        if tool_name == "parse_dockerfile":
+            # tool_enhance.md productionization pass, tool #171
+            # (2026-09-15) — was a worktree-escape STRUCTURED FILE
+            # CONTENT DISCLOSURE oracle (`path` never validated,
+            # proved live) and a missing chat_agent.py dispatch (this
+            # tool was never reachable from interactive chat at all).
+            # Now delegates to the shared, worktree-validated handler.
+            return await asyncio.to_thread(
+                parse_dockerfile_handler, root, repo, inp
             )
 
         # ========== BATCH 4 — Testing extras ==========
