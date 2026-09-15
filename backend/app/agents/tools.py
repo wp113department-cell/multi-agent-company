@@ -490,6 +490,10 @@ from app.tools.filesystem.json_validate import (
     JSON_VALIDATE_TOOL,
     json_validate_handler,
 )
+from app.tools.agents.known_issues_read import (
+    KNOWN_ISSUES_READ_TOOL,
+    known_issues_read_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -759,6 +763,7 @@ _INSPECT_GITHUB_REPO_TOOL = INSPECT_GITHUB_REPO_TOOL
 _INSPECT_OPENAPI_SPEC_TOOL = INSPECT_OPENAPI_SPEC_TOOL
 _JSON_QUERY_TOOL = JSON_QUERY_TOOL
 _JSON_VALIDATE_TOOL = JSON_VALIDATE_TOOL
+_KNOWN_ISSUES_READ_TOOL = KNOWN_ISSUES_READ_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -4143,11 +4148,9 @@ _MEMORY_READ_TOOL: dict[str, Any] = {
 # TASK_HISTORY_QUERY_TOOL / task_history_query() — tool_enhance.md
 # productionization pass, tool #118 (2026-08-26).
 
-_KNOWN_ISSUES_READ_TOOL: dict[str, Any] = {
-    "name": "known_issues_read",
-    "description": "Read the project's known issues file.",
-    "input_schema": {"type": "object", "properties": {}, "required": []},
-}
+    # moved to app/tools/agents/known_issues_read.py as
+    # KNOWN_ISSUES_READ_TOOL / known_issues_read_handler() —
+    # tool_enhance.md productionization pass, tool #160 (2026-09-15).
 
 _KNOWN_ISSUES_WRITE_TOOL: dict[str, Any] = {
     "name": "known_issues_write",
@@ -7213,10 +7216,14 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
     task_history_query_h = task_history_query
 
+    # tool_enhance.md productionization pass, tool #160 (2026-09-15) —
+    # no worktree-escape or injection surface exists (empty schema,
+    # fixed deterministic path); the real fix was a missing
+    # chat_agent.py dispatch (this tool was never reachable from
+    # interactive chat at all, proved live). Now delegates to the
+    # shared handler.
     def known_issues_read_h(inp: dict[str, Any]) -> str:
-        if not _mem_issues_path.exists():
-            return "(no known issues file yet)"
-        return _mem_issues_path.read_text(encoding="utf-8")
+        return known_issues_read_handler(repo_path)
 
     def known_issues_write_h(inp: dict[str, Any]) -> str:
         import datetime as _dt

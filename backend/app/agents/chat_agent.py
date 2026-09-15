@@ -216,6 +216,7 @@ from app.tools.integrations.inspect_github_repo import inspect_github_repo_handl
 from app.tools.integrations.inspect_openapi_spec import inspect_openapi_spec_handler
 from app.tools.filesystem.json_query import json_query_handler
 from app.tools.filesystem.json_validate import json_validate_handler
+from app.tools.agents.known_issues_read import known_issues_read_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -2538,6 +2539,15 @@ class ChatAgent:
             # Full account in this shared function's own module
             # docstring.
             return await asyncio.to_thread(task_history_query, inp)
+
+        if tool_name == "known_issues_read":
+            # tool_enhance.md productionization pass, tool #160
+            # (2026-09-15) — no worktree-escape or injection surface
+            # exists (empty schema, fixed deterministic path); the
+            # real fix was a missing chat_agent.py dispatch (this tool
+            # was never reachable from interactive chat at all,
+            # proved live). Now delegates to the shared handler.
+            return await asyncio.to_thread(known_issues_read_handler, repo)
 
         # ========== BATCH 7 — Database tools ==========
 
