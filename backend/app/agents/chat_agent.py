@@ -215,6 +215,7 @@ from app.tools.integrations.http_request import http_request_handler
 from app.tools.integrations.inspect_github_repo import inspect_github_repo_handler
 from app.tools.integrations.inspect_openapi_spec import inspect_openapi_spec_handler
 from app.tools.filesystem.json_query import json_query_handler
+from app.tools.filesystem.json_validate import json_validate_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -3442,6 +3443,16 @@ class ChatAgent:
             # worktree-validated handler — full account in that
             # module's own docstring.
             return await asyncio.to_thread(yaml_validate_handler, root, repo, inp)
+
+        if tool_name == "json_validate":
+            # tool_enhance.md productionization pass, tool #159
+            # (2026-09-15) — was a worktree-escape arbitrary file READ
+            # on both `path` and `schema_path` (`root / ...` never
+            # validated, same bug already fixed for sibling
+            # yaml_validate, proved live) and a missing chat_agent.py
+            # dispatch. Now delegates to the shared, worktree-validated
+            # handler.
+            return await asyncio.to_thread(json_validate_handler, root, repo, inp)
 
         if tool_name == "json_query":
             # tool_enhance.md productionization pass, tool #158

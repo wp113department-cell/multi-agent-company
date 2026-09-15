@@ -60,13 +60,24 @@ branch delegates to this same shared handler, closing finding #2.
 Note (documented, not fixed here — out of scope for this tool's own
 turn, matching this initiative's established "found but explicitly
 did not fix a sibling tool's identical bug" precedent, e.g. tool
-#14): the sibling `json_validate` tool (#159, still PENDING) shares
-the exact same worktree-escape bug on its own `path` and
+#14): the sibling `json_validate` tool (#159, still PENDING at the
+time) shares the exact same worktree-escape bug on its own `path` and
 `schema_path` fields via the still-untouched, tools.py-resident
 `_load_schema_doc()`/`_validate_against_schema()` closures inside
 `make_chat_handlers()` — left alone here since fixing it is that
 tool's own turn's responsibility, not something to fold in
 opportunistically.
+
+UPDATE (2026-09-14, tool #159's own turn): `_load_schema_doc()`/
+`_validate_against_schema()` were extracted out of this file into the
+new shared `app/tools/filesystem/json_schema_validation.py` (this
+file now imports `load_schema_doc`/`validate_against_schema` from
+there instead of defining its own private copies) so `json_validate`
+could reuse the identical, already-verified worktree-validated logic
+rather than duplicating it a second time — the exact duplication class
+this initiative has repeatedly consolidated elsewhere (e.g. tools
+#145/#153's `generate_commit_msg`/`generate_patch`). Behavior here is
+completely unchanged; only where the two helper functions live moved.
 """
 
 from __future__ import annotations
@@ -75,6 +86,9 @@ from pathlib import Path
 from typing import Any
 
 from app.policy.engine import check_path_in_worktree
+from app.tools.filesystem.json_schema_validation import (
+    validate_against_schema as _validate_against_schema,
+)
 
 YAML_VALIDATE_TOOL: dict[str, Any] = {
     "name": "yaml_validate",
@@ -99,46 +113,6 @@ YAML_VALIDATE_TOOL: dict[str, Any] = {
         "required": ["path"],
     },
 }
-
-
-def _load_schema_doc(root: Path, worktree_path: str, schema_rel: str) -> Any:
-    """Load a JSON Schema from a .json or .yaml/.yml file at schema_rel,
-    validated against the worktree boundary first."""
-    policy = check_path_in_worktree(schema_rel, worktree_path)
-    if not policy.allowed:
-        raise ValueError(f"policy denied: {policy.reason}")
-
-    import json as _json
-
-    import yaml as _yaml
-
-    schema_path = root / schema_rel
-    text = schema_path.read_text(encoding="utf-8")
-    if schema_path.suffix in (".yaml", ".yml"):
-        return _yaml.safe_load(text)
-    return _json.loads(text)
-
-
-def _validate_against_schema(
-    root: Path, worktree_path: str, rel: str, doc: Any, schema_rel: str
-) -> str | None:
-    """Returns an error string if the schema check fails/errors, else None."""
-    import jsonschema
-
-    try:
-        schema = _load_schema_doc(root, worktree_path, schema_rel)
-    except Exception as e:
-        return f"[ERROR] Cannot load schema {schema_rel}: {e}"
-    try:
-        jsonschema.validate(instance=doc, schema=schema)
-    except jsonschema.ValidationError as e:
-        return (
-            f"[SCHEMA VIOLATION] {rel} does not match {schema_rel}: {e.message} "
-            f"(at {'/'.join(str(p) for p in e.absolute_path) or '<root>'})"
-        )
-    except jsonschema.SchemaError as e:
-        return f"[ERROR] {schema_rel} is not a valid JSON Schema: {e.message}"
-    return None
 
 
 def yaml_validate_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> str:

@@ -486,6 +486,10 @@ from app.tools.filesystem.json_query import (
     JSON_QUERY_TOOL,
     json_query_handler,
 )
+from app.tools.filesystem.json_validate import (
+    JSON_VALIDATE_TOOL,
+    json_validate_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -754,6 +758,7 @@ _HTTP_REQUEST_TOOL = HTTP_REQUEST_TOOL
 _INSPECT_GITHUB_REPO_TOOL = INSPECT_GITHUB_REPO_TOOL
 _INSPECT_OPENAPI_SPEC_TOOL = INSPECT_OPENAPI_SPEC_TOOL
 _JSON_QUERY_TOOL = JSON_QUERY_TOOL
+_JSON_VALIDATE_TOOL = JSON_VALIDATE_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -5289,28 +5294,9 @@ _LIST_ENV_VARS_TOOL: dict[str, Any] = {
 # YAML_VALIDATE_TOOL / yaml_validate_handler() — tool_enhance.md
 # productionization pass, tool #120 (2026-08-26).
 
-_JSON_VALIDATE_TOOL: dict[str, Any] = {
-    "name": "json_validate",
-    "description": (
-        "Validate a JSON file for syntax errors. Returns 'valid' or the parse "
-        "error with position. If schema_path (a JSON Schema file) is given, "
-        "also validates the document against that JSON Schema."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "JSON file path (relative to repo root)",
-            },
-            "schema_path": {
-                "type": "string",
-                "description": "Optional: path to a JSON Schema file (.json or .yaml) to validate the document against",
-            },
-        },
-        "required": ["path"],
-    },
-}
+    # moved to app/tools/filesystem/json_validate.py as
+    # JSON_VALIDATE_TOOL / json_validate_handler() — tool_enhance.md
+    # productionization pass, tool #159 (2026-09-15).
 # moved to app/tools/filesystem/csv_preview.py as CSV_PREVIEW_TOOL /
 # csv_preview_handler() — tool_enhance.md productionization pass, tool
 # #132 (2026-09-11).
@@ -7807,34 +7793,6 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def json_query_h(inp: dict[str, Any]) -> str:
         return json_query_handler(root, repo_path, inp)
 
-    def _load_schema_doc(schema_rel: str) -> Any:
-        """Load a JSON Schema from a .json or .yaml/.yml file at schema_rel."""
-        import json as _json
-
-        import yaml as _yaml
-
-        schema_path = root / schema_rel
-        text = schema_path.read_text(encoding="utf-8")
-        if schema_path.suffix in (".yaml", ".yml"):
-            return _yaml.safe_load(text)
-        return _json.loads(text)
-
-    def _validate_against_schema(rel: str, doc: Any, schema_rel: str) -> str | None:
-        """Returns an error string if the schema check fails/errors, else None."""
-        import jsonschema
-
-        try:
-            schema = _load_schema_doc(schema_rel)
-        except Exception as e:
-            return f"[ERROR] Cannot load schema {schema_rel}: {e}"
-        try:
-            jsonschema.validate(instance=doc, schema=schema)
-        except jsonschema.ValidationError as e:
-            return f"[SCHEMA VIOLATION] {rel} does not match {schema_rel}: {e.message} (at {'/'.join(str(p) for p in e.absolute_path) or '<root>'})"
-        except jsonschema.SchemaError as e:
-            return f"[ERROR] {schema_rel} is not a valid JSON Schema: {e.message}"
-        return None
-
     # tool_enhance.md productionization pass, tool #120 (2026-08-26) —
     # was a worktree-escape arbitrary file READ on both `path` and
     # `schema_path` (`root / ...` never validated). Now delegates to
@@ -7842,21 +7800,17 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def yaml_validate_h(inp: dict[str, Any]) -> str:
         return yaml_validate_handler(root, repo_path, inp)
 
+    # tool_enhance.md productionization pass, tool #159 (2026-09-15) —
+    # was a worktree-escape arbitrary file READ on both `path` and
+    # `schema_path` (`root / ...` never validated, same bug already
+    # fixed for sibling yaml_validate) and a missing chat_agent.py
+    # dispatch. The old private `_load_schema_doc`/
+    # `_validate_against_schema` closures that used to live here were
+    # removed — their logic now lives once, shared, in
+    # app/tools/filesystem/json_schema_validation.py. Now delegates to
+    # the shared, worktree-validated handler.
     def json_validate_h(inp: dict[str, Any]) -> str:
-        import json as _json
-
-        fpath = root / str(inp["path"])
-        try:
-            doc = _json.loads(fpath.read_text(encoding="utf-8"))
-        except Exception as e:
-            return f"[INVALID JSON] {inp['path']}: {e}"
-        schema_rel = inp.get("schema_path")
-        if schema_rel:
-            err = _validate_against_schema(str(inp["path"]), doc, str(schema_rel))
-            if err:
-                return err
-            return f"✅ {inp['path']} is valid JSON and matches schema {schema_rel}"
-        return f"✅ {inp['path']} is valid JSON"
+        return json_validate_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #132 (2026-09-11) —
     # was a worktree-escape arbitrary file READ (`root / path` never

@@ -109,3 +109,20 @@ real integration re-verified working.
 now genuinely reachable from interactive chat for the first time — a
 strict capability increase, not a narrowing; no functionality lost;
 tool-specific and directly-referencing regression tests clean.
+
+## UPDATE (2026-09-15) — shared-module extraction, tool #159's own turn
+
+During sibling tool #159's (`json_validate`) own turn — fixing the
+identical worktree-escape bug this tool's own docstring had already
+flagged and deferred — the private `_load_schema_doc()`/
+`_validate_against_schema()` helpers that used to live inside this
+file were extracted into a new shared module, `app/tools/filesystem/
+json_schema_validation.py` (`load_schema_doc`/`validate_against_schema`),
+so both `yaml_validate` and `json_validate` reuse one
+already-verified, worktree-validated implementation instead of each
+maintaining its own copy — the exact duplication class this initiative
+has repeatedly consolidated elsewhere. `yaml_validate_handler()` now
+imports `validate_against_schema` from the shared module in place of
+its own former private copy. Behavior is completely unchanged; all 12
+existing tests in `tests/test_yaml_validate_hardening.py` re-run
+clean.
