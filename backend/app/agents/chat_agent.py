@@ -234,6 +234,7 @@ from app.tools.execution.pip_list import pip_list_handler
 from app.tools.execution.read_env_var import read_env_var_handler
 from app.tools.filesystem.read_image import read_image_handler
 from app.tools.filesystem.read_notebook import read_notebook_handler
+from app.tools.execution.read_output import read_output_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -3136,13 +3137,16 @@ class ChatAgent:
         # ========== BATCH 12 — Terminal extras ==========
 
         if tool_name == "read_output":
-            from app.fleet import process_manager as _pm
-
-            ro_pid = int(inp["pid"])
-            ro_max_lines = int(inp.get("lines", 50))
-            return _pm.read_output(
-                ro_pid,
-                ro_max_lines,
+            # tool_enhance.md productionization pass, tool #176
+            # (2026-09-15) — was an uncaught crash on malformed
+            # pid/lines (missing pid, non-numeric pid, non-numeric
+            # lines — all proved live on this dispatch too); the
+            # underlying process_manager.read_output() was already
+            # safe. Now delegates to the shared, input-validated
+            # handler.
+            return await asyncio.to_thread(
+                read_output_handler,
+                inp,
                 self._background_processes,
                 _read_stream_nonblocking,
             )

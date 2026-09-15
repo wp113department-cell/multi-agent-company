@@ -554,6 +554,10 @@ from app.tools.filesystem.read_notebook import (
     READ_NOTEBOOK_TOOL,
     read_notebook_handler,
 )
+from app.tools.execution.read_output import (
+    READ_OUTPUT_TOOL,
+    read_output_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -2677,24 +2681,10 @@ _LIST_CLASSES_TOOL = LIST_CLASSES_TOOL
 # tool_enhance.md productionization pass, tool #36 (2026-08-18).
 
 # Batch 12 — Terminal extras
-_READ_OUTPUT_TOOL = {
-    "name": "read_output",
-    "description": "Read the latest stdout/stderr from a background process started with run_background.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "pid": {
-                "type": "integer",
-                "description": "Process ID returned by run_background",
-            },
-            "lines": {
-                "type": "integer",
-                "description": "Max lines to return (default: 50)",
-            },
-        },
-        "required": ["pid"],
-    },
-}
+# moved to app/tools/execution/read_output.py as READ_OUTPUT_TOOL /
+# read_output_handler() — tool_enhance.md productionization pass, tool
+# #176 (2026-09-15).
+_READ_OUTPUT_TOOL: dict[str, Any] = READ_OUTPUT_TOOL
 
 # moved to app/tools/execution/run_node.py as RUN_NODE_TOOL /
 # run_node_handler — tool_enhance.md productionization pass, tool #60
@@ -6803,14 +6793,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         t.join(timeout=0.1)
         return result["data"]
 
+    # tool_enhance.md productionization pass, tool #176 (2026-09-15) —
+    # was an uncaught crash on malformed pid/lines (missing pid,
+    # non-numeric pid, non-numeric lines — all proved live); the
+    # underlying process_manager.read_output() was already safe. Now
+    # delegates to the shared, input-validated handler.
     def read_output_h(inp: dict[str, Any]) -> str:
-        from app.fleet import process_manager as _pm
-
-        ro_pid = int(inp["pid"])
-        ro_max = int(inp.get("lines", 50))
-        return _pm.read_output(
-            ro_pid, ro_max, _session_bg_procs, _read_stream_nonblocking
-        )
+        return read_output_handler(inp, _session_bg_procs, _read_stream_nonblocking)
 
     # tool_enhance.md productionization pass, tool #60 (2026-08-22) — the
     # real fix (an unbounded timeout clamp) lives in the shared
