@@ -104,6 +104,10 @@ from app.tools.git.review_diff import (
     REVIEW_DIFF_TOOL,
     build_review_diff_args,
 )
+from app.tools.agents.submit_ai_result import (
+    SUBMIT_AI_RESULT_TOOL,
+    submit_ai_result_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -4385,20 +4389,10 @@ _SUBMIT_SCHEMA_TOOL: dict[str, Any] = {
     },
 }
 
-_SUBMIT_AI_RESULT_TOOL: dict[str, Any] = {
-    "name": "submit_ai_result",
-    "description": "Submit AI/ML engineering task results.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "summary": {"type": "string"},
-            "files_created": {"type": "array", "items": {"type": "string"}},
-            "eval_results": {"type": "object"},
-            "next_steps": {"type": "array", "items": {"type": "string"}},
-        },
-        "required": ["summary"],
-    },
-}
+# moved to app/tools/agents/submit_ai_result.py as
+# SUBMIT_AI_RESULT_TOOL / submit_ai_result_handler() —
+# tool_enhance.md productionization pass, tool #180 (2026-09-15).
+_SUBMIT_AI_RESULT_TOOL: dict[str, Any] = SUBMIT_AI_RESULT_TOOL
 
 _SUBMIT_CLEANUP_TOOL: dict[str, Any] = {
     "name": "submit_cleanup",
@@ -4875,7 +4869,6 @@ def make_ai_engineer_handlers(repo_path: str) -> dict[str, Any]:
     """Handler factory for AI/ML Engineer agent."""
     root = Path(repo_path)
     handlers = make_read_only_handlers(repo_path)
-    ai_result: dict[str, Any] = {}
 
     # Blocker 6 (audit_v1.md 4.5/4.8): bare "python "/"python3 "/"pip install "
     # prefixes are inherently unrestrictable (any script path/package name
@@ -4942,16 +4935,18 @@ def make_ai_engineer_handlers(repo_path: str) -> dict[str, Any]:
     def ae_fetch_url(inp: dict[str, Any]) -> str:
         return fetch_url_handler(inp)
 
-    def ae_submit(inp: dict[str, Any]) -> str:
-        ai_result.update(inp)
-        return "AI engineering result submitted"
-
+    # tool_enhance.md productionization pass, tool #180 (2026-09-15) —
+    # was write-only dead-code state: `ai_result` was updated but
+    # NEVER read anywhere (confirmed via full-codebase grep) — the
+    # real result-capture mechanism lives entirely in
+    # base_graph.py's generic submit_* handling, which reads the tool
+    # call's own arguments directly, independent of this handler.
+    # Now delegates to the shared, stateless handler.
     handlers["run_python_snippet"] = ae_run_python_snippet
     handlers["bash"] = ae_bash
     handlers["write_file"] = ae_write_file
     handlers["fetch_url"] = ae_fetch_url
-    handlers["submit_ai_result"] = ae_submit
-    handlers["_ai_result"] = ai_result
+    handlers["submit_ai_result"] = submit_ai_result_handler
     return handlers
 
 
