@@ -510,6 +510,10 @@ from app.tools.execution.list_open_ports import (
     LIST_OPEN_PORTS_TOOL,
     list_open_ports_handler,
 )
+from app.tools.execution.list_processes import (
+    LIST_PROCESSES_TOOL,
+    list_processes_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -784,6 +788,7 @@ _KNOWN_ISSUES_WRITE_TOOL = KNOWN_ISSUES_WRITE_TOOL
 _LIST_BACKGROUND_PROCESSES_TOOL = LIST_BACKGROUND_PROCESSES_TOOL
 _LIST_ENV_VARS_TOOL = LIST_ENV_VARS_TOOL
 _LIST_OPEN_PORTS_TOOL = LIST_OPEN_PORTS_TOOL
+_LIST_PROCESSES_TOOL = LIST_PROCESSES_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -5184,20 +5189,9 @@ def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
     # pass, tool #151 (2026-09-14).
 
 # -- Process / System --
-_LIST_PROCESSES_TOOL: dict[str, Any] = {
-    "name": "list_processes",
-    "description": "List running processes, optionally filtered by name. Returns PID, CPU%, MEM%, command.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "filter": {
-                "type": "string",
-                "description": "Filter by process name (optional)",
-            }
-        },
-        "required": [],
-    },
-}
+    # moved to app/tools/execution/list_processes.py as
+    # LIST_PROCESSES_TOOL / list_processes_handler() —
+    # tool_enhance.md productionization pass, tool #165 (2026-09-15).
     # moved to app/tools/execution/list_open_ports.py as
     # LIST_OPEN_PORTS_TOOL / list_open_ports_handler() —
     # tool_enhance.md productionization pass, tool #164 (2026-09-15).
@@ -7632,22 +7626,15 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def git_stash_list_h(inp: dict[str, Any]) -> str:
         return git_stash_list_handler(repo_path)
 
+    # tool_enhance.md productionization pass, tool #165 (2026-09-15) —
+    # no worktree-escape or injection surface exists (`filter` reaches
+    # only a pure in-memory Python string containment check, never a
+    # subprocess/shell command); the real fix was a missing
+    # chat_agent.py dispatch (this tool was never reachable from
+    # interactive chat at all, proved live). Now delegates to the
+    # shared handler.
     def list_processes_h(inp: dict[str, Any]) -> str:
-        name_filter = str(inp.get("filter", ""))
-        try:
-            r = subprocess.run(
-                ["ps", "aux"], capture_output=True, text=True, timeout=10
-            )
-            lines = r.stdout.strip().splitlines()
-            if name_filter:
-                lines = [
-                    ln
-                    for ln in lines
-                    if name_filter.lower() in ln.lower() or ln.startswith("USER")
-                ]
-            return "\n".join(lines[:50])
-        except Exception as e:
-            return f"[ERROR] list_processes: {e}"
+        return list_processes_handler(inp)
 
     # tool_enhance.md productionization pass, tool #164 (2026-09-15) —
     # no worktree-escape or injection surface exists (empty schema,
