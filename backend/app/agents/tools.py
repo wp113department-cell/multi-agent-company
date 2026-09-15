@@ -530,6 +530,10 @@ from app.tools.filesystem.openapi_inspect import (
     OPENAPI_INSPECT_TOOL,
     openapi_inspect_handler,
 )
+from app.tools.filesystem.parse_docker_compose import (
+    PARSE_DOCKER_COMPOSE_TOOL,
+    parse_docker_compose_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -5348,20 +5352,10 @@ _PARSE_DOCKERFILE_TOOL: dict[str, Any] = {
         "required": [],
     },
 }
-_PARSE_DOCKER_COMPOSE_TOOL: dict[str, Any] = {
-    "name": "parse_docker_compose",
-    "description": "Parse a docker-compose YAML file into a structural summary: each service's image/build context, exposed ports, volumes, and dependencies.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "docker-compose file path (relative to repo root, default: docker-compose.yml)",
-            }
-        },
-        "required": [],
-    },
-}
+    # moved to app/tools/filesystem/parse_docker_compose.py as
+    # PARSE_DOCKER_COMPOSE_TOOL / parse_docker_compose_handler() —
+    # tool_enhance.md productionization pass, tool #170 (2026-09-15).
+_PARSE_DOCKER_COMPOSE_TOOL: dict[str, Any] = PARSE_DOCKER_COMPOSE_TOOL
     # moved to app/tools/integrations/github_inspect_repo.py as
     # GITHUB_INSPECT_REPO_TOOL / github_inspect_repo_handler() —
     # tool_enhance.md productionization pass, tool #152 (2026-09-14).
@@ -7817,32 +7811,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         ]
         return "\n".join(out)
 
+    # tool_enhance.md productionization pass, tool #170 (2026-09-15) —
+    # was a worktree-escape STRUCTURED FILE CONTENT DISCLOSURE oracle
+    # (`path` never validated, proved live) and a missing
+    # chat_agent.py dispatch. Now delegates to the shared,
+    # worktree-validated handler.
     def parse_docker_compose_h(inp: dict[str, Any]) -> str:
-        path = str(inp.get("path", "docker-compose.yml"))
-        fpath = root / path
-        if not fpath.exists():
-            return f"[ERROR] File not found: {path}"
-        try:
-            import yaml as _yaml
-
-            doc = _yaml.safe_load(fpath.read_text(encoding="utf-8"))
-        except Exception as e:
-            return f"[ERROR] parse_docker_compose: {e}"
-        if not isinstance(doc, dict):
-            return f"(empty or invalid compose file: {path})"
-        services = doc.get("services", {})
-        if not isinstance(services, dict) or not services:
-            return f"(no services found in {path})"
-        out = [f"docker-compose: {path} ({len(services)} service(s))"]
-        for name, svc in services.items():
-            if not isinstance(svc, dict):
-                continue
-            out.append(f"\n- {name}:")
-            for key in ("image", "build", "ports", "volumes", "depends_on"):
-                val = svc.get(key)
-                if val:
-                    out.append(f"    {key}: {val}")
-        return "\n".join(out)
+        return parse_docker_compose_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #152 (2026-09-14) —
     # existing owner/repo/path validation checked and confirmed
