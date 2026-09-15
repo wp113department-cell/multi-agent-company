@@ -538,6 +538,10 @@ from app.tools.filesystem.parse_dockerfile import (
     PARSE_DOCKERFILE_TOOL,
     parse_dockerfile_handler,
 )
+from app.tools.execution.pip_list import (
+    PIP_LIST_TOOL,
+    pip_list_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -5410,20 +5414,10 @@ _SUMMARIZE_OUTPUT_TOOL: dict[str, Any] = {
 # moved to app/tools/execution/npm_install.py as NPM_INSTALL_TOOL — tool_enhance.md productionization pass, tool #53 (2026-08-20).
 # moved to app/tools/execution/npm_run.py as NPM_RUN_TOOL — tool_enhance.md productionization pass, tool #54 (2026-08-20).
 # moved to app/tools/execution/pip_install.py as PIP_INSTALL_TOOL — tool_enhance.md productionization pass, tool #55 (2026-08-20).
-_PIP_LIST_TOOL: dict[str, Any] = {
-    "name": "pip_list",
-    "description": "List installed Python packages and their versions.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "filter": {
-                "type": "string",
-                "description": "Filter packages by name prefix (optional)",
-            },
-        },
-        "required": [],
-    },
-}
+    # moved to app/tools/execution/pip_list.py as PIP_LIST_TOOL /
+    # pip_list_handler() — tool_enhance.md productionization pass,
+    # tool #172 (2026-09-15).
+_PIP_LIST_TOOL: dict[str, Any] = PIP_LIST_TOOL
 
 # -- Utilities --
 # moved to app/tools/filesystem/create_directory.py as
@@ -7906,25 +7900,13 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         # app/tools/execution/pip_install.py's own docstring.
         return "[BLOCKED] pip_install requires interactive session for safety confirmation"
 
+    # tool_enhance.md productionization pass, tool #172 (2026-09-15) —
+    # `filter` audited and confirmed already safe (never reaches a
+    # subprocess/shell, pure in-memory substring check, proved live);
+    # the real fix was a missing chat_agent.py dispatch. Now delegates
+    # to the shared handler.
     def pip_list_h(inp: dict[str, Any]) -> str:
-        name_filter = str(inp.get("filter", ""))
-        try:
-            r = subprocess.run(
-                [sys.executable, "-m", "pip", "list", "--format=columns"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            lines = r.stdout.strip().splitlines()
-            if name_filter:
-                lines = [
-                    ln
-                    for ln in lines
-                    if name_filter.lower() in ln.lower() or ln.startswith("Package")
-                ]
-            return "\n".join(lines)
-        except Exception as e:
-            return f"[ERROR] pip_list: {e}"
+        return pip_list_handler(inp)
 
     # tool_enhance.md productionization pass, tool #131 (2026-08-26) —
     # worktree validation was already correct here; the real fix
