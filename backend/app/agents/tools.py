@@ -518,6 +518,10 @@ from app.tools.execution.loc_stats import (
     LOC_STATS_TOOL,
     loc_stats_handler,
 )
+from app.tools.agents.memory_read import (
+    MEMORY_READ_TOOL,
+    memory_read_handler,
+)
 from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
@@ -794,6 +798,7 @@ _LIST_ENV_VARS_TOOL = LIST_ENV_VARS_TOOL
 _LIST_OPEN_PORTS_TOOL = LIST_OPEN_PORTS_TOOL
 _LIST_PROCESSES_TOOL = LIST_PROCESSES_TOOL
 _LOC_STATS_TOOL = LOC_STATS_TOOL
+_MEMORY_READ_TOOL = MEMORY_READ_TOOL
 _DECISION_LOG_APPEND_TOOL = DECISION_LOG_APPEND_TOOL
 
 
@@ -4151,17 +4156,9 @@ def make_monitoring_agent_handlers(repo_path: str) -> dict[str, Any]:
 
 # --- Day 3B: Memory tool specs ---
 
-_MEMORY_READ_TOOL: dict[str, Any] = {
-    "name": "memory_read",
-    "description": "Read a value from the per-repo memory store by key.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "key": {"type": "string", "description": "Key to read from memory"}
-        },
-        "required": ["key"],
-    },
-}
+    # moved to app/tools/agents/memory_read.py as MEMORY_READ_TOOL /
+    # memory_read_handler() — tool_enhance.md productionization
+    # pass, tool #167 (2026-09-15).
 
 # moved to app/tools/agents/memory_write.py as MEMORY_WRITE_TOOL — tool_enhance.md productionization pass, tool #51 (2026-08-20).
 
@@ -7132,62 +7129,28 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # DAY 3B — Memory tools (flat JSON files per repo slug)
     # =========================================================================
 
-    import json as _json_mem
-    import hashlib as _hlib
+    # tool_enhance.md productionization pass, tool #167 (2026-09-15) —
+    # incidental cleanup: `_mem_lock`/`_mem_unlock` (the cross-platform
+    # advisory file lock), `_json_mem`, `_mem_slug`/`_mem_dir`, and
+    # `_mem_decisions_path` all became fully dead code as of this
+    # tool's fix — their last real callers (`_read_mem_store`/
+    # `_write_mem_store`, just removed above) were already unreachable
+    # leftovers from tools #51/#133's earlier fixes (both delegate to
+    # their own shared modules now), but stayed defined until this
+    # turn finally removed the one still-live caller
+    # (`memory_read_h`). Confirmed via grep: zero remaining references
+    # to any of these five names anywhere else in this file before
+    # removing them.
 
-    # fcntl.flock is POSIX-only (found via real execution: ModuleNotFoundError
-    # on Windows, breaking every test that builds this handler set, since the
-    # import ran unconditionally at handler-setup time, not lazily inside a
-    # single tool call). msvcrt.locking is stdlib and available on Windows;
-    # both are used purely as an advisory mutual-exclusion lock around the
-    # read-modify-write of these flat JSON/JSONL memory files, so locking a
-    # single agreed-upon byte (offset 0) via msvcrt is equivalent in effect
-    # to flock's whole-file lock for this use case.
-    if sys.platform == "win32":
-        import msvcrt as _msvcrt
-
-        def _mem_lock(fh: Any) -> None:
-            fh.seek(0)
-            _msvcrt.locking(fh.fileno(), _msvcrt.LK_LOCK, 1)
-
-        def _mem_unlock(fh: Any) -> None:
-            fh.seek(0)
-            _msvcrt.locking(fh.fileno(), _msvcrt.LK_UNLCK, 1)
-
-    else:
-        import fcntl as _fcntl
-
-        def _mem_lock(fh: Any) -> None:
-            _fcntl.flock(fh, _fcntl.LOCK_EX)
-
-        def _mem_unlock(fh: Any) -> None:
-            _fcntl.flock(fh, _fcntl.LOCK_UN)
-
-    _mem_slug = _hlib.md5(repo_path.encode()).hexdigest()[:8]
-    _mem_dir = Path(__file__).parent.parent / "memory"
-    _mem_dir.mkdir(exist_ok=True)
-    _mem_store_path = _mem_dir / f"{_mem_slug}_store.json"
-    _mem_decisions_path = _mem_dir / f"{_mem_slug}_decisions.jsonl"
-
-    def _read_mem_store() -> dict[str, str]:
-        if not _mem_store_path.exists():
-            return {}
-        try:
-            return dict(_json_mem.loads(_mem_store_path.read_text(encoding="utf-8")))
-        except Exception:
-            return {}
-
-    def _write_mem_store(store: dict[str, str]) -> None:
-        with open(_mem_store_path, "w", encoding="utf-8") as _fh:
-            _mem_lock(_fh)
-            _json_mem.dump(store, _fh, indent=2)
-            _mem_unlock(_fh)
-
+    # tool_enhance.md productionization pass, tool #167 (2026-09-15) —
+    # no worktree-escape or injection surface exists (`key` reaches
+    # only a pure in-memory dict lookup against a fixed,
+    # deterministic store path); the real fix was a missing
+    # chat_agent.py dispatch (this tool was never reachable from
+    # interactive chat at all, proved live). Now delegates to the
+    # shared handler.
     def memory_read_h(inp: dict[str, Any]) -> str:
-        key = str(inp["key"])
-        store = _read_mem_store()
-        val = store.get(key)
-        return val if val is not None else f"(key '{key}' not found in memory)"
+        return memory_read_handler(repo_path, inp)
 
     # moved to app/tools/agents/memory_write.py — this now calls the shared, atomic write_memory_key()
     # (real, empirically-proven lost-update race condition fixed there; see that module's own docstring)

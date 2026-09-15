@@ -225,6 +225,7 @@ from app.tools.execution.list_env_vars import list_env_vars_handler
 from app.tools.execution.list_open_ports import list_open_ports_handler
 from app.tools.execution.list_processes import list_processes_handler
 from app.tools.execution.loc_stats import loc_stats_handler
+from app.tools.agents.memory_read import memory_read_handler
 from app.tools.filesystem.find_test import find_test_handler
 from app.tools.agents.decision_log_append import decision_log_append_handler
 from app.tools.filesystem.file_exists import file_exists_handler
@@ -2372,6 +2373,16 @@ class ChatAgent:
             return await asyncio.to_thread(
                 create_linear_issue, lci_api_key, lci_title, lci_description, lci_team_key
             )
+
+        if tool_name == "memory_read":
+            # tool_enhance.md productionization pass, tool #167
+            # (2026-09-15) — no worktree-escape or injection surface
+            # exists (`key` reaches only a pure in-memory dict lookup
+            # against a fixed, deterministic store path); the real
+            # fix was a missing chat_agent.py dispatch (this tool was
+            # never reachable from interactive chat at all, proved
+            # live). Now delegates to the shared handler.
+            return await asyncio.to_thread(memory_read_handler, repo, inp)
 
         if tool_name == "memory_write":
             # tool_enhance.md productionization pass, tool #51 (2026-08-20)
