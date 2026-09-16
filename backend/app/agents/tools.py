@@ -188,6 +188,10 @@ from app.tools.agents.submit_style_review import (
     SUBMIT_STYLE_REVIEW_TOOL,
     submit_style_review_handler,
 )
+from app.tools.agents.submit_tech_debt import (
+    SUBMIT_TECH_DEBT_TOOL,
+    submit_tech_debt_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -4100,20 +4104,10 @@ _SUBMIT_AI_RESULT_TOOL: dict[str, Any] = SUBMIT_AI_RESULT_TOOL
 # tool_enhance.md productionization pass, tool #184 (2026-09-16).
 _SUBMIT_CLEANUP_TOOL: dict[str, Any] = SUBMIT_CLEANUP_TOOL
 
-_SUBMIT_TECH_DEBT_TOOL: dict[str, Any] = {
-    "name": "submit_tech_debt",
-    "description": "Submit technical debt analysis findings.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "summary": {"type": "string"},
-            "debt_items": {"type": "array", "items": {"type": "object"}},
-            "priority_fixes": {"type": "array", "items": {"type": "string"}},
-            "effort_estimate": {"type": "string"},
-        },
-        "required": ["summary"],
-    },
-}
+# moved to app/tools/agents/submit_tech_debt.py as
+# SUBMIT_TECH_DEBT_TOOL / submit_tech_debt_handler() —
+# tool_enhance.md productionization pass, tool #201 (2026-09-16).
+_SUBMIT_TECH_DEBT_TOOL: dict[str, Any] = SUBMIT_TECH_DEBT_TOOL
 
 # --- Day 3 agent-specific bash specs (restricted allowlists) ---
 
@@ -4712,7 +4706,6 @@ def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
     """Handler factory for Technical Debt Agent."""
     root = Path(repo_path)
     handlers = make_read_only_handlers(repo_path)
-    tech_debt_result: dict[str, Any] = {}
 
     # tool_enhance.md productionization pass, tool #82 (2026-08-24) — the
     # real fix (this implementation had ZERO worktree-boundary
@@ -4760,17 +4753,12 @@ def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
     def td_coverage_report(inp: dict[str, Any]) -> str:
         return coverage_report_handler(root, repo_path, inp)
 
-    def td_submit(inp: dict[str, Any]) -> str:
-        tech_debt_result.update(inp)
-        return "Tech debt analysis submitted"
-
     handlers["list_functions"] = td_list_functions
     handlers["list_classes"] = td_list_classes
     handlers["find_todos"] = td_find_todos
     handlers["run_linter"] = td_run_linter
     handlers["coverage_report"] = td_coverage_report
-    handlers["submit_tech_debt"] = td_submit
-    handlers["_tech_debt_result"] = tech_debt_result
+    handlers["submit_tech_debt"] = submit_tech_debt_handler
     return handlers
 
 
