@@ -693,6 +693,10 @@ from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
 )
+from app.tools.agents.capability_gap_scan import (
+    CAPABILITY_GAP_SCAN_TOOL,
+    capability_gap_scan_handler,
+)
 from app.tools.filesystem.file_info import (
     FILE_INFO_TOOL,
     file_info_handler,
@@ -7345,74 +7349,12 @@ def audit_log_read(inp: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-_CAPABILITY_GAP_SCAN_TOOL: dict[str, Any] = {
-    "name": "capability_gap_scan",
-    "description": (
-        "AUDIT_Q_BATCH15 §76 gap-closure — deterministically cluster real AgentRun "
-        "history by agent_type and surface any agent whose real failure count/rate "
-        "over the scan window crosses a real threshold, with real sample error text "
-        "from those failed runs. Use this instead of trying to eyeball a capability "
-        "gap from raw task_history_query output — the clustering itself is already "
-        "computed for you here, not something to infer."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "window_days": {
-                "type": "integer",
-                "description": "Lookback window in days (default 14).",
-            },
-            "min_failures": {
-                "type": "integer",
-                "description": "Minimum failed-run count for an agent to be reported (default 3).",
-            },
-            "min_failure_rate": {
-                "type": "number",
-                "description": "Minimum failure rate (0.0-1.0) for an agent to be reported (default 0.3).",
-            },
-        },
-        "required": [],
-    },
-}
-
-
-def capability_gap_scan(inp: dict[str, Any]) -> str:
-    """Sync tool handler — bridges to the async DB query the same way every
-    other DB-backed sync tool handler in this module does (new isolated
-    engine + asyncio.run(), never the shared app.db.session engine — see
-    feedback_asyncio_isolated_engine)."""
-    import asyncio
-
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-
-    from app.db.session import new_isolated_async_engine
-    from app.fleet.capability_gap import (
-        format_capability_gap_report,
-        scan_capability_gaps,
-    )
-
-    window_days = int(inp.get("window_days", 14))
-    min_failures = int(inp.get("min_failures", 3))
-    min_failure_rate = float(inp.get("min_failure_rate", 0.3))
-
-    async def _run() -> str:
-        engine = new_isolated_async_engine()
-        try:
-            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                clusters = await scan_capability_gaps(
-                    db,
-                    window_days=window_days,
-                    min_failures=min_failures,
-                    min_failure_rate=min_failure_rate,
-                )
-                return format_capability_gap_report(clusters)
-        finally:
-            await engine.dispose()
-
-    try:
-        return asyncio.run(_run())
-    except Exception as exc:
-        return f"[ERROR] capability_gap_scan failed: {exc}"
+# moved to app/tools/agents/capability_gap_scan.py as
+# CAPABILITY_GAP_SCAN_TOOL / capability_gap_scan_handler() —
+# tool_enhance.md productionization pass, tool #210 (2026-09-16).
+# Re-exported under the old names for backward compatibility.
+_CAPABILITY_GAP_SCAN_TOOL: dict[str, Any] = CAPABILITY_GAP_SCAN_TOOL
+capability_gap_scan = capability_gap_scan_handler
 
 
 _SUBMIT_ENHANCEMENT_REQUEST_TOOL: dict[str, Any] = {

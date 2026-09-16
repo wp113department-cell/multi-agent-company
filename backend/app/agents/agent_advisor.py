@@ -16,14 +16,16 @@ from app.agents.base_graph import VerificationConfig, run_agent_graph
 from app.agents.tools import (
     READ_ONLY_TOOLS,
     RECORD_LEARNING_TOOL,
-    _CAPABILITY_GAP_SCAN_TOOL,
     audit_log_read,
-    capability_gap_scan,
     fleet_metrics_read,
     make_read_only_handlers,
     make_record_learning_handler,
     make_submit_enhancement_request_handler,
     task_history_query,
+)
+from app.tools.agents.capability_gap_scan import (
+    CAPABILITY_GAP_SCAN_TOOL as _CAPABILITY_GAP_SCAN_TOOL,
+    capability_gap_scan_handler as capability_gap_scan,
 )
 from app.config import get_settings
 
