@@ -132,6 +132,10 @@ from app.tools.agents.submit_docker_report import (
     SUBMIT_DOCKER_REPORT_TOOL,
     submit_docker_report_handler,
 )
+from app.tools.agents.submit_health_report import (
+    SUBMIT_HEALTH_REPORT_TOOL,
+    make_submit_health_report_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -1333,30 +1337,13 @@ _DEVOPS_BASH_TOOL = {
     },
 }
 
-_SUBMIT_HEALTH_REPORT_TOOL = {
-    "name": "submit_health_report",
-    "description": "Submit the structured system health report.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "status": {"type": "string", "enum": ["healthy", "degraded", "unhealthy"]},
-            "checks": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string"},
-                        "status": {"type": "string", "enum": ["ok", "warn", "fail"]},
-                        "detail": {"type": "string"},
-                    },
-                    "required": ["name", "status", "detail"],
-                },
-            },
-            "summary": {"type": "string"},
-        },
-        "required": ["status", "checks", "summary"],
-    },
-}
+# moved to app/tools/agents/submit_health_report.py as
+# SUBMIT_HEALTH_REPORT_TOOL / make_submit_health_report_handler() —
+# tool_enhance.md productionization pass, tool #187 (2026-09-16). Not a
+# dead accumulator (unlike sibling tools #180-#186) — health_result is
+# genuinely read by app/agents/devops.py's run_devops() via
+# handlers["_health_result"]. See that module's own docstring.
+_SUBMIT_HEALTH_REPORT_TOOL: dict[str, Any] = SUBMIT_HEALTH_REPORT_TOOL
 
 # DevOps: read tools + allowlisted bash + submit_health_report. NO write_file.
 DEVOPS_TOOLS = READ_ONLY_TOOLS + [
@@ -1719,12 +1706,8 @@ def make_devops_handlers(repo_path: str) -> dict[str, Any]:
         out = (stdout + stderr)[:4000]
         return out if out else "(no output)"
 
-    def submit_health_report(inp: dict[str, Any]) -> str:
-        health_result.update(inp)
-        return "Health report submitted"
-
     handlers["bash"] = bash
-    handlers["submit_health_report"] = submit_health_report
+    handlers["submit_health_report"] = make_submit_health_report_handler(health_result)
     handlers["_health_result"] = health_result  # caller reads this after run
     return handlers
 
