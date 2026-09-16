@@ -208,6 +208,7 @@ from app.tools.filesystem.template_render import template_render_handler
 from app.tools.execution.type_check import type_check_handler
 from app.tools.filesystem.unzip_files import unzip_files_handler
 from app.tools.execution.wait_for_port import wait_for_port_handler
+from app.tools.filesystem.xml_validate import xml_validate_handler
 from app.tools.git.generate_commit_msg import generate_commit_msg_handler
 from app.tools.filesystem.generate_diagram import generate_diagram_handler
 from app.tools.filesystem.generate_patch import generate_patch_handler
@@ -3930,6 +3931,21 @@ class ChatAgent:
             # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131/#132/#133/#134/#135/#136/#137/#138/#139/#140/#141/#142/#144/#202/#203/#204/#206.
             # Delegates to the shared, link-local-guarded handler.
             return await asyncio.to_thread(wait_for_port_handler, inp)
+
+        if tool_name == "xml_validate":
+            # tool_enhance.md productionization pass, tool #208
+            # (2026-09-16) — was a worktree-escape well-formedness/
+            # error-message disclosure oracle (`root / path` never
+            # validated, proved live) AND advertised in CHAT_TOOLS but
+            # never dispatched here at all, same dispatch class as
+            # tools
+            # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131/#132/#133/#134/#135/#136/#137/#138/#139/#140/#141/#142/#144/#146/#150/#151/#152/#153/#154/#156/#157/#158/#159/#160/#161/#163/#164/#165/#166/#167/#168/#169/#170/#171/#172/#173/#174/#175/#202/#203/#204/#206.
+            # XXE via crafted entity payloads investigated and
+            # empirically REFUTED on this project's real
+            # ElementTree/expat parser (does not expand external
+            # entities by default). Delegates to the shared,
+            # worktree-validated handler.
+            return await asyncio.to_thread(xml_validate_handler, root, repo, inp)
 
         if tool_name == "bhaskar_tool":
             # Universal "no existing tool fits" fallback —

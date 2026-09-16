@@ -549,6 +549,10 @@ from app.tools.execution.wait_for_port import (
     WAIT_FOR_PORT_TOOL,
     wait_for_port_handler,
 )
+from app.tools.filesystem.xml_validate import (
+    XML_VALIDATE_TOOL,
+    xml_validate_handler,
+)
 from app.tools.git.generate_commit_msg import (
     GENERATE_COMMIT_MSG_TOOL,
     generate_commit_msg_handler,
@@ -4847,20 +4851,10 @@ _READ_ENV_VAR_TOOL: dict[str, Any] = READ_ENV_VAR_TOOL
 # the exact pattern of the existing PDF/image/CSV/YAML tools above: stdlib or
 # already-pinned dependencies only, single self-contained handler, registered
 # alongside the tools it extends.
-_XML_VALIDATE_TOOL: dict[str, Any] = {
-    "name": "xml_validate",
-    "description": "Validate an XML file for well-formedness. Returns 'valid' or the parse error with line number.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "XML file path (relative to repo root)",
-            }
-        },
-        "required": ["path"],
-    },
-}
+# moved to app/tools/filesystem/xml_validate.py as
+# XML_VALIDATE_TOOL / xml_validate_handler() — tool_enhance.md
+# productionization pass, tool #208 (2026-09-16).
+_XML_VALIDATE_TOOL: dict[str, Any] = XML_VALIDATE_TOOL
     # moved to app/tools/filesystem/read_notebook.py as
     # READ_NOTEBOOK_TOOL / read_notebook_handler() —
     # tool_enhance.md productionization pass, tool #175 (2026-09-15).
@@ -7006,16 +7000,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         return csv_preview_handler(root, repo_path, inp)
 
     def xml_validate_h(inp: dict[str, Any]) -> str:
-        import xml.etree.ElementTree as _ET
-
-        fpath = root / str(inp["path"])
-        try:
-            _ET.parse(str(fpath))
-            return f"✅ {inp['path']} is well-formed XML"
-        except _ET.ParseError as e:
-            return f"[INVALID XML] {inp['path']}: {e}"
-        except Exception as e:
-            return f"[ERROR] xml_validate: {e}"
+        return xml_validate_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #175 (2026-09-15) —
     # was a worktree-escape STRUCTURED FILE CONTENT DISCLOSURE oracle
