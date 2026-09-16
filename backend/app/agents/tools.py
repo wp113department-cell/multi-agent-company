@@ -184,6 +184,10 @@ from app.tools.agents.submit_sql_report import (
     SUBMIT_SQL_REPORT_TOOL,
     submit_sql_report_handler,
 )
+from app.tools.agents.submit_style_review import (
+    SUBMIT_STYLE_REVIEW_TOOL,
+    submit_style_review_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -4061,19 +4065,10 @@ _SLACK_SEND_MESSAGE_TOOL: dict[str, Any] = SLACK_SEND_MESSAGE_TOOL
 # tool_enhance.md productionization pass, tool #190 (2026-09-16).
 _SUBMIT_PERF_REVIEW_TOOL: dict[str, Any] = SUBMIT_PERF_REVIEW_TOOL
 
-_SUBMIT_STYLE_REVIEW_TOOL: dict[str, Any] = {
-    "name": "submit_style_review",
-    "description": "Submit style/lint review findings.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "summary": {"type": "string"},
-            "violations": {"type": "array", "items": {"type": "object"}},
-            "auto_fixable": {"type": "boolean"},
-        },
-        "required": ["summary"],
-    },
-}
+# moved to app/tools/agents/submit_style_review.py as
+# SUBMIT_STYLE_REVIEW_TOOL / submit_style_review_handler() —
+# tool_enhance.md productionization pass, tool #200 (2026-09-16).
+_SUBMIT_STYLE_REVIEW_TOOL: dict[str, Any] = SUBMIT_STYLE_REVIEW_TOOL
 
 # moved to app/tools/agents/submit_sprint_plan.py as
 # SUBMIT_SPRINT_PLAN_TOOL / submit_sprint_plan_handler() —
@@ -4290,7 +4285,6 @@ def make_style_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     """Handler factory for Style Reviewer agent."""
     root = Path(repo_path)
     handlers = make_read_only_handlers(repo_path)
-    style_result: dict[str, Any] = {}
 
     # tool_enhance.md productionization pass, tool #101 (2026-08-25) — the
     # real fix (this implementation was completely broken for every real
@@ -4329,16 +4323,11 @@ def make_style_reviewer_handlers(repo_path: str) -> dict[str, Any]:
                 continue
         return "\n".join(results[:80]) or "(no TODOs found)"
 
-    def sr_submit(inp: dict[str, Any]) -> str:
-        style_result.update(inp)
-        return "Style review submitted"
-
     handlers["run_linter"] = sr_run_linter
     handlers["list_functions"] = sr_list_functions
     handlers["list_classes"] = sr_list_classes
     handlers["find_todos"] = sr_find_todos
-    handlers["submit_style_review"] = sr_submit
-    handlers["_style_result"] = style_result
+    handlers["submit_style_review"] = submit_style_review_handler
     return handlers
 
 
