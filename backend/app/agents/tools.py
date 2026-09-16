@@ -530,6 +530,10 @@ from app.tools.filesystem.summarize_folder import (
     SUMMARIZE_FOLDER_TOOL,
     summarize_folder_handler,
 )
+from app.tools.filesystem.summarize_repo import (
+    SUMMARIZE_REPO_TOOL,
+    summarize_repo_handler,
+)
 from app.tools.git.generate_commit_msg import (
     GENERATE_COMMIT_MSG_TOOL,
     generate_commit_msg_handler,
@@ -3992,17 +3996,13 @@ _SUMMARIZE_FOLDER_TOOL: dict[str, Any] = SUMMARIZE_FOLDER_TOOL
 # chat_agent.py dispatch existed). See that module's own docstring for
 # the full account.
 
-_SUMMARIZE_REPO_TOOL: dict[str, Any] = {
-    "name": "summarize_repo",
-    "description": "Generate a high-level summary of the repository: file tree (top 3 levels), line counts, language breakdown, and README excerpt.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "repo_path": {"type": "string", "description": "Repo root (optional)"}
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/filesystem/summarize_repo.py as
+# SUMMARIZE_REPO_TOOL / summarize_repo_handler() —
+# tool_enhance.md productionization pass, tool #203 (2026-09-16).
+# Closes the deferred item logged in tool #100's own docstring: the
+# identical unvalidated repo_path-override pattern reaching os.walk()
+# directly. See that new module's own docstring.
+_SUMMARIZE_REPO_TOOL: dict[str, Any] = SUMMARIZE_REPO_TOOL
 
 # tool_enhance.md productionization pass, tool #112 (2026-08-26) —
 # moved to app/tools/git/generate_release_notes.py as
@@ -6874,66 +6874,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         return generate_changelog_handler(root, inp)
 
     def summarize_repo_h(inp: dict[str, Any]) -> str:
-        _rp = str(inp.get("repo_path", repo_path))
-        try:
-            import os as _os_sr
-
-            # File tree (3 levels)
-            tree_lines: list[str] = []
-            for dirpath, dirnames, filenames in _os_sr.walk(_rp):
-                dirnames[:] = [
-                    d
-                    for d in sorted(dirnames)
-                    if d not in (".git", ".venv", "node_modules", "__pycache__")
-                ]
-                depth = dirpath.replace(_rp, "").count(_os_sr.sep)
-                if depth > 2:
-                    continue
-                indent = "  " * depth
-                tree_lines.append(f"{indent}{_os_sr.path.basename(dirpath)}/")
-                if depth < 2:
-                    for f in sorted(filenames)[:10]:
-                        tree_lines.append(f"{indent}  {f}")
-
-            # Line counts by extension
-            ext_counts: dict[str, int] = {}
-            total_files = 0
-            for dirpath, dirnames, filenames in _os_sr.walk(_rp):
-                dirnames[:] = [
-                    d
-                    for d in dirnames
-                    if d not in (".git", ".venv", "node_modules", "__pycache__")
-                ]
-                for fname in filenames:
-                    ext = _os_sr.path.splitext(fname)[1] or "other"
-                    ext_counts[ext] = ext_counts.get(ext, 0) + 1
-                    total_files += 1
-
-            top_exts = sorted(ext_counts.items(), key=lambda x: -x[1])[:8]
-
-            # README excerpt
-            readme_excerpt = ""
-            for rname in ("README.md", "readme.md", "README.rst"):
-                rpath = _os_sr.path.join(_rp, rname)
-                if _os_sr.path.exists(rpath):
-                    with open(rpath, encoding="utf-8", errors="ignore") as rf:
-                        readme_excerpt = rf.read(800)
-                    break
-
-            summary = [
-                f"## Repository Summary: {_os_sr.path.basename(_rp)}",
-                f"Total files: {total_files}",
-                "",
-                "### Top file types",
-            ]
-            for ext, count in top_exts:
-                summary.append(f"  {ext:10} {count}")
-            summary += ["", "### Directory tree (3 levels)"] + tree_lines[:50]
-            if readme_excerpt:
-                summary += ["", "### README (first 800 chars)", readme_excerpt]
-            return "\n".join(summary)
-        except Exception as e:
-            return f"[ERROR] summarize_repo: {e}"
+        return summarize_repo_handler(root, inp)
 
     # tool_enhance.md productionization pass, tool #112 (2026-08-26) — the
     # real fix lives in the shared generate_release_notes_handler(); see

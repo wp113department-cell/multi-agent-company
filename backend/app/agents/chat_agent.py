@@ -203,6 +203,7 @@ from app.tools.filesystem.generate_api_docs_text import (
     generate_api_docs_text_handler,
 )
 from app.tools.filesystem.summarize_folder import summarize_folder_handler
+from app.tools.filesystem.summarize_repo import summarize_repo_handler
 from app.tools.git.generate_commit_msg import generate_commit_msg_handler
 from app.tools.filesystem.generate_diagram import generate_diagram_handler
 from app.tools.filesystem.generate_patch import generate_patch_handler
@@ -3877,6 +3878,21 @@ class ChatAgent:
             return await asyncio.to_thread(
                 summarize_folder_handler, root, repo, inp
             )
+
+        if tool_name == "summarize_repo":
+            # tool_enhance.md productionization pass, tool #203
+            # (2026-09-16) — closes the deferred item logged in tool
+            # #100's (generate_changelog) own docstring: the identical
+            # unvalidated repo_path-override pattern reaching
+            # os.walk() directly, proved live to disclose an arbitrary
+            # host directory's file tree/extension breakdown/README
+            # content. AND advertised in CHAT_TOOLS but never
+            # dispatched here at all, same dispatch class as tools
+            # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131/#132/#133/#134/#135/#136/#137/#138/#139/#140/#141/#142/#144/#202.
+            # Fixed by ignoring repo_path entirely (mirrors
+            # generate_changelog_handler's precedent) and delegating
+            # to the shared handler.
+            return await asyncio.to_thread(summarize_repo_handler, root, inp)
 
         if tool_name == "bhaskar_tool":
             # Universal "no existing tool fits" fallback —
