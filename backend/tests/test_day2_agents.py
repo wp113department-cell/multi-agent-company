@@ -643,8 +643,10 @@ class TestDockerAgentHandlers:
 
     def test_submit_stores_result(self, tmp_repo: Path) -> None:
         h = make_docker_agent_handlers(str(tmp_repo))
-        h["submit_docker_report"]({"action": "inspect", "outcome": "all healthy"})
-        assert h["_docker_result"]["outcome"] == "all healthy"
+        result = h["submit_docker_report"](
+            {"action": "inspect", "outcome": "all healthy"}
+        )
+        assert result == "Docker report submitted"
 
 
 # ===========================================================================

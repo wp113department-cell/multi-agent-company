@@ -128,6 +128,10 @@ from app.tools.agents.submit_dependency_report import (
     SUBMIT_DEPENDENCY_REPORT_TOOL,
     submit_dependency_report_handler,
 )
+from app.tools.agents.submit_docker_report import (
+    SUBMIT_DOCKER_REPORT_TOOL,
+    submit_docker_report_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -2888,19 +2892,10 @@ _SUBMIT_SQL_REPORT_TOOL = {
     },
 }
 
-_SUBMIT_DOCKER_REPORT_TOOL = {
-    "name": "submit_docker_report",
-    "description": "Submit Docker agent result.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "action": {"type": "string"},
-            "outcome": {"type": "string"},
-            "files_written": {"type": "array", "items": {"type": "string"}},
-        },
-        "required": ["action", "outcome"],
-    },
-}
+# moved to app/tools/agents/submit_docker_report.py as
+# SUBMIT_DOCKER_REPORT_TOOL / submit_docker_report_handler() —
+# tool_enhance.md productionization pass, tool #186 (2026-09-16).
+_SUBMIT_DOCKER_REPORT_TOOL: dict[str, Any] = SUBMIT_DOCKER_REPORT_TOOL
 
 # moved to app/tools/agents/submit_cicd_report.py as
 # SUBMIT_CICD_REPORT_TOOL / submit_cicd_report_handler() —
@@ -3413,7 +3408,6 @@ def make_docker_agent_handlers(repo_path: str) -> dict[str, Any]:
     """Docker agent: read-only + docker CLI inspection + limited docker actions + write_file."""
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
-    docker_result: dict[str, Any] = {}
 
     # tool_enhance.md productionization pass, tool #109 (2026-08-26) — the
     # real fix (this implementation completely IGNORED the `all` field
@@ -3505,10 +3499,6 @@ def make_docker_agent_handlers(repo_path: str) -> dict[str, Any]:
         diagnosis = _llm_diagnose_deployment_failure(context)
         return f"{context}\n\n=== Diagnosis ===\n{diagnosis}"
 
-    def dk_submit(inp: dict[str, Any]) -> str:
-        docker_result.update(inp)
-        return "Docker report submitted"
-
     handlers["docker_ps"] = dk_docker_ps
     handlers["docker_logs"] = dk_docker_logs
     handlers["docker_exec"] = dk_docker_exec
@@ -3517,8 +3507,7 @@ def make_docker_agent_handlers(repo_path: str) -> dict[str, Any]:
     handlers["docker_build"] = dk_docker_build
     handlers["docker_restart"] = dk_docker_restart
     handlers["write_file"] = _make_write_file_handler(root)
-    handlers["submit_docker_report"] = dk_submit
-    handlers["_docker_result"] = docker_result
+    handlers["submit_docker_report"] = submit_docker_report_handler
     return handlers
 
 
