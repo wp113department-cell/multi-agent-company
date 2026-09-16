@@ -534,6 +534,10 @@ from app.tools.filesystem.summarize_repo import (
     SUMMARIZE_REPO_TOOL,
     summarize_repo_handler,
 )
+from app.tools.filesystem.template_render import (
+    TEMPLATE_RENDER_TOOL,
+    template_render_handler,
+)
 from app.tools.git.generate_commit_msg import (
     GENERATE_COMMIT_MSG_TOOL,
     generate_commit_msg_handler,
@@ -4978,28 +4982,10 @@ _PIP_LIST_TOOL: dict[str, Any] = PIP_LIST_TOOL
 # moved to app/tools/filesystem/base64_encode.py as
 # BASE64_ENCODE_TOOL / base64_encode_handler() — tool_enhance.md
 # productionization pass, tool #122 (2026-08-26).
-_TEMPLATE_RENDER_TOOL: dict[str, Any] = {
-    "name": "template_render",
-    "description": "Render a Jinja2 template string or file with provided variables. Returns the rendered output.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "template": {
-                "type": "string",
-                "description": "Template string (mutually exclusive with path)",
-            },
-            "path": {
-                "type": "string",
-                "description": "Template file path (relative to repo root)",
-            },
-            "vars": {
-                "type": "object",
-                "description": "Variables to inject into the template",
-            },
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/filesystem/template_render.py as
+# TEMPLATE_RENDER_TOOL / template_render_handler() —
+# tool_enhance.md productionization pass, tool #204 (2026-09-16).
+_TEMPLATE_RENDER_TOOL: dict[str, Any] = TEMPLATE_RENDER_TOOL
 
 # AUDIT_Q_BATCH07 §13 gap-closure (2026-08-11) — "Present options (multi-
 # choice): NO — not found | Confirmation payload is binary approve/deny
@@ -7317,32 +7303,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         return base64_encode_handler(root, repo_path, inp)
 
     def template_render_h(inp: dict[str, Any]) -> str:
-        template_str = inp.get("template")
-        path = inp.get("path")
-        variables = dict(inp.get("vars") or {})
-        try:
-            from jinja2 import Template as _Tpl
-
-            if path:
-                template_str = (root / str(path)).read_text(encoding="utf-8")
-            if not template_str:
-                return "[ERROR] Provide either template or path"
-            return str(_Tpl(str(template_str)).render(**variables))
-        except ImportError:
-            src = (
-                str(template_str)
-                if template_str
-                else ((root / str(path)).read_text(encoding="utf-8") if path else "")
-            )
-            if not src:
-                return "[ERROR] jinja2 not installed and no template provided"
-            for k, v in variables.items():
-                src = src.replace("{{" + k + "}}", str(v)).replace(
-                    "{{ " + k + " }}", str(v)
-                )
-            return src
-        except Exception as e:
-            return f"[ERROR] template_render: {e}"
+        return template_render_handler(root, repo_path, inp)
 
     handlers["git_tag"] = git_tag_h
     handlers["git_log_file"] = git_log_file_h

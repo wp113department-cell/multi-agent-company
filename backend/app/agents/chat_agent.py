@@ -204,6 +204,7 @@ from app.tools.filesystem.generate_api_docs_text import (
 )
 from app.tools.filesystem.summarize_folder import summarize_folder_handler
 from app.tools.filesystem.summarize_repo import summarize_repo_handler
+from app.tools.filesystem.template_render import template_render_handler
 from app.tools.git.generate_commit_msg import generate_commit_msg_handler
 from app.tools.filesystem.generate_diagram import generate_diagram_handler
 from app.tools.filesystem.generate_patch import generate_patch_handler
@@ -3893,6 +3894,24 @@ class ChatAgent:
             # generate_changelog_handler's precedent) and delegating
             # to the shared handler.
             return await asyncio.to_thread(summarize_repo_handler, root, inp)
+
+        if tool_name == "template_render":
+            # tool_enhance.md productionization pass, tool #204
+            # (2026-09-16) — was a worktree-escape FULL FILE CONTENT
+            # disclosure oracle on `path` (`root / path` never
+            # validated on either the jinja2-present or jinja2-absent
+            # code path, proved live: a real secret file's content
+            # outside the worktree was disclosed byte-for-byte) AND
+            # advertised in CHAT_TOOLS but never dispatched here at
+            # all, same dispatch class as tools
+            # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131/#132/#133/#134/#135/#136/#137/#138/#139/#140/#141/#142/#144/#202/#203.
+            # Also hardened (defense in depth, not currently
+            # reachable — jinja2 is not installed in this deployment)
+            # against Jinja2 SSTI by switching to a SandboxedEnvironment.
+            # Delegates to the shared, worktree-validated handler.
+            return await asyncio.to_thread(
+                template_render_handler, root, repo, inp
+            )
 
         if tool_name == "bhaskar_tool":
             # Universal "no existing tool fits" fallback —
