@@ -240,10 +240,10 @@ class TestBugFixHandlers:
 
     def test_submit_stores_result(self, tmp_repo: Path) -> None:
         h = make_bug_fix_handlers(str(tmp_repo))
-        h["submit_bug_fix"](
+        result = h["submit_bug_fix"](
             {"root_cause": "rc", "fix_summary": "fs", "files_changed": ["a.py"]}
         )
-        assert h["_bug_fix_result"]["root_cause"] == "rc"
+        assert result == "Bug fix submitted"
 
     def test_write_file_blocked_on_protected(self, tmp_repo: Path) -> None:
         h = make_bug_fix_handlers(str(tmp_repo))

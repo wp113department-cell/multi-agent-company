@@ -693,6 +693,10 @@ from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
 )
+from app.tools.agents.submit_bug_fix import (
+    SUBMIT_BUG_FIX_TOOL,
+    submit_bug_fix_handler,
+)
 from app.tools.agents.capability_gap_scan import (
     CAPABILITY_GAP_SCAN_TOOL,
     capability_gap_scan_handler,
@@ -2799,20 +2803,10 @@ _GIT_DIFF_TOOL_SPEC = GIT_DIFF_TOOL
 
 # --- Day 2 submit tool specs ---
 
-_SUBMIT_BUG_FIX_TOOL = {
-    "name": "submit_bug_fix",
-    "description": "Submit the bug fix: root cause analysis and files modified.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "root_cause": {"type": "string"},
-            "fix_summary": {"type": "string"},
-            "files_changed": {"type": "array", "items": {"type": "string"}},
-            "tests_passed": {"type": "boolean"},
-        },
-        "required": ["root_cause", "fix_summary", "files_changed"],
-    },
-}
+# moved to app/tools/agents/submit_bug_fix.py as
+# SUBMIT_BUG_FIX_TOOL / submit_bug_fix_handler() — tool_enhance.md
+# productionization pass, tool #211 (2026-09-16).
+_SUBMIT_BUG_FIX_TOOL: dict[str, Any] = SUBMIT_BUG_FIX_TOOL
 
 # moved to app/tools/agents/submit_security_report.py as
 # SUBMIT_SECURITY_REPORT_TOOL / submit_security_report_handler() —
@@ -3073,7 +3067,6 @@ def make_bug_fix_handlers(repo_path: str) -> dict[str, Any]:
     """Bug Fix agent: read-only + AST analysis + direct file writes + submit_bug_fix."""
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
-    bug_fix_result: dict[str, Any] = {}
 
     # tool_enhance.md productionization pass, tool #83 (2026-08-24) — the
     # real fix (ZERO worktree-boundary validation + an uncaught
@@ -3118,10 +3111,6 @@ def make_bug_fix_handlers(repo_path: str) -> dict[str, Any]:
     def bf_read_logs(inp: dict[str, Any]) -> str:
         return read_logs_handler(root, repo_path, inp)
 
-    def bf_submit(inp: dict[str, Any]) -> str:
-        bug_fix_result.update(inp)
-        return "Bug fix submitted"
-
     handlers["parse_ast"] = bf_parse_ast
     handlers["call_graph"] = bf_call_graph
     handlers["find_function_body"] = bf_find_function_body
@@ -3130,8 +3119,7 @@ def make_bug_fix_handlers(repo_path: str) -> dict[str, Any]:
     handlers["edit_file"] = _make_edit_file_handler(root)
     handlers["write_file"] = _make_write_file_handler(root)
     handlers["git_diff"] = _make_git_diff_handler(repo_path)
-    handlers["submit_bug_fix"] = bf_submit
-    handlers["_bug_fix_result"] = bug_fix_result
+    handlers["submit_bug_fix"] = submit_bug_fix_handler
     return handlers
 
 
