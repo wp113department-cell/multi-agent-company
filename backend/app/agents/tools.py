@@ -526,6 +526,10 @@ from app.tools.filesystem.generate_api_docs_text import (
     GENERATE_API_DOCS_TEXT_TOOL,
     generate_api_docs_text_handler,
 )
+from app.tools.filesystem.summarize_folder import (
+    SUMMARIZE_FOLDER_TOOL,
+    summarize_folder_handler,
+)
 from app.tools.git.generate_commit_msg import (
     GENERATE_COMMIT_MSG_TOOL,
     generate_commit_msg_handler,
@@ -3939,25 +3943,14 @@ def make_monitoring_agent_handlers(repo_path: str) -> dict[str, Any]:
 # counting), so no injection/worktree surface exists. See that
 # module's own docstring for the full account.
 
-_SUMMARIZE_FOLDER_TOOL: dict[str, Any] = {
-    "name": "summarize_folder",
-    "description": "Return a concise summary of every .py/.ts file in a folder (up to 20 files).",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Relative folder path to summarize",
-            },
-            "extensions": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "File extensions to include (default: .py, .ts, .tsx)",
-            },
-        },
-        "required": ["path"],
-    },
-}
+# moved to app/tools/filesystem/summarize_folder.py as
+# SUMMARIZE_FOLDER_TOOL / summarize_folder_handler() —
+# tool_enhance.md productionization pass, tool #202 (2026-09-16). The
+# comment block immediately above this one belongs to the neighboring
+# _ESTIMATE_COMPLEXITY_TOOL (tool #110) — NOT this tool; its claim of
+# "no injection/worktree surface" does not apply here (see this new
+# module's own docstring for a real, proven worktree-escape finding).
+_SUMMARIZE_FOLDER_TOOL: dict[str, Any] = SUMMARIZE_FOLDER_TOOL
 
 # moved to app/tools/filesystem/generate_api_docs_text.py as
 # GENERATE_API_DOCS_TEXT_TOOL / generate_api_docs_text_handler() —
@@ -6730,40 +6723,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         return estimate_complexity_handler(inp)
 
     def summarize_folder_h(inp: dict[str, Any]) -> str:
-        sf_path = str(inp.get("path", "."))
-        exts = set(inp.get("extensions", [".py", ".ts", ".tsx"]))
-        results: list[str] = []
-        folder = root / sf_path
-        if not folder.exists():
-            return f"[ERROR] Path not found: {sf_path}"
-        count = 0
-        for fp in sorted(folder.rglob("*")):
-            if not fp.is_file():
-                continue
-            if fp.suffix not in exts:
-                continue
-            if count >= 20:
-                results.append("(truncated — 20 file limit)")
-                break
-            try:
-                text = fp.read_text(encoding="utf-8", errors="replace")
-                lines = text.splitlines()
-                n_lines = len(lines)
-                n_funcs = sum(
-                    1
-                    for ln in lines
-                    if ln.strip().startswith("def ")
-                    or ln.strip().startswith("async def ")
-                )
-                n_classes = sum(1 for ln in lines if ln.strip().startswith("class "))
-                rel = fp.relative_to(root)
-                results.append(
-                    f"**{rel}** — {n_lines} lines, {n_funcs} functions, {n_classes} classes"
-                )
-            except Exception as e:
-                results.append(f"[ERROR reading {fp.name}] {e}")
-            count += 1
-        return "\n".join(results) if results else "(no matching files)"
+        return summarize_folder_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #144 (2026-09-14) —
     # was a worktree-escape route/function-name disclosure oracle

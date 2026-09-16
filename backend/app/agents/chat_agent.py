@@ -202,6 +202,7 @@ from app.tools.filesystem.format_file import format_file_handler
 from app.tools.filesystem.generate_api_docs_text import (
     generate_api_docs_text_handler,
 )
+from app.tools.filesystem.summarize_folder import summarize_folder_handler
 from app.tools.git.generate_commit_msg import generate_commit_msg_handler
 from app.tools.filesystem.generate_diagram import generate_diagram_handler
 from app.tools.filesystem.generate_patch import generate_patch_handler
@@ -3860,6 +3861,21 @@ class ChatAgent:
             # Delegates to the shared, worktree-validated handler.
             return await asyncio.to_thread(
                 generate_api_docs_text_handler, root, repo, inp
+            )
+
+        if tool_name == "summarize_folder":
+            # tool_enhance.md productionization pass, tool #202
+            # (2026-09-16) — was a worktree-escape file-existence/
+            # absolute-path disclosure oracle (`root / path` never
+            # validated, proved live: the real absolute path of a
+            # matching file outside the worktree was disclosed via the
+            # tool's own relative_to() ValueError message) AND
+            # advertised in CHAT_TOOLS but never dispatched here at
+            # all, same dispatch class as tools
+            # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131/#132/#133/#134/#135/#136/#137/#138/#139/#140/#141/#142/#144.
+            # Delegates to the shared, worktree-validated handler.
+            return await asyncio.to_thread(
+                summarize_folder_handler, root, repo, inp
             )
 
         if tool_name == "bhaskar_tool":
