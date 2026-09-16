@@ -27,6 +27,10 @@ from app.agents.tools import (
     make_scoped_bash_handler,
     make_submit_enhancement_request_handler,
 )
+from app.tools.agents.submit_fix import (
+    SUBMIT_FIX_TOOL as _SUBMIT_FIX_TOOL_SHARED,
+    submit_fix_handler,
+)
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -112,15 +116,12 @@ _SUBMIT_ENHANCEMENT_TOOL_SPEC = {
         "required": ["title", "description", "category", "priority"],
     },
 }
-_SUBMIT_FIX_TOOL_SPEC = {
-    "name": "submit_fix",
-    "description": "Signal the fix is complete, tested, and committed.",
-    "input_schema": {
-        "type": "object",
-        "properties": {"summary": {"type": "string"}},
-        "required": ["summary"],
-    },
-}
+# moved to app/tools/agents/submit_fix.py as SUBMIT_FIX_TOOL /
+# submit_fix_handler() — tool_enhance.md productionization pass, tool
+# #214 (2026-09-16). Was one of 4 byte-for-byte-identical
+# implementations across agent_performance_reviewer/knowledge_curator/
+# agent_debugger/quality_auditor; unified into one shared pair.
+_SUBMIT_FIX_TOOL_SPEC = _SUBMIT_FIX_TOOL_SHARED
 
 SCAN_TOOLS = [
     READ_ONLY_TOOLS[0],
@@ -222,10 +223,7 @@ def run_agent_debugger_apply(
     handlers["record_learning"] = make_record_learning_handler("agent_debugger")
     handlers["bash"] = make_scoped_bash_handler(repo)
 
-    def submit_h(inp: dict[str, Any]) -> str:
-        return "done"
-
-    handlers["submit_fix"] = submit_h
+    handlers["submit_fix"] = submit_fix_handler
 
     msg = (
         f"Approved bug fix #{request_id}: {description}\n\n"
