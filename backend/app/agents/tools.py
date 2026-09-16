@@ -172,6 +172,10 @@ from app.tools.agents.submit_schema import (
     SUBMIT_SCHEMA_TOOL,
     submit_schema_handler,
 )
+from app.tools.agents.submit_security_report import (
+    SUBMIT_SECURITY_REPORT_TOOL,
+    submit_security_report_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -2778,22 +2782,10 @@ _SUBMIT_BUG_FIX_TOOL = {
     },
 }
 
-_SUBMIT_SECURITY_REPORT_TOOL = {
-    "name": "submit_security_report",
-    "description": "Submit security review findings.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "severity": {
-                "type": "string",
-                "enum": ["critical", "high", "medium", "low", "none"],
-            },
-            "findings": {"type": "array", "items": {"type": "string"}},
-            "recommendations": {"type": "array", "items": {"type": "string"}},
-        },
-        "required": ["severity", "findings", "recommendations"],
-    },
-}
+# moved to app/tools/agents/submit_security_report.py as
+# SUBMIT_SECURITY_REPORT_TOOL / submit_security_report_handler() —
+# tool_enhance.md productionization pass, tool #197 (2026-09-16).
+_SUBMIT_SECURITY_REPORT_TOOL: dict[str, Any] = SUBMIT_SECURITY_REPORT_TOOL
 
 # moved to app/tools/agents/submit_arch_review.py as
 # SUBMIT_ARCH_REVIEW_TOOL / submit_arch_review_handler() —
@@ -3124,7 +3116,6 @@ def make_security_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     """Security reviewer: read-only + specialized search + submit_security_report. No writes."""
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
-    security_result: dict[str, Any] = {}
 
     # tool_enhance.md productionization pass, tool #102 (2026-08-25) — the
     # real fix (ZERO worktree-boundary validation on `directory`) lives
@@ -3165,17 +3156,12 @@ def make_security_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     def sec_find_route(inp: dict[str, Any]) -> str:
         return find_route_handler(root, inp)
 
-    def sec_submit(inp: dict[str, Any]) -> str:
-        security_result.update(inp)
-        return "Security report submitted"
-
     handlers["secrets_scan"] = sec_secrets_scan
     handlers["find_sql"] = sec_find_sql
     handlers["find_config"] = sec_find_config
     handlers["find_api"] = sec_find_api
     handlers["find_route"] = sec_find_route
-    handlers["submit_security_report"] = sec_submit
-    handlers["_security_result"] = security_result
+    handlers["submit_security_report"] = submit_security_report_handler
     return handlers
 
 

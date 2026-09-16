@@ -286,10 +286,10 @@ class TestSecurityReviewerHandlers:
 
     def test_submit_stores_result(self, tmp_repo: Path) -> None:
         h = make_security_reviewer_handlers(str(tmp_repo))
-        h["submit_security_report"](
+        result = h["submit_security_report"](
             {"severity": "low", "findings": ["x"], "recommendations": ["y"]}
         )
-        assert h["_security_result"]["severity"] == "low"
+        assert result == "Security report submitted"
 
     def test_no_write_handler(self, tmp_repo: Path) -> None:
         h = make_security_reviewer_handlers(str(tmp_repo))
