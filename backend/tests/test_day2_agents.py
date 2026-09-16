@@ -387,8 +387,10 @@ class TestMonitoringHandlers:
 
     def test_submit_stores_result(self, tmp_repo: Path) -> None:
         h = make_monitoring_agent_handlers(str(tmp_repo))
-        h["submit_monitoring_report"]({"status": "healthy", "metrics": {"cpu": "5%"}})
-        assert h["_monitoring_result"]["status"] == "healthy"
+        result = h["submit_monitoring_report"](
+            {"status": "healthy", "metrics": {"cpu": "5%"}}
+        )
+        assert result == "Monitoring report submitted"
 
     def test_no_write_handler(self, tmp_repo: Path) -> None:
         h = make_monitoring_agent_handlers(str(tmp_repo))

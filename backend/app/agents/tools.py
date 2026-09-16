@@ -140,6 +140,10 @@ from app.tools.agents.submit_migration import (
     SUBMIT_MIGRATION_TOOL,
     submit_migration_handler,
 )
+from app.tools.agents.submit_monitoring_report import (
+    SUBMIT_MONITORING_REPORT_TOOL,
+    submit_monitoring_report_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -2910,20 +2914,10 @@ _SUBMIT_REFACTOR_REPORT_TOOL = {
 # history preserved in that module's own docstring.
 _SUBMIT_DEPENDENCY_REPORT_TOOL: dict[str, Any] = SUBMIT_DEPENDENCY_REPORT_TOOL
 
-_SUBMIT_MONITORING_REPORT_TOOL = {
-    "name": "submit_monitoring_report",
-    "description": "Submit system monitoring report.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "status": {"type": "string", "enum": ["healthy", "warning", "critical"]},
-            "metrics": {"type": "object"},
-            "issues": {"type": "array", "items": {"type": "string"}},
-            "recommendations": {"type": "array", "items": {"type": "string"}},
-        },
-        "required": ["status", "metrics"],
-    },
-}
+# moved to app/tools/agents/submit_monitoring_report.py as
+# SUBMIT_MONITORING_REPORT_TOOL / submit_monitoring_report_handler() —
+# tool_enhance.md productionization pass, tool #189 (2026-09-16).
+_SUBMIT_MONITORING_REPORT_TOOL: dict[str, Any] = SUBMIT_MONITORING_REPORT_TOOL
 
 _CICD_BASH_TOOL_SPEC = {
     "name": "bash",
@@ -3920,7 +3914,6 @@ def make_monitoring_agent_handlers(repo_path: str) -> dict[str, Any]:
     """Monitoring agent: read-only + system metrics + submit_monitoring_report. No writes."""
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
-    monitoring_result: dict[str, Any] = {}
 
     # tool_enhance.md productionization pass, tool #105 (2026-08-25) — the
     # real fix (this implementation had no try/except around the top
@@ -3982,18 +3975,13 @@ def make_monitoring_agent_handlers(repo_path: str) -> dict[str, Any]:
     def mon_read_logs(inp: dict[str, Any]) -> str:
         return read_logs_handler(root, repo_path, inp)
 
-    def mon_submit(inp: dict[str, Any]) -> str:
-        monitoring_result.update(inp)
-        return "Monitoring report submitted"
-
     handlers["cpu_usage"] = mon_cpu_usage
     handlers["memory_usage"] = mon_memory_usage
     handlers["disk_usage"] = mon_disk_usage
     handlers["health_check"] = mon_health_check
     handlers["task_progress"] = mon_task_progress
     handlers["read_logs"] = mon_read_logs
-    handlers["submit_monitoring_report"] = mon_submit
-    handlers["_monitoring_result"] = monitoring_result
+    handlers["submit_monitoring_report"] = submit_monitoring_report_handler
     return handlers
 
 
