@@ -148,6 +148,10 @@ from app.tools.agents.submit_perf_review import (
     SUBMIT_PERF_REVIEW_TOOL,
     submit_perf_review_handler,
 )
+from app.tools.agents.submit_qa_result import (
+    SUBMIT_QA_RESULT_TOOL,
+    make_submit_qa_result_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -1267,33 +1271,14 @@ _QA_BASH_TOOL = {
     },
 }
 
-_SUBMIT_QA_TOOL = {
-    "name": "submit_qa_result",
-    "description": "Submit the final QA result after all checks are complete.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "status": {"type": "string", "enum": ["passed", "failed"]},
-            "tests_run": {"type": "integer"},
-            "tests_passed": {"type": "integer"},
-            "tests_failed": {"type": "integer"},
-            "typecheck_clean": {"type": "boolean"},
-            "lint_clean": {"type": "boolean"},
-            "errors": {"type": "array", "items": {"type": "string"}},
-            "summary": {"type": "string"},
-        },
-        "required": [
-            "status",
-            "tests_run",
-            "tests_passed",
-            "tests_failed",
-            "typecheck_clean",
-            "lint_clean",
-            "errors",
-            "summary",
-        ],
-    },
-}
+# moved to app/tools/agents/submit_qa_result.py as
+# SUBMIT_QA_RESULT_TOOL / make_submit_qa_result_handler() —
+# tool_enhance.md productionization pass, tool #191 (2026-09-16). Not a
+# dead accumulator (unlike sibling tools #180-#186/#188-#190) —
+# qa_result is genuinely read by app/agents/qa.py's run_qa() via
+# handlers["_qa_result"], on both its success and retry-giveup paths.
+# See that module's own docstring.
+_SUBMIT_QA_TOOL: dict[str, Any] = SUBMIT_QA_RESULT_TOOL
 
 # QA has read tools + bash (test only) + submit_qa_result. NO write_file, NO edit.
 QA_TOOLS = READ_ONLY_TOOLS + [_QA_BASH_TOOL, _SUBMIT_QA_TOOL, RECORD_LEARNING_TOOL]
@@ -1667,12 +1652,8 @@ def make_qa_handlers(worktree_path: str, repo_path: str) -> dict[str, Any]:
         out = (stdout + stderr)[:6000]
         return out if out else "(no output)"
 
-    def submit_qa_result(inp: dict[str, Any]) -> str:
-        qa_result.update(inp)
-        return "QA result submitted"
-
     handlers["bash"] = bash
-    handlers["submit_qa_result"] = submit_qa_result
+    handlers["submit_qa_result"] = make_submit_qa_result_handler(qa_result)
     handlers["_qa_result"] = qa_result  # caller reads this after run
     return handlers
 
