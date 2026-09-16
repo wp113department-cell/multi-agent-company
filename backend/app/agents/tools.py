@@ -541,6 +541,10 @@ from app.tools.execution.type_check import (
     TYPE_CHECK_TOOL,
     type_check_handler,
 )
+from app.tools.filesystem.unzip_files import (
+    UNZIP_FILES_TOOL,
+    unzip_files_handler,
+)
 from app.tools.git.generate_commit_msg import (
     GENERATE_COMMIT_MSG_TOOL,
     generate_commit_msg_handler,
@@ -4808,24 +4812,10 @@ _ZIP_FILES_TOOL: dict[str, Any] = {
         "required": ["source"],
     },
 }
-_UNZIP_FILES_TOOL: dict[str, Any] = {
-    "name": "unzip_files",
-    "description": "Extract a .zip archive to a directory.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "archive": {
-                "type": "string",
-                "description": ".zip file path (relative to repo root)",
-            },
-            "dest": {
-                "type": "string",
-                "description": "Destination directory (default: archive directory)",
-            },
-        },
-        "required": ["archive"],
-    },
-}
+# moved to app/tools/filesystem/unzip_files.py as
+# UNZIP_FILES_TOOL / unzip_files_handler() — tool_enhance.md
+# productionization pass, tool #206 (2026-09-16).
+_UNZIP_FILES_TOOL: dict[str, Any] = UNZIP_FILES_TOOL
 # moved to app/tools/filesystem/move_file.py as MOVE_FILE_TOOL — tool_enhance.md productionization pass, tool #52 (2026-08-20).
     # moved to app/tools/filesystem/hash_file.py as HASH_FILE_TOOL /
     # hash_file_handler() — tool_enhance.md productionization pass,
@@ -6954,18 +6944,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] zip_files: {e}"
 
     def unzip_files_h(inp: dict[str, Any]) -> str:
-        import zipfile as _zf
-
-        archive = str(inp["archive"])
-        dest = str(inp.get("dest", str((root / archive).parent)))
-        arc_path = root / archive
-        dest_path = root / dest if not (root / dest).is_absolute() else Path(dest)
-        try:
-            with _zf.ZipFile(str(arc_path), "r") as zf:
-                zf.extractall(str(dest_path))
-            return f"Extracted {archive} to {dest}"
-        except Exception as e:
-            return f"[ERROR] unzip_files: {e}"
+        return unzip_files_handler(root, repo_path, inp)
 
     # moved to app/tools/filesystem/move_file.py — this now calls the shared, hardened move_file_handler()
     def move_file_h(inp: dict[str, Any]) -> str:

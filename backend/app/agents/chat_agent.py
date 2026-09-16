@@ -206,6 +206,7 @@ from app.tools.filesystem.summarize_folder import summarize_folder_handler
 from app.tools.filesystem.summarize_repo import summarize_repo_handler
 from app.tools.filesystem.template_render import template_render_handler
 from app.tools.execution.type_check import type_check_handler
+from app.tools.filesystem.unzip_files import unzip_files_handler
 from app.tools.git.generate_commit_msg import generate_commit_msg_handler
 from app.tools.filesystem.generate_diagram import generate_diagram_handler
 from app.tools.filesystem.generate_patch import generate_patch_handler
@@ -3891,6 +3892,26 @@ class ChatAgent:
             return await asyncio.to_thread(
                 template_render_handler, root, repo, inp
             )
+
+        if tool_name == "unzip_files":
+            # tool_enhance.md productionization pass, tool #206
+            # (2026-09-16) — real, severe finding: `dest` resolution
+            # was a tautological ternary that ALWAYS discarded `root`
+            # (since root/dest is always absolute when root is),
+            # amounting to an arbitrary-directory-write primitive —
+            # proved live: a real archive was extracted to a real
+            # absolute path completely outside the worktree. Also
+            # `archive` had zero worktree-boundary validation. AND
+            # advertised in CHAT_TOOLS but never dispatched here at
+            # all, same dispatch class as tools
+            # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131/#132/#133/#134/#135/#136/#137/#138/#139/#140/#141/#142/#144/#202/#203/#204.
+            # Classic "zip slip" via crafted archive entry names was
+            # investigated and empirically REFUTED on this project's
+            # real Python 3.12.3 zipfile.extractall() (already
+            # sanitizes traversal/absolute entries). Delegates to the
+            # shared, worktree-validated, dest-resolution-fixed
+            # handler.
+            return await asyncio.to_thread(unzip_files_handler, root, repo, inp)
 
         if tool_name == "bhaskar_tool":
             # Universal "no existing tool fits" fallback —

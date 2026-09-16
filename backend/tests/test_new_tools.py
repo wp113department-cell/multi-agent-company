@@ -111,6 +111,12 @@ def test_zip_unzip(tmp_path: Path) -> None:
     out_dir.mkdir()
     unzip_result = h["unzip_files"]({"archive": "mydir.zip", "dest": "extracted"})
     assert "extracted" in unzip_result or "Extracted" in unzip_result
+    # Real assertion (tool #206 productionization pass, 2026-09-16):
+    # `dest` must resolve relative to the repo root (tmp_path), not the
+    # test-runner process's cwd — the previous handler's dest-resolution
+    # ternary was a tautology that always discarded root, silently
+    # extracting to the wrong location without failing this test.
+    assert (out_dir / "mydir" / "file.txt").exists()
 
 
 def test_create_directory(tmp_path: Path) -> None:
