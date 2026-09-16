@@ -701,6 +701,10 @@ from app.tools.agents.capability_gap_scan import (
     CAPABILITY_GAP_SCAN_TOOL,
     capability_gap_scan_handler,
 )
+from app.tools.agents.fleet_metrics_read import (
+    FLEET_METRICS_READ_TOOL,
+    fleet_metrics_read_handler,
+)
 from app.tools.agents.submit_enhancement_request import (
     SUBMIT_ENHANCEMENT_REQUEST_TOOL,
     make_submit_enhancement_request_handler as make_submit_enhancement_request_handler,
@@ -7247,62 +7251,15 @@ def _new_isolated_db_engine() -> Any:
     return create_async_engine(_gs().database_url, pool_pre_ping=True)
 
 
-_FLEET_METRICS_READ_TOOL: dict[str, Any] = {
-    "name": "fleet_metrics_read",
-    "description": "Read real runtime performance data for an agent (or the whole fleet): recent runs, p50/p95 latency, average tool accuracy. Use this before claiming an agent is slow or unreliable — never guess.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "agent_name": {
-                "type": "string",
-                "description": "Agent to inspect. Omit to see the most recent runs across all agents.",
-            },
-            "n": {
-                "type": "integer",
-                "description": "Max runs to consider (default 20).",
-            },
-        },
-        "required": [],
-    },
-}
-
-
-def fleet_metrics_read(inp: dict[str, Any]) -> str:
-    from app.fleet.metrics import get_metrics_collector
-
-    agent_name = str(inp.get("agent_name", "")).strip()
-    n = int(inp.get("n", 20))
-    collector = get_metrics_collector()
-
-    if not agent_name:
-        runs = collector.recent(n)
-        if not runs:
-            return "(no runs recorded yet)"
-        lines = [
-            f"{m.agent_name}: status={m.status} time={m.execution_time_ms:.0f}ms tokens_in={m.tokens_in} tokens_out={m.tokens_out}"
-            for m in runs
-        ]
-        return "\n".join(lines)
-
-    runs = collector.by_agent(agent_name, n)
-    if not runs:
-        return f"(no recorded runs for agent {agent_name!r})"
-    p50 = collector.p50_latency_ms(agent_name)
-    p95 = collector.p95_latency_ms(agent_name)
-    accuracy = collector.avg_tool_accuracy(agent_name)
-    failed = sum(1 for m in runs if m.status == "failed")
-    lines = [
-        f"agent: {agent_name}",
-        f"runs considered: {len(runs)} (failed: {failed})",
-        f"p50 latency: {p50:.0f}ms" if p50 is not None else "p50 latency: n/a",
-        f"p95 latency: {p95:.0f}ms" if p95 is not None else "p95 latency: n/a",
-        (
-            f"avg tool accuracy: {accuracy:.2f}"
-            if accuracy is not None
-            else "avg tool accuracy: n/a"
-        ),
-    ]
-    return "\n".join(lines)
+# moved to app/tools/agents/fleet_metrics_read.py as
+# FLEET_METRICS_READ_TOOL / fleet_metrics_read_handler() —
+# tool_enhance.md productionization pass, tool #215 (2026-09-16).
+# Real finding: the original body had zero try/except anywhere, so a
+# malformed `n` (e.g. "not-a-number") raised an uncaught ValueError
+# straight out of the handler. Fixed by moving the numeric coercion
+# into its own try/except (TypeError, ValueError).
+_FLEET_METRICS_READ_TOOL: dict[str, Any] = FLEET_METRICS_READ_TOOL
+fleet_metrics_read = fleet_metrics_read_handler
 
 
 _AUDIT_LOG_READ_TOOL: dict[str, Any] = {
