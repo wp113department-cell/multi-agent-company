@@ -164,6 +164,10 @@ from app.tools.agents.submit_result import (
     SUBMIT_RESULT_TOOL,
     submit_result_handler,
 )
+from app.tools.agents.submit_review import (
+    SUBMIT_REVIEW_TOOL,
+    make_submit_review_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -1295,35 +1299,14 @@ _SUBMIT_QA_TOOL: dict[str, Any] = SUBMIT_QA_RESULT_TOOL
 # QA has read tools + bash (test only) + submit_qa_result. NO write_file, NO edit.
 QA_TOOLS = READ_ONLY_TOOLS + [_QA_BASH_TOOL, _SUBMIT_QA_TOOL, RECORD_LEARNING_TOOL]
 
-_SUBMIT_REVIEW_TOOL = {
-    "name": "submit_review",
-    "description": "Submit the structured code review findings.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "findings": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "severity": {
-                            "type": "string",
-                            "enum": ["blocking", "non-blocking", "suggestion"],
-                        },
-                        "file": {"type": "string"},
-                        "line": {"type": ["integer", "null"]},
-                        "finding": {"type": "string"},
-                        "recommendation": {"type": "string"},
-                    },
-                    "required": ["severity", "file", "finding", "recommendation"],
-                },
-            },
-            "verdict": {"type": "string", "enum": ["approved", "changes_required"]},
-            "summary": {"type": "string"},
-        },
-        "required": ["findings", "verdict", "summary"],
-    },
-}
+# moved to app/tools/agents/submit_review.py as
+# SUBMIT_REVIEW_TOOL / make_submit_review_handler() —
+# tool_enhance.md productionization pass, tool #195 (2026-09-16). Not
+# a dead accumulator (unlike sibling tools #180-#186/#188-#190/#192)
+# — review_result is genuinely read by app/agents/reviewer.py's
+# run_reviewer() via handlers["_review_result"]. See that module's
+# own docstring.
+_SUBMIT_REVIEW_TOOL: dict[str, Any] = SUBMIT_REVIEW_TOOL
 
 # Reviewer has read tools ONLY + submit_review. NO bash, NO write, NO edit.
 REVIEWER_TOOLS = READ_ONLY_TOOLS + [_SUBMIT_REVIEW_TOOL, RECORD_LEARNING_TOOL]
@@ -1675,11 +1658,7 @@ def make_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     handlers = make_read_only_handlers(repo_path)
     review_result: dict[str, Any] = {}
 
-    def submit_review(inp: dict[str, Any]) -> str:
-        review_result.update(inp)
-        return "Review submitted"
-
-    handlers["submit_review"] = submit_review
+    handlers["submit_review"] = make_submit_review_handler(review_result)
     handlers["_review_result"] = review_result  # caller reads this after run
     return handlers
 
