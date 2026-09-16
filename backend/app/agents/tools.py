@@ -156,6 +156,10 @@ from app.tools.agents.submit_refactor_report import (
     SUBMIT_REFACTOR_REPORT_TOOL,
     submit_refactor_report_handler,
 )
+from app.tools.agents.submit_research import (
+    SUBMIT_RESEARCH_TOOL,
+    make_submit_research_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -1716,38 +1720,14 @@ def make_devops_handlers(repo_path: str) -> dict[str, Any]:
 # above, aliased to _WEB_SEARCH_TOOL after the import block). No
 # vulnerability found — see that module's docstring.
 
-_SUBMIT_RESEARCH_TOOL = {
-    "name": "submit_research",
-    "description": "Submit the final research report with findings, library recommendations, approach, and risks.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "findings": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Key findings from the research",
-            },
-            "relevantLibraries": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string"},
-                        "version": {"type": "string"},
-                        "rationale": {"type": "string"},
-                    },
-                    "required": ["name", "rationale"],
-                },
-            },
-            "recommendedApproach": {"type": "string"},
-            "risks": {
-                "type": "array",
-                "items": {"type": "string"},
-            },
-        },
-        "required": ["findings", "relevantLibraries", "recommendedApproach", "risks"],
-    },
-}
+# moved to app/tools/agents/submit_research.py as
+# SUBMIT_RESEARCH_TOOL / make_submit_research_handler() —
+# tool_enhance.md productionization pass, tool #193 (2026-09-16). Not
+# a dead accumulator (unlike sibling tools #180-#186/#188-#190/#192)
+# — research_result is genuinely read by app/agents/research.py's
+# run_research() via handlers["_research_result"]. See that module's
+# own docstring.
+_SUBMIT_RESEARCH_TOOL: dict[str, Any] = SUBMIT_RESEARCH_TOOL
 
 # Research agent: minimal read tools + submit_research only (no AST tools, no web_search placeholder).
 # Kept small to stay within free-tier TPM limits — the agent can read files and search code.
@@ -1776,15 +1756,11 @@ def make_research_handlers(repo_path: str) -> dict[str, Any]:
     handlers = make_read_only_handlers(repo_path)
     research_result: dict[str, Any] = {}
 
-    def submit_research(inp: dict[str, Any]) -> str:
-        research_result.update(inp)
-        return "Research report submitted"
-
     # tool_enhance.md productionization pass, tool #88 (2026-08-24) — the
     # real logic now lives in web_search_handler(); see that
     # function's own module docstring.
     handlers["web_search"] = web_search_handler
-    handlers["submit_research"] = submit_research
+    handlers["submit_research"] = make_submit_research_handler(research_result)
     handlers["_research_result"] = research_result  # caller reads this after run
     return handlers
 
