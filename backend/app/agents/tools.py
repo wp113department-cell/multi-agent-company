@@ -801,6 +801,10 @@ from app.tools.git.commit import (
     GIT_COMMIT_TOOL as _GIT_COMMIT_TOOL,
     stage_and_commit as stage_and_commit,
 )
+from app.tools.git.commit_change import (
+    GIT_COMMIT_CHANGE_TOOL,
+    make_git_commit_change_handler as make_git_commit_change_handler,
+)
 from app.tools.git.create_branch import (
     CREATE_BRANCH_TOOL as _CREATE_BRANCH_TOOL,
     validate_create_branch_inputs as validate_create_branch_inputs,
@@ -7667,85 +7671,12 @@ BUG_FIX_TOOLS.append(_DELEGATE_TO_AGENT_TOOL)
 # REPORT.
 
 
-_GIT_COMMIT_CHANGE_TOOL: dict[str, Any] = {
-    "name": "git_commit_change",
-    "description": "Stage exactly the named files (never all changes) and commit them. Only usable in the APPLY phase, after a human has approved this specific fix.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "files": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Paths (relative to repo root) to stage. Never pass a wildcard — list every file explicitly.",
-            },
-            "message": {"type": "string", "description": "Commit message."},
-        },
-        "required": ["files", "message"],
-    },
-}
-
-
-def make_git_commit_change_handler(repo_path: str) -> Any:
-    def git_commit_change(inp: dict[str, Any]) -> str:
-        files = [str(f) for f in (inp.get("files") or [])]
-        message = str(inp.get("message", "")).strip()
-        if not files:
-            return "[ERROR] files is required — list every file explicitly, never a wildcard"
-        if not message:
-            return "[ERROR] message is required"
-
-        for f in files:
-            result = check_path_in_worktree(f, repo_path)
-            if not result.allowed:
-                return f"[POLICY DENIED] {f}: {result.reason}"
-            fpath = Path(repo_path) / f
-            if fpath.is_file():
-                try:
-                    fcontent = fpath.read_text(encoding="utf-8", errors="ignore")
-                except Exception:
-                    fcontent = ""
-                secret_reason = _scan_content_for_secrets(fcontent)
-                if secret_reason:
-                    return (
-                        f"[POLICY DENIED] Refusing to commit {f}: {secret_reason}. "
-                        "Remove the secret and use an environment variable/config "
-                        "reference instead."
-                    )
-
-        try:
-            add_result = subprocess.run(
-                ["git", "add", "--"] + files,
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if add_result.returncode != 0:
-                return f"[ERROR] git add failed: {add_result.stderr.strip()}"
-            commit_result = subprocess.run(
-                ["git", "commit", "-m", message],
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if commit_result.returncode != 0:
-                return f"[ERROR] git commit failed: {(commit_result.stdout + commit_result.stderr).strip()}"
-            sha_result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            sha = sha_result.stdout.strip()
-            return f"Committed {len(files)} file(s) as {sha[:12]}: {message}"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] git operation timed out"
-        except Exception as exc:
-            return f"[ERROR] {exc}"
-
-    return git_commit_change
+# moved to app/tools/git/commit_change.py as
+# GIT_COMMIT_CHANGE_TOOL / make_git_commit_change_handler() —
+# tool_enhance.md productionization pass, tool #213 (2026-09-16).
+# Re-exported under the old name for backward compatibility — all 4
+# real consumer files keep importing from here unchanged.
+_GIT_COMMIT_CHANGE_TOOL: dict[str, Any] = GIT_COMMIT_CHANGE_TOOL
 
 
 def _role_prompt_name(rel: str) -> str | None:
