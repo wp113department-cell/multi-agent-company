@@ -205,6 +205,7 @@ from app.tools.filesystem.generate_api_docs_text import (
 from app.tools.filesystem.summarize_folder import summarize_folder_handler
 from app.tools.filesystem.summarize_repo import summarize_repo_handler
 from app.tools.filesystem.template_render import template_render_handler
+from app.tools.execution.type_check import type_check_handler
 from app.tools.git.generate_commit_msg import generate_commit_msg_handler
 from app.tools.filesystem.generate_diagram import generate_diagram_handler
 from app.tools.filesystem.generate_patch import generate_patch_handler
@@ -2576,39 +2577,17 @@ class ChatAgent:
             return await asyncio.to_thread(coverage_report_handler, root, repo, inp)
 
         if tool_name == "type_check":
-            tc_path = str(inp.get("path", ""))
-            tc_strict = bool(inp.get("strict", False))
-            tc_lang = str(inp.get("language", "both"))
-            # AUDIT_Q_BATCH01 §1 "Windows terminal support" — was hardcoded
-            # POSIX `source`, silently never activating the venv on Windows
-            # (relative path is safe here: _run_subprocess always passes
-            # cwd=repo, so the shell's starting directory is already repo,
-            # matching this line's previous absolute-path behavior exactly
-            # on POSIX while adding a real Windows branch).
-            activate = _venv_activate_snippet()
-            tc_results: list[str] = []
-            if tc_lang in ("python", "both"):
-                py_path = tc_path or "backend/"
-                sf = "--strict" if tc_strict else "--ignore-missing-imports"
-                tc_results.append(
-                    await asyncio.to_thread(
-                        _run_subprocess,
-                        f"{activate} && python -m mypy {py_path} {sf} 2>&1 | head -60",
-                        repo,
-                        90,
-                    )
-                )
-            if tc_lang in ("typescript", "both"):
-                web = str(root.parent / "apps" / "web")
-                tc_results.append(
-                    await asyncio.to_thread(
-                        _run_subprocess,
-                        f"cd {web} && npx tsc --noEmit 2>&1 | head -60",
-                        repo,
-                        90,
-                    )
-                )
-            return "\n\n".join(tc_results) or "[ERROR] No language selected"
+            # tool_enhance.md productionization pass, tool #205
+            # (2026-09-16) — real, severe finding: this dispatch's
+            # `path` was interpolated completely unquoted into an
+            # f-string shell=True command (proved live: a real
+            # payload injected and executed an arbitrary command) —
+            # the sibling make_chat_handlers() implementation was
+            # already safe (shlex.quote()'d). Now delegates to that
+            # same shared, fixed handler — also picking up its
+            # parse_diagnostic_summary() one-line output prefix, which
+            # this dispatch previously lacked entirely.
+            return await asyncio.to_thread(type_check_handler, root, repo, inp)
 
         # ========== BATCH 5 — Code Intelligence ==========
 

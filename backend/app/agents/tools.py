@@ -12,7 +12,6 @@ from app.agents.conflict_resolution import (
     _apply_conflict_resolutions as _apply_conflict_resolutions,
     _parse_conflict_markers as _parse_conflict_markers,
 )
-from app.agents.output_parsers import parse_diagnostic_summary
 from app.agents.tool_security import (
     _docker_container_risk_reason as _docker_container_risk_reason,
     _extract_patch_target_paths as _extract_patch_target_paths,
@@ -537,6 +536,10 @@ from app.tools.filesystem.summarize_repo import (
 from app.tools.filesystem.template_render import (
     TEMPLATE_RENDER_TOOL,
     template_render_handler,
+)
+from app.tools.execution.type_check import (
+    TYPE_CHECK_TOOL,
+    type_check_handler,
 )
 from app.tools.git.generate_commit_msg import (
     GENERATE_COMMIT_MSG_TOOL,
@@ -2435,29 +2438,10 @@ _RUN_SINGLE_TEST_TOOL = RUN_SINGLE_TEST_TOOL
 # flag-collision + worktree escape on `path`. See that module's own
 # docstring for the full account.
 
-_TYPE_CHECK_TOOL = {
-    "name": "type_check",
-    "description": "Run static type checking (mypy for Python, tsc for TypeScript). Returns type errors.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Path to check (default: backend/ for Python, apps/web/ for TS)",
-            },
-            "strict": {
-                "type": "boolean",
-                "description": "Use --strict mode for mypy (default: false)",
-            },
-            "language": {
-                "type": "string",
-                "enum": ["python", "typescript", "both"],
-                "description": "Which language to check (default: both)",
-            },
-        },
-        "required": [],
-    },
-}
+# moved to app/tools/execution/type_check.py as
+# TYPE_CHECK_TOOL / type_check_handler() — tool_enhance.md
+# productionization pass, tool #205 (2026-09-16).
+_TYPE_CHECK_TOOL: dict[str, Any] = TYPE_CHECK_TOOL
 
 # ---------------------------------------------------------------------------
 # NEW TOOL SPECS — Batch 5: Code Intelligence
@@ -5899,46 +5883,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         return coverage_report_handler(root, repo_path, inp)
 
     def type_check(inp: dict[str, Any]) -> str:
-        import shlex as _shlex
-
-        tc_path = str(inp.get("path", ""))
-        tc_strict = bool(inp.get("strict", False))
-        tc_lang = str(inp.get("language", "both"))
-        activate = (
-            _venv_activate_snippet()
-        )  # cwd=repo_path is passed to subprocess.run below
-        tc_results: list[str] = []
-        if tc_lang in ("python", "both"):
-            py_path = _shlex.quote(tc_path) if tc_path else "backend/"
-            strict_flag = "--strict" if tc_strict else "--ignore-missing-imports"
-            cmd = (
-                f"{activate} && python -m mypy {py_path} {strict_flag} 2>&1 | head -60"
-            )
-            r = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                cwd=repo_path,
-                timeout=90,
-            )
-            tc_mypy_out = (r.stdout + r.stderr)[:3000] or "clean"
-            tc_mypy_summary = parse_diagnostic_summary(tc_mypy_out, "mypy")
-            tc_results.append(
-                f"=== mypy ==={f' {tc_mypy_summary}' if tc_mypy_summary else ''}\n{tc_mypy_out}"
-            )
-        if tc_lang in ("typescript", "both"):
-            web = str(root.parent / "apps" / "web")
-            cmd = f"cd {web} && npx tsc --noEmit 2>&1 | head -60"
-            r = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, timeout=90
-            )
-            tc_tsc_out = (r.stdout + r.stderr)[:3000] or "clean"
-            tc_tsc_summary = parse_diagnostic_summary(tc_tsc_out, "tsc")
-            tc_results.append(
-                f"=== tsc ==={f' {tc_tsc_summary}' if tc_tsc_summary else ''}\n{tc_tsc_out}"
-            )
-        return "\n\n".join(tc_results) if tc_results else "[ERROR] No language selected"
+        return type_check_handler(root, repo_path, inp)
 
     # =========================================================================
     # BATCH 5 — Code Intelligence
