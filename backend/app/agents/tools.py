@@ -176,6 +176,10 @@ from app.tools.agents.submit_security_report import (
     SUBMIT_SECURITY_REPORT_TOOL,
     submit_security_report_handler,
 )
+from app.tools.agents.submit_sprint_plan import (
+    SUBMIT_SPRINT_PLAN_TOOL,
+    submit_sprint_plan_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -4082,20 +4086,10 @@ _SUBMIT_STYLE_REVIEW_TOOL: dict[str, Any] = {
     },
 }
 
-_SUBMIT_SPRINT_PLAN_TOOL: dict[str, Any] = {
-    "name": "submit_sprint_plan",
-    "description": "Submit a sprint plan with stories and estimates.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "goal": {"type": "string"},
-            "stories": {"type": "array", "items": {"type": "object"}},
-            "total_points": {"type": "integer"},
-            "risks": {"type": "array", "items": {"type": "string"}},
-        },
-        "required": ["goal", "stories"],
-    },
-}
+# moved to app/tools/agents/submit_sprint_plan.py as
+# SUBMIT_SPRINT_PLAN_TOOL / submit_sprint_plan_handler() —
+# tool_enhance.md productionization pass, tool #198 (2026-09-16).
+_SUBMIT_SPRINT_PLAN_TOOL: dict[str, Any] = SUBMIT_SPRINT_PLAN_TOOL
 
 # moved to app/tools/agents/submit_ba_result.py as
 # SUBMIT_BA_RESULT_TOOL / submit_ba_result_handler() —
@@ -4362,7 +4356,6 @@ def make_style_reviewer_handlers(repo_path: str) -> dict[str, Any]:
 def make_sprint_planner_handlers(repo_path: str) -> dict[str, Any]:
     """Handler factory for Sprint Planner agent."""
     handlers = make_read_only_handlers(repo_path)
-    sprint_result: dict[str, Any] = {}
 
     # tool_enhance.md productionization pass, tool #110 (2026-08-26) — the
     # real fix (this tool was advertised in CHAT_TOOLS but chat_agent.py
@@ -4373,13 +4366,8 @@ def make_sprint_planner_handlers(repo_path: str) -> dict[str, Any]:
     def sp_estimate_complexity(inp: dict[str, Any]) -> str:
         return estimate_complexity_handler(inp)
 
-    def sp_submit(inp: dict[str, Any]) -> str:
-        sprint_result.update(inp)
-        return "Sprint plan submitted"
-
     handlers["estimate_complexity"] = sp_estimate_complexity
-    handlers["submit_sprint_plan"] = sp_submit
-    handlers["_sprint_result"] = sprint_result
+    handlers["submit_sprint_plan"] = submit_sprint_plan_handler
     return handlers
 
 
