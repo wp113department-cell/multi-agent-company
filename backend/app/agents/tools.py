@@ -701,6 +701,10 @@ from app.tools.agents.capability_gap_scan import (
     CAPABILITY_GAP_SCAN_TOOL,
     capability_gap_scan_handler,
 )
+from app.tools.agents.submit_enhancement_request import (
+    SUBMIT_ENHANCEMENT_REQUEST_TOOL,
+    make_submit_enhancement_request_handler as make_submit_enhancement_request_handler,
+)
 from app.tools.filesystem.file_info import (
     FILE_INFO_TOOL,
     file_info_handler,
@@ -7345,119 +7349,12 @@ _CAPABILITY_GAP_SCAN_TOOL: dict[str, Any] = CAPABILITY_GAP_SCAN_TOOL
 capability_gap_scan = capability_gap_scan_handler
 
 
-_SUBMIT_ENHANCEMENT_REQUEST_TOOL: dict[str, Any] = {
-    "name": "submit_enhancement_request",
-    "description": (
-        "File a proposed enhancement for human review on the Fleet Dashboard. "
-        "Call this only when you have real evidence for a genuine issue or improvement — "
-        "an empty scan with nothing to report is a normal, expected outcome, not a failure. "
-        "This only creates a pending request; nothing changes on disk until a human approves it."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "title": {"type": "string", "description": "Short title, plain language."},
-            "description": {
-                "type": "string",
-                "description": "Full explanation in plain, non-technical-jargon language — this is what the human reads to decide approve/reject.",
-            },
-            "category": {
-                "type": "string",
-                "enum": [
-                    "performance",
-                    "bug",
-                    "orchestration",
-                    "knowledge",
-                    "quality",
-                    "security",
-                ],
-            },
-            "priority": {"type": "string", "enum": ["emergency", "medium", "low"]},
-            "evidence": {
-                "type": "object",
-                "description": "file:line citations, metrics, or other evidence backing this claim.",
-            },
-        },
-        "required": ["title", "description", "category", "priority"],
-    },
-}
-
-
-def make_submit_enhancement_request_handler(
-    agent_name: str, trace_id: str = "", repo_path: str = ""
-) -> Any:
-    def submit_enhancement_request(inp: dict[str, Any]) -> str:
-        import asyncio
-
-        # AUDIT_Q_BATCH18 §69 gap-closure (2026-08-12) — pre-change impact
-        # simulation, computed here (SCAN/submission time, before ANY human
-        # decision) so it's visible on the row the human actually reviews,
-        # not bolted on after approval. Best-effort: a simulation failure
-        # must never block filing the request itself — see this function's
-        # own docstring for why an empty report is the honest fallback, not
-        # a fabricated one.
-        try:
-            from app.fleet.enhancement_impact import simulate_enhancement_impact
-
-            impact = simulate_enhancement_impact(
-                repo_path, str(inp["description"]), dict(inp.get("evidence") or {})
-            )
-        except Exception:
-            impact = None
-
-        async def _write() -> int:
-            from sqlalchemy.ext.asyncio import async_sessionmaker
-
-            from app.db.models import EnhancementRequest
-
-            engine = _new_isolated_db_engine()
-            try:
-                async with async_sessionmaker(
-                    engine, expire_on_commit=False
-                )() as session:
-                    row = EnhancementRequest(
-                        agent_name=agent_name,
-                        title=str(inp["title"]),
-                        description=str(inp["description"]),
-                        category=str(inp["category"]),
-                        priority=str(inp["priority"]),
-                        evidence=dict(inp.get("evidence") or {}),
-                        status="pending",
-                        trace_id=trace_id or None,
-                        impact_simulation=impact,
-                    )
-                    session.add(row)
-                    await session.commit()
-                    await session.refresh(row)
-                    return int(row.id)
-            finally:
-                await engine.dispose()
-
-        try:
-            req_id = asyncio.run(_write())
-        except Exception as exc:
-            return f"[ERROR] Could not file enhancement request: {exc}"
-
-        try:
-            from app.services.activity_stream import get_activity_registry
-
-            stream = get_activity_registry().get_or_create("fleet-dashboard")
-            stream.push(
-                {
-                    "type": "new_request",
-                    "id": req_id,
-                    "agentName": agent_name,
-                    "title": str(inp["title"]),
-                    "priority": str(inp["priority"]),
-                    "category": str(inp["category"]),
-                }
-            )
-        except Exception:
-            pass  # dashboard notification is non-fatal — the row is already written
-
-        return f"Enhancement request #{req_id} filed for human review."
-
-    return submit_enhancement_request
+# moved to app/tools/agents/submit_enhancement_request.py as
+# SUBMIT_ENHANCEMENT_REQUEST_TOOL / make_submit_enhancement_request_handler()
+# — tool_enhance.md productionization pass, tool #212 (2026-09-16).
+# Re-exported under the old names for backward compatibility — all 8
+# real consumer files keep importing from here unchanged.
+_SUBMIT_ENHANCEMENT_REQUEST_TOOL: dict[str, Any] = SUBMIT_ENHANCEMENT_REQUEST_TOOL
 
 
 _MEMORY_SEARCH_TOOL: dict[str, Any] = {
