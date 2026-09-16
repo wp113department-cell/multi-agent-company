@@ -136,6 +136,10 @@ from app.tools.agents.submit_health_report import (
     SUBMIT_HEALTH_REPORT_TOOL,
     make_submit_health_report_handler,
 )
+from app.tools.agents.submit_migration import (
+    SUBMIT_MIGRATION_TOOL,
+    submit_migration_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -4214,20 +4218,10 @@ _SUBMIT_SPRINT_PLAN_TOOL: dict[str, Any] = {
 # tool_enhance.md productionization pass, tool #182 (2026-09-15).
 _SUBMIT_BA_RESULT_TOOL: dict[str, Any] = SUBMIT_BA_RESULT_TOOL
 
-_SUBMIT_MIGRATION_TOOL: dict[str, Any] = {
-    "name": "submit_migration",
-    "description": "Submit the generated migration file path and validation results.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "migration_file": {"type": "string"},
-            "is_reversible": {"type": "boolean"},
-            "summary": {"type": "string"},
-            "warnings": {"type": "array", "items": {"type": "string"}},
-        },
-        "required": ["summary"],
-    },
-}
+# moved to app/tools/agents/submit_migration.py as
+# SUBMIT_MIGRATION_TOOL / submit_migration_handler() —
+# tool_enhance.md productionization pass, tool #188 (2026-09-16).
+_SUBMIT_MIGRATION_TOOL: dict[str, Any] = SUBMIT_MIGRATION_TOOL
 
 _SUBMIT_SCHEMA_TOOL: dict[str, Any] = {
     "name": "submit_schema",
@@ -4543,7 +4537,6 @@ def make_migration_agent_handlers(repo_path: str) -> dict[str, Any]:
 
     root = Path(repo_path)
     handlers = make_read_only_handlers(repo_path)
-    migration_result: dict[str, Any] = {}
 
     _MIGRATION_BASH_ALLOWLIST = (
         "alembic upgrade",
@@ -4637,16 +4630,11 @@ def make_migration_agent_handlers(repo_path: str) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
-    def mg_submit(inp: dict[str, Any]) -> str:
-        migration_result.update(inp)
-        return "Migration submitted"
-
     handlers["run_sql"] = mg_run_sql
     handlers["inspect_schema"] = mg_inspect_schema
     handlers["write_file"] = mg_write_file
     handlers["bash"] = mg_bash
-    handlers["submit_migration"] = mg_submit
-    handlers["_migration_result"] = migration_result
+    handlers["submit_migration"] = submit_migration_handler
     return handlers
 
 
