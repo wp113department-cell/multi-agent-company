@@ -430,8 +430,10 @@ class TestRefactorHandlers:
 
     def test_submit_stores_result(self, tmp_repo: Path) -> None:
         h = make_refactor_agent_handlers(str(tmp_repo))
-        h["submit_refactor_report"]({"summary": "s", "files_changed": ["a.py"]})
-        assert h["_refactor_result"]["summary"] == "s"
+        result = h["submit_refactor_report"](
+            {"summary": "s", "files_changed": ["a.py"]}
+        )
+        assert result == "Refactor report submitted"
 
 
 class TestCicdHandlers:

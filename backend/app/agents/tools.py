@@ -152,6 +152,10 @@ from app.tools.agents.submit_qa_result import (
     SUBMIT_QA_RESULT_TOOL,
     make_submit_qa_result_handler,
 )
+from app.tools.agents.submit_refactor_report import (
+    SUBMIT_REFACTOR_REPORT_TOOL,
+    submit_refactor_report_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -2878,19 +2882,10 @@ _SUBMIT_DOCKER_REPORT_TOOL: dict[str, Any] = SUBMIT_DOCKER_REPORT_TOOL
 # tool_enhance.md productionization pass, tool #183 (2026-09-15).
 _SUBMIT_CICD_REPORT_TOOL: dict[str, Any] = SUBMIT_CICD_REPORT_TOOL
 
-_SUBMIT_REFACTOR_REPORT_TOOL = {
-    "name": "submit_refactor_report",
-    "description": "Submit refactoring agent result.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "summary": {"type": "string"},
-            "files_changed": {"type": "array", "items": {"type": "string"}},
-            "breaking_changes": {"type": "boolean"},
-        },
-        "required": ["summary", "files_changed"],
-    },
-}
+# moved to app/tools/agents/submit_refactor_report.py as
+# SUBMIT_REFACTOR_REPORT_TOOL / submit_refactor_report_handler() —
+# tool_enhance.md productionization pass, tool #192 (2026-09-16).
+_SUBMIT_REFACTOR_REPORT_TOOL: dict[str, Any] = SUBMIT_REFACTOR_REPORT_TOOL
 
 # moved to app/tools/agents/submit_dependency_report.py as
 # SUBMIT_DEPENDENCY_REPORT_TOOL / submit_dependency_report_handler() —
@@ -3531,7 +3526,6 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
 
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
-    refactor_result: dict[str, Any] = {}
 
     _RF_ALLOWED = ("python -m pytest", "mypy", "ruff", "black", "isort")
 
@@ -3618,10 +3612,6 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
             return f"[ERROR] Command timed out after {timeout}s"
         return (stdout + stderr)[:6000] or "(no output)"
 
-    def rf_submit(inp: dict[str, Any]) -> str:
-        refactor_result.update(inp)
-        return "Refactor report submitted"
-
     handlers["list_functions"] = rf_list_functions
     handlers["list_classes"] = rf_list_classes
     handlers["find_function_body"] = rf_find_function_body
@@ -3634,8 +3624,7 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
     handlers["write_file"] = _make_write_file_handler(root)
     handlers["git_diff"] = _make_git_diff_handler(repo_path)
     handlers["bash"] = rf_bash
-    handlers["submit_refactor_report"] = rf_submit
-    handlers["_refactor_result"] = refactor_result
+    handlers["submit_refactor_report"] = submit_refactor_report_handler
     return handlers
 
 
