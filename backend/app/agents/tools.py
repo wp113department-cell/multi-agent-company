@@ -168,6 +168,10 @@ from app.tools.agents.submit_review import (
     SUBMIT_REVIEW_TOOL,
     make_submit_review_handler,
 )
+from app.tools.agents.submit_schema import (
+    SUBMIT_SCHEMA_TOOL,
+    submit_schema_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -4117,20 +4121,10 @@ _SUBMIT_BA_RESULT_TOOL: dict[str, Any] = SUBMIT_BA_RESULT_TOOL
 # tool_enhance.md productionization pass, tool #188 (2026-09-16).
 _SUBMIT_MIGRATION_TOOL: dict[str, Any] = SUBMIT_MIGRATION_TOOL
 
-_SUBMIT_SCHEMA_TOOL: dict[str, Any] = {
-    "name": "submit_schema",
-    "description": "Submit a schema design or review result.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "summary": {"type": "string"},
-            "tables": {"type": "array", "items": {"type": "object"}},
-            "normalization_issues": {"type": "array", "items": {"type": "string"}},
-            "files_written": {"type": "array", "items": {"type": "string"}},
-        },
-        "required": ["summary"],
-    },
-}
+# moved to app/tools/agents/submit_schema.py as
+# SUBMIT_SCHEMA_TOOL / submit_schema_handler() —
+# tool_enhance.md productionization pass, tool #196 (2026-09-16).
+_SUBMIT_SCHEMA_TOOL: dict[str, Any] = SUBMIT_SCHEMA_TOOL
 
 # moved to app/tools/agents/submit_ai_result.py as
 # SUBMIT_AI_RESULT_TOOL / submit_ai_result_handler() —
@@ -4533,7 +4527,6 @@ def make_schema_agent_handlers(repo_path: str) -> dict[str, Any]:
 
     root = Path(repo_path)
     handlers = make_read_only_handlers(repo_path)
-    schema_result: dict[str, Any] = {}
 
     def sa_run_sql(inp: dict[str, Any]) -> str:
         sql = str(inp["query"]).strip()
@@ -4575,15 +4568,10 @@ def make_schema_agent_handlers(repo_path: str) -> dict[str, Any]:
         except Exception as e:
             return f"[ERROR] {e}"
 
-    def sa_submit(inp: dict[str, Any]) -> str:
-        schema_result.update(inp)
-        return "Schema design submitted"
-
     handlers["run_sql"] = sa_run_sql
     handlers["inspect_schema"] = sa_inspect_schema
     handlers["write_file"] = sa_write_file
-    handlers["submit_schema"] = sa_submit
-    handlers["_schema_result"] = schema_result
+    handlers["submit_schema"] = submit_schema_handler
     return handlers
 
 
