@@ -115,6 +115,7 @@ from app.policy.engine import check_command, check_path_in_worktree
 from app.repo_tools import ast_engine as _ast_engine
 from app.tools.agents.bhaskar_tool import bhaskar_tool_handler
 from app.tools.agents.memory_write import write_memory_key
+from app.tools.agents.submit_result import submit_result_handler
 from app.tools.browser.browser_tools import (
     browser_click_handler,
     browser_close_handler,
@@ -1768,9 +1769,7 @@ class ChatAgent:
             return await asyncio.to_thread(run_linter_handler, root, repo, inp)
 
         if tool_name == "submit_result":
-            return (
-                f"Task complete: {inp.get('status', 'done')}\n{inp.get('summary', '')}"
-            )
+            return submit_result_handler(inp)
 
         # ========== BATCH 1 — File / Editing extras ==========
 

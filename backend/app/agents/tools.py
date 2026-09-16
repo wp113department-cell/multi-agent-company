@@ -160,6 +160,10 @@ from app.tools.agents.submit_research import (
     SUBMIT_RESEARCH_TOOL,
     make_submit_research_handler,
 )
+from app.tools.agents.submit_result import (
+    SUBMIT_RESULT_TOOL,
+    submit_result_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -2145,30 +2149,13 @@ _CHAT_BASH_TOOL = {
     },
 }
 
-_SUBMIT_RESULT_TOOL = {
-    "name": "submit_result",
-    "description": "Signal that the task is fully complete. Include a summary of what was done.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "summary": {
-                "type": "string",
-                "description": "What was accomplished, files changed, commands run",
-            },
-            "status": {
-                "type": "string",
-                "enum": ["done", "blocked"],
-                "description": "done = complete, blocked = hit a wall and need help",
-            },
-            "files_changed": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Paths of files created or modified",
-            },
-        },
-        "required": ["summary", "status"],
-    },
-}
+# moved to app/tools/agents/submit_result.py as
+# SUBMIT_RESULT_TOOL / submit_result_handler() —
+# tool_enhance.md productionization pass, tool #194 (2026-09-16). Real
+# behavior lives in chat_agent.py's own dispatch — see that module's
+# own docstring for the full "two implementations, one genuinely
+# unreachable" account.
+_SUBMIT_RESULT_TOOL: dict[str, Any] = SUBMIT_RESULT_TOOL
 
 # moved to app/tools/filesystem/append_file.py as APPEND_FILE_TOOL —
 # tool_enhance.md productionization pass, tool #26 (2026-08-18).
@@ -5523,12 +5510,6 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
         return f"Created branch: {name}"
 
-    # ---- submit_result ----
-    chat_result: dict[str, Any] = {}
-
-    def submit_result(inp: dict[str, Any]) -> str:
-        chat_result.update(inp)
-        return f"Result submitted: {inp.get('status', 'done')}"
 
     # ---- append_file ----
     # moved to app/tools/filesystem/append_file.py as append_file_handler
@@ -6277,7 +6258,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["create_branch"] = create_branch
     handlers["run_tests"] = run_tests
     handlers["run_linter"] = run_linter
-    handlers["submit_result"] = submit_result
+    handlers["submit_result"] = submit_result_handler
     # Batch 1
     handlers["find_file"] = find_file
     handlers["format_file"] = format_file
@@ -6338,7 +6319,6 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["diagnose_deployment_failure"] = diagnose_deployment_failure
     # Batch 9
     handlers["secrets_scan"] = secrets_scan
-    handlers["_chat_result"] = chat_result
 
     # =========================================================================
     # BATCH 10 — AST Engine (parse_ast, import_graph, call_graph, dead_code_detect,
