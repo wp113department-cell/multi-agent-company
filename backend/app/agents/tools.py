@@ -545,6 +545,10 @@ from app.tools.filesystem.unzip_files import (
     UNZIP_FILES_TOOL,
     unzip_files_handler,
 )
+from app.tools.execution.wait_for_port import (
+    WAIT_FOR_PORT_TOOL,
+    wait_for_port_handler,
+)
 from app.tools.git.generate_commit_msg import (
     GENERATE_COMMIT_MSG_TOOL,
     generate_commit_msg_handler,
@@ -4770,22 +4774,10 @@ def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
     # moved to app/tools/execution/list_open_ports.py as
     # LIST_OPEN_PORTS_TOOL / list_open_ports_handler() —
     # tool_enhance.md productionization pass, tool #164 (2026-09-15).
-_WAIT_FOR_PORT_TOOL: dict[str, Any] = {
-    "name": "wait_for_port",
-    "description": "Wait until a TCP port is open (useful after starting a server). Returns when port accepts connections or times out.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "port": {"type": "integer", "description": "TCP port number"},
-            "host": {"type": "string", "description": "Hostname (default: localhost)"},
-            "timeout": {
-                "type": "integer",
-                "description": "Max seconds to wait (default: 30)",
-            },
-        },
-        "required": ["port"],
-    },
-}
+# moved to app/tools/execution/wait_for_port.py as
+# WAIT_FOR_PORT_TOOL / wait_for_port_handler() — tool_enhance.md
+# productionization pass, tool #207 (2026-09-16).
+_WAIT_FOR_PORT_TOOL: dict[str, Any] = WAIT_FOR_PORT_TOOL
 # moved to app/tools/execution/check_url_status.py as
 # CHECK_URL_STATUS_TOOL / check_url_status_handler() — tool_enhance.md
 # productionization pass, tool #126 (2026-08-26).
@@ -6891,21 +6883,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         return list_open_ports_handler()
 
     def wait_for_port_h(inp: dict[str, Any]) -> str:
-        import socket as _socket
-        import time as _time
-
-        port = int(inp["port"])
-        host = str(inp.get("host", "localhost"))
-        timeout = int(inp.get("timeout", 30))
-        start = _time.time()
-        while _time.time() - start < timeout:
-            try:
-                with _socket.create_connection((host, port), timeout=1):
-                    elapsed = round(_time.time() - start, 2)
-                    return f"Port {host}:{port} is open (waited {elapsed}s)"
-            except (ConnectionRefusedError, OSError):
-                _time.sleep(0.5)
-        return f"[TIMEOUT] Port {host}:{port} not open after {timeout}s"
+        return wait_for_port_handler(inp)
 
     # tool_enhance.md productionization pass, tool #126 (2026-08-26) —
     # was a genuine, live SSRF with zero protection (proved live:

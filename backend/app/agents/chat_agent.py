@@ -207,6 +207,7 @@ from app.tools.filesystem.summarize_repo import summarize_repo_handler
 from app.tools.filesystem.template_render import template_render_handler
 from app.tools.execution.type_check import type_check_handler
 from app.tools.filesystem.unzip_files import unzip_files_handler
+from app.tools.execution.wait_for_port import wait_for_port_handler
 from app.tools.git.generate_commit_msg import generate_commit_msg_handler
 from app.tools.filesystem.generate_diagram import generate_diagram_handler
 from app.tools.filesystem.generate_patch import generate_patch_handler
@@ -3912,6 +3913,23 @@ class ChatAgent:
             # shared, worktree-validated, dest-resolution-fixed
             # handler.
             return await asyncio.to_thread(unzip_files_handler, root, repo, inp)
+
+        if tool_name == "wait_for_port":
+            # tool_enhance.md productionization pass, tool #207
+            # (2026-09-16) — real finding: `host` was a completely
+            # unrestricted TCP connect-probe target (a network-
+            # reconnaissance/blind-SSRF-adjacent primitive) — scoped
+            # deliberately narrower than the full _ssrf_denial_reason()
+            # guard fetch_url/check_url_status use, since this tool's
+            # own purpose (checking a just-started LOCAL dev server's
+            # port) requires loopback/private-network access to keep
+            # working; only the cloud-metadata link-local range
+            # (169.254.0.0/16 / fe80::/10) is rejected. AND advertised
+            # in CHAT_TOOLS but never dispatched here at all, same
+            # dispatch class as tools
+            # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131/#132/#133/#134/#135/#136/#137/#138/#139/#140/#141/#142/#144/#202/#203/#204/#206.
+            # Delegates to the shared, link-local-guarded handler.
+            return await asyncio.to_thread(wait_for_port_handler, inp)
 
         if tool_name == "bhaskar_tool":
             # Universal "no existing tool fits" fallback —
