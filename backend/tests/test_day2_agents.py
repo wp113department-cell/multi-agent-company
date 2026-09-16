@@ -508,7 +508,7 @@ class TestDependencyHandlers:
         # previous, unused {outdated, upgraded} shape no consuming code
         # ever read.
         h = make_dependency_agent_handlers(str(tmp_repo))
-        h["submit_dependency_report"](
+        result = h["submit_dependency_report"](
             {
                 "dependencies": [
                     {
@@ -525,7 +525,7 @@ class TestDependencyHandlers:
                 "manifest_read": True,
             }
         )
-        assert len(h["_dependency_result"]["dependencies"]) == 1
+        assert result == "Dependency report submitted"
 
 
 class TestReadmeHandlers:

@@ -124,6 +124,10 @@ from app.tools.agents.submit_cleanup import (
     SUBMIT_CLEANUP_TOOL,
     submit_cleanup_handler,
 )
+from app.tools.agents.submit_dependency_report import (
+    SUBMIT_DEPENDENCY_REPORT_TOOL,
+    submit_dependency_report_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -2917,79 +2921,12 @@ _SUBMIT_REFACTOR_REPORT_TOOL = {
     },
 }
 
-_SUBMIT_DEPENDENCY_REPORT_TOOL = {
-    # Gap-closure Day 49 (Stage 2) — real bug fix, same class as Day 48's
-    # submit_arch_review fix: this schema previously used
-    # {outdated, upgraded, issues, files_changed}, matching NEITHER
-    # roles/dependency_agent.md's own documented "Terminal tool contract"
-    # ({dependencies: list[{name, current_version, latest_version,
-    # vulnerability_ids, upgrade_recommended, breaking_changes}], summary,
-    # manifest_read}) NOR run_dependency_agent()'s own consuming code
-    # (raw.get("dependencies", []), raw.get("summary", ...)) — every real
-    # dependency finding was silently discarded (raw.get("dependencies", [])
-    # always returned [] since "dependencies" never existed in the schema).
-    # Corrected to match the role prompt and the consuming code; kept
-    # files_changed (present in code's own raw.get("files_changed", []) read,
-    # not in the prompt's contract but genuinely needed — this agent has real
-    # edit_file access per its own AGENT_CONTRACT side_effects).
-    "name": "submit_dependency_report",
-    "description": "Submit dependency upgrade analysis.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "dependencies": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string"},
-                        "current_version": {"type": "string"},
-                        "latest_version": {"type": "string"},
-                        "vulnerability_ids": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                        },
-                        "upgrade_recommended": {"type": "boolean"},
-                        "breaking_changes": {"type": "string"},
-                        # AUDIT_Q_BATCH16 §92 gap-closure (2026-08-11) —
-                        # "Abandoned/unmaintained libraries": check_last_release
-                        # already existed as a real tool (distinguishes
-                        # "outdated but active" from "no release in a long
-                        # time") but was available-not-required — nothing in
-                        # this schema captured its result as a structured
-                        # claim, so the distinction it exists to make never
-                        # reached the report. Optional (only known when
-                        # check_last_release was actually called for this
-                        # dependency) rather than required — a package with
-                        # no version delta (already current) has no reason to
-                        # spend a registry call checking staleness.
-                        "abandoned": {
-                            "type": "boolean",
-                            "description": "True if check_last_release showed no release in a long time (not merely 'not the newest version') — only set when check_last_release was actually called for this package this run.",
-                        },
-                        "last_release_days_ago": {
-                            "type": "integer",
-                            "description": "Days since the latest published release, from this run's real check_last_release output.",
-                        },
-                    },
-                    "required": [
-                        "name",
-                        "current_version",
-                        "latest_version",
-                        "upgrade_recommended",
-                    ],
-                },
-            },
-            "summary": {"type": "string"},
-            "files_changed": {"type": "array", "items": {"type": "string"}},
-            "manifest_read": {
-                "type": "boolean",
-                "description": "Overridden by the real VerificationConfig graph-execution state, never trusted from the model's own claim.",
-            },
-        },
-        "required": ["dependencies", "summary", "manifest_read"],
-    },
-}
+# moved to app/tools/agents/submit_dependency_report.py as
+# SUBMIT_DEPENDENCY_REPORT_TOOL / submit_dependency_report_handler() —
+# tool_enhance.md productionization pass, tool #185 (2026-09-16).
+# Pre-existing Gap-closure Day 49 (Stage 2) schema/consumer-mismatch
+# history preserved in that module's own docstring.
+_SUBMIT_DEPENDENCY_REPORT_TOOL: dict[str, Any] = SUBMIT_DEPENDENCY_REPORT_TOOL
 
 _SUBMIT_MONITORING_REPORT_TOOL = {
     "name": "submit_monitoring_report",
@@ -3868,7 +3805,6 @@ def make_dependency_agent_handlers(repo_path: str) -> dict[str, Any]:
     """Dependency agent: read-only + bash (pip/npm audit only) + edit requirements + submit."""
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
-    dep_result: dict[str, Any] = {}
 
     _DEP_ALLOWED = (
         "pip index versions",
@@ -3923,10 +3859,6 @@ def make_dependency_agent_handlers(repo_path: str) -> dict[str, Any]:
             return f"[ERROR] old_string appears {count} times — must be unique"
         target.write_text(text.replace(old_s, new_s, 1), encoding="utf-8")
         return f"Edited {rel}"
-
-    def dep_submit(inp: dict[str, Any]) -> str:
-        dep_result.update(inp)
-        return "Dependency report submitted"
 
     def check_last_release(inp: dict[str, Any]) -> str:
         import json as _json
@@ -4004,8 +3936,7 @@ def make_dependency_agent_handlers(repo_path: str) -> dict[str, Any]:
     handlers["bash"] = dep_bash
     handlers["check_last_release"] = check_last_release
     handlers["edit_file"] = dep_edit_file
-    handlers["submit_dependency_report"] = dep_submit
-    handlers["_dependency_result"] = dep_result
+    handlers["submit_dependency_report"] = submit_dependency_report_handler
     return handlers
 
 
