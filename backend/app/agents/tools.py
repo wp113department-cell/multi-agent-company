@@ -120,6 +120,10 @@ from app.tools.agents.submit_cicd_report import (
     SUBMIT_CICD_REPORT_TOOL,
     submit_cicd_report_handler,
 )
+from app.tools.agents.submit_cleanup import (
+    SUBMIT_CLEANUP_TOOL,
+    submit_cleanup_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -4342,20 +4346,10 @@ _SUBMIT_SCHEMA_TOOL: dict[str, Any] = {
 # tool_enhance.md productionization pass, tool #180 (2026-09-15).
 _SUBMIT_AI_RESULT_TOOL: dict[str, Any] = SUBMIT_AI_RESULT_TOOL
 
-_SUBMIT_CLEANUP_TOOL: dict[str, Any] = {
-    "name": "submit_cleanup",
-    "description": "Submit cleanup results: dead code removed, files deleted, imports organized.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "summary": {"type": "string"},
-            "dead_code_removed": {"type": "array", "items": {"type": "string"}},
-            "files_deleted": {"type": "array", "items": {"type": "string"}},
-            "imports_cleaned": {"type": "array", "items": {"type": "string"}},
-        },
-        "required": ["summary"],
-    },
-}
+# moved to app/tools/agents/submit_cleanup.py as
+# SUBMIT_CLEANUP_TOOL / submit_cleanup_handler() —
+# tool_enhance.md productionization pass, tool #184 (2026-09-16).
+_SUBMIT_CLEANUP_TOOL: dict[str, Any] = SUBMIT_CLEANUP_TOOL
 
 _SUBMIT_TECH_DEBT_TOOL: dict[str, Any] = {
     "name": "submit_tech_debt",
@@ -4903,7 +4897,6 @@ def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
     """Handler factory for Cleanup Agent."""
     root = Path(repo_path)
     handlers = make_read_only_handlers(repo_path)
-    cleanup_result: dict[str, Any] = {}
 
     _CLEANUP_BASH_ALLOWLIST = (
         "python -m ruff",
@@ -4986,18 +4979,13 @@ def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
             return f"[ERROR] Command timed out after {timeout}s"
         return (stdout + stderr).strip() or "(no output)"
 
-    def cu_submit(inp: dict[str, Any]) -> str:
-        cleanup_result.update(inp)
-        return "Cleanup submitted"
-
     handlers["dead_code_detect"] = cu_dead_code_detect
     handlers["find_todos"] = cu_find_todos
     handlers["organize_imports"] = cu_organize_imports
     handlers["delete_file"] = cu_delete_file
     handlers["edit_file"] = cu_edit_file
     handlers["bash"] = cu_bash
-    handlers["submit_cleanup"] = cu_submit
-    handlers["_cleanup_result"] = cleanup_result
+    handlers["submit_cleanup"] = submit_cleanup_handler
     return handlers
 
 
