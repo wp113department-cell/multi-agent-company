@@ -144,6 +144,10 @@ from app.tools.agents.submit_monitoring_report import (
     SUBMIT_MONITORING_REPORT_TOOL,
     submit_monitoring_report_handler,
 )
+from app.tools.agents.submit_perf_review import (
+    SUBMIT_PERF_REVIEW_TOOL,
+    submit_perf_review_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -4157,20 +4161,10 @@ _SLACK_SEND_MESSAGE_TOOL: dict[str, Any] = SLACK_SEND_MESSAGE_TOOL
 
 # --- Day 3 Agent submit tool specs ---
 
-_SUBMIT_PERF_REVIEW_TOOL: dict[str, Any] = {
-    "name": "submit_perf_review",
-    "description": "Submit performance review findings.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "summary": {"type": "string"},
-            "findings": {"type": "array", "items": {"type": "object"}},
-            "severity": {"type": "string"},
-            "recommendations": {"type": "array", "items": {"type": "string"}},
-        },
-        "required": ["summary"],
-    },
-}
+# moved to app/tools/agents/submit_perf_review.py as
+# SUBMIT_PERF_REVIEW_TOOL / submit_perf_review_handler() —
+# tool_enhance.md productionization pass, tool #190 (2026-09-16).
+_SUBMIT_PERF_REVIEW_TOOL: dict[str, Any] = SUBMIT_PERF_REVIEW_TOOL
 
 _SUBMIT_STYLE_REVIEW_TOOL: dict[str, Any] = {
     "name": "submit_style_review",
@@ -4359,7 +4353,6 @@ def make_performance_reviewer_handlers(repo_path: str) -> dict[str, Any]:
 
     root = Path(repo_path)
     handlers = make_read_only_handlers(repo_path)
-    perf_result: dict[str, Any] = {}
 
     # tool_enhance.md productionization pass, tool #91 (2026-08-24) — the
     # real fix (empty `keyword` searched only "SELECT", not the full
@@ -4410,16 +4403,11 @@ def make_performance_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     def pr_list_functions(inp: dict[str, Any]) -> str:
         return list_functions_handler(root, repo_path, inp)
 
-    def pr_submit(inp: dict[str, Any]) -> str:
-        perf_result.update(inp)
-        return "Performance review submitted"
-
     handlers["find_sql"] = pr_find_sql
     handlers["run_sql"] = pr_run_sql
     handlers["explain_query"] = pr_explain_query
     handlers["list_functions"] = pr_list_functions
-    handlers["submit_perf_review"] = pr_submit
-    handlers["_perf_result"] = perf_result
+    handlers["submit_perf_review"] = submit_perf_review_handler
     return handlers
 
 
