@@ -553,6 +553,10 @@ from app.tools.filesystem.xml_validate import (
     XML_VALIDATE_TOOL,
     xml_validate_handler,
 )
+from app.tools.filesystem.zip_files import (
+    ZIP_FILES_TOOL,
+    zip_files_handler,
+)
 from app.tools.git.generate_commit_msg import (
     GENERATE_COMMIT_MSG_TOOL,
     generate_commit_msg_handler,
@@ -4790,24 +4794,10 @@ _WAIT_FOR_PORT_TOOL: dict[str, Any] = WAIT_FOR_PORT_TOOL
 # #130 (2026-08-26).
 
 # -- File ops --
-_ZIP_FILES_TOOL: dict[str, Any] = {
-    "name": "zip_files",
-    "description": "Zip a file or directory into an archive.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "source": {
-                "type": "string",
-                "description": "File or directory to zip (relative to repo root)",
-            },
-            "output": {
-                "type": "string",
-                "description": "Output .zip file path (default: source + .zip)",
-            },
-        },
-        "required": ["source"],
-    },
-}
+# moved to app/tools/filesystem/zip_files.py as
+# ZIP_FILES_TOOL / zip_files_handler() — tool_enhance.md
+# productionization pass, tool #209 (2026-09-16).
+_ZIP_FILES_TOOL: dict[str, Any] = ZIP_FILES_TOOL
 # moved to app/tools/filesystem/unzip_files.py as
 # UNZIP_FILES_TOOL / unzip_files_handler() — tool_enhance.md
 # productionization pass, tool #206 (2026-09-16).
@@ -6897,23 +6887,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         return cpu_profile_handler(repo_path, inp)
 
     def zip_files_h(inp: dict[str, Any]) -> str:
-        import zipfile as _zf
-
-        source = str(inp["source"])
-        src_path = root / source
-        output = str(inp.get("output", source.rstrip("/") + ".zip"))
-        out_path = root / output
-        try:
-            with _zf.ZipFile(str(out_path), "w", _zf.ZIP_DEFLATED) as zf:
-                if src_path.is_dir():
-                    for f in src_path.rglob("*"):
-                        if f.is_file():
-                            zf.write(f, f.relative_to(root))
-                else:
-                    zf.write(src_path, src_path.relative_to(root))
-            return f"Zipped to {output}"
-        except Exception as e:
-            return f"[ERROR] zip_files: {e}"
+        return zip_files_handler(root, repo_path, inp)
 
     def unzip_files_h(inp: dict[str, Any]) -> str:
         return unzip_files_handler(root, repo_path, inp)

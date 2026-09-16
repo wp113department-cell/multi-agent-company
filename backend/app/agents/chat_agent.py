@@ -209,6 +209,7 @@ from app.tools.execution.type_check import type_check_handler
 from app.tools.filesystem.unzip_files import unzip_files_handler
 from app.tools.execution.wait_for_port import wait_for_port_handler
 from app.tools.filesystem.xml_validate import xml_validate_handler
+from app.tools.filesystem.zip_files import zip_files_handler
 from app.tools.git.generate_commit_msg import generate_commit_msg_handler
 from app.tools.filesystem.generate_diagram import generate_diagram_handler
 from app.tools.filesystem.generate_patch import generate_patch_handler
@@ -3946,6 +3947,22 @@ class ChatAgent:
             # entities by default). Delegates to the shared,
             # worktree-validated handler.
             return await asyncio.to_thread(xml_validate_handler, root, repo, inp)
+
+        if tool_name == "zip_files":
+            # tool_enhance.md productionization pass, tool #209
+            # (2026-09-16) — real, severe finding: `output` had zero
+            # worktree-boundary validation, a genuine content-
+            # exfiltration primitive (same severity tier as sibling
+            # tool #206's unzip_files dest finding) — proved live: a
+            # real repo file's content was zipped and written to an
+            # arbitrary absolute path completely outside the
+            # worktree, confirmed by reading the exfiltrated archive
+            # back. `source` also had zero worktree-boundary
+            # validation. AND advertised in CHAT_TOOLS but never
+            # dispatched here at all, same dispatch class as tools
+            # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131/#132/#133/#134/#135/#136/#137/#138/#139/#140/#141/#142/#144/#202/#203/#204/#206/#207/#208.
+            # Delegates to the shared, worktree-validated handler.
+            return await asyncio.to_thread(zip_files_handler, root, repo, inp)
 
         if tool_name == "bhaskar_tool":
             # Universal "no existing tool fits" fallback —
