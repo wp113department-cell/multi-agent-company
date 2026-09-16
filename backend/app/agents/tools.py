@@ -180,6 +180,10 @@ from app.tools.agents.submit_sprint_plan import (
     SUBMIT_SPRINT_PLAN_TOOL,
     submit_sprint_plan_handler,
 )
+from app.tools.agents.submit_sql_report import (
+    SUBMIT_SQL_REPORT_TOOL,
+    submit_sql_report_handler,
+)
 from app.tools.agents.request_clarification import (
     REQUEST_CLARIFICATION_TOOL as REQUEST_CLARIFICATION_TOOL,
     make_request_clarification_handler as make_request_clarification_handler,
@@ -2800,19 +2804,10 @@ _SUBMIT_SECURITY_REPORT_TOOL: dict[str, Any] = SUBMIT_SECURITY_REPORT_TOOL
 # and run_arch_review()'s own consuming code exactly.)
 _SUBMIT_ARCH_REVIEW_TOOL: dict[str, Any] = SUBMIT_ARCH_REVIEW_TOOL
 
-_SUBMIT_SQL_REPORT_TOOL = {
-    "name": "submit_sql_report",
-    "description": "Submit SQL agent output: query results or migration summary.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "action": {"type": "string"},
-            "result": {"type": "string"},
-            "files_written": {"type": "array", "items": {"type": "string"}},
-        },
-        "required": ["action", "result"],
-    },
-}
+# moved to app/tools/agents/submit_sql_report.py as
+# SUBMIT_SQL_REPORT_TOOL / submit_sql_report_handler() —
+# tool_enhance.md productionization pass, tool #199 (2026-09-16).
+_SUBMIT_SQL_REPORT_TOOL: dict[str, Any] = SUBMIT_SQL_REPORT_TOOL
 
 # moved to app/tools/agents/submit_docker_report.py as
 # SUBMIT_DOCKER_REPORT_TOOL / submit_docker_report_handler() —
@@ -3243,7 +3238,6 @@ def make_sql_agent_handlers(repo_path: str) -> dict[str, Any]:
     """SQL agent: read-only + SQL execution + schema inspection + write migrations."""
     handlers = make_read_only_handlers(repo_path)
     root = Path(repo_path)
-    sql_result: dict[str, Any] = {}
 
     def sq_run_sql(inp: dict[str, Any]) -> str:
         sq_query = str(inp["query"])
@@ -3286,18 +3280,13 @@ def make_sql_agent_handlers(repo_path: str) -> dict[str, Any]:
         eq_db_url = str(getattr(get_settings(), "database_url", "") or "")
         return explain_query_handler(eq_db_url, inp)
 
-    def sq_submit(inp: dict[str, Any]) -> str:
-        sql_result.update(inp)
-        return "SQL report submitted"
-
     handlers["run_sql"] = sq_run_sql
     handlers["inspect_schema"] = sq_inspect_schema
     handlers["find_sql"] = sq_find_sql
     handlers["explain_query"] = sq_explain_query
     handlers["edit_file"] = _make_edit_file_handler(root)
     handlers["write_file"] = _make_write_file_handler(root)
-    handlers["submit_sql_report"] = sq_submit
-    handlers["_sql_result"] = sql_result
+    handlers["submit_sql_report"] = submit_sql_report_handler
     return handlers
 
 

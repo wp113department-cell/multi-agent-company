@@ -616,8 +616,8 @@ class TestSqlAgentHandlers:
 
     def test_submit_stores_result(self, tmp_repo: Path) -> None:
         h = make_sql_agent_handlers(str(tmp_repo))
-        h["submit_sql_report"]({"action": "query", "result": "1 row"})
-        assert h["_sql_result"]["action"] == "query"
+        result = h["submit_sql_report"]({"action": "query", "result": "1 row"})
+        assert result == "SQL report submitted"
 
 
 class TestDockerAgentHandlers:
