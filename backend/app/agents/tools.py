@@ -721,6 +721,10 @@ from app.tools.agents.audit_log_read import (
     AUDIT_LOG_READ_TOOL,
     audit_log_read_handler,
 )
+from app.tools.agents.list_registered_agents import (
+    LIST_REGISTERED_AGENTS_TOOL,
+    list_registered_agents_handler,
+)
 from app.tools.agents.submit_enhancement_request import (
     SUBMIT_ENHANCEMENT_REQUEST_TOOL,
     make_submit_enhancement_request_handler as make_submit_enhancement_request_handler,
@@ -1861,11 +1865,12 @@ def make_research_handlers(repo_path: str) -> dict[str, Any]:
 # via AST parsing) for the LLM to write UP, not to invent from scratch.
 # ---------------------------------------------------------------------------
 
-_LIST_REGISTERED_AGENTS_TOOL = {
-    "name": "list_registered_agents",
-    "description": "Real introspection of every registered agent's capability contract (name, description, tools, capabilities, risk_level, dependencies) from the actual fleet capability_registry — not a guess from file names.",
-    "input_schema": {"type": "object", "properties": {}, "required": []},
-}
+# moved to app/tools/agents/list_registered_agents.py as
+# LIST_REGISTERED_AGENTS_TOOL / list_registered_agents_handler() —
+# tool_enhance.md productionization pass, tool #222 (2026-09-17). No
+# security vulnerability and no functional bug found. Re-exported
+# under the old name for backward compatibility.
+_LIST_REGISTERED_AGENTS_TOOL = LIST_REGISTERED_AGENTS_TOOL
 
 _LIST_TOOL_SPECS_TOOL = {
     "name": "list_all_tool_specs",
@@ -1881,30 +1886,7 @@ _LIST_TOOL_SPECS_TOOL = {
 _LIST_MIGRATIONS_TOOL = LIST_MIGRATIONS_TOOL
 
 
-def list_registered_agents(inp: dict[str, Any]) -> str:
-    import json as _json
-
-    from app.fleet.capability_registry import (
-        ensure_all_agents_registered,
-        get_capability_registry,
-    )
-
-    ensure_all_agents_registered()
-    entries = get_capability_registry().all()
-    data = [
-        {
-            "name": e.name,
-            "description": e.description,
-            "tools": e.tools,
-            "input_types": e.input_types,
-            "output_types": e.output_types,
-            "capabilities": e.capabilities,
-            "risk_level": e.risk_level,
-            "dependencies": e.dependencies,
-        }
-        for e in sorted(entries, key=lambda e: e.name)
-    ]
-    return _json.dumps(data, indent=2)
+list_registered_agents = list_registered_agents_handler
 
 
 def _collect_tool_specs_from_module(module: Any, seen: dict[str, str]) -> None:
