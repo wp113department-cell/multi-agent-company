@@ -121,6 +121,41 @@ def make_dependency_security_agent_handlers(repo_path: str) -> dict[str, Any]:
         result.update(inp)
         return "Submitted."
 
+    # tool_enhance.md productionization pass, tool #244 (2026-09-17) —
+    # same real, severe finding already found and fixed on sibling
+    # agents accessibility_agent (#231), agentic_ai_architect (#232),
+    # code_explainer_agent (#237), code_quality_agent (#238),
+    # compliance_agent (#239), cost_estimator_agent (#240), and
+    # debugger_agent (#243): roles/dependency_security_agent.md states
+    # "this role is read-only on code" and lists "Modifying, creating,
+    # or deleting any repo file" as an automatic Failure Condition,
+    # and AGENT_CONTRACT above claims side_effects=["writes
+    # vulnerability reports"] and permissions=["read_repo",
+    # "write_docs"] — but `base = make_chat_handlers(repo_path)` gave
+    # the TASK-MODE handlers (this function) the FULL, UNRESTRICTED
+    # write_file (any path, including real code files). Proved live: a
+    # direct write_file({"path": "app/main.py", ...}) call genuinely
+    # overwrote a real .py file. Fixed by overriding write_file with
+    # the same .md/docs/** scoping already established for the sibling
+    # agents above. NOTE: the separate autonomous SCAN-mode factory
+    # below, make_scan_handlers(), does NOT need this fix — its own
+    # _SCAN_TOOLS list never advertises write_file to the LLM at all
+    # (confirmed by direct inspection), so the schema is simply never
+    # offered in that mode regardless of what the underlying handlers
+    # dict contains.
+    unscoped_write_file = base["write_file"]
+
+    def scoped_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp.get("path", ""))
+        if not (rel.endswith(".md") or rel.startswith("docs/")):
+            return (
+                f"[POLICY DENIED] dependency_security_agent may only write .md "
+                f"files or paths under docs/ — this role is read-only on code. "
+                f"Got: {rel!r}"
+            )
+        return str(unscoped_write_file(inp))
+
+    base["write_file"] = scoped_write_file
     base["submit_dependency_security_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
