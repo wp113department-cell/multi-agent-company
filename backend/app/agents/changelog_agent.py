@@ -130,14 +130,40 @@ _VERIFICATION_CFG = VerificationConfig(
 )
 
 
+# tool_enhance.md productionization pass, tool #236 (2026-09-17) —
+# real finding: neither this function nor run_changelog_agent's own
+# near-identical post-processing validated `sections` at all before
+# aggregating it. Proved live: a non-numeric section count (e.g.
+# {"added": "not-a-number"}) raised an uncaught TypeError from
+# sum(sections.values()), and a non-dict `sections` (e.g. a list)
+# raised an uncaught AttributeError from .values()/.items() — neither
+# is prevented by the schema (which is never runtime-enforced) or by
+# any try/except in either call site. Fixed with one shared, defensive
+# helper used by both.
+def _sum_section_counts(sections: Any) -> tuple[int, dict[str, Any]]:
+    """Real, defensive count of Keep-a-Changelog section entries.
+    Returns (total, sections-as-a-safe-dict) — non-dict input becomes
+    an empty dict (so downstream .items()/.values() calls stay safe),
+    and non-numeric per-section values are skipped rather than
+    crashing the whole aggregation."""
+    if not isinstance(sections, dict):
+        return 0, {}
+    total = 0
+    for v in sections.values():
+        try:
+            total += int(v)
+        except (TypeError, ValueError):
+            continue
+    return total, sections
+
+
 def make_changelog_handlers(repo_path: str) -> dict[str, Any]:
     base = make_chat_handlers(repo_path)
     submitted: dict[str, Any] = {}
 
     def submit_changelog_h(inp: dict[str, Any]) -> str:
         submitted.update(inp)
-        sections = inp.get("sections", {})
-        total = sum(sections.values()) if sections else 0
+        total, sections = _sum_section_counts(inp.get("sections", {}))
         return f"Changelog for {inp.get('version', '?')} submitted: {total} entries across {len(sections)} sections."
 
     base["submit_changelog"] = submit_changelog_h
@@ -194,8 +220,7 @@ def run_changelog_agent(
     )
 
     raw = submitted if submitted else final_state["result"]
-    sections = raw.get("sections", {})
-    total_entries = sum(sections.values()) if sections else 0
+    total_entries, sections = _sum_section_counts(raw.get("sections", {}))
     return AgentResult(
         summary=f"Changelog v{raw.get('version', '?')}: {total_entries} entries. Written to {raw.get('file_path', 'CHANGELOG.md')}",
         findings=[{"section": k.title(), "count": v} for k, v in sections.items() if v],
