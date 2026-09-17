@@ -725,6 +725,10 @@ from app.tools.agents.list_registered_agents import (
     LIST_REGISTERED_AGENTS_TOOL,
     list_registered_agents_handler,
 )
+from app.tools.agents.memory_curate_read import (
+    MEMORY_CURATE_READ_TOOL,
+    memory_curate_read_handler,
+)
 from app.tools.agents.submit_enhancement_request import (
     SUBMIT_ENHANCEMENT_REQUEST_TOOL,
     make_submit_enhancement_request_handler as make_submit_enhancement_request_handler,
@@ -7217,71 +7221,20 @@ def memory_search(inp: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-_MEMORY_CURATE_READ_TOOL: dict[str, Any] = {
-    "name": "memory_curate_read",
-    "description": "List engineering-memory entries for curation review (duplicates, stale entries, mis-categorized entries) — distinct from memory_search (similarity search) and from memory_read (unrelated per-repo scratch store).",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "category": {
-                "type": "string",
-                "description": "Filter: task | architecture | failure | learning. Omit for all.",
-            },
-            "limit": {"type": "integer", "description": "Max rows (default 20)."},
-        },
-        "required": [],
-    },
-}
-
-
-def memory_curate_read(inp: dict[str, Any]) -> str:
-    import asyncio
-
-    category = str(inp.get("category", "")).strip()
-    limit = int(inp.get("limit", 20))
-
-    async def _list() -> list[dict[str, Any]]:
-        from sqlalchemy import select
-        from sqlalchemy.ext.asyncio import async_sessionmaker
-
-        from app.db.models import MemoryEmbedding
-
-        engine = _new_isolated_db_engine()
-        try:
-            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                q = (
-                    select(MemoryEmbedding)
-                    .order_by(MemoryEmbedding.created_at.desc())
-                    .limit(limit)
-                )
-                if category:
-                    q = q.where(MemoryEmbedding.category == category)
-                result = await session.execute(q)
-                rows = result.scalars().all()
-                return [
-                    {
-                        "id": r.id,
-                        "task_id": r.task_id,
-                        "category": r.category,
-                        "outcome": r.outcome,
-                        "summary": r.summary[:200],
-                        "created_at": r.created_at.isoformat(),
-                    }
-                    for r in rows
-                ]
-        finally:
-            await engine.dispose()
-
-    try:
-        rows = asyncio.run(_list())
-    except Exception as exc:
-        return f"[ERROR] memory_curate_read failed: {exc}"
-    if not rows:
-        return "(no memory entries found)"
-    return "\n".join(
-        f"#{r['id']} [{r['category']}] {r['outcome']} ({r['created_at']}) — {r['summary']}"
-        for r in rows
-    )
+# moved to app/tools/agents/memory_curate_read.py as
+# MEMORY_CURATE_READ_TOOL / memory_curate_read_handler() —
+# tool_enhance.md productionization pass, tool #223 (2026-09-17). Two
+# real findings: (1) `limit = int(inp.get("limit", 20))` happened
+# before the function's own try/except, so a malformed limit raised an
+# uncaught ValueError — fixed by moving the coercion inside the guard;
+# (2) used the local, less-completely-configured
+# `_new_isolated_db_engine()` instead of the canonical
+# `app.db.session.new_isolated_async_engine()` — fixed for this tool
+# specifically (3 other tools below still use the local duplicate,
+# deliberately left for their own future turns, matching tool #212's
+# precedent).
+_MEMORY_CURATE_READ_TOOL: dict[str, Any] = MEMORY_CURATE_READ_TOOL
+memory_curate_read = memory_curate_read_handler
 
 
 _MEMORY_LIST_DRAFT_LESSONS_TOOL: dict[str, Any] = {
