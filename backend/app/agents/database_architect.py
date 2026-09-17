@@ -125,14 +125,27 @@ _VERIFICATION_CFG = VerificationConfig(
 )
 
 
+# tool_enhance.md productionization pass, tool #242 (2026-09-17) —
+# real finding: `submit_db_design_h`'s own `len(inp.get("tables", []))`
+# assumed the LLM's submit call always sends a list — proved live that
+# a non-list value (e.g. `"tables": 5`) raised an uncaught TypeError
+# ("object of type 'int' has no len()"). Neither the tool's own JSON
+# schema (never runtime-enforced) nor any try/except prevented this.
+def _safe_list_len(value: Any) -> int:
+    """Real, defensive count — the LLM's own submit call is never
+    schema-validated before reaching here, so a field declared as an
+    array in the schema might arrive as any other JSON type."""
+    return len(value) if isinstance(value, list) else 0
+
+
 def make_database_architect_handlers(repo_path: str) -> dict[str, Any]:
     base = make_chat_handlers(repo_path)
     submitted: dict[str, Any] = {}
 
     def submit_db_design_h(inp: dict[str, Any]) -> str:
         submitted.update(inp)
-        n_tables = len(inp.get("tables", []))
-        n_indexes = len(inp.get("indexes", []))
+        n_tables = _safe_list_len(inp.get("tables", []))
+        n_indexes = _safe_list_len(inp.get("indexes", []))
         return f"DB design submitted: {n_tables} table ops, {n_indexes} index recommendations."
 
     base["submit_db_design"] = submit_db_design_h
@@ -190,8 +203,19 @@ def run_database_architect(
     )
 
     raw = submitted if submitted else final_state["result"]
-    tables = raw.get("tables", [])
-    indexes = raw.get("indexes", [])
+    tables_raw = raw.get("tables", [])
+    indexes_raw = raw.get("indexes", [])
+    # tool_enhance.md productionization pass, tool #242 (2026-09-17) —
+    # real finding: `tables`/`indexes` are never schema-validated at
+    # runtime (the LLM's own submit call, or the generic submit_*
+    # capture, can send anything) — a non-dict entry (e.g. a bare
+    # string or int mixed into the list) raised an uncaught
+    # AttributeError from `t.get(...)`/`i.get(...)` below. Proved live
+    # with 3 separate malformed shapes. Fixed by filtering to dict
+    # entries only before building findings — non-dict entries are
+    # dropped rather than crashing the whole result.
+    tables = [t for t in tables_raw if isinstance(t, dict)] if isinstance(tables_raw, list) else []
+    indexes = [i for i in indexes_raw if isinstance(i, dict)] if isinstance(indexes_raw, list) else []
     return AgentResult(
         summary=f"DB architecture: {len(tables)} table ops, {len(indexes)} index recommendations. {raw.get('summary', '')}",
         findings=(
