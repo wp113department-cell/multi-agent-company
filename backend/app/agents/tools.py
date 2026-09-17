@@ -737,6 +737,10 @@ from app.tools.agents.memory_list_draft_lessons import (
     MEMORY_LIST_DRAFT_LESSONS_TOOL,
     memory_list_draft_lessons_handler,
 )
+from app.tools.agents.memory_promote_lesson import (
+    MEMORY_PROMOTE_LESSON_TOOL,
+    memory_promote_lesson_handler,
+)
 from app.tools.agents.submit_enhancement_request import (
     SUBMIT_ENHANCEMENT_REQUEST_TOOL,
     make_submit_enhancement_request_handler as make_submit_enhancement_request_handler,
@@ -7277,42 +7281,16 @@ _MEMORY_CURATE_WRITE_TOOL: dict[str, Any] = MEMORY_CURATE_WRITE_TOOL
 memory_curate_write = memory_curate_write_handler
 
 
-_MEMORY_PROMOTE_LESSON_TOOL: dict[str, Any] = {
-    "name": "memory_promote_lesson",
-    "description": (
-        "Promote a DRAFT versioned lesson to PUBLISHED, making it real, "
-        "queryable fleet memory. Gap-closure Day 6: every lesson any agent "
-        "records now lands in draft state, invisible to the fleet, until "
-        "this is called — only ever call it after actually reading the "
-        "draft's real content (via memory_curate_read or the lesson's own "
-        "id) and judging it genuinely worth promoting, never reflexively."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "lesson_id": {
-                "type": "string",
-                "description": "The stable lesson_id (not the row id) of the draft to promote.",
-            },
-        },
-        "required": ["lesson_id"],
-    },
-}
-
-
-def memory_promote_lesson(inp: dict[str, Any]) -> str:
-    from app.fleet.versioned_memory import get_versioned_memory_store
-
-    lesson_id = str(inp["lesson_id"])
-    try:
-        record = get_versioned_memory_store().promote(
-            lesson_id, agent_name="knowledge_curator"
-        )
-    except ValueError as exc:
-        return f"[ERROR] {exc}"
-    except Exception as exc:
-        return f"[ERROR] memory_promote_lesson failed: {exc}"
-    return f"Lesson {lesson_id!r} (row #{record.id}) promoted to published."
+# moved to app/tools/agents/memory_promote_lesson.py as
+# MEMORY_PROMOTE_LESSON_TOOL / memory_promote_lesson_handler() —
+# tool_enhance.md productionization pass, tool #226 (2026-09-17). Real
+# finding: `lesson_id = str(inp["lesson_id"])` used bare dict indexing
+# before the function's own try/except — a genuinely missing
+# lesson_id key raised an uncaught KeyError. Fixed by using
+# `.get("lesson_id")` with an explicit presence check for a clean
+# "[ERROR] lesson_id is required" message.
+_MEMORY_PROMOTE_LESSON_TOOL: dict[str, Any] = MEMORY_PROMOTE_LESSON_TOOL
+memory_promote_lesson = memory_promote_lesson_handler
 
 
 # delegate_to_agent — plan14 Day 4 (#1 Agent-to-Agent Delegation). Real
