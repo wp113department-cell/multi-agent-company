@@ -101,6 +101,20 @@ def _compute_weighted_scores(
     of what raw weights were passed in. Every score must be in [0, 5]."""
     if not isinstance(options, list) or not options:
         raise ValueError("options must be a non-empty list")
+    # tool_enhance.md productionization pass, tool #230 (2026-09-17) —
+    # real finding: a non-dict entry in `options` (e.g. a bare string)
+    # raised an uncaught AttributeError from opt.get(...) below, not
+    # caught by score_h's own `except (ValueError, TypeError)` guard.
+    # Proved live: options=[{...}, "not-a-dict"] crashed uncaught.
+    for opt in options:
+        if not isinstance(opt, dict):
+            raise ValueError(f"each option must be an object, got {type(opt).__name__}")
+    # Same class, second instance: a non-dict `weights` (e.g. a list)
+    # raised an uncaught AttributeError from raw_weights.get(...)
+    # further down. Proved live: weights=["not","a","dict"] crashed
+    # uncaught.
+    if weights is not None and not isinstance(weights, dict):
+        raise ValueError(f"weights must be an object (map), got {type(weights).__name__}")
 
     all_criteria: list[str] = []
     for opt in options:
