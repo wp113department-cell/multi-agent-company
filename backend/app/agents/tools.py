@@ -289,6 +289,10 @@ from app.tools.filesystem.list_deploy_artifacts import (
     LIST_DEPLOY_ARTIFACTS_TOOL,
     make_list_deploy_artifacts_handler as make_list_deploy_artifacts_handler,
 )
+from app.tools.filesystem.list_migrations import (
+    LIST_MIGRATIONS_TOOL,
+    list_migrations_handler,
+)
 from app.tools.filesystem.delete_block import (
     DELETE_BLOCK_TOOL as _DELETE_BLOCK_TOOL,
     delete_block_handler as delete_block_handler,
@@ -1869,11 +1873,12 @@ _LIST_TOOL_SPECS_TOOL = {
     "input_schema": {"type": "object", "properties": {}, "required": []},
 }
 
-_LIST_MIGRATIONS_TOOL = {
-    "name": "list_migrations",
-    "description": "Real introspection of every Alembic migration file under backend/migrations/versions/ — file name, revision id, down_revision, and the file's own module docstring, extracted via AST parsing (the file is never executed) — not a guess from file names alone.",
-    "input_schema": {"type": "object", "properties": {}, "required": []},
-}
+# moved to app/tools/filesystem/list_migrations.py as
+# LIST_MIGRATIONS_TOOL / list_migrations_handler() — tool_enhance.md
+# productionization pass, tool #221 (2026-09-17). No security
+# vulnerability and no functional bug found. Re-exported under the old
+# name for backward compatibility.
+_LIST_MIGRATIONS_TOOL = LIST_MIGRATIONS_TOOL
 
 
 def list_registered_agents(inp: dict[str, Any]) -> str:
@@ -1955,53 +1960,7 @@ def list_all_tool_specs(inp: dict[str, Any]) -> str:
     return _json.dumps(data, indent=2)
 
 
-def list_migrations(inp: dict[str, Any]) -> str:
-    import ast as _ast_mod
-    import json as _json
-
-    versions_dir = (
-        Path(__file__).resolve().parent.parent.parent / "migrations" / "versions"
-    )
-    if not versions_dir.exists():
-        return "[]"
-    results: list[dict[str, Any]] = []
-    for path in sorted(versions_dir.glob("*.py")):
-        try:
-            tree = _ast_mod.parse(path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        docstring = _ast_mod.get_docstring(tree) or ""
-        revision: Any = None
-        down_revision: Any = None
-        for node in tree.body:
-            # Alembic's generated files use annotated assignments
-            # (`revision: str = "001"`), not plain `Assign` — handle both.
-            targets: list[_ast_mod.expr] = []
-            value: _ast_mod.expr | None = None
-            if isinstance(node, _ast_mod.Assign):
-                targets = list(node.targets)
-                value = node.value
-            elif isinstance(node, _ast_mod.AnnAssign) and node.value is not None:
-                targets = [node.target]
-                value = node.value
-            for target in targets:
-                if not isinstance(target, _ast_mod.Name) or not isinstance(
-                    value, _ast_mod.Constant
-                ):
-                    continue
-                if target.id == "revision":
-                    revision = value.value
-                if target.id == "down_revision":
-                    down_revision = value.value
-        results.append(
-            {
-                "file": path.name,
-                "revision": revision,
-                "down_revision": down_revision,
-                "docstring": docstring.strip()[:300],
-            }
-        )
-    return _json.dumps(results, indent=2)
+list_migrations = list_migrations_handler
 
 
 # ---------------------------------------------------------------------------
