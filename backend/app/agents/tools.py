@@ -705,6 +705,10 @@ from app.tools.agents.decision_log_append import (
     DECISION_LOG_APPEND_TOOL,
     decision_log_append_handler,
 )
+from app.tools.agents.memory_search import (
+    MEMORY_SEARCH_TOOL,
+    memory_search_handler,
+)
 from app.tools.agents.submit_bug_fix import (
     SUBMIT_BUG_FIX_TOOL,
     submit_bug_fix_handler,
@@ -7118,23 +7122,17 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _new_isolated_db_engine() -> Any:
-    """A throwaway async engine, NOT the shared app.db.session singleton.
-
-    Tool handlers are sync functions called from arbitrary contexts (a fleet
-    agent's scan loop may call several DB tools in the same process run).
-    asyncio.run() opens and tears down its own event loop per call; the shared
-    engine/pool in app.db.session gets bound to whichever loop first touched
-    it, so reusing it across multiple asyncio.run() calls raises
-    "Future attached to a different loop". A fresh, disposed-after-use engine
-    per call avoids that entirely — slightly less efficient, always correct.
-    """
-    from sqlalchemy.ext.asyncio import create_async_engine
-
-    from app.config import get_settings as _gs
-
-    return create_async_engine(_gs().database_url, pool_pre_ping=True)
-
+# _new_isolated_db_engine() (the local, less-completely-configured
+# duplicate of app.db.session.new_isolated_async_engine() — only
+# pool_pre_ping=True, missing the explicit pool_size/max_overflow/
+# connect_args the canonical helper sets) was removed here as part of
+# tool #227's turn (2026-09-17): its last 4 real callers
+# (memory_curate_read #223, memory_curate_write #224,
+# memory_list_draft_lessons #225, memory_search #227) have all been
+# migrated to the canonical helper, one tool at a time across their
+# own turns — confirmed via grep that zero real callers remained
+# before deleting it. Genuinely dead code, not a backwards-
+# compatibility shim to preserve.
 
 # moved to app/tools/agents/fleet_metrics_read.py as
 # FLEET_METRICS_READ_TOOL / fleet_metrics_read_handler() —
@@ -7174,63 +7172,17 @@ capability_gap_scan = capability_gap_scan_handler
 _SUBMIT_ENHANCEMENT_REQUEST_TOOL: dict[str, Any] = SUBMIT_ENHANCEMENT_REQUEST_TOOL
 
 
-_MEMORY_SEARCH_TOOL: dict[str, Any] = {
-    "name": "memory_search",
-    "description": "Semantic search over the fleet's persistent engineering memory (past task outcomes, architecture decisions, failures, lessons) — NOT the same as memory_read/memory_write (those are a different, per-repo scratch store). Searches fleet-wide (across every repo) by default — pass repo_id only to narrow to one specific repo's own memories plus fleet-wide/legacy ones.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "What to search for."},
-            "top_k": {"type": "integer", "description": "Max results (default 5)."},
-            "repo_id": {
-                "type": "integer",
-                "description": "Stage 4 Cluster O Phase 1d (2026-08-05): optional — restrict "
-                "results to this repo's own memories plus fleet-wide/legacy ones. Omit to "
-                "search fleet-wide (the default, and the right choice for this tool's real "
-                "caller, knowledge_curator, whose job is curating memory across the whole "
-                "fleet, not one repo).",
-            },
-        },
-        "required": ["query"],
-    },
-}
-
-
-def memory_search(inp: dict[str, Any]) -> str:
-    import asyncio
-
-    query = str(inp.get("query", "")).strip()
-    if not query:
-        return "[ERROR] query is required"
-    top_k = int(inp.get("top_k", 5))
-    repo_id_raw = inp.get("repo_id")
-    repo_id: int | None = int(repo_id_raw) if repo_id_raw is not None else None
-
-    async def _search() -> list[dict[str, Any]]:
-        from sqlalchemy.ext.asyncio import async_sessionmaker
-
-        from app.memory.store import query_similar_tasks
-
-        engine = _new_isolated_db_engine()
-        try:
-            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                return await query_similar_tasks(
-                    description=query, db=session, top_k=top_k, repo_id=repo_id
-                )
-        finally:
-            await engine.dispose()
-
-    try:
-        results = asyncio.run(_search())
-    except Exception as exc:
-        return f"[ERROR] memory_search failed: {exc}"
-    if not results:
-        return "(no similar memories found)"
-    lines = [
-        f"[{r.get('similarity', 0):.2f}] task={r.get('task_id')} outcome={r.get('outcome')} — {str(r.get('summary', ''))[:200]}"
-        for r in results
-    ]
-    return "\n".join(lines)
+# moved to app/tools/agents/memory_search.py as MEMORY_SEARCH_TOOL /
+# memory_search_handler() — tool_enhance.md productionization pass,
+# tool #227 (2026-09-17). Two real findings, same class already fixed
+# on the rest of this memory-tool family (#223-#225): (1) `top_k` and
+# `repo_id` coercions happened before the function's own try/except —
+# malformed values raised an uncaught ValueError. Fixed by moving both
+# inside the guard. (2) used the local `_new_isolated_db_engine()`
+# instead of the canonical `app.db.session.new_isolated_async_engine()`
+# — fixed for this tool specifically, closing out the full family.
+_MEMORY_SEARCH_TOOL: dict[str, Any] = MEMORY_SEARCH_TOOL
+memory_search = memory_search_handler
 
 
 # moved to app/tools/agents/memory_curate_read.py as

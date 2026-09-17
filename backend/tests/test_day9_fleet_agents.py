@@ -356,16 +356,20 @@ def test_audit_log_read_filters_by_agent() -> None:
 
 async def _with_isolated_session(coro_fn: Any) -> Any:
     """Run coro_fn(session) against a fresh, disposed-after-use engine — never the
-    shared app.db.session singleton. Mirrors app.agents.tools._new_isolated_db_engine:
-    repeated asyncio.run() calls in the same process (as pytest does across test
-    functions) bind the shared engine's pool to whichever loop touched it first,
-    so reusing it here would hit the exact 'attached to a different loop' bug this
-    module's own tests exist to catch in the tools themselves."""
+    shared app.db.session singleton. Mirrors the real tool handlers' own
+    app.db.session.new_isolated_async_engine() usage (the local, less-completely-
+    configured app.agents.tools._new_isolated_db_engine() duplicate this comment
+    used to reference was removed as part of tool #227's turn, 2026-09-17, once
+    its last real callers had all migrated to the canonical helper): repeated
+    asyncio.run() calls in the same process (as pytest does across test functions)
+    bind the shared engine's pool to whichever loop touched it first, so reusing
+    it here would hit the exact 'attached to a different loop' bug this module's
+    own tests exist to catch in the tools themselves."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    from app.agents.tools import _new_isolated_db_engine
+    from app.db.session import new_isolated_async_engine
 
-    engine = _new_isolated_db_engine()
+    engine = new_isolated_async_engine()
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             return await coro_fn(session)
