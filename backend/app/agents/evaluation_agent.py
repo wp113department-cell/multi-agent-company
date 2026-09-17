@@ -112,13 +112,30 @@ _VERIFICATION_CFG = VerificationConfig(
 )
 
 
+# tool_enhance.md productionization pass, tool #247 (2026-09-17) —
+# real finding: `overall_score` is never schema-validated at runtime
+# (the LLM's own submit call, or the generic submit_* capture, can
+# send anything, despite the schema declaring it a "number") — a
+# non-numeric value (e.g. a string) raised an uncaught ValueError from
+# the `{score:.2f}` format spec, in BOTH submit_eval_h and
+# run_evaluation_agent's own near-identical post-processing.
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Real, defensive coercion — the LLM's own submit call is never
+    schema-validated before reaching here, so a field declared as a
+    number in the schema might arrive as any other JSON type."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def make_evaluation_handlers(repo_path: str) -> dict[str, Any]:
     base = make_chat_handlers(repo_path)
     submitted: dict[str, Any] = {}
 
     def submit_eval_h(inp: dict[str, Any]) -> str:
         submitted.update(inp)
-        score = inp.get("overall_score", 0)
+        score = _safe_float(inp.get("overall_score", 0))
         return f"Evaluation complete: score={score:.2f} pass={inp.get('pass_count', 0)} fail={inp.get('fail_count', 0)}"
 
     base["submit_eval_result"] = submit_eval_h
@@ -169,10 +186,17 @@ def run_evaluation_agent(
     )
 
     raw = submitted if submitted else final_state["result"]
-    cases = raw.get("cases", [])
-    score = raw.get("overall_score", 0.0)
+    cases_raw = raw.get("cases", [])
+    # Same real finding as submit_eval_h above, plus a sibling
+    # AttributeError proved live for a non-dict entry mixed into
+    # `cases` — fixed with the same isinstance-filtering pattern
+    # already established for tool #242's database_architect.
+    cases = [c for c in cases_raw if isinstance(c, dict)] if isinstance(cases_raw, list) else []
+    score = _safe_float(raw.get("overall_score", 0.0))
+    pass_count = int(_safe_float(raw.get("pass_count", 0)))
+    fail_count = int(_safe_float(raw.get("fail_count", 0)))
     return AgentResult(
-        summary=f"Eval: score={score:.2f} ({raw.get('pass_count', 0)}/{raw.get('pass_count', 0) + raw.get('fail_count', 0)} passed). {raw.get('summary', '')}",
+        summary=f"Eval: score={score:.2f} ({pass_count}/{pass_count + fail_count} passed). {raw.get('summary', '')}",
         findings=[
             {
                 "case": c.get("name", "?"),
