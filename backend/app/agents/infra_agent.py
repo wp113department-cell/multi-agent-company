@@ -120,6 +120,39 @@ def make_infra_agent_handlers(repo_path: str) -> dict[str, Any]:
         result.update(inp)
         return "Submitted."
 
+    # tool_enhance.md productionization pass, tool #250 (2026-09-17) —
+    # same real, severe finding already found and fixed on sibling
+    # agents accessibility_agent (#231), agentic_ai_architect (#232),
+    # code_explainer_agent (#237), code_quality_agent (#238),
+    # compliance_agent (#239), cost_estimator_agent (#240),
+    # debugger_agent (#243), dependency_security_agent (#244),
+    # devex_agent (#245), env_checker_agent (#246), feature_flag_agent
+    # (#248), and incident_responder_agent (#249): roles/infra_agent.md
+    # states "this role is read-only on code" and lists "Modifying,
+    # creating, or deleting any repo file" as an automatic Failure
+    # Condition, and AGENT_CONTRACT above claims side_effects=["writes
+    # infrastructure security reports", ...] and
+    # permissions=["read_repo", "write_docs", "execute_infra_dry_run"]
+    # — but `base = make_chat_handlers(repo_path)` gave this agent the
+    # FULL, UNRESTRICTED write_file (any path, including real code
+    # files). Proved live: a direct write_file({"path": "app/main.py",
+    # ...}) call genuinely overwrote a real .py file. Fixed by
+    # overriding write_file with the same .md/docs/** scoping already
+    # established for the sibling agents above. `bash` is already
+    # correctly scoped to the dry-run-only handler below — not
+    # touched.
+    unscoped_write_file = base["write_file"]
+
+    def scoped_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp.get("path", ""))
+        if not (rel.endswith(".md") or rel.startswith("docs/")):
+            return (
+                f"[POLICY DENIED] infra_agent may only write .md files "
+                f"or paths under docs/ — this role is read-only on code. Got: {rel!r}"
+            )
+        return str(unscoped_write_file(inp))
+
+    base["write_file"] = scoped_write_file
     base["submit_infra_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
