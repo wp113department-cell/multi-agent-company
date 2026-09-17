@@ -733,6 +733,10 @@ from app.tools.agents.memory_curate_write import (
     MEMORY_CURATE_WRITE_TOOL,
     memory_curate_write_handler,
 )
+from app.tools.agents.memory_list_draft_lessons import (
+    MEMORY_LIST_DRAFT_LESSONS_TOOL,
+    memory_list_draft_lessons_handler,
+)
 from app.tools.agents.submit_enhancement_request import (
     SUBMIT_ENHANCEMENT_REQUEST_TOOL,
     make_submit_enhancement_request_handler as make_submit_enhancement_request_handler,
@@ -7241,70 +7245,18 @@ _MEMORY_CURATE_READ_TOOL: dict[str, Any] = MEMORY_CURATE_READ_TOOL
 memory_curate_read = memory_curate_read_handler
 
 
-_MEMORY_LIST_DRAFT_LESSONS_TOOL: dict[str, Any] = {
-    "name": "memory_list_draft_lessons",
-    "description": (
-        "List versioned lessons currently in draft state, awaiting review. "
-        "Gap-closure Day 6: every record_learning call now files a draft, "
-        "not a published lesson — this is how a curation pass finds what's "
-        "actually pending, distinct from memory_curate_read (which only "
-        "ever sees the older, unversioned memory_embeddings table)."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "limit": {"type": "integer", "description": "Max rows (default 20)."},
-        },
-        "required": [],
-    },
-}
-
-
-def memory_list_draft_lessons(inp: dict[str, Any]) -> str:
-    import asyncio
-
-    limit = int(inp.get("limit", 20))
-
-    async def _list() -> list[dict[str, Any]]:
-        from sqlalchemy import select
-        from sqlalchemy.ext.asyncio import async_sessionmaker
-
-        from app.db.models import VersionedLesson
-
-        engine = _new_isolated_db_engine()
-        try:
-            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                result = await session.execute(
-                    select(VersionedLesson)
-                    .where(VersionedLesson.state == "draft")
-                    .order_by(VersionedLesson.created_at.desc())
-                    .limit(limit)
-                )
-                rows = result.scalars().all()
-                return [
-                    {
-                        "lesson_id": r.lesson_id,
-                        "topic": r.topic,
-                        "version": r.version,
-                        "content": r.content[:300],
-                        "created_at": r.created_at.isoformat() if r.created_at else "",
-                    }
-                    for r in rows
-                ]
-        finally:
-            await engine.dispose()
-
-    try:
-        rows = asyncio.run(_list())
-    except Exception as exc:
-        return f"[ERROR] memory_list_draft_lessons failed: {exc}"
-    if not rows:
-        return "(no draft lessons pending review)"
-    return "\n".join(
-        f"lesson_id={r['lesson_id']} v{r['version']} [{r['topic']}] "
-        f"({r['created_at']}) — {r['content']}"
-        for r in rows
-    )
+# moved to app/tools/agents/memory_list_draft_lessons.py as
+# MEMORY_LIST_DRAFT_LESSONS_TOOL / memory_list_draft_lessons_handler()
+# — tool_enhance.md productionization pass, tool #225 (2026-09-17).
+# Same 2 findings already fixed on sibling tool #223
+# (memory_curate_read): (1) `limit = int(inp.get("limit", 20))`
+# happened before the function's own try/except, so a malformed limit
+# raised an uncaught ValueError — fixed by moving the coercion inside
+# the guard; (2) used the local `_new_isolated_db_engine()` instead of
+# the canonical `app.db.session.new_isolated_async_engine()` — fixed
+# for this tool specifically.
+_MEMORY_LIST_DRAFT_LESSONS_TOOL: dict[str, Any] = MEMORY_LIST_DRAFT_LESSONS_TOOL
+memory_list_draft_lessons = memory_list_draft_lessons_handler
 
 
 # moved to app/tools/agents/memory_curate_write.py as
