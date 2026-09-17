@@ -705,6 +705,10 @@ from app.tools.agents.fleet_metrics_read import (
     FLEET_METRICS_READ_TOOL,
     fleet_metrics_read_handler,
 )
+from app.tools.agents.audit_log_read import (
+    AUDIT_LOG_READ_TOOL,
+    audit_log_read_handler,
+)
 from app.tools.agents.submit_enhancement_request import (
     SUBMIT_ENHANCEMENT_REQUEST_TOOL,
     make_submit_enhancement_request_handler as make_submit_enhancement_request_handler,
@@ -7262,44 +7266,15 @@ _FLEET_METRICS_READ_TOOL: dict[str, Any] = FLEET_METRICS_READ_TOOL
 fleet_metrics_read = fleet_metrics_read_handler
 
 
-_AUDIT_LOG_READ_TOOL: dict[str, Any] = {
-    "name": "audit_log_read",
-    "description": "Read the fleet audit trail: what actions ran, for which agent, with what outcome. Use this to diagnose failing agents from real evidence, not speculation.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "agent_name": {
-                "type": "string",
-                "description": "Filter to one agent. Omit for the most recent entries across all agents.",
-            },
-            "n": {
-                "type": "integer",
-                "description": "Max entries to return (default 50).",
-            },
-        },
-        "required": [],
-    },
-}
-
-
-def audit_log_read(inp: dict[str, Any]) -> str:
-    from app.fleet.audit_log import get_audit_log
-
-    agent_name = str(inp.get("agent_name", "")).strip()
-    n = int(inp.get("n", 50))
-    log = get_audit_log()
-    entries = log.recent(max(n, 200))
-    if agent_name:
-        entries = [e for e in entries if e.agent_name == agent_name]
-    entries = entries[-n:]
-    if not entries:
-        return f"(no audit entries{f' for agent {agent_name!r}' if agent_name else ''})"
-    lines = [
-        f"[{e.timestamp}] {e.agent_name} — {e.action_type} — outcome={e.outcome}"
-        + (f" — {e.description}" if e.description else "")
-        for e in entries
-    ]
-    return "\n".join(lines)
+# moved to app/tools/agents/audit_log_read.py as
+# AUDIT_LOG_READ_TOOL / audit_log_read_handler() —
+# tool_enhance.md productionization pass, tool #216 (2026-09-17).
+# Real finding, same class as tool #215's fleet_metrics_read: the
+# original body had zero try/except anywhere, so a malformed `n`
+# raised an uncaught ValueError. Fixed by moving the numeric coercion
+# into its own try/except (TypeError, ValueError).
+_AUDIT_LOG_READ_TOOL: dict[str, Any] = AUDIT_LOG_READ_TOOL
+audit_log_read = audit_log_read_handler
 
 
 # moved to app/tools/agents/capability_gap_scan.py as
