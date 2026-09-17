@@ -505,6 +505,10 @@ from app.tools.git.explain_merge_conflict import (
     EXPLAIN_MERGE_CONFLICT_TOOL,
     explain_merge_conflict_handler,
 )
+from app.tools.git.parse_merge_conflicts import (
+    PARSE_MERGE_CONFLICTS_TOOL,
+    parse_merge_conflicts_handler,
+)
 from app.tools.filesystem.export_markdown import (
     EXPORT_MARKDOWN_TOOL,
     export_markdown_handler,
@@ -2344,20 +2348,13 @@ _RUN_MAKE_TOOL = RUN_MAKE_TOOL
 # ---------------------------------------------------------------------------
 
 
-_PARSE_MERGE_CONFLICTS_TOOL = {
-    "name": "parse_merge_conflicts",
-    "description": "Parse a file's real <<<<<<</=======/>>>>>>> conflict markers into structured hunks (ours/theirs text, labels, line ranges) — read this before deciding how to resolve a conflicted file, never guess resolution from raw marker text.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Conflicted file, relative to repo root",
-            },
-        },
-        "required": ["path"],
-    },
-}
+# moved to app/tools/git/parse_merge_conflicts.py as
+# PARSE_MERGE_CONFLICTS_TOOL / parse_merge_conflicts_handler() —
+# tool_enhance.md productionization pass, tool #228 (2026-09-17). Same
+# "two real implementations" shape already fixed on sibling tool #136
+# (explain_merge_conflict) — BOTH real call sites (this closure AND
+# chat_agent.py's own dispatch) now delegate to the shared handler.
+_PARSE_MERGE_CONFLICTS_TOOL = PARSE_MERGE_CONFLICTS_TOOL
 
 # moved to app/tools/git/explain_merge_conflict.py as
 # EXPLAIN_MERGE_CONFLICT_TOOL / explain_merge_conflict_handler() —
@@ -5572,20 +5569,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
             return f"[ERROR] {e}"
 
     def parse_merge_conflicts(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        result = check_path_in_worktree(rel, repo_path)
-        if not result.allowed:
-            return f"[POLICY DENIED] {rel}: {result.reason}"
-        target = Path(repo_path) / rel
-        if not target.exists():
-            return f"[ERROR] File not found: {rel}"
-        text = target.read_text(encoding="utf-8")
-        hunks = _parse_conflict_markers(text)
-        if not hunks:
-            return f"No conflict markers found in {rel}."
-        import json as _json
-
-        return _json.dumps({"path": rel, "hunks": hunks}, indent=2)
+        return parse_merge_conflicts_handler(root, repo_path, inp)
 
     # tool_enhance.md productionization pass, tool #136 (2026-09-11) —
     # worktree validation was already correct here; the real fix

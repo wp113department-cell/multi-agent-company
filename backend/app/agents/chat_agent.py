@@ -104,7 +104,6 @@ from app.agents.tools import (
     _llm_explain_conflict_hunks,
     _llm_generate_commit_message,
     _llm_review_diff,
-    _parse_conflict_markers,
     _redact_secrets_in_text,
     _run_bash_command,
     _venv_activate_snippet,
@@ -193,6 +192,7 @@ from app.tools.filesystem.create_directory import create_directory_handler
 from app.tools.filesystem.csv_preview import csv_preview_handler
 from app.tools.filesystem.env_diff import env_diff_handler
 from app.tools.git.explain_merge_conflict import explain_merge_conflict_handler
+from app.tools.git.parse_merge_conflicts import parse_merge_conflicts_handler
 from app.tools.filesystem.export_markdown import export_markdown_handler
 from app.tools.filesystem.find_file import find_file_handler
 from app.tools.filesystem.find_queue import find_queue_handler
@@ -2049,19 +2049,19 @@ class ChatAgent:
             return gm_output
 
         if tool_name == "parse_merge_conflicts":
-            pmc_rel = str(inp["path"])
-            if _is_protected_path(pmc_rel, repo):
-                return f"[POLICY DENIED] Protected path: {pmc_rel}"
-            pmc_target = root / pmc_rel
-            if not pmc_target.exists():
-                return f"[ERROR] File not found: {pmc_rel}"
-            pmc_text = pmc_target.read_text(encoding="utf-8")
-            pmc_hunks = _parse_conflict_markers(pmc_text)
-            if not pmc_hunks:
-                return f"No conflict markers found in {pmc_rel}."
-            import json as _json
-
-            return _json.dumps({"path": pmc_rel, "hunks": pmc_hunks}, indent=2)
+            # tool_enhance.md productionization pass, tool #228
+            # (2026-09-17) — same "two real implementations" shape
+            # already fixed on sibling tool #136
+            # (explain_merge_conflict). Worktree validation was
+            # already correct; was missing a `.get()` guard on `path`
+            # (a genuinely missing key raised an uncaught KeyError)
+            # and a try/except around the file read (a directory or
+            # invalid-UTF-8 file raised an uncaught IsADirectoryError/
+            # UnicodeDecodeError, both proved live). Now delegates to
+            # the shared, already-worktree-validated, fixed handler.
+            return await asyncio.to_thread(
+                parse_merge_conflicts_handler, root, repo, inp
+            )
 
         if tool_name == "resolve_merge_conflict":
             rmc_rel = str(inp["path"])
