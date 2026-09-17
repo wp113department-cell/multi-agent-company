@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from app.agents.conflict_resolution import (
     _apply_conflict_resolutions as _apply_conflict_resolutions,
@@ -284,6 +284,10 @@ from app.tools.execution.run_tests import (
 from app.tools.filesystem.append_file import (
     APPEND_FILE_TOOL as _APPEND_FILE_TOOL,
     append_file_handler as append_file_handler,
+)
+from app.tools.filesystem.list_deploy_artifacts import (
+    LIST_DEPLOY_ARTIFACTS_TOOL,
+    make_list_deploy_artifacts_handler as make_list_deploy_artifacts_handler,
 )
 from app.tools.filesystem.delete_block import (
     DELETE_BLOCK_TOOL as _DELETE_BLOCK_TOOL,
@@ -2015,54 +2019,15 @@ def list_migrations(inp: dict[str, Any]) -> str:
 # whichever repo_path the calling agent is scoped to.
 # ---------------------------------------------------------------------------
 
-_LIST_DEPLOY_ARTIFACTS_TOOL = {
-    "name": "list_deploy_artifacts",
-    "description": "Real filesystem discovery of this project's actual deployment-relevant files: Dockerfiles, docker-compose files, Procfile, .github/workflows/*.yml, scripts/systemd/*.service|.timer, and k8s/terraform manifests if present. Read each with read_file before writing a deployment guide — never invent a deploy mechanism this project doesn't actually have.",
-    "input_schema": {"type": "object", "properties": {}, "required": []},
-}
-
-_DEPLOY_ARTIFACT_GLOBS: tuple[str, ...] = (
-    "Dockerfile",
-    "*/Dockerfile",
-    "*/*/Dockerfile",
-    "Dockerfile.*",
-    "docker-compose*.yml",
-    "docker-compose*.yaml",
-    "Procfile",
-    ".github/workflows/*.yml",
-    ".github/workflows/*.yaml",
-    "scripts/systemd/*.service",
-    "scripts/systemd/*.timer",
-    "k8s/*.yaml",
-    "k8s/*.yml",
-    "kubernetes/*.yaml",
-    "kubernetes/*.yml",
-    "terraform/*.tf",
-    "Vagrantfile",
-)
-
-
-def make_list_deploy_artifacts_handler(
-    repo_path: str,
-) -> Callable[[dict[str, Any]], str]:
-    root = Path(repo_path)
-
-    def list_deploy_artifacts(inp: dict[str, Any]) -> str:
-        import json as _json
-
-        found: list[str] = []
-        seen: set[str] = set()
-        for pattern in _DEPLOY_ARTIFACT_GLOBS:
-            for p in sorted(root.glob(pattern)):
-                if not p.is_file():
-                    continue
-                rel = str(p.relative_to(root))
-                if rel not in seen:
-                    seen.add(rel)
-                    found.append(rel)
-        return _json.dumps({"deploy_artifacts": found}, indent=2)
-
-    return list_deploy_artifacts
+# moved to app/tools/filesystem/list_deploy_artifacts.py as
+# LIST_DEPLOY_ARTIFACTS_TOOL / make_list_deploy_artifacts_handler() —
+# tool_enhance.md productionization pass, tool #220 (2026-09-17). No
+# security vulnerability and no functional bug found — audited and
+# confirmed safe (fixed hardcoded globs, no `**` recursion, no crash
+# on a nonexistent repo_path, no content-leak risk via symlinks since
+# only relative file names are ever returned). Re-exported under the
+# old name for backward compatibility.
+_LIST_DEPLOY_ARTIFACTS_TOOL = LIST_DEPLOY_ARTIFACTS_TOOL
 
 
 # ---------------------------------------------------------------------------
