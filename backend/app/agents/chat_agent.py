@@ -3570,7 +3570,18 @@ class ChatAgent:
         # ========== AUDIT_Q_BATCH07 §13 — Human interaction ==========
 
         if tool_name == "ask_human_to_choose":
-            ahtc_question = str(inp["question"]).strip()
+            # tool_enhance.md productionization pass, tool #217
+            # (2026-09-17): was `inp["question"]` — a missing `question`
+            # key (schema marks it required, but nothing enforces that
+            # at runtime) raised an uncaught KeyError instead of the
+            # very next line's own intended "[ERROR] question is
+            # required." message. Proved live via a direct
+            # _execute_tool() call with no `question` key. The outer
+            # generic except in _execute_tool_node did prevent a full
+            # crash, but produced "[ERROR] Tool ask_human_to_choose
+            # failed: 'question'" instead of the clean, actionable
+            # message this branch already has code to return.
+            ahtc_question = str(inp.get("question", "")).strip()
             ahtc_options = inp.get("options")
             if not ahtc_question:
                 return "[ERROR] question is required."
