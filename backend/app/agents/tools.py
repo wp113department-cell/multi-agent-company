@@ -729,6 +729,10 @@ from app.tools.agents.memory_curate_read import (
     MEMORY_CURATE_READ_TOOL,
     memory_curate_read_handler,
 )
+from app.tools.agents.memory_curate_write import (
+    MEMORY_CURATE_WRITE_TOOL,
+    memory_curate_write_handler,
+)
 from app.tools.agents.submit_enhancement_request import (
     SUBMIT_ENHANCEMENT_REQUEST_TOOL,
     make_submit_enhancement_request_handler as make_submit_enhancement_request_handler,
@@ -7303,63 +7307,22 @@ def memory_list_draft_lessons(inp: dict[str, Any]) -> str:
     )
 
 
-_MEMORY_CURATE_WRITE_TOOL: dict[str, Any] = {
-    "name": "memory_curate_write",
-    "description": "Update a memory entry during curation (recategorize, or mark as a superseded duplicate by rewriting its summary to note the supersession). Precursor to the full versioned-lesson lifecycle — light-touch, not a rewrite of history.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "id": {"type": "integer", "description": "MemoryEmbedding row id."},
-            "category": {
-                "type": "string",
-                "description": "New category, if recategorizing.",
-            },
-            "note": {
-                "type": "string",
-                "description": "Note to append to the summary, e.g. superseded-by info.",
-            },
-        },
-        "required": ["id"],
-    },
-}
-
-
-def memory_curate_write(inp: dict[str, Any]) -> str:
-    import asyncio
-
-    row_id = int(inp["id"])
-    new_category = inp.get("category")
-    note = inp.get("note")
-    if not new_category and not note:
-        return "[ERROR] provide category and/or note — nothing to update"
-
-    async def _update() -> bool:
-        from sqlalchemy.ext.asyncio import async_sessionmaker
-
-        from app.db.models import MemoryEmbedding
-
-        engine = _new_isolated_db_engine()
-        try:
-            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                row = await session.get(MemoryEmbedding, row_id)
-                if row is None:
-                    return False
-                if new_category:
-                    row.category = str(new_category)
-                if note:
-                    row.summary = f"{row.summary}\n[curated] {note}"
-                await session.commit()
-                return True
-        finally:
-            await engine.dispose()
-
-    try:
-        found = asyncio.run(_update())
-    except Exception as exc:
-        return f"[ERROR] memory_curate_write failed: {exc}"
-    if not found:
-        return f"[ERROR] No memory entry with id={row_id}"
-    return f"Memory entry #{row_id} updated."
+# moved to app/tools/agents/memory_curate_write.py as
+# MEMORY_CURATE_WRITE_TOOL / memory_curate_write_handler() —
+# tool_enhance.md productionization pass, tool #224 (2026-09-17). Two
+# real findings, worse than sibling tool #223's equivalent ones:
+# (1) `row_id = int(inp["id"])` used bare dict indexing AND happened
+# before the function's own try/except — a genuinely missing `id` key
+# raised an uncaught KeyError, and a malformed `id` value raised an
+# uncaught ValueError. Fixed by moving the coercion inside the guard
+# and using `.get("id")` for a clean "[ERROR] id is required" message.
+# (2) used the local `_new_isolated_db_engine()` instead of the
+# canonical `app.db.session.new_isolated_async_engine()` — fixed for
+# this tool specifically (2 other tools — memory_search,
+# memory_list_draft_lessons — still use the local duplicate,
+# deliberately left for their own future turns).
+_MEMORY_CURATE_WRITE_TOOL: dict[str, Any] = MEMORY_CURATE_WRITE_TOOL
+memory_curate_write = memory_curate_write_handler
 
 
 _MEMORY_PROMOTE_LESSON_TOOL: dict[str, Any] = {
