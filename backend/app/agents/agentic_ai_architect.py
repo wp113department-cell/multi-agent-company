@@ -129,6 +129,34 @@ def make_agentic_ai_architect_handlers(repo_path: str) -> dict[str, Any]:
         result.update(inp)
         return "Submitted."
 
+    # tool_enhance.md productionization pass, tool #232 (2026-09-17) —
+    # same real, severe finding already found and fixed on the sibling
+    # agent accessibility_agent (tool #231): this agent's own role
+    # file (roles/agentic_ai_architect.md) states "Zero repo files
+    # modified (design-only role)" as a Quality Gate, and AGENT_CONTRACT
+    # above claims side_effects=["writes agentic system design docs"]
+    # and permissions=["read_repo", "write_docs"] — but `base = make_
+    # chat_handlers(repo_path)` gave this agent the FULL, UNRESTRICTED
+    # write_file (any path, including real code files). Proved live: a
+    # direct write_file({"path": "app/main.py", ...}) call genuinely
+    # overwrote a real .py file, with no policy denial at all. Fixed
+    # by overriding write_file with the same .md/docs/** scoping
+    # already established for the Day-53 doc-generator agents
+    # (make_doc_generator_handlers's dg_write_file, app/agents/tools.py)
+    # and just applied to accessibility_agent — this agent's own actual
+    # purpose (design + write a design doc) needs nothing broader.
+    unscoped_write_file = base["write_file"]
+
+    def scoped_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp.get("path", ""))
+        if not (rel.endswith(".md") or rel.startswith("docs/")):
+            return (
+                f"[POLICY DENIED] agentic_ai_architect may only write .md files "
+                f"or paths under docs/ — this is a design-only role. Got: {rel!r}"
+            )
+        return str(unscoped_write_file(inp))
+
+    base["write_file"] = scoped_write_file
     base["submit_agentic_ai_architect"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
