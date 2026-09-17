@@ -601,6 +601,10 @@ from app.tools.integrations.http_request import (
     HTTP_REQUEST_TOOL,
     http_request_handler,
 )
+from app.tools.integrations.check_last_release import (
+    CHECK_LAST_RELEASE_TOOL,
+    check_last_release_handler,
+)
 from app.tools.integrations.inspect_github_repo import (
     INSPECT_GITHUB_REPO_TOOL,
     inspect_github_repo_handler,
@@ -2909,22 +2913,15 @@ _DEPENDENCY_BASH_TOOL_SPEC = {
 # installed. Real registry API calls (PyPI's/npm's own public JSON APIs,
 # verified live against real packages before writing this), not a
 # heuristic or the LLM's own training-time guess.
-_CHECK_LAST_RELEASE_TOOL = {
-    "name": "check_last_release",
-    "description": "Check when a package's latest version was actually published (real PyPI/npm registry lookup) — distinguishes 'outdated but active' from 'abandoned' (no release in a long time), which pip/npm version-comparison alone cannot tell apart.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "package": {"type": "string", "description": "Package name"},
-            "ecosystem": {
-                "type": "string",
-                "enum": ["pypi", "npm"],
-                "description": "Which registry to check (default: pypi)",
-            },
-        },
-        "required": ["package"],
-    },
-}
+# moved to app/tools/integrations/check_last_release.py as
+# CHECK_LAST_RELEASE_TOOL / check_last_release_handler() —
+# tool_enhance.md productionization pass, tool #218 (2026-09-17).
+# Real finding: datetime.fromisoformat(upload_time...) had no
+# try/except at all (one line after a separate, already-closed
+# try/except block) — a malformed registry timestamp raised an
+# uncaught ValueError. Fixed by wrapping the date-parsing block in its
+# own try/except (ValueError, OverflowError, AttributeError).
+_CHECK_LAST_RELEASE_TOOL = CHECK_LAST_RELEASE_TOOL
 
 # --- Day 2 Tool Lists ---
 
@@ -3757,81 +3754,8 @@ def make_dependency_agent_handlers(repo_path: str) -> dict[str, Any]:
         target.write_text(text.replace(old_s, new_s, 1), encoding="utf-8")
         return f"Edited {rel}"
 
-    def check_last_release(inp: dict[str, Any]) -> str:
-        import json as _json
-
-        package = str(inp.get("package", "")).strip()
-        ecosystem = str(inp.get("ecosystem", "pypi")).strip().lower()
-        if not package:
-            return "[ERROR] package is required"
-        if ecosystem == "pypi":
-            registry_url = f"https://pypi.org/pypi/{package}/json"
-        elif ecosystem == "npm":
-            registry_url = f"https://registry.npmjs.org/{package}"
-        else:
-            return (
-                f"[ERROR] Unknown ecosystem: {ecosystem!r} (expected 'pypi' or 'npm')"
-            )
-
-        try:
-            r = subprocess.run(
-                [
-                    "curl",
-                    "-s",
-                    "-L",
-                    "--max-time",
-                    "15",
-                    "--user-agent",
-                    "Gridiron-Agent/1.0",
-                    registry_url,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=20,
-            )
-        except subprocess.TimeoutExpired:
-            return f"[ERROR] Registry lookup for {package!r} timed out"
-        except FileNotFoundError:
-            return "[ERROR] curl not found"
-        if r.returncode != 0 or not r.stdout:
-            return f"[ERROR] Could not reach {ecosystem} registry for {package!r}"
-        try:
-            data = _json.loads(r.stdout)
-        except _json.JSONDecodeError:
-            return f"[ERROR] {package!r} not found on {ecosystem} (or invalid response)"
-
-        try:
-            if ecosystem == "pypi":
-                latest_version = data["info"]["version"]
-                urls = data.get("urls") or []
-                upload_time = urls[0]["upload_time_iso_8601"] if urls else None
-            else:
-                latest_version = data["dist-tags"]["latest"]
-                upload_time = data.get("time", {}).get(latest_version)
-        except (KeyError, IndexError, TypeError):
-            return f"[ERROR] Unexpected {ecosystem} registry response shape for {package!r}"
-
-        if not upload_time:
-            return f"{package}: latest version {latest_version}, no publish date available from {ecosystem}"
-
-        from datetime import datetime, timezone as _timezone
-
-        published = datetime.fromisoformat(upload_time.replace("Z", "+00:00"))
-        days_since = (datetime.now(_timezone.utc) - published).days
-        settings = get_settings()
-        if days_since >= settings.dependency_abandoned_threshold_days:
-            staleness = f"ABANDONED (no release in {days_since} days)"
-        elif days_since >= settings.dependency_possibly_abandoned_threshold_days:
-            staleness = f"possibly abandoned (no release in {days_since} days)"
-        else:
-            staleness = f"actively maintained ({days_since} days since last release)"
-        return (
-            f"{package} ({ecosystem}): latest release {latest_version}, "
-            f"published {upload_time} — {staleness}"
-        )
-
     handlers["bash"] = dep_bash
-    handlers["check_last_release"] = check_last_release
+    handlers["check_last_release"] = check_last_release_handler
     handlers["edit_file"] = dep_edit_file
     handlers["submit_dependency_report"] = submit_dependency_report_handler
     return handlers
