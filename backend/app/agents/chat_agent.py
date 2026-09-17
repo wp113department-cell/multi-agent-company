@@ -96,7 +96,6 @@ from app.agents.base_graph import (
 )
 from app.agents.tools import (
     CHAT_TOOLS,
-    _apply_conflict_resolutions,
     _docker_container_risk_reason,
     _is_dangerous_command,
     _is_protected_path,
@@ -193,6 +192,7 @@ from app.tools.filesystem.csv_preview import csv_preview_handler
 from app.tools.filesystem.env_diff import env_diff_handler
 from app.tools.git.explain_merge_conflict import explain_merge_conflict_handler
 from app.tools.git.parse_merge_conflicts import parse_merge_conflicts_handler
+from app.tools.git.resolve_merge_conflict import resolve_merge_conflict_handler
 from app.tools.filesystem.export_markdown import export_markdown_handler
 from app.tools.filesystem.find_file import find_file_handler
 from app.tools.filesystem.find_queue import find_queue_handler
@@ -2064,36 +2064,21 @@ class ChatAgent:
             )
 
         if tool_name == "resolve_merge_conflict":
-            rmc_rel = str(inp["path"])
-            if _is_protected_path(rmc_rel, repo):
-                return f"[POLICY DENIED] Protected path: {rmc_rel}"
-            rmc_target = root / rmc_rel
-            if not rmc_target.exists():
-                return f"[ERROR] File not found: {rmc_rel}"
-            rmc_raw_resolutions = inp.get("resolutions") or []
-            if not rmc_raw_resolutions:
-                return "[ERROR] resolutions is required — at least one {index, choice}"
-            rmc_resolutions: dict[int, dict[str, Any]] = {}
-            for entry in rmc_raw_resolutions:
-                rmc_idx = int(entry["index"])
-                rmc_choice = str(entry.get("choice", ""))
-                if rmc_choice == "custom" and "custom_content" not in entry:
-                    return (
-                        f"[ERROR] hunk {rmc_idx}: choice='custom' requires "
-                        "custom_content"
-                    )
-                rmc_resolutions[rmc_idx] = entry
-            rmc_text = rmc_target.read_text(encoding="utf-8")
-            rmc_new_text, rmc_applied, rmc_unresolved = _apply_conflict_resolutions(
-                rmc_text, rmc_resolutions
+            # tool_enhance.md productionization pass, tool #229
+            # (2026-09-17) — same "two real implementations" shape
+            # already fixed on sibling tools #136
+            # (explain_merge_conflict) and #228
+            # (parse_merge_conflicts). Worktree validation was already
+            # correct; was missing a `.get()` guard on `path` and on
+            # each resolution entry's `index` (both raised an uncaught
+            # KeyError when absent, and a malformed index raised an
+            # uncaught ValueError), plus a try/except around the file
+            # read/write (a directory raised an uncaught
+            # IsADirectoryError) — all 4 proved live. Now delegates to
+            # the shared, already-worktree-validated, fixed handler.
+            return await asyncio.to_thread(
+                resolve_merge_conflict_handler, root, repo, inp
             )
-            rmc_target.write_text(rmc_new_text, encoding="utf-8")
-            if rmc_unresolved:
-                return (
-                    f"Resolved {len(rmc_applied)} hunk(s) in {rmc_rel}. "
-                    f"Still unresolved (markers left intact): {rmc_unresolved}"
-                )
-            return f"Resolved all {len(rmc_applied)} conflict hunk(s) in {rmc_rel}."
 
         if tool_name == "explain_merge_conflict":
             # tool_enhance.md productionization pass, tool #136

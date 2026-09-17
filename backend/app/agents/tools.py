@@ -8,10 +8,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from app.agents.conflict_resolution import (
-    _apply_conflict_resolutions as _apply_conflict_resolutions,
-    _parse_conflict_markers as _parse_conflict_markers,
-)
 from app.agents.tool_security import (
     _docker_container_risk_reason as _docker_container_risk_reason,
     _extract_patch_target_paths as _extract_patch_target_paths,
@@ -508,6 +504,10 @@ from app.tools.git.explain_merge_conflict import (
 from app.tools.git.parse_merge_conflicts import (
     PARSE_MERGE_CONFLICTS_TOOL,
     parse_merge_conflicts_handler,
+)
+from app.tools.git.resolve_merge_conflict import (
+    RESOLVE_MERGE_CONFLICT_TOOL,
+    resolve_merge_conflict_handler,
 )
 from app.tools.filesystem.export_markdown import (
     EXPORT_MARKDOWN_TOOL,
@@ -2360,41 +2360,13 @@ _PARSE_MERGE_CONFLICTS_TOOL = PARSE_MERGE_CONFLICTS_TOOL
 # EXPLAIN_MERGE_CONFLICT_TOOL / explain_merge_conflict_handler() —
 # tool_enhance.md productionization pass, tool #136 (2026-09-11).
 
-_RESOLVE_MERGE_CONFLICT_TOOL = {
-    "name": "resolve_merge_conflict",
-    "description": "Resolve specific conflict hunks in a file (by index, from parse_merge_conflicts) by keeping 'ours', 'theirs', or 'custom' merged content. Hunks not named in resolutions are left untouched and reported back as still unresolved.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Conflicted file, relative to repo root",
-            },
-            "resolutions": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "index": {
-                            "type": "integer",
-                            "description": "Hunk index from parse_merge_conflicts",
-                        },
-                        "choice": {
-                            "type": "string",
-                            "enum": ["ours", "theirs", "custom"],
-                        },
-                        "custom_content": {
-                            "type": "string",
-                            "description": "Required when choice='custom' — the exact merged content for this hunk",
-                        },
-                    },
-                    "required": ["index", "choice"],
-                },
-            },
-        },
-        "required": ["path", "resolutions"],
-    },
-}
+# moved to app/tools/git/resolve_merge_conflict.py as
+# RESOLVE_MERGE_CONFLICT_TOOL / resolve_merge_conflict_handler() —
+# tool_enhance.md productionization pass, tool #229 (2026-09-17). Same
+# "two real implementations" shape already fixed on sibling tools #136
+# (explain_merge_conflict) and #228 (parse_merge_conflicts) — BOTH
+# real call sites now delegate to the shared handler.
+_RESOLVE_MERGE_CONFLICT_TOOL = RESOLVE_MERGE_CONFLICT_TOOL
 
 # _GIT_RESET_TOOL moved to app/tools/git/reset.py as GIT_RESET_TOOL —
 # tool_enhance.md productionization pass, tool #5 (2026-08-16).
@@ -5582,32 +5554,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         )
 
     def resolve_merge_conflict(inp: dict[str, Any]) -> str:
-        rel = str(inp["path"])
-        result = check_path_in_worktree(rel, repo_path)
-        if not result.allowed:
-            return f"[POLICY DENIED] {rel}: {result.reason}"
-        target = Path(repo_path) / rel
-        if not target.exists():
-            return f"[ERROR] File not found: {rel}"
-        raw_resolutions = inp.get("resolutions") or []
-        if not raw_resolutions:
-            return "[ERROR] resolutions is required — at least one {index, choice}"
-        resolutions: dict[int, dict[str, Any]] = {}
-        for entry in raw_resolutions:
-            idx = int(entry["index"])
-            choice = str(entry.get("choice", ""))
-            if choice == "custom" and "custom_content" not in entry:
-                return f"[ERROR] hunk {idx}: choice='custom' requires custom_content"
-            resolutions[idx] = entry
-        text = target.read_text(encoding="utf-8")
-        new_text, applied, unresolved = _apply_conflict_resolutions(text, resolutions)
-        target.write_text(new_text, encoding="utf-8")
-        if unresolved:
-            return (
-                f"Resolved {len(applied)} hunk(s) in {rel}. "
-                f"Still unresolved (markers left intact): {unresolved}"
-            )
-        return f"Resolved all {len(applied)} conflict hunk(s) in {rel}."
+        return resolve_merge_conflict_handler(root, repo_path, inp)
 
     # git_reset moved to app/tools/git/reset.py as git_reset_handler —
     # tool_enhance.md productionization pass, tool #5 (2026-08-16).

@@ -19,11 +19,11 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from app.agents.tools import (
+from app.agents.conflict_resolution import (
     _apply_conflict_resolutions,
     _parse_conflict_markers,
-    make_chat_handlers,
 )
+from app.agents.tools import make_chat_handlers
 
 _DIFF3_CONFLICT = """line before
 <<<<<<< HEAD
