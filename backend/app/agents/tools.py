@@ -1898,20 +1898,55 @@ def list_registered_agents(inp: dict[str, Any]) -> str:
     return _json.dumps(data, indent=2)
 
 
-def list_all_tool_specs(inp: dict[str, Any]) -> str:
-    import json as _json
-    import sys
-
-    module = sys.modules[__name__]
-    seen: dict[str, str] = {}
+def _collect_tool_specs_from_module(module: Any, seen: dict[str, str]) -> None:
     for attr_name in dir(module):
-        val = getattr(module, attr_name)
+        try:
+            val = getattr(module, attr_name)
+        except Exception:
+            continue
         if isinstance(val, dict) and "name" in val and "input_schema" in val:
             seen[str(val["name"])] = str(val.get("description", ""))
         elif isinstance(val, list):
             for item in val:
                 if isinstance(item, dict) and "name" in item and "input_schema" in item:
                     seen[str(item["name"])] = str(item.get("description", ""))
+
+
+def list_all_tool_specs(inp: dict[str, Any]) -> str:
+    """Real introspection of every distinct tool schema in the codebase.
+
+    tool_enhance.md productionization pass, tool #219 (2026-09-17): real
+    finding — this function's own description claims "every distinct
+    tool schema defined in this codebase," but it only ever scanned
+    this one module (app.agents.tools). Proved live: 2 real tools were
+    silently invisible to every real caller (tool_catalog_doc_agent,
+    whose whole job is writing an accurate tool catalog doc from this
+    output) — `submit_fix` (tool #214's shared schema, re-exported only
+    inside the 4 agent files that use it, never into this module) and
+    the pre-existing `score_tech_options` (tech_advisor_agent.py-local,
+    unrelated to any change in this initiative). Fixed by also scanning
+    every other module directly under app/agents/ — closes the root
+    cause (any future agent-local-only tool schema is now covered
+    automatically) rather than just patching these 2 known instances.
+    """
+    import importlib
+    import json as _json
+    import sys
+    from pathlib import Path as _Path
+
+    seen: dict[str, str] = {}
+    _collect_tool_specs_from_module(sys.modules[__name__], seen)
+
+    agents_dir = _Path(__file__).resolve().parent
+    for path in sorted(agents_dir.glob("*.py")):
+        if path.stem in ("tools", "__init__"):
+            continue
+        try:
+            mod = importlib.import_module(f"app.agents.{path.stem}")
+        except Exception:
+            continue
+        _collect_tool_specs_from_module(mod, seen)
+
     data = [{"name": n, "description": d} for n, d in sorted(seen.items())]
     return _json.dumps(data, indent=2)
 
