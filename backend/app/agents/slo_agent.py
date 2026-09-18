@@ -100,6 +100,35 @@ def make_slo_agent_handlers(repo_path: str) -> dict[str, Any]:
         result.update(inp)
         return "Submitted."
 
+    # tool_enhance.md productionization pass, tool #263 (2026-09-18) — same
+    # real, severe finding class already found and fixed on 19 sibling
+    # agents. roles/slo_agent.md's "reports, specs, scripts, docs"
+    # write_file phrasing is shared boilerplate across 15 role files, not
+    # decisive on its own (see tool #261's rollback_agent for the same
+    # discernment). This agent's own Non-Responsibilities instead say
+    # "Modifying monitoring config" is out of scope, and AGENT_CONTRACT
+    # claims permissions=["read_repo","write_docs"] (never "write_repo")
+    # with side_effects=["writes SLO specification documents"] — the real,
+    # intended output is a spec document. But `base =
+    # make_chat_handlers(repo_path)` gave this agent the FULL,
+    # UNRESTRICTED write_file, able to write real application code too.
+    # Proved live: a direct write_file({"path": "app/main.py", ...}) call
+    # genuinely overwrote a real .py file. Fixed with the same .md/docs/**
+    # scoping already established for the sibling agents.
+    unscoped_write_file = base["write_file"]
+
+    def scoped_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp.get("path", ""))
+        if not (rel.endswith(".md") or rel.startswith("docs/")):
+            return (
+                f"[POLICY DENIED] slo_agent may only write .md files or "
+                f"paths under docs/ — this agent produces SLO "
+                f"specification documents, not code or monitoring config "
+                f"changes. Got: {rel!r}"
+            )
+        return str(unscoped_write_file(inp))
+
+    base["write_file"] = scoped_write_file
     base["submit_slo_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
