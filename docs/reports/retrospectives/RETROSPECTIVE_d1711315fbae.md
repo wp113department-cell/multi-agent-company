@@ -1,7 +1,7 @@
-# Release Retrospective — f047e83a1509
+# Release Retrospective — d1711315fbae
 
-Period: 2026-08-18T09:43:38.857045+00:00 .. 2026-08-25T09:43:38.869343+00:00
-Commit range: `92779249eaab..f047e83a1509`
+Period: 2026-09-11T12:54:55.000500+00:00 .. 2026-09-18T12:54:55.016695+00:00
+Commit range: `5c40efae47c7..d1711315fbae`
 
 ## What went well
 - 0 task(s) completed successfully (n/a of 0 closed this period).
@@ -9,4 +9,4 @@ Commit range: `92779249eaab..f047e83a1509`
 
 ## What failed
 - 0 task(s) failed; 0 task(s) still blocked; 0 cancelled.
-- 0 of 0 filed enhancement request(s) were rejected.
+- 0 of 3 filed enhancement request(s) were rejected.
