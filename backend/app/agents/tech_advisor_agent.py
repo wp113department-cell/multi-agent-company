@@ -292,6 +292,34 @@ def make_tech_advisor_agent_handlers(repo_path: str) -> dict[str, Any]:
         result.update(inp)
         return "Submitted."
 
+    # tool_enhance.md productionization pass, tool #266 (2026-09-18) — same
+    # real, severe finding class already found and fixed on 21 sibling
+    # agents. roles/tech_advisor_agent.md's own Non-Responsibilities say
+    # "Implementing the chosen technology (the relevant coder/dev agent's
+    # scope)", and AGENT_CONTRACT claims permissions=["read_repo",
+    # "write_docs"] (never "write_repo") with
+    # side_effects=["writes technology-comparison reports"] — the real,
+    # intended output is a comparison report. But `base =
+    # make_chat_handlers(repo_path)` gave this agent the FULL,
+    # UNRESTRICTED write_file, able to write real application code too.
+    # Proved live: a direct write_file({"path": "app/main.py", ...}) call
+    # genuinely overwrote a real .py file. Fixed with the same .md/docs/**
+    # scoping already established for the sibling agents.
+    unscoped_write_file = base["write_file"]
+
+    def scoped_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp.get("path", ""))
+        if not (rel.endswith(".md") or rel.startswith("docs/")):
+            return (
+                f"[POLICY DENIED] tech_advisor_agent may only write .md "
+                f"files or paths under docs/ — this agent produces "
+                f"technology-comparison reports; implementing the chosen "
+                f"technology is out of scope (coder/dev agent's job). "
+                f"Got: {rel!r}"
+            )
+        return str(unscoped_write_file(inp))
+
+    base["write_file"] = scoped_write_file
     base["score_tech_options"] = score_h
     base["submit_tech_advisor_agent"] = submit_h
     base["_result"] = result
