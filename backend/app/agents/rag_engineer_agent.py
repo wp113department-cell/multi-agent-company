@@ -182,7 +182,21 @@ def run_rag_engineer_agent(
         max_turns=20,
     )
 
-    raw = submitted if submitted else final_state["result"]
+    # tool_enhance.md productionization pass, tool #258 (2026-09-18) — this
+    # was backwards relative to the correct, established pattern used by
+    # every other submit_* agent in this codebase (`final_state["result"]
+    # if final_state["result"] else <local fallback>`). base_graph.py's
+    # execute_tools() builds final_state["result"] starting from the exact
+    # same dict the LLM passed to submit_rag_design, then extends it with
+    # graph-enforced diagnostics (_quality_gate, _citation_check,
+    # _validation_warning) at the one real submit_* chokepoint. Preferring
+    # the local `submitted` dict here silently dropped that diagnostic
+    # trail from AgentResult.raw — proved live: a failing quality gate
+    # (_quality_gate.passed=False) never reached AgentResult.raw for this
+    # agent while it does for every sibling agent using the correct order.
+    # `submitted` remains a legitimate fallback only for the edge case
+    # where final_state["result"] is genuinely empty.
+    raw = final_state["result"] if final_state["result"] else submitted
     return AgentResult(
         summary=f"RAG design: {raw.get('vector_store', '?')} | {raw.get('embedding_model', '?')} | {raw.get('retrieval_strategy', '?')}. {raw.get('summary', '')}",
         findings=raw.get("implementation_notes", []),
