@@ -541,6 +541,10 @@ from app.tools.filesystem.summarize_folder import (
     SUMMARIZE_FOLDER_TOOL,
     summarize_folder_handler,
 )
+from app.tools.filesystem.summarize_output import (
+    SUMMARIZE_OUTPUT_TOOL,
+    summarize_output_handler,
+)
 from app.tools.filesystem.summarize_repo import (
     SUMMARIZE_REPO_TOOL,
     summarize_repo_handler,
@@ -4730,29 +4734,7 @@ _PARSE_DOCKER_COMPOSE_TOOL: dict[str, Any] = PARSE_DOCKER_COMPOSE_TOOL
     # moved to app/tools/filesystem/generate_diagram.py as
     # GENERATE_DIAGRAM_TOOL / generate_diagram_handler() —
     # tool_enhance.md productionization pass, tool #146 (2026-09-14).
-_SUMMARIZE_OUTPUT_TOOL: dict[str, Any] = {
-    "name": "summarize_output",
-    "description": (
-        "Condense a long piece of text (e.g. a command/log/tool result you just "
-        "received) into a short LLM-generated summary — real summarization, "
-        "distinct from just truncating the text. Use this instead of pasting a "
-        "huge result verbatim into your own next message."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "text": {
-                "type": "string",
-                "description": "The long text to summarize",
-            },
-            "focus": {
-                "type": "string",
-                "description": "Optional: what to focus the summary on (e.g. 'errors only', 'files changed')",
-            },
-        },
-        "required": ["text"],
-    },
-}
+_SUMMARIZE_OUTPUT_TOOL: dict[str, Any] = SUMMARIZE_OUTPUT_TOOL
 # moved to app/tools/filesystem/export_markdown.py as
 # EXPORT_MARKDOWN_TOOL / export_markdown_handler() — tool_enhance.md
 # productionization pass, tool #137 (2026-09-11).
@@ -6841,34 +6823,11 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def openapi_inspect_h(inp: dict[str, Any]) -> str:
         return openapi_inspect_handler(root, repo_path, inp)
 
+    # moved to app/tools/filesystem/summarize_output.py as
+    # SUMMARIZE_OUTPUT_TOOL / summarize_output_handler() —
+    # tool_enhance.md productionization pass, tool #273 (2026-09-18).
     def summarize_output_h(inp: dict[str, Any]) -> str:
-        """AUDIT_Q_BATCH14 §99 gap-closure — real LLM-generated output
-        summarization, distinct from the hard char/line truncation used
-        elsewhere in this file (e.g. result.stdout[:8000]). Reuses
-        _llm_generate_text (the same one-shot, circuit-breaker-protected,
-        never-raises LLM call already used by generate_commit_msg and
-        every other "generate X" tool in this module — see that function's
-        own docstring) rather than building a second Anthropic call path."""
-        text = str(inp["text"])
-        focus = str(inp.get("focus", "")).strip()
-        if not text.strip():
-            return "(nothing to summarize — empty text)"
-
-        focus_line = f" Focus specifically on: {focus}." if focus else ""
-        prompt = (
-            "Summarize the following text concisely, in 3-8 concrete bullet "
-            "points. Preserve specifics (file paths, error messages, numbers, "
-            f"conclusions) — do not write vague generalities.{focus_line}\n\n"
-            f"Text to summarize:\n{text[:20000]}"
-        )
-        summary = _llm_generate_text(prompt, max_tokens=500)
-        if not summary:
-            return (
-                "[summarization unavailable — LLM call failed] "
-                f"Original text was {len(text)} chars; here is a truncated excerpt:\n"
-                f"{text[:2000]}"
-            )
-        return summary
+        return summarize_output_handler(inp)
 
     # tool_enhance.md productionization pass, tool #146 (2026-09-14) —
     # was a worktree-escape CLASS/METHOD/FUNCTION-NAME disclosure

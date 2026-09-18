@@ -203,6 +203,7 @@ from app.tools.filesystem.generate_api_docs_text import (
     generate_api_docs_text_handler,
 )
 from app.tools.filesystem.summarize_folder import summarize_folder_handler
+from app.tools.filesystem.summarize_output import summarize_output_handler
 from app.tools.filesystem.summarize_repo import summarize_repo_handler
 from app.tools.filesystem.template_render import template_render_handler
 from app.tools.execution.type_check import type_check_handler
@@ -3873,6 +3874,20 @@ class ChatAgent:
             # generate_changelog_handler's precedent) and delegating
             # to the shared handler.
             return await asyncio.to_thread(summarize_repo_handler, root, inp)
+
+        if tool_name == "summarize_output":
+            # tool_enhance.md productionization pass, tool #273
+            # (2026-09-18) — two real findings: (1) the handler did
+            # `text = str(inp["text"])`, a direct dict index rather
+            # than `.get()`, and genuinely crashed with `KeyError` on
+            # a missing `text` field (nothing enforces the schema's
+            # declared "required": ["text"] at runtime); (2) advertised
+            # in CHAT_TOOLS but never dispatched here at all, same
+            # dispatch class as tools
+            # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131/#132/#133/#134/#135/#136/#137/#138/#139/#140/#141/#142/#144/#202/#203.
+            # Fixed by coercing `text` via `.get("text", "")` and
+            # delegating to the shared handler.
+            return await asyncio.to_thread(summarize_output_handler, inp)
 
         if tool_name == "template_render":
             # tool_enhance.md productionization pass, tool #204
