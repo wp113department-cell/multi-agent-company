@@ -106,6 +106,34 @@ def make_spike_agent_handlers(repo_path: str) -> dict[str, Any]:
         result.update(inp)
         return "Submitted."
 
+    # tool_enhance.md productionization pass, tool #264 (2026-09-18) — same
+    # real, severe finding class already found and fixed on 20 sibling
+    # agents. roles/spike_agent.md's "reports, specs, scripts, docs"
+    # write_file phrasing is shared boilerplate across 15 role files, not
+    # decisive on its own (see tool #261's rollback_agent for the same
+    # discernment). This agent's own Non-Responsibilities instead say
+    # "Producing production code — spike output is findings, not
+    # features", and AGENT_CONTRACT claims permissions=["read_repo",
+    # "write_docs"] (never "write_repo") with side_effects=["writes spike
+    # research reports"] — the real, intended output is a research report.
+    # But `base = make_chat_handlers(repo_path)` gave this agent the FULL,
+    # UNRESTRICTED write_file, able to write real application code too.
+    # Proved live: a direct write_file({"path": "app/main.py", ...}) call
+    # genuinely overwrote a real .py file. Fixed with the same .md/docs/**
+    # scoping already established for the sibling agents.
+    unscoped_write_file = base["write_file"]
+
+    def scoped_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp.get("path", ""))
+        if not (rel.endswith(".md") or rel.startswith("docs/")):
+            return (
+                f"[POLICY DENIED] spike_agent may only write .md files or "
+                f"paths under docs/ — spike output is findings/"
+                f"recommendations, not production code. Got: {rel!r}"
+            )
+        return str(unscoped_write_file(inp))
+
+    base["write_file"] = scoped_write_file
     base["submit_spike_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
