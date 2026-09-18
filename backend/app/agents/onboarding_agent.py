@@ -106,6 +106,53 @@ def make_onboarding_agent_handlers(repo_path: str) -> dict[str, Any]:
         result.update(inp)
         return "Submitted."
 
+    # tool_enhance.md productionization pass, tool #254 (2026-09-18) —
+    # a real, genuine variant of the finding already found and fixed
+    # on 13 sibling agents (#231, #232, #237-#240, #243-#246, #248-#250,
+    # #252): unlike those, roles/onboarding_agent.md doesn't use the
+    # exact phrase "read-only on code", but AGENT_CONTRACT above still
+    # explicitly claims permissions=["read_repo", "write_docs"] (never
+    # "write_repo") and side_effects scoped to exactly one artifact —
+    # "writes onboarding documentation" / "edits an existing onboarding
+    # guide" — this agent's entire declared purpose is a single doc
+    # artifact, with no legitimate reason to ever touch source code.
+    # But `base = make_chat_handlers(repo_path)` gave this agent BOTH
+    # the FULL, UNRESTRICTED write_file AND edit_file (any path,
+    # including real code files). Proved live: a direct
+    # write_file({"path": "app/main.py", ...}) call genuinely
+    # overwrote a real .py file, and edit_file on the same path
+    # genuinely edited it too. Fixed by scoping BOTH tools to
+    # .md/docs/** — this is the first tool in this initiative to need
+    # edit_file scoped alongside write_file, since this is the first
+    # "docs-only" agent in the run that also advertises edit_file.
+    unscoped_write_file = base["write_file"]
+    unscoped_edit_file = base["edit_file"]
+
+    def _onboarding_path_allowed(rel: str) -> bool:
+        return rel.endswith(".md") or rel.startswith("docs/")
+
+    def scoped_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp.get("path", ""))
+        if not _onboarding_path_allowed(rel):
+            return (
+                f"[POLICY DENIED] onboarding_agent may only write .md files "
+                f"or paths under docs/ — this agent produces a single "
+                f"onboarding guide, not code changes. Got: {rel!r}"
+            )
+        return str(unscoped_write_file(inp))
+
+    def scoped_edit_file(inp: dict[str, Any]) -> str:
+        rel = str(inp.get("path", ""))
+        if not _onboarding_path_allowed(rel):
+            return (
+                f"[POLICY DENIED] onboarding_agent may only edit .md files "
+                f"or paths under docs/ — this agent produces a single "
+                f"onboarding guide, not code changes. Got: {rel!r}"
+            )
+        return str(unscoped_edit_file(inp))
+
+    base["write_file"] = scoped_write_file
+    base["edit_file"] = scoped_edit_file
     base["submit_onboarding_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
