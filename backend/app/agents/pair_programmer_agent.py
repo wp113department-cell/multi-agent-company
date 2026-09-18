@@ -100,6 +100,42 @@ def make_pair_programmer_agent_handlers(repo_path: str) -> dict[str, Any]:
         result.update(inp)
         return "Submitted."
 
+    # tool_enhance.md productionization pass, tool #255 (2026-09-18) —
+    # same real, severe finding class already found and fixed on 14
+    # sibling agents (#231, #232, #237-#240, #243-#246, #248-#250,
+    # #252, #254). This agent doesn't use the exact phrase "read-only
+    # on code" in its own role file, but tests/test_analyzer_tier_
+    # confirmed.py — this codebase's own authoritative, locked-in
+    # classification test — lists pair_programmer_agent among the
+    # "Analyzer tier" agents: those whose role explicitly excludes
+    # editing/fixing/modifying real code (confirmed by that test's own
+    # real assertion that these agents carry no edit_file/bash tool at
+    # all). AGENT_CONTRACT above matches that intent:
+    # permissions=["read_repo", "write_docs"] (never "write_repo"),
+    # and side_effects=["writes code suggestions and implementation
+    # guides"] — an output artifact, not a direct edit of the driver's
+    # real files (this agent doesn't even have edit_file, only a
+    # single-shot write_file). But `base = make_chat_handlers(
+    # repo_path)` gave this agent the FULL, UNRESTRICTED write_file
+    # (any path, including real code files). Proved live: a direct
+    # write_file({"path": "app/main.py", ...}) call genuinely
+    # overwrote a real .py file. Fixed by scoping write_file to
+    # .md/docs/** — the same pattern already established for the
+    # sibling agents above.
+    unscoped_write_file = base["write_file"]
+
+    def scoped_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp.get("path", ""))
+        if not (rel.endswith(".md") or rel.startswith("docs/")):
+            return (
+                f"[POLICY DENIED] pair_programmer_agent may only write .md "
+                f"files or paths under docs/ — this Analyzer-tier role "
+                f"guides implementation, it never edits the driver's real "
+                f"files directly. Got: {rel!r}"
+            )
+        return str(unscoped_write_file(inp))
+
+    base["write_file"] = scoped_write_file
     base["submit_pair_programmer_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
