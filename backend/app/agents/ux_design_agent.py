@@ -110,6 +110,34 @@ def make_ux_design_agent_handlers(repo_path: str) -> dict[str, Any]:
         result.update(inp)
         return "Submitted."
 
+    # tool_enhance.md productionization pass, tool #271 (2026-09-18) — same
+    # real, severe finding class already found and fixed on 24 sibling
+    # agents. roles/ux_design_agent.md's own Quality Gate says "Zero repo
+    # files modified (design-only role)" and its Non-Responsibilities say
+    # "Writing implementation code (frontend_dev's scope)", AGENT_CONTRACT
+    # claims permissions=["read_repo","write_docs"] (never "write_repo")
+    # with side_effects=["writes UI/UX design specs and design-system
+    # audit docs"] — the real, intended output is a design spec/audit
+    # document. But `base = make_chat_handlers(repo_path)` gave this agent
+    # the FULL, UNRESTRICTED write_file, able to write real application
+    # code too. Proved live: a direct write_file({"path": "app/main.py",
+    # ...}) call genuinely overwrote a real .py file. Fixed with the same
+    # .md/docs/** scoping already established for the sibling agents.
+    unscoped_write_file = base["write_file"]
+
+    def scoped_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp.get("path", ""))
+        if not (rel.endswith(".md") or rel.startswith("docs/")):
+            return (
+                f"[POLICY DENIED] ux_design_agent may only write .md files "
+                f"or paths under docs/ — this is a design-only role per "
+                f"its own Quality Gate (Zero repo files modified); "
+                f"implementation code is frontend_dev's scope. "
+                f"Got: {rel!r}"
+            )
+        return str(unscoped_write_file(inp))
+
+    base["write_file"] = scoped_write_file
     base["submit_ux_design_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
