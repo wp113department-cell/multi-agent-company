@@ -119,6 +119,53 @@ def make_runbook_generator_agent_handlers(repo_path: str) -> dict[str, Any]:
         result.update(inp)
         return "Submitted."
 
+    # tool_enhance.md productionization pass, tool #262 (2026-09-18) — same
+    # real, severe finding class already found and fixed on 18 sibling
+    # agents, adapted for this agent's dual write_file+edit_file tool set
+    # (same shape as tool #254's onboarding_agent fix). roles/
+    # runbook_generator_agent.md's own Process says "Write the runbook
+    # with write_file, or edit_file if updating an existing one" and its
+    # Non-Responsibilities say "Executing operations — runbooks only".
+    # AGENT_CONTRACT claims permissions=["read_repo","write_docs"] (never
+    # "write_repo") and side_effects=["writes operational runbooks",
+    # "edits existing runbooks", "validates embedded YAML for syntax"] —
+    # every real output is a runbook document. But `base =
+    # make_chat_handlers(repo_path)` gave this agent BOTH the FULL,
+    # UNRESTRICTED write_file AND edit_file, able to modify real
+    # application code too. Proved live: direct write_file and edit_file
+    # calls against "app/main.py" both genuinely modified a real .py
+    # file. Fixed with the same .md/docs/** scoping already established
+    # for the sibling agents, applied to both tools.
+    unscoped_write_file = base["write_file"]
+    unscoped_edit_file = base["edit_file"]
+
+    def _runbook_path_allowed(rel: str) -> bool:
+        return rel.endswith(".md") or rel.startswith("docs/")
+
+    def scoped_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp.get("path", ""))
+        if not _runbook_path_allowed(rel):
+            return (
+                f"[POLICY DENIED] runbook_generator_agent may only write "
+                f".md files or paths under docs/ — this agent produces "
+                f"runbook documents, not code; executing operations is out "
+                f"of scope. Got: {rel!r}"
+            )
+        return str(unscoped_write_file(inp))
+
+    def scoped_edit_file(inp: dict[str, Any]) -> str:
+        rel = str(inp.get("path", ""))
+        if not _runbook_path_allowed(rel):
+            return (
+                f"[POLICY DENIED] runbook_generator_agent may only edit "
+                f".md files or paths under docs/ — this agent produces "
+                f"runbook documents, not code; executing operations is out "
+                f"of scope. Got: {rel!r}"
+            )
+        return str(unscoped_edit_file(inp))
+
+    base["write_file"] = scoped_write_file
+    base["edit_file"] = scoped_edit_file
     base["submit_runbook_generator_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
