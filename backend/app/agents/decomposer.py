@@ -118,8 +118,22 @@ def decomposer_node(state: PipelineState) -> PipelineState:
     repo = state.get("repo_path", settings.target_repo_path)
 
     handlers = make_read_only_handlers(repo)
-    handlers["submit_subtasks"] = (
-        lambda inp: f"Submitted {len(inp.get('subtasks', []))} subtasks"
+    # tool_enhance.md productionization pass, tool #265 (2026-09-18) — proved
+    # live that a malformed submit_subtasks call (e.g. subtasks=None or a
+    # non-list value — the LLM's tool-use args aren't runtime-enforced
+    # against the declared array-typed schema) crashed this lambda with
+    # TypeError before this fix. base_graph.py's _run_tool_with_retry
+    # chokepoint already catches that exception and the real subtasks data
+    # still reaches decomposer_node correctly via final_state["result"]
+    # (captured independently at the submit_* chokepoint from the raw tool
+    # input), so this was never a pipeline-breaking bug — only a confusing
+    # "[ERROR] submit_subtasks raised: ..." shown to the LLM instead of a
+    # clean confirmation. Fixed by coercing non-list values to a safe
+    # length of 0 rather than letting len() raise.
+    handlers["submit_subtasks"] = lambda inp: (
+        f"Submitted "
+        f"{len(inp.get('subtasks', [])) if isinstance(inp.get('subtasks'), list) else 0} "
+        f"subtasks"
     )
     handlers["record_learning"] = make_record_learning_handler("decomposer")
 
