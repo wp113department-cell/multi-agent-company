@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from app.agents.agent_result import AgentResult
@@ -110,6 +111,24 @@ _CFG = VerificationConfig(
 )
 
 
+_TEST_FILE_PATTERN = re.compile(
+    r"(^|/)(test_[^/]+\.py|[^/]+_test\.py|[^/]+\.(test|spec)\.[jt]sx?)$"
+)
+
+
+def _is_test_file_path(rel: str) -> bool:
+    """Matches this repo's own real test-discovery conventions: pytest's
+    default (test_*.py / *_test.py, confirmed via backend/pytest.ini's
+    testpaths=tests with no python_files override) and Jest/Vitest's
+    default (*.test.[jt]sx? / *.spec.[jt]sx?, confirmed via
+    apps/web/vitest.config.ts's own include glob plus Jest's well-known
+    default testMatch). Also allows anything under a tests/ directory at
+    any depth, matching testpaths=tests."""
+    if "/tests/" in f"/{rel}" or rel.startswith("tests/"):
+        return True
+    return bool(_TEST_FILE_PATTERN.search(rel))
+
+
 def make_test_writer_agent_handlers(repo_path: str) -> dict[str, Any]:
     base = make_chat_handlers(repo_path)
     result: dict[str, Any] = {}
@@ -118,6 +137,37 @@ def make_test_writer_agent_handlers(repo_path: str) -> dict[str, Any]:
         result.update(inp)
         return "Submitted."
 
+    # tool_enhance.md productionization pass, tool #268 (2026-09-18) — a
+    # distinct variant of the write_file finding class already fixed on 22
+    # sibling agents: this agent's own AGENT_CONTRACT genuinely needs
+    # permissions=["read_repo","write_code","execute_tests"] (writing NEW
+    # test files IS its job, unlike the write_docs-only siblings), so a
+    # blanket .md/docs/** scope would be wrong here. But
+    # roles/test_writer_agent.md's own Non-Responsibilities explicitly
+    # forbid "Changing application code to make it testable — report
+    # testability blockers instead", and nothing enforced that: proved
+    # live that write_file({"path": "app/main.py", ...}) genuinely
+    # overwrote real, non-test application source. Fixed by scoping
+    # write_file to actual test-file paths (this repo's own real pytest/
+    # Jest/Vitest naming conventions, not an invented rule), which
+    # continues to permit this agent's genuine legitimate use case
+    # (writing tests/test_*.py, *.test.ts, etc.) while blocking edits to
+    # production code.
+    unscoped_write_file = base["write_file"]
+
+    def scoped_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp.get("path", ""))
+        if not _is_test_file_path(rel):
+            return (
+                f"[POLICY DENIED] test_writer_agent may only write test "
+                f"files (tests/**, test_*.py, *_test.py, *.test.[jt]sx?, "
+                f"*.spec.[jt]sx?) — changing application code to make it "
+                f"testable is out of scope; report the blocker instead. "
+                f"Got: {rel!r}"
+            )
+        return str(unscoped_write_file(inp))
+
+    base["write_file"] = scoped_write_file
     base["submit_test_writer_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
