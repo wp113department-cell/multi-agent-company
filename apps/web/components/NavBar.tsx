@@ -55,10 +55,15 @@ const NAV_LINKS = [
   { href: "/settings", label: "Settings" },
 ];
 
-function useFleetPendingCount(): number {
+function useFleetPendingCount(authed: boolean): number {
   const [count, setCount] = useState(0);
 
   useEffect(() => {
+    // Real bug found during UI audit (2026-09-18): this fetched
+    // /api/fleet/requests unconditionally on mount, including on /login
+    // before the user is authenticated — every unauthenticated visitor's
+    // console showed a 401 for a request they had no way to succeed.
+    if (!authed) return;
     let cancelled = false;
 
     async function refresh() {
@@ -87,15 +92,17 @@ function useFleetPendingCount(): number {
       cancelled = true;
       es.close();
     };
-  }, []);
+  }, [authed]);
 
   return count;
 }
 
-function useApprovalsPendingCount(): number {
+function useApprovalsPendingCount(authed: boolean): number {
   const [count, setCount] = useState(0);
 
   useEffect(() => {
+    // Same real bug as useFleetPendingCount above — gated on `authed`.
+    if (!authed) return;
     let cancelled = false;
 
     async function refresh() {
@@ -116,7 +123,7 @@ function useApprovalsPendingCount(): number {
       cancelled = true;
       clearInterval(interval);
     };
-  }, []);
+  }, [authed]);
 
   return count;
 }
@@ -124,8 +131,8 @@ function useApprovalsPendingCount(): number {
 export function NavBar() {
   const [authed, setAuthed] = useState(false);
   const pathname = usePathname();
-  const fleetPending = useFleetPendingCount();
-  const approvalsPending = useApprovalsPendingCount();
+  const fleetPending = useFleetPendingCount(authed);
+  const approvalsPending = useApprovalsPendingCount(authed);
 
   useEffect(() => {
     setAuthed(isAuthenticated());
