@@ -119,6 +119,42 @@ def make_prompt_engineer_agent_handlers(repo_path: str) -> dict[str, Any]:
         result.update(inp)
         return "Submitted."
 
+    # tool_enhance.md productionization pass, tool #257 (2026-09-18) —
+    # same real, severe finding class already found and fixed on 14
+    # sibling agents, adapted for this agent's own real, legitimate
+    # need to write .md prompt/role files: roles/prompt_engineer_agent.md
+    # explicitly lists "Implementing the code that calls the prompt
+    # (that's coder/backend_dev's scope)" as a Non-Responsibility and
+    # its own Quality Gate says "Zero UNRELATED repo files modified"
+    # (narrower than the other agents' absolute "Zero repo files
+    # modified" — this one genuinely needs to write the specific
+    # prompt/role file in scope, e.g. roles/*.md). AGENT_CONTRACT
+    # claims permissions=["read_repo", "write_docs"] (never
+    # "write_repo") and side_effects=["writes prompt drafts and
+    # prompt-audit reports"] — but `base = make_chat_handlers(
+    # repo_path)` gave this agent the FULL, UNRESTRICTED write_file,
+    # able to write real application code too. Proved live: a direct
+    # write_file({"path": "app/main.py", ...}) call genuinely
+    # overwrote a real .py file. Fixed with the same .md/docs/**
+    # scoping already established for the sibling agents — this
+    # already correctly permits the agent's real, intended use case
+    # (every role file lives at roles/*.md, which ends in .md) while
+    # blocking the code-implementation work this agent's own
+    # Non-Responsibilities explicitly excludes.
+    unscoped_write_file = base["write_file"]
+
+    def scoped_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp.get("path", ""))
+        if not (rel.endswith(".md") or rel.startswith("docs/")):
+            return (
+                f"[POLICY DENIED] prompt_engineer_agent may only write .md "
+                f"files or paths under docs/ (prompts/role files, drafts, "
+                f"audit reports) — implementing application code is out of "
+                f"scope (coder/backend_dev's job). Got: {rel!r}"
+            )
+        return str(unscoped_write_file(inp))
+
+    base["write_file"] = scoped_write_file
     base["submit_prompt_engineer_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
