@@ -114,6 +114,35 @@ def make_version_manager_agent_handlers(repo_path: str) -> dict[str, Any]:
         result.update(inp)
         return "Submitted."
 
+    # tool_enhance.md productionization pass, tool #272 (2026-09-18) — same
+    # real, severe finding class already found and fixed on 25 sibling
+    # agents, strongest form: roles/version_manager_agent.md's own Failure
+    # Conditions state "Modifying, creating, or deleting any repo file
+    # (this role is read-only on code)" and its Quality Gates require
+    # "Zero repo files were modified" (matching localization_agent's/
+    # test_coverage_agent's exact phrasing). AGENT_CONTRACT claims
+    # permissions=["read_repo","write_docs"] and side_effects=["writes
+    # version upgrade reports"] — the real, intended output is an upgrade
+    # report. Note: this agent's real git_tag/semver_bump tools were
+    # already independently productionized (tools #22/#25) and are
+    # untouched here — this fix is scoped to write_file only. Proved
+    # live: a direct write_file({"path": "app/main.py", ...}) call
+    # genuinely overwrote a real .py file. Fixed with the same .md/docs/**
+    # scoping already established for the sibling agents.
+    unscoped_write_file = base["write_file"]
+
+    def scoped_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp.get("path", ""))
+        if not (rel.endswith(".md") or rel.startswith("docs/")):
+            return (
+                f"[POLICY DENIED] version_manager_agent may only write "
+                f".md files or paths under docs/ — this role is "
+                f"read-only on code per its own Quality Gate (Zero repo "
+                f"files were modified). Got: {rel!r}"
+            )
+        return str(unscoped_write_file(inp))
+
+    base["write_file"] = scoped_write_file
     base["submit_version_manager_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
