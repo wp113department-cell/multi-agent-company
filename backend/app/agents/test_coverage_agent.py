@@ -139,6 +139,36 @@ def make_test_coverage_agent_handlers(repo_path: str) -> dict[str, Any]:
         result.update(inp)
         return "Submitted."
 
+    # tool_enhance.md productionization pass, tool #267 (2026-09-18) — same
+    # real, severe finding class already found and fixed on 22 sibling
+    # agents. roles/test_coverage_agent.md's own Failure Conditions state
+    # "Modifying, creating, or deleting any repo file (this role is
+    # read-only on code)" and its Quality Gates require "Zero repo files
+    # were modified" — the strongest form of this finding, matching
+    # localization_agent's exact phrasing. AGENT_CONTRACT claims
+    # permissions=["read_repo","write_docs","execute_tests"] and its own
+    # side_effects explicitly say "never writes code". But `base =
+    # make_chat_handlers(repo_path)` gave this agent the FULL,
+    # UNRESTRICTED write_file, able to write real application code too.
+    # Proved live: a direct write_file({"path": "app/main.py", ...}) call
+    # genuinely overwrote a real .py file. Fixed with the same .md/docs/**
+    # scoping already established for the sibling agents. bash is already
+    # correctly scoped to make_test_runner_bash_handler (coverage-tooling-
+    # only) — verified, not touched.
+    unscoped_write_file = base["write_file"]
+
+    def scoped_write_file(inp: dict[str, Any]) -> str:
+        rel = str(inp.get("path", ""))
+        if not (rel.endswith(".md") or rel.startswith("docs/")):
+            return (
+                f"[POLICY DENIED] test_coverage_agent may only write .md "
+                f"files or paths under docs/ — this role is read-only on "
+                f"code per its own Quality Gate (Zero repo files were "
+                f"modified). Got: {rel!r}"
+            )
+        return str(unscoped_write_file(inp))
+
+    base["write_file"] = scoped_write_file
     base["submit_test_coverage_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])
