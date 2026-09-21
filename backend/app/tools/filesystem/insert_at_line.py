@@ -64,6 +64,10 @@ from pathlib import Path
 from typing import Any
 
 from app.agents.tool_security import _is_protected_path
+from app.tools.filesystem._textio import (
+    read_text_lf,
+    write_text_lf,
+)
 
 INSERT_AT_LINE_TOOL = {
     "name": "insert_at_line",
@@ -98,11 +102,12 @@ def insert_at_line_handler(root: Path, worktree_path: str, inp: dict[str, Any]) 
     if not target.exists():
         return f"[ERROR] File not found: {rel}"
     try:
-        file_lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
+        text, nl_style = read_text_lf(target)
+        file_lines = text.splitlines(keepends=True)
         insert_at = min(line_num - 1, len(file_lines)) if line_num > 0 else 0
         ins_content = content if content.endswith("\n") else content + "\n"
         file_lines.insert(insert_at, ins_content)
-        target.write_text("".join(file_lines), encoding="utf-8")
+        write_text_lf(target, "".join(file_lines), nl_style)
         return f"Inserted at line {line_num} in {rel}"
     except Exception as e:
         return f"[ERROR] {e}"

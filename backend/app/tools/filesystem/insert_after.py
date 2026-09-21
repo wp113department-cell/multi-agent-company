@@ -64,6 +64,10 @@ from pathlib import Path
 from typing import Any
 
 from app.agents.tool_security import _is_protected_path
+from app.tools.filesystem._textio import (
+    read_text_lf,
+    write_text_lf,
+)
 
 INSERT_AFTER_TOOL: dict[str, object] = {
     "name": "insert_after",
@@ -99,7 +103,8 @@ def insert_after_handler(root: Path, worktree_path: str, inp: dict[str, Any]) ->
         return f"[BLOCKED] {path} is a protected path"
     fpath = root / path
     try:
-        lines = fpath.read_text(encoding="utf-8").splitlines(keepends=True)
+        text, nl_style = read_text_lf(fpath)
+        lines = text.splitlines(keepends=True)
         new_lines: list[str] = []
         inserted = False
         for line in lines:
@@ -109,7 +114,7 @@ def insert_after_handler(root: Path, worktree_path: str, inp: dict[str, Any]) ->
                 inserted = True
         if not inserted:
             return f"[WARN] Pattern '{pattern}' not found in {path}"
-        fpath.write_text("".join(new_lines), encoding="utf-8")
+        write_text_lf(fpath, "".join(new_lines), nl_style)
         return f"Inserted {len(content.splitlines())} line(s) after pattern '{pattern}' in {path}"
     except Exception as e:
         return f"[ERROR] insert_after: {e}"

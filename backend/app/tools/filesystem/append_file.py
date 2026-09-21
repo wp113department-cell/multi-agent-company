@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import Any
 
 from app.agents.tool_security import _is_protected_path
+from app.tools.filesystem._textio import adapt_to_style, existing_newline_style
 
 APPEND_FILE_TOOL = {
     "name": "append_file",
@@ -76,8 +77,11 @@ def append_file_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> 
     content = str(inp["content"])
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        with open(target, "a", encoding="utf-8") as f:
-            f.write(content)
+        # Append in the existing file's own newline style (LF text appended to a
+        # CRLF file used to leave it with mixed line endings).
+        data = adapt_to_style(content, existing_newline_style(target))
+        with open(target, "a", encoding="utf-8", newline="") as f:
+            f.write(data)
         return f"Appended {len(content)} bytes to {rel}"
     except Exception as e:
         return f"[ERROR] {e}"

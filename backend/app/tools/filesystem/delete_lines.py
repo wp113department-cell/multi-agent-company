@@ -42,6 +42,10 @@ from pathlib import Path
 from typing import Any
 
 from app.agents.tool_security import _is_protected_path
+from app.tools.filesystem._textio import (
+    read_text_lf,
+    write_text_lf,
+)
 
 DELETE_LINES_TOOL = {
     "name": "delete_lines",
@@ -79,14 +83,15 @@ def delete_lines_handler(root: Path, worktree_path: str, inp: dict[str, Any]) ->
     if start < 1 or end < start:
         return f"[ERROR] Invalid line range: {start}-{end}"
     try:
-        lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
+        text, nl_style = read_text_lf(target)
+        lines = text.splitlines(keepends=True)
         total = len(lines)
         if start > total:
             return f"[ERROR] File only has {total} lines"
         s = start - 1
         e = min(end, total)
         deleted = e - s
-        target.write_text("".join(lines[:s] + lines[e:]), encoding="utf-8")
+        write_text_lf(target, "".join(lines[:s] + lines[e:]), nl_style)
         return f"Deleted {deleted} lines ({start}-{end}) from {rel}"
     except Exception as ex:
         return f"[ERROR] {ex}"

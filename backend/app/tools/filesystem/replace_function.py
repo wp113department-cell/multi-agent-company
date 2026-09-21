@@ -87,6 +87,15 @@ from pathlib import Path
 from typing import Any
 
 from app.agents.tool_security import _is_protected_path
+import ast
+
+from app.tools.filesystem._textio import (
+    find_python_block,
+    read_text_lf,
+    split_keepends_lf,
+    trim_trailing_blank_lines,
+    write_text_lf,
+)
 
 REPLACE_FUNCTION_TOOL = {
     "name": "replace_function",
@@ -112,7 +121,9 @@ REPLACE_FUNCTION_TOOL = {
 }
 
 
-def replace_function_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> str:
+def replace_function_handler(
+    root: Path, worktree_path: str, inp: dict[str, Any]
+) -> str:
     """Core replace_function logic shared by every real call site.
     Finds `def <name>(`/`async def <name>(` at ANY indentation level
     (top-level function or class method) by scanning stripped lines, then
@@ -129,10 +140,20 @@ def replace_function_handler(root: Path, worktree_path: str, inp: dict[str, Any]
     if not target.exists():
         return f"[ERROR] File not found: {rel}"
     try:
-        lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
+        text, nl_style = read_text_lf(target)
+        lines = split_keepends_lf(text)
+        # Real syntax tree first: the indentation heuristic below stops at the
+        # first unindented line INSIDE the function (a multi-line SQL/template
+        # string, say), leaving the tail of the old body behind and producing a
+        # file that no longer parses while reporting success.
+        block = find_python_block(
+            text, func_name, (ast.FunctionDef, ast.AsyncFunctionDef)
+        )
         start: int | None = None
         indent = 0
         for i, line in enumerate(lines):
+            if block is not None:
+                break
             stripped = line.strip()
             if stripped.startswith(f"def {func_name}(") or stripped.startswith(
                 f"async def {func_name}("
@@ -140,20 +161,26 @@ def replace_function_handler(root: Path, worktree_path: str, inp: dict[str, Any]
                 start = i
                 indent = len(line) - len(line.lstrip())
                 break
-        if start is None:
-            return f"[ERROR] Function '{func_name}' not found in {rel}"
-        end = len(lines)
-        for j in range(start + 1, len(lines)):
-            jline = lines[j]
-            if jline.strip() == "":
-                continue
-            jindent = len(jline) - len(jline.lstrip())
-            if jindent <= indent and jline.strip():
-                end = j
-                break
+        if block is not None:
+            start, end = block
+        else:
+            if start is None:
+                return f"[ERROR] Function '{func_name}' not found in {rel}"
+            end = len(lines)
+            for j in range(start + 1, len(lines)):
+                jline = lines[j]
+                if jline.strip() == "":
+                    continue
+                jindent = len(jline) - len(jline.lstrip())
+                if jindent <= indent and jline.strip():
+                    end = j
+                    break
+            # keep the blank lines that separate this function from the next
+            end = trim_trailing_blank_lines(lines, start, end)
+        new_code = new_code.replace("\r\n", "\n")
         new_final = new_code if new_code.endswith("\n") else new_code + "\n"
         result = lines[:start] + [new_final] + lines[end:]
-        target.write_text("".join(result), encoding="utf-8")
+        write_text_lf(target, "".join(result), nl_style)
         return f"Replaced '{func_name}' in {rel} (lines {start + 1}-{end})"
     except Exception as e:
         return f"[ERROR] {e}"

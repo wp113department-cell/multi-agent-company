@@ -71,6 +71,15 @@ from pathlib import Path
 from typing import Any
 
 from app.agents.tool_security import _is_protected_path
+import ast
+
+from app.tools.filesystem._textio import (
+    find_python_block,
+    read_text_lf,
+    split_keepends_lf,
+    trim_trailing_blank_lines,
+    write_text_lf,
+)
 
 REPLACE_CLASS_TOOL = {
     "name": "replace_class",
@@ -117,10 +126,16 @@ def replace_class_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -
     if not target.exists():
         return f"[ERROR] File not found: {rel}"
     try:
-        lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
+        text, nl_style = read_text_lf(target)
+        lines = split_keepends_lf(text)
+        # Real syntax tree first (see replace_function for why the indentation
+        # heuristic is unsafe around unindented multi-line strings).
+        block = find_python_block(text, class_name, (ast.ClassDef,))
         start: int | None = None
         base_indent = 0
         for i, line in enumerate(lines):
+            if block is not None:
+                break
             stripped = line.strip()
             if (
                 stripped.startswith(f"class {class_name}(")
@@ -130,21 +145,26 @@ def replace_class_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -
                 start = i
                 base_indent = len(line) - len(line.lstrip())
                 break
-        if start is None:
-            return f"[ERROR] Class '{class_name}' not found in {rel}"
-        end = len(lines)
-        for j in range(start + 1, len(lines)):
-            jline = lines[j]
-            if jline.strip() == "":
-                continue
-            jindent = len(jline) - len(jline.lstrip())
-            if jindent <= base_indent and jline.strip():
-                end = j
-                break
+        if block is not None:
+            start, end = block
+        else:
+            if start is None:
+                return f"[ERROR] Class '{class_name}' not found in {rel}"
+            end = len(lines)
+            for j in range(start + 1, len(lines)):
+                jline = lines[j]
+                if jline.strip() == "":
+                    continue
+                jindent = len(jline) - len(jline.lstrip())
+                if jindent <= base_indent and jline.strip():
+                    end = j
+                    break
+            end = trim_trailing_blank_lines(lines, start, end)
         before = "".join(lines[:start])
         after = "".join(lines[end:])
+        new_code = new_code.replace("\r\n", "\n")
         new_final = new_code if new_code.endswith("\n") else new_code + "\n"
-        target.write_text(before + new_final + after, encoding="utf-8")
+        write_text_lf(target, before + new_final + after, nl_style)
         return f"Replaced class '{class_name}' in {rel} (was lines {start + 1}–{end})"
     except Exception as e:
         return f"[ERROR] {e}"

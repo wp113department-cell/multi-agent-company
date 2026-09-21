@@ -75,6 +75,7 @@ from pathlib import Path
 from typing import Any
 
 from app.agents.tool_security import _is_protected_path
+from app.tools.filesystem._textio import adapt_to_style, existing_newline_style
 
 WRITE_FILE_TOOL = {
     "name": "write_file",
@@ -119,7 +120,11 @@ def write_file_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> s
     target = root / rel
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-        return f"Written {rel} ({len(content)} bytes)"
+        # Overwriting a CRLF file with LF content keeps the file CRLF (no
+        # whole-file line-ending churn); new files are written exactly as given.
+        data = adapt_to_style(content, existing_newline_style(target))
+        with open(target, "w", encoding="utf-8", newline="") as f:
+            f.write(data)
+        return f"Written {rel} ({len(data.encode('utf-8'))} bytes)"
     except Exception as e:
         return f"[ERROR] Cannot write {rel}: {e}"

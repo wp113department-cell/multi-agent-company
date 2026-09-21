@@ -63,7 +63,7 @@ from pathlib import Path
 from typing import Any
 
 from app.policy.engine import check_path_in_worktree
-
+import shutil
 
 SYNC_FILES_TOOL = {
     "name": "sync_files",
@@ -101,7 +101,10 @@ def sync_files_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> s
     if not source_path.exists():
         return f"[ERROR] Source file not found: {source}"
     try:
-        content = source_path.read_text(encoding="utf-8")
+        # bytes, not text: sync means IDENTICAL. A text round trip converted
+        # CRLF sources to LF, reported a CRLF/LF-only difference as "already in
+        # sync", and could not sync a binary file at all.
+        content = source_path.read_bytes()
     except Exception as e:
         return f"[ERROR] Could not read source {source}: {e}"
 
@@ -114,11 +117,7 @@ def sync_files_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> s
             continue
         target_path = root / target
         try:
-            existing = (
-                target_path.read_text(encoding="utf-8")
-                if target_path.exists()
-                else None
-            )
+            existing = target_path.read_bytes() if target_path.exists() else None
         except Exception as e:
             results.append(f"  {target}: [ERROR] {e}")
             continue
@@ -127,11 +126,14 @@ def sync_files_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> s
             continue
         try:
             target_path.parent.mkdir(parents=True, exist_ok=True)
-            target_path.write_text(content, encoding="utf-8")
+            target_path.write_bytes(content)
+            shutil.copymode(source_path, target_path)  # keep e.g. the exec bit
             results.append(
                 f"  {target}: {'created' if existing is None else 'updated'} from {source}"
             )
         except Exception as e:
             results.append(f"  {target}: [ERROR] {e}")
 
-    return f"Synchronized '{source}' to {len(targets)} target(s):\n" + "\n".join(results)
+    return f"Synchronized '{source}' to {len(targets)} target(s):\n" + "\n".join(
+        results
+    )

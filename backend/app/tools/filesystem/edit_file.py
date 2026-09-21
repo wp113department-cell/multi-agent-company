@@ -67,6 +67,10 @@ from pathlib import Path
 from typing import Any
 
 from app.agents.tool_security import _is_protected_path
+from app.tools.filesystem._textio import (
+    read_text_lf,
+    write_text_lf,
+)
 
 EDIT_FILE_TOOL = {
     "name": "edit_file",
@@ -117,18 +121,22 @@ def edit_file_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> st
     if not target.exists():
         return f"[ERROR] File not found: {rel}"
     try:
-        text = target.read_text(encoding="utf-8")
+        text, nl_style = read_text_lf(target)
     except Exception as e:
         return f"[ERROR] Cannot read {rel}: {e}"
-    old_s = str(inp["old_string"])
-    new_s = str(inp["new_string"])
+    # Match/replace on LF text, write back in the file's own newline style
+    # (a CRLF file used to be silently rewritten as LF).
+    old_s = str(inp["old_string"]).replace("\r\n", "\n")
+    new_s = str(inp["new_string"]).replace("\r\n", "\n")
     count = text.count(old_s)
     if count == 0:
-        return f"[ERROR] old_string not found in {rel}. Check for whitespace differences."
+        return (
+            f"[ERROR] old_string not found in {rel}. Check for whitespace differences."
+        )
     if count > 1:
         return f"[ERROR] old_string appears {count} times in {rel} — must be unique. Add more context."
     try:
-        target.write_text(text.replace(old_s, new_s, 1), encoding="utf-8")
+        write_text_lf(target, text.replace(old_s, new_s, 1), nl_style)
         return f"Edited {rel}"
     except Exception as e:
         return f"[ERROR] Cannot write {rel}: {e}"

@@ -58,6 +58,10 @@ from pathlib import Path
 from typing import Any
 
 from app.agents.tool_security import _is_protected_path
+from app.tools.filesystem._textio import (
+    read_text_lf,
+    write_text_lf,
+)
 
 DELETE_BLOCK_TOOL: dict[str, Any] = {
     "name": "delete_block",
@@ -91,7 +95,8 @@ def delete_block_handler(root: Path, worktree_path: str, inp: dict[str, Any]) ->
         return f"[BLOCKED] {path} is a protected path"
     fpath = root / path
     try:
-        lines = fpath.read_text(encoding="utf-8").splitlines(keepends=True)
+        text, nl_style = read_text_lf(fpath)
+        lines = text.splitlines(keepends=True)
         new_lines: list[str] = []
         in_block = False
         deleted = 0
@@ -108,7 +113,17 @@ def delete_block_handler(root: Path, worktree_path: str, inp: dict[str, Any]) ->
             new_lines.append(line)
         if deleted == 0:
             return f"[WARN] Block pattern not found in {path}"
-        fpath.write_text("".join(new_lines), encoding="utf-8")
-        return f"Deleted {deleted} lines between '{start_pat}' and '{end_pat}' in {path}"
+        if in_block:
+            # end_pattern never matched after the last start_pattern: this used to
+            # silently delete everything to end-of-file and report success.
+            return (
+                f"[ERROR] end_pattern {end_pat!r} was not found after the block "
+                f"starting at pattern {start_pat!r} in {path} — nothing was deleted. "
+                "Fix end_pattern (or use delete_lines with an explicit range)."
+            )
+        write_text_lf(fpath, "".join(new_lines), nl_style)
+        return (
+            f"Deleted {deleted} lines between '{start_pat}' and '{end_pat}' in {path}"
+        )
     except Exception as e:
         return f"[ERROR] delete_block: {e}"
