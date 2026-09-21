@@ -76,15 +76,35 @@ from typing import Any
 from app.config import get_settings
 from app.policy.engine import check_path_in_worktree
 
+# A single ranged read is bounded so it can never itself become an oversized
+# context dump; the response says exactly how to continue.
+MAX_RANGE_LINES = 400
+MAX_RANGE_CHARS = 30_000
+# Even a file with few (but enormous) lines — minified JS, one-line JSON — must
+# not be able to put megabytes into an agent's context.
+HARD_MAX_CHARS = 200_000
+
 READ_FILE_TOOL = {
     "name": "read_file",
-    "description": "Read the full contents of a file. Always read a file before editing it.",
+    "description": (
+        "Read the contents of a file. Always read a file before editing it. "
+        "Very large files come back as a structure outline or truncated; use "
+        "start_line/end_line to read any specific range of them."
+    ),
     "input_schema": {
         "type": "object",
         "properties": {
             "path": {
                 "type": "string",
                 "description": "File path relative to the repo root",
+            },
+            "start_line": {
+                "type": "integer",
+                "description": "First line to return (1-based). Optional — reads a range instead of the whole file.",
+            },
+            "end_line": {
+                "type": "integer",
+                "description": f"Last line to return (inclusive). Optional; a range is capped at {MAX_RANGE_LINES} lines per call.",
             },
         },
         "required": ["path"],
@@ -106,6 +126,9 @@ def read_file_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> st
     except Exception as e:
         return f"[ERROR] Cannot read {rel}: {e}"
 
+    if inp.get("start_line") is not None or inp.get("end_line") is not None:
+        return _read_line_range(rel, content, inp)
+
     # Gap-closure Days 45-47 (Stage 2) — this file has "no truncation/
     # chunking safeguard" for 9,000+ line files (answers.md); a large
     # file is folded to its structural signature instead of loaded in
@@ -121,8 +144,8 @@ def read_file_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> st
             return (
                 f"[NOTE] {rel} is {line_count} lines — showing structure "
                 "only (functions/classes + line ranges) instead of full "
-                "content to avoid an oversized context. Read a specific "
-                "line range if you need implementation detail.\n\n"
+                "content to avoid an oversized context. Call read_file again "
+                "with start_line/end_line to read any specific range.\n\n"
                 f"{folded}"
             )
         if len(content) > settings.file_fold_fallback_max_chars:
@@ -130,7 +153,49 @@ def read_file_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> st
             return (
                 content[:cap]
                 + f"\n... [TRUNCATED: {rel} is {line_count} lines; showing "
-                f"the first {cap} characters]"
+                f"the first {cap} characters. Call read_file again with "
+                "start_line/end_line to read any other range.]"
             )
 
+    if len(content) > HARD_MAX_CHARS:
+        return (
+            content[:HARD_MAX_CHARS]
+            + f"\n... [TRUNCATED: {rel} is {len(content)} characters on "
+            f"{line_count} line(s); showing the first {HARD_MAX_CHARS}. Use "
+            "search_code or a shell command to inspect the rest.]"
+        )
     return content
+
+
+def _read_line_range(rel: str, content: str, inp: dict[str, Any]) -> str:
+    """Return lines [start_line, end_line] (1-based, inclusive) of `content`."""
+    try:
+        start = int(inp["start_line"]) if inp.get("start_line") is not None else 1
+        end_raw = inp.get("end_line")
+        end = int(end_raw) if end_raw is not None else start + MAX_RANGE_LINES - 1
+    except (TypeError, ValueError):
+        return "[ERROR] read_file: start_line/end_line must be integers"
+    lines = content.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()  # trailing newline is not an extra line
+    total = len(lines)
+    if start < 1 or end < start:
+        return f"[ERROR] read_file: invalid range {start}-{end} (lines are 1-based, end >= start)"
+    if start > total:
+        return f"[ERROR] read_file: {rel} has only {total} line(s); start_line={start} is past the end"
+    stop = min(end, total, start + MAX_RANGE_LINES - 1)
+    chunk = lines[start - 1 : stop]
+    text = "\n".join(chunk)
+    capped_by_chars = len(text) > MAX_RANGE_CHARS
+    if capped_by_chars:
+        text = text[:MAX_RANGE_CHARS]
+        stop = start + text.count("\n")
+    header = f"[{rel}: lines {start}-{stop} of {total}]"
+    footer = ""
+    if stop < min(end, total) or (end > stop and stop < total):
+        footer = f"\n[range capped — continue with start_line={stop + 1}]"
+    elif stop < total:
+        footer = (
+            f"\n[{total - stop} more line(s) — continue with start_line={stop + 1}]"
+        )
+    return f"{header}\n{text}{footer}"
