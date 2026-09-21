@@ -146,7 +146,7 @@ async def create(
     request: Request,
     body: CreateTaskRequest,
     db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, Any]:
     # AUDIT_Q_BATCH08 §66 "Idempotency" — a client retrying task creation
     # after a dropped response (e.g. a network timeout on a request that
@@ -204,7 +204,7 @@ async def patch_status(
     task_id: int,
     body: TransitionRequest,
     db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, Any]:
     try:
         task = await transition_task(db, task_id, body.status)
@@ -220,7 +220,7 @@ async def patch_priority(
     task_id: int,
     body: PriorityRequest,
     db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """AUDIT_Q_BATCH16 §86 gap-closure (2026-08-11) — "Reorder": neither
     queue adapter supports true in-place reordering of an already-enqueued
@@ -280,7 +280,7 @@ async def add_log(
     task_id: int,
     body: LogRequest,
     db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, Any]:
     log = await append_log(db, task_id, body.category, body.message, body.extra_data)
     return _log_to_dict(log)
@@ -305,7 +305,7 @@ async def run_task(
     body: RunRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Trigger planning pipeline or simple planner for a pending/blocked/rejected task."""
     from app.api.agents import launch_planning_pipeline, launch_planner
@@ -383,7 +383,7 @@ async def restart_task(
     task_id: int,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Reset a failed/blocked/error task back to pending and re-trigger the planning pipeline."""
     from app.api.agents import launch_planning_pipeline
@@ -455,7 +455,7 @@ async def repeat(
     body: RepeatTaskRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """AUDIT_Q_BATCH18 §51 gap-closure (2026-08-12) — "Repeat Task &
     Historical Context" was PARTIAL: the only recall mechanism was
@@ -973,7 +973,7 @@ MAX_PDF_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB per file
 @router.post("/extract-pdfs")
 async def extract_pdfs(
     files: list[UploadFile] = File(...),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Extract text from up to 5 PDF files. Returns extracted text for each file.
 
@@ -1057,7 +1057,7 @@ async def upload_task_images(
     task_id: int,
     files: list[UploadFile] = File(...),
     db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Upload reference images for a task (e.g. a website design screenshot).
     Multipart, same shape as /extract-pdfs. Per-file 5MB limit, 20MB total
@@ -1163,7 +1163,7 @@ async def remove_task_image(
     task_id: int,
     image_id: int,
     db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, Any]:
     image = await get_task_image(db, image_id)
     if not image or image.task_id != task_id:

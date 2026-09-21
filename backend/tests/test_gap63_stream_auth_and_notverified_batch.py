@@ -31,7 +31,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from app.middleware.rbac import require_authenticated
+from app.middleware.rbac import require_approver, require_authenticated
 
 
 class TestCookieFallbackForJwtAuth:
@@ -124,13 +124,16 @@ def test_stream_endpoint_still_has_its_stop_resume_tokens_siblings_gated() -> No
     from the siblings the Appendix finding compared it against."""
     from app.api.activity import get_token_usage, resume_task, stop_task
 
-    for fn in (stop_task, resume_task, get_token_usage):
+    # UPDATED (verification batch B7/config): stop/resume now need the approver role (a viewer is
+    # read-only); the token counters need any authenticated caller.
+    for fn, expected in (
+        (stop_task, require_approver),
+        (resume_task, require_approver),
+        (get_token_usage, require_authenticated),
+    ):
         sig = inspect.signature(fn)
         assert "_actor" in sig.parameters
-        assert (
-            getattr(sig.parameters["_actor"].default, "dependency", None)
-            is require_authenticated
-        )
+        assert getattr(sig.parameters["_actor"].default, "dependency", None) is expected
     # UPDATED (verification batch B7): get_token_usage used to be left ungated here on purpose;
     # it returns a task's token/cost counters, so it now requires authentication like its siblings
     # (the stream endpoint's own docstring already claimed it did).

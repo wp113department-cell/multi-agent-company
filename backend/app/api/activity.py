@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.db.models import VALID_TRANSITIONS
 from app.db.repository import TransitionError, get_task, transition_task
-from app.middleware.rbac import require_authenticated
+from app.middleware.rbac import require_approver, require_authenticated
 from app.services.activity_stream import get_activity_registry
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ async def stream_task_events(
 
 @router.post("/{task_id}/stop")
 async def stop_task(
-    task_id: str, _actor: str = Depends(require_authenticated)
+    task_id: str, _actor: str = Depends(require_approver)
 ) -> dict[str, Any]:
     """Signal the agent to stop after the current tool call completes."""
     registry = get_activity_registry()
@@ -98,7 +98,7 @@ async def resume_task(
     task_id: str,
     payload: ResumePayload,
     db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Resume after a stop: clears abort flag and injects a user message.
 
@@ -142,7 +142,7 @@ async def resume_task(
 async def cancel_task(
     task_id: str,
     db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Terminal cancel — AUDIT_Q_BATCH08 §14 "Cancel (distinct terminal
     state)": previously the DB's VALID_TRANSITIONS state machine had no

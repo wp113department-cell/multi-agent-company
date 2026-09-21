@@ -487,3 +487,8 @@ Live tally is kept at the top of each batch section once that batch starts.
 | 517 | BONUS | coder.py has code-enforced read-before-write gate | PENDING | |
 | 518 | BONUS | All API routes require authentication (no unauthenticated internal-data routes) | PENDING | |
 | 519 | BONUS | DevTask.priority and model-context-limit checks are live, not dead code | PENDING | |
+
+## Follow-up decisions (2026-09-21, after B8)
+- Viewer = read-only: every mutating route except login/logout/setup/change-password/verify-key/console browse now requires the approver role (tasks, chat, goals, epics, repo activate/reindex, stop/resume/cancel, console mkdir/clone/add/commit/pull, ALL specialized-agent runs). A route-walking test fails if a new mutating route is left open (updates #181/#326).
+- .env: MAX_TOKENS_PER_AGENT_RUN=1500000, MAX_RUN_TIME_SECONDS=1800, COST_BUDGET_DAILY_USD=25, COST_TOKENS_PER_SUBTASK=100000 (was 4000), USE_GROQ=false with the Groq lines commented out (real Anthropic call verified).
+- Migration 049 applied to gridiron_dev (audit chain: 12,021 rows verified intact; backup of audit_log/system_settings taken first).

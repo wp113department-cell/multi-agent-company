@@ -385,7 +385,7 @@ async def delete_repo(
 async def activate_repo(
     repo_id: int,
     db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Switch the active repo without re-cloning."""
     global _active_repo_path
@@ -504,7 +504,7 @@ async def _do_reindex() -> None:
 @router.post("/reindex")
 async def trigger_reindex(
     background_tasks: BackgroundTasks,
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, object]:
     background_tasks.add_task(_do_reindex)
     return {"triggered": True}

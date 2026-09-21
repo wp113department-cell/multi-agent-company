@@ -263,16 +263,20 @@ def test_an_approver_can_run_it_on_a_registered_repo(client, world) -> None:
     bg.assert_awaited_once()
 
 
-def test_a_viewer_can_still_run_a_read_only_agent(client, world) -> None:
+def test_a_viewer_cannot_run_any_agent_not_even_a_read_only_one(client, world) -> None:
+    """Running an agent spends LLM money and touches a repository: operating the platform is approver-only."""
     tid, repo = world
-    r, _ = _run(client, "architecture_doc_agent", "viewer", tid, repo)
+    r, bg = _run(client, "architecture_doc_agent", "viewer", tid, repo)
+    assert r.status_code == 403
+    bg.assert_not_awaited()
+    r, _ = _run(client, "architecture_doc_agent", "approver", tid, repo)
     assert r.status_code == 200, r.text
 
 
 @pytest.mark.parametrize("bad", ["/", "/etc", "/home", "/root/.ssh", "../../etc"])
 def test_repo_path_must_be_a_registered_repository(client, world, bad) -> None:
     tid, _ = world
-    for role in ("viewer", "approver"):
+    for role in ("approver",):
         r, bg = _run(client, "architecture_doc_agent", role, tid, bad)
         assert r.status_code == 422, (role, bad, r.text)
         bg.assert_not_awaited()
@@ -284,7 +288,7 @@ def test_a_subdirectory_of_a_registered_repo_is_fine_and_a_sibling_prefix_is_not
     tid, repo = world
     (Path(repo) / "src").mkdir()
     assert (
-        _run(client, "architecture_doc_agent", "viewer", tid, repo + "/src")[
+        _run(client, "architecture_doc_agent", "approver", tid, repo + "/src")[
             0
         ].status_code
         == 200
@@ -292,7 +296,7 @@ def test_a_subdirectory_of_a_registered_repo_is_fine_and_a_sibling_prefix_is_not
     Path(repo + "-evil").mkdir(exist_ok=True)
     try:
         assert (
-            _run(client, "architecture_doc_agent", "viewer", tid, repo + "-evil")[
+            _run(client, "architecture_doc_agent", "approver", tid, repo + "-evil")[
                 0
             ].status_code
             == 422
@@ -922,3 +926,84 @@ def test_safe_env_drops_credential_shaped_names_and_keeps_the_rest() -> None:
         }
     )
     assert out == {"PATH": "/usr/bin", "HOME": "/h", "LANG": "C", "VIRTUAL_ENV": "/v"}
+
+
+# ---------------------------------------------------------------- viewers are read-only
+
+
+def test_every_mutating_route_is_approver_only_except_a_short_reviewed_list() -> None:
+    """A guard against a new route quietly being open to viewers. Walks the real app's routes."""
+    from fastapi.routing import APIRoute
+
+    from app.main import app as fastapi_app
+
+    allowed_for_any_authenticated_or_anonymous = {
+        ("POST", "/api/auth/login"),
+        ("POST", "/api/auth/refresh"),
+        ("POST", "/api/auth/setup"),
+        ("POST", "/api/auth/logout"),
+        ("POST", "/api/auth/change-password"),
+        (
+            "POST",
+            "/api/settings/verify-key",
+        ),  # tests a key the caller supplies; changes nothing
+        ("POST", "/api/console/workspace/browse"),  # a directory listing sent as POST
+    }
+    found: list[tuple[str, str, set[str]]] = []
+
+    def dependency_names(route: APIRoute, inherited: tuple) -> set[str]:
+        names: set[str] = set()
+
+        def walk(d) -> None:
+            for sub in d.dependencies:
+                if sub.call is not None:
+                    names.add(getattr(sub.call, "__name__", ""))
+                walk(sub)
+
+        walk(route.dependant)
+        for dep in inherited:
+            names.add(getattr(getattr(dep, "dependency", dep), "__name__", ""))
+        return names
+
+    def collect(router, prefix: str = "", inherited: tuple = ()) -> None:
+        for r in router.routes:
+            if type(r).__name__ == "_IncludedRouter":
+                ctx = r.include_context
+                collect(
+                    r.original_router,
+                    prefix + (getattr(ctx, "prefix", "") or ""),
+                    inherited + tuple(getattr(ctx, "dependencies", None) or ()),
+                )
+            elif isinstance(r, APIRoute):
+                for method in r.methods - {"HEAD", "OPTIONS"}:
+                    found.append(
+                        (method, prefix + r.path, dependency_names(r, inherited))
+                    )
+
+    collect(fastapi_app)
+    assert len(found) > 100
+    open_to_viewers = sorted(
+        (m, p)
+        for m, p, deps in found
+        if m in {"POST", "PUT", "PATCH", "DELETE"}
+        and "require_approver" not in deps
+        and (m, p) not in allowed_for_any_authenticated_or_anonymous
+    )
+    assert open_to_viewers == []
+
+
+def test_a_viewer_cannot_operate_the_platform_but_can_read(client) -> None:
+    for method, path in (
+        ("post", "/api/tasks"),
+        ("post", "/api/tasks/1/run"),
+        ("post", "/api/tasks/1/stop"),
+        ("post", "/api/goals"),
+        ("post", "/api/epics"),
+        ("post", "/api/chat/sessions"),
+        ("post", "/api/repo/reindex"),
+        ("post", "/api/console/repos/clone"),
+        ("post", "/api/console/workspace/mkdir"),
+    ):
+        r = getattr(client, method)(path, json={}, headers=auth("viewer"))
+        assert r.status_code == 403, (path, r.status_code)
+    assert client.get("/api/tasks", headers=auth("viewer")).status_code == 200

@@ -19,9 +19,10 @@ def test_estimate_zero_subtasks() -> None:
 
 
 def test_estimate_small_does_not_require_approval() -> None:
-    # Default threshold=1.0, 5 subtasks with default (Sonnet-tier) coefficients
-    # → $0.15 < $1.0
-    result = estimate_epic_cost_sync(subtask_count=5)
+    # Default threshold=1.0. UPDATED: the per-subtask token fallback is now a realistic 100k (a
+    # subtask is a developer + qa + reviewer agent loop), so a single subtask is the small case
+    # (~$0.75); five (~$3.75) rightly ask for approval.
+    result = estimate_epic_cost_sync(subtask_count=1)
     assert result.estimated_cost_usd < 1.0
     assert result.requires_approval is False
 

@@ -112,7 +112,7 @@ async def browse_workspace(
 
 @router.post("/workspace/mkdir")
 async def make_directory(
-    req: MkdirRequest, _actor: str = Depends(require_authenticated)
+    req: MkdirRequest, _actor: str = Depends(require_approver)
 ) -> dict[str, Any]:
     """Create a new directory inside the allowed workspace."""
     import os
@@ -156,7 +156,7 @@ async def clone_private_repo(
 
 @router.post("/repos/clone")
 async def clone_repo(
-    req: CloneRequest, _actor: str = Depends(require_authenticated)
+    req: CloneRequest, _actor: str = Depends(require_approver)
 ) -> dict[str, Any]:
     """Clone a remote repo to a local folder in the workspace."""
     try:
@@ -205,7 +205,7 @@ async def repo_diff(
 
 @router.post("/repos/{rpath:path}/add")
 async def repo_add(
-    rpath: str, req: AddRequest, _actor: str = Depends(require_authenticated)
+    rpath: str, req: AddRequest, _actor: str = Depends(require_approver)
 ) -> dict[str, Any]:
     path = _decode_path(rpath)
     try:
@@ -216,7 +216,7 @@ async def repo_add(
 
 @router.post("/repos/{rpath:path}/commit")
 async def repo_commit(
-    rpath: str, req: CommitRequest, _actor: str = Depends(require_authenticated)
+    rpath: str, req: CommitRequest, _actor: str = Depends(require_approver)
 ) -> dict[str, Any]:
     path = _decode_path(rpath)
     try:
@@ -264,7 +264,7 @@ async def repo_checkout(
 async def repo_pull(
     rpath: str,
     remote: str = "origin",
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, Any]:
     path = _decode_path(rpath)
     try:

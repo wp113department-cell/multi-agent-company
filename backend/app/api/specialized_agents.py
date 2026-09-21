@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db.repository import append_log, transition_task
 from app.db.session import get_db
-from app.middleware.rbac import require_approver, require_authenticated
+from app.middleware.rbac import require_approver
 from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
@@ -287,58 +287,13 @@ def _load_agent_fn(agent_name: str) -> Callable[..., Any]:
 # platform knows about.
 # ──────────────────────────────────────────────────────────────────────────────
 
-_PRIVILEGED_PERMISSIONS = frozenset(
-    {
-        "write_repo",
-        "write_worktree",
-        "write_repo_on_approval",
-        "write_code",
-        "git_write",
-        "execute_bash",
-        "execute_tests",
-        "execute_code",
-        "execute_infra_dry_run",
-        "execute_load_test",
-        "bash_scoped",
-        "bash_allowlisted",
-        "docker_exec",
-        "write_db",
-        "database_write",
-    }
-)
-
-
-def _agent_is_privileged(agent_name: str) -> bool:
-    """True when the agent's own contract grants write/execute powers — and for an agent
-    whose contract cannot be found (a runtime-spawned temporary agent), True: unknown is
-    treated as privileged, never as harmless."""
-    try:
-        module = importlib.import_module(f"app.agents.{agent_name}")
-        contract = getattr(module, "AGENT_CONTRACT", None)
-    except ImportError:
-        contract = None
-    if contract is None:
-        entry = _REGISTRY.get(agent_name)
-        if entry is not None:
-            try:
-                contract = getattr(
-                    importlib.import_module(entry[0]), "AGENT_CONTRACT", None
-                )
-            except ImportError:
-                contract = None
-    if not contract:
-        return True
-    return bool(_PRIVILEGED_PERMISSIONS & set(contract.get("permissions", [])))
-
 
 async def _authorize_agent_run(
     request: Request, db: AsyncSession, agent_name: str, repo_path: str | None
 ) -> None:
-    """Approver role for privileged agents; registered-repo path for everyone."""
-    if _agent_is_privileged(agent_name):
-        await require_approver(
-            request=request, x_user_id=request.headers.get("x-user-id"), db=db
-        )
+    """repo_path must be a registered repository (or inside one)."""
+    # (Running any agent is an approver action — enforced by the routes' own dependency: it spends
+    # LLM money and touches a repository, and a viewer is read-only.)
     if repo_path is None:
         return
     import os
@@ -558,7 +513,7 @@ async def dispatch_specialized_agent(
     body: DispatchAgentRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, str]:
     """Capability-based dispatch: FleetManager selects the best-scoring
     available agent for `required_capability` from the live capability
@@ -624,7 +579,7 @@ async def run_specialized_agent(
     body: RunAgentRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, str]:
     """Dispatch a specialized worker agent on a task asynchronously.
 
@@ -675,7 +630,7 @@ async def run_specialized_agent_sync(
     agent_name: str,
     body: RunAgentRequest,
     db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> RunAgentResponse:
     """Run a specialized agent synchronously and return the full result.
 

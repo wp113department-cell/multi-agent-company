@@ -1180,15 +1180,15 @@ class Settings(BaseSettings):
 
     # Day 10 — Fleet OS Budget Manager (live enforcement, per-run + daily cumulative)
     max_tokens_per_agent_run: int = Field(
-        default=100_000,
-        description="Max total tokens (in+out) a single agent run may consume before BudgetExceeded is raised.",
+        default=1_500_000,
+        description="Max total BILLED tokens (in+out, summed over every LLM call — each call re-sends the conversation) a single agent run may consume before it is stopped. Set MAX_TOKENS_PER_AGENT_RUN in .env. 1.5M ~ $4.5 of Sonnet input worst case; a 30-turn coder run with a 60k context is ~1.8M before prompt-cache savings.",
     )
     cost_budget_daily_usd: float = Field(
         default=25.0,
         description="Max cumulative agent spend (USD) per calendar day before BudgetExceeded is raised.",
     )
     max_run_time_seconds: int = Field(
-        default=600,
+        default=1800,
         description="Max wall-clock seconds a single agent run may take before BudgetExceeded is raised.",
     )
     max_memory_mb: int = Field(

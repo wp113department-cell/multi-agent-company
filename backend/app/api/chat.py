@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import get_db
-from app.middleware.rbac import require_authenticated
+from app.middleware.rbac import require_approver, require_authenticated
 from app.models.chat import (
     ChatSession,
     create_session,
@@ -135,7 +135,7 @@ async def _event_stream(session: ChatSession) -> AsyncGenerator[str, None]:
 async def create_chat_session(
     body: CreateSessionRequest,
     db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> CreateSessionResponse:
     """Create a new chat session for a repository."""
     # Stage 4 Cluster O Phase 1b (2026-08-05) — resolved once here, at
@@ -161,7 +161,7 @@ async def send_message(
     session_id: str,
     body: SendMessageRequest,
     db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> StreamingResponse:
     """
     Send a user message and stream the agent's response as SSE.
@@ -318,7 +318,7 @@ async def _resume_agent(
 async def confirm_action(
     session_id: str,
     body: ConfirmActionRequest,
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, str]:
     """
     Resolve a pending confirmation request (approve or deny a dangerous action).
@@ -390,7 +390,7 @@ async def get_history(
 
 @router.delete("/sessions/{session_id}")
 async def close_session(
-    session_id: str, _actor: str = Depends(require_authenticated)
+    session_id: str, _actor: str = Depends(require_approver)
 ) -> dict[str, str]:
     """Close and clean up a chat session."""
     from app.agents.chat_agent import delete_chat_agent

@@ -96,7 +96,7 @@ async def create_epic(
     request: Request,
     body: CreateEpicRequest,
     db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
+    _actor: str = Depends(require_approver),
 ) -> dict[str, Any]:
     """Create a new epic and start the epic manager pipeline in the background."""
     epic_id = str(uuid.uuid4())
