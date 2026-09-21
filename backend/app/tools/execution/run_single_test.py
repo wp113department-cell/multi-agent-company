@@ -84,7 +84,7 @@ helper.
 from __future__ import annotations
 
 import shlex
-import subprocess
+from app.tools.execution import safe_subprocess as subprocess
 from typing import Any
 
 from app.policy.engine import check_path_in_worktree

@@ -106,7 +106,7 @@ venv's own `python` binary directly by path when it exists
 
 from __future__ import annotations
 
-import subprocess
+from app.tools.execution import safe_subprocess as subprocess
 import sys
 from pathlib import Path
 from typing import Any

@@ -191,7 +191,9 @@ async def cancel_task(
 
 
 @router.get("/{task_id}/tokens")
-async def get_token_usage(task_id: str) -> dict[str, Any]:
+async def get_token_usage(
+    task_id: str, _actor: str = Depends(require_authenticated)
+) -> dict[str, Any]:
     """Return current cumulative token counters for a task."""
     registry = get_activity_registry()
     stream = registry.get(task_id)

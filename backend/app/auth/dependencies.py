@@ -61,10 +61,17 @@ async def get_current_user(request: Request) -> CurrentUser:
                 from app.auth.jwt import decode_access_token
 
                 payload = decode_access_token(token)
-                return CurrentUser(
-                    username=str(payload.get("sub", "unknown")),
-                    role=str(payload.get("role", "viewer")),
+                from app.auth.revocation import current_role
+
+                username = str(payload.get("sub", "unknown"))
+                live_role = await current_role(
+                    username, str(payload.get("role", "viewer"))
                 )
+                if live_role is None:
+                    raise HTTPException(
+                        status_code=401, detail="This account no longer exists"
+                    )
+                return CurrentUser(username=username, role=live_role)
             except JWTError:
                 raise HTTPException(status_code=401, detail="Invalid or expired token")
         raise HTTPException(

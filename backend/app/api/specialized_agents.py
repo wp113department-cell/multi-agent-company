@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db.repository import append_log, transition_task
 from app.db.session import get_db
-from app.middleware.rbac import require_authenticated
+from app.middleware.rbac import require_approver, require_authenticated
 from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
@@ -277,6 +277,90 @@ def _load_agent_fn(agent_name: str) -> Callable[..., Any]:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Authorization for running agents (B7 verification)
+#
+# These endpoints were reachable by ANY authenticated user (viewer included) and
+# passed the caller's `repo_path` straight through to the agent. An agent with
+# bash/write tools pointed at an arbitrary directory is arbitrary command
+# execution on the host, so: (1) an agent whose contract can write, execute or
+# touch a database needs an approver, and (2) repo_path must be a repository the
+# platform knows about.
+# ──────────────────────────────────────────────────────────────────────────────
+
+_PRIVILEGED_PERMISSIONS = frozenset(
+    {
+        "write_repo",
+        "write_worktree",
+        "write_repo_on_approval",
+        "write_code",
+        "git_write",
+        "execute_bash",
+        "execute_tests",
+        "execute_code",
+        "execute_infra_dry_run",
+        "execute_load_test",
+        "bash_scoped",
+        "bash_allowlisted",
+        "docker_exec",
+        "write_db",
+        "database_write",
+    }
+)
+
+
+def _agent_is_privileged(agent_name: str) -> bool:
+    """True when the agent's own contract grants write/execute powers — and for an agent
+    whose contract cannot be found (a runtime-spawned temporary agent), True: unknown is
+    treated as privileged, never as harmless."""
+    try:
+        module = importlib.import_module(f"app.agents.{agent_name}")
+        contract = getattr(module, "AGENT_CONTRACT", None)
+    except ImportError:
+        contract = None
+    if contract is None:
+        entry = _REGISTRY.get(agent_name)
+        if entry is not None:
+            try:
+                contract = getattr(
+                    importlib.import_module(entry[0]), "AGENT_CONTRACT", None
+                )
+            except ImportError:
+                contract = None
+    if not contract:
+        return True
+    return bool(_PRIVILEGED_PERMISSIONS & set(contract.get("permissions", [])))
+
+
+async def _authorize_agent_run(
+    request: Request, db: AsyncSession, agent_name: str, repo_path: str | None
+) -> None:
+    """Approver role for privileged agents; registered-repo path for everyone."""
+    if _agent_is_privileged(agent_name):
+        await require_approver(
+            request=request, x_user_id=request.headers.get("x-user-id"), db=db
+        )
+    if repo_path is None:
+        return
+    import os
+
+    from sqlalchemy import select
+
+    from app.api.repo import get_active_repo_path
+    from app.db.models import Repo
+    from app.services.workspace_service import is_within
+
+    roots = [str(r) for r in (await db.execute(select(Repo.local_path))).scalars() if r]
+    roots.append(get_active_repo_path())
+    if not any(root and is_within(repo_path, root) for root in roots):
+        raise HTTPException(
+            status_code=422,
+            detail="repo_path must be a registered repository (or inside one)",
+        )
+    if not os.path.isdir(repo_path):
+        raise HTTPException(status_code=422, detail="repo_path is not a directory")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Request / Response schemas
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -499,6 +583,11 @@ async def dispatch_specialized_agent(
             detail=f"No agent available for capability '{body.required_capability}'",
         )
     agent_name: str = plan["agent_name"]
+    try:
+        await _authorize_agent_run(request, db, agent_name, body.repo_path)
+    except HTTPException:
+        get_fleet_manager().complete(agent_name)  # dispatch() already claimed the agent
+        raise
 
     await append_log(
         db,
@@ -547,6 +636,8 @@ async def run_specialized_agent(
             status_code=422,
             detail=f"Unknown agent '{agent_name}'. Supported: {SUPPORTED_AGENTS}",
         )
+
+    await _authorize_agent_run(request, db, agent_name, body.repo_path)
 
     await append_log(
         db, body.task_id, "dispatch", f"Queuing {agent_name} on task {body.task_id}"
@@ -599,6 +690,8 @@ async def run_specialized_agent_sync(
             status_code=422,
             detail=f"Unknown agent '{agent_name}'. Supported: {SUPPORTED_AGENTS}",
         )
+
+    await _authorize_agent_run(request, db, agent_name, body.repo_path)
 
     try:
         fn = _load_agent_fn(agent_name)

@@ -84,7 +84,7 @@ branch delegates to this same shared handler, closing finding #3.
 
 from __future__ import annotations
 
-import subprocess
+from app.tools.execution import safe_subprocess as subprocess
 from pathlib import Path
 from typing import Any
 

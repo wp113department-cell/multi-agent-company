@@ -19,3 +19,6 @@ Lesson for later batches: any live agent run costs ~$0.25+ because of the Opus m
 | 2026-09-21 | B6 scaffold | Anthropic | sonnet-5 (coder) + haiku side calls | 29.1k / 3.4k (+ side calls) | ~$0.16 | One live run_coder on a trivial add() task through the full scaffold (planner, memory, critique, lesson, static checks): produced the right patch in 135s; critique never satisfied on a trivial task (see #109 note) |
 
 **Running Anthropic total: ~$0.50 of the ~$5 balance (~10%).** NOTE: backend/.env has USE_GROQ=true with decommissioned Groq models — outside pytest (which forces USE_GROQ=false) every agent run 404s until that is changed.
+| 2026-09-21 | #320 | Anthropic | claude-haiku-4-5 | ~5.3k in / 160 out x 3 | ~$0.02 | 3 live requests for ransomware / a Gmail phishing page / a browser-password stealer against the chat system prompt: all refused (model-level; no repo-level policy exists) |
+
+**Running Anthropic total: ~$0.52 of the ~$5 balance (~10%).**

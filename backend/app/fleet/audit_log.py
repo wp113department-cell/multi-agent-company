@@ -452,6 +452,25 @@ class AuditLog:
             from app.db.session import get_session_factory
 
             async with get_session_factory()() as session:
+                # The chain is verified as a LINKED LIST (each row's prev_hash is the
+                # entry_hash of exactly one existing row; one root), not by walking seq
+                # order. seq is assigned before the trigger takes its advisory lock, so two
+                # concurrent inserts can commit in the opposite order to their seq values:
+                # the chain is intact in commit order but the old LAG-over-seq check
+                # reported those valid rows as breaks (14 false breaks in a 545-row table),
+                # which makes a real break impossible to tell from noise.
+                # rows before migration 049 may contain forks from the concurrent-insert race
+                # (and, in test databases, deleted parents): their CONTENT hashes are still
+                # verified, their LINKS are only checked from that migration's boundary on
+                boundary_row = (
+                    await session.execute(
+                        text(
+                            "SELECT value FROM system_settings "
+                            "WHERE key = 'audit_chain_fork_free_since_seq'"
+                        )
+                    )
+                ).first()
+                fork_free_from = int(boundary_row[0]) if boundary_row else 1
                 result = await session.execute(
                     text(
                         "WITH windowed AS ("
@@ -460,11 +479,10 @@ class AuditLog:
                         "         details, outcome, requires_human_approval, approved_by "
                         "  FROM audit_log WHERE seq >= :since_seq "
                         "  ORDER BY seq LIMIT :max_rows"
-                        "), anchor AS ("
-                        "  SELECT COALESCE(("
-                        "    SELECT entry_hash FROM audit_log "
-                        "    WHERE seq < :since_seq ORDER BY seq DESC LIMIT 1"
-                        "  ), '') AS anchor_hash"
+                        "), children AS ("
+                        "  SELECT prev_hash, count(*) AS n FROM audit_log GROUP BY prev_hash"
+                        "), roots AS ("
+                        "  SELECT count(*) AS n FROM audit_log WHERE prev_hash = ''"
                         ") "
                         "SELECT w.seq, w.entry_id, w.timestamp, "
                         "w.entry_hash = encode(digest("
@@ -473,12 +491,22 @@ class AuditLog:
                         "  COALESCE(w.details::text, '') || w.outcome || "
                         "  w.requires_human_approval::text || COALESCE(w.approved_by, ''), "
                         "  'sha256'), 'hex') AS content_hash_valid, "
-                        "w.prev_hash = COALESCE(LAG(w.entry_hash) OVER (ORDER BY w.seq), "
-                        "  a.anchor_hash) AS chain_link_valid "
-                        "FROM windowed w CROSS JOIN anchor a "
+                        "(w.seq < :fork_free_from OR ("
+                        "  (CASE WHEN w.prev_hash = '' THEN r.n = 1 "
+                        "        ELSE p.entry_hash IS NOT NULL END) "
+                        "  AND COALESCE(c.n, 0) <= 1)) "
+                        "AS chain_link_valid "
+                        "FROM windowed w "
+                        "CROSS JOIN roots r "
+                        "LEFT JOIN audit_log p ON p.entry_hash = w.prev_hash "
+                        "LEFT JOIN children c ON c.prev_hash = w.entry_hash "
                         "ORDER BY w.seq"
                     ),
-                    {"since_seq": since_seq, "max_rows": max_rows},
+                    {
+                        "since_seq": since_seq,
+                        "max_rows": max_rows,
+                        "fork_free_from": fork_free_from,
+                    },
                 )
                 rows = result.mappings().all()
         except Exception as exc:
@@ -513,12 +541,29 @@ class AuditLog:
     # ------------------------------------------------------------------
 
     def _persist_async(self, entry: AuditEntry) -> None:
+        """Schedule the DB write on the server's event loop.
+
+        Agent tool execution — and therefore every policy denial, guardrail block and other
+        security-relevant entry — runs in a worker thread (asyncio.to_thread), where
+        asyncio.get_event_loop() raises RuntimeError. The old code swallowed that and the entry
+        lived only in the bounded in-memory ring buffer: proven with a real DB, an audit()
+        from a worker thread never reached the audit_log table. Same cross-thread dispatch the
+        lesson store and agent registry use."""
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.create_task(self._write_to_db(entry))
-        except RuntimeError:
-            pass
+            try:
+                running = asyncio.get_running_loop()
+            except RuntimeError:
+                running = None
+            if running is not None:
+                running.create_task(self._write_to_db(entry))
+                return
+            from app.fleet.fleet_events import get_main_loop
+
+            main = get_main_loop()
+            if main is not None and main.is_running():
+                asyncio.run_coroutine_threadsafe(self._write_to_db(entry), main)
+        except Exception:
+            logger.warning("AuditLog could not schedule the DB write", exc_info=True)
 
     async def _write_to_db(self, entry: AuditEntry) -> None:
         try:
@@ -553,7 +598,10 @@ class AuditLog:
                 )
                 await session.commit()
         except Exception:
-            pass
+            # was `pass`: a failing audit write was invisible
+            logger.warning(
+                "AuditLog DB write failed for %s", entry.entry_id, exc_info=True
+            )
 
 
 # ---------------------------------------------------------------------------

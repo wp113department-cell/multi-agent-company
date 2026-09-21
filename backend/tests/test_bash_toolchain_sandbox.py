@@ -151,8 +151,13 @@ def test_migration_bash_reaches_the_real_database_through_the_sandbox() -> None:
     backend_root = str(Path(__file__).resolve().parent.parent)
     handlers = make_migration_agent_handlers(backend_root)
     out = handlers["bash"]({"command": "alembic current"})
-    assert "048" in out, (
-        f"expected the real, current alembic head (048) in sandboxed output, got: {out!r}"
+    # UPDATED (verification batch B7): was hard-coded to 048 and broke with every new migration
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    head = ScriptDirectory.from_config(Config("alembic.ini")).get_current_head()
+    assert head in out, (
+        f"expected the real, current alembic head ({head}) in sandboxed output, got: {out!r}"
     )
 
 

@@ -59,7 +59,7 @@ not fixed here (this pass is scoped to run_python_snippet).
 from __future__ import annotations
 
 import shlex
-import subprocess
+from app.tools.execution import safe_subprocess as subprocess
 from typing import Any
 
 MAX_PYTHON_SNIPPET_TIMEOUT_SECONDS = 300

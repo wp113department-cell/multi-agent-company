@@ -90,7 +90,7 @@ Fixed via a shared `coverage_report_handler()`:
 
 from __future__ import annotations
 
-import subprocess
+from app.tools.execution import safe_subprocess as subprocess
 import sys
 from pathlib import Path
 from typing import Any

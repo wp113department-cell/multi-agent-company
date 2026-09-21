@@ -202,6 +202,32 @@ _DENIED_COMMAND_PATTERNS = [
     r"\bcurl\b.*-d\s*@",
     r"\|\s*(bash|sh|zsh)\b",
     r"\bbase64\s+-d\b.*\|\s*(bash|sh)\b",
+    # B7 verification — the dedicated tools (git_reset, docker_restart, ...) ask a human
+    # first, but plain `bash` walked around every one of those gates. Same commands,
+    # same policy, now also when typed into bash:
+    r"\bdocker\s+(rm|rmi|stop|kill|restart|pause|prune)\b",
+    r"\bdocker\s+(system|volume|network|container|image)\s+(rm|prune|kill|stop)\b",
+    r"\bdocker[- ]compose\s+(down|rm|kill|stop|restart)\b",
+    r"\bdocker\s+compose\s+(down|rm|kill|stop|restart)\b",
+    r"\bgit\s+reset\s+--hard\b",
+    r"\bgit\s+clean\s+-\w*[fdx]",
+    # an agent's shell shares the OS user with this server (and the database container
+    # next to it): killing by name or pid 1 takes the platform down
+    r"\b(killall|pkill)\b",
+    r"\bkill\s+(-\S+\s+)*(-1|1)\b",
+    # reverse shells / raw sockets / serving the filesystem
+    r"/dev/(tcp|udp)/",
+    r"\b(nc|ncat|netcat)\b.*\s-(e|c)\b",
+    r"\bsocat\b.*\bexec:",
+    r"\bpython3?\s+-m\s+(http\.server|SimpleHTTPServer)\b",
+    # wholesale deletion / system tampering
+    r"\bfind\s+/(\s|\*).*(-delete|-exec\s+rm)\b",
+    r"\b(chmod|chown)\s+-R\b.*\s/(\s|$)",
+    r"\bcrontab\s+-r\b",
+    r"\biptables\b",
+    r"\bcat\s+.*(/etc/shadow|/proc/\S*/environ)",
+    r"(>|>>)\s*/etc/",
+    r"\b(mv|cp|truncate|tee)\b.*\s/etc/(passwd|shadow|hosts|sudoers)",
 ]
 
 _CHAINING_METACHARS = re.compile(r"(;|&&|\|\||\|(?!\|)|`|\$\(|\n|\r|>|<)")

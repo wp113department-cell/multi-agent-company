@@ -66,7 +66,7 @@ output on every real call site.
 
 from __future__ import annotations
 
-import subprocess
+from app.tools.execution import safe_subprocess as subprocess
 from pathlib import Path
 from shlex import quote
 from typing import Any

@@ -67,7 +67,7 @@ preserving as a meaningful difference).
 from __future__ import annotations
 
 import shlex
-import subprocess
+from app.tools.execution import safe_subprocess as subprocess
 from typing import Any
 
 MAX_RUN_NODE_TIMEOUT_SECONDS = 300

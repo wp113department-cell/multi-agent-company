@@ -35,6 +35,8 @@ os.environ.setdefault("TARGET_REPO_PATH", ".")
 # override this via patch("app.middleware.rbac.get_settings") to set
 # rbac_enabled=True explicitly for those specific cases.
 os.environ.setdefault("RBAC_ENABLED", "false")
+# tests that mock the DB verify tokens without a users row; the revocation tests opt in
+os.environ.setdefault("JWT_REVALIDATE_AGAINST_DB", "false")
 
 # The general unit suite mocks anthropic.Anthropic directly and expects
 # run_agent_graph() to go through the real LangGraph node path. .env sets

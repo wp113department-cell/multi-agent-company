@@ -2253,6 +2253,20 @@ _INJECTION_LOOKING_PATTERNS = [
     re.compile(r"(?i)ignore (all )?(previous|prior|above) instructions"),
     re.compile(r"<\|(system|assistant|im_start|im_end)\|>"),
     re.compile(r"(?im)^\s*#{1,3}\s*(system|instructions?)\s*$"),
+    # B7 verification — the four patterns above caught one phrasing each; common
+    # variants went through unflagged:
+    re.compile(
+        r"(?i)\b(disregard|forget|override)\b.{0,30}\b(previous|prior|above|earlier|all)\b"
+        r".{0,30}\b(instructions?|rules?|prompts?|context)\b"
+    ),
+    re.compile(r"(?i)\byou are now\b"),
+    re.compile(r"(?i)\bnew (system )?instructions?\s*:"),
+    re.compile(r"(?i)</?(system|assistant|instructions?)>|\[/?INST\]|<<SYS>>"),
+    re.compile(r"(?i)\bdo not (tell|inform|mention)\b.{0,20}\buser\b"),
+    re.compile(
+        r"(?i)\b(send|post|upload|exfiltrate|email)\b.{0,40}"
+        r"\b(secrets?|credentials?|api[_ ]?keys?|tokens?|\.env)\b"
+    ),
 ]
 
 
@@ -2262,6 +2276,12 @@ def _wrap_untrusted_tool_content(tool_name: str, content: str) -> str:
     own real usage actually feeds untrusted external content through."""
     if tool_name not in _UNTRUSTED_CONTENT_TOOLS:
         return content
+    # The delimiter must not be forgeable from inside the data: content that contained
+    # `</untrusted_external_data>` closed the block early and everything after it read as
+    # trusted instructions.
+    content = re.sub(
+        r"(?i)<(/?)untrusted_external_data", r"<\1untrusted_external_data_", content
+    )
     return (
         f'<untrusted_external_data source="{tool_name}">\n'
         f"{content}\n"

@@ -356,6 +356,7 @@ async def confirm_action(
 async def get_history(
     session_id: str,
     db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
 ) -> dict[str, object]:
     """Return the conversation history for a session.
 

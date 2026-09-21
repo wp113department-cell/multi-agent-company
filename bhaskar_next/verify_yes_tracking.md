@@ -31,7 +31,8 @@ Live tally is kept at the top of each batch section once that batch starts.
 | **B4** Memory & knowledge systems | 33 | **33** | 30 | 3 | 0 | 0 |
 | **B5** Context, cost, confidence, intent, truthfulness | 33 | **33** | 15 | 17 | 1 | 0 |
 | **B6** Agent scaffold, capability audit, skills | 39 | **39** | 36 | 3 | 0 | 0 |
-| B7–B11 | 191 | 0 | 0 | 0 | 0 | 0 |
+| **B7** Security, governance, enterprise, frontend/API | 32 | **32** | 15 | 16 | 1 | 0 |
+| B8–B11 | 159 | 0 | 0 | 0 | 0 | 0 |
 
 **Environment baseline (Day 0):** isolated DB `gridiron_verify`; first full run 31 failed / 7,707 passed / 54 skipped — 28 of the 31 were `python: not found` from running pytest without the venv on PATH (84 tests pass with it), 2 pip-audit drift (known), 1 shared-state test. See `verify_api_ledger.md` for live-API spend (~$0.30 so far).
 
@@ -274,38 +275,38 @@ Live tally is kept at the top of each batch section once that batch starts.
 
 | # | § | Question | Verdict | Evidence / notes |
 |---:|---|---|---|---|
-| 173 | 9 | API connections | PENDING | |
-| 174 | 9 | Streaming (SSE) | PENDING | |
-| 176 | 9 | State management | PENDING | |
-| 177 | 9 | Error handling | PENDING | |
-| 178 | 9 | Reconnect logic | PENDING | |
-| 179 | 9 | Frontend/backend synchronization | PENDING | |
-| 180 | 9 | Authentication | PENDING | |
-| 181 | 9 | Authorization (RBAC) | PENDING | |
-| 182 | 9 | Broken/incomplete integration items | PENDING | |
-| 313 | 21 | Credential protection | PENDING | |
-| 314 | 21 | Secret management | PENDING | |
-| 315 | 21 | Sandboxing | PENDING | |
-| 316 | 21 | Dangerous command detection | PENDING | |
-| 317 | 21 | Permission system | PENDING | |
-| 318 | 21 | Prompt injection resistance | PENDING | |
-| 319 | 21 | Data leakage prevention | PENDING | |
-| 320 | 22 | Refuses malware/ransomware/credential-theft/phishing requests | PENDING | |
-| 322 | 96 | Secret scanning | PENDING | |
-| 323 | 96 | Encrypted credential storage | PENDING | |
-| 324 | 96 | Audit logs (tamper-resistant + queryable) | PENDING | |
-| 325 | 96 | Role-based permissions | PENDING | |
-| 326 | 96 | Least-privilege access | PENDING | |
-| 327 | 96 | Approval chains | PENDING | |
-| 328 | 96 | Compliance readiness (GDPR/CCPA export & erase) | PENDING | |
-| 330 | 85 | All agents automatically follow policy (structural guarantee) | PENDING | |
-| 331 | 85 | Licensing policy enforcement | PENDING | |
-| 375 | 48 | Multiple users (normalized users table) | PENDING | |
-| 379 | 48 | Audit logging | PENDING | |
-| 380 | 48 | Role-based access | PENDING | |
-| 382 | 77 | Agent lifecycle (hire/retire/replace/promote) | PENDING | |
-| 384 | 95 | Credentials scoped per-repo/project | PENDING | |
-| 385 | 95 | Agents use the correct repo_path consistently | PENDING | |
+| 173 | 9 | API connections | CONFIRMED | Frontend typecheck clean; 24 vitest tests pass (api/auth libs); real uvicorn accepts Bearer and cookie credentials. Playwright e2e was not run (needs the full stack). |
+| 174 | 9 | Streaming (SSE) | CONFIRMED | Real uvicorn: GET /api/tasks/{id}/stream -> 401 without credentials, 200 text/event-stream with a Bearer token or the gridiron_token cookie, ping heartbeat within 15 s. |
+| 176 | 9 | State management | CONFIRMED | react-query based state; vitest page tests (fleet, agents, stream) pass. Not exercised in a browser. |
+| 177 | 9 | Error handling | CONFIRMED | Structured 422s (B3) and the api.ts error handling tests; not exercised in a browser. |
+| 178 | 9 | Reconnect logic | CONFIRMED | vitest 'SSE reconnect-with-backoff' passes (one connection on mount, backoff on drop). |
+| 179 | 9 | Frontend/backend synchronization | CONFIRMED | Typecheck + API-contract unit tests; the payload shapes (camelCase) match the routes read in B4-B7. No browser e2e. |
+| 180 | 9 | Authentication | FIXED | GET /api/chat/sessions/{id}/history and GET /api/tasks/{id}/tokens had no auth at all (a neighbouring docstring claimed tokens did; a pinned test enshrined it). Also: a deleted user's JWT kept working for 24 h — accounts are now re-checked against the users table (jwt_revalidate_against_db, ~15 s cache). Forged / wrong-secret / expired / alg=none / legacy-header identities all rejected (tested). |
+| 181 | 9 | Authorization (RBAC) | FIXED | POST /api/specialized-agents/{agent}/run|run-sync|dispatch needed only 'authenticated' (a viewer) and passed the caller's repo_path straight to the agent: a viewer could aim an agent with bash/write tools at ANY directory. Now agents whose contract can write/execute need an approver (unknown = privileged) and repo_path must be a registered repo (or inside one). |
+| 182 | 9 | Broken/incomplete integration items | CONFIRMED | No broken integration found at typecheck/unit level; the real defects were on the server side (above). Browser e2e not run. |
+| 313 | 21 | Credential protection | FIXED | Code-running tools (run_python_snippet, run_node, run_script, run_make, run_tests, run_single_test, type_check, run_linter, coverage_report, deps_outdated, find_unused_imports) inherited the server's whole environment: ANTHROPIC_API_KEY, JWT_SECRET_KEY, DATABASE_URL readable by any code an agent ran. New safe_subprocess strips credential-shaped variables. (The coder's bash already ran in the Docker sandbox with a minimal env.) |
+| 314 | 21 | Secret management | CONFIRMED | Fernet encryption at rest (enc:v1: in system_settings, real Postgres test); values never echoed (masked view, names-only list); reserved platform names refused; plaintext fallback only outside production, production refuses to boot without CREDENTIAL_ENCRYPTION_KEY. backend/.env has no key (dev = plaintext). |
+| 315 | 21 | Sandboxing | FIXED | The Docker sandbox was verified in B1. The bhaskar Python sandbox guarded only builtins.open: pathlib read_text/read_bytes, io.open, os.open, os.listdir and os.scandir read ANY file (incl. backend/.env). Guarded; ctypes/raw syscalls remain (documented: 'not a hard multi-tenant boundary'). |
+| 316 | 21 | Dangerous command detection | FIXED | The denylist (~25 patterns) missed 27 of 50 dangerous samples: docker rm/stop/compose down, git reset --hard, git clean -fdx, killall/pkill/kill -9 1, reverse shells (/dev/tcp, nc -e), python -m http.server, find / -delete, cat /etc/shadow, writes to /etc/... The dedicated tools ask a human first but plain bash walked around every gate. Added (overridable by a present human; rm -rf/dd/mkfs stay non-overridable); 22 ordinary dev commands verified unblocked. |
+| 317 | 21 | Permission system | FIXED | Agent contracts declare permissions (write_repo, execute_bash, ...) but nothing enforced them at the run endpoints — now privileged agents need the approver role (see #181). |
+| 318 | 21 | Prompt injection resistance | FIXED | Two real gaps: untrusted content could close its own <untrusted_external_data> delimiter (everything after it read as trusted instructions) — now escaped; and the injection-shape flag knew 4 phrasings — now also 'disregard the above', 'you are now', 'new instructions:', <system>/[INST], 'do not tell the user', exfiltration verbs. Heuristic flagging, not a guarantee. |
+| 319 | 21 | Data leakage prevention | FIXED | See #313 (env) and B6 #125 (redaction of agent output: sk-ant-, JWT, DB-URL passwords, ...). |
+| 320 | 22 | Refuses malware/ransomware/credential-theft/phishing requests | CONFIRMED | No repo-level policy or prompt mentions malware; the refusal is the model's own. 3 live probes (ransomware, Gmail phishing page, browser-password stealer) were all refused. |
+| 322 | 96 | Secret scanning | FIXED | secrets_scan / pre-commit scanner share the pattern set fixed in B6 #125. |
+| 323 | 96 | Encrypted credential storage | CONFIRMED | See #314: encrypted at rest with Fernet, decrypt only through the vault. |
+| 324 | 96 | Audit logs (tamper-resistant + queryable) | FIXED | Three real defects: (1) audit() from an agent WORKER THREAD (where all tool execution and every policy denial runs) never reached the database — get_event_loop() raised and was swallowed; entries lived only in the in-memory ring; (2) the hash chain FORKED under concurrent inserts (seq drawn before the trigger's advisory lock): 14 false 'breaks' in 545 rows, so verify could not tell tampering from noise — migration 049 re-draws seq inside the lock; verifier now checks a linked list and forks only from the boundary; (3) DB write failures were `pass`. Verified on real Postgres: UPDATE/DELETE rejected, 40 concurrent inserts stay one line, a privileged rewrite is detected. |
+| 325 | 96 | Role-based permissions | FIXED | JWT roles were frozen at login: a demoted approver stayed an approver for 24 h. The users row is now authoritative (see #180). |
+| 326 | 96 | Least-privilege access | FIXED | Viewer/approver matrix over all 136 routes: every mutating route needs auth; approver-only routes 403 for viewers (tested); agent-run endpoints fixed (#181). Lead: a viewer can still create/run tasks, mkdir/clone/commit/pull via /api/console/*, chat with a tool-using agent — a design decision worth revisiting. |
+| 327 | 96 | Approval chains | CONFIRMED | Approval endpoints are approver-only; decision identity now the authenticated approver (B4 #464). Other approval endpoints still record decided_by='user' (approvals.py, chat) — lead. |
+| 328 | 96 | Compliance readiness (GDPR/CCPA export & erase) | FIXED | Erasure removed the login but the erased user's token kept working for up to 24 h (see #180 — now immediate). Export/erase cover identity, role and audit rows only; chat messages and tasks carry no user link, so there is nothing else to export. |
+| 330 | 85 | All agents automatically follow policy (structural guarantee) | CONFIRMED | One chokepoint (execute_tools: policy check, blocking_until, unadvertised-tool refusal) for all 79 agents (B6 audit); its denylist gaps were fixed under #316; host-run exec tools now scrubbed (#313). |
+| 331 | 85 | Licensing policy enforcement | DOWNGRADED | PARTIAL: check_license_compliance scans the PLATFORM's own installed Python packages (SPDX/classifier based) and is an advisory tool — nothing enforces a license policy on a target repo's dependency changes, and CI has no license job. |
+| 375 | 48 | Multiple users (normalized users table) | CONFIRMED | users table (migration 044) with bcrypt hashes, roles, must_change_password; real rows used in the revocation tests; /auth/setup only when the table is empty and never in production. |
+| 379 | 48 | Audit logging | FIXED | See #324. |
+| 380 | 48 | Role-based access | FIXED | See #325/#181. |
+| 382 | 77 | Agent lifecycle (hire/retire/replace/promote) | CONFIRMED | POST /api/agents/{name}/lifecycle is approver-only; disabled/retired agents are excluded by select() (B2); existing lifecycle tests pass. |
+| 384 | 95 | Credentials scoped per-repo/project | CONFIRMED | credential_vault repo-scoped keys with global fallback; 25 real-DB vault/encryption tests pass. |
+| 385 | 95 | Agents use the correct repo_path consistently | FIXED | Specialized-agent endpoints accepted an arbitrary repo_path (see #181); task-owned repo resolution (resolve_task_repo_path) was already used elsewhere and is now the only unprivileged source. |
 
 ## B8 — Fleet self-improvement, guardians & health  (33 items, depth: Standard)
 

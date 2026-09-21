@@ -1875,6 +1875,10 @@ class Settings(BaseSettings):
         description="Secret key for signing JWTs. REQUIRED in production. Generate with: openssl rand -hex 32",
     )
     jwt_algorithm: str = Field(default="HS256", description="JWT signing algorithm.")
+    jwt_revalidate_against_db: bool = Field(
+        default=True,
+        description="Check every verified JWT against the users table (account still exists; role taken from the row, not the token) so deleting or demoting a user takes effect immediately instead of when their token expires. Cached ~15 s per user.",
+    )
     jwt_access_token_expire_minutes: int = Field(
         default=1440,
         description="JWT access token lifetime in minutes (default: 24 hours).",

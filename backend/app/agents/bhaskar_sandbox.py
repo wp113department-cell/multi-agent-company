@@ -98,7 +98,7 @@ _USE_PROCESS_GROUP = sys.platform != "win32"
 # ---------------------------------------------------------------------------
 
 # {sandbox_dir!r} is substituted at build time (see _build_script below).
-_FILESYSTEM_GUARD_PRELUDE_TEMPLATE = '''\
+_FILESYSTEM_GUARD_PRELUDE_TEMPLATE = """\
 import builtins as __bhaskar_builtins
 import os as __bhaskar_os
 import shutil as __bhaskar_shutil
@@ -148,6 +148,34 @@ def __bhaskar_guarded_open(file, mode="r", *a, **kw):
             __bhaskar_check_read_path(file)
     return __bhaskar_orig_open(file, mode, *a, **kw)
 __bhaskar_builtins.open = __bhaskar_guarded_open
+# pathlib.Path.open/read_text/read_bytes/write_text and io.open() all go through io.open,
+# which is a separate reference from builtins.open — patching only builtins.open left
+# `Path("/any/file").read_text()` (the most common file API in generated scripts) unguarded.
+import io as __bhaskar_io
+__bhaskar_io.open = __bhaskar_guarded_open
+
+__bhaskar_orig_os_open = __bhaskar_os.open
+__bhaskar_WRITE_FLAGS = (
+    __bhaskar_os.O_WRONLY | __bhaskar_os.O_RDWR | __bhaskar_os.O_CREAT
+    | __bhaskar_os.O_TRUNC | __bhaskar_os.O_APPEND
+)
+def __bhaskar_guarded_os_open(path, flags, *a, **kw):
+    if kw.get("dir_fd") is None and isinstance(path, (str, bytes, __bhaskar_os.PathLike)):
+        if flags & __bhaskar_WRITE_FLAGS:
+            __bhaskar_check_write_path(path)
+        else:
+            __bhaskar_check_read_path(path)
+    return __bhaskar_orig_os_open(path, flags, *a, **kw)
+__bhaskar_os.open = __bhaskar_guarded_os_open
+
+def __bhaskar_make_read_guard(orig):
+    def _guarded(path=".", *a, **kw):
+        if isinstance(path, (str, bytes, __bhaskar_os.PathLike)):
+            __bhaskar_check_read_path(path)
+        return orig(path, *a, **kw)
+    return _guarded
+for _name in ("listdir", "scandir"):
+    setattr(__bhaskar_os, _name, __bhaskar_make_read_guard(getattr(__bhaskar_os, _name)))
 
 def __bhaskar_deny_chdir(*a, **kw):
     raise PermissionError("bhaskar_tool sandbox: os.chdir is blocked")
@@ -178,9 +206,9 @@ __bhaskar_os.replace = __bhaskar_guarded_rename
 for _name in ("rmtree", "copy", "copy2", "copyfile", "copytree", "move"):
     if hasattr(__bhaskar_shutil, _name):
         setattr(__bhaskar_shutil, _name, __bhaskar_make_write_guard(getattr(__bhaskar_shutil, _name)))
-'''
+"""
 
-_NETWORK_GUARD_PRELUDE = '''\
+_NETWORK_GUARD_PRELUDE = """\
 import ipaddress as __bhaskar_ipaddress
 import socket as __bhaskar_socket
 
@@ -253,9 +281,9 @@ __bhaskar_orig_connect_ex = __bhaskar_socket.socket.connect_ex
 def __bhaskar_guarded_connect_ex(self, address):
     return __bhaskar_orig_connect_ex(self, __bhaskar_guard_address(address))
 __bhaskar_socket.socket.connect_ex = __bhaskar_guarded_connect_ex
-'''
+"""
 
-_NETWORK_DENY_ALL_PRELUDE = '''\
+_NETWORK_DENY_ALL_PRELUDE = """\
 import socket as __bhaskar_socket
 
 def __bhaskar_deny(*a, **kw):
@@ -266,7 +294,7 @@ def __bhaskar_deny(*a, **kw):
 __bhaskar_socket.create_connection = __bhaskar_deny
 __bhaskar_socket.socket.connect = __bhaskar_deny
 __bhaskar_socket.socket.connect_ex = __bhaskar_deny
-'''
+"""
 
 
 def _resolve_python_executable(repo_path: str) -> str:

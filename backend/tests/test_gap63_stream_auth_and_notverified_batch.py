@@ -124,13 +124,13 @@ def test_stream_endpoint_still_has_its_stop_resume_tokens_siblings_gated() -> No
     from the siblings the Appendix finding compared it against."""
     from app.api.activity import get_token_usage, resume_task, stop_task
 
-    for fn in (stop_task, resume_task):
+    for fn in (stop_task, resume_task, get_token_usage):
         sig = inspect.signature(fn)
         assert "_actor" in sig.parameters
         assert (
             getattr(sig.parameters["_actor"].default, "dependency", None)
             is require_authenticated
         )
-    # get_token_usage was never gated by the Appendix finding and is left
-    # unchanged by this fix -- documented here, not silently assumed.
-    assert "_actor" not in inspect.signature(get_token_usage).parameters
+    # UPDATED (verification batch B7): get_token_usage used to be left ungated here on purpose;
+    # it returns a task's token/cost counters, so it now requires authentication like its siblings
+    # (the stream endpoint's own docstring already claimed it did).

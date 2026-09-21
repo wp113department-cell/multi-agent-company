@@ -71,6 +71,15 @@ async def require_approver(
                 payload = decode_access_token(token)
                 role = str(payload.get("role", "viewer"))
                 username = str(payload.get("sub", "unknown"))
+                from app.auth.revocation import current_role
+
+                live_role = await current_role(username, role, db)
+                if live_role is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="This account no longer exists",
+                    )
+                role = live_role
                 if role not in ("approver", "admin"):
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
@@ -157,7 +166,20 @@ async def require_authenticated(
                 from app.auth.jwt import decode_access_token
 
                 payload = decode_access_token(token)
-                return str(payload.get("sub", "unknown"))
+                username = str(payload.get("sub", "unknown"))
+                from app.auth.revocation import current_role
+
+                if (
+                    await current_role(username, str(payload.get("role", "viewer")), db)
+                    is None
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="This account no longer exists",
+                    )
+                return username
+            except HTTPException:
+                raise
             except Exception as exc:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
