@@ -28,7 +28,8 @@ Live tally is kept at the top of each batch section once that batch starts.
 | **B1** Repo execution, terminals & file ops | 36 | **36** | 12 | 24 | 0 | 0 |
 | **B2** Orchestration, selection, runtime decisions | 25 | **25** | 17 | 8 | 0 | 0 |
 | **B3** Human control, approvals, recovery, reliability | 37 | **37** | 32 | 4 | 0 | 1 |
-| B4–B11 | 296 | 0 | 0 | 0 | 0 | 0 |
+| **B4** Memory & knowledge systems | 33 | **33** | 30 | 3 | 0 | 0 |
+| B5–B11 | 263 | 0 | 0 | 0 | 0 | 0 |
 
 **Environment baseline (Day 0):** isolated DB `gridiron_verify`; first full run 31 failed / 7,707 passed / 54 skipped — 28 of the 31 were `python: not found` from running pytest without the venv on PATH (84 tests pass with it), 2 pip-audit drift (known), 1 shared-state test. See `verify_api_ledger.md` for live-API spend (~$0.30 so far).
 
@@ -151,39 +152,39 @@ Live tally is kept at the top of each batch section once that batch starts.
 
 | # | § | Question | Verdict | Evidence / notes |
 |---:|---|---|---|---|
-| 73 | 5 | Working Memory | PENDING | |
-| 74 | 5 | Session Memory | PENDING | |
-| 75 | 5 | Shared Memory | PENDING | |
-| 76 | 5 | Project Memory | PENDING | |
-| 77 | 5 | Long-Term Memory | PENDING | |
-| 78 | 5 | Procedural Memory | PENDING | |
-| 79 | 5 | Failure Memory | PENDING | |
-| 80 | 5 | Knowledge Memory | PENDING | |
-| 81 | 5 | Where memory is stored (real DB schema) | PENDING | |
-| 82 | 5 | How memory is updated | PENDING | |
-| 83 | 5 | How memory is retrieved | PENDING | |
-| 84 | 5 | How memory is synchronized (race-safe) | PENDING | |
-| 85 | 5 | Memory survives restart | PENDING | |
-| 86 | 5 | Memory shared between agents | PENDING | |
-| 87 | 120 | Working Memory scoped to task, no overflow | PENDING | |
-| 89 | 120 | Long-term memory promotion gate (draft->published) | PENDING | |
-| 91 | 120 | Memory Retrieval targeted, not full dump | PENDING | |
-| 92 | 120 | Automatic Memory Cleanup | PENDING | |
-| 93 | 120 | Memory Prioritization | PENDING | |
-| 94 | 120 | Token Optimization | PENDING | |
-| 95 | 120 | Context Window Management (aggregate cap) | PENDING | |
-| 96 | 120 | Memory Aging/Lifecycle | PENDING | |
-| 97 | 120 | Shared Memory Synchronization (lock safety) | PENDING | |
-| 99 | 120 | Memory Analytics | PENDING | |
-| 400 | 37 | Agent routing score updates from real outcomes over time | PENDING | |
-| 401 | 74 | Preferences recorded and retrieved as first-class memory | PENDING | |
-| 402 | 75 | Central store consulted before starting work | PENDING | |
-| 403 | 75 | Covers proven patterns/failed approaches/architecture decisions/templates | PENDING | |
-| 404 | 75 | Covers known bugs as a distinct type | PENDING | |
-| 406 | 75 | Knowledge validation before promotion | PENDING | |
-| 410 | 110 | Prompt evolution (versioning + rollback, human & automatic) | PENDING | |
-| 412 | 114 | Per-repo knowledge isolation | PENDING | |
-| 464 | 93 | Draft->published promotion gate with real approver | PENDING | |
+| 73 | 5 | Working Memory | CONFIRMED | AgentRunState is built per run_agent_graph call (no module-level state); condense on context_token_budget. Static + existing tests; the condense path itself is re-checked in B5 (#65 context). |
+| 74 | 5 | Session Memory | CONFIRMED | LessonStore on real Postgres: dedup, capacity, keyword retrieval, lessons-table persistence and refresh_from_db into a SECOND store (test_session_lessons_reach_a_second_process). Persist is a no-op when no main loop is set (only matters outside FastAPI). |
+| 75 | 5 | Shared Memory | CONFIRMED | Same real cross-process test + memory_embeddings shared table (legacy unscoped rows visible to every repo by design). |
+| 76 | 5 | Project Memory | CONFIRMED | Repo-scoped memory on real pgvector: repo A rows never returned for repo B (all 5 categories) — test_every_category_round_trips_and_is_repo_isolated. |
+| 77 | 5 | Long-Term Memory | FIXED | eb61f6f0 — _embed called the sync Voyage client inside a coroutine (blocked the event loop) and one provider blip stored a permanent ZERO-vector row that could never be found. Now to_thread + 3 retries; reembed_zero_vector_rows repairs old rows (called by the daily lesson loop). |
+| 78 | 5 | Procedural Memory | CONFIRMED | embed_procedure/query_procedures round trip on real pgvector, repo-isolated. |
+| 79 | 5 | Failure Memory | CONFIRMED | embed_failure/query_failures round trip on real pgvector, repo-isolated, feeds memory_hook_node (#402). |
+| 80 | 5 | Knowledge Memory | CONFIRMED | architecture notes + learning signals (LessonStore/versioned lessons) round trip; architecture repo-isolated. |
+| 81 | 5 | Where memory is stored (real DB schema) | CONFIRMED | Real schema: memory_embeddings(vector(1536)) + versioned_lessons + lessons in Postgres; queried through real cosine ops. |
+| 82 | 5 | How memory is updated | CONFIRMED | Near-duplicate write reuses the row instead of inserting (real DB); quality gate rejects empty/placeholder writes. |
+| 83 | 5 | How memory is retrieved | CONFIRMED | Targeted top-k on 6 topics returns the matching row first; similarity floor respected. |
+| 84 | 5 | How memory is synchronized (race-safe) | CONFIRMED | 8 concurrent identical writes -> exactly 1 row (pg advisory lock per category/repo). |
+| 85 | 5 | Memory survives restart | CONFIRMED | Rows survive an engine dispose/restart (durable Postgres, not process memory). |
+| 86 | 5 | Memory shared between agents | CONFIRMED | Any agent's write is visible to any other agent's query (single table) — same tests as #75. |
+| 87 | 120 | Working Memory scoped to task, no overflow | CONFIRMED | Working memory = per-run state; no cross-run sharing found. Overflow behaviour (condense) verified under B5. |
+| 89 | 120 | Long-term memory promotion gate (draft->published) | CONFIRMED | VersionedMemoryStore.publish() files a DRAFT invisible to query_learning_signals; only promote() makes it fleet memory (test_a_lesson_is_invisible_until_promoted). Curator SCAN handlers have no promote tool; APPLY does, and only after /approve. |
+| 91 | 120 | Memory Retrieval targeted, not full dump | CONFIRMED | query_memory_context returns top_k per category, never a table dump. |
+| 92 | 120 | Automatic Memory Cleanup | CONFIRMED | retention._archive_table on real rows: 400-day-old row archived, fresh row kept, archived row disappears from query_similar_tasks. (Scheduled loop wiring covered by test_retention_archive.) |
+| 93 | 120 | Memory Prioritization | CONFIRMED | Composite score (similarity/importance/recency/reuse) — gap40 + stage4 tests on real DB pass. |
+| 94 | 120 | Token Optimization | CONFIRMED | Injection is capped (memory_injection_token_budget) and compresses by priority, whole entries only — test_injection_cap_bounds_the_real_block. |
+| 95 | 120 | Context Window Management (aggregate cap) | CONFIRMED | Same cap function used by memory_hook_node on the real formatted block; highest-priority section kept, low-priority entries dropped with a notice. |
+| 96 | 120 | Memory Aging/Lifecycle | CONFIRMED | Aging/staleness distribution + archive lifecycle real (gap44 + retention test). |
+| 97 | 120 | Shared Memory Synchronization (lock safety) | CONFIRMED | Advisory-lock + per-lesson async lock; concurrent write test (#84) and lesson-lock tests pass. |
+| 99 | 120 | Memory Analytics | CONFIRMED | compute_memory_analytics on real DB (size, growth, unused, duplicates, staleness). One test depended on leftover rows (empty table + cap 0 = scan runs) — test fixed, code correct. |
+| 400 | 37 | Agent routing score updates from real outcomes over time | FIXED | agent_registry.compute_live_success_rate loaded EVERY AgentRun row (blobs included) per capability per sync and counted in-flight 'running' runs as failures, so a busy agent's routing score fell while it worked. Now a SQL aggregate over finished runs; real-DB test replaces two mocked ones. Note for Task 2: it is a lifetime average (no recency weighting). |
+| 401 | 74 | Preferences recorded and retrieved as first-class memory | CONFIRMED | embed_preference/query_preferences round trip + record_preference tool tests. |
+| 402 | 75 | Central store consulted before starting work | CONFIRMED | memory_hook_node run against the real DB injects a seeded failure's root cause into memory_context (test_memory_hook_node_injects_real_db_memory). |
+| 403 | 75 | Covers proven patterns/failed approaches/architecture decisions/templates | CONFIRMED | failures, procedures, architecture notes, learnings all stored and injected (six sections in query_memory_context). |
+| 404 | 75 | Covers known bugs as a distinct type | CONFIRMED | known bugs are their own category (embed_bug/query_bugs), injected as their own section. |
+| 406 | 75 | Knowledge validation before promotion | CONFIRMED | quality gate at write + draft->published gate + curator scan cannot promote (see #89). |
+| 410 | 110 | Prompt evolution (versioning + rollback, human & automatic) | CONFIRMED | PromptRegistry propose->review->approve->deploy->rollback with regression gate and operator route; /prompts/{role}/rollback needs approver. Verified by existing real-DB tests + static review (deploy writes the roles/*.md file). |
+| 412 | 114 | Per-repo knowledge isolation | CONFIRMED | per-repo isolation proven across all categories (see #76). |
+| 464 | 93 | Draft->published promotion gate with real approver | FIXED | fleet_dashboard approve/reject recorded the CLIENT-supplied `decided_by` body field on the audit trail; with RBAC on an approver could stamp any name. Now the authenticated identity. Lead for B7: other approval endpoints hard-code decided_by='user', and X-User-Id is an unauthenticated header when JWT is off. |
 
 ## B5 — Context, cost, confidence, intent & truthfulness  (33 items, depth: Standard)
 

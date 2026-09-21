@@ -474,16 +474,28 @@ async def compute_live_success_rate(
     0% or 100%, matching every other real-signal-not-fabricated convention
     in this codebase (e.g. app/memory/store.py's zero-vector skip).
     """
-    from sqlalchemy import select
+    from sqlalchemy import case, func, select
 
     from app.db.models import AgentRun
 
-    result = await db.execute(select(AgentRun).where(AgentRun.agent_type == agent_type))
-    runs = list(result.scalars().all())
-    total = len(runs)
+    # Aggregate in SQL (was: load every AgentRun ORM row, output blobs included,
+    # for every capability on every sync) and count only FINISHED runs — a run
+    # that is still "running" has no outcome yet and must not drag an agent's
+    # routing score down while it does its job (an agent busy on a long task
+    # looked like it was failing).
+    row = (
+        await db.execute(
+            select(
+                func.count(),
+                func.coalesce(
+                    func.sum(case((AgentRun.status == "completed", 1), else_=0)), 0
+                ),
+            ).where(AgentRun.agent_type == agent_type, AgentRun.status != "running")
+        )
+    ).one()
+    total, successes = int(row[0]), int(row[1])
     if total == 0:
         return fallback, 0
-    successes = sum(1 for r in runs if r.status == "completed")
     return successes / total, total
 
 

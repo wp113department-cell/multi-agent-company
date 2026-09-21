@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db import get_db
 from app.db.models import (
     AgentHistoricalPerformance,
@@ -444,6 +445,18 @@ class DecisionPayload(BaseModel):
     decided_by: str = "admin"
 
 
+def _decider(approver: str, payload: DecisionPayload | None) -> str:
+    """Who to record as the decision-maker on an approve/reject.
+
+    With RBAC on, the identity the server authenticated is the only trustworthy
+    answer — the body's `decided_by` is client-supplied, so an approver could
+    otherwise stamp any name (or another person's) on the audit trail. The body
+    value is honoured only when RBAC is off (local dev, no real identity)."""
+    if get_settings().rbac_enabled:
+        return approver
+    return (payload.decided_by if payload else "") or approver
+
+
 @router.post("/requests/{request_id}/approve")
 async def approve_request(
     request_id: int,
@@ -465,7 +478,7 @@ async def approve_request(
     trace_id = uuid.uuid4().hex[:12]
     row.status = "in_progress"
     row.decided_at = datetime.now(timezone.utc)
-    row.decided_by = payload.decided_by if payload else "admin"
+    row.decided_by = _decider(_approver, payload)
     row.trace_id = trace_id
     await db.commit()
 
@@ -498,7 +511,7 @@ async def reject_request(
 
     row.status = "rejected"
     row.decided_at = datetime.now(timezone.utc)
-    row.decided_by = payload.decided_by if payload else "admin"
+    row.decided_by = _decider(_approver, payload)
     await db.commit()
     _push_dashboard_event("status_changed", {"id": request_id, "status": "rejected"})
 

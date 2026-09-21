@@ -57,36 +57,7 @@ def test_update_success_rate_visible_via_every_existing_reference() -> None:
     assert held_ref.success_rate == 0.1
 
 
-@pytest.mark.asyncio
-async def test_compute_live_success_rate_returns_fallback_when_no_runs() -> None:
-    mock_db = AsyncMock()
-    mock_scalars = MagicMock()
-    mock_scalars.all.return_value = []
-    mock_result = MagicMock()
-    mock_result.scalars.return_value = mock_scalars
-    mock_db.execute = AsyncMock(return_value=mock_result)
-
-    rate, total = await compute_live_success_rate(mock_db, "td_agent_x", fallback=0.77)
-
-    assert rate == 0.77
-    assert total == 0
-
-
-@pytest.mark.asyncio
-async def test_compute_live_success_rate_computes_from_real_run_statuses() -> None:
-    mock_db = AsyncMock()
-    mock_scalars = MagicMock()
-    mock_scalars.all.return_value = [
-        SimpleNamespace(status="completed"),
-        SimpleNamespace(status="completed"),
-        SimpleNamespace(status="failed"),
-        SimpleNamespace(status="failed"),
-    ]
-    mock_result = MagicMock()
-    mock_result.scalars.return_value = mock_scalars
-    mock_db.execute = AsyncMock(return_value=mock_result)
-
-    rate, total = await compute_live_success_rate(mock_db, "td_agent_y", fallback=1.0)
-
-    assert rate == 0.5
-    assert total == 4
+# UPDATED (verification batch B4, #400): the two tests that used to live here mocked
+# db.execute().scalars().all() — the ORM boundary itself — so they could not notice the
+# query loading every AgentRun row, or counting in-flight runs as failures. The real-DB
+# versions are in tests/test_b4_memory_categories.py.

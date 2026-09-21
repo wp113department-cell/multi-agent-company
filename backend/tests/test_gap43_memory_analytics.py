@@ -212,15 +212,36 @@ async def test_duplicate_scan_skipped_when_table_exceeds_cap(
     reset_settings_cache()
     try:
         engine = _engine()
+        task_id = f"td-gap43-cap-{uuid.uuid4().hex[:8]}"
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                analytics = await compute_memory_analytics(session)
-                assert analytics.duplicate_pairs_count is None
-                assert analytics.duplicate_scan_skipped_reason is not None
-                assert (
-                    "memory_dup_scan_max_rows"
-                    in analytics.duplicate_scan_skipped_reason
-                )
+                # UPDATED (verification batch B4): the cap is "rows > max", so on
+                # an EMPTY table max=0 does not skip the scan — the test silently
+                # depended on other tests having left rows behind. Seed its own.
+                with patch("app.memory.store._embed", side_effect=_vector_for):
+                    await embed_task_outcome(
+                        task_id=task_id,
+                        description="gap43 cap test row",
+                        summary="s",
+                        outcome="completed",
+                        files_changed=[],
+                        db=session,
+                    )
+                try:
+                    analytics = await compute_memory_analytics(session)
+                    assert analytics.duplicate_pairs_count is None
+                    assert analytics.duplicate_scan_skipped_reason is not None
+                    assert (
+                        "memory_dup_scan_max_rows"
+                        in analytics.duplicate_scan_skipped_reason
+                    )
+                finally:
+                    await session.execute(
+                        delete(MemoryEmbedding).where(
+                            MemoryEmbedding.task_id == task_id
+                        )
+                    )
+                    await session.commit()
         finally:
             await engine.dispose()
     finally:
