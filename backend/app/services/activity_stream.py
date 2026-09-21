@@ -189,6 +189,18 @@ class ActivityStreamRegistry:
         stream = self.get(task_id)
         return stream.should_abort() if stream else False
 
+    def clear_abort(self, task_id: str | int) -> bool:
+        """Drop a STALE abort flag before a run starts. The flag is only ever
+        cleared by /resume, so a Stop or Cancel (or a stray Stop on an idle task)
+        used to make every LATER run of that task abort at its first LLM call and
+        "finish" doing no work, until the server restarted. Returns whether a flag
+        was actually set."""
+        stream = self.get(task_id)
+        if stream is None or not stream.should_abort():
+            return False
+        stream._abort_event.clear()
+        return True
+
 
 _registry: ActivityStreamRegistry | None = None
 _registry_lock = threading.Lock()

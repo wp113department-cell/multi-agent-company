@@ -2260,10 +2260,12 @@ def _run_tool_with_retry(
         except Exception as exc:
             result_content = f"[ERROR] {tu_name} raised: {exc}"
             logger.exception("Tool %s raised", tu_name)
-        ok = not result_content.startswith("[ERROR]") and not result_content.startswith(
-            "[POLICY"
-        )
-        if ok or attempt == max_attempts - 1:
+        denied = result_content.startswith("[POLICY")
+        ok = not result_content.startswith("[ERROR]") and not denied
+        # A policy denial is deterministic (a blocked SSRF target, a protected
+        # path): retrying it can never change the answer and used to burn the
+        # full backoff (up to ~1.5s) on every denied call.
+        if ok or denied or attempt == max_attempts - 1:
             break
         if policy == "backoff":
             time.sleep(min(0.5 * (2**attempt), 4.0))

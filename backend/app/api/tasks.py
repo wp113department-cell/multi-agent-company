@@ -42,6 +42,17 @@ from app.repo_tools.worktree import remove_worktree
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 
+def _clear_stale_abort(task_id: int) -> None:
+    """A new run is starting: any abort flag left by an earlier Stop/Cancel
+    belongs to the PREVIOUS run (see ActivityStreamRegistry.clear_abort)."""
+    try:
+        from app.services.activity_stream import get_activity_registry
+
+        get_activity_registry().clear_abort(task_id)
+    except Exception:  # never let flag housekeeping block starting a run
+        pass
+
+
 class CreateTaskRequest(BaseModel):
     title: str
     description: str
@@ -340,6 +351,7 @@ async def run_task(
     mode = body.mode or settings.pipeline_mode
 
     if mode == "full":
+        _clear_stale_abort(task_id)
         await dispatch_job(
             background_tasks,
             launch_planning_pipeline,
@@ -350,6 +362,7 @@ async def run_task(
             priority=task.priority,
         )
     else:
+        _clear_stale_abort(task_id)
         await dispatch_job(
             background_tasks,
             launch_planner,
@@ -420,6 +433,7 @@ async def restart_task(
         db, task_id, "pipeline", "Task restarted — planning pipeline re-triggered"
     )
 
+    _clear_stale_abort(task_id)
     await dispatch_job(
         background_tasks,
         launch_planning_pipeline,
@@ -482,6 +496,7 @@ async def repeat(
     settings = get_settings()
     mode = body.mode or settings.pipeline_mode
     if mode == "full":
+        _clear_stale_abort(task_id)
         await dispatch_job(
             background_tasks,
             launch_planning_pipeline,
@@ -492,6 +507,7 @@ async def repeat(
             priority=new_task.priority,
         )
     else:
+        _clear_stale_abort(task_id)
         await dispatch_job(
             background_tasks,
             launch_planner,
@@ -556,6 +572,7 @@ async def approve_task(
     task = await transition_task(db, task_id, "coding")
     await append_log(db, task_id, "approval", "Plan approved — coding agent starting")
 
+    _clear_stale_abort(task_id)
     await dispatch_job(
         background_tasks,
         launch_coder,
@@ -634,6 +651,7 @@ async def pipeline_approve(
             repo_path = repo_obj.local_path
 
     await append_log(db, task_id, "approval", "Plan approved — resuming pipeline")
+    _clear_stale_abort(task_id)
     await dispatch_job(
         background_tasks,
         resume_planning_pipeline,
@@ -667,6 +685,7 @@ async def pipeline_reject(
         )
 
     await append_log(db, task_id, "rejection", "Plan rejected — pipeline cancelled")
+    _clear_stale_abort(task_id)
     await dispatch_job(
         background_tasks,
         resume_planning_pipeline,
@@ -929,6 +948,7 @@ async def push_task(
             detail="Task has no branch to push — has coding completed yet?",
         )
 
+    _clear_stale_abort(task_id)
     await dispatch_job(
         background_tasks,
         dispatch_git_push_decision,
