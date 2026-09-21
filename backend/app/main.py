@@ -263,6 +263,18 @@ async def _versioned_lesson_consolidation_loop() -> None:
                 )
         except Exception as exc:
             logger.warning("Versioned lesson consolidation loop failed: %s", exc)
+        # Also repair memory rows stored with a zero embedding during a provider
+        # outage (they were unsearchable forever; see memory.store._embed).
+        try:
+            from app.db.session import get_async_session
+            from app.memory.store import reembed_zero_vector_rows
+
+            async with get_async_session() as _db:
+                repaired = await reembed_zero_vector_rows(_db)
+            if repaired:
+                logger.info("Memory: re-embedded %d zero-vector row(s)", repaired)
+        except Exception as exc:
+            logger.warning("Zero-vector memory repair failed: %s", exc)
 
 
 async def _agent_historical_performance_rollup_loop() -> None:

@@ -332,28 +332,94 @@ async def _find_near_duplicate(
         return None
 
 
+_EMBED_ATTEMPTS = 3
+_EMBED_BACKOFF_SECONDS = 0.5
+
+
 async def _embed(text_to_embed: str) -> list[float]:
-    """Return a 1536-dim embedding via Voyage AI, or zero vector if key not set."""
+    """Return a 1536-dim embedding via Voyage AI, or zero vector if key not set
+    (or, after retries, if the provider keeps failing).
+
+    Verification batch B4 (#73-#86): two real defects here.
+    * The Voyage client is SYNCHRONOUS; calling it directly inside this
+      coroutine blocked the whole event loop for the duration of every API call.
+      It now runs in a worker thread.
+    * One transient failure (rate limit, 5xx, timeout) produced a zero vector
+      that was STORED as if it were a memory — a permanently unsearchable row
+      nothing ever re-embedded. It now retries with backoff first, and
+      reembed_zero_vector_rows() repairs any row that still ended up dead."""
+    import asyncio
+
     settings = get_settings()
     if not settings.voyage_api_key:
         return _ZERO_VECTOR_1536
 
-    try:
-        import importlib
+    last_exc: Exception | None = None
+    for attempt in range(_EMBED_ATTEMPTS):
+        try:
+            import importlib
 
-        voyageai = importlib.import_module("voyageai")
+            voyageai = importlib.import_module("voyageai")
 
-        client = voyageai.Client(api_key=settings.voyage_api_key)
-        result = client.embed(
-            texts=[text_to_embed],
-            model=settings.voyage_model,
-            input_type="document",
-        )
-        raw = result.embeddings[0]
-        return [float(v) for v in raw]
-    except Exception as exc:
-        logger.warning("Voyage embed failed: %s — using zero vector", exc)
-        return _ZERO_VECTOR_1536
+            client = voyageai.Client(api_key=settings.voyage_api_key)
+            result = await asyncio.to_thread(
+                client.embed,
+                texts=[text_to_embed],
+                model=settings.voyage_model,
+                input_type="document",
+            )
+            raw = result.embeddings[0]
+            return [float(v) for v in raw]
+        except Exception as exc:
+            last_exc = exc
+            if attempt < _EMBED_ATTEMPTS - 1:
+                await asyncio.sleep(_EMBED_BACKOFF_SECONDS * (2**attempt))
+    logger.warning(
+        "Voyage embed failed after %d attempts: %s — using zero vector",
+        _EMBED_ATTEMPTS,
+        last_exc,
+    )
+    return _ZERO_VECTOR_1536
+
+
+async def reembed_zero_vector_rows(
+    db: AsyncSession, limit: int = 50, only_ids: list[int] | None = None
+) -> int:
+    """Repair rows that were stored with a zero embedding (provider outage):
+    they can never be retrieved or deduplicated, and nothing else ever fixed
+    them. Re-embeds up to `limit` of them; returns how many were repaired.
+    A no-op without an embedding key."""
+    if not get_settings().voyage_api_key:
+        return 0
+    stmt = (
+        select(MemoryEmbedding)
+        .where(text("vector_norm(embedding) = 0"))
+        .where(MemoryEmbedding.archived == False)  # noqa: E712
+        .order_by(MemoryEmbedding.id)
+        .limit(limit)
+    )
+    if only_ids is not None:
+        stmt = stmt.where(MemoryEmbedding.id.in_(only_ids))
+    rows = (await db.execute(stmt)).scalars().all()
+    repaired = 0
+    for row in rows:
+        if row.category == "task":
+            src = _build_outcome_text(
+                row.description,
+                row.summary or "",
+                row.outcome or "",
+                row.files_changed or [],
+            )
+        else:
+            src = f"{row.description}\n{row.summary or ''}".strip()
+        vec = await _embed(src)
+        if vec == _ZERO_VECTOR_1536:
+            break  # provider still down: stop, try again next cycle
+        row.embedding = vec
+        repaired += 1
+    if repaired:
+        await db.commit()
+    return repaired
 
 
 async def embed_task_outcome(
