@@ -260,6 +260,25 @@ class AgentRegistry:
             instance.start(task_id or str(uuid.uuid4()))
             return instance
 
+    def try_start_task(
+        self, name: str, task_id: str | None = None
+    ) -> AgentInstance | None:
+        """Atomic check-and-start: mark `name` RUNNING only if it is STILL
+        available, all under the registry lock. Returns None if another caller
+        got there first.
+
+        FleetManager.select() (availability check) and start_task() (mark
+        running) are two separate steps, so two concurrent dispatchers could both
+        pass the check and both be handed the same single-flight agent — observed
+        under a thread stress test (1 in 400 rounds of 6 concurrent dispatches).
+        """
+        with self._lock:
+            instance = self._instances.setdefault(name, AgentInstance(name=name))
+            if not instance.is_available:
+                return None
+            instance.start(task_id or str(uuid.uuid4()))
+            return instance
+
     def complete_task(
         self, name: str, confidence: float | None = None
     ) -> AgentInstance | None:

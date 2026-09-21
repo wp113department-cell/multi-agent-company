@@ -38,6 +38,9 @@ from app.fleet.metrics import MetricsCollector, get_metrics_collector
 logger = logging.getLogger(__name__)
 
 
+_MAX_CLAIM_ATTEMPTS = 5
+
+
 @dataclass
 class DispatchPlan:
     agent_name: str
@@ -373,13 +376,25 @@ class FleetManager:
         Does NOT actually call the agent — that is the caller's responsibility.
         This function's job is purely: select → validate → mark running → return plan.
         """
-        plan = self.select(
-            required_capability,
-            requested_side_effects,
-            task_id=task_id,
-            task_description=str(task_payload.get("description", "")),
-            repo_path=str(task_payload.get("repo_path", "")),
-        )
+        # select() only CHECKS availability; claiming the agent must be atomic
+        # with it, or two concurrent dispatchers can both be handed the same
+        # single-flight agent (select-then-start race). If we lose the claim,
+        # select again — the winner is no longer available, so the next best
+        # candidate (or "no agent available") comes back.
+        plan: DispatchPlan | None = None
+        for _attempt in range(_MAX_CLAIM_ATTEMPTS):
+            plan = self.select(
+                required_capability,
+                requested_side_effects,
+                task_id=task_id,
+                task_description=str(task_payload.get("description", "")),
+                repo_path=str(task_payload.get("repo_path", "")),
+            )
+            if plan is None:
+                break
+            if self._agents.try_start_task(plan.agent_name, task_id) is not None:
+                break
+            plan = None
         if plan is None:
             return {
                 "status": "no_agent_available",
@@ -387,7 +402,6 @@ class FleetManager:
                 "task_id": task_id,
             }
 
-        self._agents.start_task(plan.agent_name, task_id)
         logger.info(
             "Fleet dispatch: task_id=%s → agent=%s (score=%.3f)",
             task_id,
