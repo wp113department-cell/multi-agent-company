@@ -285,21 +285,30 @@ async def test_chat_agent_docker_compose_up_now_requires_confirmation(
 
 
 @pytest.mark.asyncio
-async def test_chat_agent_docker_compose_down_still_has_no_confirmation(
+async def test_chat_agent_docker_compose_disruptive_actions_now_ask_but_ps_does_not(
     tmp_path: Path,
 ) -> None:
-    """Regression proof — only 'up' should ever pause; 'down'/'ps'/etc.
-    must keep running immediately, matching their pre-existing behavior."""
+    """UPDATED (verification batch B3): this test used to pin "only 'up' should
+    ever pause; 'down' must keep running immediately". `down` stops every service
+    in the stack (and restart/build/pull are disruptive too), so they now ask;
+    read-only ps/logs still run immediately."""
     repo = _git_repo(tmp_path)
     agent = _agent(repo)
     with (
-        patch.object(agent, "_confirm", new=AsyncMock()) as mock_confirm,
+        patch.object(agent, "_confirm", new=AsyncMock(return_value=True)) as mock_confirm,
         patch("app.agents.chat_agent._run_subprocess", return_value="stopped"),
     ):
         result = await agent._execute_tool("docker_compose", {"action": "down"})
-
-    mock_confirm.assert_not_awaited()
+    mock_confirm.assert_awaited_once()
     assert "stopped" in result
+
+    with (
+        patch.object(agent, "_confirm", new=AsyncMock()) as mock_confirm,
+        patch("app.agents.chat_agent._run_subprocess", return_value="listing"),
+    ):
+        result = await agent._execute_tool("docker_compose", {"action": "ps"})
+    mock_confirm.assert_not_awaited()
+    assert "listing" in result
 
 
 # ---------------------------------------------------------------------------

@@ -197,3 +197,46 @@ def test_stash_drop_is_gated_but_push_and_list_are_not(repo) -> None:
     a2 = _agent(repo, approve=True)
     _call(a2, "git_stash", action="drop")
     assert _git(repo, "stash", "list") == ""
+
+
+# ------------------------------- docker gates ------------------------------
+
+
+def test_docker_restart_and_disruptive_compose_actions_are_gated(
+    repo, monkeypatch
+) -> None:
+    ran: list[str] = []
+    from app.agents import chat_agent as ca
+
+    monkeypatch.setattr(
+        ca, "_run_subprocess", lambda cmd, cwd, timeout=60: ran.append(cmd) or "ok"
+    )
+    a = _agent(repo, approve=False)
+    assert _call(a, "docker_restart", container="some-container").startswith("[DENIED]")
+    for action in ("down", "restart", "build", "pull", "up"):
+        out = _call(a, "docker_compose", action=action)
+        assert out.startswith("[DENIED]"), (action, out)
+    assert ran == [], "a disruptive docker command ran without approval"
+    assert a._confirm.await_count == 6
+
+
+def test_read_only_compose_actions_never_prompt(repo, monkeypatch) -> None:
+    from app.agents import chat_agent as ca
+
+    monkeypatch.setattr(ca, "_run_subprocess", lambda cmd, cwd, timeout=60: "ok")
+    a = _agent(repo, approve=False)
+    for action in ("ps", "logs"):
+        assert not _call(a, "docker_compose", action=action).startswith("[DENIED]")
+    assert a._confirm.await_count == 0
+
+
+def test_approved_docker_restart_runs(repo, monkeypatch) -> None:
+    ran: list[str] = []
+    from app.agents import chat_agent as ca
+
+    monkeypatch.setattr(
+        ca, "_run_subprocess", lambda cmd, cwd, timeout=60: ran.append(cmd) or "ok"
+    )
+    a = _agent(repo, approve=True)
+    assert _call(a, "docker_restart", container="some-container") == "ok"
+    assert len(ran) == 1 and "some-container" in ran[0]

@@ -21,6 +21,8 @@ import shutil
 import subprocess
 import uuid
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from app.agents.chat_agent import ChatAgent
@@ -60,6 +62,7 @@ async def test_chat_agent_docker_restart_rejects_shell_injection(tmp_path) -> No
     marker = tmp_path / "PWNED_docker_restart.txt"
     payload = f"x; touch {marker}; echo "
     agent = _agent(str(tmp_path))
+    agent._confirm = AsyncMock(return_value=True)  # restart now asks first (B3)
     result = await agent._execute_tool("docker_restart", {"container": payload})
     assert not marker.exists()
     assert "No such container" in result
@@ -82,6 +85,7 @@ async def test_chat_agent_docker_restart_real_container(
     tmp_path, disposable_container
 ) -> None:
     agent = _agent(str(tmp_path))
+    agent._confirm = AsyncMock(return_value=True)  # restart now asks first (B3)
     result = await agent._execute_tool(
         "docker_restart", {"container": disposable_container}
     )

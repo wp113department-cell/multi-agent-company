@@ -2860,6 +2860,15 @@ class ChatAgent:
             dc_action = str(inp["action"])
             dc_services = [str(s) for s in (inp.get("services") or [])]
             dc_detach = bool(inp.get("detach", True))
+            if dc_action in ("down", "restart", "build", "pull"):
+                # Only `up` was gated: `down` (stops every service in the stack),
+                # `restart`, `build` and `pull` ran with no prompt (verification
+                # batch B3). ps/logs stay read-only and ungated.
+                if not await self._confirm(
+                    description=f"Run docker compose {dc_action}",
+                    details=f"docker compose {dc_action} {' '.join(dc_services)}".strip(),
+                ):
+                    return f"[DENIED] User declined docker compose {dc_action}."
             if dc_action == "up":
                 # tool_enhance.md productionization pass, tool #4 (2026-08-16)
                 # — real gap found while auditing git_push's dead sibling in
@@ -3274,6 +3283,14 @@ class ChatAgent:
         if tool_name == "docker_restart":
             drst_name = str(inp["container"])
             drst_cmd = build_docker_restart_command(drst_name)
+            # Restarting a container interrupts whatever it serves (the DB, the
+            # queue, the app itself) — it ran with no prompt (and, in a probe,
+            # really restarted the dev Redis container).
+            if not await self._confirm(
+                description="Restart a Docker container",
+                details=f"docker restart {drst_name}",
+            ):
+                return f"[DENIED] User declined to restart container {drst_name}."
             return await asyncio.to_thread(_run_subprocess, drst_cmd, repo, 60)
 
         if tool_name == "git_tag":
