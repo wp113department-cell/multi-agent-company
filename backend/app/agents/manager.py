@@ -19,6 +19,33 @@ from typing import Any, TypedDict
 logger = logging.getLogger(__name__)
 
 
+def _subtask_dependencies(
+    subtasks: list[dict[str, Any]],
+) -> tuple[list[list[int]], int]:
+    """(per-subtask valid dependency indices, number of INVALID entries seen).
+
+    An out-of-range index, a self-reference, a non-integer (string index,
+    title, bool) used to be silently DROPPED — the subtask then lost its
+    constraint and, under fan-out, was dispatched in the SAME parallel wave as
+    the very thing it depends on, while both functions' docstrings promised a
+    sequential fallback ("a cycle or an out-of-range index returns one subtask
+    per wave"). Callers now treat any invalid entry like a cycle.
+    """
+    n = len(subtasks)
+    deps: list[list[int]] = []
+    invalid = 0
+    for i, st in enumerate(subtasks):
+        raw = st.get("depends_on") or []
+        valid: list[int] = []
+        for d in raw:
+            if isinstance(d, int) and not isinstance(d, bool) and 0 <= d < n and d != i:
+                valid.append(d)
+            else:
+                invalid += 1
+        deps.append(valid)
+    return deps, invalid
+
+
 def _topological_subtask_order(subtasks: list[dict[str, Any]]) -> list[int]:
     """Gap-closure Days 11-14 (Stage 1.1, answers.md): returns original-list
     indices in dependency-respecting order — before this, run_manager()'s
@@ -47,11 +74,16 @@ def _topological_subtask_order(subtasks: list[dict[str, Any]]) -> list[int]:
     guarantee for that one batch.
     """
     n = len(subtasks)
-    deps: list[list[int]] = []
-    for i, st in enumerate(subtasks):
-        raw = st.get("depends_on") or []
-        valid = [d for d in raw if isinstance(d, int) and 0 <= d < n and d != i]
-        deps.append(valid)
+    deps, invalid = _subtask_dependencies(subtasks)
+    if invalid:
+        logger.warning(
+            "Subtask depends_on has %d invalid entr(y/ies) (out-of-range, "
+            "self-reference or non-integer) — dispatching subtasks in "
+            "original order instead (n=%d)",
+            invalid,
+            n,
+        )
+        return list(range(n))
 
     in_degree = [0] * n
     dependents: list[list[int]] = [[] for _ in range(n)]
@@ -109,11 +141,16 @@ def _topological_subtask_waves(subtasks: list[dict[str, Any]]) -> list[list[int]
     logged, never raised.
     """
     n = len(subtasks)
-    deps: list[list[int]] = []
-    for i, st in enumerate(subtasks):
-        raw = st.get("depends_on") or []
-        valid = [d for d in raw if isinstance(d, int) and 0 <= d < n and d != i]
-        deps.append(valid)
+    deps, invalid = _subtask_dependencies(subtasks)
+    if invalid:
+        logger.warning(
+            "Subtask depends_on has %d invalid entr(y/ies) (out-of-range, "
+            "self-reference or non-integer) — dispatching subtasks "
+            "one-per-wave in original order instead (n=%d)",
+            invalid,
+            n,
+        )
+        return [[i] for i in range(n)]
 
     in_degree = [0] * n
     dependents: list[list[int]] = [[] for _ in range(n)]
