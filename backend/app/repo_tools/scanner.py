@@ -67,6 +67,12 @@ class FileIndex:
 class RepoIndex:
     repo_path: str
     files: dict[str, FileIndex] = field(default_factory=dict)
+    # Every indexable path index_repository() saw on disk during its walk,
+    # whether it was (re)parsed or skipped as unchanged. merge_indexes() needs it
+    # to tell "unchanged" from "deleted" — an incremental index only carries the
+    # CHANGED files, so a deleted file simply never appeared and its stale entry
+    # lived in the merged index forever. Empty for hand-built indexes (no pruning).
+    seen_paths: set[str] = field(default_factory=set)
 
 
 def _content_hash(content: bytes) -> str:
@@ -244,6 +250,7 @@ def index_repository(
 
             abs_path = Path(root) / fname
             rel_path = str(abs_path.relative_to(base))
+            index.seen_paths.add(rel_path)
 
             # Blocker (audit_v1.md 4.2 #3 / 4.8 #12): a cheap os.stat() size
             # check BEFORE ever reading file bytes — the previous code read
@@ -289,6 +296,13 @@ def merge_indexes(base_index: RepoIndex, new_index: RepoIndex) -> RepoIndex:
     """
     merged = RepoIndex(repo_path=base_index.repo_path, files=dict(base_index.files))
     merged.files.update(new_index.files)
+    if new_index.seen_paths:
+        # Files that were indexed before but are no longer on disk: drop them
+        # (proved live: a deleted file stayed in the merged index forever, so
+        # symbol search / call graph / context kept pointing at phantom files).
+        for gone in [p for p in merged.files if p not in new_index.seen_paths]:
+            del merged.files[gone]
+        merged.seen_paths = set(new_index.seen_paths)
     return merged
 
 
