@@ -80,22 +80,32 @@ async def compute_success_rate_window(
     instead of a fallback since there's no natural fallback for "before
     this specific change" / "after this specific change" windows.
     """
-    from sqlalchemy import select
+    from sqlalchemy import case, func, select
 
     from app.db.models import AgentRun
 
-    result = await db.execute(
-        select(AgentRun).where(
-            AgentRun.agent_type == agent_type,
-            AgentRun.started_at >= start,
-            AgentRun.started_at < end,
+    # SQL aggregate over FINISHED runs. This used to load every row and count runs still
+    # "running" as failures — and the post-change window always ends "now", so it always
+    # contains in-flight runs: the comparison was biased toward "declined", and a decline
+    # triggers an automatic, unattended `git revert` of the enhancement.
+    row = (
+        await db.execute(
+            select(
+                func.count(),
+                func.coalesce(
+                    func.sum(case((AgentRun.status == "completed", 1), else_=0)), 0
+                ),
+            ).where(
+                AgentRun.agent_type == agent_type,
+                AgentRun.started_at >= start,
+                AgentRun.started_at < end,
+                AgentRun.status != "running",
+            )
         )
-    )
-    runs = list(result.scalars().all())
-    total = len(runs)
+    ).one()
+    total, successes = int(row[0]), int(row[1])
     if total == 0:
         return None, 0
-    successes = sum(1 for r in runs if r.status == "completed")
     return successes / total, total
 
 

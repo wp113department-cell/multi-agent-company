@@ -69,12 +69,31 @@ class AgentInstance:
     avg_confidence: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def _cooldown_elapsed(self) -> bool:
+        """An unhealthy agent may be tried again once agent_unhealthy_cooldown_seconds have passed
+        since its last failure (half-open, like a circuit breaker). 0 disables the trial.
+        """
+        from app.config import get_settings
+
+        cooldown = get_settings().agent_unhealthy_cooldown_seconds
+        return cooldown > 0 and (_now() - self.last_active).total_seconds() >= cooldown
+
     @property
     def is_available(self) -> bool:
-        return (
-            self.state in (AgentState.SLEEP, AgentState.IDLE)
-            and self.health != "unhealthy"
-        )
+        """Can this agent be handed new work?
+
+        B8 verification: this used to be `state in (SLEEP, IDLE) and health != "unhealthy"`. But
+        fail() leaves state == ERROR, so a SINGLE failure (health "degraded") made the agent
+        unselectable — the 0.5 "degraded" tier the scoring formula defines was unreachable — and an
+        unhealthy agent was excluded forever: recovery only happens when the agent completes a
+        run, which a never-selected agent cannot do (no time-based retry existed, and the
+        recovery test even slept). Now: degraded stays selectable (low score); unhealthy is
+        retried after a cooldown, and a success recovers it."""
+        if self.state in (AgentState.SLEEP, AgentState.IDLE):
+            return self.health != "unhealthy" or self._cooldown_elapsed()
+        if self.state == AgentState.ERROR:
+            return self.health == "degraded" or self._cooldown_elapsed()
+        return False
 
     def start(self, task_id: str) -> None:
         self.state = AgentState.RUNNING

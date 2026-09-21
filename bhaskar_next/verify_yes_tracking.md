@@ -32,7 +32,8 @@ Live tally is kept at the top of each batch section once that batch starts.
 | **B5** Context, cost, confidence, intent, truthfulness | 33 | **33** | 15 | 17 | 1 | 0 |
 | **B6** Agent scaffold, capability audit, skills | 39 | **39** | 36 | 3 | 0 | 0 |
 | **B7** Security, governance, enterprise, frontend/API | 32 | **32** | 15 | 16 | 1 | 0 |
-| B8–B11 | 159 | 0 | 0 | 0 | 0 | 0 |
+| **B8** Fleet self-improvement, guardians, health | 33 | **33** | 22 | 9 | 2 | 0 |
+| B9–B11 | 126 | 0 | 0 | 0 | 0 | 0 |
 
 **Environment baseline (Day 0):** isolated DB `gridiron_verify`; first full run 31 failed / 7,707 passed / 54 skipped — 28 of the 31 were `python: not found` from running pytest without the venv on PATH (84 tests pass with it), 2 pip-audit drift (known), 1 shared-state test. See `verify_api_ledger.md` for live-API spend (~$0.30 so far).
 
@@ -312,39 +313,39 @@ Live tally is kept at the top of each batch section once that batch starts.
 
 | # | § | Question | Verdict | Evidence / notes |
 |---:|---|---|---|---|
-| 197 | 12 | Autonomous scheduling (no manual trigger) | PENDING | |
-| 199 | 12 | Log monitoring | PENDING | |
-| 200 | 12 | Docker monitoring | PENDING | |
-| 201 | 12 | Git monitoring | PENDING | |
-| 202 | 12 | Architecture monitoring | PENDING | |
-| 203 | 12 | Enhancement suggestions | PENDING | |
-| 204 | 12 | Bug detection | PENDING | |
-| 206 | 12 | Approval workflow before code changes | PENDING | |
-| 207 | 12 | Never modifies code without approval | PENDING | |
-| 396 | 35 | Broken imports / dead code / unused files / duplicate functions / circular deps | PENDING | |
-| 397 | 35 | Dependency conflicts | PENDING | |
-| 408 | 76 | agent_performance_reviewer uses real data, not self-reports | PENDING | |
-| 409 | 76 | Capability gap detection from repeated failed/blocked requests | PENDING | |
-| 413 | 115 | Real 'what went well / what failed' report tied to a release event | PENDING | |
-| 415 | 118 | Detect | PENDING | |
-| 416 | 118 | Analyze | PENDING | |
-| 417 | 118 | Propose | PENDING | |
-| 419 | 118 | Show plan | PENDING | |
-| 420 | 118 | Wait for approval | PENDING | |
-| 421 | 118 | Implement | PENDING | |
-| 422 | 118 | Test | PENDING | |
-| 423 | 118 | Rollback if quality declines | PENDING | |
-| 441 | 88 | Detect slow/crashed agents | PENDING | |
-| 442 | 88 | Detect looping agents (cross-run) | PENDING | |
-| 444 | 88 | Health state transitions are real, not static | PENDING | |
-| 445 | 88 | 'degraded' state reachable and persisted | PENDING | |
-| 446 | 88 | Automatic recovery from unhealthy | PENDING | |
-| 447 | 89 | Disable a repeatedly-failing agent | PENDING | |
-| 448 | 89 | Notify a supervisor | PENDING | |
-| 449 | 89 | Replace / permanently disable (persists across restart) | PENDING | |
-| 458 | 91 | Deterministic architecture drift detection vs stored baseline | PENDING | |
-| 507 | 69 | Pre-change impact simulation (blast radius) before human review | PENDING | |
-| 508 | 69 | Automatic rollback-on-quality-decline for code-commit enhancements | PENDING | |
+| 197 | 12 | Autonomous scheduling (no manual trigger) | CONFIRMED | test_the_fleet_scan_loop...: the REAL loop code runs all 8 scans by itself (LLM boundary stubbed) and survives one failing. Caveats: every loop is sleep-FIRST (default 4 h) with no persisted last-run time, so a server restarted more often than the interval never scans; loops run under leader election. |
+| 199 | 12 | Log monitoring | CONFIRMED | monitoring_agent scan: read_logs/docker_logs (docker_logs fixed in B1) run for real against the live containers. |
+| 200 | 12 | Docker monitoring | CONFIRMED | Real docker_ps / docker_logs against the running compose stack; part of the autonomous monitoring scan. |
+| 201 | 12 | Git monitoring | CONFIRMED | git_status / git worktree health in the monitoring scan (real, on a temp repo). Note: health_check reports the DB as '❓ pg_isready not available' when that binary is missing. |
+| 202 | 12 | Architecture monitoring | FIXED | circular_dep_detect said 'No circular imports detected' on a project with an obvious a <-> b cycle: it only treated an import as local when its first component was the scanned directory's name or 'app', recorded `from pkg import mod` as a dependency on `pkg`, left relative imports unresolved, named nodes relative to the scan root (scanning app/ itself found nothing) and counted function-level (deferred) imports. Rewritten against the modules that exist; architecture_drift depends on it. Platform's own graph: 0 import-time cycles. |
+| 203 | 12 | Enhancement suggestions | FIXED | submit_enhancement_request had no de-duplication: every scan (every 4 h) filed another identical pending row for a finding that persisted until a human acted, and a rejected one came straight back. Same agent + title (case/space-insensitive) is not filed again while open or rejected in the last 14 days. |
+| 204 | 12 | Bug detection | CONFIRMED | dead_code_detect, find_unused_imports (ruff F401) and the debugger scan run for real on a crafted project; the detection classes are listed under #396. |
+| 206 | 12 | Approval workflow before code changes | CONFIRMED | Findings become pending rows; only POST /api/fleet/requests/{id}/approve (approver-only, records the authenticated approver — B4 #464) starts the APPLY phase. |
+| 207 | 12 | Never modifies code without approval | FIXED | The autonomous SCAN-phase agents (agent_debugger, quality_auditor: every 4 h, no human) got a bash whose Docker sandbox mounted the repo READ-WRITE: `sed -i`, `rm a.py` and planting `.git/hooks/post-commit` all succeeded on the host repo. Scan-phase bash now mounts :ro (run_sandboxed(read_only=True)); reading and /tmp scratch still work; apply-phase bash still writes. Real Docker tests. |
+| 396 | 35 | Broken imports / dead code / unused files / duplicate functions / circular deps | DOWNGRADED | PARTIAL: dead code (a duplicated def is reported once), unused imports (ruff F401) and circular imports (now working) are detected. There is NO detector for broken/unresolvable imports (`import missing_mod_xyz`), unused files or duplicate/cloned functions. |
+| 397 | 35 | Dependency conflicts | CONFIRMED | `pip check` of the platform's own installed environment (real, returned [] here) — not a resolver for a target repo's manifests; documented in the module. |
+| 408 | 76 | agent_performance_reviewer uses real data, not self-reports | CONFIRMED | performance reviewer scan reads fleet_metrics_read / audit_log_read (real stored data), not the agents' own summaries. |
+| 409 | 76 | Capability gap detection from repeated failed/blocked requests | CONFIRMED | capability_gap clusters repeated failed/blocked requests from real rows (existing real-DB tests). |
+| 413 | 115 | Real 'what went well / what failed' report tied to a release event | CONFIRMED | generate_release_retrospective builds the report from real rows for a period; lead: write_retrospective_report writes into the source tree (docs/reports/retrospectives/) and tests left untracked RETROSPECTIVE_*.md files there. |
+| 415 | 118 | Detect | CONFIRMED | Detect: scan loops + monitoring/dead-code/dependency tools (see #197/#204). |
+| 416 | 118 | Analyze | CONFIRMED | Analyze: scan agents read real repo/metrics data and produce structured findings. |
+| 417 | 118 | Propose | CONFIRMED | Propose: submit_enhancement_request files a structured row (now de-duplicated). |
+| 419 | 118 | Show plan | CONFIRMED | Show plan: the row carries an impact_simulation computed at filing time (enhancement_impact) and is listed on the dashboard/API. |
+| 420 | 118 | Wait for approval | CONFIRMED | Wait for approval: nothing runs until an approver approves (row status pending -> in_progress). |
+| 421 | 118 | Implement | CONFIRMED | Implement: the APPLY agents have write tools and commit through git_commit_change (path-in-worktree + secret-content checks). |
+| 422 | 118 | Test | FIXED | 'Test' was tracked (tests_run) but never enforced: an approved change could be committed with no test run, or after an edit that invalidated an earlier run. git_commit_change is now blocked until run_tests ran and any edit re-arms it (agent_debugger, quality_auditor, agent_performance_reviewer). |
+| 423 | 118 | Rollback if quality declines | FIXED | The unattended rollback compares success rates before/after an enhancement; compute_success_rate_window loaded every row and counted runs still 'running' as failures — the post window always ends now, so it always contains in-flight runs: a bias toward 'declined', and a decline triggers an automatic git revert. Now a SQL aggregate over finished runs. Lead: the rate compared is the FILING agent's own, only loosely tied to the changed code. |
+| 441 | 88 | Detect slow/crashed agents | CONFIRMED | failure_ladder orphan recovery (stale heartbeat > 900 s, checked every 5 min) + per-run heartbeats (existing tests). |
+| 442 | 88 | Detect looping agents (cross-run) | DOWNGRADED | PARTIAL: only within-run stall detection exists (consecutive turns without tool calls -> n_stalls) bounded by max_turns; nothing detects the same tool call repeating, or an agent looping/failing repeatedly across runs. |
+| 444 | 88 | Health state transitions are real, not static | FIXED | Health states were real but not usable: fail() leaves state=ERROR, so a SINGLE failure (health 'degraded') made the agent unselectable — the scoring formula's 0.5 'degraded' tier could never be chosen — and an unhealthy agent was excluded forever (recovery requires the agent to complete a run, which a never-selected agent cannot). Degraded now stays selectable; see #446. |
+| 445 | 88 | 'degraded' state reachable and persisted | CONFIRMED | 'degraded' is reachable (1-2 consecutive errors), selectable (fixed) and published as a health event; on restart only unhealthy/disabled/retired are re-applied (degraded resets, which is reasonable for a transient state). |
+| 446 | 88 | Automatic recovery from unhealthy | FIXED | New half-open retry: an unhealthy agent is offered one trial dispatch after agent_unhealthy_cooldown_seconds (300 s, 0 = old behaviour); success -> recover_task, failure restarts the cooldown. Disabled/retired agents never get a trial. Also fixes the restart case: a re-seeded 'unhealthy' agent used to stay excluded for good. |
+| 447 | 89 | Disable a repeatedly-failing agent | CONFIRMED | 3 consecutive failures -> unhealthy -> excluded by select() (tested); now with the cooldown retry above. |
+| 448 | 89 | Notify a supervisor | CONFIRMED | fail_task fires send_agent_alert (best-effort, cross-thread) when an agent newly becomes unhealthy; existing tests. |
+| 449 | 89 | Replace / permanently disable (persists across restart) | CONFIRMED | disable/retire persist through agent.health_updated events and are re-seeded at startup (existing real-DB tests); retire is not reversible via reactivate. |
+| 458 | 91 | Deterministic architecture drift detection vs stored baseline | FIXED | architecture_drift diffs a deterministic snapshot (cycles, dead code, import edges) against the stored baseline — its cycle count was blind (see #202). Leads: a single global baseline key (not per repo) and the baseline is overwritten each run, so slow drift under 10% per run never triggers. |
+| 507 | 69 | Pre-change impact simulation (blast radius) before human review | CONFIRMED | simulate_enhancement_impact (blast radius via referencing files) runs at filing time; existing tests. |
+| 508 | 69 | Automatic rollback-on-quality-decline for code-commit enhancements | FIXED | See #423. |
 
 ## B9 — Scheduler, metrics, quality gates, scalability & architecture  (37 items, depth: Standard)
 

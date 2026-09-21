@@ -102,6 +102,7 @@ def _run_bash_command(
     extra_env: dict[str, str] | None = None,
     image: str | None = None,
     network: str | None = None,
+    read_only: bool = False,
 ) -> tuple[str, str, int, bool]:
     """Returns (stdout, stderr, returncode, timed_out) regardless of which
     path ran the command — each call site keeps its own existing output
@@ -141,6 +142,8 @@ def _run_bash_command(
                 env=extra_env,
                 image=image,
                 network=network,
+                # only passed when set: keeps every existing caller/test double unchanged
+                **({"read_only": True} if read_only else {}),
             )
             return result.stdout, result.stderr, result.returncode, result.timed_out
         except SandboxUnavailableError as exc:
@@ -477,7 +480,9 @@ _FLEET_BASH_TOOL: dict[str, Any] = {
 }
 
 
-def make_scoped_bash_handler(repo_path: str) -> Callable[[dict[str, Any]], str]:
+def make_scoped_bash_handler(
+    repo_path: str, *, read_only: bool = False
+) -> Callable[[dict[str, Any]], str]:
     """Shared scoped-bash handler for fleet agents — check_command() guardrail,
     same pattern every other bash-using agent already follows."""
 
@@ -488,7 +493,7 @@ def make_scoped_bash_handler(repo_path: str) -> Callable[[dict[str, Any]], str]:
             return f"[POLICY DENIED] {policy.reason}"
         timeout = get_settings().bash_tool_timeout_seconds.get("scoped", 60)
         stdout, stderr, _returncode, timed_out = _run_bash_command(
-            cmd, repo_path, timeout=timeout
+            cmd, repo_path, timeout=timeout, read_only=read_only
         )
         if timed_out:
             return f"[ERROR] Command timed out after {timeout}s"

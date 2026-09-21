@@ -268,6 +268,33 @@ def detect_dead_code(directory: str) -> str:
     return "\n".join(lines)
 
 
+def _import_time_imports(tree: ast.AST) -> list[ast.Import | ast.ImportFrom]:
+    """Imports that execute when the module is imported: module level (through if/try/with and
+    class bodies), NOT inside function bodies (deferred — the standard way to break a cycle, and
+    used all over this codebase) and NOT under `if TYPE_CHECKING:`."""
+    found: list[ast.Import | ast.ImportFrom] = []
+
+    def visit(nodes: list[ast.stmt]) -> None:
+        for node in nodes:
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                found.append(node)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            elif isinstance(node, ast.If):
+                test = ast.unparse(node.test)
+                if "TYPE_CHECKING" not in test:
+                    visit(node.body)
+                visit(node.orelse)
+            else:
+                for field in ("body", "orelse", "finalbody"):
+                    visit(getattr(node, field, []) or [])
+                for handler in getattr(node, "handlers", []) or []:
+                    visit(handler.body)
+
+    visit(getattr(tree, "body", []))
+    return found
+
+
 def _find_circular_import_cycles(
     directory: str,
 ) -> tuple[list[str], int] | None:
@@ -292,30 +319,81 @@ def _find_circular_import_cycles(
     if not py_files:
         return None
 
-    # module name → set of local module deps
-    graph: dict[str, set[str]] = {}
-    local_roots = {d.name, "app"}
-
+    # module name → set of local module deps.
+    #
+    # B8 verification — the old builder only treated an import as local when its first
+    # component was the scanned directory's own name (or "app"), recorded `from pkg import
+    # mod` as a dependency on `pkg` (never on pkg.mod), left relative imports unresolved, and
+    # named modules relative to the scanned directory: `from pkg import b` / `from . import b`
+    # cycles between sibling modules — the usual way cycles happen — were never seen, and
+    # scanning `app/` itself found nothing because nodes were `agents.x` while imports said
+    # `app.agents.x`. Imports are now resolved against the modules that actually exist.
+    modules: dict[str, Path] = {}
     for fp in py_files:
-        rel = fp.relative_to(d)
-        mod = str(rel).replace("/", ".").removesuffix(".py")
+        parts = list(fp.relative_to(d).with_suffix("").parts)
+        is_package = parts[-1] == "__init__"
+        if is_package:
+            parts = parts[:-1]
+        if parts:
+            modules[".".join(parts)] = fp
+    known = set(modules)
+
+    def _resolve(name: str) -> str | None:
+        """Map an absolute dotted import onto an existing module node, tolerating that the scan
+        root may be inside the import root (drop leading components until one matches).
+        """
+        parts = name.split(".")
+        for start in range(len(parts)):
+            candidate = ".".join(parts[start:])
+            if candidate in known:
+                return candidate
+        return None
+
+    graph: dict[str, set[str]] = {}
+    for mod, fp in modules.items():
         try:
             source = fp.read_text(encoding="utf-8", errors="replace")
             tree = ast.parse(source, filename=str(fp))
         except SyntaxError:
             graph[mod] = set()
             continue
+        package = mod if fp.name == "__init__.py" else mod.rpartition(".")[0]
         deps: set[str] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module:
-                parts = node.module.split(".")
-                if parts[0] in local_roots or node.level > 0:
-                    deps.add(node.module)
+        for node in _import_time_imports(tree):
+            if isinstance(node, ast.ImportFrom):
+                if node.level:
+                    base_parts = package.split(".") if package else []
+                    keep = len(base_parts) - (node.level - 1)
+                    if keep < 0:
+                        continue
+                    base = ".".join(base_parts[:keep])
+                    if node.module:
+                        base = f"{base}.{node.module}" if base else node.module
+                    absolute = True
+                else:
+                    base = node.module or ""
+                    absolute = False
+                targets = [
+                    f"{base}.{alias.name}" if base else alias.name
+                    for alias in node.names
+                ]
+                for target in targets:
+                    hit = (
+                        known & {target} if absolute else ({_resolve(target)} - {None})
+                    )
+                    if not hit and base:
+                        hit = (
+                            (known & {base})
+                            if absolute
+                            else ({_resolve(base)} - {None})
+                        )
+                    deps.update(h for h in hit if h)
             elif isinstance(node, ast.Import):
                 for alias in node.names:
-                    parts = alias.name.split(".")
-                    if parts[0] in local_roots:
-                        deps.add(alias.name)
+                    hit = _resolve(alias.name)
+                    if hit:
+                        deps.add(hit)
+        deps.discard(mod)
         graph[mod] = deps
 
     cycles: list[str] = []

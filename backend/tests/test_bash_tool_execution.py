@@ -42,6 +42,17 @@ import pytest
 from app.config import get_settings
 
 
+@pytest.fixture(autouse=True)
+def _warm_the_docker_probe():
+    """Several tests here patch subprocess.run globally. The sandbox's cached `docker version` probe
+    goes through that same function, so when this file ran first (or alone) the probe saw the patched
+    TimeoutExpired, cached "Docker unavailable" and every later test in the process failed."""
+    from app.policy.sandbox import _docker_available
+
+    _docker_available()
+    yield
+
+
 # ---------------------------------------------------------------------------
 # Real bug fix: missing TimeoutExpired handling in ci_bash/rf_bash/dep_bash
 # ---------------------------------------------------------------------------

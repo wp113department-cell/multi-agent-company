@@ -178,6 +178,36 @@ def make_submit_enhancement_request_handler(
                 async with async_sessionmaker(
                     engine, expire_on_commit=False
                 )() as session:
+                    # The scan loops run every few hours and the same finding persists until a human
+                    # acts: without this every run filed another identical pending row (dashboard
+                    # spam, and a human rejecting one still saw it return). Same agent + same title,
+                    # still open — or rejected within the last 14 days — is not filed again.
+                    from datetime import datetime, timedelta, timezone
+
+                    from sqlalchemy import func, or_, select
+
+                    cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+                    existing = (
+                        await session.execute(
+                            select(EnhancementRequest.id, EnhancementRequest.status)
+                            .where(
+                                EnhancementRequest.agent_name == agent_name,
+                                func.lower(func.trim(EnhancementRequest.title))
+                                == str(inp["title"]).strip().lower(),
+                                or_(
+                                    EnhancementRequest.status.in_(
+                                        ("pending", "in_progress")
+                                    ),
+                                    (EnhancementRequest.status == "rejected")
+                                    & (EnhancementRequest.decided_at >= cutoff),
+                                ),
+                            )
+                            .order_by(EnhancementRequest.id.desc())
+                            .limit(1)
+                        )
+                    ).first()
+                    if existing is not None:
+                        return -int(existing[0])
                     row = EnhancementRequest(
                         agent_name=agent_name,
                         title=str(inp["title"]),
@@ -201,6 +231,11 @@ def make_submit_enhancement_request_handler(
         except Exception as exc:
             return f"[ERROR] Could not file enhancement request: {exc}"
 
+        if req_id < 0:
+            return (
+                f"Enhancement request #{-req_id} (same title) is already open or was "
+                "rejected recently — not filed again."
+            )
         try:
             from app.services.activity_stream import get_activity_registry
 

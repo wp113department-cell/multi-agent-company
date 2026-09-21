@@ -55,7 +55,9 @@ def test_fail_task_increments_error_count() -> None:
     inst = r.fail_task("a", "timeout")
     assert inst.state == AgentState.ERROR
     assert inst.error_count == 1
-    assert inst.is_available is False
+    # UPDATED (verification batch B8, #444-#446): one failure makes the agent "degraded", which is
+    # still selectable (scored at 0.5) — it used to be benched for good because state stayed ERROR
+    assert inst.is_available is True
 
 
 def test_three_failures_marks_unhealthy() -> None:
@@ -95,7 +97,7 @@ def test_one_or_two_failures_marks_degraded_not_unhealthy() -> None:
     r.start_task("a", "task-0")
     inst = r.fail_task("a", "timeout")
     assert inst.health == "degraded"
-    assert inst.is_available is False  # ERROR state, not SLEEP/IDLE
+    assert inst.is_available is True  # UPDATED (B8): degraded stays selectable
 
     r.start_task("a", "task-1")
     inst = r.fail_task("a", "timeout again")

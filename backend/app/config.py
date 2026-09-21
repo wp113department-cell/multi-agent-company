@@ -1898,6 +1898,10 @@ class Settings(BaseSettings):
         default=".",
         description="Root of the Gridiron project itself — where the 5 fleet-enhancement agents read/write (backend/ + apps/web/). Defaults to the process cwd (repo root when run normally).",
     )
+    agent_unhealthy_cooldown_seconds: float = Field(
+        default=300.0,
+        description="After this many seconds without a further failure an 'unhealthy' agent is offered one trial dispatch again (half-open); a success recovers it, a failure restarts the cooldown. 0 = an unhealthy agent stays excluded until something else recovers it.",
+    )
     fleet_scan_interval_hours: float = Field(
         default=4.0,
         description="Hours between automatic SCAN-phase runs of the 5 fleet-enhancement agents (background loop). Set to 0 to disable the background loop entirely.",

@@ -104,8 +104,14 @@ def run_sandboxed(
     tmp_size: str = "100m",
     timeout: int = 120,
     env: dict[str, str] | None = None,
+    read_only: bool = False,
 ) -> SandboxResult:
     """Run `command` inside a fresh, `--rm` Docker container.
+
+    read_only=True mounts the workspace `:ro` — for autonomous SCAN-phase agents, whose
+    contract is "read-only until a human approves" (B8 verification: with the default rw
+    mount those agents' bash could `sed -i`/`rm` source files and plant .git/hooks on the
+    host repo with no approval).
 
     `cwd` must be an absolute host path — the caller's already-resolved
     repo worktree — bind-mounted read-write at /workspace and nothing else
@@ -185,7 +191,7 @@ def run_sandboxed(
         f"{os.getuid()}:{os.getgid()}",
         *env_flags,
         "-v",
-        f"{cwd}:/workspace:rw",
+        f"{cwd}:/workspace:{'ro' if read_only else 'rw'}",
         "-w",
         "/workspace",
         resolved_image,

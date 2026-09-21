@@ -144,17 +144,21 @@ _SCAN_CFG = VerificationConfig(
 
 _APPLY_CFG = VerificationConfig(
     set_by={"git_commit_change": "committed", "run_tests": "tests_run"},
-    reset_by=(),
-    reset_keys=(),
+    # B8 verification: "test before commit" was only tracked, never enforced — an approved
+    # change could be committed with no test run at all, or after an edit that invalidated an
+    # earlier run. Now: no commit until run_tests ran, and any edit re-arms that requirement.
+    reset_by=("write_file", "edit_file"),
+    reset_keys=("tests_run",),
     enforce_in_result={"committed": "committed"},
     initial={"committed": False, "tests_run": False},
+    blocking_until={"git_commit_change": "tests_run"},
 )
 
 
 def make_scan_handlers(repo_path: str, trace_id: str = "") -> dict[str, Any]:
     handlers = make_read_only_handlers(repo_path)
     handlers["record_learning"] = make_record_learning_handler("agent_debugger")
-    handlers["bash"] = make_scoped_bash_handler(repo_path)
+    handlers["bash"] = make_scoped_bash_handler(repo_path, read_only=True)
     handlers["audit_log_read"] = audit_log_read
     handlers["fleet_metrics_read"] = fleet_metrics_read
     handlers["submit_enhancement_request"] = make_submit_enhancement_request_handler(
