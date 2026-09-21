@@ -29,11 +29,19 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import signal
+import subprocess
+import threading
 import time
 from pathlib import Path
 from threading import Lock
 from typing import Any
+
+try:  # pinned in requirements.txt; degrade to the old PID-only behavior if absent
+    import psutil
+except ImportError:  # pragma: no cover
+    psutil = None
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +54,130 @@ def _registry_path() -> Path:
     return Path(get_settings().bg_process_registry_path)
 
 
-def register(pid: int, command: str, cwd: str) -> None:
+# ---------------------------------------------------------------------------
+# Process-tree termination primitives (verification batch B1, item #25).
+#
+# Proved live: with the default sandbox on, a background job is
+# `sh -c "docker run ... <cmd>"`, and the three cleanup paths that did NOT go
+# through process_manager.kill() — ChatAgent session close, the startup orphan
+# sweep, the liveness reaper — signalled only that `sh` wrapper (proc.terminate
+# / os.kill(pid)). The `docker run` client and the CONTAINER kept running
+# indefinitely. kill_process(signal=KILL) had the same hole (a SIGKILLed
+# `docker run` client cannot forward anything to its container). Everything
+# now goes through the helpers below.
+# ---------------------------------------------------------------------------
+
+_CONTAINER_NAME_RE = re.compile(r"^gridiron-bg-[0-9a-f]{12}$")
+_FORCE_KILL_GRACE_SECONDS = 8.0
+
+
+def process_start_time(pid: int) -> float | None:
+    """Epoch creation time of `pid`, or None if it does not exist / cannot be
+    read (or psutil is unavailable)."""
+    if psutil is None:
+        return None
+    try:
+        return float(psutil.Process(pid).create_time())
+    except psutil.Error:
+        return None
+
+
+def _same_process(pid: int, meta: dict[str, Any]) -> bool:
+    """True only if `pid` is (still) the process this registry entry was
+    written for. A bare os.kill(pid, 0) says "some process has this PID" — after
+    a crash/restart a recycled PID belongs to an UNRELATED process, and the old
+    startup sweep would SIGTERM it."""
+    if psutil is None:
+        return _is_alive(pid)
+    created = process_start_time(pid)
+    if created is None:
+        return False  # gone (or not ours to signal)
+    recorded = meta.get("proc_start")
+    if recorded:
+        return abs(created - float(recorded)) <= 1.0
+    started_at = meta.get("started_at")
+    if not started_at:
+        return True
+    # A process created AFTER the entry was written cannot be the one it
+    # describes (legacy entries carry no proc_start).
+    return created <= float(started_at) + 2.0
+
+
+def signal_process(pid: int, sig: int) -> bool:
+    """Signal `pid`'s whole process group when `pid` leads its own group
+    (process_manager.spawn uses start_new_session=True), otherwise just `pid`
+    — never a group that isn't exclusively ours. False if the process is gone."""
+    getpgid = getattr(os, "getpgid", None)
+    killpg = getattr(os, "killpg", None)
+    try:
+        pgid = getpgid(pid) if getpgid else None
+    except ProcessLookupError:
+        return False
+    except OSError:
+        pgid = None
+    try:
+        if killpg is not None and pgid is not None and pgid == pid:
+            killpg(pgid, sig)
+        else:
+            os.kill(pid, sig)
+        return True
+    except ProcessLookupError:
+        return False
+    except Exception as exc:
+        logger.warning("Failed to signal PID %d: %s", pid, exc)
+        return False
+
+
+def kill_container(name: str | None, sig_name: str = "KILL") -> None:
+    """Best-effort `docker kill --signal=<sig> <name>` for a sandboxed
+    background job's container. Name is validated against the exact pattern
+    process_manager.spawn generates, so a tampered registry file can never make
+    us kill an arbitrary container."""
+    if not name or not _CONTAINER_NAME_RE.match(name):
+        return
+    if sig_name not in ("TERM", "KILL", "INT"):
+        sig_name = "TERM"
+    try:
+        subprocess.run(
+            ["docker", "kill", f"--signal={sig_name}", name],
+            capture_output=True,
+            timeout=15,
+        )
+    except Exception:
+        logger.debug("docker kill %s failed", name, exc_info=True)
+
+
+def terminate(
+    pid: int,
+    container: str | None = None,
+    *,
+    grace_seconds: float = _FORCE_KILL_GRACE_SECONDS,
+) -> bool:
+    """Ask a background job — its process group AND its sandbox container — to
+    exit (SIGTERM), then force-kill anything still alive after `grace_seconds`.
+    Returns whether the process was alive to be signalled."""
+    started = process_start_time(pid)
+    alive = signal_process(pid, signal.SIGTERM)
+    kill_container(container, "TERM")
+    if grace_seconds > 0 and (alive or container):
+
+        def _force() -> None:
+            if (
+                alive
+                and started is not None
+                and process_start_time(pid)
+                == started  # same process, not a recycled PID
+            ):
+                signal_process(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+            kill_container(container, "KILL")
+
+        timer = threading.Timer(grace_seconds, _force)
+        timer.daemon = True
+        timer.start()
+    return alive
+
+
+def register(pid: int, command: str, cwd: str, container: str | None = None) -> None:
     with _lock:
         path = _registry_path()
         entries = _read(path)
@@ -54,6 +185,8 @@ def register(pid: int, command: str, cwd: str) -> None:
             "command": command,
             "cwd": cwd,
             "started_at": time.time(),
+            "proc_start": process_start_time(pid),
+            "container": container,
         }
         _write(path, entries)
 
@@ -99,26 +232,15 @@ def _write(path: Path, entries: dict[str, Any]) -> None:
     tmp.replace(path)  # atomic replace on both POSIX and Windows
 
 
-def _terminate(pid: int) -> bool:
-    # SIGKILL doesn't exist on Windows (same finding already documented in
-    # app/agents/tools.py::kill_process / chat_agent.py's own handler) —
-    # SIGTERM already maps to TerminateProcess there, an unconditional hard
-    # kill, so it's the right single signal to use for orphan cleanup
-    # regardless of platform.
-    try:
-        os.kill(pid, signal.SIGTERM)
-        return True
-    except ProcessLookupError:
-        return False  # already gone — not an orphan needing cleanup
-    except Exception as exc:
-        logger.warning("Failed to terminate orphaned PID %d: %s", pid, exc)
-        return False
-
-
 def sweep_orphaned_processes() -> list[int]:
     """Called once at FastAPI startup, before any agent can start a new
     background process. Terminates everything left in the registry and
-    clears it. Returns the PIDs actually terminated (for logging)."""
+    clears it. Returns the PIDs actually terminated (for logging).
+
+    A registry PID that no longer refers to the process that was registered
+    (it exited, or the PID was recycled by an unrelated process) is NEVER
+    signalled. Its sandbox container, if any, is still killed — the container
+    has a unique name and outlives its `docker run` client."""
     with _lock:
         path = _registry_path()
         entries = _read(path)
@@ -128,15 +250,19 @@ def sweep_orphaned_processes() -> list[int]:
                 pid = int(pid_str)
             except ValueError:
                 continue
-            if _terminate(pid):
-                killed.append(pid)
-                logger.warning(
-                    "Orphaned background process PID %d (command=%r, cwd=%r) "
-                    "terminated at startup",
-                    pid,
-                    meta.get("command", "?"),
-                    meta.get("cwd", "?"),
-                )
+            container = meta.get("container")
+            if _same_process(pid, meta):
+                if terminate(pid, container):
+                    killed.append(pid)
+                    logger.warning(
+                        "Orphaned background process PID %d (command=%r, cwd=%r) "
+                        "terminated at startup",
+                        pid,
+                        meta.get("command", "?"),
+                        meta.get("cwd", "?"),
+                    )
+            else:
+                kill_container(container, "KILL")
         if path.exists():
             path.unlink()
         return killed
@@ -192,8 +318,12 @@ def _sweep_dead_registry_entries() -> list[int]:
                 del entries[pid_str]
                 changed = True
                 continue
-            if not _is_alive(pid):
+            meta = entries[pid_str] if isinstance(entries[pid_str], dict) else {}
+            if not _same_process(pid, meta):
                 dead.append(pid)
+                # The `sh` wrapper is gone (or its PID was recycled) but a
+                # sandboxed job's container can outlive it.
+                kill_container(meta.get("container"), "KILL")
                 del entries[pid_str]
                 changed = True
         if changed:
@@ -222,7 +352,7 @@ def _sweep_hung_registry_entries() -> list[tuple[int, float]]:
         except ValueError:
             continue
         started_at = meta.get("started_at")
-        if not started_at or not _is_alive(pid):
+        if not started_at or not _same_process(pid, meta):
             continue
         age = now - started_at
         if age > threshold:

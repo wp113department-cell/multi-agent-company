@@ -93,13 +93,21 @@ class TestProcessManager:
         assert "Started background process PID" in msg
         pid = int(msg.split("PID ")[1].split(":")[0])
         assert pid in procs
-        time.sleep(0.3)
 
         def _read_stream(stream: Any) -> str | None:
             return stream.read()
 
-        out = process_manager.read_output(pid, 50, procs, _read_stream)
-        assert "hello_pm" in out or "exited" in out
+        # read_output is non-blocking now (output is drained by reader threads),
+        # and with the default Docker sandbox the container needs a moment to
+        # start — poll for the output instead of relying on a blocking read.
+        out = ""
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            out = process_manager.read_output(pid, 50, procs, _read_stream)
+            if "hello_pm" in out:
+                break
+            time.sleep(0.3)
+        assert "hello_pm" in out, out
 
         kill_msg = process_manager.kill(pid, "TERM", procs)
         assert "Sent TERM" in kill_msg or "No process" in kill_msg

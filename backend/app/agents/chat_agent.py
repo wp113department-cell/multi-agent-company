@@ -427,12 +427,19 @@ def delete_chat_agent(session_id: str) -> None:
     agent = _chat_agents.pop(session_id, None)
     if agent is None:
         return
+    from app.fleet.bg_process_registry import terminate as _bg_terminate
     from app.fleet.bg_process_registry import unregister as _bg_unregister
 
     for pid, proc in agent._background_processes.items():
-        if proc.poll() is None:  # still running
+        # proc.terminate() only signalled the `sh` wrapper: with the default
+        # Docker sandbox the `docker run` client + CONTAINER kept running
+        # after the session closed (proved live). terminate() signals the
+        # process group, stops the container, and force-kills after a grace.
+        # Runs even when the wrapper already exited — the container may not have.
+        container = getattr(proc, "_gridiron_container", None)
+        if proc.poll() is None or container:
             try:
-                proc.terminate()
+                _bg_terminate(pid, container)
                 logger.info(
                     "Session %s closed — terminated its background PID %d",
                     session_id,

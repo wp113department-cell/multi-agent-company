@@ -103,9 +103,9 @@ def test_spawn_sandboxed_command_cannot_write_outside_cwd(tmp_path: Path) -> Non
         result = pm.spawn(f"echo pwned > {outside_marker}", str(tmp_path), procs)
         assert "Started background process PID" in result
         time.sleep(3)
-        assert not outside_marker.exists(), (
-            "sandboxed command must not be able to write outside cwd"
-        )
+        assert (
+            not outside_marker.exists()
+        ), "sandboxed command must not be able to write outside cwd"
     finally:
         if outside_marker.exists():
             outside_marker.unlink()
@@ -185,22 +185,42 @@ def test_kill_unsandboxed_background_process_actually_stops_it(
     assert "Sent TERM" in kill_result
     time.sleep(1)
     still_alive = subprocess.run(["ps", "-p", str(pid)], capture_output=True).returncode
-    assert still_alive == 1, "the real sleep process must actually be gone, not orphaned"
+    assert (
+        still_alive == 1
+    ), "the real sleep process must actually be gone, not orphaned"
 
 
 @pytest.mark.skipif(not _HAS_DOCKER, reason="requires a real docker binary")
 def test_kill_sandboxed_background_process_stops_container(tmp_path: Path) -> None:
+    def _bg_containers() -> set[str]:
+        return set(
+            subprocess.run(
+                [
+                    "docker",
+                    "ps",
+                    "--filter",
+                    "name=gridiron-bg-",
+                    "--format",
+                    "{{.Names}}",
+                ],
+                capture_output=True,
+                text=True,
+            ).stdout.split()
+        )
+
+    # Scoped to THIS test's own container: the old global "no gridiron-bg
+    # anywhere" assertion failed whenever any other test's job was still alive.
+    before = _bg_containers()
     procs: dict[int, "subprocess.Popen[str]"] = {}
     result = pm.spawn("sleep 300", str(tmp_path), procs)
     pid = int(result.split("PID ")[1].split(":")[0])
     time.sleep(2)
+    mine = _bg_containers() - before
+    assert mine, "precondition: the sandbox container should be running"
     kill_result = pm.kill(pid, "TERM", procs)
     assert "Sent TERM" in kill_result
     time.sleep(3)
-    out = subprocess.run(
-        ["docker", "ps", "--format", "{{.Names}}"], capture_output=True, text=True
-    ).stdout
-    assert "gridiron-bg" not in out, "sandboxed container must not be left running"
+    assert not (mine & _bg_containers()), "sandboxed container must not be left running"
 
 
 # ---------------------------------------------------------------------------

@@ -271,9 +271,11 @@ class TestRunBackground:
     def test_starts_process_returns_pid(self, handlers: dict[str, Any]) -> None:
         result = handlers["run_background"]({"command": "sleep 30"})
         assert "PID" in result
-        # Extract PID and kill it
+        # Extract PID and kill it through the real tool. (A bare os.kill(pid, 9)
+        # SIGKILLs only the `docker run` client and orphans the sandbox
+        # container — this test itself used to leave one running for 30s.)
         pid = int(result.split("PID")[1].split(":")[0].strip())
-        os.kill(pid, 9)
+        assert "Sent KILL" in handlers["kill_process"]({"pid": pid, "signal": "KILL"})
 
     def test_bad_command_graceful(self, handlers: dict[str, Any]) -> None:
         result = handlers["run_background"](

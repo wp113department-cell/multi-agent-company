@@ -21,6 +21,7 @@ rather than re-implementing this.
 
 from __future__ import annotations
 
+import collections
 import logging
 import os
 import signal
@@ -38,6 +39,86 @@ _SIGNAL_MAP = {
     "KILL": getattr(signal, "SIGKILL", signal.SIGTERM),
     "INT": signal.SIGINT,
 }
+
+
+# ---------------------------------------------------------------------------
+# Continuous output draining (verification batch B1, items #15/#16/#23).
+#
+# Proved live: spawn() attached stdout/stderr PIPEs that nothing read until an
+# agent happened to call read_output (and that read at most 8 KB per call). A
+# background job printing more than the OS pipe buffer (~64 KB) — a verbose
+# build, `npm run dev`, `pytest -v` — BLOCKED on write forever: a job that
+# prints 1.5 MB never reached the `touch DONE` after it. And read_output on an
+# exited job returned only "has exited (code N)", discarding the job's whole
+# output — including the stderr that explains a failure.
+#
+# Fix: two daemon reader threads per job drain both pipes continuously into a
+# bounded, thread-safe buffer (oldest lines dropped and counted, never
+# unbounded memory), and read_output returns what is unread — including the
+# tail after the process has exited.
+# ---------------------------------------------------------------------------
+
+_MAX_BUFFERED_LINES = 5000
+_MAX_LINE_CHARS = 4000
+_TAIL_WAIT_SECONDS = 1.0
+
+
+class _OutputBuffer:
+    def __init__(self, readers: int) -> None:
+        self._lines: collections.deque[str] = collections.deque()
+        self._dropped = 0
+        self._open_readers = readers
+        self._cond = threading.Condition()
+
+    def add(self, line: str) -> None:
+        with self._cond:
+            if len(self._lines) >= _MAX_BUFFERED_LINES:
+                self._lines.popleft()
+                self._dropped += 1
+            self._lines.append(line)
+
+    def reader_done(self) -> None:
+        with self._cond:
+            self._open_readers -= 1
+            self._cond.notify_all()
+
+    def wait_closed(self, timeout: float) -> None:
+        """Block until both pipes hit EOF (or `timeout`) — used after the
+        process exits so its final output is not missed. A grandchild that
+        inherited the pipe can keep it open; the timeout bounds that."""
+        with self._cond:
+            self._cond.wait_for(lambda: self._open_readers <= 0, timeout=timeout)
+
+    def drain(self) -> tuple[list[str], int]:
+        with self._cond:
+            lines = list(self._lines)
+            dropped = self._dropped
+            self._lines.clear()
+            self._dropped = 0
+            return lines, dropped
+
+
+def _drain_stream(stream: Any, buf: _OutputBuffer) -> None:
+    try:
+        while True:
+            # readline(size) bounds memory even for a job that prints one
+            # enormous line with no newline.
+            chunk = stream.readline(_MAX_LINE_CHARS)
+            if not chunk:
+                break
+            buf.add(chunk.rstrip("\r\n"))
+    except Exception:  # closed underneath us at kill/exit — nothing left to read
+        pass
+    finally:
+        buf.reader_done()
+
+
+def _start_output_drain(proc: "subprocess.Popen[str]") -> None:
+    streams = [st for st in (proc.stdout, proc.stderr) if st is not None]
+    buf = _OutputBuffer(readers=len(streams))
+    for st in streams:
+        threading.Thread(target=_drain_stream, args=(st, buf), daemon=True).start()
+    setattr(proc, "_gridiron_output", buf)
 
 
 def _build_sandboxed_argv(command: str, cwd: str, container_name: str) -> list[str]:
@@ -229,11 +310,14 @@ def spawn(
         )
     except Exception as e:
         return f"[ERROR] {e}"
+    _start_output_drain(proc)
     procs[proc.pid] = proc
+    # Remembered so kill()/session-close/startup-sweep can stop the CONTAINER too.
+    setattr(proc, "_gridiron_container", container_name)
     # Gap-closure Day 23 (Stage 1.3, answers.md) — durably persisted so a
     # crash/restart before kill_process ever runs still leaves a trail
     # sweep_orphaned_processes() can find and clean up at the next startup.
-    bg_process_registry.register(proc.pid, real_command, cwd)
+    bg_process_registry.register(proc.pid, real_command, cwd, container=container_name)
     if wait_for_pids:
         return (
             f"Started background process PID {proc.pid} (waiting on "
@@ -294,19 +378,20 @@ def kill(pid: int, sig_name: str, procs: dict[int, Any]) -> str:
             "itself spawned."
         )
     sig = _SIGNAL_MAP.get(sig_name, signal.SIGTERM)
+    container = getattr(procs.get(pid), "_gridiron_container", None)
     procs.pop(pid, None)
     bg_process_registry.unregister(pid)
     try:
-        try:
-            os.killpg(os.getpgid(pid), sig)
-        except (ProcessLookupError, PermissionError, OSError):
-            # No separate process group (e.g. a Popen from before this fix,
-            # or a platform without process-group support) — fall back to
-            # signaling the tracked PID directly, the prior behavior.
-            os.kill(pid, sig)
+        alive = bg_process_registry.signal_process(pid, sig)
+        # Deliver the same signal straight to the sandbox container as well:
+        # a SIGKILLed `docker run` client cannot forward it, so KILL used to
+        # leave the container running (proved live).
+        bg_process_registry.kill_container(
+            container, sig_name if sig_name in _SIGNAL_MAP else "TERM"
+        )
+        if not alive and not container:
+            return f"[ERROR] No process with PID {pid}"
         return f"Sent {sig_name} to PID {pid}"
-    except ProcessLookupError:
-        return f"[ERROR] No process with PID {pid}"
     except Exception as e:
         return f"[ERROR] {e}"
 
@@ -327,6 +412,31 @@ def read_output(
     proc = procs.get(pid)
     if proc is None:
         return f"[ERROR] No tracked background process with PID {pid}"
+
+    buf: _OutputBuffer | None = getattr(proc, "_gridiron_output", None)
+    if buf is not None:
+        exited = proc.poll() is not None
+        if exited:
+            buf.wait_closed(_TAIL_WAIT_SECONDS)  # catch the job's final output
+        lines, dropped = buf.drain()
+        max_lines = max(1, max_lines)
+        omitted = max(0, len(lines) - max_lines)
+        notes: list[str] = []
+        if dropped:
+            notes.append(
+                f"[{dropped} earlier line(s) dropped: output buffer full — "
+                "read_output more often or redirect the job's output to a file]"
+            )
+        if omitted:
+            notes.append(f"[{omitted} earlier unread line(s) not shown]")
+        body = "\n".join(notes + lines[-max_lines:])
+        if exited:
+            status = f"Process {pid} has exited (code {proc.returncode})"
+            return f"{body}\n{status}" if body else status
+        return body if body else f"(no output yet from PID {pid})"
+
+    # Not started by spawn() (no drain thread owns its pipes): legacy
+    # non-blocking chunk read, unchanged.
     if proc.poll() is not None:
         return f"Process {pid} has exited (code {proc.returncode})"
     out_lines: list[str] = []
