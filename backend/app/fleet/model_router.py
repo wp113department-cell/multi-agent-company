@@ -13,6 +13,8 @@ Usage:
 
 from __future__ import annotations
 
+import re
+
 import json
 import logging
 import os
@@ -26,6 +28,24 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
+
+
+# Models that still take the fixed-budget form of extended thinking. Everything
+# newer (Opus 4.7/4.8/5, Sonnet 5, Fable, ...) REMOVED `budget_tokens` and answers
+# `thinking: {type: "enabled", ...}` with a 400 — found by a real end-to-end
+# pipeline run: the Architect/Decomposer/Planner agents (opus-4-8) failed on
+# their very first call, blocking every task at planning. Older models need
+# the budget form; unknown/newer IDs default to the adaptive form.
+_LEGACY_THINKING_MODEL_RE = re.compile(
+    r"^claude-(?:3|haiku-4-5|sonnet-4-5|opus-4-5|opus-4-1|sonnet-4(?:-\d{8})?$|opus-4(?:-\d{8})?$)"
+)
+
+
+def thinking_param_for(model: str, budget_tokens: int) -> dict[str, Any]:
+    """The `thinking` request parameter that is valid for `model`."""
+    if _LEGACY_THINKING_MODEL_RE.match(model or ""):
+        return {"type": "enabled", "budget_tokens": budget_tokens}
+    return {"type": "adaptive"}
 
 
 @dataclass(frozen=True)
@@ -45,7 +65,7 @@ class RouteConfig:
             "max_tokens": self.max_tokens,
         }
         if self.thinking_budget is not None:
-            kw["thinking"] = {"type": "enabled", "budget_tokens": self.thinking_budget}
+            kw["thinking"] = thinking_param_for(self.model, self.thinking_budget)
         return kw
 
 

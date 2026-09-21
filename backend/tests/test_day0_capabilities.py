@@ -477,9 +477,13 @@ class TestReflectionNodeFires:
             "tokens_out": 25,
         }
         out = node(state)
-        assert "messages" in out
-        assert len(out["messages"]) == 3  # added self-review message
-        assert "[Self-review]" in out["messages"][-1]["content"]
+        # UPDATED (verification batch B1, item #11): the note is no longer
+        # inserted into `messages` here (that put a user message between the
+        # assistant's tool_use and its tool_result - a 400 from the real API);
+        # execute_tools delivers it after the tool results.
+        assert "messages" not in out
+        assert "[Self-review]" in out["self_review"]
+        assert out["reflection_unsatisfied_count"] == 1
 
     @patch("app.agents.base_graph.load_role", return_value="You are a test agent.")
     @patch("app.agents.base_graph.get_effective_api_key", return_value="test-key")

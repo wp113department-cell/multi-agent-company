@@ -175,9 +175,8 @@ class TestReflectionNodeRealLLM:
         out = node(state)
         # Either empty dict (satisfied=True) or has a messages key (not satisfied)
         assert isinstance(out, dict)
-        if "messages" in out:
-            last = out["messages"][-1]
-            assert "[Self-review]" in last.get("content", "")
+        if "self_review" in out:  # (moved out of `messages` - see execute_tools)
+            assert "[Self-review]" in out["self_review"]
 
     def test_reflection_is_non_fatal_on_partial_json(
         self, groq_llm_patch: Any  # noqa: F811

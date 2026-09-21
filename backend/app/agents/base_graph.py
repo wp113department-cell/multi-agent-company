@@ -205,6 +205,7 @@ class AgentRunState(_AgentRunStateBase, total=False):
         int  # times reflection_node judged its own tool output unsatisfactory
     )
     critique_result: dict[str, Any]  # last critique_node score: {criteria, all_met}
+    self_review: str  # reflection_node's note, delivered by execute_tools after the tool results
     critique_retries: int  # times critique_node sent work back for improvement
     replan_count: int  # times replan_node actually revised the plan mid-execution
 
@@ -696,6 +697,98 @@ def _text_from_content(content: list[dict[str, Any]]) -> str:
     ).strip()
 
 
+def _parse_llm_json(text: str, expect: type | None = dict) -> Any:
+    """Parse the JSON object/array an LLM was asked to return.
+
+    Proved live against the real API: even when told "Respond in JSON only",
+    Claude Haiku returns the JSON inside a markdown fence (```json ... ```) or
+    with a sentence around it. A bare json.loads() then raised
+    "Expecting value: line 1 column 1" and every consumer swallowed it — the
+    planner's confidence was permanently the 0.8 default, the critique node
+    never critiqued, the lesson extractor never stored a lesson.
+
+    Tries, in order: the text as-is, the contents of a ``` fence, then the first
+    balanced {...} / [...] span. Only a value of type `expect` (default: an
+    object) is accepted — a nested list found inside a malformed object must not
+    be returned as if it were the answer. Raises ValueError (json.JSONDecodeError
+    is a subclass) if none parses, so existing `except` clauses still apply.
+    """
+    candidates: list[str] = [text.strip()]
+    fence = re.search(r"```(?:json|JSON)?\s*\n?(.*?)```", text, re.DOTALL)
+    if fence:
+        candidates.append(fence.group(1).strip())
+    for opener, closer in (("{", "}"), ("[", "]")):
+        start = text.find(opener)
+        end = text.rfind(closer)
+        if start != -1 and end > start:
+            candidates.append(text[start : end + 1])
+    last_exc: Exception | None = None
+    decoder = json.JSONDecoder()
+    def _ok(value: Any) -> bool:
+        return expect is None or isinstance(value, expect)
+
+    for cand in candidates:
+        try:
+            value = json.loads(cand)
+            if _ok(value):
+                return value
+        except (json.JSONDecodeError, ValueError) as exc:
+            last_exc = exc
+        # "Extra data": a complete value followed by more text/objects — take
+        # the first complete value (seen live from the planner).
+        opener = re.search(r"[\{\[]", cand)
+        if opener:
+            try:
+                value = decoder.raw_decode(cand[opener.start() :])[0]
+                if _ok(value):
+                    return value
+            except (json.JSONDecodeError, ValueError) as exc:
+                last_exc = exc
+    raise ValueError(f"no JSON found in LLM response: {last_exc}")
+
+
+def _messages_valid_for_review(messages: list[Any]) -> list[Any]:
+    """History that is valid to send to the API with an extra reviewer prompt.
+
+    reflection_node runs BETWEEN call_llm and execute_tools, so the history
+    ends with the assistant's tool_use message that has no tool_result yet.
+    Anthropic rejects that with a 400 ("tool_use ids were found without
+    tool_result blocks immediately after") — proved live: reflection failed
+    every time it ran and was silently skipped as "non-fatal". Pair each
+    pending tool_use with a placeholder result so the reviewer still sees the
+    call it is judging.
+    """
+    if not messages:
+        return list(messages)
+    last = messages[-1]
+    content = last.get("content") if isinstance(last, dict) else None
+    if (
+        isinstance(last, dict)
+        and last.get("role") == "assistant"
+        and isinstance(content, list)
+    ):
+        pending = [
+            b
+            for b in content
+            if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("id")
+        ]
+        if pending:
+            return list(messages) + [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": b["id"],
+                            "content": "[pending — this call has not been executed yet]",
+                        }
+                        for b in pending
+                    ],
+                }
+            ]
+    return list(messages)
+
+
 # ---------------------------------------------------------------------------
 # Context trim — token budget enforcement before call_llm
 # Pattern from: LangGraph RemainingSteps + roo-code src/core/condense/
@@ -999,11 +1092,13 @@ def _gather_facts_and_plan(
         r2 = _call_anthropic(
             client,
             model=model_haiku,
-            max_tokens=512,
+            # was 512: real plans run 1.7k+ characters, so the JSON was cut off
+            # mid-object and confidence silently fell back to the default
+            max_tokens=1200,
             messages=[{"role": "user", "content": plan_prompt}],
         )
         plan_text = _text_from_content(_serialize_content(r2.content))
-        confidence = float(json.loads(plan_text).get("confidence", 0.8))
+        confidence = float(_parse_llm_json(plan_text).get("confidence", 0.8))
     except Exception as exc:
         logger.warning("planner plan call failed: %s", exc)
 
@@ -1486,10 +1581,12 @@ def _make_call_llm_node(
 
         _route = _get_router().route(role_name)
         if _route.tier == "opus":
-            _thinking_budget = {
-                "type": "enabled",
-                "budget_tokens": get_settings().thinking_budget_opus,
-            }
+            from app.fleet.model_router import thinking_param_for
+
+            # model-aware: opus 4.7+/sonnet 5 reject the fixed-budget form (400)
+            _thinking_budget = thinking_param_for(
+                _route.model, get_settings().thinking_budget_opus
+            )
         _real_context_window = _route.context_window
     except Exception:
         _thinking_budget = None
@@ -1720,25 +1817,31 @@ def _make_reflection_node(model: str) -> Callable[[AgentRunState], dict[str, Any
             r = _call_anthropic(
                 client,
                 model=model,
-                max_tokens=384,
-                messages=list(state["messages"])
+                max_tokens=600,
+                messages=_messages_valid_for_review(list(state["messages"]))
                 + [{"role": "user", "content": REFLECTION_PROMPT}],
                 # No tools param → tool_choice=none equivalent
             )
             text = _text_from_content(_serialize_content(r.content))
             satisfied = True
             try:
-                satisfied = bool(json.loads(text).get("satisfied", True))
-            except (json.JSONDecodeError, ValueError):
+                satisfied = bool(_parse_llm_json(text).get("satisfied", True))
+            except (json.JSONDecodeError, ValueError, AttributeError):
                 pass
 
             if not satisfied:
                 logger.info(
                     "reflection_node: not satisfied — adding self-review message"
                 )
+                # NOT appended to messages here: this node runs between the
+                # assistant's tool_use and execute_tools, so a user message
+                # inserted now would sit between the tool_use and its
+                # tool_result — a 400 from the API on the next call_llm (and the
+                # old code path even dropped the pending tool calls). It is
+                # handed to execute_tools, which delivers it as a text block
+                # AFTER the tool results in the same user message.
                 return {
-                    "messages": list(state["messages"])
-                    + [{"role": "user", "content": f"[Self-review]\n{text}"}],
+                    "self_review": f"[Self-review]\n{text}",
                     "reflection_unsatisfied_count": state.get(
                         "reflection_unsatisfied_count", 0
                     )
@@ -1832,13 +1935,15 @@ def _make_critique_node(
             r = _call_anthropic(
                 client,
                 model=model,
-                max_tokens=512,
+                # was 512: a per-criterion verdict with evidence is longer, and a
+                # truncated object never parsed, so the critique silently never ran
+                max_tokens=1500,
                 messages=list(state["messages"])
                 + [{"role": "user", "content": prompt}],
                 # No tools param → tool_choice=none equivalent
             )
             text = _text_from_content(_serialize_content(r.content))
-            data = json.loads(text)
+            data = _parse_llm_json(text)
             all_met = bool(data.get("all_met", True))
             critique_result = {
                 "criteria": data.get("criteria", []),
@@ -2655,9 +2760,13 @@ def _make_execute_tools_node(
                 "batch_requires_human_approval": batch_requires_human_approval,
             }
 
+        review = state.get("self_review", "")
+        user_content: list[dict[str, Any]] = list(tool_results)
+        if review:  # tool_results first, then the reviewer's note (API rule)
+            user_content.append({"type": "text", "text": review})
         return {
             "messages": list(state["messages"])
-            + [{"role": "user", "content": tool_results}],
+            + [{"role": "user", "content": user_content}],
             "verification": new_verification,
             "result": new_result,
             "submitted": submitted,
@@ -2667,6 +2776,7 @@ def _make_execute_tools_node(
             "pending_tool_uses": [],
             "tool_results_buffer": [],
             "batch_requires_human_approval": False,
+            "self_review": "",
         }
 
     return execute_tools
@@ -2710,11 +2820,11 @@ def _extract_and_store_lesson(
         r = _call_anthropic(
             client,
             model=model_haiku,
-            max_tokens=256,
+            max_tokens=500,
             messages=[{"role": "user", "content": prompt}],
         )
         text = _text_from_content(_serialize_content(r.content))
-        data = json.loads(text)
+        data = _parse_llm_json(text)
         lesson = Lesson(
             agent_name=role_name,
             lesson=str(data.get("lesson", "")),

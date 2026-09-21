@@ -68,10 +68,14 @@ def test_opus_tier_agent_gets_real_thinking_budget_in_request_payload() -> None:
 
     kwargs = mock_client.messages.create.call_args.kwargs
     assert "thinking" in kwargs, "opus-tier agent must get a real thinking payload"
-    assert kwargs["thinking"] == {
-        "type": "enabled",
-        "budget_tokens": get_settings().thinking_budget_opus,
-    }
+    # UPDATED (verification batch B1, item #11): this used to pin
+    # {"type": "enabled", "budget_tokens": N} for claude-opus-4-8. That form is
+    # REMOVED on Opus 4.7+/Sonnet 5 and the real API answers 400 — every
+    # Architect/Decomposer/Planner call failed in a live run. Modern models take
+    # adaptive thinking; the budget form is only for legacy models
+    # (see thinking_param_for and tests/test_b1_pipeline_live_api_regressions.py).
+    assert kwargs["thinking"] == {"type": "adaptive"}
+    assert "budget_tokens" not in kwargs["thinking"]
 
 
 def test_non_opus_tier_agent_never_gets_thinking_in_request_payload() -> None:
