@@ -1517,9 +1517,30 @@ async def http_exception_handler(
 async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
+    # Never str(exc): in this FastAPI version it appends an endpoint-context stack
+    # frame — absolute server file paths ("File /home/.../slowapi/extension.py,
+    # line 289, in run_task") — to the response body (proved live). Return only
+    # where/what/why for each failing field.
+    details = [
+        {
+            "loc": [str(p) for p in err.get("loc", ())],
+            "msg": str(err.get("msg", "")),
+            "type": str(err.get("type", "")),
+        }
+        for err in exc.errors()
+    ]
+    summary = "; ".join(
+        f"{'.'.join(d['loc'])}: {d['msg']}" if d["loc"] else d["msg"] for d in details
+    )
     return JSONResponse(
         status_code=422,
-        content={"error": {"code": "422", "message": str(exc)}},
+        content={
+            "error": {
+                "code": "422",
+                "message": f"{len(details)} validation error(s): {summary}",
+                "details": details,
+            }
+        },
     )
 
 
