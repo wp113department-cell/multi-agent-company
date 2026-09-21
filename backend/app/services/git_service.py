@@ -4,11 +4,20 @@ Security rules enforced here (not in the API layer):
 - No shell=True — all subprocess calls use list args
 - Workspace scoping: paths must start with ALLOWED_WORKSPACE_PARENT
 - Caller must pass workspace_root so we can scope all operations
+- Argument-injection safe: every caller-supplied URL/ref/remote is validated so
+  it can never be parsed by git as an OPTION (`--upload-pack=CMD` executes a
+  command; `checkout -f` discards work; `push --force`), and positional
+  arguments are separated with `--` wherever git supports it.
+- Credentials never touch argv, the clone URL, or `.git/config`: a token is
+  handed to git through GIT_CONFIG_* environment variables as a host-scoped
+  `http.<origin>.extraheader` (the same mechanism actions/checkout uses), so
+  it is not persisted in the cloned repo and not visible in `ps`.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import os
 import re
@@ -30,17 +39,119 @@ def _get_allowed_hosts() -> list[str]:
         return ["github.com", "gitlab.com", "bitbucket.org"]
 
 
+_LOCAL_HOSTS = ("localhost", "127.0.0.1")
+# First char alphanumeric/underscore => can never be read as an option; no
+# whitespace, control chars, `..`, `@{`, `\\` etc. (git's own ref rules are
+# looser, this is deliberately the conservative subset real branches use).
+_REF_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._/\-]*$")
+_REMOTE_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._\-]*$")
+_SCP_LIKE_RE = re.compile(r"^[A-Za-z0-9._-]+@([A-Za-z0-9.-]+):(?!//)")
+
+
+def _check_url_chars(url: str) -> None:
+    """Reject anything that could change how git/curl parse the URL."""
+    if not isinstance(url, str) or not url:
+        raise ValueError("Git URL must be a non-empty string.")
+    if (
+        url != url.strip()
+        or url.startswith("-")
+        or any(ch.isspace() or ord(ch) < 32 or ch in "\\" for ch in url)
+    ):
+        raise ValueError(f"Invalid git URL: {url!r}")
+
+
 def _validate_url(url: str) -> None:
-    """Raise ValueError if url is not on the allowlist."""
+    """Raise ValueError unless url is a plain https:// (or http:// to
+    localhost) URL on the host allowlist, with no embedded credentials.
+
+    Previously an EMPTY hostname was accepted, so `--upload-pack=CMD`,
+    `ext::sh -c ...`, `/etc`, `file:///...` all passed the allowlist and
+    `--upload-pack=CMD` was executed by `git clone` (argument injection).
+    """
+    _check_url_chars(url)
     parsed = urlparse(url)
-    host = parsed.hostname or ""
-    allowed = _get_allowed_hosts()
-    # Also allow localhost/127.0.0.1 for tests
-    if host not in allowed and host not in ("localhost", "127.0.0.1", ""):
+    if parsed.scheme not in ("https", "http"):
+        raise ValueError(
+            f"Only https:// git URLs are supported (got scheme {parsed.scheme!r})."
+        )
+    if (
+        parsed.username is not None
+        or parsed.password is not None
+        or "@" in parsed.netloc
+    ):
+        raise ValueError(
+            "Git URLs must not embed credentials — pass the token separately."
+        )
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise ValueError("Git URL has no hostname.")
+    allowed = [h.lower() for h in _get_allowed_hosts()]
+    is_local = host in _LOCAL_HOSTS
+    if host not in allowed and not is_local:
         raise ValueError(
             f"Remote host '{host}' is not in the git allowlist. "
             f"Allowed: {', '.join(allowed)}"
         )
+    if parsed.scheme == "http" and not is_local:
+        raise ValueError("Plain http:// is only allowed for localhost.")
+
+
+def validate_clone_url(url: str) -> None:
+    """Public alias — the one place every clone entry point validates a URL."""
+    _validate_url(url)
+
+
+def _validate_remote_url(url: str) -> None:
+    """Validate an ALREADY-CONFIGURED remote's URL before a push.
+
+    More permissive than `_validate_url` on purpose (this URL comes from the
+    repo's own config, set by an earlier clone/operator, not from a request):
+    userinfo is tolerated (legacy repos cloned with a token in the URL), ssh
+    forms are accepted when the host is allowlisted, and a plain local path
+    (bare-repo remotes) is fine since it cannot leave the machine. What it
+    still refuses: option-looking strings, `ext::`/other transports, and
+    http(s)/ssh hosts outside the allowlist.
+    """
+    _check_url_chars(url)
+    if url.startswith(("/", "./", "../", "file://")):
+        return
+    allowed = [h.lower() for h in _get_allowed_hosts()]
+    scp = _SCP_LIKE_RE.match(url)
+    if scp:
+        host = scp.group(1).lower()
+    else:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("https", "http", "ssh"):
+            raise ValueError(f"Unsupported git remote URL scheme: {parsed.scheme!r}")
+        host = (parsed.hostname or "").lower()
+    if not host or (host not in allowed and host not in _LOCAL_HOSTS):
+        raise ValueError(
+            f"Remote host '{host}' is not in the git allowlist. "
+            f"Allowed: {', '.join(allowed)}"
+        )
+
+
+def validate_ref(name: str, what: str = "branch") -> str:
+    """A branch/ref name git can never mistake for an option."""
+    if (
+        not isinstance(name, str)
+        or not _REF_RE.match(name)
+        or ".." in name
+        or "//" in name
+        or name.endswith(("/", ".", ".lock"))
+    ):
+        raise ValueError(f"Invalid {what} name: {name!r}")
+    return name
+
+
+def _validate_remote_name(remote: str) -> str:
+    if (
+        not isinstance(remote, str)
+        or not _REMOTE_NAME_RE.match(remote)
+        or ".." in remote
+    ):
+        raise ValueError(f"Invalid remote name: {remote!r}")
+    return remote
 
 
 def _validate_workspace(path: str) -> None:
@@ -53,16 +164,80 @@ def _validate_workspace(path: str) -> None:
         parent = "/home"
     real = os.path.realpath(path)
     real_parent = os.path.realpath(parent)
-    if not (real == real_parent or real.startswith(real_parent + os.sep)):
+    if not (
+        real == real_parent or real.startswith(real_parent.rstrip(os.sep) + os.sep)
+    ):
         raise ValueError(
             f"Path '{path}' is outside allowed workspace parent '{parent}'."
         )
 
 
+def _validate_dest(dest_path: str) -> str:
+    """dest_path must be an absolute path that is ITSELF inside the workspace
+    (previously only its parent was checked, and a relative path resolved
+    against the server's cwd)."""
+    if (
+        not isinstance(dest_path, str)
+        or not dest_path.strip()
+        or not os.path.isabs(dest_path)
+        or "\x00" in dest_path
+    ):
+        raise ValueError("dest_path must be an absolute path.")
+    _validate_workspace(dest_path)
+    return dest_path
+
+
+def _strip_userinfo(url: str) -> str:
+    """Drop any `user[:pw]@` from an http(s) URL so a credential can never be
+    persisted as the cloned repo's `remote.origin.url`."""
+    _check_url_chars(url)
+    parsed = urlparse(url)
+    if "@" not in parsed.netloc:
+        return url
+    host = parsed.hostname or ""
+    if not host:
+        raise ValueError(f"Could not parse URL: {url!r}")
+    if ":" in host:  # IPv6 literal
+        host = f"[{host}]"
+    port = parsed.port
+    netloc = host + (f":{port}" if port else "")
+    return parsed._replace(netloc=netloc).geturl()
+
+
+def _auth_env(url: str, token: str) -> dict[str, str]:
+    """Environment that makes git send `Authorization: Basic x-access-token:
+    <token>` to (only) `url`'s origin. Env vars, not argv/URL/config-file:
+    invisible to `ps`, never written into `.git/config`. Needs git >= 2.31."""
+    parsed = urlparse(url)
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": f"http.{parsed.scheme}://{parsed.netloc}/.extraheader",
+        "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+
+
+def scrub_secret(text: str, token: str | None) -> str:
+    """Remove a token (and its Basic-auth encoding) from text bound for
+    logs, DB rows or API responses."""
+    if not token:
+        return text
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return text.replace(token, "***").replace(basic, "***")
+
+
 async def _run_git(
-    args: list[str], cwd: str | None = None, timeout: float = 120.0
+    args: list[str],
+    cwd: str | None = None,
+    timeout: float = 120.0,
+    env: dict[str, str] | None = None,
 ) -> tuple[int, str, str]:
-    """Run a git command. Returns (returncode, stdout, stderr). No shell=True."""
+    """Run a git command. Returns (returncode, stdout, stderr). No shell=True.
+
+    `env` entries are ADDED to the inherited environment (used to pass
+    credentials without putting them on the command line).
+    """
     cmd = ["git"] + args
     logger.debug("git %s (cwd=%s)", " ".join(args), cwd)
     proc = await asyncio.create_subprocess_exec(
@@ -70,6 +245,7 @@ async def _run_git(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=cwd,
+        env={**os.environ, **env} if env else None,
     )
     try:
         stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
@@ -94,14 +270,17 @@ async def git_clone(
 ) -> dict[str, Any]:
     """Clone a remote repo to dest_path.
 
-    dest_path must be inside allowed_workspace_parent. url must be on allowlist.
+    url must be an allowlisted https URL; dest_path must be an absolute path
+    inside allowed_workspace_parent; branch (if given) must be a plain ref
+    name. All three are validated BEFORE git sees them and passed after `--`
+    so none can be interpreted as a git option.
     """
     _validate_url(url)
-    _validate_workspace(str(Path(dest_path).parent))
-
-    args = ["clone", url, dest_path]
+    _validate_dest(dest_path)
+    args = ["clone"]
     if branch:
-        args += ["--branch", branch]
+        args += ["--branch", validate_ref(branch)]
+    args += ["--", url, dest_path]
     rc, stdout, stderr = await _run_git(args, timeout=300.0)
     return {"ok": rc == 0, "stdout": stdout, "stderr": stderr, "returncode": rc}
 
@@ -109,38 +288,35 @@ async def git_clone(
 async def git_clone_with_token(
     url: str, dest_path: str, token: str, branch: str | None = None
 ) -> dict[str, Any]:
-    """Clone a private HTTPS repo by embedding a PAT in the URL.
+    """Clone a private HTTPS repo using a PAT.
 
-    The token is never logged — we strip it from any logged output.
-    Supported URL formats:
-      https://github.com/user/repo.git  (token injected as https://TOKEN@github.com/...)
-      https://TOKEN@github.com/user/repo.git  (already has token — used as-is)
+    The token is NEVER embedded in the URL or argv (that persisted it in
+    plaintext in `<repo>/.git/config`): it is sent via an environment-scoped
+    `http.<origin>.extraheader`, so the resulting repo's remote URL is the
+    clean one. A `https://TOKEN@host/...` URL is still accepted — the
+    userinfo is stripped before use — but the `token` argument is what
+    authenticates. Token is scrubbed from any returned output.
     """
     if not token.strip():
         raise ValueError("Token is required for private repo clone.")
-    _validate_url(url)
-    _validate_workspace(str(Path(dest_path).parent))
+    token = token.strip()
+    clean_url = _strip_userinfo(url)
+    _validate_url(clean_url)
+    _validate_dest(dest_path)
 
-    # Inject token into HTTPS URL
-    from urllib.parse import urlparse, urlunparse
-
-    parsed = urlparse(url)
-    if not parsed.netloc:
-        raise ValueError(f"Could not parse URL: {url!r}")
-    # If no credentials in URL yet, inject the token as username (GitHub PAT style)
-    if "@" not in parsed.netloc:
-        netloc_with_token = f"{token.strip()}@{parsed.netloc}"
-        auth_url = urlunparse(parsed._replace(netloc=netloc_with_token))
-    else:
-        auth_url = url  # Token already embedded
-
-    args = ["clone", auth_url, dest_path]
+    args = ["clone"]
     if branch:
-        args += ["--branch", branch]
-    rc, stdout, stderr = await _run_git(args, timeout=300.0)
-    # Strip token from any error output before returning
-    safe_stderr = stderr.replace(token, "***") if token else stderr
-    return {"ok": rc == 0, "stdout": stdout, "stderr": safe_stderr, "returncode": rc}
+        args += ["--branch", validate_ref(branch)]
+    args += ["--", clean_url, dest_path]
+    rc, stdout, stderr = await _run_git(
+        args, timeout=300.0, env=_auth_env(clean_url, token)
+    )
+    return {
+        "ok": rc == 0,
+        "stdout": scrub_secret(stdout, token),
+        "stderr": scrub_secret(stderr, token),
+        "returncode": rc,
+    }
 
 
 async def git_init(repo_path: str) -> dict[str, Any]:
@@ -252,6 +428,11 @@ async def git_revert(
     _validate_workspace(repo_path)
     if not commit_sha.strip():
         raise ValueError("commit_sha cannot be empty.")
+    # A sha/ref only — never something git could parse as an option
+    # (`--abort`, `--no-commit`, `-m 1`, ...).
+    if not re.match(r"^[A-Za-z0-9_][A-Za-z0-9._/~^@{}\-]*$", commit_sha.strip()):
+        raise ValueError(f"Invalid commit ref: {commit_sha!r}")
+    commit_sha = commit_sha.strip()
     env = dict(os.environ)
     if author_name:
         env["GIT_AUTHOR_NAME"] = author_name
@@ -294,10 +475,15 @@ async def git_push(
 ) -> dict[str, Any]:
     """Push to remote. Remote URL must be on allowlist (checked via git remote get-url)."""
     _validate_workspace(repo_path)
+    # remote/branch used to be passed to git unvalidated, so branch="--force"
+    # became a force-push and remote="--receive-pack=CMD" executed a command.
+    _validate_remote_name(remote)
+    if branch:
+        validate_ref(branch)
     # Verify remote URL is on allowlist before pushing
     rc_url, url_out, _ = await _run_git(["remote", "get-url", remote], cwd=repo_path)
     if rc_url == 0 and url_out.strip():
-        _validate_url(url_out.strip())
+        _validate_remote_url(url_out.strip())
     args = ["push", remote]
     if branch:
         args.append(branch)
@@ -320,13 +506,10 @@ async def git_checkout(
 ) -> dict[str, Any]:
     """Checkout or create a branch."""
     _validate_workspace(repo_path)
-    # Validate branch name — no path traversal (..) or absolute paths
-    if (
-        ".." in branch
-        or branch.startswith("/")
-        or not re.match(r"^[a-zA-Z0-9._/\-]+$", branch)
-    ):
-        raise ValueError(f"Invalid branch name: {branch!r}")
+    # Validate branch name — no path traversal (..), absolute paths or a
+    # leading "-": `checkout -f` (force-discard uncommitted work) and
+    # `--orphan`/`--detach` used to pass the old regex as a "branch".
+    validate_ref(branch)
     args = ["checkout"]
     if create:
         args.append("-b")
@@ -338,5 +521,8 @@ async def git_checkout(
 async def git_pull(repo_path: str, remote: str = "origin") -> dict[str, Any]:
     """Pull latest from remote."""
     _validate_workspace(repo_path)
+    # `remote` is a request parameter on a login-only route: `--upload-pack=CMD`
+    # / `--rebase` etc. must never reach git as an option.
+    _validate_remote_name(remote)
     rc, stdout, stderr = await _run_git(["pull", remote], cwd=repo_path, timeout=120.0)
     return {"ok": rc == 0, "stdout": stdout, "stderr": stderr}

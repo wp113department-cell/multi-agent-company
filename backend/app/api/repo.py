@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -28,6 +30,7 @@ from app.config import get_settings
 from app.db.models import Repo
 from app.db.session import get_async_session, get_db
 from app.middleware.rbac import require_approver, require_authenticated
+from app.services import git_service, workspace_service
 
 if TYPE_CHECKING:
     # Deferred at runtime like every other scanner import in this file —
@@ -101,11 +104,15 @@ async def _clone_and_activate(
     async with get_async_session() as db:
         try:
             target = Path(local_path)
-            # Build the clone URL — inject token for private repos
-            clone_url = github_url
-            if token:
-                # https://TOKEN@github.com/...
-                clone_url = github_url.replace("https://", f"https://{token}@", 1)
+            # The token is handed to git through the environment as a
+            # host-scoped Authorization header — NOT spliced into the clone
+            # URL (which git persists in plaintext as remote.origin.url in
+            # <repo>/.git/config, readable by every agent in that repo).
+            git_env = (
+                {**os.environ, **git_service._auth_env(github_url, token)}
+                if token
+                else None
+            )
 
             is_git_repo = (target / ".git").exists()
 
@@ -115,6 +122,7 @@ async def _clone_and_activate(
                     "git",
                     "pull",
                     cwd=local_path,
+                    env=git_env,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
@@ -124,16 +132,21 @@ async def _clone_and_activate(
                 cmd = ["git", "clone"]
                 if branch:
                     cmd += ["-b", branch]
-                cmd += [clone_url, local_path]
+                # `--` so neither the URL nor the destination can ever be
+                # read by git as an option.
+                cmd += ["--", github_url, local_path]
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
+                    env=git_env,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
             _, stderr_bytes = await proc.communicate()
 
             if proc.returncode != 0:
-                error_msg = stderr_bytes.decode(errors="replace")[:2000]
+                error_msg = git_service.scrub_secret(
+                    stderr_bytes.decode(errors="replace"), token
+                )[:2000]
                 await db.execute(
                     update(Repo)
                     .where(Repo.id == repo_id)
@@ -178,7 +191,10 @@ async def _clone_and_activate(
                 await db.execute(
                     update(Repo)
                     .where(Repo.id == repo_id)
-                    .values(status="error", error_msg=str(exc)[:2000])
+                    .values(
+                        status="error",
+                        error_msg=git_service.scrub_secret(str(exc), token)[:2000],
+                    )
                 )
                 await db.commit()
             except Exception:
@@ -223,6 +239,9 @@ def _repo_to_dict(r: Repo) -> dict[str, Any]:
     }
 
 
+_SAFE_REPO_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
 def _extract_name(url: str) -> str:
     name = url.rstrip("/").split("/")[-1]
     if name.endswith(".git"):
@@ -262,13 +281,50 @@ async def clone_repo(
         raise HTTPException(status_code=400, detail="Only https:// URLs are supported.")
 
     settings = get_settings()
+    # Same host allowlist / no-embedded-credentials rules as the Repo Console
+    # clone — this route used to accept ANY https host and would then splice
+    # the caller's token into that host's URL.
+    try:
+        git_service.validate_clone_url(url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     name = _extract_name(url)
-    local_path = (
-        body.dest_path.strip()
-        if body.dest_path and body.dest_path.strip()
-        else str(Path(settings.repos_dir) / name)
-    )
+    if not _SAFE_REPO_NAME_RE.match(name) or name in (".", ".."):
+        raise HTTPException(
+            status_code=400, detail=f"Invalid repository name: {name!r}"
+        )
+
+    if body.dest_path and body.dest_path.strip():
+        local_path = body.dest_path.strip()
+        # dest_path was never validated: any writable location on the host
+        # (mkdir -p + clone) was accepted. It must be absolute and inside the
+        # workspace parent or the managed repos dir.
+        if not os.path.isabs(local_path) or "\x00" in local_path:
+            raise HTTPException(
+                status_code=400, detail="dest_path must be an absolute path."
+            )
+        if not any(
+            workspace_service.is_within(local_path, root)
+            for root in (settings.allowed_workspace_parent, settings.repos_dir)
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"dest_path {local_path!r} is outside the allowed workspace "
+                    f"({settings.allowed_workspace_parent!r}) and the managed "
+                    f"repos directory ({settings.repos_dir!r})."
+                ),
+            )
+    else:
+        local_path = str(Path(settings.repos_dir) / name)
+
     branch = body.branch.strip() if body.branch and body.branch.strip() else None
+    if branch:
+        try:
+            git_service.validate_ref(branch)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
     token = body.token.strip() if body.token and body.token.strip() else None
 
     # If already in DB, return existing record and re-trigger clone (pull)
@@ -277,9 +333,11 @@ async def clone_repo(
 
     if existing_repo:
         await db.execute(
-            update(Repo)
-            .where(Repo.id == existing_repo.id)
-            .values(status="cloning", error_msg=None)
+            update(Repo).where(Repo.id == existing_repo.id)
+            # local_path too: the clone below targets `local_path`, so a
+            # re-trigger with a different dest_path used to leave the DB row
+            # (and the startup active-repo restore) pointing at the old one.
+            .values(status="cloning", error_msg=None, local_path=local_path)
         )
         await db.commit()
         repo_id = existing_repo.id

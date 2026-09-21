@@ -20,11 +20,22 @@ def _workspace_parent() -> str:
         return "/home"
 
 
+def is_within(path: str, parent: str) -> bool:
+    """True if realpath(path) is `parent` itself or lies strictly beneath it.
+
+    Compares whole path components: a bare `startswith(parent)` treats the
+    sibling `/home-evil` as being "inside" `/home`.
+    """
+    real = os.path.realpath(path)
+    real_parent = os.path.realpath(parent)
+    return real == real_parent or real.startswith(real_parent.rstrip(os.sep) + os.sep)
+
+
 def assert_in_workspace(path: str) -> str:
     """Return realpath if inside allowed parent, raise ValueError otherwise."""
     parent = os.path.realpath(_workspace_parent())
     real = os.path.realpath(path)
-    if not real.startswith(parent):
+    if not is_within(real, parent):
         raise ValueError(
             f"Path '{path}' resolves to '{real}' which is outside "
             f"allowed workspace parent '{parent}'."
