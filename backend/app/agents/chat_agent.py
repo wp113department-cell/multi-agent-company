@@ -126,7 +126,7 @@ from app.tools.browser.browser_tools import (
 from app.tools.database.migration import validate_run_migration_inputs
 from app.tools.database.seed import validate_seed_database_script
 from app.tools.execution.parallel import MAX_PARALLEL_COMMANDS
-from app.tools.database.sql import run_sql_handler
+from app.tools.database.sql import WRITE_BLOCKED, run_sql_handler
 from app.tools.execution.docker_build import validate_docker_build_inputs
 from app.tools.execution.docker_compose import build_docker_compose_command
 from app.tools.execution.docker_exec import build_docker_exec_command
@@ -2697,7 +2697,21 @@ class ChatAgent:
             from app.config import get_settings as _get_settings
 
             rs_db_url = str(getattr(_get_settings(), "database_url", ""))
-            return await asyncio.to_thread(run_sql_handler, rs_db_url, inp)
+            rs_result = await asyncio.to_thread(run_sql_handler, rs_db_url, inp)
+            if not rs_result.startswith(WRITE_BLOCKED):
+                return rs_result
+            # A statement that can modify data/schema (or run several statements)
+            # used to execute here with NO confirmation — `DROP TABLE` against the
+            # platform's own database (proved live). Ask a human, then re-run it
+            # with write access only if approved.
+            if not await self._confirm(
+                description="Run a SQL statement that can modify the database",
+                details=str(inp.get("query", ""))[:2000],
+            ):
+                return "[DENIED] User declined to run the SQL statement."
+            return await asyncio.to_thread(
+                run_sql_handler, rs_db_url, inp, allow_write=True
+            )
 
         if tool_name == "inspect_schema":
             # tool_enhance.md productionization pass, tool #96 (2026-08-25)

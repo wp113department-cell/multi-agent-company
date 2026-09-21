@@ -140,10 +140,12 @@ def test_handler_runs_a_real_query_with_a_legit_param() -> None:
 
 
 def test_handler_reports_ddl_success_without_a_result_set() -> None:
-    result = run_sql_handler(
-        _db_url(), {"query": "CREATE TEMP TABLE td_run_sql_ddl_test (x int)"}
-    )
-    assert result == "Query OK"
+    # UPDATED (verification batch B3): DDL now needs explicit write approval
+    # (allow_write=True — the interactive chat grants it only after a human says
+    # yes). Without it the statement is refused, never executed.
+    stmt = {"query": "CREATE TEMP TABLE td_run_sql_ddl_test (x int)"}
+    assert run_sql_handler(_db_url(), stmt).startswith("[WRITE BLOCKED]")
+    assert run_sql_handler(_db_url(), stmt, allow_write=True) == "Query OK"
 
 
 def test_handler_errors_cleanly_on_missing_database_url() -> None:

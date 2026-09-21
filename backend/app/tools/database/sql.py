@@ -74,6 +74,162 @@ from typing import Any
 _PLACEHOLDER_RE = re.compile(r"\$(\d+)")
 MAX_RESULT_ROWS = 200
 
+# ---------------------------------------------------------------------------
+# Write gate (verification batch B3, items #218/#220).
+#
+# Proved live: chat's run_sql executed `DELETE FROM t` and `DROP TABLE t`
+# against the platform's OWN database with autocommit and no confirmation, and
+# four agents' run_sql wrappers shelled out to `psql <postgresql+asyncpg://...>`
+# (psql reads that as a database NAME, so they could never connect) with no
+# read-only guard at all — the role files' "blocked from DROP/DELETE" was
+# prompt-only.
+#
+# A Postgres read-only transaction is NOT enough on its own: proved live that
+# `SET TRANSACTION READ WRITE; DELETE ...` and `COMMIT; BEGIN READ WRITE;
+# DELETE ...; COMMIT` execute inside one "read-only" call. So a statement is
+# treated as read-only only if ALL of these hold: exactly one statement (after
+# stripping comments/strings/dollar-quotes), it starts with an allow-listed
+# keyword, it uses none of the forbidden tokens (COPY .. PROGRAM, server-file
+# and large-object functions, dblink, ...) — and it then runs inside a
+# read-only transaction as a second, independent layer. Anything else is
+# refused with WRITE_BLOCKED; the interactive chat asks a human and re-runs it
+# with allow_write=True, headless agents simply cannot write.
+# ---------------------------------------------------------------------------
+
+WRITE_BLOCKED = "[WRITE BLOCKED]"
+_READ_FIRST_KEYWORDS = frozenset(
+    {"select", "with", "values", "table", "show", "explain"}
+)
+_FORBIDDEN_TOKENS = frozenset(
+    {
+        "copy",
+        "program",
+        "lo_import",
+        "lo_export",
+        "lo_unlink",
+        "pg_read_file",
+        "pg_read_binary_file",
+        "pg_ls_dir",
+        "pg_stat_file",
+        "dblink",
+        "dblink_exec",
+        "pg_terminate_backend",
+        "pg_cancel_backend",
+        "pg_reload_conf",
+        "pg_rotate_logfile",
+        "set_config",
+        "pg_advisory_lock",
+        "nextval",
+        "setval",
+        "into",  # SELECT ... INTO newtable
+        # DML/DDL/session-control words anywhere in a "read" statement: a writable
+        # CTE (WITH d AS (DELETE ...) SELECT ...), EXPLAIN ANALYZE <write>, SELECT ... FOR UPDATE.
+        # (`end`/`fetch`/`start` are deliberately NOT here: CASE ... END and
+        # FETCH FIRST n ROWS are ordinary read syntax.)
+        "insert",
+        "update",
+        "delete",
+        "merge",
+        "truncate",
+        "drop",
+        "create",
+        "alter",
+        "grant",
+        "revoke",
+        "vacuum",
+        "reindex",
+        "cluster",
+        "refresh",
+        "lock",
+        "do",
+        "call",
+        "prepare",
+        "deallocate",
+        "discard",
+        "reset",
+        "set",
+        "commit",
+        "rollback",
+        "savepoint",
+    }
+)
+
+
+def _scrub_sql(sql: str) -> str:
+    """The SQL with comments removed and the CONTENT of string literals,
+    quoted identifiers and dollar-quoted bodies blanked — so keyword/`;`
+    scanning can't be fooled by text inside them."""
+    out: list[str] = []
+    i, n = 0, len(sql)
+    while i < n:
+        c = sql[i]
+        two = sql[i : i + 2]
+        if two == "--":
+            j = sql.find("\n", i)
+            i = n if j == -1 else j
+            out.append(" ")
+        elif two == "/*":
+            depth, i = 1, i + 2
+            while i < n and depth:
+                if sql[i : i + 2] == "/*":
+                    depth, i = depth + 1, i + 2
+                elif sql[i : i + 2] == "*/":
+                    depth, i = depth - 1, i + 2
+                else:
+                    i += 1
+            out.append(" ")
+        elif c == "'" or (
+            c in "eE"
+            and sql[i + 1 : i + 2] == "'"
+            and (i == 0 or not (sql[i - 1].isalnum() or sql[i - 1] == "_"))
+        ):
+            escapes = c in "eE"
+            i += 2 if escapes else 1
+            while i < n:
+                if escapes and sql[i] == "\\":
+                    i += 2
+                elif sql[i] == "'":
+                    if sql[i + 1 : i + 2] == "'":
+                        i += 2
+                    else:
+                        i += 1
+                        break
+                else:
+                    i += 1
+            out.append(" '' ")
+        elif c == '"':
+            i += 1
+            while i < n and not (sql[i] == '"' and sql[i + 1 : i + 2] != '"'):
+                i += 2 if sql[i] == '"' else 1
+            i += 1
+            out.append(" ident ")
+        elif c == "$":
+            m = re.match(r"\$([A-Za-z_][A-Za-z0-9_]*)?\$", sql[i:])
+            if m:
+                tag = m.group(0)
+                end = sql.find(tag, i + len(tag))
+                i = n if end == -1 else end + len(tag)
+                out.append(" '' ")
+            else:
+                out.append(c)
+                i += 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def is_read_only_sql(sql: str) -> bool:
+    """True only for a single, allow-listed, side-effect-free-looking statement."""
+    bare = _scrub_sql(sql).lower()
+    statements = [part for part in bare.split(";") if part.strip()]
+    if len(statements) != 1:
+        return False
+    tokens = re.findall(r"[a-z_][a-z0-9_$]*", statements[0])
+    if not tokens or tokens[0] not in _READ_FIRST_KEYWORDS:
+        return False
+    return not (_FORBIDDEN_TOKENS & set(tokens))
+
 
 def _convert_placeholders(
     query: str, params: list[str]
@@ -141,7 +297,9 @@ RUN_SQL_TOOL = {
 }
 
 
-def run_sql_handler(database_url: str, inp: dict[str, Any]) -> str:
+def run_sql_handler(
+    database_url: str, inp: dict[str, Any], *, allow_write: bool = False
+) -> str:
     """Core run_sql logic shared by both real call sites. Executes via a
     real psycopg2 connection with genuine parameter binding — `$N`
     placeholders in `query` are converted to psycopg2's `%s` style and the
@@ -157,6 +315,14 @@ def run_sql_handler(database_url: str, inp: dict[str, Any]) -> str:
     converted_query, bound_params, error = _convert_placeholders(query, params)
     if error:
         return f"[ERROR] {error}"
+    read_only = is_read_only_sql(query)
+    if not read_only and not allow_write:
+        return (
+            f"{WRITE_BLOCKED} This statement is not a single read-only query "
+            "(it may modify data or schema, run several statements, or use a "
+            "server-side file/command feature). Running it needs explicit human "
+            "approval, which this run does not have."
+        )
 
     import psycopg2
 
@@ -166,7 +332,11 @@ def run_sql_handler(database_url: str, inp: dict[str, Any]) -> str:
     except Exception as e:
         return f"[ERROR] Could not connect to database: {e}"
     try:
-        conn.autocommit = True
+        if read_only:
+            # second, independent layer under the statement classifier
+            conn.set_session(readonly=True, autocommit=False)
+        else:
+            conn.autocommit = True  # approved write: unchanged behaviour
         with conn.cursor() as cur:
             cur.execute(converted_query, bound_params or None)
             if cur.description is None:
@@ -181,4 +351,8 @@ def run_sql_handler(database_url: str, inp: dict[str, Any]) -> str:
     except Exception as e:
         return f"[ERROR] {e}"
     finally:
-        conn.close()
+        try:
+            if read_only:
+                conn.rollback()
+        finally:
+            conn.close()

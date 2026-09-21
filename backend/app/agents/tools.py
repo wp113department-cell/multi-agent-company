@@ -3210,25 +3210,13 @@ def make_sql_agent_handlers(repo_path: str) -> dict[str, Any]:
     root = Path(repo_path)
 
     def sq_run_sql(inp: dict[str, Any]) -> str:
-        sq_query = str(inp["query"])
-        sq_settings = get_settings()
-        sq_db_url = getattr(sq_settings, "database_url", None)
-        if not sq_db_url:
-            return "[ERROR] DATABASE_URL not configured"
-        try:
-            r = subprocess.run(
-                ["psql", str(sq_db_url), "-c", sq_query, "--no-password"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            return (r.stdout + r.stderr)[:5000] or "(no output)"
-        except FileNotFoundError:
-            return "[ERROR] psql not found — install postgresql-client"
-        except subprocess.TimeoutExpired:
-            return "[ERROR] Query timed out"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        # Delegates to the shared run_sql_handler: real psycopg2 (this used to be
+        # `psql <postgresql+asyncpg://...> -c`, which psql reads as a database
+        # NAME, so it could never connect) and READ-ONLY by construction — a
+        # statement that can modify data is refused (WRITE_BLOCKED); this
+        # headless agent run has no human to approve it. The role file's
+        # "blocked from DROP/DELETE" used to be enforced by the prompt alone.
+        return run_sql_handler(str(getattr(get_settings(), "database_url", "") or ""), inp)
 
     # tool_enhance.md productionization pass, tool #96 (2026-08-25) — the
     # real fix lives in the shared inspect_schema_handler(); see that
@@ -4086,7 +4074,6 @@ TECH_DEBT_AGENT_TOOLS: list[dict[str, Any]] = READ_ONLY_TOOLS + [
 
 def make_performance_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     """Handler factory for Performance Reviewer agent."""
-    import subprocess as _sp
     from app.config import get_settings as _gs
 
     root = Path(repo_path)
@@ -4102,27 +4089,13 @@ def make_performance_reviewer_handlers(repo_path: str) -> dict[str, Any]:
         return find_sql_handler(root, inp)
 
     def pr_run_sql(inp: dict[str, Any]) -> str:
-        sql = str(inp["query"]).strip()
-        settings = _gs()
-        db_url = getattr(settings, "database_url", "")
-        if not db_url:
-            return "[ERROR] DATABASE_URL not set"
-        # Block destructive ops
-        low = sql.lower()
-        if any(
-            k in low for k in ("drop ", "delete ", "truncate ", "update ", "insert ")
-        ):
-            return "[POLICY DENIED] Performance reviewer is read-only — use SELECT / EXPLAIN only"
-        try:
-            r = _sp.run(
-                ["psql", db_url, "-c", sql, "--no-psqlrc"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            return (r.stdout + r.stderr).strip() or "(no output)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        # Delegates to the shared run_sql_handler: real psycopg2 (this used to be
+        # `psql <postgresql+asyncpg://...> -c`, which psql reads as a database
+        # NAME, so it could never connect) and READ-ONLY by construction — a
+        # statement that can modify data is refused (WRITE_BLOCKED); this
+        # headless agent run has no human to approve it. The role file's
+        # "blocked from DROP/DELETE" used to be enforced by the prompt alone.
+        return run_sql_handler(str(getattr(get_settings(), "database_url", "") or ""), inp)
 
     # tool_enhance.md productionization pass, tool #98 (2026-08-25) — the
     # real fix lives in the shared explain_query_handler(); see that
@@ -4234,7 +4207,6 @@ def make_business_analyst_handlers(repo_path: str) -> dict[str, Any]:
 
 def make_migration_agent_handlers(repo_path: str) -> dict[str, Any]:
     """Handler factory for Migration Agent."""
-    import subprocess as _sp
     from app.config import get_settings as _gs
 
     root = Path(repo_path)
@@ -4253,24 +4225,13 @@ def make_migration_agent_handlers(repo_path: str) -> dict[str, Any]:
     )
 
     def mg_run_sql(inp: dict[str, Any]) -> str:
-        sql = str(inp["query"]).strip()
-        settings = _gs()
-        db_url = getattr(settings, "database_url", "")
-        if not db_url:
-            return "[ERROR] DATABASE_URL not set"
-        low = sql.lower()
-        if any(k in low for k in ("drop table", "truncate", "delete from")):
-            return "[POLICY DENIED] Destructive SQL blocked in migration agent"
-        try:
-            r = _sp.run(
-                ["psql", db_url, "-c", sql, "--no-psqlrc"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            return (r.stdout + r.stderr).strip() or "(no output)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        # Delegates to the shared run_sql_handler: real psycopg2 (this used to be
+        # `psql <postgresql+asyncpg://...> -c`, which psql reads as a database
+        # NAME, so it could never connect) and READ-ONLY by construction — a
+        # statement that can modify data is refused (WRITE_BLOCKED); this
+        # headless agent run has no human to approve it. The role file's
+        # "blocked from DROP/DELETE" used to be enforced by the prompt alone.
+        return run_sql_handler(str(getattr(get_settings(), "database_url", "") or ""), inp)
 
     # tool_enhance.md productionization pass, tool #96 (2026-08-25) — the
     # real fix lives in the shared inspect_schema_handler(); see that
@@ -4342,31 +4303,19 @@ def make_migration_agent_handlers(repo_path: str) -> dict[str, Any]:
 
 def make_schema_agent_handlers(repo_path: str) -> dict[str, Any]:
     """Handler factory for Schema Agent."""
-    import subprocess as _sp
     from app.config import get_settings as _gs
 
     root = Path(repo_path)
     handlers = make_read_only_handlers(repo_path)
 
     def sa_run_sql(inp: dict[str, Any]) -> str:
-        sql = str(inp["query"]).strip()
-        settings = _gs()
-        db_url = getattr(settings, "database_url", "")
-        if not db_url:
-            return "[ERROR] DATABASE_URL not set"
-        low = sql.lower()
-        if any(k in low for k in ("drop ", "delete ", "truncate ")):
-            return "[POLICY DENIED] Schema agent cannot run destructive SQL"
-        try:
-            r = _sp.run(
-                ["psql", db_url, "-c", sql, "--no-psqlrc"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            return (r.stdout + r.stderr).strip() or "(no output)"
-        except Exception as e:
-            return f"[ERROR] {e}"
+        # Delegates to the shared run_sql_handler: real psycopg2 (this used to be
+        # `psql <postgresql+asyncpg://...> -c`, which psql reads as a database
+        # NAME, so it could never connect) and READ-ONLY by construction — a
+        # statement that can modify data is refused (WRITE_BLOCKED); this
+        # headless agent run has no human to approve it. The role file's
+        # "blocked from DROP/DELETE" used to be enforced by the prompt alone.
+        return run_sql_handler(str(getattr(get_settings(), "database_url", "") or ""), inp)
 
     # tool_enhance.md productionization pass, tool #96 (2026-08-25) — the
     # real fix lives in the shared inspect_schema_handler(); see that
