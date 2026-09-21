@@ -21,76 +21,88 @@ Live tally is kept at the top of each batch section once that batch starts.
 | B11 — Testing audit, hidden risks & domain coverage | 43 | Light |
 
 
+## Progress
+
+| Batch | Items | Done | CONFIRMED | FIXED | DOWNGRADED | BLOCKED |
+|---|---:|---:|---:|---:|---:|---:|
+| **B1** Repo execution, terminals & file ops | 36 | **36** | 12 | 24 | 0 | 0 |
+| **B2** Orchestration, selection, runtime decisions | 25 | **25** | 17 | 8 | 0 | 0 |
+| B3–B11 | 333 | 0 | 0 | 0 | 0 | 0 |
+
+**Environment baseline (Day 0):** isolated DB `gridiron_verify`; first full run 31 failed / 7,707 passed / 54 skipped — 28 of the 31 were `python: not found` from running pytest without the venv on PATH (84 tests pass with it), 2 pip-audit drift (known), 1 shared-state test. See `verify_api_ledger.md` for live-API spend (~$0.30 so far).
+
+**Stale-config finding (not code):** `backend/.env` GROQ models (`llama-3.3-70b-versatile`, `llama-3.1-8b-instant`) no longer exist on the Groq key (404 model_not_found); Groq free tier's per-minute token limit is also below the PM prompt size, so the pipeline cannot run on Groq at all. Left `.env` untouched.
+
 ## B1 — Repo execution, terminals & file operations  (36 items, depth: Deep)
 
 | # | § | Question | Verdict | Evidence / notes |
 |---:|---|---|---|---|
-| 1 | 1 | Clones repo into user-selected folder | PENDING | |
-| 2 | 1 | Every operation stays inside that cloned repo | PENDING | |
-| 4 | 1 | Terminal/session manager | PENDING | |
-| 7 | 1 | Linux/Ubuntu support | PENDING | |
-| 8 | 1 | Docker terminal handling | PENDING | |
-| 9 | 1 | Virtual environment activation | PENDING | |
-| 10 | 1 | Safe shell execution (injection prevention) | PENDING | |
-| 11 | 1 | Execution pipeline trace | PENDING | |
-| 13 | 17 | Detect completion | PENDING | |
-| 14 | 17 | Detect failure | PENDING | |
-| 15 | 17 | Detect hanging processes | PENDING | |
-| 16 | 17 | Wait for commands to finish | PENDING | |
-| 17 | 17 | Parse generic logs | PENDING | |
-| 18 | 17 | Parse Docker logs | PENDING | |
-| 19 | 17 | Parse test output (pytest etc.) | PENDING | |
-| 20 | 17 | Parse compiler/type-checker output | PENDING | |
-| 21 | 58 | Concurrent shell-session registry | PENDING | |
-| 22 | 58 | Concurrent command execution (fan-out) | PENDING | |
-| 23 | 58 | Background vs foreground distinction | PENDING | |
-| 24 | 58 | Task dependency handling between terminal jobs | PENDING | |
-| 25 | 58 | Terminal monitoring, recovery, cleanup | PENDING | |
-| 26 | 18 | Create/edit/delete files | PENDING | |
-| 27 | 18 | Compare files | PENDING | |
-| 28 | 18 | Synchronize files | PENDING | |
-| 29 | 18 | Refactor projects | PENDING | |
-| 30 | 18 | Preserve formatting | PENDING | |
-| 31 | 18 | Preserve comments | PENDING | |
-| 32 | 18 | Avoid restricted files | PENDING | |
-| 33 | 18 | Obey repository rules | PENDING | |
-| 34 | 59 | Read hundreds of files safely | PENDING | |
-| 35 | 59 | Edit hundreds of files | PENDING | |
-| 36 | 59 | Rename/move/delete files | PENDING | |
-| 37 | 59 | Preserve formatting/comments across multi-file edits | PENDING | |
-| 254 | 15 | Understand 9,000+ line files | PENDING | |
-| 256 | 15 | Scan 1,000+ files | PENDING | |
-| 258 | 15 | Build complete projects (scaffold) | PENDING | |
+| 1 | 1 | Clones repo into user-selected folder | FIXED | 3cd81ad4 — git clone RCE via `--upload-pack` URL (empty hostname passed the allowlist), PAT persisted in `.git/config`, main clone route never validated dest_path/host/name. Live HTTP battery with real roles + 87 tests (72 fail on original). |
+| 2 | 1 | Every operation stays inside that cloned repo | FIXED | 3cd81ad4, ee3831db — workspace `startswith` prefix bug (`/home-evil`), checkout `-f` / push `--force` / pull `--upload-pack` arg injection, rename_symbol wrote through outside symlinks. |
+| 4 | 1 | Terminal/session manager | FIXED | d6fa8343 — session close / startup sweep / `kill KILL` / reaper left the Docker container running; PID reuse could SIGTERM an unrelated process. |
+| 7 | 1 | Linux/Ubuntu support | FIXED | 2df4d293 — venv activation used bash `source` under dash (/bin/sh on Ubuntu): silently never ran. Everything else in B1 ran on this Ubuntu host. |
+| 8 | 1 | Docker terminal handling | FIXED | 66564a7e — sandbox boundary CONFIRMED (20 hostile-input tests); docker_logs cut the NEWEST (crash) lines and scrambled stdout/stderr order. |
+| 9 | 1 | Virtual environment activation | FIXED | 2df4d293 — see #7; naive `.` swap would abort the whole shell in dash (proved), guarded `if [ -f ]` form used. |
+| 10 | 1 | Safe shell execution (injection prevention) | CONFIRMED | 20 black-box tests through the real chat `bash` tool (read-only rootfs, non-root, no docker.sock, host env/files invisible, 8 injection shapes, cgroup caps, cwd escape, fail-closed, timeout kills container) + AST scan: 13 real `shell=True` sites. LEAD → B7/B11: run_tests/run_single_test/type_check/run_node/run_python_snippet execute repo code on the HOST (not sandboxed). |
+| 11 | 1 | Execution pipeline trace | FIXED | f9a9503c — REAL pipeline vs live Anthropic API: Architect died on removed `thinking.type.enabled` (400); reflection/critique/planner-confidence/lesson storage silently dead. Now PM→Architect→Decomposer complete live and pause at approval (agent_runs 26k in/6k out, ~$0.26). |
+| 13 | 17 | Detect completion | FIXED | d6fa8343 — read_output now returns the unread tail + exit status after a job ends. |
+| 14 | 17 | Detect failure | FIXED | d6fa8343 — failure output (stderr) was discarded once a background job exited; exit code detection itself worked. |
+| 15 | 17 | Detect hanging processes | FIXED | d6fa8343 — root cause of 'hung' jobs: nothing drained pipes, so >64 KB output blocked forever. Advisory possibly_hung flag confirmed by existing tests. |
+| 16 | 17 | Wait for commands to finish | FIXED | d6fa8343 — same pipe stall; foreground bash blocks until done, background returns <1.5s (tests). |
+| 17 | 17 | Parse generic logs | CONFIRMED | read_logs tail/lines returned the real last lines incl. traceback on a real log file. Not exercised here: `level` filter. |
+| 18 | 17 | Parse Docker logs | FIXED | 66564a7e — see #8 (tail kept, whole log analysed, chronological via `--timestamps`); shared helper also fixes diagnose_deployment_failure. |
+| 19 | 17 | Parse test output (pytest etc.) | FIXED | 66564a7e — pytest appends `(H:MM:SS)` after 60s; every long run produced no structured summary. Real pytest -q/-v output with all outcome kinds parses. |
+| 20 | 17 | Parse compiler/type-checker output | CONFIRMED | 66564a7e tests feed REAL mypy / ruff / tsc output (errors + clean) — counts correct. |
+| 21 | 58 | Concurrent shell-session registry | FIXED | d6fa8343 — registry now records container + process start time; identity-checked. |
+| 22 | 58 | Concurrent command execution (fan-out) | CONFIRMED | run_parallel_commands: 3×3s jobs in 4.0s wall, exit code flagged, per-call timeout enforced, results in order. |
+| 23 | 58 | Background vs foreground distinction | FIXED | d6fa8343 — background returns immediately; chatty background jobs no longer stall. |
+| 24 | 58 | Task dependency handling between terminal jobs | CONFIRMED | wait_for_pids: dependent waits until the dependency EXITS (doc: 'have exited'); it also runs if the dependency FAILED — matches its documented contract. |
+| 25 | 58 | Terminal monitoring, recovery, cleanup | FIXED | d6fa8343 — cleanup paths now stop process group AND container; liveness reaper kills orphaned containers. |
+| 26 | 18 | Create/edit/delete files | CONFIRMED | create nested / edit / delete through the real dispatch; overwrite approval gate held (denied → file untouched). LEADS → B3 (#214/#215): move_file/rename_file/copy_file overwrite an existing destination with no confirmation; delete gate to verify. |
+| 27 | 18 | Compare files | CONFIRMED | compare_files: unified diff, 'identical', outside-worktree denied. |
+| 28 | 18 | Synchronize files | FIXED | d0798640 — sync_files converted CRLF→LF, called CRLF/LF-only diffs 'in sync', couldn't sync binaries, dropped exec bit; now byte-exact + mode. |
+| 29 | 18 | Refactor projects | FIXED | ee3831db — rename_symbol: form-feed line separators CORRUPTED files, one bad .py aborted the batch (TokenError uncaught), no rollback on mid-batch failure. Token-aware (strings/comments untouched) confirmed. |
+| 30 | 18 | Preserve formatting | FIXED | d0798640 — every line-editing tool rewrote CRLF as LF; replace_function ate blank-line separators. |
+| 31 | 18 | Preserve comments | CONFIRMED | comments/docstrings/decorators outside the edited symbol preserved by edit_file, replace_function/class, rename_symbol (tests). |
+| 32 | 18 | Avoid restricted files | FIXED | ee3831db — write tools deny .env*/secrets/.git/workflows/keys/outside/symlink escapes (confirmed); rename_symbol bypassed all of it with file_pattern='*'. |
+| 33 | 18 | Obey repository rules | CONFIRMED | policy engine (paths/commands) + governance rule enforced in tests. LEAD → B7 (§85): governance checks `package.json` CONTENT only when it parses as full JSON — edit_file/append of a fragment may bypass it. |
+| 34 | 59 | Read hundreds of files safely | FIXED | 83961084 — read_files 20/call with explicit continue notice (confirmed); read_file got start_line/end_line + hard char cap. |
+| 35 | 59 | Edit hundreds of files | FIXED | ee3831db — rename batch now preflights writability and rolls back on failure; 1,500-file rename dry-run threshold confirmed. |
+| 36 | 59 | Rename/move/delete files | CONFIRMED | rename/move/copy/delete work; protected/.git targets denied; copy keeps exec bit. LEAD → B3: move/copy onto an existing file overwrites silently. |
+| 37 | 59 | Preserve formatting/comments across multi-file edits | FIXED | d0798640, ee3831db — formatting (CRLF/blank lines) preserved across single- and multi-file edits. |
+| 254 | 15 | Understand 9,000+ line files | FIXED | 83961084 — 12,000-line file: fold/truncate worked but read_file had no way to read a specific range (agents without a shell could never reach the middle); added start_line/end_line. |
+| 256 | 15 | Scan 1,000+ files | CONFIRMED | 1,500 files: index_repository 0.5s, tree/list/search <0.05s, rename dry-run 0.7s. |
+| 258 | 15 | Build complete projects (scaffold) | CONFIRMED | mechanics only: 22 real-git tests (blank-repo detection, scaffold plan validation, real commit, non-fatal failures, both entry points). Live LLM scaffold quality NOT run (budget) — revisit at end if balance allows. |
 
 ## B2 — Orchestration, agent/tool selection, runtime decisions  (25 items, depth: Deep)
 
 | # | § | Question | Verdict | Evidence / notes |
 |---:|---|---|---|---|
-| 39 | 2 | Who receives the request first (defined path) | PENDING | |
-| 40 | 2 | Who decides which agents work | PENDING | |
-| 41 | 2 | Routing is automatic/rule-based | PENDING | |
-| 46 | 2 | Agents reject tasks they're not suited for | PENDING | |
-| 48 | 2 | Dependencies managed | PENDING | |
-| 49 | 2 | Priorities managed | PENDING | |
-| 50 | 2 | Conflicts resolved | PENDING | |
-| 51 | 2 | Duplicate work prevented (file locking) | PENDING | |
-| 52 | 3 | Considers skills/capability | PENDING | |
-| 53 | 3 | Considers tools availability | PENDING | |
-| 54 | 3 | Considers current workload | PENDING | |
-| 55 | 3 | Considers health/previous success/previous failures | PENDING | |
-| 56 | 3 | Considers experience (tenure) | PENDING | |
-| 57 | 3 | Considers confidence | PENDING | |
-| 59 | 4 | Automatic tool selection | PENDING | |
-| 60 | 4 | Call multiple tools per turn | PENDING | |
-| 61 | 4 | Retry failed tools | PENDING | |
-| 62 | 4 | Verify tool outputs | PENDING | |
-| 63 | 4 | Recover from failures | PENDING | |
-| 68 | 62 | Request human approval (HITL) | PENDING | |
-| 69 | 62 | Stop execution | PENDING | |
-| 70 | 62 | Retry | PENDING | |
-| 72 | 62 | Skip unnecessary work | PENDING | |
-| 373 | 47 | New agent via role/tools/prompt/memory config only, no orchestration code change | PENDING | |
-| 374 | 47 | New agent auto-joins / becomes dispatchable | PENDING | |
+| 39 | 2 | Who receives the request first (defined path) | CONFIRMED | Live run (task 271): POST /api/tasks/{id}/run → planning pipeline PM → Architect → Decomposer → awaiting_approval. Single defined entry path; f9a9503c fixed the pipeline that used to die at the Architect. |
+| 40 | 2 | Who decides which agents work | CONFIRMED | FleetManager.select (16 real-registry tests) + decomposer/manager dispatch; live run traced through it. |
+| 41 | 2 | Routing is automatic/rule-based | CONFIRMED | Rule-based: capability lookup + scoring + `_TYPE_TO_TAG`; no LLM routing (that is item #42, SKIP). |
+| 46 | 2 | Agents reject tasks they're not suited for | CONFIRMED | CAVEAT: the refusal is system-level — FleetManager declines dispatch when no healthy AVAILABLE agent covers the capability and the subtask is blocked with a dispatch_refused event (tests). There is no agent-initiated 'this is not my job' reply. Candidate for Task 2 (PARTIAL). |
+| 48 | 2 | Dependencies managed | FIXED | c30e0b1f — valid graphs correct (300 random DAGs), but out-of-range/self/non-integer depends_on entries were silently dropped, so a subtask lost its constraint and, under fan-out, ran in the SAME parallel wave as its dependency; docstring promised a sequential fallback. |
+| 49 | 2 | Priorities managed | CONFIRMED | 9 real asyncio tests: priority order, FIFO among equals, unknown priority = medium, cancellation safety incl. cancel racing the grant, exact permit count under churn, loud timeout, end-to-end via agent_run_slot. |
+| 50 | 2 | Conflicts resolved | FIXED | 147add84 — real Postgres: same epic re-reserving its own files (retry after crash) was refused as a conflict with 'another epic'; exclusion, all-or-nothing, expiry reaping, 8 concurrent reservers → 1 winner confirmed. |
+| 51 | 2 | Duplicate work prevented (file locking) | FIXED | 147add84 — `./src/a.py`, `src//a.py`, `src\a.py` all acquired a file already locked as `src/a.py` (raw-string compare in the UNIQUE lock and the conflict guard). Paths canonicalised. NOTE: lock TTL is a fixed 4h with no renewal. |
+| 52 | 3 | Considers skills/capability | CONFIRMED | capability matching tests (unknown capability → None). |
+| 53 | 3 | Considers tools availability | CONFIRMED | verify_tool_availability skips agents declaring an unresolvable tool (manager passes True). |
+| 54 | 3 | Considers current workload | FIXED | 73007350 — busy agents excluded (confirmed) but dispatch() = select() then start_task(): concurrent callers could both get the same single-flight agent (1/400 rounds). Atomic try_start_task added. |
+| 55 | 3 | Considers health/previous success/previous failures | CONFIRMED | unhealthy/disabled/retired excluded; degraded, error_count and success_rate lower the score exactly as documented. |
+| 56 | 3 | Considers experience (tenure) | CONFIRMED | tenure factor: capped diminishing bonus (200 runs beats 0). |
+| 57 | 3 | Considers confidence | CONFIRMED | confidence factor lowers a low-confidence agent's rank; neutral when no history. |
+| 59 | 4 | Automatic tool selection | CONFIRMED | live run: PM/Architect/Decomposer chose their own tool calls; a tool outside the advertised list is refused even when a handler exists. |
+| 60 | 4 | Call multiple tools per turn | CONFIRMED | real execute_tools node: N tool_use blocks in one turn all run in order and answer in ONE user message. |
+| 61 | 4 | Retry failed tools | FIXED | 9af9847e — manifest-driven retry (backoff×3 / once×2), hazardous permissions never retried (confirmed); [POLICY DENIED] results were retried with backoff (deterministic → pure delay). |
+| 62 | 4 | Verify tool outputs | CONFIRMED | verification flags set only by successful runs, reset by mutating tools, blocking_until refuses the handler, enforce_in_result overwrites false claims (real node tests). |
+| 63 | 4 | Recover from failures | CONFIRMED | a raising handler becomes an [ERROR] result and the rest of the batch continues; retry as above. (Run-level recovery/checkpoint resume is B3.) |
+| 68 | 62 | Request human approval (HITL) | CONFIRMED | live run paused at awaiting_approval with brief/plan/subtasks; chat overwrite gate held in B1. Full approval-gate coverage is B3 (§39). |
+| 69 | 62 | Stop execution | FIXED | 9af9847e — Stop/Cancel set an in-process abort flag only /resume cleared: any later run of that task aborted at its first LLM call ('stopped') doing no work until server restart. Cleared at run entry points; a Stop mid-run still halts later stages. LEAD → B7: stop/cancel accept any authenticated role (incl. viewer). |
+| 70 | 62 | Retry | FIXED | 9af9847e — restart/re-run inherited the stale abort flag (see #69); restart correctly refused while a run is active. |
+| 72 | 62 | Skip unnecessary work | FIXED | c4deb9a9 — incremental reindex skips unchanged files (confirmed) but deleted/renamed files stayed in the merged index forever (phantom entries). Other skips confirmed: sync 'already in sync', rename dry-run. NOTE: manager still runs QA+review when a dev agent produced no changes. |
+| 373 | 47 | New agent via role/tools/prompt/memory config only, no orchestration code change | CONFIRMED | new agent = module (AGENT_CONTRACT + exactly one run_* fn) + role file + agent_models.json entry; zero edits to manager/dispatcher/router (21 tests incl. hostile names, ambiguity, scan/apply reserved). |
+| 374 | 47 | New agent auto-joins / becomes dispatchable | CONFIRMED | auto-registered by ensure_all_agents_registered; dispatchable by capability with data alone. |
 
 ## B3 — Human control, approvals, recovery & reliability  (37 items, depth: Deep)
 
