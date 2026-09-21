@@ -20,6 +20,7 @@ ready-for-review terminal paths.
 from __future__ import annotations
 
 import logging
+import posixpath
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, select
@@ -30,6 +31,23 @@ from app.config import get_settings
 from app.db.models import EpicFileLock
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_repo_path(path: str) -> str:
+    """Canonical spelling of a repo-relative path, so two spellings of the SAME
+    file compare (and lock) as the same file.
+
+    Proved live on real Postgres: with `src/a.py` held by one epic, another epic
+    acquired `./src/a.py`, `src//a.py` and `src\\a.py` — the UNIQUE(file_path)
+    lock and check_file_conflicts() both compared raw strings, so how an LLM
+    happened to spell a path decided whether "duplicate work prevention" applied.
+    Case is left alone (only case-insensitive filesystems fold it).
+    """
+    p = str(path).strip().replace("\\", "/")
+    p = posixpath.normpath(p) if p else p
+    while p.startswith("./"):
+        p = p[2:]
+    return p
 
 
 async def reserve_epic_files(
@@ -52,20 +70,41 @@ async def reserve_epic_files(
     if not candidate_files:
         return None
 
-    candidate_set = sorted(set(candidate_files))
+    candidate_set = sorted({normalize_repo_path(f) for f in candidate_files if f})
     now = datetime.now(timezone.utc)
+    ttl = timedelta(seconds=get_settings().epic_file_lock_ttl_seconds)
 
     await db.execute(delete(EpicFileLock).where(EpicFileLock.expires_at < now))
 
+    # Idempotent for the SAME epic: a retry/resume of an epic that crashed before
+    # finalize released its locks used to be refused as a conflict with "another
+    # epic" (its own rows hit the UNIQUE constraint and the holder query excludes
+    # itself). Files it already holds are simply renewed, not re-inserted.
+    already_mine = {
+        row.file_path: row
+        for row in (
+            await db.execute(
+                select(EpicFileLock).where(
+                    EpicFileLock.epic_id == epic_id,
+                    EpicFileLock.file_path.in_(candidate_set),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    }
+    for row in already_mine.values():
+        row.expires_at = now + ttl
+    to_acquire = [p for p in candidate_set if p not in already_mine]
+
     try:
         async with db.begin_nested():
-            for path in candidate_set:
+            for path in to_acquire:
                 db.add(
                     EpicFileLock(
                         epic_id=epic_id,
                         file_path=path,
-                        expires_at=now
-                        + timedelta(seconds=get_settings().epic_file_lock_ttl_seconds),
+                        expires_at=now + ttl,
                     )
                 )
             await db.flush()

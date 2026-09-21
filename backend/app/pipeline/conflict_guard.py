@@ -30,7 +30,9 @@ async def check_file_conflicts(
     if not candidate_files:
         return None
 
-    candidate_set = set(candidate_files)
+    from app.pipeline.file_locks import normalize_repo_path
+
+    candidate_set = {normalize_repo_path(f) for f in candidate_files if f}
 
     # Fetch all epics in a running state (not pending/completed/failed/halted)
     running_statuses = {"planning", "coding", "testing", "ready_for_review"}
@@ -58,6 +60,7 @@ async def _get_epic_files(epic_id: str, db: AsyncSession) -> set[str]:
     """Extract impacted_files from every PipelineState.architect_plan for an epic."""
     # All tasks in the epic share their pipeline_state; get them via task FK
     from app.db.models import DevTask
+    from app.pipeline.file_locks import normalize_repo_path
 
     result = await db.execute(
         select(PipelineState)
@@ -83,7 +86,7 @@ async def _get_epic_files(epic_id: str, db: AsyncSession) -> set[str]:
                 # the real schema; a bare string is still accepted too, in
                 # case any caller ever passes the simpler shape.
                 if isinstance(f, str):
-                    files.add(f)
+                    files.add(normalize_repo_path(f))
                 elif isinstance(f, dict) and f.get("path"):
-                    files.add(str(f["path"]))
+                    files.add(normalize_repo_path(str(f["path"])))
     return files
