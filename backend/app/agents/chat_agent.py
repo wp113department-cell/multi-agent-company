@@ -3475,7 +3475,12 @@ class ChatAgent:
             rmig_backend = (
                 str(root / "backend") if (root / "backend").exists() else repo
             )
-            activate = f"source {rmig_backend}/.venv/bin/activate 2>/dev/null || true"
+            # POSIX `.` + existence guard — `source` does not exist in dash
+            # (/bin/sh on Ubuntu/Debian); see tools._venv_activate_snippet.
+            import shlex as _shlex_rmig
+
+            _rmig_act = _shlex_rmig.quote(f"{rmig_backend}/.venv/bin/activate")
+            activate = f"if [ -f {_rmig_act} ]; then . {_rmig_act}; fi"
             rmig_cmd = (
                 f"{activate} && cd {rmig_backend} && alembic {rmig_dir} {rmig_rev} 2>&1"
             )

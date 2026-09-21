@@ -1072,7 +1072,18 @@ def _venv_activate_snippet() -> str:
     """
     if sys.platform == "win32":
         return ".venv\\Scripts\\activate.bat 2>nul || ver>nul"
-    return "source .venv/bin/activate 2>/dev/null || true"
+    # POSIX `.` (not the bashism `source`), behind an existence guard:
+    # `subprocess.run(shell=True)` runs /bin/sh, which is DASH on Ubuntu/
+    # Debian. dash has no `source` builtin, so the previous
+    # `source .venv/bin/activate 2>/dev/null || true` silently NEVER
+    # activated the venv there (the error and the failure were both
+    # swallowed). The guard is required, not cosmetic: in dash `.` is a
+    # special builtin, so `. missing-file || true` aborts the whole shell
+    # (exit 2) instead of falling through — proved live. As an `if`
+    # compound it also evaluates to success when no .venv exists, and (unlike
+    # the old `A && activate || true && cmd` chain) a failed preceding `cd`
+    # still short-circuits the command that follows.
+    return "if [ -f .venv/bin/activate ]; then . .venv/bin/activate; fi"
 
 
 # tool_enhance.md productionization pass, tool #108 (2026-08-25) —

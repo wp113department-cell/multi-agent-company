@@ -55,19 +55,22 @@ from unittest.mock import patch
 from app.agents.tools import _venv_activate_snippet
 
 
-def test_posix_branch_matches_the_real_previously_hardcoded_string() -> None:
-    """No behavior change intended for POSIX -- the fix is Windows support,
-    not a POSIX rewrite. Byte-for-byte identical to what every one of the
-    11 sites hardcoded before this change."""
-    with patch("app.agents.tools.sys.platform", "linux"):
-        assert (
-            _venv_activate_snippet() == "source .venv/bin/activate 2>/dev/null || true"
-        )
-
-    with patch("app.agents.tools.sys.platform", "darwin"):
-        assert (
-            _venv_activate_snippet() == "source .venv/bin/activate 2>/dev/null || true"
-        )
+def test_posix_branch_is_dash_safe_and_guarded() -> None:
+    """UPDATED (verification batch B1, item #9, 2026-09-21). This test used to
+    pin the POSIX branch byte-for-byte to `source .venv/bin/activate
+    2>/dev/null || true` ("no behavior change intended for POSIX"). That
+    string is a bashism: `subprocess.run(shell=True)` runs /bin/sh, which is
+    DASH on Ubuntu/Debian and has no `source`, so the venv was silently never
+    activated — pinning it locked the bug in. The real-shell behavior is
+    proved in tests/test_b1_venv_activation.py; this test pins the contract:
+    POSIX `.` (never `source`), behind an existence guard (in dash a bare
+    `. missing || true` aborts the whole shell)."""
+    for platform in ("linux", "darwin"):
+        with patch("app.agents.tools.sys.platform", platform):
+            snippet = _venv_activate_snippet()
+        assert "source" not in snippet
+        assert ". .venv/bin/activate" in snippet
+        assert "[ -f .venv/bin/activate ]" in snippet
 
 
 def test_windows_branch_uses_real_cmd_exe_syntax_not_bash() -> None:
@@ -101,16 +104,14 @@ def test_real_call_sites_no_longer_hardcode_the_posix_pattern_directly() -> None
     import app.agents.tools as tools_module
 
     source = inspect.getsource(tools_module)
-    # 'source .venv/bin/activate 2>/dev/null || true' appears exactly once —
-    # _venv_activate_snippet()'s own POSIX-branch return statement (the
-    # module's explanatory comment near the top references the OLD pattern
-    # differently, as 'source {repo_path}/.venv/bin/activate', so it doesn't
-    # collide with this exact literal).
-    assert source.count("source .venv/bin/activate 2>/dev/null || true") == 1
-    # The old absolute-path form (used by 6 of the 11 real call sites)
-    # appears exactly once now too -- only in that same explanatory comment,
-    # not at any real call site.
-    assert source.count("source {repo_path}/.venv/bin/activate") == 1
+    # UPDATED (B1 #9): the old `source ...` literal must no longer appear in
+    # ANY executable line of the module — only in comments that explain the
+    # bug. (It used to be pinned as "exactly once", i.e. as the snippet's own
+    # return statement.)
+    code_lines = [ln for ln in source.splitlines() if not ln.lstrip().startswith("#")]
+    code = "\n".join(code_lines)
+    assert "source .venv/bin/activate" not in code
+    assert "source {repo_path}/.venv/bin/activate" not in code
     # tool_enhance.md productionization pass, tools #101, #115, and
     # #143 (2026-08-25, 2026-08-26, 2026-09-11) — 6 of the original 11
     # real call sites (3 for run_linter, 1 for organize_imports, 2 for
