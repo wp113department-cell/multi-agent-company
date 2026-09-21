@@ -154,7 +154,11 @@ def build_architecture_map(repo_path: str, index: RepoIndex) -> ArchitectureMap:
             text = "".join(
                 block.text for block in response.content if hasattr(block, "text")
             )
-            data = json.loads(text)
+            # Claude fences JSON even when told "JSON only" — a bare json.loads failed every
+            # attempt on a fenced reply and the map was never built.
+            from app.agents.base_graph import _parse_llm_json
+
+            data = _parse_llm_json(text)
             return ArchitectureMap.model_validate(data)
         except (json.JSONDecodeError, ValidationError) as exc:
             last_error = exc

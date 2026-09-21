@@ -30,7 +30,8 @@ Live tally is kept at the top of each batch section once that batch starts.
 | **B3** Human control, approvals, recovery, reliability | 37 | **37** | 32 | 4 | 0 | 1 |
 | **B4** Memory & knowledge systems | 33 | **33** | 30 | 3 | 0 | 0 |
 | **B5** Context, cost, confidence, intent, truthfulness | 33 | **33** | 15 | 17 | 1 | 0 |
-| B6–B11 | 230 | 0 | 0 | 0 | 0 | 0 |
+| **B6** Agent scaffold, capability audit, skills | 39 | **39** | 36 | 3 | 0 | 0 |
+| B7–B11 | 191 | 0 | 0 | 0 | 0 | 0 |
 
 **Environment baseline (Day 0):** isolated DB `gridiron_verify`; first full run 31 failed / 7,707 passed / 54 skipped — 28 of the 31 were `python: not found` from running pytest without the venv on PATH (84 tests pass with it), 2 pip-audit drift (known), 1 shared-state test. See `verify_api_ledger.md` for live-API spend (~$0.30 so far).
 
@@ -229,45 +230,45 @@ Live tally is kept at the top of each batch section once that batch starts.
 
 | # | § | Question | Verdict | Evidence / notes |
 |---:|---|---|---|---|
-| 101 | 6 | Identity/Role/Responsibilities | PENDING | |
-| 102 | 6 | System prompt loaded from role file | PENDING | |
-| 103 | 6 | Skills/Tool List | PENDING | |
-| 104 | 6 | Memory wired per agent | PENDING | |
-| 105 | 6 | Knowledge Base (repo context) | PENDING | |
-| 107 | 6 | Reasoning Loop | PENDING | |
-| 108 | 6 | Verification Loop | PENDING | |
-| 109 | 6 | Self-Critique | PENDING | |
-| 110 | 6 | Recovery System (retry+feedback) | PENDING | |
-| 111 | 6 | Safety Layer | PENDING | |
-| 112 | 6 | Learning Layer | PENDING | |
-| 113 | 6 | Configuration (no hardcoding) | PENDING | |
-| 114 | 6 | Observability/Logging | PENDING | |
-| 115 | 6 | Metrics | PENDING | |
-| 116 | 7 | Intelligent Understanding / Deep Instruction Analysis | PENDING | |
-| 118 | 7 | Context Awareness | PENDING | |
-| 119 | 7 | Long-Term Memory | PENDING | |
-| 120 | 7 | Learn From Success | PENDING | |
-| 121 | 7 | Learn From Failure | PENDING | |
-| 122 | 7 | Detect User Satisfaction | PENDING | |
-| 124 | 7 | Honest Error Handling | PENDING | |
-| 125 | 7 | Credential Handling | PENDING | |
-| 127 | 7 | Cross-Agent Collaboration / Shared Learning | PENDING | |
-| 128 | 7 | Architecture Awareness | PENDING | |
-| 131 | 7 | Self Review | PENDING | |
-| 132 | 7 | Continuous Improvement | PENDING | |
-| 133 | 7 | Production Quality (lint/test gates) | PENDING | |
-| 134 | 72 | Requirement Analysis / Problem Decomposition | PENDING | |
-| 135 | 72 | Planning | PENDING | |
-| 136 | 72 | Code Reading/Writing | PENDING | |
-| 137 | 72 | Code Review | PENDING | |
-| 138 | 72 | Debugging / Root Cause Analysis | PENDING | |
-| 139 | 72 | Testing / Verification | PENDING | |
-| 140 | 72 | Security Awareness | PENDING | |
-| 141 | 72 | Cost Awareness | PENDING | |
-| 142 | 72 | Risk Assessment | PENDING | |
-| 143 | 72 | Observability | PENDING | |
-| 144 | 72 | Refactoring | PENDING | |
-| 145 | 72 | Documentation | PENDING | |
+| 101 | 6 | Identity/Role/Responsibilities | CONFIRMED | All 88 agent modules carry an AGENT_CONTRACT (name, tools, permissions, expected_verification); test_b6_agent_scaffold drives every run_* entry point of the 79 reachable agents with run_agent_graph replaced by a recorder. |
+| 102 | 6 | System prompt loaded from role file | CONFIRMED | Every agent's role_name resolves to roles/<name>.md with real content (audit test). chat_agent/barot_agent/bhaskar_agent are the documented exceptions with their own prompt path. |
+| 103 | 6 | Skills/Tool List | CONFIRMED | Audit: every tool advertised to the model has a handler, for all 79 agents (no advertised-but-not-dispatched). Handlers offered but not advertised are refused at dispatch (existing guard). |
+| 104 | 6 | Memory wired per agent | CONFIRMED | enable_memory on 78/79 agents; memory_hook_node reads the real DB (B4 #402). |
+| 105 | 6 | Knowledge Base (repo context) | CONFIRMED | repo_context (scanner + context_builder) injected by memory_hook_node; scanner verified in B2. |
+| 107 | 6 | Reasoning Loop | CONFIRMED | Live run_coder on the real API: plan -> tool loop -> submit_patch -> static checks, correct patch (135 s, 29k/3.4k tokens, ~$0.16). |
+| 108 | 6 | Verification Loop | CONFIRMED | All 79 agents declare a verification contract (set_by/enforce_in_result); enforcement bugs found in B5 (#501/#349). |
+| 109 | 6 | Self-Critique | CONFIRMED | Critique node enabled on 7 agents only (coder, qa, reviewer, ...), runs live and parses Claude's JSON. Note: on the trivial live task it judged generic role criteria ('rollback path stated') unmet and burned its retry, then accepted with a gate flag — costs tokens for no benefit on small tasks (Task 2 lead). |
+| 110 | 6 | Recovery System (retry+feedback) | CONFIRMED | Retry-with-feedback loops in coder/backend_dev/frontend_dev/qa; the static-check trigger was broken for non-Python repos (fixed, B5 #352). |
+| 111 | 6 | Safety Layer | CONFIRMED | Policy check + blocking_until + unadvertised-tool refusal run at the one execute_tools chokepoint; deeper security review in B7 (host-run tools unsandboxed lead stands). |
+| 112 | 6 | Learning Layer | CONFIRMED | Lesson extraction persists to the lessons table (rows from the live pipeline run: pm/architect/decomposer); a standalone process without the FastAPI main loop does not persist (by design). |
+| 113 | 6 | Configuration (no hardcoding) | CONFIRMED | No model id is hardcoded anywhere under app/ except config.py and model_router (audit test); models/tiers come from agent_models.json, thresholds from settings. |
+| 114 | 6 | Observability/Logging | CONFIRMED | JSON logs carry trace_id/task_id/agent_run_id; policy denials go to the audit log; run_span per agent run. |
+| 115 | 6 | Metrics | CONFIRMED | RunMetrics tokens/cost per run + agent_runs rows (existing tests); cost_estimate is NULL on pipeline agents (B5 lead). |
+| 116 | 7 | Intelligent Understanding / Deep Instruction Analysis | CONFIRMED | Live PM run (B1): goals, constraints, confidence from a plain-language request. |
+| 118 | 7 | Context Awareness | CONFIRMED | Memory + repo context + facts/plan step injected before the first LLM call (B4/B2). |
+| 119 | 7 | Long-Term Memory | CONFIRMED | See B4 #77-#80 (real pgvector). |
+| 120 | 7 | Learn From Success | CONFIRMED | record_agent_run_outcome hooks write successful outcomes to memory (test_memory_hooks + B4 store). |
+| 121 | 7 | Learn From Failure | CONFIRMED | Same hooks embed failures (root cause) and query_failures feeds later runs (B4 real DB). |
+| 122 | 7 | Detect User Satisfaction | CONFIRMED | Only NEGATIVE signals are detected (frustration phrases, shouting, repeats) — no positive-satisfaction signal. Two real defects fixed in B5 (#338/#339). |
+| 124 | 7 | Honest Error Handling | CONFIRMED | Coder/QA/planner failures come back as explicit error results (never a fabricated success); B5 removed a false pass (QA) and a false failure (non-Python static checks); 422 bodies no longer leak paths (B3). |
+| 125 | 7 | Credential Handling | FIXED | _redact_secrets_in_text / the pre-commit scanner missed the platform's OWN key shape (sk-ant-...: the hyphen defeated the sk- alternative), sk-proj-, github_pat_, JWTs, Stripe, Google keys, DB-URL passwords and Bearer tokens; only the first token on a line was redacted; masking showed 6 characters of a password. All fixed with tests. |
+| 127 | 7 | Cross-Agent Collaboration / Shared Learning | CONFIRMED | LessonStore + lessons table shared across processes (B4 real-DB test); delegation module has its own tests. |
+| 128 | 7 | Architecture Awareness | FIXED | build_architecture_map did json.loads on the raw reply: Claude fences JSON, so every attempt failed and the map was never built (returned the 'Failed to generate' stub). Now the fence-tolerant parser. |
+| 131 | 7 | Self Review | CONFIRMED | self_review state field delivered by execute_tools (fixed in B1 #11). |
+| 132 | 7 | Continuous Improvement | CONFIRMED | Lessons, versioned lessons with promotion gate, prompt registry with rollback exist and work (B4); the scheduled self-improvement scans are verified in B8. |
+| 133 | 7 | Production Quality (lint/test gates) | FIXED | Lint/type gate was broken for non-Python repos and blocked on unrelated pre-existing errors — see B5 #352; live coder run passed mypy on the changed file. |
+| 134 | 72 | Requirement Analysis / Problem Decomposition | CONFIRMED | PM + decomposer run live in B1 (task 271): structured goals and subtasks. |
+| 135 | 72 | Planning | CONFIRMED | Planner agent + the shared gather-facts/plan node (planner_node) — plan produced in the live coder run. |
+| 136 | 72 | Code Reading/Writing | CONFIRMED | Live coder run read calc.py, wrote add(), ran checks. |
+| 137 | 72 | Code Review | CONFIRMED | reviewer/security_reviewer/architecture_reviewer: contracts, tools, handlers verified for all; review quality not measured live. |
+| 138 | 72 | Debugging / Root Cause Analysis | CONFIRMED | debugger_agent/bug_fix + analyze_error/read_logs tools verified structurally and in tool_enhance; not exercised live. |
+| 139 | 72 | Testing / Verification | CONFIRMED | qa/test_writer/test_coverage: verification now requires a real test command (B5 #501). |
+| 140 | 72 | Security Awareness | CONFIRMED | security_reviewer, dependency_security_agent, secrets_scan, redaction (fixed here #125). |
+| 141 | 72 | Cost Awareness | CONFIRMED | cost_controller + cost_estimator_agent (B5 fixes to the estimate). |
+| 142 | 72 | Risk Assessment | CONFIRMED | Architect emits risk_level (live: 'low'), surfaced by /tasks/{id}/explain. |
+| 143 | 72 | Observability | CONFIRMED | monitoring_agent/slo_agent/observability tools exist with contracts; structured logging is fleet-wide. |
+| 144 | 72 | Refactoring | CONFIRMED | rename_symbol AST refactor verified in B1; refactor tools present. |
+| 145 | 72 | Documentation | CONFIRMED | doc agents (api_docs, architecture_doc, changelog, ...) registered with contracts/role files; output quality not measured live. |
 
 ## B7 — Security, governance, enterprise & frontend/API  (32 items, depth: Deep)
 

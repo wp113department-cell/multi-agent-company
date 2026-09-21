@@ -322,7 +322,10 @@ def _mask_secret_value(name: str, value: str) -> str:
             looks_secret = True
     if not looks_secret:
         return value
-    prefix = value[:6]
+    # A 6-character prefix identifies a PROVIDER token (sk-ant-, ghp_16...) and is safe to
+    # show; for a password or an arbitrary secret value it is 6 characters of the secret
+    # (a 10-character password lost 60% of itself).
+    prefix = value[:6] if _SECRET_VALUE_RE.match(value) else ""
     return f"{prefix}***REDACTED"
 
 
@@ -361,7 +364,18 @@ def _scan_content_for_secrets(content: str) -> str | None:
                 # pattern set instead of three independently-drifting regex
                 # lists.
                 r"\b(sk-[A-Za-z0-9]{16,}|(?:AKIA|AGPA|AROA|AIPA|ANPA|ANVA|ASIA)[0-9A-Z]{12,}"
-                r"|gh[opsu]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9\-]{10,})\b"
+                r"|gh[opsu]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9\-]{10,}"
+                # B6 verification: the shapes below went straight through — including
+                # the platform's own ANTHROPIC_API_KEY (`sk-ant-...`: the hyphen after
+                # "sk-ant" defeated the sk-[A-Za-z0-9]{16,} alternative).
+                r"|sk-ant-[A-Za-z0-9_\-]{20,}|sk-(?:proj|svcacct|admin)-[A-Za-z0-9_\-]{20,}"
+                r"|github_pat_[A-Za-z0-9_]{22,}|(?:sk|rk|pk)_live_[A-Za-z0-9]{16,}"
+                r"|AIza[0-9A-Za-z_\-]{35}"
+                r"|eyJ[A-Za-z0-9_\-]{8,}\.eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,})"
+            ),
+            "bearer": _re.compile(r"(?i)\bbearer\s+([A-Za-z0-9._~+/=\-]{20,})"),
+            "url_password": _re.compile(
+                r"\b[a-z][a-z0-9+.\-]*://[^\s:/@]+:([^\s@/]{3,})@"
             ),
             "pem_header": _re.compile(
                 r"-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"
@@ -371,6 +385,13 @@ def _scan_content_for_secrets(content: str) -> str | None:
         m = _SECRET_CONTENT_RE["provider_token"].search(line)
         if m:
             return f"line {line_no} contains a value matching a known secret-token pattern ({m.group(1)[:6]}***REDACTED)"
+        for extra in ("bearer", "url_password"):
+            xm = _SECRET_CONTENT_RE[extra].search(line)
+            if xm:
+                return (
+                    f"line {line_no} contains a credential ({extra}: "
+                    f"{xm.group(1)[:4]}***REDACTED)"
+                )
         if _SECRET_CONTENT_RE["pem_header"].search(line):
             return f"line {line_no} contains a private key header (-----BEGIN ... PRIVATE KEY-----)"
         am = _SECRET_CONTENT_RE["assignment"].match(line)
@@ -486,11 +507,17 @@ def _redact_secrets_in_text(content: str) -> tuple[str, bool]:
     out_lines: list[str] = []
     for line in content.splitlines():
         new_line = line
-        m = patterns["provider_token"].search(new_line)
-        if m:
+        # every token on the line (was: only the first — a second one leaked)
+        for m in list(patterns["provider_token"].finditer(new_line)):
             token = m.group(1)
             new_line = new_line.replace(token, _mask_secret_value("TOKEN", token))
             found = True
+        for extra in ("bearer", "url_password"):
+            for m in list(patterns[extra].finditer(new_line)):
+                new_line = new_line.replace(
+                    m.group(1), _mask_secret_value("TOKEN", m.group(1))
+                )
+                found = True
         if patterns["pem_header"].search(new_line):
             new_line = "[REDACTED: private key header]"
             found = True
