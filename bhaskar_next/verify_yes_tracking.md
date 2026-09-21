@@ -27,7 +27,8 @@ Live tally is kept at the top of each batch section once that batch starts.
 |---|---:|---:|---:|---:|---:|---:|
 | **B1** Repo execution, terminals & file ops | 36 | **36** | 12 | 24 | 0 | 0 |
 | **B2** Orchestration, selection, runtime decisions | 25 | **25** | 17 | 8 | 0 | 0 |
-| B3–B11 | 333 | 0 | 0 | 0 | 0 | 0 |
+| **B3** Human control, approvals, recovery, reliability | 37 | **37** | 32 | 4 | 0 | 1 |
+| B4–B11 | 296 | 0 | 0 | 0 | 0 | 0 |
 
 **Environment baseline (Day 0):** isolated DB `gridiron_verify`; first full run 31 failed / 7,707 passed / 54 skipped — 28 of the 31 were `python: not found` from running pytest without the venv on PATH (84 tests pass with it), 2 pip-audit drift (known), 1 shared-state test. See `verify_api_ledger.md` for live-API spend (~$0.30 so far).
 
@@ -108,43 +109,43 @@ Live tally is kept at the top of each batch section once that batch starts.
 
 | # | § | Question | Verdict | Evidence / notes |
 |---:|---|---|---|---|
-| 208 | 13 | Ask permission | PENDING | |
-| 209 | 13 | Wait indefinitely for a response | PENDING | |
-| 210 | 13 | Present options (multi-choice) | PENDING | |
-| 211 | 13 | Recommend choices (structured field) | PENDING | |
-| 214 | 39 | Delete a file gated | PENDING | |
-| 215 | 39 | Overwrite an existing file gated | PENDING | |
-| 216 | 39 | git push (incl. force) gated | PENDING | |
-| 217 | 39 | git reset --hard gated | PENDING | |
-| 218 | 39 | Dangerous bash command gated | PENDING | |
-| 219 | 39 | undo_changes gated | PENDING | |
-| 220 | 39 | DB migration gated | PENDING | |
-| 221 | 39 | seed_database gated | PENDING | |
-| 222 | 39 | Dependency upgrades gated | PENDING | |
-| 224 | 39 | 'Don't ask again this session' option | PENDING | |
-| 225 | 103 | Interrupt any agent mid-run | PENDING | |
-| 226 | 103 | Resume with injected input | PENDING | |
-| 228 | 14 | Pause | PENDING | |
-| 229 | 14 | Resume | PENDING | |
-| 230 | 14 | Cancel (distinct terminal state) | PENDING | |
-| 231 | 14 | Retry | PENDING | |
-| 232 | 14 | Rollback (manual operator-invoked) | PENDING | |
-| 233 | 14 | Checkpoints (Postgres-backed, all paths) | PENDING | |
-| 237 | 38 | Docker crashes (sandbox) - fails closed correctly | PENDING | |
-| 239 | 38 | Terminal/shell session closes - detected live | PENDING | |
-| 240 | 38 | Internet disconnects - retry/backoff | PENDING | |
-| 241 | 38 | LLM API fails (rate limit/500/timeout) | PENDING | |
-| 242 | 97 | Backup exists and is automated/scheduled | PENDING | |
-| 243 | 97 | Auto-restart on crash | PENDING | |
-| 244 | 102 | Run 30+ min / hours without being killed | PENDING | |
-| 245 | 102 | Progress reporting | PENDING | |
-| 247 | 66 | Retries | PENDING | |
-| 248 | 66 | Exponential backoff | PENDING | |
-| 249 | 66 | Circuit breakers | PENDING | |
-| 250 | 66 | Timeout handling (incl. DB statement timeout) | PENDING | |
-| 251 | 66 | Idempotency | PENDING | |
-| 252 | 66 | Transaction safety | PENDING | |
-| 253 | 66 | Structured error reporting | PENDING | |
+| 208 | 13 | Ask permission | CONFIRMED | Real-dispatch battery with approval DENIED: 10 named destructive actions genuinely ask first. Neighbours that did NOT ask were fixed (see #215/#218/#219/#220). |
+| 209 | 13 | Wait indefinitely for a response | CONFIRMED | Static: no expiry/timeout anywhere in approval_gate.py or the pending_approvals model; the row persists in Postgres. Not re-verified by actually waiting hours. |
+| 210 | 13 | Present options (multi-choice) | CONFIRMED | _confirm_with_options + tests (test_audit_q_batch07_guardian_human_interaction.py) pass. |
+| 211 | 13 | Recommend choices (structured field) | CONFIRMED | structured `recommended` field on option prompts; same batch07 tests pass. |
+| 214 | 39 | Delete a file gated | CONFIRMED | delete_file asks; denial leaves the file (live battery). |
+| 215 | 39 | Overwrite an existing file gated | FIXED | 7110d286 — write_file overwrite IS gated, but move_file/rename_file/copy_file silently replaced an existing destination (Path.rename/shutil.copy2). Now refuse unless overwrite=true; chat asks the user (also when the model passes overwrite up front). |
+| 216 | 39 | git push (incl. force) gated | CONFIRMED | git_push incl. force=true asks; denial pushes nothing. (Console route push option-injection fixed in B1.) |
+| 217 | 39 | git reset --hard gated | CONFIRMED | git_reset hard asks; denial keeps changes. NOTE 7110d286: sibling `git_checkout <ref> -- <file>` discarded work silently and `git_stash drop` deleted stashes silently — both now gated. |
+| 218 | 39 | Dangerous bash command gated | FIXED | 3fc5ce8b, 948a5eba — bash dangerous commands ask (confirmed), but docker_restart ran unprompted (a probe restarted the dev Redis!) and docker compose down/restart/build/pull were ungated (only `up` asked). Now gated. |
+| 219 | 39 | undo_changes gated | CONFIRMED | undo_changes asks. Its silent bypass (git_checkout of a dirty file) was closed in 7110d286. |
+| 220 | 39 | DB migration gated | FIXED | 3fc5ce8b — run_migration asks (confirmed), but chat's run_sql ran DELETE/DROP TABLE against the PLATFORM DB with no prompt, and 4 agents' run_sql could never connect (psql got the +asyncpg URL as a db name) with prompt-only 'no DROP' rules. Read-only by construction now; PG read-only txn alone proved bypassable in one call; chat asks, headless agents cannot write. |
+| 221 | 39 | seed_database gated | CONFIRMED | seed_database asks; denial runs nothing. |
+| 222 | 39 | Dependency upgrades gated | CONFIRMED | pip_install / npm_install ask; denial installs nothing. |
+| 224 | 39 | 'Don't ask again this session' option | CONFIRMED | 'remember for this session' (session.remembered_confirmations) — batch07 tests pass; only skips the pause, never a hard block. |
+| 225 | 103 | Interrupt any agent mid-run | CONFIRMED | Stop sets an abort flag honoured at the next LLM/tool boundary ('after the current tool call completes' — not mid-call). See #69 for the stale-flag bug fixed in 9af9847e. |
+| 226 | 103 | Resume with injected input | CONFIRMED | /resume clears the flag and injects the message (real API + DB test, b2_stop_cancel_restart). |
+| 228 | 14 | Pause | CONFIRMED | Pause = Stop (resumable). Verified with real API; stale flag bug fixed (9af9847e). |
+| 229 | 14 | Resume | CONFIRMED | Resume verified (409 on a cancelled task). |
+| 230 | 14 | Cancel (distinct terminal state) | CONFIRMED | Cancel is a distinct terminal state: DB status 'cancelled', resume refused, restart allowed (tests). |
+| 231 | 14 | Retry | CONFIRMED | POST /restart re-triggers planning; refused (409) while a run is active; no longer inherits a stale abort (9af9847e). |
+| 232 | 14 | Rollback (manual operator-invoked) | CONFIRMED | failure_ladder rollback + prompt/enhancement rollback API tests pass (batch15/batch18). Not exercised live against a real deploy. |
+| 233 | 14 | Checkpoints (Postgres-backed, all paths) | CONFIRMED | CAVEAT: pipeline and agent checkpointers are Postgres-backed (AsyncPostgresSaver) but SILENTLY fall back to in-memory MemorySaver if Postgres init fails (a warning only) — then nothing survives a restart. Crash-recovery gaps are Task 2 (#234-236). |
+| 237 | 38 | Docker crashes (sandbox) - fails closed correctly | CONFIRMED | B1: Docker unreachable → [SANDBOX UNAVAILABLE], command NOT run on the host (tests). |
+| 239 | 38 | Terminal/shell session closes - detected live | CONFIRMED | B1: a killed/crashed shell wrapper is detected by the liveness reaper AND its container is now killed (d6fa8343). |
+| 240 | 38 | Internet disconnects - retry/backoff | CONFIRMED | real `anthropic` SDK retry/backoff tests (test_gap58_59) pass; SDK max_retries is settings-driven. Not re-run against a real network partition. |
+| 241 | 38 | LLM API fails (rate limit/500/timeout) | CONFIRMED | rate-limit/5xx/timeout handling: real-SDK tests + breaker wiring pass; live Groq 429 storms were observed backing off (54s, 27s, 42s...). |
+| 242 | 97 | Backup exists and is automated/scheduled | CONFIRMED | STATIC: scripts/backup_db.sh (pg_dump -Fc + pg_restore --list verify) + systemd timer (daily, Persistent=true). NOT executed here — a restore drill is still owed. |
+| 243 | 97 | Auto-restart on crash | CONFIRMED | STATIC: `restart: unless-stopped` on the long-running services in docker-compose.prod.yml. Not crash-tested here. |
+| 244 | 102 | Run 30+ min / hours without being killed | BLOCKED | Cannot be verified in this environment (needs a 30+ minute live run). Structurally: LLM/slot/DB timeouts exist; no evidence checked for a global wall-clock kill. Revisit with a long-run soak. |
+| 245 | 102 | Progress reporting | CONFIRMED | live: activity stream / task logs reported PM→Architect→Decomposer progress during the real run; task_progress tool tests pass. |
+| 247 | 66 | Retries | CONFIRMED | tool retry policy (B2) + SDK retries + failure ladder. |
+| 248 | 66 | Exponential backoff | CONFIRMED | tool backoff 0.5s,1.0s capped 4s (test); SDK exponential backoff + jitter (live 429 sequence 5s→27s→54s→42s observed). |
+| 249 | 66 | Circuit breakers | CONFIRMED | CircuitBreaker closed/open/half-open + wiring into every LLM call (tests pass). |
+| 250 | 66 | Timeout handling (incl. DB statement timeout) | CONFIRMED | db statement_timeout server setting, LLM call timeout, slot-acquisition timeout (loud SlotAcquisitionTimeout) — tests pass. |
+| 251 | 66 | Idempotency | CONFIRMED | Idempotency-Key middleware wired into task creation; 68 idempotency-related tests pass. Not re-probed live end to end. |
+| 252 | 66 | Transaction safety | CONFIRMED | structural transaction-boundary invariant test passes (test_batch08_transaction_boundary_invariant). |
+| 253 | 66 | Structured error reporting | FIXED | 2nd-to-last commit — the 422 handler returned str(exc) which appended a stack frame with absolute SERVER FILE PATHS to the response body (proved live). Now loc/msg/type only. |
 
 ## B4 — Memory & knowledge systems  (33 items, depth: Deep)
 
