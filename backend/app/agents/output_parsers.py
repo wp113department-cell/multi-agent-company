@@ -27,8 +27,17 @@ _PYTEST_COUNT_RE = re.compile(
 # line completely bare, with no "=" padding at all — found via real
 # execution (a first version of this regex required "=" padding and
 # silently never matched -q output, this codebase's only actual caller).
+#
+# pytest appends a human-readable "(H:MM:SS)" once a run takes 60s or longer
+# ("31 failed, 7707 passed in 714.98s (0:11:54)"). The anchor used to end at
+# "s", so every run >= 60s — the long, important ones — silently produced no
+# structured summary (found by feeding it a real full-suite run's last line).
+_PYTEST_DURATION = r"in\s+[\d.]+s(?:\s*\(\d+:\d{2}:\d{2}\))?"
 _PYTEST_SUMMARY_LINE_RE = re.compile(
-    r"^=*\s*(?:\d+\s+\w+,?\s*)+in\s+[\d.]+s\s*=*$", re.IGNORECASE
+    rf"^=*\s*(?:\d+\s+\w+,?\s*)+{_PYTEST_DURATION}\s*=*$", re.IGNORECASE
+)
+_PYTEST_NO_TESTS_RE = re.compile(
+    rf"^=*\s*no tests ran\s+{_PYTEST_DURATION}\s*=*$", re.IGNORECASE
 )
 
 
@@ -40,6 +49,8 @@ def parse_pytest_summary(output: str) -> str | None:
     bare count pattern on its own."""
     for line in reversed(output.splitlines()):
         stripped = line.strip()
+        if _PYTEST_NO_TESTS_RE.match(stripped):
+            return "=== Test Summary === no tests ran"
         if not _PYTEST_SUMMARY_LINE_RE.match(stripped):
             continue
         matches = _PYTEST_COUNT_RE.findall(stripped)

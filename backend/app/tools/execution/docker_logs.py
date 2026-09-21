@@ -78,6 +78,7 @@ call site, not just a security patch.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from typing import Any
 
@@ -104,19 +105,62 @@ def docker_logs_handler(inp: dict[str, Any]) -> str:
         )
 
     try:
+        # stderr merged INTO stdout: `docker logs` writes the container's
+        # stderr to the client's stderr, so `stdout + stderr` concatenation
+        # put every stderr line (the errors) after all stdout lines,
+        # destroying chronological order. Merged, they arrive in log order.
         r = subprocess.run(
-            ["docker", "logs", "--tail", str(lines), container],
-            capture_output=True,
+            ["docker", "logs", "--timestamps", "--tail", str(lines), container],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
+            errors="replace",
             timeout=15,
         )
     except FileNotFoundError:
         return "[ERROR] docker not found"
 
-    raw = (r.stdout + r.stderr)[:MAX_LOG_CHARS]
-    if not raw:
+    return analyze_and_tail_logs(merge_chronologically(r.stdout or ""))
+
+
+_DOCKER_TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}T[0-9:.]+Z) ?(.*)$")
+
+
+def merge_chronologically(raw: str) -> str:
+    """Order `docker logs --timestamps` output by the daemon's own timestamps
+    and strip them.
+
+    Merging stderr into stdout is NOT enough: the json-file driver reads the
+    two streams through separate copiers, so their interleaving is not
+    preserved (a stderr line written right before the last stdout lines can be
+    logged earlier — observed live, it made a test flaky). The per-entry
+    timestamps are reliable to the nanosecond. Falls back to the text as-is if
+    any line lacks one (a different logging driver / unexpected format)."""
+    lines = raw.splitlines()
+    parsed = [_DOCKER_TS_RE.match(ln) for ln in lines]
+    if not lines or not all(parsed):
+        return raw
+    ordered = sorted(
+        (m for m in parsed if m), key=lambda m: m.group(1)  # stable: ties keep order
+    )
+    return "\n".join(m.group(2) for m in ordered) + "\n"
+
+
+def analyze_and_tail_logs(full: str, limit: int = MAX_LOG_CHARS) -> str:
+    """Pattern-analyse the WHOLE fetched log, then show only its TAIL.
+
+    The old `[:6000]` kept the head and cut the newest lines — exactly the
+    crash/fatal line a caller is looking for — and ran the pattern analysis on
+    the truncated text, so a container that had just died looked healthy
+    (proved live). Shared by docker_logs and diagnose_deployment_failure."""
+    if not full:
         return "(no logs)"
-    return _summarize_docker_log_patterns(raw) + raw
+    if len(full) > limit:
+        omitted = len(full) - limit
+        shown = f"[... {omitted} earlier character(s) omitted ...]\n" + full[-limit:]
+    else:
+        shown = full
+    return _summarize_docker_log_patterns(full) + shown
 
 
 DOCKER_LOGS_TOOL = {

@@ -93,7 +93,10 @@ import json
 import subprocess
 from typing import Any
 
-from app.agents.tool_security import _summarize_docker_log_patterns
+from app.tools.execution.docker_logs import (
+    analyze_and_tail_logs,
+    merge_chronologically,
+)
 
 
 def gather_deployment_diagnostics(inp: dict[str, Any]) -> str:
@@ -136,20 +139,20 @@ def gather_deployment_diagnostics(inp: dict[str, Any]) -> str:
     )
 
     if container:
+        # stderr merged into stdout (chronological) and the TAIL kept — the
+        # old `(stdout + stderr)[:6000]` reordered streams and cut the newest
+        # (crash) lines; see docker_logs.analyze_and_tail_logs.
         logs_r = subprocess.run(
-            ["docker", "logs", "--tail", str(lines), container],
-            capture_output=True,
+            ["docker", "logs", "--timestamps", "--tail", str(lines), container],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
+            errors="replace",
             timeout=15,
         )
-        raw_logs = (logs_r.stdout + logs_r.stderr)[:6000]
         parts.append(
             f"=== docker logs --tail {lines} {container} ===\n"
-            + (
-                _summarize_docker_log_patterns(raw_logs) + raw_logs
-                if raw_logs
-                else "(no logs)"
-            )
+            + analyze_and_tail_logs(merge_chronologically(logs_r.stdout or ""), 6000)
         )
 
         inspect_r = subprocess.run(
