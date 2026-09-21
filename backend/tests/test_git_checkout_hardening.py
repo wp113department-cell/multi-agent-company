@@ -130,11 +130,18 @@ async def test_chat_agent_git_checkout_real_single_file_restore(tmp_path: Path) 
     repo = _real_repo(tmp_path)
     (repo / "important_work.py").write_text("modified but not committed\n")
     agent = _agent(repo)
+    # UPDATED (verification batch B3): restoring a file that has uncommitted work
+    # discards that work, so it now asks the user first (it used to run silently —
+    # a bypass of the gated undo_changes). Approve explicitly here.
+    from unittest.mock import AsyncMock
+
+    agent._confirm = AsyncMock(return_value=True)
 
     result = await agent._execute_tool(
         "git_checkout", {"target": "HEAD", "file": "important_work.py"}
     )
     assert not result.startswith("[ERROR]")
+    assert agent._confirm.await_count == 1
     assert (repo / "important_work.py").read_text() == "original committed content\n"
 
 

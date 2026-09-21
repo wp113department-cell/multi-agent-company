@@ -1011,6 +1011,27 @@ class ChatAgent:
 
         return approved
 
+    async def _guard_overwrite(
+        self, root: Path, src_rel: str, dest_rel: str, inp: dict[str, Any]
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        """move/rename/copy silently replaced an existing destination (Path.rename
+        and shutil.copy2 do), a gap next to write_file's overwrite gate. If the
+        final destination exists, ask the user; on approval return the input with
+        overwrite=true, on refusal a [DENIED] result. Returns (inp, None) or
+        (None, denial)."""
+        dst = root / dest_rel
+        src = root / src_rel
+        final = dst / src.name if dst.is_dir() else dst
+        if final.exists() or final.is_symlink():
+            approved = await self._confirm(
+                description="Overwrite an existing file or directory",
+                details=f"{src_rel} → {dest_rel}",
+            )
+            if not approved:
+                return None, f"[DENIED] User declined to overwrite: {dest_rel}"
+            return {**inp, "overwrite": True}, None
+        return inp, None
+
     async def _confirm_with_options(
         self,
         description: str,
@@ -1464,7 +1485,12 @@ class ChatAgent:
             return append_file_handler(root, repo, inp)
 
         if tool_name == "rename_file":
-            return rename_file_handler(root, repo, inp)
+            rf_inp, rf_denied = await self._guard_overwrite(
+                root, str(inp.get("from_path", "")), str(inp.get("to_path", "")), inp
+            )
+            if rf_denied:
+                return rf_denied
+            return rename_file_handler(root, repo, rf_inp or inp)
 
         if tool_name == "copy_file":
             # tool_enhance.md productionization pass, tool #128
@@ -1475,7 +1501,12 @@ class ChatAgent:
             # real chmod 500 destination directory raising an
             # unhandled PermissionError). Now delegates to the
             # shared, already-worktree-validated handler.
-            return copy_file_handler(root, repo, inp)
+            cf_inp, cf_denied = await self._guard_overwrite(
+                root, str(inp.get("from_path", "")), str(inp.get("to_path", "")), inp
+            )
+            if cf_denied:
+                return cf_denied
+            return copy_file_handler(root, repo, cf_inp or inp)
 
         if tool_name == "move_file":
             # tool_enhance.md productionization pass, tool #52 (2026-08-20)
@@ -1489,7 +1520,12 @@ class ChatAgent:
             # repo, destroying the original file at its source location.
             # Fixed via the shared move_file_handler(), which validates
             # both source and dest.
-            return move_file_handler(root, repo, inp)
+            mv_inp, mv_denied = await self._guard_overwrite(
+                root, str(inp.get("source", "")), str(inp.get("dest", "")), inp
+            )
+            if mv_denied:
+                return mv_denied
+            return move_file_handler(root, repo, mv_inp or inp)
 
         if tool_name == "delete_file":
             rel = str(inp["path"])
@@ -1561,6 +1597,18 @@ class ChatAgent:
             if ck_error:
                 return ck_error
             if file_arg:
+                # `checkout <ref> -- <file>` silently throws away uncommitted work
+                # in that file — the same destructive act undo_changes gates
+                # (proved live: it ran with no prompt).
+                dirty = await asyncio.to_thread(
+                    _git, ["status", "--porcelain", "--", file_arg], repo
+                )
+                if dirty not in ("", "(no output)"):
+                    if not await self._confirm(
+                        description="Discard uncommitted changes to a file",
+                        details=f"git checkout {ck_target} -- {file_arg}",
+                    ):
+                        return f"[DENIED] User declined to discard changes to {file_arg}"
                 return _git(["checkout", ck_target, "--", file_arg], repo)
             return _git(["checkout", ck_target], repo)
 
@@ -1569,6 +1617,11 @@ class ChatAgent:
             gst_error = validate_git_stash_action(gst_action)
             if gst_error:
                 return gst_error
+            if gst_action == "drop" and not await self._confirm(
+                description="Permanently delete stashed changes",
+                details="git stash drop",
+            ):
+                return "[DENIED] User declined to drop the stash."
             gst_msg = str(inp.get("message", ""))
             if gst_action == "push" and gst_msg:
                 return _git(["stash", "push", "-m", gst_msg], repo)

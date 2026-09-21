@@ -63,6 +63,12 @@ from typing import Any
 
 from app.agents.tool_security import _is_protected_path
 
+
+def destination_exists(path: Path) -> bool:
+    """True if `path` exists or is a (possibly dangling) symlink."""
+    return path.exists() or path.is_symlink()
+
+
 MOVE_FILE_TOOL: dict[str, object] = {
     "name": "move_file",
     "description": "Move a file or directory to a new path (mv semantics, can move across directories).",
@@ -76,6 +82,10 @@ MOVE_FILE_TOOL: dict[str, object] = {
             "dest": {
                 "type": "string",
                 "description": "Destination path (relative to repo root)",
+            },
+            "overwrite": {
+                "type": "boolean",
+                "description": "Replace the destination if it already exists (default false: refuses). In the interactive chat this asks the user to confirm.",
             },
         },
         "required": ["source", "dest"],
@@ -95,6 +105,19 @@ def move_file_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> st
     src_path = root / source
     dst_path = root / dest
     try:
+        final_dst = dst_path / src_path.name if dst_path.is_dir() else dst_path
+        dest_label = dest
+        # Refuse to silently clobber an existing destination (Path.rename and
+        # shutil.copy2/move overwrite without a word — proved live: chat's
+        # move/rename/copy replaced an existing file with NO confirmation, unlike
+        # write_file). Interactive chat asks the user first and then passes
+        # overwrite=true; a caller that passes it explicitly takes responsibility.
+        if destination_exists(final_dst) and inp.get("overwrite") is not True:
+            return (
+                f"[ERROR] Destination already exists: {dest_label} — refusing to "
+                "overwrite it silently. Pass overwrite=true to replace it "
+                "(the interactive chat asks the user to confirm first)."
+            )
         dst_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src_path), str(dst_path))
         return f"Moved {source} → {dest}"

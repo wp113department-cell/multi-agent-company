@@ -56,6 +56,12 @@ from typing import Any
 
 from app.agents.tool_security import _is_protected_path
 
+
+def destination_exists(path: Path) -> bool:
+    """True if `path` exists or is a (possibly dangling) symlink."""
+    return path.exists() or path.is_symlink()
+
+
 COPY_FILE_TOOL: dict[str, Any] = {
     "name": "copy_file",
     "description": "Copy a file to a new location within the repository.",
@@ -69,6 +75,10 @@ COPY_FILE_TOOL: dict[str, Any] = {
             "to_path": {
                 "type": "string",
                 "description": "Destination file path relative to repo root",
+            },
+            "overwrite": {
+                "type": "boolean",
+                "description": "Replace the destination if it already exists (default false: refuses). In the interactive chat this asks the user to confirm.",
             },
         },
         "required": ["from_path", "to_path"],
@@ -88,6 +98,19 @@ def copy_file_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> st
     dst = root / to_rel
     if not src.exists():
         return f"[ERROR] Source not found: {from_rel}"
+    final_dst = dst / src.name if dst.is_dir() else dst
+    dest_label = to_rel
+    # Refuse to silently clobber an existing destination (Path.rename and
+    # shutil.copy2/move overwrite without a word — proved live: chat's
+    # move/rename/copy replaced an existing file with NO confirmation, unlike
+    # write_file). Interactive chat asks the user first and then passes
+    # overwrite=true; a caller that passes it explicitly takes responsibility.
+    if destination_exists(final_dst) and inp.get("overwrite") is not True:
+        return (
+            f"[ERROR] Destination already exists: {dest_label} — refusing to "
+            "overwrite it silently. Pass overwrite=true to replace it "
+            "(the interactive chat asks the user to confirm first)."
+        )
     try:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(str(src), str(dst))
