@@ -4,9 +4,17 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
+import tokenize
 from pathlib import Path
 from typing import Any
+
+from app.tools.filesystem._textio import (
+    read_text_lf,
+    split_keepends_lf,
+    write_text_lf,
+)
 
 
 def parse_file_ast(path: str) -> str:
@@ -384,7 +392,10 @@ def _rename_in_python_source(
     if count == 0:
         return source, 0
 
-    lines = source.splitlines(keepends=True)
+    # Split on "\n" only — the way `tokenize` counts lines. str.splitlines also
+    # splits on form feed / \x1c-\x1e / \x85 / \u2028 / \u2029, which put every
+    # later edit on the wrong line and corrupted the file (proved live).
+    lines = split_keepends_lf(source)
     for lineno, spans in by_line.items():
         line = lines[lineno - 1]
         for col_start, col_end in sorted(spans, reverse=True):
@@ -423,22 +434,42 @@ def rename_symbol(
     if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", new_name):
         return f"[ERROR] new_name must be a valid identifier: {new_name!r}"
 
+    from app.policy.engine import check_path
+
     pattern = re.compile(r"\b" + re.escape(old_name) + r"\b")
-    candidates: list[Path] = [
-        fp
-        for fp in d.rglob(file_pattern)
-        if not any(
+    root_real = os.path.realpath(d)
+    candidates: list[Path] = []
+    skipped: list[str] = []
+    for fp in d.rglob(file_pattern):
+        if not fp.is_file() or any(
             part in (".git", "__pycache__", ".venv", "node_modules")
             for part in fp.parts
-        )
-    ]
+        ):
+            continue
+        rel = fp.relative_to(d).as_posix()
+        # Never write through a symlink that leaves the tree (proved live: a
+        # symlinked file pointing OUTSIDE the repo was rewritten), and never
+        # touch a path the write tools' own policy protects (.env*, secrets/,
+        # .github/workflows/, keys, .git/) — a rename with file_pattern="*"
+        # used to rewrite all of them.
+        real = os.path.realpath(fp)
+        if not (
+            real == root_real or real.startswith(root_real.rstrip(os.sep) + os.sep)
+        ):
+            skipped.append(f"{rel} (symlink leaves the directory)")
+            continue
+        if not check_path(rel).allowed:
+            skipped.append(f"{rel} (protected path)")
+            continue
+        candidates.append(fp)
 
     # First pass: count matches per file without writing anything, so a
     # dry-run preview never has to do the rewrite work twice.
     planned: list[tuple[Path, str, int]] = []  # (path, new_content, count)
+    styles: dict[Path, str] = {}
     for fp in candidates:
         try:
-            original = fp.read_text(encoding="utf-8")
+            original, styles[fp] = read_text_lf(fp)
         except (OSError, UnicodeDecodeError):
             continue
         modified: str
@@ -446,7 +477,13 @@ def rename_symbol(
         if fp.suffix == ".py":
             try:
                 modified, count = _rename_in_python_source(original, old_name, new_name)
-            except (SyntaxError, IndentationError, ValueError, OSError):
+            except (
+                SyntaxError,
+                IndentationError,
+                ValueError,
+                OSError,
+                tokenize.TokenError,  # unbalanced brackets / unterminated string
+            ):
                 count = len(pattern.findall(original))
                 modified = pattern.sub(new_name, original) if count else original
         else:
@@ -455,8 +492,16 @@ def rename_symbol(
         if count:
             planned.append((fp, modified, count))
 
+    skipped_note = (
+        "\n[SKIPPED] " + "; ".join(skipped[:20]) + (" ..." if len(skipped) > 20 else "")
+        if skipped
+        else ""
+    )
     if not planned:
-        return f"(no occurrences of '{old_name}' found in {file_pattern!r} files under {directory!r})"
+        return (
+            f"(no occurrences of '{old_name}' found in {file_pattern!r} files under "
+            f"{directory!r})" + skipped_note
+        )
 
     from app.config import get_settings
 
@@ -476,14 +521,48 @@ def rename_symbol(
             "Re-run with confirm_large_batch=true to actually apply this rename."
         )
 
+    # All-or-nothing: refuse up front if any file cannot be written, and roll
+    # back already-written files if a write still fails part-way. Before this a
+    # single PermissionError escaped as an uncaught exception and left the
+    # project half-renamed (a.py renamed, b.py not) with nothing to undo it.
+    unwritable = [
+        fp.relative_to(d).as_posix()
+        for fp, _m, _c in planned
+        if not os.access(fp, os.W_OK)
+    ]
+    if unwritable:
+        return (
+            f"[ERROR] rename_symbol aborted before writing anything: "
+            f"{len(unwritable)} file(s) are not writable: {', '.join(unwritable[:20])}"
+            + skipped_note
+        )
     changed: list[str] = []
-    for fp, modified, count in planned:
-        fp.write_text(modified, encoding="utf-8")
-        changed.append(f"  {fp.relative_to(d)}  ({count} replacement(s))")
+    written: list[tuple[Path, bytes]] = []
+    try:
+        for fp, modified, count in planned:
+            before = fp.read_bytes()
+            write_text_lf(fp, modified, styles[fp])
+            written.append((fp, before))
+            changed.append(f"  {fp.relative_to(d)}  ({count} replacement(s))")
+    except OSError as exc:
+        failed_restore: list[str] = []
+        for wfp, before in reversed(written):
+            try:
+                wfp.write_bytes(before)
+            except OSError:
+                failed_restore.append(wfp.relative_to(d).as_posix())
+        msg = (
+            f"[ERROR] rename_symbol aborted: {exc}. "
+            f"{len(written) - len(failed_restore)} already-written file(s) were rolled back"
+        )
+        if failed_restore:
+            msg += f"; COULD NOT restore: {', '.join(failed_restore)}"
+        return msg
 
     result = (
         f"Renamed '{old_name}' → '{new_name}' across {len(changed)} file(s):\n"
         + "\n".join(changed)
+        + skipped_note
     )
 
     # AUDIT_Q_BATCH01 §59 "Preserve architecture consistency" — a batch
