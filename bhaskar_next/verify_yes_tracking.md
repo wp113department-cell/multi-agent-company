@@ -29,7 +29,8 @@ Live tally is kept at the top of each batch section once that batch starts.
 | **B2** Orchestration, selection, runtime decisions | 25 | **25** | 17 | 8 | 0 | 0 |
 | **B3** Human control, approvals, recovery, reliability | 37 | **37** | 32 | 4 | 0 | 1 |
 | **B4** Memory & knowledge systems | 33 | **33** | 30 | 3 | 0 | 0 |
-| B5–B11 | 263 | 0 | 0 | 0 | 0 | 0 |
+| **B5** Context, cost, confidence, intent, truthfulness | 33 | **33** | 15 | 17 | 1 | 0 |
+| B6–B11 | 230 | 0 | 0 | 0 | 0 | 0 |
 
 **Environment baseline (Day 0):** isolated DB `gridiron_verify`; first full run 31 failed / 7,707 passed / 54 skipped — 28 of the 31 were `python: not found` from running pytest without the venv on PATH (84 tests pass with it), 2 pip-audit drift (known), 1 shared-state test. See `verify_api_ledger.md` for live-API spend (~$0.30 so far).
 
@@ -190,39 +191,39 @@ Live tally is kept at the top of each batch section once that batch starts.
 
 | # | § | Question | Verdict | Evidence / notes |
 |---:|---|---|---|---|
-| 334 | 25 | Ask clarification questions before acting | PENDING | |
-| 335 | 25 | Refuse to guess when info insufficient | PENDING | |
-| 338 | 26 | Frustration detection changes behavior | PENDING | |
-| 339 | 26 | Repetition detection changes behavior | PENDING | |
-| 342 | 26 | Remains professional | PENDING | |
-| 345 | 27 | Remember previous answers on re-dispatch | PENDING | |
-| 349 | 29 | Check for existing implementation before building (enforced, not advisory) | PENDING | |
-| 350 | 30 | Repo search/read files/understand architecture required before writing (enforced) | PENDING | |
-| 352 | 30 | Static quality checks (mypy/ruff) | PENDING | |
-| 353 | 42 | Pre-execution cost/token estimate | PENDING | |
-| 354 | 42 | Recommend cheaper approaches | PENDING | |
-| 355 | 43 | Every important answer has a confidence estimate | PENDING | |
-| 356 | 43 | Distinguish verified facts from assumptions | PENDING | |
-| 357 | 43 | Explicitly say 'I don't know' | PENDING | |
-| 358 | 44 | Explain why this approach / agents / tools chosen | PENDING | |
-| 359 | 44 | Structured decision-log/rationale field in DB | PENDING | |
-| 360 | 45 | Context persists across app restart | PENDING | |
-| 362 | 52 | Condensation trigger | PENDING | |
-| 363 | 52 | Compression method (real summarization, not truncation) | PENDING | |
-| 364 | 52 | Applied to chat_agent conversations too | PENDING | |
-| 366 | 65 | Check against model's real context limit | PENDING | |
-| 367 | 65 | Warn user when approaching limits | PENDING | |
-| 368 | 101 | Token usage estimate | PENDING | |
-| 369 | 101 | API cost estimate | PENDING | |
-| 370 | 101 | Execution time estimate | PENDING | |
-| 371 | 101 | Storage impact estimate | PENDING | |
-| 372 | 101 | Compute requirements estimate | PENDING | |
-| 489 | 73 | Detects professional role and adapts terminology/depth | PENDING | |
-| 492 | 84 | Communicates what it can't do (real, code-enforced limitation classification) | PENDING | |
-| 501 | 54 | Refuse to invent test/execution results | PENDING | |
-| 502 | 54 | Refuse to invent APIs/files/functions/classes (code-checked citations) | PENDING | |
-| 504 | 54 | Say 'I cannot verify this' instead of guessing | PENDING | |
-| 506 | 57 | Approving a clarification correctly resumes the owning agent with the answer | PENDING | |
+| 334 | 25 | Ask clarification questions before acting | CONFIRMED | Mechanism real: planner/coder request_clarification -> PendingApproval -> approval resumes the agent (see #506). Chat asks in plain text per roles/chat.md. Whether a live model asks at the right moments was not measured. |
+| 335 | 25 | Refuse to guess when info insufficient | CONFIRMED | Same mechanism + prompt rules (roles/coder.md 'stop and ask', planner 'UNVERIFIED'). Prompt-level behaviour, not measured live. |
+| 338 | 26 | Frustration detection changes behavior | FIXED | user_sentiment flagged a second 'yes'/'ok'/'continue' as frustration (Jaccard 1.0 on a 1-word set) so the model was told the user was frustrated; now needs >= user_frustration_repeat_min_words (4). The directive itself reaches the system prompt (real). |
+| 339 | 26 | Repetition detection changes behavior | FIXED | Repetition was compared against role='user' history, but tool RESULTS are stored as role='user' list messages — after any tool use the user repeating themselves was compared with tool output and never noticed. New _human_user_messages(). |
+| 342 | 26 | Remains professional | CONFIRMED | Prompt-level (roles/chat.md pressure/hostility sections) + the frustration directive ('acknowledge briefly, concrete next step'). No code enforces tone; not measured live. |
+| 345 | 27 | Remember previous answers on re-dispatch | CONFIRMED | The answer is folded into the immediate re-dispatch of planner/coder (real HTTP test). Limitation: the answer lives only in that run's description and a task log — it is not stored on the approval row, so a later manual retry re-asks the question, and an interrupted background dispatch loses it (row already 'approved' -> 409). Task 2 lead. |
+| 349 | 29 | Check for existing implementation before building (enforced, not advisory) | FIXED | 'Enforced' = blocking_until read gate. It covered write_file/edit_file only, so bash (`echo > f`, `sed -i`) wrote files with nothing read. Coder now gates bash too. Caveat: the gate is 'any read_file/search_code once', not 'searched for THIS feature'. |
+| 350 | 30 | Repo search/read files/understand architecture required before writing (enforced) | FIXED | Same gate: coder blocks write_file/edit_file/bash until read; real execute_tools node test. |
+| 352 | 30 | Static quality checks (mypy/ruff) | FIXED | _run_checks ran `mypy .`/`ruff .` on the whole worktree: a repo with no Python files exits 2 ('no .py files') so EVERY attempt failed and the coder burned its retries; pre-existing errors anywhere blocked unrelated changes; a missing tool failed forever. New app/agents/static_checks.py checks only the changed .py files (real mypy/ruff/black in tests), skips a missing tool, `--` before paths; frontend check skips without apps/web/tsconfig.json. |
+| 353 | 42 | Pre-execution cost/token estimate | FIXED | _historical_avg_tokens averaged EVERY completed agent_run (guardian/test/utility runs included): 80 tokens/run on the dev DB, so a real epic never reached the approval threshold. Now developer run + qa + reviewer per subtask; falls back to config when no developer history. |
+| 354 | 42 | Recommend cheaper approaches | CONFIRMED | CostEstimate.cost_per_subtask_usd / max_subtasks_within_threshold (scope reduction) is real and tested on Postgres. No cheaper-MODEL suggestion (every dispatched agent is sonnet-tier). Calibration note: the config fallback of 4,000 tokens per subtask is far below what a real agent loop uses. |
+| 355 | 43 | Every important answer has a confidence estimate | FIXED | Every run carries a planner confidence, gated by quality_gate_min_confidence (default 0.0 = opt-in). The value was float(model output) unclamped: 85 (percent) or 1.7 passed any floor, NaN compared False. New _coerce_confidence. Lead: a failed planner call yields 0.8, not 'unknown'. |
+| 356 | 43 | Distinguish verified facts from assumptions | CONFIRMED | Planner facts step + 'UNVERIFIED:' convention + file:line citation check flag (see #502). Prompt-level; not measured live. |
+| 357 | 43 | Explicitly say 'I don't know' | CONFIRMED | roles/chat.md 'State uncertainty' + planner/others. Prompt-level only; 3 live Haiku probes (no tools) went and looked instead of guessing but were inconclusive about an explicit 'I don't know'. |
+| 358 | 44 | Explain why this approach / agents / tools chosen | CONFIRMED | GET /tasks/{id}/explain on the REAL task from the live pipeline run (271): goals, plan confidence, architect approach and risk level returned; dispatch rationales when present. |
+| 359 | 44 | Structured decision-log/rationale field in DB | CONFIRMED | task_logs.rationale column exists and is surfaced by the API; one writer today (manager's agent_dispatch log). |
+| 360 | 45 | Context persists across app restart | FIXED | get_or_restore_session was imported into api/chat.py with `noqa: F401` and NEVER called: after a restart every conversation answered 404, its stored history could not be continued. Now send/confirm restore from chat_messages; restored history decodes tool blocks and is repaired (start on a user turn, no dangling tool_use). Real HTTP test. |
+| 362 | 52 | Condensation trigger | FIXED | The condense trigger read state['tokens_in'] = CUMULATIVE billed input over all turns, not the context size: past the budget it condensed (extra Haiku call + information loss) on every later turn. New state['context_tokens'] (last call's input incl. cache). Also: an odd message count could leave an orphaned tool_result (API 400); boundary now keeps pairs. |
+| 363 | 52 | Compression method (real summarization, not truncation) | FIXED | Compression is a real Haiku summarization (existing test proves content survives); fixed the orphaned-tool_result boundary bug (proven: 7 tool pairs + a stray user message). |
+| 364 | 52 | Applied to chat_agent conversations too | FIXED | chat_agent used self._tokens_in (cumulative for the whole session) as context size: condensed every turn after a few turns and hard-stopped ('Conversation too long') after ~1M cumulative tokens with a tiny real history. Now self._context_tokens. |
+| 366 | 65 | Check against model's real context limit | FIXED | The 'real model window' stop compared the cumulative billed total to 1,000,000 (opus/sonnet): any run whose calls add up past 1M was reported 'blocked' while its actual context was ~50k. Now the context size. |
+| 367 | 65 | Warn user when approaching limits | FIXED | approaching_limit warned on the cumulative total (same bug); now the real context size, in both graph and chat. |
+| 368 | 101 | Token usage estimate | FIXED | Token estimate per epic: see #353. |
+| 369 | 101 | API cost estimate | FIXED | Cost estimate per epic: see #353. Lead: cost_estimate is NULL on pipeline (pm/architect/decomposer) agent_runs — only simple-mode launch_* record it. |
+| 370 | 101 | Execution time estimate | CONFIRMED | estimated_duration_seconds: historical coder-run average when present, config fallback otherwise (Postgres test). |
+| 371 | 101 | Storage impact estimate | CONFIRMED | estimate_project_size: real measured repo size x config multiplier. Coefficients (disk x3, etc.) are not calibrated against anything. |
+| 372 | 101 | Compute requirements estimate | CONFIRMED | Memory/indexing/embedding time estimates from file counts x config coefficients (2 MB/file etc.) — exists, uncalibrated. |
+| 489 | 73 | Detects professional role and adapts terminology/depth | FIXED | Role detection classifies against the LIVE capability registry, which holds 4 agents (pm, bug_fix, qa, executive) in a freshly started server (agents register when imported, lazily) — a React question came back as 'bug_fix'. Now imports all agent modules once (85 entries); real Haiku probes: postgres schema -> database_architect. Also the blocking Anthropic call ran on the event loop; now asyncio.to_thread. |
+| 492 | 84 | Communicates what it can't do (real, code-enforced limitation classification) | CONFIRMED | Quality gate: blocked/needs_human submissions need limitation_type (temporary|fundamental) + proposed_alternative, else the gate fails (existing tests). |
+| 501 | 54 | Refuse to invent test/execution results | FIXED | QA 'tests_run' was set by ANY successful bash call (`echo`, `ls`) and — worse — run_qa read the handler's copy of what the model submitted, never the graph's verified flag, so a QA agent that ran nothing could submit 'passed, 42 tests' and the pipeline believed it. Now the flag needs a test-runner command (pytest/npm test/go test/...) and run_qa discards results when it is unset (also test_writer_agent). |
+| 502 | 54 | Refuse to invent APIs/files/functions/classes (code-checked citations) | DOWNGRADED | PARTIAL: only `path:line` citations are checked (file exists, line within the file's length) and only FLAGGED (`_citation_check`), never refused; invented functions/classes/APIs are not checked at all. (Fixed on the way: a citation like `x/../../f.txt:1` probed files outside the repo.) |
+| 504 | 54 | Say 'I cannot verify this' instead of guessing | CONFIRMED | Prompt-level (chat.md, planner.md). See #357. |
+| 506 | 57 | Approving a clarification correctly resumes the owning agent with the answer | CONFIRMED | Real Postgres + HTTP: planner and coder answers resume the right agent with the answer; reject / empty answer resume nothing; a 2nd question after the 1st answer reaches a human; double-approve -> 409. Only the launch_* call is faked. |
 
 ## B6 — Agent scaffold, capability audit & skill coverage  (39 items, depth: Standard)
 

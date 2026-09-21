@@ -20,7 +20,7 @@ from app.models.chat import (
     create_session,
     get_session,
     delete_session,
-    get_or_restore_session,  # noqa: F401
+    get_or_restore_session,
     load_history_from_db,
     save_message_to_db,
 )
@@ -72,6 +72,36 @@ def _require_session(session_id: str) -> ChatSession:
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
     return session
+
+
+async def _require_session_restoring(session_id: str) -> ChatSession:
+    """_require_session, but a session lost to a restart is rebuilt from the chat_messages
+    table (get_or_restore_session existed — and was imported here with `noqa: F401` — but was
+    never called, so every conversation 404'd after a restart and its stored history was
+    unreachable for continuing)."""
+    session = get_session(session_id)
+    if session is not None:
+        return session
+    from sqlalchemy import text
+
+    from app.db.session import get_session_factory
+
+    try:
+        async with get_session_factory()() as db:
+            row = (
+                await db.execute(
+                    text(
+                        "SELECT repo_path FROM chat_messages WHERE session_id = :sid "
+                        "ORDER BY created_at DESC LIMIT 1"
+                    ),
+                    {"sid": session_id},
+                )
+            ).first()
+            if row is not None:
+                return await get_or_restore_session(session_id, str(row[0]), db)
+    except Exception:
+        logger.warning("could not restore chat session %s", session_id, exc_info=True)
+    raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
 
 
 async def _event_stream(session: ChatSession) -> AsyncGenerator[str, None]:
@@ -149,7 +179,7 @@ async def send_message(
     from app.agents.chat_agent import get_or_create_chat_agent  # avoid circular import
     from app.db.session import get_session_factory
 
-    session = _require_session(session_id)
+    session = await _require_session_restoring(session_id)
     if session.active:
         raise HTTPException(
             status_code=409,
@@ -305,7 +335,7 @@ async def confirm_action(
     from app.agents.chat_agent import get_or_create_chat_agent
     from app.db.session import get_session_factory
 
-    session = _require_session(session_id)
+    session = await _require_session_restoring(session_id)
     agent = get_or_create_chat_agent(session)
     factory = get_session_factory()
     asyncio.create_task(

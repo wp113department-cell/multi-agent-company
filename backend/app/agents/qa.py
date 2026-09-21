@@ -16,7 +16,11 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.agents.base_graph import VerificationConfig, run_agent_graph
+from app.agents.base_graph import (
+    TEST_COMMAND_PATTERN,
+    VerificationConfig,
+    run_agent_graph,
+)
 from app.agents.tools import QA_TOOLS, make_qa_handlers, make_record_learning_handler
 from app.config import get_settings
 
@@ -76,6 +80,8 @@ _VERIFICATION_CFG = VerificationConfig(
     reset_keys=(),
     enforce_in_result={"tests_run": "tests_run"},
     initial={"tests_run": False},
+    # tests_run is only true after a command that looks like a test runner ran
+    command_patterns={"tests_run": TEST_COMMAND_PATTERN},
 )
 
 # ---------------------------------------------------------------------------
@@ -236,6 +242,33 @@ def run_qa(
                     errors=list(raw.get("errors", [])) or [last_error],
                     summary=str(raw.get("summary", "")) or last_error,
                     confidence=float(final_state.get("confidence", 0.8)),
+                )
+            continue
+
+        # The graph tracks whether a test-runner command actually ran
+        # (enforce_in_result overwrites the result the GRAPH keeps) — but this
+        # function reads the handler's own copy of what the model submitted, so the
+        # enforcement never reached the QAResult: a QA agent that ran nothing could
+        # submit "passed, 42 tests" and the pipeline believed it.
+        if not (final_state.get("verification") or {}).get("tests_run", False):
+            last_error = (
+                "QA submitted results without running any test command — "
+                "the reported results were discarded"
+            )
+            logger.warning("QA subtask %d: %s", subtask_id, last_error)
+            if not should_retry(attempt + 1, max_retries):
+                return QAResult(
+                    status="failed",
+                    tests_run=0,
+                    tests_passed=0,
+                    tests_failed=0,
+                    typecheck_clean=False,
+                    lint_clean=False,
+                    tokens_in=total_in,
+                    tokens_out=total_out,
+                    errors=[last_error],
+                    summary=last_error,
+                    confidence=float(final_state.get("confidence", 0.0)),
                 )
             continue
 

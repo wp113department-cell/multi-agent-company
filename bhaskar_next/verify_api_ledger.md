@@ -12,3 +12,7 @@ Stop at ~60% of the Anthropic balance. Ask before any single call/run estimated 
 
 **Running Anthropic total: ~$0.30 of the ~$5 balance (~6%).** Cap for me: ~$3 (60%).
 Lesson for later batches: any live agent run costs ~$0.25+ because of the Opus mapping; check cost_estimate in agent_runs before repeating, prefer offline/mocked-API checks that enforce the real API rules, and reserve live runs for items that cannot be falsified otherwise.
+| 2026-09-21 | #489 | Anthropic | claude-haiku-4-5 | ~0.6k-3.5k in / 20 out x 6 | ~$0.02 | Role classification against the real capability roster (4 entries before the fix, 85 after) |
+| 2026-09-21 | #357/#504 | Anthropic | claude-haiku-4-5 | ~5.3k in / 250 out x 3 | ~$0.02 | 3 no-tools probes of the chat system prompt for 'I don't know' behaviour (inconclusive) |
+
+**Running Anthropic total: ~$0.34 of the ~$5 balance (~7%).**

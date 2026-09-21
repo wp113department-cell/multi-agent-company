@@ -145,9 +145,9 @@ async def test_long_chat_session_condenses_and_preserves_content(
             "read_file", {"path": "x.py"}, tool_id="toolu_1", tokens_in=90
         ),
         _FakeToolUseStream(
-            "read_file", {"path": "y.py"}, tool_id="toolu_2", tokens_in=10
+            "read_file", {"path": "y.py"}, tool_id="toolu_2", tokens_in=95
         ),
-        _FakeTextStream("Read both.", tokens_in=10),
+        _FakeTextStream("Read both.", tokens_in=110),
     ]
     p1, p2, p3 = _patched_agent(agent, responses)
     with p1, p2, p3:
@@ -161,9 +161,13 @@ async def test_long_chat_session_condenses_and_preserves_content(
         f"the budget, got types: {[e.get('type') for e in events]}"
     )
     assert approaching[0]["token_budget"] == 100
-    assert agent._tokens_in == 110  # 90 + 10 + 10, strictly over the budget
+    # UPDATED (verification batch B5, #362/#366): each call's input_tokens is the WHOLE
+    # context sent, so it grows with the conversation (90 -> 95 -> 110); the condense
+    # check reads the last call's context size, not the cumulative billed total (295).
+    assert agent._tokens_in == 295
+    assert agent._context_tokens == 110  # strictly over the budget
 
-    # Turn 2: self._tokens_in (110) is strictly over budget (100) at the
+    # Turn 2: the last call's context (110) is strictly over budget (100) at the
     # start of this turn's own call_llm invocation -> must condense now.
     responses2 = [_FakeTextStream("ok", tokens_in=5)]
     p1, p2, p3 = _patched_agent(agent, responses2)

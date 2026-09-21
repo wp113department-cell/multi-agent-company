@@ -45,10 +45,38 @@ class RoleSignal:
     directive: str = ""
 
 
+_agents_imported = False
+
+
+def _ensure_agents_registered() -> None:
+    """Agents register themselves in capability_registry when their module is imported, and
+    most are imported lazily on first use — a freshly started server had 4 registered agents
+    (pm, bug_fix, qa, executive), so every message was classified against a 4-entry roster
+    (a React question came back as "bug_fix") until enough other agents had happened to run.
+    Import them all once so the roster the classifier sees is the real one."""
+    global _agents_imported
+    if _agents_imported:
+        return
+    _agents_imported = True
+    import importlib
+    import pkgutil
+
+    import app.agents as agents_pkg
+
+    for module in pkgutil.iter_modules(agents_pkg.__path__):
+        try:
+            importlib.import_module(f"app.agents.{module.name}")
+        except Exception:
+            logger.debug(
+                "role detection: could not import %s", module.name, exc_info=True
+            )
+
+
 def _load_catalog() -> list[tuple[str, str]]:
     """Real, live (name, description) pairs from capability_registry — never
     a hardcoded role list, so this tracks whatever domains are actually
     registered without needing a matching edit here."""
+    _ensure_agents_registered()
     try:
         from app.fleet.capability_registry import get_capability_registry
 

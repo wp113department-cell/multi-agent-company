@@ -536,7 +536,9 @@ class TestRunQaBehavior:
             "summary": "All 42 tests passed",
         }
         mock_handlers.return_value = {"_qa_result": qa_raw}
-        mock_graph.return_value = _BASE_STATE
+        # UPDATED (verification batch B5, #501): a QA result is only believed when the
+        # graph saw a test command run (verification["tests_run"]).
+        mock_graph.return_value = {**_BASE_STATE, "verification": {"tests_run": True}}
 
         result = run_qa(1, 1, ["src/auth.py"], "/tmp/wt")
         assert isinstance(result, QAResult)

@@ -7,7 +7,11 @@ import re
 from typing import Any
 
 from app.agents.agent_result import AgentResult
-from app.agents.base_graph import VerificationConfig, run_agent_graph
+from app.agents.base_graph import (
+    TEST_COMMAND_PATTERN,
+    VerificationConfig,
+    run_agent_graph,
+)
 from app.agents.tools import (
     _LIST_FUNCTIONS_TOOL,
     _PARSE_AST_TOOL,
@@ -108,6 +112,7 @@ _CFG = VerificationConfig(
     reset_keys=("tests_run",),
     enforce_in_result={"read": "read", "tests_run": "tests_run"},
     initial={"read": False, "tests_run": False},
+    command_patterns={"tests_run": TEST_COMMAND_PATTERN},
 )
 
 

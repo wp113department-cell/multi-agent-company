@@ -13,11 +13,10 @@ Static-check retry loop kept because mypy/ruff run OUTSIDE the LLM graph.
 from __future__ import annotations
 
 import logging
-import subprocess
-import sys
 from typing import Any
 
 from app.agents.base_graph import VerificationConfig, run_agent_graph
+from app.agents.static_checks import run_python_checks
 from app.agents.tools import (
     CODER_TOOLS,
     make_coder_handlers,
@@ -105,7 +104,9 @@ _VERIFICATION_CFG = VerificationConfig(
 # ---------------------------------------------------------------------------
 
 
-def _run_backend_checks(worktree_path: str) -> str | None:
+def _run_backend_checks(
+    worktree_path: str, files_changed: list[str] | None = None
+) -> str | None:
     """Run mypy + ruff + black --check in the backend directory. Returns
     error output or None on success.
 
@@ -119,19 +120,7 @@ def _run_backend_checks(worktree_path: str) -> str | None:
     self-correction retry loop (run_backend_dev's check_error feedback) as
     a real type or lint error, not a new/separate gate.
     """
-    python = sys.executable
-    checks = [
-        [python, "-m", "mypy", ".", "--ignore-missing-imports", "--no-error-summary"],
-        [python, "-m", "ruff", "check", "."],
-        [python, "-m", "black", "--check", "."],
-    ]
-    for cmd in checks:
-        result = subprocess.run(
-            cmd, cwd=worktree_path, capture_output=True, text=True, timeout=60
-        )
-        if result.returncode != 0:
-            return (result.stdout + result.stderr)[:3000]
-    return None
+    return run_python_checks(worktree_path, files_changed, black=True)
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +259,7 @@ def run_backend_dev(
                 return [], "Backend dev did not submit a patch", total_in, total_out
             continue
 
-        check_error = _run_backend_checks(worktree_path)
+        check_error = _run_backend_checks(worktree_path, files_changed)
         if check_error is None:
             logger.info(
                 "Backend dev done — subtask %d, attempt %d, %d files, in=%d out=%d",

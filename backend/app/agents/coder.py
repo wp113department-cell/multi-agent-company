@@ -14,11 +14,10 @@ Static-check retry loop kept because mypy/ruff run OUTSIDE the LLM graph.
 from __future__ import annotations
 
 import logging
-import subprocess
-import sys
 from typing import Any
 
 from app.agents.base_graph import VerificationConfig, run_agent_graph
+from app.agents.static_checks import run_python_checks
 from app.agents.tools import (
     CODER_TOOLS,
     REQUEST_CLARIFICATION_TOOL,
@@ -97,7 +96,10 @@ _VERIFICATION_CFG = VerificationConfig(
     # chat_agent.py's identical blocking_until pattern exactly — write_file/
     # edit_file are refused with a real [POLICY DENIED] result (the handler
     # never runs) until read_file or search_code has run at least once.
-    blocking_until={"write_file": "read", "edit_file": "read"},
+    # `bash` is gated too (B5 verification): with only write_file/edit_file gated,
+    # `echo x > f` / `sed -i` through bash wrote files with no read at all, so
+    # the "read before write" rule was advisory for anything but the two tools.
+    blocking_until={"write_file": "read", "edit_file": "read", "bash": "read"},
 )
 
 # ---------------------------------------------------------------------------
@@ -105,20 +107,12 @@ _VERIFICATION_CFG = VerificationConfig(
 # ---------------------------------------------------------------------------
 
 
-def _run_checks(worktree_path: str) -> str | None:
-    """Run mypy + ruff in the worktree. Returns error output or None on success."""
-    python = sys.executable
-    checks = [
-        [python, "-m", "mypy", ".", "--ignore-missing-imports", "--no-error-summary"],
-        [python, "-m", "ruff", "check", "."],
-    ]
-    for cmd in checks:
-        result = subprocess.run(
-            cmd, cwd=worktree_path, capture_output=True, text=True, timeout=60
-        )
-        if result.returncode != 0:
-            return (result.stdout + result.stderr)[:3000]
-    return None
+def _run_checks(
+    worktree_path: str, files_changed: list[str] | None = None
+) -> str | None:
+    """Run mypy + ruff on the changed Python files. Returns error output or None on success
+    (see app/agents/static_checks.py for what counts as a pass)."""
+    return run_python_checks(worktree_path, files_changed)
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +249,7 @@ def run_coder(
         files_changed: list[str] = patch_result.get("files_changed", [])
 
         try:
-            check_error = _run_checks(worktree_path)
+            check_error = _run_checks(worktree_path, files_changed)
         except Exception as exc:
             check_error = str(exc)
 

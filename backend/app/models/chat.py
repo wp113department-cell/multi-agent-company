@@ -11,6 +11,7 @@ or call `load_history_from_db()` / `save_message_to_db()` explicitly.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -177,6 +178,60 @@ async def get_or_restore_session(
         _sessions[session_id] = session
 
     if not session.history and db is not None:
-        session.history = await load_history_from_db(session_id, db)
+        session.history = prepare_restored_history(
+            await load_history_from_db(session_id, db)
+        )
 
     return session
+
+
+_BLOCK_TYPES = {"text", "tool_use", "tool_result", "thinking", "redacted_thinking"}
+
+
+def _decode_stored_content(content: str) -> Any:
+    """chat_messages.content is TEXT: a turn's list-of-blocks content (tool_use /
+    tool_result) was stored with json.dumps. Turn it back into blocks; plain text — and
+    a user message that merely LOOKS like JSON — stays a string."""
+    if content[:1] == "[":
+        try:
+            decoded = json.loads(content)
+        except ValueError:
+            return content
+        if (
+            isinstance(decoded, list)
+            and decoded
+            and all(
+                isinstance(b, dict) and b.get("type") in _BLOCK_TYPES for b in decoded
+            )
+        ):
+            return decoded
+    return content
+
+
+def _has_block(message: dict[str, Any], block_type: str) -> bool:
+    content = message.get("content")
+    return isinstance(content, list) and any(
+        isinstance(b, dict) and b.get("type") == block_type for b in content
+    )
+
+
+def prepare_restored_history(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """History loaded from the DB, made safe to continue from. The LIMIT in
+    load_history_from_db can cut the window in the middle of a tool round trip, and a turn
+    that died mid-flight leaves a tool_use with no result — either one makes the API
+    reject the next request (orphaned tool_result / tool_use without tool_result)."""
+    history = [
+        {"role": r["role"], "content": _decode_stored_content(str(r["content"]))}
+        for r in rows
+    ]
+    # start on a real user turn
+    while history and not (
+        history[0]["role"] == "user" and isinstance(history[0]["content"], str)
+    ):
+        history.pop(0)
+    # end on a message that leaves no tool_use waiting for a result
+    while history and (
+        history[-1]["role"] != "assistant" or _has_block(history[-1], "tool_use")
+    ):
+        history.pop()
+    return history

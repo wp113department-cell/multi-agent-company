@@ -669,7 +669,14 @@ def verify_file_line_citations(
                 continue
             seen.add(key)
             checked += 1
-            abs_path = os.path.join(repo_root, rel_path)
+            abs_path = os.path.realpath(os.path.join(repo_root, rel_path))
+            root_real = os.path.realpath(repo_root)
+            if abs_path != root_real and not abs_path.startswith(root_real + os.sep):
+                # a citation like `x/../../etc/hosts.txt:1` must not turn this into a
+                # probe of files outside the repo (exists / how many lines)
+                if len(unverified) < 20:
+                    unverified.append(f"{rel_path}:{line} — outside the repo")
+                continue
             if not os.path.isfile(abs_path):
                 if len(unverified) < 20:
                     unverified.append(f"{rel_path}:{line} — file not found in repo")

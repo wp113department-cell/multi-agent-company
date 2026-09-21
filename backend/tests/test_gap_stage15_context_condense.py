@@ -40,8 +40,11 @@ SUBMIT_TOOL = {
 
 class _LongConversationLLM:
     """Calls do_thing for `do_thing_turns` turns (each reporting a real
-    input_tokens usage figure that accumulates in state["tokens_in"], the
-    same field call_llm's own context-condense check reads), then submits.
+    input_tokens usage figure that GROWS with the conversation — like the real API,
+    where each call's input_tokens is the whole context sent — and which
+    call_llm's context-condense check reads as state["context_tokens"]; UPDATED in
+    verification batch B5, the check used to read the cumulative billed total),
+    then submits.
     Also answers the haiku-tier summarization call _condense_messages
     makes once tokens_in crosses the budget."""
 
@@ -79,7 +82,8 @@ class _LongConversationLLM:
                     )
                 ],
                 usage=SimpleNamespace(
-                    input_tokens=self.tokens_per_turn, output_tokens=10
+                    input_tokens=self.tokens_per_turn * max(len(messages), 1),
+                    output_tokens=10,
                 ),
             )
         return SimpleNamespace(
@@ -91,7 +95,10 @@ class _LongConversationLLM:
                     input={"summary": "done"},
                 )
             ],
-            usage=SimpleNamespace(input_tokens=self.tokens_per_turn, output_tokens=10),
+            usage=SimpleNamespace(
+                input_tokens=self.tokens_per_turn * max(len(messages), 1),
+                output_tokens=10,
+            ),
         )
 
 

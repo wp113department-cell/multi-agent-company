@@ -13,6 +13,7 @@ Static-check retry loop kept because tsc --noEmit runs OUTSIDE the LLM graph.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from typing import Any
 
@@ -113,6 +114,11 @@ _VERIFICATION_CFG = VerificationConfig(
 def _run_frontend_checks(worktree_path: str) -> str | None:
     """Run tsc --noEmit in the apps/web directory. Returns error output or None on success."""
     web_dir = f"{worktree_path}/apps/web"
+    # A repo without apps/web/tsconfig.json has no TypeScript project to check:
+    # running tsc there either raised FileNotFoundError (missing cwd) or made
+    # `npx` fetch a compiler and fail on "no inputs", failing every attempt.
+    if not os.path.isfile(os.path.join(web_dir, "tsconfig.json")):
+        return None
     result = subprocess.run(
         ["npx", "tsc", "--noEmit"],
         cwd=web_dir,

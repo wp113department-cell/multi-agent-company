@@ -92,6 +92,7 @@ from app.agents.base_graph import (
     _policy_check,
     _select_messages_to_condense,
     _stringify_messages_for_summary,
+    _context_size,
     _wrap_untrusted_tool_content,
 )
 from app.agents.tools import (
@@ -797,6 +798,19 @@ def _git(args: list[str], cwd: str, timeout: int = 30) -> str:
         return f"[ERROR] {e}"
 
 
+def _human_user_messages(history: list[dict[str, Any]]) -> list[str]:
+    """The user's own typed turns, oldest first. The tool-use loop stores tool
+    results as role="user" messages whose content is a LIST of tool_result
+    blocks, so filtering on role alone made the "recent user messages" for
+    repetition detection mostly tool output in any conversation that had used
+    a tool — the user repeating themselves was then never noticed."""
+    return [
+        m["content"]
+        for m in history
+        if m.get("role") == "user" and isinstance(m.get("content"), str)
+    ]
+
+
 class ChatAgent:
     """
     Async streaming chat agent that runs a full agentic loop:
@@ -809,6 +823,9 @@ class ChatAgent:
     the full design and why per-tool-call node granularity is what makes
     that safe.
     """
+
+    # default so an instance built without __init__ (tests do) still has the attribute
+    _context_tokens: int = 0
 
     MAX_ITERATIONS = 30
 
@@ -858,6 +875,11 @@ class ChatAgent:
         # needing to round-trip through checkpointed graph state.
         self._tokens_in: int = 0
         self._tokens_out: int = 0
+        # Size of the conversation the last call was sent. self._tokens_in is the
+        # cumulative BILLED total — using it as "context size" condensed on every turn
+        # once a session passed the budget, and hard-stopped ("Conversation too long")
+        # after ~1M cumulative tokens while the real history was a fraction of that.
+        self._context_tokens: int = 0
         # AUDIT_Q_BATCH04 §6 gap-closure (2026-08-10) — chat_agent tracked
         # tokens/tools entirely on its own instance state and never fed the
         # shared app.fleet.metrics.RunMetrics span the other ~76
@@ -4138,8 +4160,8 @@ class ChatAgent:
         # decision is based on real content size, not a counter that hasn't
         # observed a real API response yet.
         effective_tokens_in = (
-            self._tokens_in
-            if self._tokens_in > 0
+            self._context_tokens
+            if self._context_tokens > 0
             else _estimate_tokens(self.session.history)
         )
         if effective_tokens_in > 0 and context_token_budget > 0:
@@ -4237,6 +4259,7 @@ class ChatAgent:
                 # feeding the condense check above on the NEXT turn.
                 self._tokens_in += final.usage.input_tokens
                 self._tokens_out += final.usage.output_tokens
+                self._context_tokens = _context_size(final.usage)
                 for block in final.content:
                     if block.type == "tool_use":
                         tool_uses.append(
@@ -4561,11 +4584,7 @@ class ChatAgent:
         try:
             from app.agents.user_sentiment import detect_user_frustration
 
-            prior_user_messages = [
-                str(m.get("content", ""))
-                for m in self.session.history
-                if m.get("role") == "user"
-            ]
+            prior_user_messages = _human_user_messages(self.session.history)
             signal = detect_user_frustration(user_message, prior_user_messages)
             if signal.frustrated:
                 await self.session.push(
@@ -4609,8 +4628,9 @@ class ChatAgent:
             try:
                 from app.agents.role_detection import detect_professional_role
 
-                role_signal = detect_professional_role(
-                    user_message, self._haiku_model()
+                # a blocking Anthropic request — off the event loop
+                role_signal = await asyncio.to_thread(
+                    detect_professional_role, user_message, self._haiku_model()
                 )
                 self.session.role_directive = role_signal.directive
             except Exception:

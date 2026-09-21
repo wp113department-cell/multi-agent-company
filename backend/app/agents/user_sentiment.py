@@ -87,8 +87,16 @@ def detect_user_frustration(
                 signals.append(f"excessive_caps:{caps_ratio:.2f}")
 
     current_words = _word_set(message)
+    # Short replies ("yes", "ok", "continue") are answers to consecutive
+    # questions, not a user repeating themselves: with Jaccard on a 1-word set
+    # every second "yes" scored 1.0 and the model was told the user was
+    # frustrated.
+    min_words = settings.user_frustration_repeat_min_words
     for prior in recent_user_messages[-3:]:
-        similarity = _jaccard_similarity(current_words, _word_set(prior))
+        prior_words = _word_set(prior)
+        if len(current_words) < min_words or len(prior_words) < min_words:
+            continue
+        similarity = _jaccard_similarity(current_words, prior_words)
         if similarity >= settings.user_frustration_repeat_similarity_threshold:
             signals.append(f"repeated_message:{similarity:.2f}")
             break

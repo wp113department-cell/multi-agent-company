@@ -90,24 +90,50 @@ def _cheaper_scope_fields(
     return cost_per_subtask, max_subtasks
 
 
+# What one subtask actually costs is the run of the developer that implements it
+# PLUS the qa and reviewer runs that check it — not the average of every run in
+# the table. (B5 verification: the old query averaged ALL completed agent_runs,
+# so tiny guardian/test/utility runs dragged "tokens per subtask" down to a few
+# hundred — on the dev database 80 tokens — and a real epic never reached the
+# approval threshold.)
+_DEV_AGENT_TYPES = ("backend_dev", "frontend_dev", "coder")
+_CHECK_AGENT_TYPES = ("qa", "reviewer")
+
+
 async def _historical_avg_tokens(db: AsyncSession) -> tuple[int | None, int | None]:
-    """Query average tokens per agent_run from completed runs."""
+    """Average tokens per SUBTASK from completed runs: the developer runs' average plus each
+    checking agent's own average. None when there is no developer history to calibrate on.
+    """
     from app.db.models import AgentRun
 
-    result = await db.execute(
-        select(
-            func.avg(AgentRun.tokens_in).label("avg_in"),
-            func.avg(AgentRun.tokens_out).label("avg_out"),
-            func.count(AgentRun.id).label("run_count"),
-        ).where(
-            AgentRun.status == "completed",
-            AgentRun.tokens_in.isnot(None),
+    rows = (
+        await db.execute(
+            select(
+                AgentRun.agent_type,
+                func.avg(AgentRun.tokens_in),
+                func.avg(AgentRun.tokens_out),
+            )
+            .where(
+                AgentRun.status == "completed",
+                AgentRun.tokens_in.isnot(None),
+                AgentRun.agent_type.in_(_DEV_AGENT_TYPES + _CHECK_AGENT_TYPES),
+            )
+            .group_by(AgentRun.agent_type)
         )
-    )
-    row = result.one()
-    if row.run_count == 0 or row.avg_in is None:
+    ).all()
+    per_type = {r[0]: (float(r[1] or 0), float(r[2] or 0)) for r in rows}
+    dev = [per_type[t] for t in _DEV_AGENT_TYPES if t in per_type]
+    if not dev:
         return None, None
-    return int(row.avg_in), int(row.avg_out) if row.avg_out else None
+    total_in = max(
+        i for i, _ in dev
+    )  # a subtask is built by ONE developer agent, not all three
+    total_out = max(o for _, o in dev)
+    for t in _CHECK_AGENT_TYPES:
+        if t in per_type:
+            total_in += per_type[t][0]
+            total_out += per_type[t][1]
+    return int(total_in), int(total_out) if total_out else None
 
 
 async def estimate_epic_cost(

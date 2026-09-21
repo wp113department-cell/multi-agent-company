@@ -188,9 +188,15 @@ class _AgentRunStateBase(TypedDict):
 class AgentRunState(_AgentRunStateBase, total=False):
     """Full agent state including 9 new Fleet OS fields (Session 0, 2026-07-16).
 
+    context_tokens: size of the conversation the LAST LLM call was sent (input + cached
+    input). tokens_in/tokens_out are cumulative BILLED totals across turns; context checks
+    (condense trigger, approaching-limit warning, real-window stop) need this instead.
+
     All new fields are optional (total=False) so existing callers need zero changes.
     run_agent_graph() populates them with safe defaults in initial_state.
     """
+
+    context_tokens: int
 
     plan: str  # structured plan JSON from planner_node
     facts: str  # gathered-facts JSON from planner_node
@@ -205,7 +211,9 @@ class AgentRunState(_AgentRunStateBase, total=False):
         int  # times reflection_node judged its own tool output unsatisfactory
     )
     critique_result: dict[str, Any]  # last critique_node score: {criteria, all_met}
-    self_review: str  # reflection_node's note, delivered by execute_tools after the tool results
+    self_review: (
+        str  # reflection_node's note, delivered by execute_tools after the tool results
+    )
     critique_retries: int  # times critique_node sent work back for improvement
     replan_count: int  # times replan_node actually revised the plan mid-execution
 
@@ -235,6 +243,15 @@ class AgentRunState(_AgentRunStateBase, total=False):
 # ---------------------------------------------------------------------------
 # Verification configuration (per agent)
 # ---------------------------------------------------------------------------
+
+
+# A bash command counts as "ran the tests" only if it looks like a test runner.
+TEST_COMMAND_PATTERN = (
+    r"\b(pytest|py\.test|unittest|tox|nox|jest|vitest|mocha|playwright|cypress|"
+    r"(npm|yarn|pnpm|bun)\s+(run\s+)?test|go\s+test|cargo\s+test|"
+    r"(mvn|gradle|gradlew|mvnw)\b.*\btest|dotnet\s+test|phpunit|rspec|"
+    r"bundle\s+exec\s+rspec|make\s+test|ctest)\b"
+)
 
 
 @dataclass
@@ -268,6 +285,11 @@ class VerificationConfig:
     enforce_in_result: dict[str, str] = field(default_factory=dict)
     initial: dict[str, Any] = field(default_factory=dict)
     blocking_until: dict[str, str] = field(default_factory=dict)
+    # {verification_key: regex} — the `bash` command must match for that key to be
+    # set. Without it ANY successful bash call (`echo hi`, `ls`) set "tests_run" /
+    # "checks_run", so "the agent ran the tests" was true after running nothing
+    # that resembles a test.
+    command_patterns: dict[str, str] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -724,6 +746,7 @@ def _parse_llm_json(text: str, expect: type | None = dict) -> Any:
             candidates.append(text[start : end + 1])
     last_exc: Exception | None = None
     decoder = json.JSONDecoder()
+
     def _ok(value: Any) -> bool:
         return expect is None or isinstance(value, expect)
 
@@ -804,11 +827,35 @@ def _select_messages_to_condense(
     if tokens_in <= token_budget or len(messages) <= 4:
         return None
     head = messages[:1]
-    dropped = messages[1:-4]
-    tail = messages[-4:]
+    start = len(messages) - 4
+    # The kept tail must not open on a tool_result whose tool_use was summarized
+    # away — the API rejects an orphaned tool_result (400). An odd number of
+    # messages (or a stray extra user message) shifts the alternation and lands
+    # the boundary on a tool_result. Walk it back so the tool_use travels with
+    # its result; if that leaves nothing to summarize, walk it forward instead so
+    # the pair is summarized together.
+    back = start
+    while back > 1 and _has_tool_result(messages[back]):
+        back -= 1
+    if back > 1:
+        start = back
+    else:
+        while start < len(messages) and _has_tool_result(messages[start]):
+            start += 1
+        if start >= len(messages):
+            return None
+    dropped = messages[1:start]
+    tail = messages[start:]
     if not dropped:
         return None
     return head, dropped, tail
+
+
+def _has_tool_result(message: dict[str, Any]) -> bool:
+    content = message.get("content")
+    return isinstance(content, list) and any(
+        isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+    )
 
 
 def _stringify_messages_for_summary(messages: list[dict[str, Any]]) -> str:
@@ -1040,6 +1087,23 @@ def _policy_check(tool_name: str, tool_input: dict[str, Any]) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _coerce_confidence(value: Any, default: float = 0.8) -> float:
+    """A model-reported confidence as a usable 0..1 number. The raw float() was fed straight
+    into the quality gate and the replan trigger, so "confidence": 85 (a percentage) or 1.7
+    always passed any floor, and NaN compared False against everything."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return default
+    try:
+        number = float(value)
+    except ValueError:
+        return default
+    if number != number or number in (float("inf"), float("-inf")):
+        return default
+    if 1.0 < number <= 100.0:
+        number /= 100.0  # a percentage
+    return max(0.0, min(1.0, number))
+
+
 def _gather_facts_and_plan(
     client: anthropic.Anthropic,
     model_haiku: str,
@@ -1098,7 +1162,9 @@ def _gather_facts_and_plan(
             messages=[{"role": "user", "content": plan_prompt}],
         )
         plan_text = _text_from_content(_serialize_content(r2.content))
-        confidence = float(_parse_llm_json(plan_text).get("confidence", 0.8))
+        confidence = _coerce_confidence(
+            _parse_llm_json(plan_text).get("confidence"), default=0.8
+        )
     except Exception as exc:
         logger.warning("planner plan call failed: %s", exc)
 
@@ -1544,6 +1610,21 @@ def _make_memory_hook_node(
     return memory_hook_node
 
 
+def _context_size(usage: Any) -> int:
+    """Input tokens of one call including prompt-cache reads/writes (with caching on,
+    usage.input_tokens is only the uncached remainder)."""
+    total = 0
+    for name in (
+        "input_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+    ):
+        value = getattr(usage, name, 0)
+        if isinstance(value, int) and not isinstance(value, bool):
+            total += value
+    return total
+
+
 def _make_call_llm_node(
     role_name: str,
     model: str,
@@ -1651,7 +1732,13 @@ def _make_call_llm_node(
         client = _make_client()
 
         # Context condense (real LLM summarization, not silent drop-oldest)
-        tokens_in_so_far = state.get("tokens_in", 0)
+        # The CONTEXT size — what the last call was sent — not the cumulative billed
+        # total: state["tokens_in"] sums every turn, so it passed the (60k) budget
+        # after a few turns and condensed (an extra LLM call, and information loss) on
+        # every later turn, and passed the model's real window (1M) on any long run,
+        # which the check below reports as "blocked" while the actual context was a
+        # small fraction of it.
+        tokens_in_so_far = state.get("context_tokens", 0)
         messages, was_condensed = _condense_messages(
             list(state["messages"]),
             token_budget=context_token_budget,
@@ -1791,6 +1878,7 @@ def _make_call_llm_node(
             + [{"role": "assistant", "content": serialized}],
             "tokens_in": state.get("tokens_in", 0) + response.usage.input_tokens,
             "tokens_out": state.get("tokens_out", 0) + response.usage.output_tokens,
+            "context_tokens": _context_size(response.usage),
         }
 
     return call_llm
@@ -2558,7 +2646,11 @@ def _make_execute_tools_node(
                 ) and not result_content.startswith("[POLICY"):
                     if tu_name in verification_cfg.set_by:
                         key = verification_cfg.set_by[tu_name]
-                        new_verification[key] = True
+                        pattern = verification_cfg.command_patterns.get(key)
+                        if pattern is None or re.search(
+                            pattern, str(tu_input.get("command", ""))
+                        ):
+                            new_verification[key] = True
                         logger.debug("Verification: %s=True (from %s)", key, tu_name)
 
                 if tu_name in verification_cfg.reset_by:
@@ -2683,9 +2775,9 @@ def _make_execute_tools_node(
                                 thread_id=(
                                     f"low-confidence-{trace_id or run_id or task_id or 'notask'}"
                                 ),
-                                task_id=int(task_id)
-                                if str(task_id).isdigit()
-                                else None,
+                                task_id=(
+                                    int(task_id) if str(task_id).isdigit() else None
+                                ),
                                 blocking=False,
                                 description=(
                                     f"{agent_name or 'agent'} submitted {tu_name} with "
@@ -3566,6 +3658,7 @@ def run_agent_graph(
             "requires_human_approval": False,
             "tokens_in": 0,
             "tokens_out": 0,
+            "context_tokens": 0,
             # New Fleet OS fields with safe defaults
             "plan": "",
             "facts": "",

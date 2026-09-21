@@ -297,7 +297,7 @@ class TestReviewerFlags:
 class TestQaFlags:
     def test_flags_and_kwargs(self) -> None:
         with patch(
-            "app.agents.qa.run_agent_graph", return_value=_MINIMAL_FINAL_STATE
+            "app.agents.qa.run_agent_graph", return_value={**_MINIMAL_FINAL_STATE, "verification": {"tests_run": True}}
         ) as mock_run, patch(
             "app.agents.qa.get_settings", return_value=_mock_settings()
         ), patch(

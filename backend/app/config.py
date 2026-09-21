@@ -992,6 +992,10 @@ class Settings(BaseSettings):
         default=0.6,
         description="Jaccard word-overlap ratio against a recent prior user message, at or above which the current message is flagged as a near-repeat.",
     )
+    user_frustration_repeat_min_words: int = Field(
+        default=4,
+        description="Minimum distinct words in a message before the near-repeat check applies (a 'yes'/'ok'/'continue' answered twice is an answer, not a sign the user is repeating themselves).",
+    )
     user_frustration_excessive_caps_ratio: float = Field(
         default=0.5,
         description="Fraction of alphabetic characters that are uppercase, at or above which a long-enough message is flagged as excessive caps.",
