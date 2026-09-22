@@ -229,6 +229,30 @@ async def record_memory_access(memory_ids: list[int], db: AsyncSession) -> None:
         await db.rollback()
 
 
+async def record_memory_feedback(
+    memory_id: int, helpful: bool, db: AsyncSession
+) -> bool:
+    """T2-B4 (2026-09-22, GRIDIRON_PARTIAL #98 "Memory Quality Control
+    (accuracy validation)") — the real usage-outcome signal
+    MemoryEmbedding's own comment describes: did retrieving and using this
+    specific memory actually help, fed back explicitly (POST /api/memory/
+    {id}/feedback) after a real retrieval — distinct from `verified` (a
+    write-time outcome boolean) and the write-time MemoryQualityDecision
+    content gate (authorship quality), neither of which this ever measured.
+    Returns True if a row was actually updated (False for an unknown
+    memory_id, which the caller should surface as 404 rather than a silent
+    no-op)."""
+    row = await db.get(MemoryEmbedding, memory_id)
+    if row is None:
+        return False
+    if helpful:
+        row.helpful_count += 1
+    else:
+        row.not_helpful_count += 1
+    await db.commit()
+    return True
+
+
 # Gap-closure Day 41 (Stage 2, answers.md Q120 "Memory Prioritization" — "memory
 # ranking is 100% pure vector similarity today"). A single shared SQL expression
 # spliced into all 5 query_* functions' SELECT/ORDER BY, so the formula is
@@ -241,6 +265,11 @@ _COMPOSITE_SCORE_EXPR = """(
     + :w_reuse * LEAST(1.0, reuse_count::float / GREATEST(CAST(:reuse_cap AS float), 1))
     + :w_importance * importance
     + :w_verified * (CASE WHEN verified THEN 1.0 ELSE 0.0 END)
+    + :w_usefulness * (
+        CASE WHEN (helpful_count + not_helpful_count) = 0 THEN 0.5
+        ELSE helpful_count::float / (helpful_count + not_helpful_count)
+        END
+      )
 )"""
 
 
@@ -251,6 +280,12 @@ def _composite_score_params(settings: Any) -> dict[str, Any]:
         "w_reuse": settings.memory_score_weight_reuse,
         "w_importance": settings.memory_score_weight_importance,
         "w_verified": settings.memory_score_weight_verified,
+        # T2-B4 (2026-09-22, GRIDIRON_PARTIAL #98) — see MemoryEmbedding's
+        # own comment for helpful_count/not_helpful_count's full story.
+        # Neutral (0.5, the CASE's own default above) until a memory has
+        # actually been rated at least once — same "no data yet is neutral,
+        # never fabricated" convention every other weighted term here uses.
+        "w_usefulness": settings.memory_score_weight_usefulness,
         "recency_half_life_days": settings.memory_recency_half_life_days,
         "reuse_cap": settings.memory_reuse_cap,
     }
@@ -570,7 +605,7 @@ async def query_similar_tasks(
             WITH candidates AS (
                 SELECT id, task_id, epic_id, outcome, description, summary,
                        files_changed, embedding, created_at, reuse_count,
-                       importance, verified
+                       importance, verified, helpful_count, not_helpful_count
                 FROM memory_embeddings
                 WHERE embedding IS NOT NULL
                   AND vector_norm(embedding) > 0
@@ -951,7 +986,7 @@ async def query_architecture_notes(
             WITH candidates AS (
                 SELECT id, task_id, epic_id, outcome, description, summary,
                        files_changed, embedding, created_at, reuse_count,
-                       importance, verified
+                       importance, verified, helpful_count, not_helpful_count
                 FROM memory_embeddings
                 WHERE outcome = 'architecture'
                   AND embedding IS NOT NULL
@@ -1109,7 +1144,8 @@ async def query_failures(
         sql = text(f"""
             WITH candidates AS (
                 SELECT id, task_id, epic_id, description, summary, embedding,
-                       created_at, reuse_count, importance, verified
+                       created_at, reuse_count, importance, verified,
+                       helpful_count, not_helpful_count
                 FROM memory_embeddings
                 WHERE outcome = 'failure'
                   AND embedding IS NOT NULL
@@ -1304,7 +1340,8 @@ async def query_learning_signals(
         sql = text(f"""
             WITH candidates AS (
                 SELECT id, task_id, description, summary, embedding,
-                       created_at, reuse_count, importance, verified
+                       created_at, reuse_count, importance, verified,
+                       helpful_count, not_helpful_count
                 FROM memory_embeddings
                 WHERE category = 'learning'
                   AND embedding IS NOT NULL
@@ -1490,7 +1527,8 @@ async def query_procedures(
         sql = text(f"""
             WITH candidates AS (
                 SELECT id, task_id, epic_id, description, summary, embedding,
-                       created_at, reuse_count, importance, verified
+                       created_at, reuse_count, importance, verified,
+                       helpful_count, not_helpful_count
                 FROM memory_embeddings
                 WHERE category = 'procedure'
                   AND embedding IS NOT NULL
@@ -1696,7 +1734,8 @@ async def query_preferences(
         sql = text(f"""
             WITH candidates AS (
                 SELECT id, task_id, epic_id, description, summary, embedding,
-                       created_at, reuse_count, importance, verified
+                       created_at, reuse_count, importance, verified,
+                       helpful_count, not_helpful_count
                 FROM memory_embeddings
                 WHERE category = 'preference'
                   AND embedding IS NOT NULL
@@ -1892,7 +1931,8 @@ async def query_bugs(
         sql = text(f"""
             WITH candidates AS (
                 SELECT id, task_id, epic_id, description, summary, embedding,
-                       created_at, reuse_count, importance, verified
+                       created_at, reuse_count, importance, verified,
+                       helpful_count, not_helpful_count
                 FROM memory_embeddings
                 WHERE category = 'bug'
                   AND embedding IS NOT NULL

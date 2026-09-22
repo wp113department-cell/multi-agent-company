@@ -953,6 +953,9 @@ def test_every_mutating_route_is_approver_only_except_a_short_reviewed_list() ->
         # the platform. A viewer giving a thumbs-up/down is exactly the
         # engagement this feature exists to capture.
         ("POST", "/api/ratings"),
+        # T2-B4 (2026-09-22, GRIDIRON_PARTIAL #98) — same reasoning: feedback
+        # on a retrieved memory's usefulness, not a platform operation.
+        ("POST", "/api/memory/{memory_id}/feedback"),
     }
     found: list[tuple[str, str, set[str]]] = []
 

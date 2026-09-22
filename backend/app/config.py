@@ -464,6 +464,16 @@ class Settings(BaseSettings):
         default=0.05,
         description="Composite memory ranking: weight on the verified boolean flag",
     )
+    memory_score_weight_usefulness: float = Field(
+        default=0.05,
+        description="T2-B4 (2026-09-22, GRIDIRON_PARTIAL #98 'Memory Quality "
+        "Control (accuracy validation)') — composite memory ranking: weight on "
+        "the real helpful_count/not_helpful_count usage-feedback signal "
+        "(POST /api/memory/{id}/feedback), neutral (0.5) until a memory has "
+        "actually been rated at least once. Weights need not sum to 1.0 "
+        "(not enforced, same as the others above) — this only mildly "
+        "re-ranks otherwise-close matches.",
+    )
     memory_recency_half_life_days: float = Field(
         default=30.0,
         gt=0,
@@ -1565,6 +1575,47 @@ class Settings(BaseSettings):
     memory_embeddings_retention_days: int = Field(
         default=180,
         description="Days to keep memory_embeddings rows before the retention loop marks them archived=true. 0 disables. Separate from LOG_RETENTION_DAYS since engineering memory is longer-lived than raw execution logs.",
+    )
+
+    # T2-B4 (2026-09-22, GRIDIRON_PARTIAL #100 "Memory Evolution (active
+    # shrink/consolidate over time)") — app/memory/consolidation.py. Named
+    # memory_EMBEDDINGS_consolidation_* (not memory_consolidation_*, already
+    # taken above by the versioned_lessons consolidation loop) for the same
+    # reason memory_embeddings_retention_days above is distinctly named from
+    # log_retention_days — a different table, a different real feature.
+    # versioned_lessons' consolidation proposes a DRAFT for human review
+    # (promote() gates every real change); memory_embeddings has no such
+    # human gate anywhere in its own lifecycle (writes are fully automatic,
+    # scored only by the deterministic MemoryQualityDecision content check)
+    # — auto-merging here is consistent with that existing design, not a new
+    # risk class introduced by this feature.
+    memory_embeddings_consolidation_enabled: bool = Field(
+        default=False,
+        description="If true, a leader-gated background loop periodically finds clusters of old, mutually-similar, still-active memory_embeddings rows and merges each cluster via a real LLM call, archiving the rest. OFF by default — unlike a per-task agent run, this is unbounded automatic background LLM spend running forever regardless of real platform usage; opt in deliberately once you've reviewed the cost knobs below.",
+    )
+    memory_embeddings_consolidation_interval_hours: float = Field(
+        default=24.0,
+        description="Hours between memory_embeddings consolidation cycles",
+    )
+    memory_embeddings_consolidation_min_age_days: int = Field(
+        default=30,
+        description="Only memory_embeddings rows older than this are consolidation candidates — recent memory is still actively being reinforced by reuse and shouldn't be merged away yet",
+    )
+    memory_embeddings_consolidation_min_group_size: int = Field(
+        default=3,
+        description="Minimum number of mutually-similar same-category rows required before a cluster is merged — smaller groups aren't worth an LLM call",
+    )
+    memory_embeddings_consolidation_similarity_threshold: float = Field(
+        default=0.85,
+        description="Cosine similarity above which two memory_embeddings rows are considered part of the same consolidation cluster — deliberately close to memory_dedup_similarity_threshold's 0.97 but a bit looser, since these are genuinely distinct-but-related old entries being merged for space, not near-duplicates",
+    )
+    memory_embeddings_consolidation_scan_limit: int = Field(
+        default=200,
+        description="Bounds each category's per-cycle candidate scan to the N oldest qualifying rows, keeping the O(n^2) pairwise clustering pass cost-bounded — same reasoning as memory_consolidation_max_candidates above",
+    )
+    memory_embeddings_consolidation_max_groups_per_cycle: int = Field(
+        default=3,
+        description="Hard cap on real LLM merge calls per consolidation cycle, across every category combined — the actual cost-control knob",
     )
     scratchpad_ttl_seconds: int = Field(
         default=14400,

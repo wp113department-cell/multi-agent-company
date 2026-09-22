@@ -261,6 +261,10 @@ async def test_zero_weights_reduce_composite_ranking_to_pure_similarity(
     monkeypatch.setenv("MEMORY_SCORE_WEIGHT_REUSE", "0.0")
     monkeypatch.setenv("MEMORY_SCORE_WEIGHT_IMPORTANCE", "0.0")
     monkeypatch.setenv("MEMORY_SCORE_WEIGHT_VERIFIED", "0.0")
+    # T2-B4 (2026-09-22, GRIDIRON_PARTIAL #98) — the new usefulness term
+    # must also be zeroed for this "pure similarity" equivalence to hold;
+    # it defaults to a neutral 0.5 contribution (no feedback yet), not 0.0.
+    monkeypatch.setenv("MEMORY_SCORE_WEIGHT_USEFULNESS", "0.0")
     reset_settings_cache()
     try:
         engine = _engine()

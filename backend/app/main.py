@@ -278,6 +278,20 @@ async def _versioned_lesson_consolidation_loop() -> None:
             logger.warning("Zero-vector memory repair failed: %s", exc)
 
 
+async def _memory_embeddings_consolidation_loop() -> None:
+    """T2-B4 (2026-09-22, GRIDIRON_PARTIAL #100 "Memory Evolution (active
+    shrink/consolidate over time)") — see app/memory/consolidation.py's own
+    module docstring for the full design and how this differs from
+    _versioned_lesson_consolidation_loop immediately above (a different
+    table, no human-review gate, off by default). start_memory_
+    consolidation_loop() itself checks memory_embeddings_consolidation_
+    enabled and no-ops immediately when disabled — leader election still
+    runs the check on exactly one instance either way, cheap and correct."""
+    from app.memory.consolidation import start_memory_consolidation_loop
+
+    await start_memory_consolidation_loop()
+
+
 async def _agent_historical_performance_rollup_loop() -> None:
     """plan14 follow-on #3 (Memory-Aware Agent Selection) — periodic
     recomputation of agent_historical_performance from memory_embeddings.
@@ -1358,6 +1372,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             _leader_election_engine,
         )
     )
+    memory_embeddings_consolidation_task = asyncio.create_task(
+        _run_as_leader(
+            "loop:memory_embeddings_consolidation",
+            _memory_embeddings_consolidation_loop,
+            _leader_election_engine,
+        )
+    )
     agent_historical_performance_rollup_task = asyncio.create_task(
         _run_as_leader(
             "loop:agent_historical_performance_rollup",
@@ -1432,6 +1453,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     fleet_scan_task.cancel()
     lesson_archive_task.cancel()
     lesson_consolidation_task.cancel()
+    memory_embeddings_consolidation_task.cancel()
     benchmark_baseline_task.cancel()
     orphan_recovery_task.cancel()
     doc_agent_auto_trigger_task.cancel()
@@ -1451,6 +1473,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         fleet_scan_task,
         lesson_archive_task,
         lesson_consolidation_task,
+        memory_embeddings_consolidation_task,
         benchmark_baseline_task,
         orphan_recovery_task,
         doc_agent_auto_trigger_task,

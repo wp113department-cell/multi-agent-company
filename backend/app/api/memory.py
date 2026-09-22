@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -237,3 +238,37 @@ async def rollback_versioned_lesson(
         "state": record.state,
         "rolledBackBy": user_id,
     }
+
+
+class MemoryFeedbackRequest(BaseModel):
+    helpful: bool
+
+
+@router.post("/{memory_id}/feedback")
+async def rate_memory_usefulness(
+    memory_id: int,
+    payload: MemoryFeedbackRequest,
+    db: AsyncSession = Depends(get_db),
+    actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
+    """T2-B4 (2026-09-22, GRIDIRON_PARTIAL #98 "Memory Quality Control
+    (accuracy validation)") — real feedback on whether a retrieved memory
+    actually helped, feeding the composite ranking's usefulness term (see
+    app/memory/store.py::record_memory_feedback's own docstring for what
+    this is distinct from). require_authenticated, not require_approver —
+    same reasoning as POST /api/ratings (T2-B3, #439): feedback on
+    completed/retrieved content is not an operation on the platform.
+    """
+    from app.memory.store import record_memory_feedback
+
+    found = await record_memory_feedback(memory_id, payload.helpful, db)
+    if not found:
+        raise HTTPException(status_code=404, detail=f"Memory {memory_id} not found")
+
+    logger.info(
+        "Memory feedback recorded: id=%d helpful=%s by=%s",
+        memory_id,
+        payload.helpful,
+        actor,
+    )
+    return {"ok": True, "id": memory_id, "helpful": payload.helpful}

@@ -678,6 +678,19 @@ class MemoryEmbedding(Base):
     reuse_count: Mapped[int] = mapped_column(Integer, default=0)
     importance: Mapped[float] = mapped_column(Float, default=0.5)
     verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    # T2-B4 (2026-09-22, GRIDIRON_PARTIAL #98 "Memory Quality Control
+    # (accuracy validation)") — a real per-use usefulness signal, distinct
+    # from BOTH `verified` (a coarse, write-time "did the task that produced
+    # this memory complete successfully" boolean) and the write-time
+    # MemoryQualityDecision content gate (evaluate_memory_quality — rejects
+    # near-empty/placeholder text, an authorship-quality check). Neither
+    # ever asked "did retrieving and using THIS memory actually help a later
+    # agent" — this does, fed back explicitly (app/memory/store.py::
+    # record_memory_feedback, POST /api/memory/{id}/feedback) after a real
+    # retrieval, into the composite ranking score alongside similarity/
+    # recency/reuse/importance/verified.
+    helpful_count: Mapped[int] = mapped_column(Integer, default=0)
+    not_helpful_count: Mapped[int] = mapped_column(Integer, default=0)
     last_accessed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
