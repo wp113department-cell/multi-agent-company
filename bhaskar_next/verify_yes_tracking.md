@@ -33,7 +33,8 @@ Live tally is kept at the top of each batch section once that batch starts.
 | **B6** Agent scaffold, capability audit, skills | 39 | **39** | 36 | 3 | 0 | 0 |
 | **B7** Security, governance, enterprise, frontend/API | 32 | **32** | 15 | 16 | 1 | 0 |
 | **B8** Fleet self-improvement, guardians, health | 33 | **33** | 22 | 9 | 2 | 0 |
-| B9–B11 | 126 | 0 | 0 | 0 | 0 | 0 |
+| **B9** Scheduler, metrics, quality gates, scalability | 37 | **37** | 30 | 3 | 4 | 0 |
+| B10–B11 | 89 | 0 | 0 | 0 | 0 | 0 |
 
 **Environment baseline (Day 0):** isolated DB `gridiron_verify`; first full run 31 failed / 7,707 passed / 54 skipped — 28 of the 31 were `python: not found` from running pytest without the venv on PATH (84 tests pass with it), 2 pip-audit drift (known), 1 shared-state test. See `verify_api_ledger.md` for live-API spend (~$0.30 so far).
 
@@ -351,43 +352,43 @@ Live tally is kept at the top of each batch section once that batch starts.
 
 | # | § | Question | Verdict | Evidence / notes |
 |---:|---|---|---|---|
-| 151 | 8 | Response latency tracking | PENDING | |
-| 152 | 8 | Planning speed tracking | PENDING | |
-| 153 | 8 | Orchestration speed tracking | PENDING | |
-| 154 | 8 | File scanning speed tracking | PENDING | |
-| 155 | 8 | Editing speed tracking | PENDING | |
-| 156 | 8 | Tool execution speed tracking | PENDING | |
-| 157 | 8 | Memory retrieval speed tracking | PENDING | |
-| 160 | 8 | Bottleneck: sync blocking in async code | PENDING | |
-| 161 | 10 | Folder structure | PENDING | |
-| 163 | 10 | Dependency management (pinning) | PENDING | |
-| 164 | 10 | Code quality (lint/type-check clean) | PENDING | |
-| 165 | 10 | Testing volume | PENDING | |
-| 166 | 10 | Observability | PENDING | |
-| 167 | 10 | Deployment readiness (prod manifest) | PENDING | |
-| 168 | 46 | Hardcoded agent lists that wouldn't survive growth | PENDING | |
-| 170 | 46 | DB indexing on frequently-filtered columns | PENDING | |
-| 172 | 46 | Connection pooling | PENDING | |
-| 424 | 86 | Queue | PENDING | |
-| 425 | 86 | Prioritize | PENDING | |
-| 426 | 86 | Pause / Resume / Cancel | PENDING | |
-| 430 | 86 | Retry (both queue backends) | PENDING | |
-| 431 | 87 | Success rate | PENDING | |
-| 432 | 87 | Failure rate | PENDING | |
-| 433 | 87 | Avg execution time (p50/p95) | PENDING | |
-| 434 | 87 | Tool usage / accuracy | PENDING | |
-| 435 | 87 | Token usage | PENDING | |
-| 438 | 87 | User approval rate | PENDING | |
-| 440 | 87 | Reliability score | PENDING | |
-| 450 | 90 | Linting | PENDING | |
-| 451 | 90 | Formatting | PENDING | |
-| 452 | 90 | Tests | PENDING | |
-| 459 | 92 | Outdated packages | PENDING | |
-| 460 | 92 | Security vulnerabilities | PENDING | |
-| 493 | 23 | Overall production readiness scored across all categories | PENDING | |
-| 496 | 24 | Accessibility tooling in this product's own frontend | PENDING | |
-| 498 | 50 | Roadmap tracked, sequenced, and re-sequenced against real progress | PENDING | |
-| 499 | 51 | Deterministic 'repeat this exact prior task by ID' mechanism | PENDING | |
+| 151 | 8 | Response latency tracking | CONFIRMED | MetricsCollector.p50/p95_latency_ms per agent, real durations from record_tool/RunMetrics; exercised live via GET /api/agents/{name}/metrics. |
+| 152 | 8 | Planning speed tracking | CONFIRMED | planner_node wrapped with record_phase_timing('planner_node') — real per-run timing, isolated from the rest of the run. |
+| 153 | 8 | Orchestration speed tracking | CONFIRMED | orchestration_analytics.record_orchestration_time, called from manager.py's real dispatch sites. |
+| 154 | 8 | File scanning speed tracking | CONFIRMED | record_phase_timing('file_scanning') around index_repository() in memory_hook_node. |
+| 155 | 8 | Editing speed tracking | CONFIRMED | editing_speed_stats() aggregates real duration_ms across edit_file/write_file/apply_patch. |
+| 156 | 8 | Tool execution speed tracking | CONFIRMED | MetricsCollector.tool_latency_stats() — real per-call duration_ms, any tool name or group, with p50/p95/avg/min/max. |
+| 157 | 8 | Memory retrieval speed tracking | CONFIRMED | record_phase_timing('memory_retrieval') around query_memory_context_sync in memory_hook_node (also exercised in B4). |
+| 160 | 8 | Bottleneck: sync blocking in async code | FIXED | _run_doc_agent_auto_trigger_once (the body of a scheduled loop on the shared FastAPI event loop) called subprocess.run(['git','rev-parse','main'], timeout=10) directly — a real git-lock/slow-filesystem stall freezes every other coroutine in the process for up to 10s. Proved live: pre-fix, a 0.6s slow git call delayed a concurrent asyncio ticker by 0.66s; post-fix, off the loop via asyncio.to_thread, max delay 0.05s. Full-codebase AST scan found no other async function calling subprocess.run/call/check_output/Popen directly; a static test guards against a future regression. |
+| 161 | 10 | Folder structure | CONFIRMED | app/{agents,api,db,fleet,tools,policy,security,queue,repo_tools,...} — real, coherent module boundaries; ~28 top-level packages. |
+| 163 | 10 | Dependency management (pinning) | CONFIRMED | All 43 entries in requirements.txt are exact-pinned (==); 0 unpinned/range-pinned. |
+| 164 | 10 | Code quality (lint/type-check clean) | FIXED | mypy --strict (the real CI command) found 5 real issues introduced across this initiative's own B7-B9 work (2 variable-name collisions across incompatible inferred types in _parse_llm_json/circular_dep_detect's _resolve loop, an unexported TimeoutExpired re-export, a **dict kwargs-splat typing hole in the read_only sandbox fix, and an untyped exception-handler dict) — all fixed, mypy --strict now 0 errors across 471 files. Caveat: `ruff check .` / `black --check .` over the WHOLE tree (CI's real scope) still fail — 25 ruff errors (mostly unused imports) and 184 files needing reformat, all pre-existing in old test files, not from this initiative's own changes (which are ruff/black-clean). Also: GitHub Actions CI has not run in 28 days (account billing issue) — the gate exists and is correctly configured but is not currently enforcing anything. |
+| 165 | 10 | Testing volume | CONFIRMED | 8,400+ real pytest tests across 575+ files; not a token count — every test asserts real behavior (this initiative alone verified hundreds against real Postgres/Docker). |
+| 166 | 10 | Observability | CONFIRMED | Structured JSON logs w/ trace_id/task_id/agent_run_id, audit_log (hash-chained, B7), OTEL bridge, RunMetrics/phase timings, Sentry hook. |
+| 167 | 10 | Deployment readiness (prod manifest) | CONFIRMED | docker-compose.prod.yml: hard-fails on missing secrets (proved live), DEPLOYMENT_ENV=production triggers real startup validators, named volumes, bounded logging, RQ by default. Validated: `docker compose config` fails without secrets (as designed) and succeeds with them supplied. |
+| 168 | 46 | Hardcoded agent lists that wouldn't survive growth | CONFIRMED | specialized_agents.py's _discover_agent_fn/_discoverable_agent_names resolve any AGENT_CONTRACT-bearing module dynamically — a new agent needs zero edits to the dispatch registry (verified in B7's audit of all 79 agents). |
+| 170 | 46 | DB indexing on frequently-filtered columns | CONFIRMED | Real indexes on every hot filter column verified directly on gridiron_dev: agent_runs/task_logs(task_id,archived), dev_tasks(status,repo_id,epic_id), memory_embeddings(category,repo_id,task_id)+hnsw, audit_log(seq,trace_id,task_id,timestamp). |
+| 172 | 46 | Connection pooling | CONFIRMED | create_async_engine with real pool_size/max_overflow/pool_pre_ping from config (db_pool_size=20, db_pool_max_overflow=10), not sqlalchemy defaults. |
+| 424 | 86 | Queue | CONFIRMED | In-process asyncio dispatch (default) + RQQueueAdapter (Redis/RQ, QUEUE_BACKEND=rq) — real enqueue, two named queues. |
+| 425 | 86 | Prioritize | CONFIRMED | gridiron-high vs. gridiron-default queues; RQQueueAdapter.enqueue(priority=...). |
+| 426 | 86 | Pause / Resume / Cancel | DOWNGRADED | PARTIAL: Stop/Resume/Cancel (app/api/activity.py) work correctly for the default in-process backend, but the mechanism is a process-local ActivityStreamRegistry singleton. Proved live with two real subprocesses: a Stop flag set in one process is invisible in another — under QUEUE_BACKEND=rq the agent runs in a separate `rq worker` process, so these signals never reach it. Same root cause the original audit already flagged generally (#169 in-memory registries PARTIAL, #171 horizontal scaling NO); this is that same gap applied specifically to pause/resume/cancel. |
+| 430 | 86 | Retry (both queue backends) | CONFIRMED | RQ: Retry(max=queue_job_retry_max) plus sweep_failed_rq_jobs() reading FailedJobRegistry. Asyncio backend: failure_ladder.should_retry() retry-with-feedback loops (B1-B8). Both real, verified in earlier batches + this one. |
+| 431 | 87 | Success rate | CONFIRMED | compute_live_success_rate (real SQL aggregate over finished AgentRun rows, fixed in B4) surfaced on GET /api/agents/{name}/metrics. |
+| 432 | 87 | Failure rate | CONFIRMED | 1-success_rate implicit; capability_gap.py/fleet_dashboard.py compute a real, explicit failureRate. |
+| 433 | 87 | Avg execution time (p50/p95) | CONFIRMED | MetricsCollector.p50/p95_latency_ms — real per-run wall-clock, same endpoint. |
+| 434 | 87 | Tool usage / accuracy | CONFIRMED | avg_tool_accuracy + tool_latency_stats — real per-tool-call data. |
+| 435 | 87 | Token usage | CONFIRMED | RunMetrics tokens_in/out per run, aggregated into cost reports (B6/B8). |
+| 438 | 87 | User approval rate | CONFIRMED | _compute_user_approval_rate — real task_logs approval/rejection counts per assigned_agent, honest None when no decisions logged yet. |
+| 440 | 87 | Reliability score | CONFIRMED | reliabilityScore = weighted composite of success_rate + avg_tool_accuracy, exercised live on the real (empty) verify DB — honest 1.0/None, not fabricated. |
+| 450 | 90 | Linting | DOWNGRADED | PARTIAL: `ruff check .` (CI's real command, whole backend tree) currently fails with 25 errors — all pre-existing in old test files (2 that were in this initiative's own recent test files were found and fixed here). The gate is correctly configured; the current repo state does not pass it. |
+| 451 | 90 | Formatting | DOWNGRADED | PARTIAL: `black --check .` (CI's real command) currently fails — 184 files would be reformatted, all pre-existing, none from this initiative's own changes (kept black-clean file-by-file throughout). Same caveat as #450: mechanism real, current state not clean. |
+| 452 | 90 | Tests | CONFIRMED | `pytest tests/` is the real CI gate; 8,400+ tests, consistently green modulo the two long-documented pip-audit-drift exceptions. |
+| 459 | 92 | Outdated packages | CONFIRMED | deps_outdated tool (real pip/npm outdated-package check, verified in earlier batches). |
+| 460 | 92 | Security vulnerabilities | CONFIRMED | pip-audit (real CVE scan, B6/B8) + pnpm audit (CI) + dependency_security_agent's autonomous scan (B8). |
+| 493 | 23 | Overall production readiness scored across all categories | FIXED | get_quality_score() (Tests/Architecture/Security/Memory/Agents composite) had full test coverage but ZERO real callers anywhere in the app — not one route, agent, or dashboard read it. Also, calling it directly from an async route would have crashed ('asyncio.run() cannot be called from a running event loop' — every per-category reader bridges to the DB via its own internal asyncio.run()). New GET /api/fleet/reports/quality-score/{repo_id}, run via asyncio.to_thread; proved live end-to-end with a real persisted SecurityScore row: overallScore=0.7, unscored categories honestly null, not fabricated. |
+| 496 | 24 | Accessibility tooling in this product's own frontend | CONFIRMED | eslint-plugin-jsx-a11y (plugin:jsx-a11y/recommended) in the real ESLint config; verified it actually catches a real violation (missing alt text) and the current frontend tree passes clean. |
+| 498 | 50 | Roadmap tracked, sequenced, and re-sequenced against real progress | DOWNGRADED | PARTIAL: roadmap_agent produces a one-shot LLM-written roadmap document (phases/impact/effort/confidence, written to a file) with no persisted Roadmap model, no sequence field, and no mechanism that re-sequences it against real completed epics/tasks over time — each run is independent, nothing is 'tracked' between runs. |
+| 499 | 51 | Deterministic 'repeat this exact prior task by ID' mechanism | CONFIRMED | POST /api/tasks/{id}/repeat + repeated_from_task_id column (indexed) — deterministic clone-and-relaunch by real task id, exercised via the API. |
 
 ## B10 — File understanding, external knowledge, git, docs & deploy  (46 items, depth: Light)
 

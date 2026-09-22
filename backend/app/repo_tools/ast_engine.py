@@ -390,9 +390,12 @@ def _find_circular_import_cycles(
                     deps.update(h for h in hit if h)
             elif isinstance(node, ast.Import):
                 for alias in node.names:
-                    hit = _resolve(alias.name)
-                    if hit:
-                        deps.add(hit)
+                    # named `resolved`, not `hit` — the ImportFrom branch above already
+                    # binds `hit` to a set[str]; mypy flagged the two incompatible
+                    # inferred types this function's shared (non-block-scoped) name got.
+                    resolved = _resolve(alias.name)
+                    if resolved:
+                        deps.add(resolved)
         deps.discard(mod)
         graph[mod] = deps
 

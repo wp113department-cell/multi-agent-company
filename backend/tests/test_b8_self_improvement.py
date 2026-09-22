@@ -319,9 +319,9 @@ def test_the_same_finding_is_not_filed_again_while_open_or_recently_rejected() -
         "priority": "low",
         "evidence": {"file": "a.py"},
     }
-    file_as = lambda who, **over: make_submit_enhancement_request_handler(who)(
-        {**payload, **over}
-    )  # noqa: E731
+
+    def file_as(who, **over):
+        return make_submit_enhancement_request_handler(who)({**payload, **over})
 
     async def rows(who):
         async with _db() as s:

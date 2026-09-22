@@ -759,10 +759,13 @@ def _parse_llm_json(text: str, expect: type | None = dict) -> Any:
             last_exc = exc
         # "Extra data": a complete value followed by more text/objects — take
         # the first complete value (seen live from the planner).
-        opener = re.search(r"[\{\[]", cand)
-        if opener:
+        # (named opener_match, not opener — this function's outer `for opener, closer in
+        # (...)` loop above already binds `opener` to a str; mypy flagged the two
+        # incompatible inferred types for the same name.)
+        opener_match = re.search(r"[\{\[]", cand)
+        if opener_match:
             try:
-                value = decoder.raw_decode(cand[opener.start() :])[0]
+                value = decoder.raw_decode(cand[opener_match.start() :])[0]
                 if _ok(value):
                     return value
             except (json.JSONDecodeError, ValueError) as exc:

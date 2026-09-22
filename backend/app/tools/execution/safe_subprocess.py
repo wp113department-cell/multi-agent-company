@@ -26,10 +26,26 @@ from subprocess import (  # noqa: F401  (re-exported so callers keep using the s
 )
 from typing import Any, Mapping
 
+__all__ = [
+    "DEVNULL",
+    "PIPE",
+    "STDOUT",
+    "CalledProcessError",
+    "CompletedProcess",
+    "TimeoutExpired",
+    "safe_env",
+    "run",
+    "check_output",
+    "Popen",
+]
+
 _SECRET_NAME = re.compile(
-    r"(KEY|SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIAL|AUTH|PRIVATE|DSN|COOKIE)", re.IGNORECASE
+    r"(KEY|SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIAL|AUTH|PRIVATE|DSN|COOKIE)",
+    re.IGNORECASE,
 )
-_SECRET_EXACT = frozenset({"DATABASE_URL", "REDIS_URL", "REDIS_URI", "MONGODB_URI", "AMQP_URL"})
+_SECRET_EXACT = frozenset(
+    {"DATABASE_URL", "REDIS_URL", "REDIS_URI", "MONGODB_URI", "AMQP_URL"}
+)
 
 
 def safe_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -55,5 +71,7 @@ def check_output(*args: Any, **kwargs: Any) -> Any:
     return _subprocess.check_output(*args, **_scrubbed(kwargs))
 
 
-def Popen(*args: Any, **kwargs: Any) -> "_subprocess.Popen[Any]":  # noqa: N802 - mirrors subprocess
+def Popen(
+    *args: Any, **kwargs: Any
+) -> "_subprocess.Popen[Any]":  # noqa: N802 - mirrors subprocess
     return _subprocess.Popen(*args, **_scrubbed(kwargs))

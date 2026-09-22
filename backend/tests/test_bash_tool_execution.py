@@ -46,7 +46,8 @@ from app.config import get_settings
 def _warm_the_docker_probe():
     """Several tests here patch subprocess.run globally. The sandbox's cached `docker version` probe
     goes through that same function, so when this file ran first (or alone) the probe saw the patched
-    TimeoutExpired, cached "Docker unavailable" and every later test in the process failed."""
+    TimeoutExpired, cached "Docker unavailable" and every later test in the process failed.
+    """
     from app.policy.sandbox import _docker_available
 
     _docker_available()
@@ -169,6 +170,7 @@ def test_scoped_bash_timeout_is_config_driven(
         env: Any = None,
         image: Any = None,
         network: Any = None,
+        read_only: bool = False,
     ) -> SandboxResult:
         captured["timeout"] = timeout
         return SandboxResult(stdout="ok", stderr="", returncode=0, timed_out=False)

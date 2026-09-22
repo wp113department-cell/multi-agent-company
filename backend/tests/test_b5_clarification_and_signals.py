@@ -12,7 +12,6 @@ Defects proven before the fix:
 from __future__ import annotations
 
 import asyncio
-import uuid
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 

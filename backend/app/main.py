@@ -912,7 +912,12 @@ async def _run_doc_agent_auto_trigger_once() -> None:
     repo_path = str(settings.target_repo_path)
 
     try:
-        head = subprocess.run(
+        # B9 verification (#160): this ran subprocess.run() directly on the event loop — a real
+        # git lock contention or a slow filesystem could block every other coroutine in the
+        # process (every HTTP request, every SSE stream, every other background loop) for up to
+        # the full 10s timeout. asyncio.to_thread moves it off the loop.
+        head = await asyncio.to_thread(
+            subprocess.run,
             ["git", "rev-parse", "main"],
             cwd=repo_path,
             capture_output=True,
@@ -1533,7 +1538,7 @@ async def validation_exception_handler(
     # frame — absolute server file paths ("File /home/.../slowapi/extension.py,
     # line 289, in run_task") — to the response body (proved live). Return only
     # where/what/why for each failing field.
-    details = [
+    details: list[dict[str, Any]] = [
         {
             "loc": [str(p) for p in err.get("loc", ())],
             "msg": str(err.get("msg", "")),

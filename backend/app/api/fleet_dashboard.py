@@ -737,6 +737,46 @@ async def agent_memory_performance_report(
     ]
 
 
+@router.get("/reports/quality-score/{repo_id}")
+async def quality_score_report(
+    repo_id: int,
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
+    """Overall production-readiness score for a repo, aggregated across the Tests, Architecture,
+    Security, Memory and Agents categories (app.fleet.quality_score.get_quality_score).
+
+    B9 verification (#493) — this real aggregator existed with full test coverage but had ZERO
+    real callers anywhere in the app (grepped): not one API route, agent, or dashboard read it.
+    This is that read path. get_quality_score() is a sync function whose per-category readers
+    each bridge to the DB via their own internal asyncio.run() (matching this codebase's other
+    sync/async DB bridges) — calling it directly from this async route would raise "asyncio.run()
+    cannot be called from a running event loop", so it runs via asyncio.to_thread like every other
+    sync-bridging call site in this file.
+    """
+    from dataclasses import asdict
+
+    from app.fleet.quality_score import get_quality_score
+
+    result = await asyncio.to_thread(get_quality_score, repo_id)
+    return {
+        "repoId": result.repo_id,
+        "overallScore": result.overall_score,
+        "availableCategoryCount": result.available_category_count,
+        "totalCategoryCount": result.total_category_count,
+        "timestamp": result.timestamp,
+        "categories": [
+            {
+                "name": c.name,
+                "status": c.status,
+                "score": c.score,
+                "reason": c.reason,
+                "detail": asdict(c.detail) if c.detail is not None else None,
+            }
+            for c in result.categories
+        ],
+    }
+
+
 @router.get("/requests/stream")
 async def stream_dashboard_events(
     _actor: str = Depends(require_authenticated),

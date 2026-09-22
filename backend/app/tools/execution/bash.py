@@ -142,8 +142,7 @@ def _run_bash_command(
                 env=extra_env,
                 image=image,
                 network=network,
-                # only passed when set: keeps every existing caller/test double unchanged
-                **({"read_only": True} if read_only else {}),
+                read_only=read_only,
             )
             return result.stdout, result.stderr, result.returncode, result.timed_out
         except SandboxUnavailableError as exc:
