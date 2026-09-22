@@ -13,14 +13,19 @@ import json
 import logging
 from typing import Any, AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.db.models import VALID_TRANSITIONS
-from app.db.repository import TransitionError, get_task, transition_task
+from app.db.repository import (
+    TransitionError,
+    get_latest_agent_run_for_task,
+    get_task,
+    transition_task,
+)
 from app.middleware.rbac import require_approver, require_authenticated
 from app.services.activity_stream import get_activity_registry
 
@@ -97,10 +102,29 @@ async def stop_task(
 async def resume_task(
     task_id: str,
     payload: ResumePayload,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     _actor: str = Depends(require_approver),
 ) -> dict[str, Any]:
-    """Resume after a stop: clears abort flag and injects a user message.
+    """Resume after a stop: clears abort flag, injects a user message, and —
+    T2-B2 (2026-09-22, GRIDIRON_PARTIAL #212/#213) — actually re-dispatches
+    the agent when its type supports real checkpoint resume.
+
+    Before this, resume only ever called stream.set_resume(), which stashed
+    the message/files in ActivityStreamRegistry — a real, confirmed dead
+    end: nothing in the codebase ever called TaskStream.pop_resume() to
+    consume it, so "Resume" never actually restarted a worker-agent run; it
+    only cleared the abort flag a later, unrelated manual re-run would have
+    to contend with anyway. Now: if the most recent agent_runs row for this
+    task names an agent_type app.fleet.resume_registry can resolve (see that
+    module's own docstring for exactly which agents, and why coverage is
+    bounded rather than fleet-wide yet), this re-dispatches that SAME agent
+    with resume_trace_id set, so it genuinely continues the prior
+    checkpointed conversation (run_agent_graph's own resume_trace_id
+    mechanism) with payload.message as the new turn — not a fresh,
+    context-free restart. Falls back to today's exact pre-existing behavior
+    (flag only, no re-dispatch) for any task/agent this registry doesn't yet
+    cover, never a guessed dispatch.
 
     AUDIT_Q_BATCH08 §14 "Cancel (distinct terminal state)": refuses to
     resume a task whose DB status is terminal (cancelled/completed/failed —
@@ -135,7 +159,47 @@ async def resume_task(
 
     stream.set_resume(payload.message, payload.files)
     logger.info("Resume requested for task %s (msg=%s)", task_id, payload.message[:80])
-    return {"ok": True, "task_id": task_id, "message": "Resume signal sent."}
+
+    dispatched = False
+    dispatched_agent: str | None = None
+    if numeric_id is not None:
+        agent_run = await get_latest_agent_run_for_task(db, numeric_id)
+        if agent_run is not None and agent_run.trace_id:
+            from app.fleet.resume_registry import resolve_resume_call
+
+            resolved = resolve_resume_call(
+                agent_run.agent_type,
+                task_id=numeric_id,
+                trace_id=agent_run.trace_id,
+                resume_message=payload.message,
+                repo_path="",
+            )
+            if resolved is not None:
+                from app.api.repo import get_active_repo_path
+                from app.api.specialized_agents import _run_specialized_agent_bg
+
+                background_tasks.add_task(
+                    _run_specialized_agent_bg,
+                    agent_name=agent_run.agent_type,
+                    task_id=numeric_id,
+                    description=payload.message,
+                    repo_path=get_active_repo_path(),
+                    resume_trace_id=agent_run.trace_id,
+                )
+                dispatched = True
+                dispatched_agent = agent_run.agent_type
+
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "message": (
+            f"Resume signal sent — re-dispatching {dispatched_agent} from its "
+            "checkpoint."
+            if dispatched
+            else "Resume signal sent."
+        ),
+        "dispatched": dispatched,
+    }
 
 
 @router.post("/{task_id}/cancel")

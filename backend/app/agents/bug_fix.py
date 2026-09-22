@@ -87,6 +87,12 @@ def run_bug_fix(
     repo_path: str | None = None,
     on_heartbeat: Any = None,
     on_tool_call: Any = None,
+    # T2-B2 (2026-09-22, GRIDIRON_PARTIAL #212/#213) — set by
+    # app.fleet.resume_registry.resolve_resume_call() to genuinely continue
+    # a previous run's checkpointed conversation (see run_agent_graph's own
+    # resume_trace_id docstring) instead of starting a fresh one under a new
+    # trace_id. "" (the default) is today's exact behavior, unchanged.
+    resume_trace_id: str = "",
 ) -> AgentResult:
     settings = get_settings()
     repo = repo_path or str(settings.target_repo_path)
@@ -136,6 +142,7 @@ def run_bug_fix(
         enable_reflection=True,
         enable_lesson=True,
         max_turns=25,
+        resume_trace_id=resume_trace_id,
     )
 
     raw = final_state["result"]

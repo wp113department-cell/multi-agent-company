@@ -94,6 +94,9 @@ def run_sql_agent(
     repo_path: str | None = None,
     on_heartbeat: Any = None,
     on_tool_call: Any = None,
+    # T2-B2 (2026-09-22, GRIDIRON_PARTIAL #212/#213) — see bug_fix.py's
+    # run_bug_fix for the full comment; same real-resume opt-in.
+    resume_trace_id: str = "",
 ) -> AgentResult:
     settings = get_settings()
     repo = repo_path or str(settings.target_repo_path)
@@ -133,6 +136,7 @@ def run_sql_agent(
         enable_lesson=True,
         human_approval_required=requires_approval,
         max_turns=20,
+        resume_trace_id=resume_trace_id,
     )
 
     raw = final_state["result"]

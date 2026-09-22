@@ -208,11 +208,23 @@ _ORPHAN_SWEEP_INTERVAL_SECONDS = 300  # check every 5 minutes
 
 async def reconcile_orphaned_runs(threshold_seconds: int | None = None) -> int:
     """Find agent_runs rows stuck in status="running" with a heartbeat older
-    than the threshold, transition them to "failed" with a clear orphan
-    error, and escalate each one through the existing failure-ladder path
-    (agent_registry.fail_task() + a health_updated event) so the run isn't
-    just marked dead in isolation — the rest of the fleet's normal recovery
-    machinery picks it up. Returns the number of runs reconciled.
+    than the threshold. T2-B2 (2026-09-22, GRIDIRON_PARTIAL #235/#236/#246)
+    — for any orphan whose agent_type app.fleet.resume_registry can resolve
+    (see that module's own docstring for exactly which agents, and why
+    coverage is bounded rather than fleet-wide yet), genuinely RESUMES it
+    from its Postgres checkpoint instead of only marking it "failed" — this
+    is the real per-agent-type graph-rebuild registry the audit's own plan
+    said this needed ("each of the ~76-83 worker-agent files currently
+    builds these inline rather than from a shared registry... a generic
+    resume dispatcher would need a per-agent-type graph-rebuild registry
+    that doesn't exist yet" — see AgentRun.trace_id's own comment in
+    db/models.py, written before this batch). Every other orphan (an
+    uncovered agent_type, no trace_id, no resolvable task, or resume itself
+    fails to even dispatch) gets today's exact pre-existing behavior:
+    transitioned to "failed" with a clear orphan error and escalated through
+    the existing failure-ladder path (agent_registry.fail_task() + a
+    health_updated event) so the run isn't just marked dead in isolation.
+    Returns the number of runs reconciled (failed + resumed).
     """
     from datetime import datetime, timedelta, timezone
 
@@ -254,7 +266,7 @@ async def reconcile_orphaned_runs(threshold_seconds: int | None = None) -> int:
     async with factory() as db:
         selected = await db.execute(
             text(
-                "SELECT id, agent_type FROM agent_runs "
+                "SELECT id, agent_type, task_id, trace_id FROM agent_runs "
                 "WHERE status = 'running' AND last_heartbeat_at < :cutoff"
             ),
             {"cutoff": cutoff},
@@ -263,18 +275,26 @@ async def reconcile_orphaned_runs(threshold_seconds: int | None = None) -> int:
         if not orphans:
             return 0
 
-        await db.execute(
-            text(
-                "UPDATE agent_runs SET status = 'failed', "
-                "error = 'orphaned — process died without a clean shutdown', "
-                "finished_at = :now "
-                "WHERE status = 'running' AND last_heartbeat_at < :cutoff"
-            ),
-            {"cutoff": cutoff, "now": now},
-        )
-        await db.commit()
+        resumed_ids: list[str] = []
+        for row in orphans:
+            resumed = await _try_resume_orphan(db, row)
+            if resumed:
+                resumed_ids.append(str(row.id))
 
-    for row in orphans:
+        to_fail = [row for row in orphans if str(row.id) not in resumed_ids]
+        if to_fail:
+            await db.execute(
+                text(
+                    "UPDATE agent_runs SET status = 'failed', "
+                    "error = 'orphaned — process died without a clean shutdown', "
+                    "finished_at = :now "
+                    "WHERE id = ANY(:ids)"
+                ),
+                {"now": now, "ids": [str(row.id) for row in to_fail]},
+            )
+            await db.commit()
+
+    for row in to_fail:
         try:
             escalate(
                 str(row.agent_type),
@@ -283,8 +303,80 @@ async def reconcile_orphaned_runs(threshold_seconds: int | None = None) -> int:
         except Exception:
             pass
 
-    logger.warning("Orphan recovery: reconciled %d stale agent_runs", len(orphans))
+    if resumed_ids:
+        logger.warning(
+            "Orphan recovery: resumed %d stale agent_runs from their "
+            "checkpoint, marked %d failed",
+            len(resumed_ids),
+            len(to_fail),
+        )
+    else:
+        logger.warning("Orphan recovery: reconciled %d stale agent_runs", len(to_fail))
     return len(orphans)
+
+
+async def _try_resume_orphan(db: Any, row: Any) -> bool:
+    """Attempts a real resume for one orphaned agent_runs row. Returns
+    True only on an actual successful dispatch — anything short of that
+    (uncovered agent_type, no trace_id, no resolvable task/repo, the
+    dispatch itself raising) returns False so the caller falls back to
+    marking this row failed exactly as it always has. Never raises."""
+    if not row.trace_id or not row.task_id:
+        return False
+    try:
+        from app.fleet.resume_registry import is_resumable_agent_type
+
+        if not is_resumable_agent_type(str(row.agent_type)):
+            return False
+
+        from app.db.repository import get_task, resolve_task_repo_path
+
+        task = await get_task(db, int(row.task_id))
+        if task is None:
+            return False
+        repo_path = resolve_task_repo_path(task) or ""
+        resume_message = task.description or task.plan or "Continue the previous work."
+
+        from app.fleet.resume_registry import resolve_resume_call
+
+        resolved = resolve_resume_call(
+            str(row.agent_type),
+            task_id=int(row.task_id),
+            trace_id=str(row.trace_id),
+            resume_message=resume_message,
+            repo_path=repo_path,
+        )
+        if resolved is None:
+            return False
+        fn, kwargs = resolved
+
+        async def _dispatch() -> None:
+            try:
+                await asyncio.to_thread(fn, **kwargs)
+            except Exception:
+                logger.exception(
+                    "Orphan resume dispatch failed for agent_run %s (agent_type=%s)",
+                    row.id,
+                    row.agent_type,
+                )
+
+        asyncio.create_task(_dispatch())
+        logger.info(
+            "Orphan recovery: resuming agent_run %s (agent_type=%s, "
+            "task_id=%s) from its checkpoint instead of marking it failed",
+            row.id,
+            row.agent_type,
+            row.task_id,
+        )
+        return True
+    except Exception:
+        logger.exception(
+            "Orphan resume attempt raised for agent_run %s (agent_type=%s) — "
+            "falling back to marking it failed",
+            row.id,
+            row.agent_type,
+        )
+        return False
 
 
 async def start_orphan_recovery_loop() -> None:

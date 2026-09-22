@@ -1230,3 +1230,42 @@ class IdempotencyKey(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
+
+
+class TaskControlFlag(Base):
+    """T2-B2 (2026-09-22, GRIDIRON_PARTIAL #234) — durable backing store for
+    a worker-agent run's abort/resume signal.
+
+    Before this table, Stop/Resume/Cancel (app/api/activity.py) lived
+    entirely in ActivityStreamRegistry's in-process threading.Event/dict
+    (app/services/activity_stream.py::TaskStream) — real for the common
+    case (signal set and consumed within one process's lifetime), but a
+    process crash or restart between "Stop was clicked" and "the agent loop
+    actually checked should_abort()" silently lost the signal: a fresh
+    process starts with an empty registry and has no way to know a Stop (or
+    a queued Resume message) was ever requested. This table is that
+    write-through backing store — TaskStream still serves same-process reads
+    from memory (no added per-turn latency for the overwhelmingly common
+    case), and only consults this table on a cold cache (a TaskStream just
+    created in a fresh process that never locally saw the flag set),
+    mirroring lessons.py's own "write-through + read-refresh-on-miss"
+    convention (migration 047).
+
+    task_id is a free-form string, not an FK to dev_tasks: many real runs
+    (fleet self-improvement scans, the Executive, chat sessions) use a
+    synthetic non-numeric task_id with no backing DevTask row — the exact
+    same reason AgentRun.task_id validation and ActivityStreamRegistry's own
+    keys are string-typed rather than FK-constrained.
+    """
+
+    __tablename__ = "task_control_flags"
+
+    task_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    stop_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    resume_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resume_files: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSONB, nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

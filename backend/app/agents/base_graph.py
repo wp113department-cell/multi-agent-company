@@ -32,7 +32,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Any, Callable, TypedDict
+from typing import Any, Callable, TypedDict, cast
 
 import anthropic
 import jsonschema
@@ -3387,6 +3387,63 @@ def run_agent_graph(
     # for why this replaces the on_heartbeat param base.py/planner.py/
     # coder.py accept but never actually invoke.
     enable_run_tracking: bool = True,
+    # T2-B2 (2026-09-22, GRIDIRON_PARTIAL #212/#213/#235/#236/#246) — real
+    # checkpoint resume, not a fresh restart. Before this, EVERY call built a
+    # brand-new AgentRunState literal (turns=0, submitted=False, messages=
+    # [{the one initial message}], ...) and passed it to graph.stream() —
+    # even when `trace_id` reused an EXISTING checkpointer thread_id, this
+    # plain, non-Annotated (no reducer) AgentRunState TypedDict means
+    # LangGraph's default last-write-wins channel semantics simply OVERWROTE
+    # whatever the checkpoint held, so a second call under the same
+    # trace_id silently restarted from scratch rather than continuing —
+    # calling this function again was never actually resuming anything,
+    # despite AgentRun.trace_id's own comment (added earlier, Stage 4
+    # Cluster N) already documenting the *intent*. Proven live by this
+    # batch's own regression test (test_t2b2_worker_agent_resume.py):
+    # calling run_agent_graph() twice under the same trace_id with
+    # resume_trace_id unset on the second call loses turn 1 entirely; with
+    # it set, turn 2's final state contains both.
+    #
+    # Passing resume_trace_id (== the ORIGINAL run's trace_id/thread_id):
+    #   - fetches the last checkpointed state for that thread_id via
+    #     graph.get_state() (built fresh here via build_agent_graph(), since
+    #     tool_handlers/verification_cfg are never themselves checkpointed —
+    #     they hold live objects (open subprocess handles, closures) that
+    #     cannot survive a process restart and must always be rebuilt by
+    #     the caller, exactly as the audit's own plan for #212 says);
+    #   - appends `initial_message` as a new user turn onto that
+    #     checkpoint's real prior `messages` history (rather than replacing
+    #     it), and carries its turns/token counters/plan/facts forward
+    #     instead of resetting them to 0 — this is the actual "continue
+    #     prior context" behavior #213 asks for;
+    #   - reuses the SAME agent_runs DB row (reopened, not a second row
+    #     created for the same logical run) when one is linked to this
+    #     trace_id, so orphan-recovery bookkeeping stays one-row-per-run.
+    # No checkpoint found for resume_trace_id (e.g. the checkpointer was a
+    # MemorySaver that itself got wiped by the crash being recovered from) —
+    # falls back to a normal fresh run under that same trace_id, logged, not
+    # silently different behavior than what the caller asked for.
+    #
+    # Deliberately NOT the same mechanism as LangGraph's raw
+    # `graph.stream(None, config=...)` continue-pending-tasks idiom (used by
+    # test_gap21_agent_checkpointer_postgres.py to resume a mid-node crash
+    # exactly where it left off, replaying no already-completed tool calls).
+    # This always re-enters at START (call_llm) with the full carried-
+    # forward history instead. That is intentional, not a missed idiom: a
+    # worker agent's tools are real side effects (write_file, bash, git
+    # commit) — blindly continuing whatever tool call was in flight when an
+    # unknown-duration crash happened (did the write land? is the process
+    # still running?) is a correctness hazard `None`-resume cannot see or
+    # avoid, whereas asking the LLM to re-assess first (it has read_file/
+    # git_diff/run_tests to check ground truth before acting again) is the
+    # safe posture for a run that may have died mid side-effect. This is
+    # also exactly what makes ONE mechanism correctly serve both real
+    # callers: a graceful Stop→Resume (call_llm's own should_abort() check
+    # already ends the graph cleanly at a turn boundary before this ever
+    # runs — nothing was "mid-node" to begin with) and orphan/crash recovery
+    # (where a stale mid-node checkpoint might exist, and re-assessing is
+    # the safer choice anyway).
+    resume_trace_id: str = "",
 ) -> AgentRunState:
     """Build + run the agent graph, return the final state.
 
@@ -3397,6 +3454,10 @@ def run_agent_graph(
 
     All Fleet OS flags default to True. Callers can pass False to opt out.
     Settings-based defaults for model_haiku and repo_path when not provided.
+
+    resume_trace_id (T2-B2): see the parameter's own comment above — set
+    this (instead of trace_id) to genuinely continue a previous run's
+    checkpointed state rather than starting a fresh one.
     """
     import uuid as _uuid
 
@@ -3407,7 +3468,7 @@ def run_agent_graph(
             role_name, True
         )
 
-    tid = trace_id or _uuid.uuid4().hex[:12]
+    tid = resume_trace_id or trace_id or _uuid.uuid4().hex[:12]
 
     # Salvage-on-fatal-error (swe-agent attempt_autosubmission_after_error
     # pattern, repos/swe-agent/sweagent/agent/agents.py): graph.invoke() only
@@ -3528,17 +3589,33 @@ def run_agent_graph(
     _agent_run_id: str | None = None
     if enable_run_tracking and task_id:
         try:
-            from app.db.repository import create_agent_run_sync
+            from app.db.repository import (
+                create_agent_run_sync,
+                get_agent_run_by_trace_id_sync,
+                reopen_agent_run_sync,
+            )
 
             _int_task_id = int(task_id)
-            # AUDIT_Q_BATCH08 §14 "Recovery after reboot" — trace_id=tid
-            # links this DB row to the actual LangGraph checkpointer
-            # thread_id (see run_config below), so an orphaned run is no
-            # longer traceable-in-name-only: its checkpoint can genuinely
-            # be looked up from the agent_runs row alone.
-            _agent_run_id = create_agent_run_sync(
-                _int_task_id, role_name, model, trace_id=tid
+            _existing_run = (
+                get_agent_run_by_trace_id_sync(tid) if resume_trace_id else None
             )
+            if _existing_run is not None:
+                # T2-B2 (#212/#235/#236) — a genuine resume reconnects to
+                # the SAME agent_runs row instead of create_agent_run_sync()
+                # making a second row for the same logical run (which would
+                # leave two rows sharing one trace_id and confuse orphan
+                # recovery's "one running row per stuck thread" assumption).
+                reopen_agent_run_sync(_existing_run["id"])
+                _agent_run_id = _existing_run["id"]
+            else:
+                # AUDIT_Q_BATCH08 §14 "Recovery after reboot" — trace_id=tid
+                # links this DB row to the actual LangGraph checkpointer
+                # thread_id (see run_config below), so an orphaned run is no
+                # longer traceable-in-name-only: its checkpoint can
+                # genuinely be looked up from the agent_runs row alone.
+                _agent_run_id = create_agent_run_sync(
+                    _int_task_id, role_name, model, trace_id=tid
+                )
         except (ValueError, TypeError):
             # task_id isn't a real dev_tasks integer id (e.g. a synthetic
             # id like "fleet-scan" from a guardian agent's periodic scan) —
@@ -3688,44 +3765,95 @@ def run_agent_graph(
             run_id=_agent_run_id or "",
         )
 
-        initial_state: AgentRunState = {
-            # Original 8 required fields
-            "messages": [{"role": "user", "content": initial_content}],
-            "verification": dict(verification_cfg.initial),
-            "result": {},
-            "turns": 0,
-            "submitted": False,
-            "requires_human_approval": False,
-            "tokens_in": 0,
-            "tokens_out": 0,
-            "context_tokens": 0,
-            # New Fleet OS fields with safe defaults
-            "plan": "",
-            "facts": "",
-            "n_stalls": 0,
-            "retry_count": 0,
-            "confidence": 1.0,
-            "status": "running",
-            "trace_id": tid,
-            "memory_context": "",
-            "repo_context": "",
-            "reflection_unsatisfied_count": 0,
-            "critique_result": {},
-            "critique_retries": 0,
-            "replan_count": 0,
-            # Day 19 batch-processing fields
-            "pending_tool_uses": [],
-            "tool_results_buffer": [],
-            "batch_requires_human_approval": False,
-            # Stage 4 Cluster O (2026-08-05)
-            "repo_id": _repo_id,
-        }
-
         # Day 21 — tid is this run's stable identity end to end (already used
         # as state["trace_id"] and build_agent_graph's trace_id= above); using
         # it as the checkpointer's thread_id is what makes a resumed run
         # actually address the SAME checkpoint rather than starting fresh.
         run_config = {"configurable": {"thread_id": tid}}
+
+        # T2-B2 (#212/#213/#235/#236/#246) — real resume: read back whatever
+        # this thread_id's checkpointer last saved, BEFORE building a fresh
+        # initial_state that would otherwise silently overwrite it (see this
+        # function's own resume_trace_id docstring for why a plain re-call
+        # never actually resumed anything before this).
+        _resume_prior_state: dict[str, Any] | None = None
+        initial_state: AgentRunState
+        if resume_trace_id:
+            try:
+                _prior_snapshot = graph.get_state(run_config)
+                if _prior_snapshot is not None and _prior_snapshot.values:
+                    _resume_prior_state = dict(_prior_snapshot.values)
+            except Exception:
+                logger.warning(
+                    "T2-B2 resume: could not read prior checkpoint for "
+                    "trace_id=%s — falling back to a fresh run",
+                    resume_trace_id,
+                    exc_info=True,
+                )
+
+        if _resume_prior_state is not None:
+            _prior_messages = list(_resume_prior_state.get("messages") or [])
+            logger.info(
+                "T2-B2 resume: continuing trace_id=%s from checkpoint "
+                "(%d prior turns, %d prior messages)",
+                tid,
+                _resume_prior_state.get("turns", 0),
+                len(_prior_messages),
+            )
+            initial_state = cast(
+                AgentRunState,
+                {
+                    **_resume_prior_state,
+                    # New user turn appended onto the REAL prior history
+                    # (rather than replacing it) — this is what makes
+                    # "continue prior context" (#213) actually true instead
+                    # of just re-asking the same original task from zero.
+                    "messages": _prior_messages
+                    + [{"role": "user", "content": initial_content}],
+                    # A resumed run is, by definition, not already
+                    # submitted/stopped/awaiting approval — those flags
+                    # described the PAUSED state, not the one about to run.
+                    "submitted": False,
+                    "status": "running",
+                    "requires_human_approval": False,
+                    "batch_requires_human_approval": False,
+                    "trace_id": tid,
+                    "repo_id": _repo_id,
+                },
+            )
+        else:
+            initial_state = {
+                # Original 8 required fields
+                "messages": [{"role": "user", "content": initial_content}],
+                "verification": dict(verification_cfg.initial),
+                "result": {},
+                "turns": 0,
+                "submitted": False,
+                "requires_human_approval": False,
+                "tokens_in": 0,
+                "tokens_out": 0,
+                "context_tokens": 0,
+                # New Fleet OS fields with safe defaults
+                "plan": "",
+                "facts": "",
+                "n_stalls": 0,
+                "retry_count": 0,
+                "confidence": 1.0,
+                "status": "running",
+                "trace_id": tid,
+                "memory_context": "",
+                "repo_context": "",
+                "reflection_unsatisfied_count": 0,
+                "critique_result": {},
+                "critique_retries": 0,
+                "replan_count": 0,
+                # Day 19 batch-processing fields
+                "pending_tool_uses": [],
+                "tool_results_buffer": [],
+                "batch_requires_human_approval": False,
+                # Stage 4 Cluster O (2026-08-05)
+                "repo_id": _repo_id,
+            }
         # Blocker (audit_v1.md 4.7 #2): every log line emitted by any node
         # function during this run (tool calls, LLM calls, policy denials,
         # budget checks, etc.) — from already-existing, unmodified logger

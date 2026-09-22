@@ -383,6 +383,12 @@ async def _run_specialized_agent_bg(
     task_id: int,
     description: str,
     repo_path: str | None,
+    # T2-B2 (2026-09-22, GRIDIRON_PARTIAL #212/#213) — set only by
+    # app.api.activity.py's resume_task() for an agent_name
+    # app.fleet.resume_registry.is_resumable_agent_type() has already
+    # confirmed accepts this kwarg. "" (the default) is a normal fresh
+    # dispatch, unchanged.
+    resume_trace_id: str = "",
 ) -> None:
     """Fire-and-forget: run a worker agent, save artifact, log result."""
     from app.artifacts.store import save_artifact_async
@@ -396,7 +402,12 @@ async def _run_specialized_agent_bg(
     fleet_manager = get_fleet_manager()
 
     async with factory() as db:
-        await append_log(db, task_id, "agent_dispatch", f"Starting {agent_name} …")
+        await append_log(
+            db,
+            task_id,
+            "agent_dispatch",
+            f"{'Resuming' if resume_trace_id else 'Starting'} {agent_name} …",
+        )
 
         # AUDIT_Q_BATCH14 §47 gap-closure — FleetManager.dispatch()'s own
         # docstring says invoking the agent and closing out its running state
@@ -413,10 +424,10 @@ async def _run_specialized_agent_bg(
             fn = _load_agent_fn(agent_name)
             effective_repo = repo_path or get_active_repo_path()
 
-            result = await asyncio.to_thread(
-                fn,
-                **_agent_call_kwargs(fn, task_id, description, effective_repo),
-            )
+            call_kwargs = _agent_call_kwargs(fn, task_id, description, effective_repo)
+            if resume_trace_id:
+                call_kwargs["resume_trace_id"] = resume_trace_id
+            result = await asyncio.to_thread(fn, **call_kwargs)
             fleet_manager.complete(agent_name)
 
             # Phase 1.1 (MASTER_AGENT_v2.md) — write to shared memory. Before this,

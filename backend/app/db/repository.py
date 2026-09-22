@@ -20,6 +20,7 @@ from app.db.models import (
     Repo,
     Subtask,
     SystemSetting,
+    TaskControlFlag,
     TaskImage,
     TaskLog,
     User,
@@ -507,6 +508,124 @@ async def finish_agent_run(
     await db.commit()
 
 
+async def get_agent_run_by_trace_id(db: AsyncSession, trace_id: str) -> AgentRun | None:
+    """T2-B2 (#212/#235/#236/#246) — the lookup a resume factory needs to go
+    from "I have a LangGraph checkpointer thread_id" back to the agent_runs
+    row that names its agent_type/task_id, so it can rebuild the right
+    tools/handlers and reconnect a resumed run to the SAME durable row
+    instead of orphaning it and creating a second one."""
+    result = await db.execute(
+        select(AgentRun)
+        .where(AgentRun.trace_id == trace_id)
+        # started_at, not id — AgentRun.id is a random uuid4 string with no
+        # chronological ordering. Normally exactly one row shares a given
+        # trace_id (a resume reopens the existing row rather than creating a
+        # new one — see reopen_agent_run()); this tiebreak only matters for
+        # legacy/edge-case duplicates.
+        .order_by(AgentRun.started_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_latest_agent_run_for_task(
+    db: AsyncSession, task_id: int
+) -> AgentRun | None:
+    """T2-B2 (#212/#213) — what app/api/activity.py's resume_task() needs to
+    go from "a human clicked Resume on task_id" to "which real agent_type
+    and checkpointer trace_id was actually running here", so a resume can
+    genuinely re-dispatch that agent instead of only clearing an in-memory
+    flag nothing then reads (the real, dead-endpoint gap this batch
+    closes — see app/api/activity.py's resume_task for the full story)."""
+    # AgentRun.id is a random uuid4 string, not sortable chronologically —
+    # started_at (a real server-default timestamp) is the actual "most
+    # recent" ordering key.
+    result = await db.execute(
+        select(AgentRun)
+        .where(AgentRun.task_id == task_id)
+        .order_by(AgentRun.started_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def reopen_agent_run(db: AsyncSession, run_id: str) -> None:
+    """T2-B2 — marks a previously stopped/orphaned agent_runs row 'running'
+    again for a genuine resume, instead of create_agent_run() making a
+    second, disconnected row for the same logical run (which would leave
+    two rows claiming the same trace_id and break orphan-recovery's own
+    'one running row per stuck thread' assumption)."""
+    await db.execute(
+        update(AgentRun)
+        .where(AgentRun.id == run_id)
+        .values(
+            status="running",
+            error=None,
+            finished_at=None,
+            last_heartbeat_at=datetime.now(timezone.utc),
+        )
+    )
+    await db.commit()
+
+
+async def get_task_control_flag(db: AsyncSession, task_id: str) -> TaskControlFlag | None:
+    return await db.get(TaskControlFlag, task_id)
+
+
+async def set_task_control_flag_stop(
+    db: AsyncSession, task_id: str, stop_requested: bool
+) -> None:
+    """T2-B2 (#234) — durable counterpart to TaskStream.set_abort()/
+    clear_abort(). Upserts rather than assuming a row exists: the first
+    Stop/Cancel for a given task_id has no prior row."""
+    row = await db.get(TaskControlFlag, task_id)
+    if row is None:
+        db.add(TaskControlFlag(task_id=task_id, stop_requested=stop_requested))
+    else:
+        row.stop_requested = stop_requested
+    await db.commit()
+
+
+async def set_task_control_flag_resume(
+    db: AsyncSession, task_id: str, message: str, files: list[dict[str, Any]]
+) -> None:
+    """T2-B2 (#234) — durable counterpart to TaskStream.set_resume(). Also
+    clears stop_requested, mirroring set_resume()'s own
+    `self._abort_event.clear()`."""
+    row = await db.get(TaskControlFlag, task_id)
+    if row is None:
+        db.add(
+            TaskControlFlag(
+                task_id=task_id,
+                stop_requested=False,
+                resume_message=message,
+                resume_files=files,
+            )
+        )
+    else:
+        row.stop_requested = False
+        row.resume_message = message
+        row.resume_files = files
+    await db.commit()
+
+
+async def pop_task_control_flag_resume(
+    db: AsyncSession, task_id: str
+) -> dict[str, Any] | None:
+    """T2-B2 (#234) — durable counterpart to TaskStream.pop_resume(): reads
+    and clears the pending resume payload in one step, so a resume is
+    consumed exactly once even if the process that queued it crashed before
+    consuming it itself."""
+    row = await db.get(TaskControlFlag, task_id)
+    if row is None or row.resume_message is None:
+        return None
+    payload = {"message": row.resume_message, "files": row.resume_files or []}
+    row.resume_message = None
+    row.resume_files = None
+    await db.commit()
+    return payload
+
+
 # ---------------------------------------------------------------------------
 # Sync bridges — Stage 4 Cluster N (2026-08-04)
 #
@@ -625,6 +744,175 @@ def finish_agent_run_sync(
         asyncio.run(_run())
     except Exception as exc:
         logger.warning("finish_agent_run_sync failed for run_id=%r: %s", run_id, exc)
+
+
+def get_agent_run_by_trace_id_sync(trace_id: str) -> dict[str, Any] | None:
+    """Sync bridge for get_agent_run_by_trace_id(). Returns a plain dict
+    (not the ORM object, which would be detached the instant this
+    isolated-engine session closes) with just the fields a resume factory
+    needs. None on any failure or no match — same non-fatal contract as
+    every other *_sync bridge in this section."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> dict[str, Any] | None:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                run = await get_agent_run_by_trace_id(session, trace_id)
+                if run is None:
+                    return None
+                return {
+                    "id": run.id,
+                    "task_id": run.task_id,
+                    "agent_type": run.agent_type,
+                    "status": run.status,
+                    "trace_id": run.trace_id,
+                }
+        finally:
+            await engine.dispose()
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        logger.warning(
+            "get_agent_run_by_trace_id_sync failed for trace_id=%r: %s", trace_id, exc
+        )
+        return None
+
+
+def reopen_agent_run_sync(run_id: str) -> None:
+    """Sync bridge for reopen_agent_run()."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> None:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                await reopen_agent_run(session, run_id)
+        finally:
+            await engine.dispose()
+
+    try:
+        asyncio.run(_run())
+    except Exception as exc:
+        logger.warning("reopen_agent_run_sync failed for run_id=%r: %s", run_id, exc)
+
+
+def get_task_control_flag_sync(task_id: str) -> dict[str, Any] | None:
+    """Sync bridge for get_task_control_flag() — the cold-cache read
+    ActivityStreamRegistry falls back to for a task_id it has no in-process
+    TaskStream state for yet (see TaskControlFlag's own docstring)."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> dict[str, Any] | None:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                row = await get_task_control_flag(session, task_id)
+                if row is None:
+                    return None
+                return {
+                    "stop_requested": row.stop_requested,
+                    "resume_message": row.resume_message,
+                    "resume_files": row.resume_files or [],
+                }
+        finally:
+            await engine.dispose()
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        logger.warning(
+            "get_task_control_flag_sync failed for task_id=%r: %s", task_id, exc
+        )
+        return None
+
+
+def set_task_control_flag_stop_sync(task_id: str, stop_requested: bool) -> None:
+    """Sync bridge for set_task_control_flag_stop()."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> None:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                await set_task_control_flag_stop(session, task_id, stop_requested)
+        finally:
+            await engine.dispose()
+
+    try:
+        asyncio.run(_run())
+    except Exception as exc:
+        logger.warning(
+            "set_task_control_flag_stop_sync failed for task_id=%r: %s", task_id, exc
+        )
+
+
+def set_task_control_flag_resume_sync(
+    task_id: str, message: str, files: list[dict[str, Any]]
+) -> None:
+    """Sync bridge for set_task_control_flag_resume()."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> None:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                await set_task_control_flag_resume(session, task_id, message, files)
+        finally:
+            await engine.dispose()
+
+    try:
+        asyncio.run(_run())
+    except Exception as exc:
+        logger.warning(
+            "set_task_control_flag_resume_sync failed for task_id=%r: %s", task_id, exc
+        )
+
+
+def pop_task_control_flag_resume_sync(task_id: str) -> dict[str, Any] | None:
+    """Sync bridge for pop_task_control_flag_resume()."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> dict[str, Any] | None:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                return await pop_task_control_flag_resume(session, task_id)
+        finally:
+            await engine.dispose()
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        logger.warning(
+            "pop_task_control_flag_resume_sync failed for task_id=%r: %s", task_id, exc
+        )
+        return None
 
 
 async def save_subtasks(
