@@ -340,6 +340,16 @@ class RunAgentResponse(BaseModel):
     tokens_in: int
     tokens_out: int
     files_touched: list[str]
+    # T2-B3 (2026-09-22, GRIDIRON_PARTIAL #130) — AgentResult.requires_human_
+    # approval was computed by every real agent run and then silently
+    # dropped at this exact boundary (confirmed: absent from both this
+    # schema and the /run background-dispatch artifact payload below) —
+    # the audit's own plan calls this out by name ("make specialized_
+    # agents.py's dispatch handler actually read AgentResult.requires_
+    # human_approval instead of discarding it"). A caller of /run-sync can
+    # now actually see it instead of it only ever existing inside the
+    # Python object this endpoint builds and returns.
+    requires_human_approval: bool = False
 
 
 class DispatchAgentRequest(BaseModel):
@@ -459,6 +469,9 @@ async def _run_specialized_agent_bg(
                 "status": result.status,
                 "tokens_in": result.tokens_in,
                 "tokens_out": result.tokens_out,
+                # T2-B3 (2026-09-22, GRIDIRON_PARTIAL #130) — was computed
+                # by every real agent run and silently dropped right here.
+                "requires_human_approval": result.requires_human_approval,
             }
             # Stage 4 Cluster Q (2026-08-05) — this whitelist previously
             # dropped AgentResult.raw entirely, which would have silently
@@ -719,6 +732,9 @@ async def run_specialized_agent_sync(
         "files_touched": result.files_touched,
         "verified": result.verified,
         "status": result.status,
+        # T2-B3 (2026-09-22, GRIDIRON_PARTIAL #130) — same fix as the /run
+        # background dispatch path above.
+        "requires_human_approval": result.requires_human_approval,
     }
     # Stage 4 Cluster Q (2026-08-05) — same fix as the /run background
     # dispatch path above: without this, coverage_pct would be captured by
@@ -750,4 +766,5 @@ async def run_specialized_agent_sync(
         tokens_in=result.tokens_in,
         tokens_out=result.tokens_out,
         files_touched=result.files_touched,
+        requires_human_approval=result.requires_human_approval,
     )

@@ -7,12 +7,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.db.models import (
+    AgentRating,
     AgentRun,
     DevTask,
     Epic,
@@ -624,6 +625,58 @@ async def pop_task_control_flag_resume(
     row.resume_files = None
     await db.commit()
     return payload
+
+
+async def create_agent_rating(
+    db: AsyncSession,
+    agent_name: str,
+    rating: int,
+    task_id: str | None = None,
+    comment: str | None = None,
+    rated_by: str | None = None,
+) -> AgentRating:
+    """T2-B3 (2026-09-22, GRIDIRON_PARTIAL #439 "User satisfaction (real,
+    not proxy)") — records one explicit human verdict on a completed agent
+    run. `rating` must be +1 (thumbs-up) or -1 (thumbs-down) — the DB's own
+    CheckConstraint is the real enforcement; this raises ValueError first so
+    a bad request gets a clear 4xx instead of surfacing as a raw DB
+    IntegrityError."""
+    if rating not in (-1, 1):
+        raise ValueError(f"rating must be -1 or 1, got {rating!r}")
+    row = AgentRating(
+        agent_name=agent_name,
+        task_id=task_id,
+        rating=rating,
+        comment=comment,
+        rated_by=rated_by,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+async def get_agent_satisfaction_rate(
+    db: AsyncSession, agent_name: str
+) -> tuple[float | None, int]:
+    """Real per-agent user satisfaction: the fraction of ratings that were
+    thumbs-up, same 0..1 convention as success_rate/reliability_score
+    elsewhere on this endpoint — not an average of raw +1/-1 values (which
+    would read confusingly on a -1..1 scale next to those). Returns
+    (None, 0) when this agent has never been rated — "no signal yet," never
+    a fabricated 0.0 or 1.0."""
+    result = await db.execute(
+        select(func.count(AgentRating.id), func.sum(AgentRating.rating)).where(
+            AgentRating.agent_name == agent_name
+        )
+    )
+    total, rating_sum = result.one()
+    if not total:
+        return None, 0
+    # sum(+1/-1) = (#up - #down); #up = (total + sum) / 2 recovers the real
+    # thumbs-up count without a second query.
+    thumbs_up = (total + (rating_sum or 0)) / 2
+    return thumbs_up / total, total
 
 
 # ---------------------------------------------------------------------------

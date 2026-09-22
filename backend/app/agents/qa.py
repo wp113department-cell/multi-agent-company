@@ -111,6 +111,25 @@ class QAResult:
     # exact "computed but not propagated" pattern flagged by the audit.
     # 0.0 means no agent run actually completed (e.g. slot-timeout fallback).
     confidence: float = 0.0
+    # T2-B3 (2026-09-22, GRIDIRON_PARTIAL #130 "Confidence Evaluation feeds
+    # control flow") — base_graph.py's _run_quality_gate already computes
+    # this (raw_result["_requires_human_approval"]) and, when
+    # quality_gate_min_confidence > 0, already registers a real pending-
+    # approval row (approval_gate.py) the moment the planner's confidence
+    # falls below that floor — but QAResult had no field to carry the flag
+    # out to manager.py's dispatch loop at all, so a low-confidence QA pass
+    # sailed straight through to the reviewer/merge stage with zero
+    # visibility. sql_agent.py is the only other agent that already reads
+    # this flag; qa.py is a natural second real consumer given its whole
+    # job is verifying correctness.
+    requires_human_approval: bool = False
+    # T2-B3 (2026-09-22, GRIDIRON_PARTIAL #126/#146 "Step-by-Step Guidance
+    # (dedicated renderer)") — the SAME "QA Process (follow in order)" steps
+    # roles/qa.md already tells the model to follow, structured (see
+    # app/agents/guidance.py). [] means the role file had no such section or
+    # the graph run failed before this could be computed — not a claim that
+    # QA followed no real process.
+    guidance_steps: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +210,17 @@ def run_qa(
                 # coder.py: qa.md has a real Quality Gates section.
                 # T2-B1 (2026-09-22) — enable_replanning omitted: run_agent_graph() resolves
                 # the real fleet default itself (True unless explicitly opted out for "qa").
+                # T2-B3 (2026-09-22, GRIDIRON_PARTIAL #130) — second real
+                # pilot agent (after spike_agent) opted into a nonzero
+                # confidence floor: a low-confidence QA verdict is exactly
+                # the case that should get a human's eyes before the
+                # reviewer/merge stage proceeds on it. This alone is what
+                # makes _run_quality_gate's existing request_human_input()
+                # call fire (real pending_approvals row) — no new approval
+                # mechanism needed, just opting in.
+                quality_gate_min_confidence=settings.quality_gate_min_confidence_by_agent.get(
+                    "qa", 0.0
+                ),
                 max_turns=20,
                 task_id=str(task_id),
             )
@@ -289,6 +319,19 @@ def run_qa(
             errors=list(raw.get("errors", [])),
             summary=str(raw.get("summary", "")),
             confidence=float(final_state.get("confidence", 0.8)),
+            # T2-B3 (#130) — the GRAPH's own result copy (final_state
+            # ["result"], enforced by _run_quality_gate), not handlers'
+            # "_qa_result" sink above (the model's raw, pre-enforcement
+            # submission) — _requires_human_approval is only ever set on the
+            # former.
+            requires_human_approval=bool(
+                final_state.get("result", {}).get("_requires_human_approval", False)
+            ),
+            # T2-B3 (#126/#146) — the SAME "QA Process (follow in order)"
+            # steps roles/qa.md already tells the model to follow, structured.
+            guidance_steps=list(
+                final_state.get("result", {}).get("_guidance_steps", [])
+            ),
         )
 
     return QAResult(

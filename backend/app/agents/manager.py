@@ -737,7 +737,22 @@ async def _dispatch_one_subtask(
                 event_type="qa.passed",
                 task_id=str(task_id),
                 epic_id=epic_id,
-                payload={"subtask_id": subtask_id, "confidence": qa_result.confidence},
+                payload={
+                    "subtask_id": subtask_id,
+                    "confidence": qa_result.confidence,
+                    # T2-B3 (2026-09-22, GRIDIRON_PARTIAL #130) — before this,
+                    # a QA "pass" with low underlying planner confidence
+                    # (already flagged by _run_quality_gate and already
+                    # registered as a real pending_approvals row once qa.py
+                    # opted into quality_gate_min_confidence_by_agent) sailed
+                    # into the reviewer/merge stage with zero visibility on
+                    # the fleet event stream — this doesn't change control
+                    # flow (the epic still proceeds; the human-review signal
+                    # already lives in approval_gate.py's own table), it
+                    # just stops silently dropping a real, already-computed
+                    # signal at this observability boundary.
+                    "requires_human_approval": qa_result.requires_human_approval,
+                },
                 emitted_by="qa",
             ),
             db=db,

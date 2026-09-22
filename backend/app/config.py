@@ -579,14 +579,17 @@ class Settings(BaseSettings):
     # confidence score via enable_planning=True). Expanding to more agents is
     # a config-only change (add another key here), never a code change.
     quality_gate_min_confidence_by_agent: dict[str, float] = Field(
-        default_factory=lambda: {"spike_agent": 0.5},
+        default_factory=lambda: {"spike_agent": 0.5, "qa": 0.5},
         description="Per-agent quality_gate_min_confidence override, keyed by "
         "role_name/AGENT_CONTRACT['name']. An agent's own run_agent_graph() call "
         "site looks itself up here; absent keys fall back to 0.0 (today's "
         "unchanged, inert default). 0.5 for spike_agent is a conservative floor "
         "— below-coinflip planner confidence is flagged for review, not merely "
         "below-perfect confidence — chosen for the pilot rollout, adjustable "
-        "here without a code change.",
+        "here without a code change. T2-B3 (2026-09-22, GRIDIRON_PARTIAL #130) "
+        "added 'qa' as the second real pilot agent — a low-confidence QA verdict "
+        "is exactly the case that should get a human's eyes before the "
+        "reviewer/merge stage proceeds on it.",
     )
 
     # AUDIT_Q_BATCH03 §120 "Context Window Management" — NO/not found:

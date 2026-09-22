@@ -340,6 +340,26 @@ class MetricsCollector:
             return None
         return sum(m.cost_estimate_usd for m in runs) / len(runs)
 
+    def avg_retries(self, agent_name: str) -> float | None:
+        """T2-B3 (2026-09-22, GRIDIRON_PARTIAL #437 "Retry count (real
+        per-run persisted value)") — mean RunMetrics.retries across this
+        agent's recent runs, same shape as avg_cost_usd/avg_tool_accuracy
+        above. RunMetrics.retries is already set correctly per-run
+        (base_graph.py's run_agent_graph(): `_metrics.retries = final_state.
+        get("retry_count", 0)`) — the gap was never in computing it, only in
+        that nothing read it back out of this in-process ring buffer into
+        the durable Agent.avg_retries column app/api/registry.py's own
+        metrics endpoint returns (see that endpoint's own comment, now
+        superseded, that called this "approximated from tokens" — no such
+        approximation actually existed in code; the column was simply never
+        written by anything and stayed at its 0.0 default forever). None
+        when there's no run history yet, matching this class's own
+        no-data-yet convention."""
+        runs = self.by_agent(agent_name)
+        if not runs:
+            return None
+        return sum(m.retries for m in runs) / len(runs)
+
     def tool_latency_stats(
         self, tool_names: str | tuple[str, ...]
     ) -> dict[str, float | int] | None:

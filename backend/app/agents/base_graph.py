@@ -2095,6 +2095,62 @@ class QualityGateResult:
     checks: dict[str, bool]
     warnings: list[str]
     confidence: float
+    # T2-B3 (2026-09-22, GRIDIRON_PARTIAL #505 "Distinguish facts from
+    # assumptions structurally") — see _plain_language_verification_summary's
+    # own docstring. Deterministic, generated from the same real checks
+    # above, never a second LLM call.
+    plain_language_summary: str = ""
+
+
+def _plain_language_verification_summary(
+    passed: bool,
+    checks: dict[str, bool],
+    warnings: list[str],
+    confidence: float,
+    min_confidence: float,
+) -> str:
+    """T2-B3 (2026-09-22, GRIDIRON_PARTIAL #505 "Distinguish facts from
+    assumptions structurally, plain-language, all agents") — the existing
+    `_quality_gate` JSON output (checks/warnings/passed) is real and
+    structural, but only a developer reading raw JSON keys like
+    "confidence:threshold": false can tell "this was verified" from "this is
+    an assumption." This turns the SAME already-computed checks into one
+    plain-English sentence a non-technical user can read directly — no new
+    signal, no LLM call, purely a deterministic rendering of what
+    _run_quality_gate already decided. Most specific real reason wins over
+    a generic "failed" — a human deciding whether to trust a result needs
+    to know WHICH thing wasn't verified, not just that something wasn't.
+    """
+    if passed:
+        return "Verified: the real checks for this submission passed."
+
+    if checks.get("confidence:threshold") is False:
+        return (
+            f"Partly an assumption: the agent's own confidence "
+            f"({confidence:.2f}) was below the required threshold "
+            f"({min_confidence:.2f}) — a human should review this before "
+            "relying on it."
+        )
+    if checks.get("critique:all_met") is False:
+        return (
+            "Partly an assumption: this did not fully meet its own quality "
+            "criteria after a review pass — some of it is unverified."
+        )
+    if checks.get("policy:schema_valid") is False:
+        return (
+            "Unverified: the submitted result didn't match the expected "
+            "format, so its content could not be structurally checked."
+        )
+    if checks.get("escalation:limitation_taxonomy") is False or checks.get(
+        "escalation:alternative_proposed"
+    ) is False:
+        return (
+            "Unverified: this was reported as blocked/needing a human, but "
+            "without a complete explanation of why or what to try instead."
+        )
+    if warnings:
+        return "Not fully verified: " + "; ".join(warnings)
+    return "Not fully verified — see the structured checks for details."
 
 
 def _run_quality_gate(
@@ -2205,7 +2261,13 @@ def _run_quality_gate(
         and checks.get("policy:schema_valid", True)
     )
     return QualityGateResult(
-        passed=passed, checks=checks, warnings=warnings, confidence=confidence
+        passed=passed,
+        checks=checks,
+        warnings=warnings,
+        confidence=confidence,
+        plain_language_summary=_plain_language_verification_summary(
+            passed, checks, warnings, confidence, min_confidence
+        ),
     )
 
 
@@ -2743,6 +2805,11 @@ def _make_execute_tools_node(
                         "passed": gate.passed,
                         "checks": gate.checks,
                         "warnings": gate.warnings,
+                        # T2-B3 (#505) — see _plain_language_verification_
+                        # summary's own docstring: one plain-English sentence
+                        # a non-technical user can read directly, alongside
+                        # the structured data a developer would read.
+                        "plain_language_summary": gate.plain_language_summary,
                     }
                     if not gate.passed:
                         quality_gate_failed = True
@@ -3871,6 +3938,25 @@ def run_agent_graph(
         final_state: AgentRunState = (
             _last_known_state if _last_known_state is not None else initial_state
         )
+
+        # T2-B3 (2026-09-22, GRIDIRON_PARTIAL #126/#146 "Step-by-Step
+        # Guidance (dedicated renderer)") — parses the SAME role file's own
+        # "Process"/"Steps" section the LLM was already told to follow into
+        # a structured list, attached to every run's result (mirrors
+        # _requires_human_approval's own "compute centrally, let any wrapper
+        # opt into reading it" pattern) instead of it only ever existing as
+        # unstructured prose buried in the system prompt. Non-fatal — a role
+        # file read failing here must never break a real agent run that
+        # already completed successfully.
+        if isinstance(final_state.get("result"), dict):
+            try:
+                from app.agents.guidance import extract_guidance_steps
+
+                final_state["result"]["_guidance_steps"] = extract_guidance_steps(
+                    load_role(role_name)
+                )
+            except Exception:
+                pass
 
         # Post-graph lesson extraction (non-fatal, runs after graph completes)
         if enable_lesson and final_state.get("submitted"):

@@ -157,6 +157,9 @@ def run_bug_fix(
         files_touched=list(raw.get("files_changed", [])),
         verified=bool(final_state["verification"].get("tests_passed", False)),
         requires_human_approval=False,
+        # T2-B3 (#126/#146) — the SAME "Process (fixed order)" steps
+        # roles/bug_fix.md already tells the model to follow, structured.
+        guidance_steps=list(raw.get("_guidance_steps", [])),
         tokens_in=final_state["tokens_in"],
         tokens_out=final_state["tokens_out"],
         status="completed" if final_state["submitted"] else "blocked",

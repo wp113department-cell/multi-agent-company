@@ -33,3 +33,12 @@ class AgentResult:
     raw: dict[str, Any] = field(
         default_factory=dict
     )  # full result dict from submit_* tool
+    # T2-B3 (2026-09-22, GRIDIRON_PARTIAL #126/#146 "Step-by-Step Guidance
+    # (dedicated renderer)") — run_agent_graph() already computes this for
+    # every real run (final_state["result"]["_guidance_steps"], parsed from
+    # the SAME role file's own "Process"/"Steps" section the LLM was told to
+    # follow — app/agents/guidance.py). [] means either the role file has no
+    # such section, or (for most existing agent wrappers, which don't read
+    # it yet) it simply wasn't wired through — not a claim that the agent
+    # followed no real steps.
+    guidance_steps: list[str] = field(default_factory=list)

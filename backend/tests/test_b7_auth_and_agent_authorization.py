@@ -948,6 +948,11 @@ def test_every_mutating_route_is_approver_only_except_a_short_reviewed_list() ->
             "/api/settings/verify-key",
         ),  # tests a key the caller supplies; changes nothing
         ("POST", "/api/console/workspace/browse"),  # a directory listing sent as POST
+        # T2-B3 (2026-09-22, GRIDIRON_PARTIAL #439) — feedback on completed
+        # work (no LLM spend, no repo/task mutation), not an operation on
+        # the platform. A viewer giving a thumbs-up/down is exactly the
+        # engagement this feature exists to capture.
+        ("POST", "/api/ratings"),
     }
     found: list[tuple[str, str, set[str]]] = []
 

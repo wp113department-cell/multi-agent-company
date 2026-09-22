@@ -180,11 +180,19 @@ async def get_agent_metrics(
     success_rate, total_runs = await compute_live_success_rate(
         db, name, fallback=agent.success_rate
     )
-    # avg_retries: approximated from tokens — real retry count not stored per-run
-    # use the agent table value (updated separately by manager)
-    avg_retries = agent.avg_retries
-
     collector = get_metrics_collector()
+    # T2-B3 (2026-09-22, GRIDIRON_PARTIAL #437) — real per-run retry counts
+    # (RunMetrics.retries, already set correctly by run_agent_graph()) now
+    # actually flow into Agent.avg_retries instead of the column being
+    # written by nothing and staying at its 0.0 default forever (see
+    # MetricsCollector.avg_retries's own docstring for the full story).
+    # Falls back to the existing persisted value when there's no run
+    # history in the in-process ring buffer yet (e.g. right after a
+    # restart) rather than a misleading 0.0.
+    computed_avg_retries = collector.avg_retries(name)
+    avg_retries = (
+        computed_avg_retries if computed_avg_retries is not None else agent.avg_retries
+    )
     p50_latency_ms = collector.p50_latency_ms(name)
     p95_latency_ms = collector.p95_latency_ms(name)
     avg_tool_accuracy = collector.avg_tool_accuracy(name)
@@ -199,9 +207,21 @@ async def get_agent_metrics(
         reliability_score = round(success_rate, 4)
 
     user_approval_rate = await _compute_user_approval_rate(db, name)
+    # T2-B3 (2026-09-22, GRIDIRON_PARTIAL #439 "User satisfaction (real, not
+    # proxy)") — a real, explicit thumbs-up/down verdict (app/api/ratings.py),
+    # distinct from user_approval_rate above (a workflow-gate outcome — did
+    # a human approve this agent's proposed plan/PR — not a subjective
+    # quality judgment) and from app/agents/user_sentiment.py's regex-based
+    # frustration detector (a real-time in-conversation heuristic, not an
+    # explicit verdict on completed work). None when this agent has never
+    # been rated — "no data," never a fabricated number.
+    from app.db.repository import get_agent_satisfaction_rate
+
+    user_satisfaction_rate, rating_count = await get_agent_satisfaction_rate(db, name)
 
     # Persist computed metrics back
     agent.success_rate = success_rate
+    agent.avg_retries = avg_retries
     agent.last_computed_at = datetime.now(tz=timezone.utc)
     await db.commit()
 
@@ -216,6 +236,8 @@ async def get_agent_metrics(
         "avgToolAccuracy": avg_tool_accuracy,
         "reliabilityScore": reliability_score,
         "userApprovalRate": user_approval_rate,
+        "userSatisfactionRate": user_satisfaction_rate,
+        "ratingCount": rating_count,
         "lastComputedAt": agent.last_computed_at.isoformat(),
     }
 

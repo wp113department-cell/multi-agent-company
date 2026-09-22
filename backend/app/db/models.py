@@ -8,6 +8,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -1269,3 +1270,35 @@ class TaskControlFlag(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class AgentRating(Base):
+    """T2-B3 (2026-09-22, GRIDIRON_PARTIAL #439 "User satisfaction (real,
+    not proxy)") — a real, explicit per-agent user rating, replacing the
+    audit's own honestly-labeled proxy (app/agents/user_sentiment.py's
+    regex-based frustration detector, which stays in place for its own
+    real-time in-conversation purpose — this is a separate, complementary
+    signal: an explicit human verdict on one agent's completed piece of
+    work, not an inferred one from message text).
+
+    task_id is nullable and unconstrained (not an FK) for the same reason
+    TaskControlFlag's is (migration 050): a rating on a synthetic/non-
+    DevTask run (a chat session, a fleet agent) is still real feedback worth
+    keeping, even with no dev_tasks row to join against.
+    """
+
+    __tablename__ = "agent_ratings"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    agent_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    task_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    # +1 (thumbs-up) or -1 (thumbs-down) — a plain CheckConstraint keeps a
+    # malformed write from silently corrupting the aggregate.
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rated_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+    __table_args__ = (CheckConstraint("rating IN (-1, 1)", name="ck_agent_ratings_rating"),)
