@@ -69,6 +69,8 @@ AGENT_CONTRACT: dict[str, Any] = {
 
 _VERIFICATION_CFG = VerificationConfig(
     set_by={
+        "read_file": "read",
+        "search_code": "read",
         "run_tests": "tests_passed",
         "git_diff": "diff_checked",
         "rename_symbol": "symbol_renamed",
@@ -76,7 +78,17 @@ _VERIFICATION_CFG = VerificationConfig(
     reset_by=("edit_file", "write_file", "apply_patch", "rename_symbol"),
     reset_keys=("tests_passed",),
     enforce_in_result={"behavior_preserved": "tests_passed"},
-    initial={"tests_passed": False, "diff_checked": False, "symbol_renamed": False},
+    initial={
+        "read": False,
+        "tests_passed": False,
+        "diff_checked": False,
+        "symbol_renamed": False,
+    },
+    blocking_until={
+        "edit_file": "read",
+        "replace_function": "read",
+        "write_file": "read",
+    },
 )
 
 

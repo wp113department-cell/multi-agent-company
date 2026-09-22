@@ -62,13 +62,16 @@ AGENT_CONTRACT: dict[str, Any] = {
 
 _VERIFICATION_CFG = VerificationConfig(
     set_by={
+        "read_file": "read",
+        "search_code": "read",
         "run_python_snippet": "code_tested",
         "bash": "code_tested",
     },
     reset_by=("write_file",),
     reset_keys=("code_tested",),
     enforce_in_result={"code_tested": "code_tested"},
-    initial={"code_tested": False},
+    initial={"read": False, "code_tested": False},
+    blocking_until={"write_file": "read"},
 )
 
 

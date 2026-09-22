@@ -113,6 +113,7 @@ _CFG = VerificationConfig(
     enforce_in_result={"read": "read", "tests_run": "tests_run"},
     initial={"read": False, "tests_run": False},
     command_patterns={"tests_run": TEST_COMMAND_PATTERN},
+    blocking_until={"write_file": "read"},
 )
 
 

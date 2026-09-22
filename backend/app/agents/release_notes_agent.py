@@ -113,13 +113,16 @@ _RELEASE_NOTES_TOOLS = READ_ONLY_TOOLS + [
 
 _VERIFICATION_CFG = VerificationConfig(
     set_by={
+        "read_file": "read",
+        "search_code": "read",
         "generate_release_notes": "git_log_read",
         "generate_changelog": "git_log_read",
     },
     reset_by=(),
     reset_keys=(),
     enforce_in_result={"git_log_read": "git_log_read"},
-    initial={"git_log_read": False},
+    initial={"read": False, "git_log_read": False},
+    blocking_until={"write_file": "read"},
 )
 
 

@@ -112,6 +112,7 @@ _CFG = VerificationConfig(
     reset_keys=(),
     enforce_in_result={"read": "read"},
     initial={"read": False, "reproduced": False},
+    blocking_until={"write_file": "read"},
 )
 
 

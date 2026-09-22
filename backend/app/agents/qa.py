@@ -189,10 +189,8 @@ def run_qa(
                 enable_critique=True,
                 # AUDIT_Q_BATCH04 §6 gap-closure (2026-08-10) — same opt-in as
                 # coder.py: qa.md has a real Quality Gates section.
-                # plan14 Day 5 Task 10 — config-driven, not hardcoded; default
-                # (config.py's replanning_enabled_agents) is True for "qa",
-                # preserving this exact behavior.
-                enable_replanning=settings.replanning_enabled_agents.get("qa", False),
+                # T2-B1 (2026-09-22) — enable_replanning omitted: run_agent_graph() resolves
+                # the real fleet default itself (True unless explicitly opted out for "qa").
                 max_turns=20,
                 task_id=str(task_id),
             )

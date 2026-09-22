@@ -543,7 +543,12 @@ def test_graph_replanning_bounded_by_max_turns_even_with_generous_max_replans() 
     )
 
 
-def test_graph_replanning_disabled_by_default_never_calls_replan_logic() -> None:
+def test_graph_replanning_disabled_explicitly_never_calls_replan_logic() -> None:
+    """UPDATED (T2-B1, 2026-09-22, GRIDIRON_PARTIAL #47/#65): the bare function default is no
+    longer meaningfully 'off' — run_agent_graph(enable_replanning=None) now resolves to the fleet
+    default (True) for any role not explicitly opted out in config (see
+    test_replanning_agent_wiring.py for that resolution logic). This test's real purpose —
+    prove replanning never fires when it's off — now asks for that explicitly."""
     llm = _ReplanGraphLLM(satisfied_after=3)
 
     with (
@@ -570,6 +575,7 @@ def test_graph_replanning_disabled_by_default_never_calls_replan_logic() -> None
             enable_memory=False,
             enable_reflection=True,
             enable_lesson=False,
+            enable_replanning=False,
             max_turns=15,
         )
 

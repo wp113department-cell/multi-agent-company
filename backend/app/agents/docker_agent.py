@@ -66,6 +66,8 @@ AGENT_CONTRACT: dict[str, Any] = {
 
 _VERIFICATION_CFG = VerificationConfig(
     set_by={
+        "read_file": "read",
+        "search_code": "read",
         "docker_ps": "container_inspected",
         "docker_logs": "logs_read",
         "docker_build": "build_ran",
@@ -73,7 +75,13 @@ _VERIFICATION_CFG = VerificationConfig(
     reset_by=("write_file", "edit_file"),
     reset_keys=("build_ran",),
     enforce_in_result={"build_verified": "build_ran"},
-    initial={"container_inspected": False, "logs_read": False, "build_ran": False},
+    initial={
+        "read": False,
+        "container_inspected": False,
+        "logs_read": False,
+        "build_ran": False,
+    },
+    blocking_until={"edit_file": "read", "write_file": "read"},
 )
 
 

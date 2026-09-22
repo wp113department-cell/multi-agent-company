@@ -376,10 +376,13 @@ def test_graph_critique_never_satisfied_is_bounded_by_max_critique_retries() -> 
     assert final_state.get("critique_retries", 0) == 1
 
 
-def test_graph_critique_disabled_by_default_preserves_prior_behavior() -> None:
-    """enable_critique defaults False — a role with real Quality Gates must
-    NOT get a critique call at all unless explicitly opted in, matching the
-    Session-0-style rollout of every other Fleet OS flag in this file."""
+def test_graph_critique_disabled_explicitly_preserves_prior_behavior() -> None:
+    """UPDATED (T2-B1, 2026-09-22, GRIDIRON_PARTIAL #123): the bare function default is no
+    longer meaningfully 'off' — run_agent_graph(enable_critique=None) now resolves to the fleet
+    default (True) for any role not explicitly opted out in config (see
+    test_replanning_agent_wiring.py for that resolution logic, shared with enable_replanning).
+    This test's real purpose — a role with critique explicitly off gets no critique call at
+    all — now asks for that explicitly."""
     llm = _CritiqueGraphLLM([])  # would raise StopIteration if ever consumed
 
     with patch(
@@ -402,6 +405,7 @@ def test_graph_critique_disabled_by_default_preserves_prior_behavior() -> None:
             enable_memory=False,
             enable_reflection=False,
             enable_lesson=False,
+            enable_critique=False,
             max_turns=10,
         )
 

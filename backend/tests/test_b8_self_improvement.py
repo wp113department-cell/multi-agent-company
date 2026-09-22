@@ -490,10 +490,18 @@ def test_an_approved_change_cannot_be_committed_before_the_tests_ran(module) -> 
     )
     assert blocked.startswith("[POLICY DENIED]") and ran == []
     _, v = call(
-        "run_tests", {"path": "tests"}, {"tests_run": False, "committed": False}
+        "run_tests",
+        {"path": "tests"},
+        {"tests_run": False, "committed": False, "read": True},
     )
     assert v["tests_run"] is True
     ok, v = call("git_commit_change", {"message": "x"}, v)
     assert ok == "ok" and v["committed"] is True
-    _, v = call("edit_file", {"path": "a.py"}, {"tests_run": True, "committed": True})
+    # T2-B1: edit_file is now also gated on the fleet-wide read-before-write rollout —
+    # "read" must be satisfied too, a real, additional precondition, not a regression.
+    _, v = call(
+        "edit_file",
+        {"path": "a.py"},
+        {"tests_run": True, "committed": True, "read": True},
+    )
     assert v["tests_run"] is False  # an edit after the test run re-arms the requirement

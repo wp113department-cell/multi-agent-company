@@ -122,11 +122,17 @@ _CHANGELOG_TOOLS = READ_ONLY_TOOLS + [
 ]
 
 _VERIFICATION_CFG = VerificationConfig(
-    set_by={"generate_changelog": "git_log_read", "write_file": "changelog_written"},
+    set_by={
+        "read_file": "read",
+        "search_code": "read",
+        "generate_changelog": "git_log_read",
+        "write_file": "changelog_written",
+    },
     reset_by=(),
     reset_keys=(),
     enforce_in_result={"git_log_read": "git_log_read"},
-    initial={"git_log_read": False, "changelog_written": False},
+    initial={"read": False, "git_log_read": False, "changelog_written": False},
+    blocking_until={"write_file": "read"},
 )
 
 

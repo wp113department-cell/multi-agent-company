@@ -120,11 +120,12 @@ _TOOLS = READ_ONLY_TOOLS + [
 ]
 
 _CFG = VerificationConfig(
-    set_by={"bash": "tested"},
+    set_by={"read_file": "read", "search_code": "read", "bash": "tested"},
     reset_by=("edit_file", "write_file"),
     reset_keys=("tested",),
     enforce_in_result={"tested": "tested"},
-    initial={"tested": False},
+    initial={"read": False, "tested": False},
+    blocking_until={"edit_file": "read", "write_file": "read"},
 )
 
 

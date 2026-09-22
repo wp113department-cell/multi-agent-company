@@ -77,6 +77,7 @@ _VERIFICATION_CFG = VerificationConfig(
         "files_read": False,
         "docs_written": False,
     },
+    blocking_until={"write_file": "files_read"},
 )
 
 

@@ -68,6 +68,7 @@ _VERIFICATION_CFG = VerificationConfig(
     reset_keys=("tests_passed",),
     enforce_in_result={"manifest_read": "manifest_read"},
     initial={"manifest_read": False, "registry_checked": False, "tests_passed": False},
+    blocking_until={"edit_file": "manifest_read"},
 )
 
 

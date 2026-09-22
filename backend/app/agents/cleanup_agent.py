@@ -62,11 +62,16 @@ AGENT_CONTRACT: dict[str, Any] = {
 }
 
 _VERIFICATION_CFG = VerificationConfig(
-    set_by={"dead_code_detect": "dead_code_scanned"},
+    set_by={
+        "read_file": "read",
+        "search_code": "read",
+        "dead_code_detect": "dead_code_scanned",
+    },
     reset_by=("edit_file", "delete_file"),
     reset_keys=("dead_code_scanned",),
     enforce_in_result={"dead_code_scanned": "dead_code_scanned"},
-    initial={"dead_code_scanned": False},
+    initial={"read": False, "dead_code_scanned": False},
+    blocking_until={"edit_file": "read"},
 )
 
 

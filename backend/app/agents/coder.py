@@ -198,12 +198,9 @@ def run_coder(
                 # legitimately reach the >=2 threshold _should_replan checks
                 # (base_graph.py::_should_replan) when the same criteria keep
                 # failing across retries. Bounded by max_replans=1 (default).
-                # plan14 Day 5 Task 10 — config-driven, not hardcoded; default
-                # (config.py's replanning_enabled_agents) is True for "coder",
-                # preserving this exact behavior.
-                enable_replanning=settings.replanning_enabled_agents.get(
-                    "coder", False
-                ),
+                # T2-B1 (2026-09-22) — enable_replanning omitted entirely: run_agent_graph()
+                # now resolves the real fleet default itself (True unless config's
+                # replanning_enabled_agents explicitly opts "coder" out).
                 max_turns=30,
                 task_id=str(task_id),
             )

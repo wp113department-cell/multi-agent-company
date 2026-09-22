@@ -60,13 +60,15 @@ _TOOLS = READ_ONLY_TOOLS + [
 
 _VERIFICATION_CFG = VerificationConfig(
     set_by={
+        "read_file": "read",
         "list_all_tool_specs": "catalog_read",
         "write_file": "docs_written",
     },
     reset_by=(),
     reset_keys=(),
     enforce_in_result={"catalog_read": "catalog_read"},
-    initial={"catalog_read": False, "docs_written": False},
+    initial={"read": False, "catalog_read": False, "docs_written": False},
+    blocking_until={"write_file": "read"},
 )
 
 

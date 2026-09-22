@@ -63,13 +63,15 @@ _TOOLS = READ_ONLY_TOOLS + [
 
 _VERIFICATION_CFG = VerificationConfig(
     set_by={
+        "read_file": "read",
         "list_registered_agents": "roster_read",
         "write_file": "docs_written",
     },
     reset_by=(),
     reset_keys=(),
     enforce_in_result={"roster_read": "roster_read"},
-    initial={"roster_read": False, "docs_written": False},
+    initial={"read": False, "roster_read": False, "docs_written": False},
+    blocking_until={"write_file": "read"},
 )
 
 

@@ -143,15 +143,24 @@ _SCAN_CFG = VerificationConfig(
 )
 
 _APPLY_CFG = VerificationConfig(
-    set_by={"git_commit_change": "committed", "run_tests": "tests_run"},
+    set_by={
+        "read_file": "read",
+        "search_code": "read",
+        "git_commit_change": "committed",
+        "run_tests": "tests_run",
+    },
     # B8 verification: "test before commit" was only tracked, never enforced — an approved
     # change could be committed with no test run at all, or after an edit that invalidated an
     # earlier run. Now: no commit until run_tests ran, and any edit re-arms that requirement.
     reset_by=("write_file", "edit_file"),
     reset_keys=("tests_run",),
     enforce_in_result={"committed": "committed"},
-    initial={"committed": False, "tests_run": False},
-    blocking_until={"git_commit_change": "tests_run"},
+    initial={"read": False, "committed": False, "tests_run": False},
+    blocking_until={
+        "git_commit_change": "tests_run",
+        "edit_file": "read",
+        "write_file": "read",
+    },
 )
 
 

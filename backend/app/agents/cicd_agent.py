@@ -69,6 +69,7 @@ _VERIFICATION_CFG = VerificationConfig(
     reset_keys=("lint_ran",),
     enforce_in_result={"lint_passed": "lint_ran"},
     initial={"lint_ran": False, "files_read": False},
+    blocking_until={"edit_file": "files_read", "write_file": "files_read"},
 )
 
 

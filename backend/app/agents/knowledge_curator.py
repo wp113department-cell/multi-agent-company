@@ -183,6 +183,7 @@ _SCAN_CFG = VerificationConfig(
 
 _APPLY_CFG = VerificationConfig(
     set_by={
+        "read_file": "read",
         "memory_curate_write": "curated",
         "memory_promote_lesson": "curated",
         "git_commit_change": "committed",
@@ -190,7 +191,8 @@ _APPLY_CFG = VerificationConfig(
     reset_by=(),
     reset_keys=(),
     enforce_in_result={"curated": "curated"},
-    initial={"curated": False, "committed": False},
+    initial={"read": False, "curated": False, "committed": False},
+    blocking_until={"edit_file": "read", "write_file": "read"},
 )
 
 

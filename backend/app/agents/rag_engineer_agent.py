@@ -123,6 +123,7 @@ _VERIFICATION_CFG = VerificationConfig(
     reset_keys=(),
     enforce_in_result={"codebase_read": "codebase_read"},
     initial={"codebase_read": False, "code_written": False},
+    blocking_until={"write_file": "codebase_read"},
 )
 
 

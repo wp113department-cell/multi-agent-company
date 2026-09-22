@@ -181,10 +181,8 @@ def pm_node(state: PipelineState) -> PipelineState:
                 # fleet-flip opt-in as coder.py/qa.py: pm.md has a real
                 # Quality Gates section.
                 enable_critique=True,
-                # plan14 Day 5 Task 10 — config-driven, not hardcoded; default
-                # (config.py's replanning_enabled_agents) is True for "pm",
-                # preserving this exact behavior.
-                enable_replanning=settings.replanning_enabled_agents.get("pm", False),
+                # T2-B1 (2026-09-22) — enable_replanning omitted: run_agent_graph() resolves
+                # the real fleet default itself (True unless explicitly opted out for "pm").
                 max_turns=10,
                 images=images,
                 task_id=stream_task_id,

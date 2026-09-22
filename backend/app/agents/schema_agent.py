@@ -60,11 +60,16 @@ AGENT_CONTRACT: dict[str, Any] = {
 }
 
 _VERIFICATION_CFG = VerificationConfig(
-    set_by={"inspect_schema": "schema_inspected"},
+    set_by={
+        "read_file": "read",
+        "search_code": "read",
+        "inspect_schema": "schema_inspected",
+    },
     reset_by=("write_file",),
     reset_keys=("schema_inspected",),
     enforce_in_result={"schema_inspected": "schema_inspected"},
-    initial={"schema_inspected": False},
+    initial={"read": False, "schema_inspected": False},
+    blocking_until={"write_file": "read"},
 )
 
 

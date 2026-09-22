@@ -251,16 +251,16 @@ _TOOLS = READ_ONLY_TOOLS + [
 ]
 
 _CFG = VerificationConfig(
-    set_by={"score_tech_options": "scored"},
+    set_by={"read_file": "read", "search_code": "read", "score_tech_options": "scored"},
     reset_by=(),
     reset_keys=(),
     enforce_in_result={"scored": "scored"},
-    initial={"scored": False},
+    initial={"read": False, "scored": False},
     # Real, code-enforced gate (base_graph.py's blocking_until mechanism,
     # same one AUDIT_Q_BATCH17 §84 already confirmed real elsewhere): submit
     # is refused outright — never even reaches the handler — until real
     # weighted-sum arithmetic has actually run this session.
-    blocking_until={"submit_tech_advisor_agent": "scored"},
+    blocking_until={"submit_tech_advisor_agent": "scored", "write_file": "read"},
 )
 
 

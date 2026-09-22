@@ -284,8 +284,8 @@ class Settings(BaseSettings):
     # — landing a new capability without changing behavior for any
     # existing caller/test that never opts in.
     enable_subtask_fanout: bool = Field(
-        default=False,
-        description="Dispatch independent subtasks (no depends_on edge) concurrently in dependency-respecting waves instead of strictly sequentially",
+        default=True,
+        description="Dispatch independent subtasks (no depends_on edge) concurrently in dependency-respecting waves instead of strictly sequentially. T2-B1 (2026-09-22, GRIDIRON_PARTIAL #43): flipped on by default after the audit's own recommended rollout — the mechanism is real, tested (concurrent overlap, depends_on ordering, and git-commit-lock serialization across a shared worktree all proven in tests/test_subtask_fanout.py). Set to false to force the old strictly-sequential path.",
     )
 
     # plan14 follow-on #2 (Dynamic Subtask Creation) — the highest-risk item
@@ -1356,13 +1356,25 @@ class Settings(BaseSettings):
     # (coder/pm/qa/security_reviewer) while making both "which agents" and
     # "how sensitive" real config, not code.
     replanning_enabled_agents: dict[str, bool] = Field(
-        default_factory=lambda: {
-            "coder": True,
-            "pm": True,
-            "qa": True,
-            "security_reviewer": True,
-        },
-        description="agent_name -> whether build_agent_graph()'s enable_replanning flag is on for it. Replaces 4 hardcoded `enable_replanning=True` literals (coder.py/pm.py/qa.py/security_reviewer.py) with one config-driven policy — an agent absent from this dict defaults to False (replanning off), matching every other agent's pre-plan14 behavior.",
+        default_factory=dict,
+        description="T2-B1 (2026-09-22, GRIDIRON_PARTIAL #47/#65/#106/#117): a fleet-wide "
+        "default rollout of the already-proven, already-tested replanning mechanism — "
+        "run_agent_graph() now treats 'caller passed nothing' as True for every real agent "
+        "(see its own docstring on enable_replanning), matching the audit's own recommended "
+        "rollout after the pilot period. This dict is now an EXCEPTION list — set an agent "
+        "name to False here to opt a specific agent OUT (e.g. a purely read-only reporting "
+        "agent with no real 'redo the plan' failure mode), never to opt one in; the old "
+        "'absent means off' meaning is gone. Chat/pipeline-only entry points that don't call "
+        "run_agent_graph (chat_agent, pm/architect/decomposer's own pipeline graph) are "
+        "unaffected either way.",
+    )
+    critique_enabled_agents: dict[str, bool] = Field(
+        default_factory=dict,
+        description="T2-B1 (2026-09-22, GRIDIRON_PARTIAL #123): same fleet-wide-default "
+        "rollout as replanning_enabled_agents, for the self-critique mechanism — every real "
+        "role file already has a genuine Quality Gates/Success Criteria section for the "
+        "critique node to score against (confirmed by the audit before this rollout). An "
+        "exception list for agents to opt OUT of critique, not a hand-maintained opt-in list.",
     )
     replanning_reflection_failure_threshold: int = Field(
         default=2,

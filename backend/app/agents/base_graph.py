@@ -3359,9 +3359,19 @@ def run_agent_graph(
     enable_memory: bool = True,
     enable_reflection: bool = True,
     enable_lesson: bool = True,
-    enable_critique: bool = False,
+    # T2-B1 verification-batch enhancement (2026-09-22, GRIDIRON_PARTIAL #117/#123/
+    # #106/#47/#65) — None (not a hardcoded False) means "use this role's real fleet
+    # default from config.py's critique_enabled_agents/replanning_enabled_agents",
+    # resolved just below. Before this, only 4-9 of the ~89 real run_agent_graph()
+    # callers ever passed either flag at all — every other real agent got the bare
+    # function default (False) regardless of what config said, so "fleet-wide
+    # default" was never actually reachable without editing all ~80 remaining call
+    # sites individually. An explicit True/False here (e.g. temporary_agent.py's own
+    # enable_critique=False) still always wins — this only changes what happens when
+    # a caller passes nothing at all.
+    enable_critique: bool | None = None,
     max_critique_retries: int = 1,
-    enable_replanning: bool = False,
+    enable_replanning: bool | None = None,
     max_replans: int = 1,
     quality_gate_min_confidence: float = 0.0,
     task_description: str = "",
@@ -3389,6 +3399,13 @@ def run_agent_graph(
     Settings-based defaults for model_haiku and repo_path when not provided.
     """
     import uuid as _uuid
+
+    if enable_critique is None:
+        enable_critique = get_settings().critique_enabled_agents.get(role_name, True)
+    if enable_replanning is None:
+        enable_replanning = get_settings().replanning_enabled_agents.get(
+            role_name, True
+        )
 
     tid = trace_id or _uuid.uuid4().hex[:12]
 

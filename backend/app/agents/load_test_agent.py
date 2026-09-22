@@ -107,6 +107,7 @@ _CFG = VerificationConfig(
     reset_keys=("smoke_tested",),
     enforce_in_result={"read": "read", "smoke_tested": "smoke_tested"},
     initial={"read": False, "smoke_tested": False},
+    blocking_until={"write_file": "read"},
 )
 
 

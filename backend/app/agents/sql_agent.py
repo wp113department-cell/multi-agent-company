@@ -63,6 +63,8 @@ AGENT_CONTRACT: dict[str, Any] = {
 
 _VERIFICATION_CFG = VerificationConfig(
     set_by={
+        "read_file": "read",
+        "search_code": "read",
         "inspect_schema": "schema_inspected",
         "run_sql": "sql_ran",
         "explain_query": "explain_ran",
@@ -70,7 +72,13 @@ _VERIFICATION_CFG = VerificationConfig(
     reset_by=("write_file",),
     reset_keys=(),
     enforce_in_result={"verified_against_schema": "schema_inspected"},
-    initial={"schema_inspected": False, "sql_ran": False, "explain_ran": False},
+    initial={
+        "read": False,
+        "schema_inspected": False,
+        "sql_ran": False,
+        "explain_ran": False,
+    },
+    blocking_until={"edit_file": "read", "write_file": "read"},
 )
 
 _DESTRUCTIVE_KEYWORDS = ("drop ", "truncate ", "delete from", "alter table")

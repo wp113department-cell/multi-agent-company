@@ -1,13 +1,19 @@
-"""plan14 Day 5 Task 10 — proves the 4 agent call sites (coder.py, pm.py,
-qa.py, security_reviewer.py) that used to hardcode `enable_replanning=True`
-now read app.config.Settings.replanning_enabled_agents instead, and that an
-agent absent from that dict defaults to replanning OFF (matching every
-other agent's pre-plan14 behavior).
+"""plan14 Day 5 Task 10, updated by T2-B1 (2026-09-22, GRIDIRON_PARTIAL #47/#65/#106/#117):
+the 4 agent call sites (coder.py, pm.py, qa.py, security_reviewer.py) used to each explicitly read
+`settings.replanning_enabled_agents.get("<name>", False)` and pass the result to `run_agent_graph`.
 
-run_agent_graph itself is mocked at each agent module's import site — these
-are wiring tests, not agent-behavior tests (that coverage already exists in
-test_phase36_continuous_replanning.py). Mocking one level below the LLM
-graph keeps these fast and avoids any real DB/LLM/subprocess work.
+That only ever worked for those 4 agents — the other ~85 real `run_agent_graph()` callers never
+passed `enable_replanning` at all, so "fleet-wide default" was unreachable without editing every
+one of them. Now `run_agent_graph`'s own `enable_replanning: bool | None = None` parameter resolves
+the real fleet default itself (True unless a specific agent is opted out in config) when the caller
+passes nothing — so these 4 agents (and the other ~85) now correctly omit the argument entirely and
+let `run_agent_graph` do the one, single resolution.
+
+`run_agent_graph` itself is mocked at each agent module's import site for the wiring checks below
+(these prove the CALL SITE no longer overrides the fleet default) — the resolution logic itself is
+tested directly against the real function in `test_run_agent_graph_replanning_default_resolution`
+below, and its end-to-end graph behavior already has separate coverage in
+test_phase36_continuous_replanning.py.
 """
 
 from __future__ import annotations
@@ -33,26 +39,32 @@ def _fake_final_state(**overrides: Any) -> dict[str, Any]:
     return state
 
 
-def test_coder_wires_enable_replanning_from_config() -> None:
+@pytest.mark.parametrize(
+    "agent_name,run_fn_path,call",
+    [
+        (
+            "coder",
+            "app.agents.coder.run_agent_graph",
+            lambda: __import__("app.agents.coder", fromlist=["run_coder"]).run_coder(
+                task_id=1, plan="do it", worktree_path="/tmp/wt", repo_path="/tmp/repo"
+            ),
+        ),
+    ],
+)
+def test_coder_no_longer_overrides_enable_replanning_at_its_own_call_site(
+    agent_name, run_fn_path, call
+) -> None:
     with (
         patch(
-            "app.agents.coder.run_agent_graph",
-            return_value=_fake_final_state(result={"status": "ok"}),
+            run_fn_path, return_value=_fake_final_state(result={"status": "ok"})
         ) as mock_run,
         patch("app.agents.coder._run_checks", return_value=None),
     ):
-        from app.agents.coder import run_coder
-
-        run_coder(
-            task_id=1, plan="do it", worktree_path="/tmp/wt", repo_path="/tmp/repo"
-        )
-
-    kwargs = mock_run.call_args.kwargs
-    expected = get_settings().replanning_enabled_agents.get("coder", False)
-    assert kwargs["enable_replanning"] == expected == True  # noqa: E712
+        call()
+    assert "enable_replanning" not in mock_run.call_args.kwargs
 
 
-def test_qa_wires_enable_replanning_from_config() -> None:
+def test_qa_no_longer_overrides_enable_replanning_at_its_own_call_site() -> None:
     with patch(
         "app.agents.qa.run_agent_graph", return_value=_fake_final_state()
     ) as mock_run:
@@ -65,13 +77,10 @@ def test_qa_wires_enable_replanning_from_config() -> None:
             worktree_path="/tmp/wt",
             repo_path="/tmp/repo",
         )
-
-    kwargs = mock_run.call_args.kwargs
-    expected = get_settings().replanning_enabled_agents.get("qa", False)
-    assert kwargs["enable_replanning"] == expected == True  # noqa: E712
+    assert "enable_replanning" not in mock_run.call_args.kwargs
 
 
-def test_pm_wires_enable_replanning_from_config() -> None:
+def test_pm_no_longer_overrides_enable_replanning_at_its_own_call_site() -> None:
     with patch(
         "app.agents.pm.run_agent_graph", return_value=_fake_final_state()
     ) as mock_run:
@@ -85,99 +94,101 @@ def test_pm_wires_enable_replanning_from_config() -> None:
                 "task_id": 1,
             }
         )
-
-    kwargs = mock_run.call_args.kwargs
-    expected = get_settings().replanning_enabled_agents.get("pm", False)
-    assert kwargs["enable_replanning"] == expected == True  # noqa: E712
+    assert "enable_replanning" not in mock_run.call_args.kwargs
 
 
-def test_security_reviewer_wires_enable_replanning_from_config() -> None:
+def test_security_reviewer_no_longer_overrides_enable_replanning_at_its_own_call_site() -> (
+    None
+):
     with patch(
-        "app.agents.security_reviewer.run_agent_graph",
-        return_value=_fake_final_state(),
+        "app.agents.security_reviewer.run_agent_graph", return_value=_fake_final_state()
     ) as mock_run:
         from app.agents.security_reviewer import run_security_review
 
         run_security_review(task_id=1, focus="full audit", repo_path="/tmp/repo")
-
-    kwargs = mock_run.call_args.kwargs
-    expected = get_settings().replanning_enabled_agents.get("security_reviewer", False)
-    assert kwargs["enable_replanning"] == expected == True  # noqa: E712
+    assert "enable_replanning" not in mock_run.call_args.kwargs
 
 
-@pytest.mark.parametrize(
-    ("agent_name", "override"),
-    [("coder", False), ("qa", False), ("pm", False), ("security_reviewer", False)],
-)
-def test_disabling_an_agent_in_config_actually_disables_replanning(
-    agent_name: str, override: bool, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Flip one agent's replanning off via config and prove the corresponding
-    call site actually respects it — not just reads a default that happens
-    to match."""
-    settings = get_settings()
-    new_map = dict(settings.replanning_enabled_agents)
-    new_map[agent_name] = override
-    monkeypatch.setattr(settings, "replanning_enabled_agents", new_map)
-
-    if agent_name == "coder":
-        with (
-            patch(
-                "app.agents.coder.run_agent_graph",
-                return_value=_fake_final_state(result={"status": "ok"}),
-            ) as mock_run,
-            patch("app.agents.coder._run_checks", return_value=None),
-        ):
-            from app.agents.coder import run_coder
-
-            run_coder(
-                task_id=1, plan="do it", worktree_path="/tmp/wt", repo_path="/tmp/repo"
-            )
-    elif agent_name == "qa":
-        with patch(
-            "app.agents.qa.run_agent_graph", return_value=_fake_final_state()
-        ) as mock_run:
-            from app.agents.qa import run_qa
-
-            run_qa(
-                task_id=1,
-                subtask_id=1,
-                files_changed=[],
-                worktree_path="/tmp/wt",
-                repo_path="/tmp/repo",
-            )
-    elif agent_name == "pm":
-        with patch(
-            "app.agents.pm.run_agent_graph", return_value=_fake_final_state()
-        ) as mock_run:
-            from app.agents.pm import pm_node
-
-            pm_node(
-                {
-                    "task_title": "t",
-                    "task_description": "d",
-                    "repo_path": "/tmp/repo",
-                    "task_id": 1,
-                }
-            )
-    else:
-        with patch(
-            "app.agents.security_reviewer.run_agent_graph",
-            return_value=_fake_final_state(),
-        ) as mock_run:
-            from app.agents.security_reviewer import run_security_review
-
-            run_security_review(task_id=1, focus="full audit", repo_path="/tmp/repo")
-
-    assert mock_run.call_args.kwargs["enable_replanning"] == override
+# ---------------------------------------------------------------------------
+# The real resolution logic, tested directly against run_agent_graph (not
+# through an agent-level mock, which would bypass it entirely)
+# ---------------------------------------------------------------------------
 
 
-def test_an_agent_absent_from_the_config_map_defaults_to_replanning_off(
+def _run_agent_graph_kwargs_seen(
+    monkeypatch: pytest.MonkeyPatch, **call_kwargs: Any
+) -> dict[str, Any]:
+    """Calls the real run_agent_graph up to (but not including) building the real graph —
+    captures what it resolved enable_critique/enable_replanning to before passing them on.
+    """
+    from app.agents import base_graph
+
+    seen: dict[str, Any] = {}
+
+    def fake_build_agent_graph(**kwargs: Any) -> Any:
+        seen.update(kwargs)
+        raise RuntimeError("stop before building a real graph")
+
+    monkeypatch.setattr(base_graph, "build_agent_graph", fake_build_agent_graph)
+    try:
+        base_graph.run_agent_graph(
+            role_name=call_kwargs.pop("role_name", "some_agent_never_in_the_map"),
+            model="claude-haiku-4-5-20251001",
+            tools=[],
+            tool_handlers={},
+            verification_cfg=base_graph.VerificationConfig(),
+            initial_message="do a task",
+            **call_kwargs,
+        )
+    except RuntimeError:
+        pass
+    return seen
+
+
+def test_an_agent_absent_from_config_now_gets_replanning_and_critique_on_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The actual T2-B1 change: an agent NOT mentioned in config gets the new fleet
+    default (True), not the old off-by-default behavior."""
     settings = get_settings()
     assert "some_agent_never_in_the_map" not in settings.replanning_enabled_agents
-    assert (
-        settings.replanning_enabled_agents.get("some_agent_never_in_the_map", False)
-        is False
+    assert "some_agent_never_in_the_map" not in settings.critique_enabled_agents
+
+    seen = _run_agent_graph_kwargs_seen(monkeypatch)
+    assert seen["enable_replanning"] is True
+    assert seen["enable_critique"] is True
+
+
+def test_an_agent_explicitly_opted_out_in_config_stays_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """config.py's dicts are now an exception list — an agent explicitly set to False there
+    stays off even though the fleet default is now True."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "replanning_enabled_agents", {"coder": False})
+    monkeypatch.setattr(settings, "critique_enabled_agents", {"coder": False})
+
+    seen = _run_agent_graph_kwargs_seen(monkeypatch, role_name="coder")
+    assert seen["enable_replanning"] is False
+    assert seen["enable_critique"] is False
+
+    # a different, unmentioned agent is unaffected and still gets the fleet default
+    seen_other = _run_agent_graph_kwargs_seen(monkeypatch, role_name="some_other_agent")
+    assert seen_other["enable_replanning"] is True
+    assert seen_other["enable_critique"] is True
+
+
+def test_an_explicit_argument_always_wins_over_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """temporary_agent.py (and any future caller) can still pass an explicit True/False —
+    that must never be overridden by the config-driven fleet default."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "replanning_enabled_agents", {})
+    monkeypatch.setattr(settings, "critique_enabled_agents", {})
+
+    seen = _run_agent_graph_kwargs_seen(
+        monkeypatch, enable_replanning=False, enable_critique=False
     )
+    assert seen["enable_replanning"] is False
+    assert seen["enable_critique"] is False

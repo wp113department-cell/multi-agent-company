@@ -297,7 +297,8 @@ class TestReviewerFlags:
 class TestQaFlags:
     def test_flags_and_kwargs(self) -> None:
         with patch(
-            "app.agents.qa.run_agent_graph", return_value={**_MINIMAL_FINAL_STATE, "verification": {"tests_run": True}}
+            "app.agents.qa.run_agent_graph",
+            return_value={**_MINIMAL_FINAL_STATE, "verification": {"tests_run": True}},
         ) as mock_run, patch(
             "app.agents.qa.get_settings", return_value=_mock_settings()
         ), patch(
@@ -438,7 +439,15 @@ class TestDocsFlags:
     def test_verification_cfg_set_by(self) -> None:
         import app.agents.docs as mod
 
-        assert mod._VERIFICATION_CFG.set_by == {"write_file": "docs_written"}
+        # UPDATED (T2-B1, 2026-09-22): docs.py is now part of the fleet-wide
+        # read-before-write rollout (GRIDIRON_PARTIAL #495/#503) — read_file/search_code
+        # now also set a "read" flag that write_file's new blocking_until requires.
+        assert mod._VERIFICATION_CFG.set_by == {
+            "read_file": "read",
+            "search_code": "read",
+            "write_file": "docs_written",
+        }
+        assert mod._VERIFICATION_CFG.blocking_until == {"write_file": "read"}
 
 
 # ===========================================================================

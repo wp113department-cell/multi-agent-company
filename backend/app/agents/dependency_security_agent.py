@@ -109,7 +109,7 @@ _CFG = VerificationConfig(
     # happened first. Matches this role's own prompt
     # (roles/dependency_security_agent.md Process step 1: "Read relevant
     # files... to identify manifests in scope" before step 2's audit run).
-    blocking_until={"bash": "read"},
+    blocking_until={"bash": "read", "write_file": "read"},
 )
 
 

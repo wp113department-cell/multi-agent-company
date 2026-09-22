@@ -85,6 +85,8 @@ _TOOLS = READ_ONLY_TOOLS + [
 
 _VERIFICATION_CFG = VerificationConfig(
     set_by={
+        "read_file": "read",
+        "search_code": "read",
         "import_graph": "graph_read",
         "circular_dep_detect": "graph_read",
         "write_file": "docs_written",
@@ -92,7 +94,8 @@ _VERIFICATION_CFG = VerificationConfig(
     reset_by=(),
     reset_keys=(),
     enforce_in_result={"graph_read": "graph_read"},
-    initial={"graph_read": False, "docs_written": False},
+    initial={"read": False, "graph_read": False, "docs_written": False},
+    blocking_until={"write_file": "read"},
 )
 
 

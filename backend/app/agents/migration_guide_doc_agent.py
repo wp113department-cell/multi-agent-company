@@ -64,13 +64,15 @@ _TOOLS = READ_ONLY_TOOLS + [
 
 _VERIFICATION_CFG = VerificationConfig(
     set_by={
+        "read_file": "read",
         "list_migrations": "migrations_read",
         "write_file": "docs_written",
     },
     reset_by=(),
     reset_keys=(),
     enforce_in_result={"migrations_read": "migrations_read"},
-    initial={"migrations_read": False, "docs_written": False},
+    initial={"read": False, "migrations_read": False, "docs_written": False},
+    blocking_until={"write_file": "read"},
 )
 
 
