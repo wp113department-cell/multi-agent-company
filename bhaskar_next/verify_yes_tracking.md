@@ -34,7 +34,8 @@ Live tally is kept at the top of each batch section once that batch starts.
 | **B7** Security, governance, enterprise, frontend/API | 32 | **32** | 15 | 16 | 1 | 0 |
 | **B8** Fleet self-improvement, guardians, health | 33 | **33** | 22 | 9 | 2 | 0 |
 | **B9** Scheduler, metrics, quality gates, scalability | 37 | **37** | 30 | 3 | 4 | 0 |
-| B10–B11 | 89 | 0 | 0 | 0 | 0 | 0 |
+| **B10** File understanding, external knowledge, git, docs, deploy | 46 | **46** | 44 | 2 | 0 | 0 |
+| **B11** Testing audit, hidden risks, domain coverage | 43 | **43** | 42 | 0 | 1 | 0 |
 
 **Environment baseline (Day 0):** isolated DB `gridiron_verify`; first full run 31 failed / 7,707 passed / 54 skipped — 28 of the 31 were `python: not found` from running pytest without the venv on PATH (84 tests pass with it), 2 pip-audit drift (known), 1 shared-state test. See `verify_api_ledger.md` for live-API spend (~$0.30 so far).
 
@@ -394,100 +395,100 @@ Live tally is kept at the top of each batch section once that batch starts.
 
 | # | § | Question | Verdict | Evidence / notes |
 |---:|---|---|---|---|
-| 260 | 16 | Python | PENDING | |
-| 261 | 16 | TypeScript/JavaScript | PENDING | |
-| 264 | 16 | Markdown | PENDING | |
-| 265 | 16 | JSON (incl. schema validation) | PENDING | |
-| 266 | 16 | YAML (incl. schema validation) | PENDING | |
-| 267 | 16 | Docker/Docker Compose | PENDING | |
-| 268 | 16 | Jupyter Notebook | PENDING | |
-| 269 | 16 | PDF | PENDING | |
-| 270 | 16 | Images | PENDING | |
-| 272 | 16 | XML | PENDING | |
-| 273 | 16 | CSV | PENDING | |
-| 276 | 79 | Open URLs | PENDING | |
-| 277 | 79 | SSRF protection on URL fetch | PENDING | |
-| 279 | 79 | Detect 'I don't know this tech, look it up' (research agent) | PENDING | |
-| 280 | 79 | Inspect external GitHub repositories | PENDING | |
-| 281 | 79 | Inspect APIs (OpenAPI/Swagger) | PENDING | |
-| 283 | 19 | Detect deployment issues | PENDING | |
-| 284 | 19 | Diagnose deployment failures | PENDING | |
-| 285 | 19 | Generate deployment guides for this project | PENDING | |
-| 287 | 19 | Docker | PENDING | |
-| 293 | 20 | Open URLs | PENDING | |
-| 294 | 20 | Understand / summarize websites | PENDING | |
-| 295 | 20 | Inspect external GitHub repos | PENDING | |
-| 296 | 20 | Inspect APIs (OpenAPI/Swagger) | PENDING | |
-| 298 | 40 | Create meaningful commits / write commit messages | PENDING | |
-| 299 | 40 | Create branches | PENDING | |
-| 301 | 40 | Explain conflicts | PENDING | |
-| 302 | 40 | Review diffs (structured, beyond raw output) | PENDING | |
-| 303 | 40 | Summarize changes | PENDING | |
-| 304 | 40 | Generate PR descriptions | PENDING | |
-| 305 | 41 | README generation | PENDING | |
-| 306 | 41 | Architecture docs generation | PENDING | |
-| 307 | 41 | API docs generation | PENDING | |
-| 308 | 41 | Agent docs generation | PENDING | |
-| 309 | 41 | Tool docs generation | PENDING | |
-| 310 | 41 | Changelog generation | PENDING | |
-| 311 | 41 | Migration guide generation | PENDING | |
-| 312 | 41 | Auto-update when code changes | PENDING | |
-| 386 | 98 | Git tags / semver | PENDING | |
-| 387 | 98 | Migration state reasoning | PENDING | |
-| 389 | 99 | Generate diagrams | PENDING | |
-| 390 | 99 | Summarize long outputs | PENDING | |
-| 391 | 100 | ARIA / semantic HTML in the product's own frontend | PENDING | |
-| 392 | 100 | a11y linting | PENDING | |
-| 490 | 83 | Dedicated multi-criteria recommendation engine (real weighted scoring, not model-guessed) | PENDING | |
-| 491 | 83 | General single-question research/recommendation capability | PENDING | |
+| 260 | 16 | Python | CONFIRMED | read_file/search_code/analyze_file/parse_ast on real .py sources — extensively exercised throughout B1-B9. |
+| 261 | 16 | TypeScript/JavaScript | CONFIRMED | search_code/find_references/organize_imports/format_file on real .ts/.tsx; frontend eslint+tsc gates confirmed in B7/B9. |
+| 264 | 16 | Markdown | CONFIRMED | read_file on real .md; doc-generation agents write structured markdown (B6/B9). |
+| 265 | 16 | JSON (incl. schema validation) | CONFIRMED | json_validate (+ schema_path against a real JSON Schema file) — live: valid doc passes, a type-mismatched doc returns a precise SCHEMA VIOLATION with field/reason. |
+| 266 | 16 | YAML (incl. schema validation) | CONFIRMED | yaml_validate (shared json_schema_validation.py schema engine) — live valid-YAML check. |
+| 267 | 16 | Docker/Docker Compose | CONFIRMED | parse_dockerfile (stages/images/ports) + parse_docker_compose (services) — live on a real Dockerfile/compose file. |
+| 268 | 16 | Jupyter Notebook | CONFIRMED | read_notebook — live on a real .ipynb, cell type + source + output extracted. |
+| 269 | 16 | PDF | CONFIRMED | read_pdf tool wired (make_chat_handlers); PDF extraction verified structurally, not re-exercised with a new PDF this batch (Light depth). |
+| 270 | 16 | Images | CONFIRMED | read_image tool wired; vision-capable read verified structurally (Light depth). |
+| 272 | 16 | XML | CONFIRMED | xml_validate — live well-formedness check on a real .xml file. |
+| 273 | 16 | CSV | CONFIRMED | csv_preview — live column/row extraction on a real .csv file. |
+| 276 | 79 | Open URLs | CONFIRMED | fetch_url — live GET against a real external URL (example.com), real HTML returned. |
+| 277 | 79 | SSRF protection on URL fetch | CONFIRMED | _ssrf_denial_reason blocks 169.254.169.254/127.0.0.1/10.x live; the B7 redirect-bypass fix re-verified. FIXED IN THIS BATCH: _ssrf_safe_curl_fetch (shared by fetch_url/inspect_openapi_spec) truncated the fetched body at a hardcoded 10,000 chars BEFORE parsing — fine as fetch_url's own display cap, but corrupted any real OpenAPI spec over that size for inspect_openapi_spec. Proved live against the real ~13.8KB public Swagger Petstore spec. Now parameterized (max_chars); fetch_url's own 10,000-char display behavior is unchanged (regression-tested). |
+| 279 | 79 | Detect 'I don't know this tech, look it up' (research agent) | CONFIRMED | research agent + tech_advisor_agent's real web_search/fetch_url tool access for unfamiliar-tech lookups (structural; not live-exercised this batch). |
+| 280 | 79 | Inspect external GitHub repositories | CONFIRMED | inspect_github_repo — live real GitHub API call (psf/requests): stars, language, license, topics, description all real. |
+| 281 | 79 | Inspect APIs (OpenAPI/Swagger) | FIXED | inspect_openapi_spec — see #277's fix. Live post-fix: real Swagger Petstore spec (20 endpoints) parses correctly end-to-end. |
+| 283 | 19 | Detect deployment issues | CONFIRMED | monitoring_agent's docker_ps/docker_logs/health_check scan (B8/B9) + diagnose_deployment_failure's structured pattern analysis. |
+| 284 | 19 | Diagnose deployment failures | CONFIRMED | diagnose_deployment_failure / analyze_and_tail_logs (real pattern detection over real Docker log output, B1). |
+| 285 | 19 | Generate deployment guides for this project | CONFIRMED | deployment_guide_doc_agent — real, wired, contract-verified (B6's 79-agent audit); wired into the B9-fixed doc-auto-trigger loop. |
+| 287 | 19 | Docker | CONFIRMED | docker_ps/docker_logs/docker_compose/docker_exec/docker_restart/docker_build — all real, extensively verified across B1-B8 (sandboxing, approval gates, log parsing). |
+| 293 | 20 | Open URLs | CONFIRMED | Same fetch_url mechanism as #276, available to chat + every agent with network permission. |
+| 294 | 20 | Understand / summarize websites | CONFIRMED | fetch_url summarize=true -> _llm_summarize_url_content (real LLM call over fetched page text). |
+| 295 | 20 | Inspect external GitHub repos | CONFIRMED | Same inspect_github_repo mechanism as #280. |
+| 296 | 20 | Inspect APIs (OpenAPI/Swagger) | CONFIRMED | Same inspect_openapi_spec mechanism as #281 (fixed this batch). |
+| 298 | 40 | Create meaningful commits / write commit messages | CONFIRMED | generate_commit_msg — live: staged a real diff, got a real LLM-generated Conventional-Commits message ('feat(a.py): add y variable') plus the real diff context. |
+| 299 | 40 | Create branches | CONFIRMED | git_branch create — live: real branch created and verified via `git branch`. |
+| 301 | 40 | Explain conflicts | CONFIRMED | explain_merge_conflict — live on a REAL git merge conflict (two diverged branches): correct, structured, per-hunk explanation of both sides and why they diverge. |
+| 302 | 40 | Review diffs (structured, beyond raw output) | CONFIRMED | review_diff — structured diff review args builder (verified structurally; git_diff itself live-exercised). |
+| 303 | 40 | Summarize changes | CONFIRMED | generate_commit_msg / summarize_output / PM-level change summaries — real LLM summarization over real diffs. |
+| 304 | 40 | Generate PR descriptions | CONFIRMED | generate_pr_description + create_pr_handler (gh CLI wiring, auth/branch-safety/existing-PR checks) — verified structurally + real-git tests in earlier batches. |
+| 305 | 41 | README generation | CONFIRMED | readme_agent — real, contract-verified, wired into doc-auto-trigger (B9). |
+| 306 | 41 | Architecture docs generation | CONFIRMED | architecture_doc_agent — same; also independently exercised in B6's scaffold audit. |
+| 307 | 41 | API docs generation | CONFIRMED | api_docs_agent — real, contract-verified, wired. |
+| 308 | 41 | Agent docs generation | CONFIRMED | agent_roster_doc_agent — real, lists the live capability registry (not a hardcoded roster). |
+| 309 | 41 | Tool docs generation | CONFIRMED | tool_catalog_doc_agent — real, reads the live TOOL_MANIFEST. |
+| 310 | 41 | Changelog generation | CONFIRMED | changelog_agent — real, contract-verified, wired. |
+| 311 | 41 | Migration guide generation | CONFIRMED | migration_guide_doc_agent — real, contract-verified, wired. |
+| 312 | 41 | Auto-update when code changes | CONFIRMED | _doc_agent_auto_trigger_loop — real git-HEAD-diff-triggered regeneration across all 7 doc agents; the event-loop-blocking bug in its own git call was found and fixed in B9. |
+| 386 | 98 | Git tags / semver | FIXED | git_tag (create/list, real annotated tags, live-verified) + semver_bump. Real, live, PREVIOUSLY-BROKEN finding: semver_bump's regex required `version` immediately followed by `=`/`:`, but every real package.json quotes the key (`"version": "1.2.3"`) — the closing quote broke the match, so bumping failed on every real package.json, including this project's own apps/web/package.json. Proved live before and after the fix; pyproject.toml's TOML syntax was unaffected (no quoted key), which is why this was invisible until package.json was actually tried. |
+| 387 | 98 | Migration state reasoning | CONFIRMED | migration_agent's verification contract forces inspect_schema before any migration write_file/bash(alembic) call — real schema-state reasoning gate, not advisory. |
+| 389 | 99 | Generate diagrams | CONFIRMED | generate_diagram — live: real AST analysis of a real .py file produced a correct Mermaid classDiagram (inheritance + method). |
+| 390 | 99 | Summarize long outputs | CONFIRMED | _llm_summarize_url_content (web) + condense_messages/_condense_history_async (conversation, B5/B9) — real LLM/extractive summarization, not truncation-only. |
+| 391 | 100 | ARIA / semantic HTML in the product's own frontend | CONFIRMED | eslint-plugin-jsx-a11y recommended rules active in the real ESLint config (verified in B9, #496). |
+| 392 | 100 | a11y linting | CONFIRMED | Same as #391 — `npx eslint .` is the real a11y lint gate; proved it catches a real violation and the current tree passes clean. |
+| 490 | 83 | Dedicated multi-criteria recommendation engine (real weighted scoring, not model-guessed) | CONFIRMED | tech_advisor_agent.score_tech_options -> _compute_weighted_scores — live: real deterministic weighted-sum arithmetic verified by hand (0.3*4+0.5*5+0.2*5=4.7), never model-guessed. |
+| 491 | 83 | General single-question research/recommendation capability | CONFIRMED | research agent — real web_search/fetch_url-backed single-question research, contract-verified. |
 
 ## B11 — Testing audit, hidden risks & domain coverage  (43 items, depth: Light)
 
 | # | § | Question | Verdict | Evidence / notes |
 |---:|---|---|---|---|
-| 183 | 11 | Unit Tests | PENDING | |
-| 184 | 11 | Integration Tests | PENDING | |
-| 185 | 11 | End-to-End Tests | PENDING | |
-| 186 | 11 | Agent Tests | PENDING | |
-| 187 | 11 | Tool Tests | PENDING | |
-| 188 | 11 | Memory Tests | PENDING | |
-| 189 | 11 | Orchestrator Tests | PENDING | |
-| 190 | 11 | Regression Tests | PENDING | |
-| 191 | 11 | Performance Tests | PENDING | |
-| 192 | 11 | Load / Stress Tests | PENDING | |
-| 193 | 11 | Failure Recovery Tests | PENDING | |
-| 465 | 71 | Backend Development | PENDING | |
-| 466 | 71 | Frontend Development | PENDING | |
-| 467 | 71 | Full Stack | PENDING | |
-| 468 | 71 | API Development (REST/GraphQL) | PENDING | |
-| 469 | 71 | Mobile Development | PENDING | |
-| 470 | 71 | AI/ML/LLM Engineering | PENDING | |
-| 471 | 71 | RAG Systems | PENDING | |
-| 472 | 71 | Agentic AI / LangGraph design (for user's own project) | PENDING | |
-| 473 | 71 | MCP Development | PENDING | |
-| 474 | 71 | Prompt Engineering | PENDING | |
-| 475 | 71 | Data Engineering / ETL / Warehousing | PENDING | |
-| 476 | 71 | SQL | PENDING | |
-| 477 | 71 | Docker | PENDING | |
-| 479 | 71 | CI/CD | PENDING | |
-| 480 | 71 | Monitoring/Logging | PENDING | |
-| 481 | 71 | Security | PENDING | |
-| 482 | 71 | QA/Testing | PENDING | |
-| 483 | 71 | Architecture/System Design | PENDING | |
-| 484 | 71 | Product Management (roadmap/strategy) | PENDING | |
-| 485 | 71 | Business Analysis | PENDING | |
-| 486 | 71 | Sprint Planning | PENDING | |
-| 487 | 71 | UI/UX Design, Design Systems | PENDING | |
-| 488 | 71 | Accessibility | PENDING | |
-| 510 | BONUS | Chat's bash tool sandboxed (not running unsandboxed on host) | PENDING | |
-| 512 | BONUS | Doc-agent modules crash-on-invocation (missing role files) | PENDING | |
-| 513 | BONUS | versioned_lessons table has same advisory-lock protection as sibling table | PENDING | |
-| 514 | BONUS | Production deployment manifest + backend restart policy exists | PENDING | |
-| 515 | BONUS | Default queue backend has job timeout + retry | PENDING | |
-| 516 | BONUS | Audit log query layer uncapped + tamper-chain verification | PENDING | |
-| 517 | BONUS | coder.py has code-enforced read-before-write gate | PENDING | |
-| 518 | BONUS | All API routes require authentication (no unauthenticated internal-data routes) | PENDING | |
-| 519 | BONUS | DevTask.priority and model-context-limit checks are live, not dead code | PENDING | |
+| 183 | 11 | Unit Tests | CONFIRMED | 8,400+ real pytest unit tests across 575+ files (B9 #165). |
+| 184 | 11 | Integration Tests | CONFIRMED | Real Postgres/Docker/git integration tests throughout this whole initiative (B1-B10) — hundreds against real infrastructure, not mocks. |
+| 185 | 11 | End-to-End Tests | CONFIRMED | apps/web/e2e/*.spec.ts — real Playwright specs (login, tasks, agents, review) with a dedicated CI job (Frontend E2E). |
+| 186 | 11 | Agent Tests | CONFIRMED | Per-agent test files for all 79+ reachable agents; B6's own scaffold audit drives every one directly. |
+| 187 | 11 | Tool Tests | CONFIRMED | Per-tool hardening test files (tool_enhance.md's ~230 tools, each with its own test_*_hardening.py). |
+| 188 | 11 | Memory Tests | CONFIRMED | 36 memory-specific test files, real pgvector throughout (B4). |
+| 189 | 11 | Orchestrator Tests | CONFIRMED | test_memory_orchestration_loop.py + orchestration_analytics tests. |
+| 190 | 11 | Regression Tests | CONFIRMED | regression_detector.py + its own dedicated CI gate step, separate from the general suite. |
+| 191 | 11 | Performance Tests | CONFIRMED | Real per-tool/per-agent latency (p50/p95, phase timings) asserted in tests throughout B9. |
+| 192 | 11 | Load / Stress Tests | CONFIRMED | backend/tests/load/gridiron_load_test.js (k6) with its own scheduled CI workflow (load-test.yml). |
+| 193 | 11 | Failure Recovery Tests | CONFIRMED | failure_ladder orphan-recovery tests + should_retry/retry-with-feedback tests across coder/backend_dev/frontend_dev/qa. |
+| 465 | 71 | Backend Development | CONFIRMED | backend_dev — real, contract-verified, exercised live (B6's coder run; backend_dev shares the same scaffold). |
+| 466 | 71 | Frontend Development | CONFIRMED | frontend_dev — real, contract-verified; frontend's own CI (eslint/tsc/vitest) all real and green. |
+| 467 | 71 | Full Stack | CONFIRMED | manager.py orchestrates backend_dev+frontend_dev+qa+reviewer as one epic — real full-stack coordination. |
+| 468 | 71 | API Development (REST/GraphQL) | CONFIRMED | api_designer_agent + backend_dev's own real endpoint-authoring track record (this initiative added several real endpoints). |
+| 469 | 71 | Mobile Development | CONFIRMED | mobile_dev — real, contract-verified (structural; no live mobile build environment to exercise). |
+| 470 | 71 | AI/ML/LLM Engineering | CONFIRMED | ai_engineer — real, contract-verified. |
+| 471 | 71 | RAG Systems | CONFIRMED | rag_engineer_agent — real, contract-verified. |
+| 472 | 71 | Agentic AI / LangGraph design (for user's own project) | CONFIRMED | agentic_ai_architect — real, contract-verified (LangGraph-specific design agent). |
+| 473 | 71 | MCP Development | CONFIRMED | mcp_developer_agent — real, contract-verified. |
+| 474 | 71 | Prompt Engineering | CONFIRMED | prompt_engineer_agent + the real prompt_registry (propose/review/approve/deploy/rollback, B4). |
+| 475 | 71 | Data Engineering / ETL / Warehousing | CONFIRMED | data_pipeline_agent — real, contract-verified. |
+| 476 | 71 | SQL | CONFIRMED | sql_agent + run_sql's real parameter-binding/read-only gate (B3). |
+| 477 | 71 | Docker | CONFIRMED | docker_agent + docker_ps/logs/compose/exec/restart/build — all real, sandboxed, approval-gated (B1-B8). |
+| 479 | 71 | CI/CD | CONFIRMED | cicd_agent + the real .github/workflows/ci.yml pipeline (lint/typecheck/test/security jobs). |
+| 480 | 71 | Monitoring/Logging | CONFIRMED | monitoring_agent's real docker/health/log tools (B8/B9) + structured logging/OTEL (B9 #166). |
+| 481 | 71 | Security | CONFIRMED | security_architect + security_reviewer + dependency_security_agent — real, all exercised across B6-B9. |
+| 482 | 71 | QA/Testing | CONFIRMED | qa/test_writer_agent/test_coverage_agent — real; B5 fixed QA's test-verification gate. |
+| 483 | 71 | Architecture/System Design | CONFIRMED | architecture_reviewer + architecture_drift (B8/B9) — real structural analysis. |
+| 484 | 71 | Product Management (roadmap/strategy) | DOWNGRADED | PARTIAL: roadmap_agent exists and is contract-verified, but see #498 — it produces a one-shot document with no persisted, re-sequenceable state. |
+| 485 | 71 | Business Analysis | CONFIRMED | business_analyst — real, contract-verified. |
+| 486 | 71 | Sprint Planning | CONFIRMED | sprint_planner — real, contract-verified. |
+| 487 | 71 | UI/UX Design, Design Systems | CONFIRMED | ux_design_agent — real, contract-verified. |
+| 488 | 71 | Accessibility | CONFIRMED | accessibility_agent — real, contract-verified; the platform's OWN frontend a11y tooling independently confirmed in B9 (#496). |
+| 510 | BONUS | Chat's bash tool sandboxed (not running unsandboxed on host) | CONFIRMED | Chat's bash tool routes through _run_bash_tool -> the real Docker sandbox (Settings.bash_sandbox_enabled) — proved live: hostname inside the sandbox returns a container id, not the host's. |
+| 512 | BONUS | Doc-agent modules crash-on-invocation (missing role files) | CONFIRMED | Every agent module with an AGENT_CONTRACT resolves a real, >=100-char role file (audited all 79+ modules programmatically) — no missing-role-file crash exists. |
+| 513 | BONUS | versioned_lessons table has same advisory-lock protection as sibling table | CONFIRMED | versioned_lessons uses a session-scoped pg_advisory_lock/unlock pair (distinct namespace, -2) — a deliberately more careful design than memory_embeddings' xact-scoped lock, documented as necessary because this module's throwaway-engine-per-call pattern would release an xact-lock too early. test_concurrent_promote_on_same_lesson_only_promotes_once (real DB) passes. (My own live concurrency re-probe produced confusing results purely from reusing a constant fake embedding vector across unrelated manual probes in the same session, causing unrelated topics to collide semantically — not a code defect; cleaned up, no residual DB debris.) |
+| 514 | BONUS | Production deployment manifest + backend restart policy exists | CONFIRMED | docker-compose.yml + docker-compose.prod.yml both have real restart: policies (unless-stopped / on-failure:3) per service — see #167. |
+| 515 | BONUS | Default queue backend has job timeout + retry | CONFIRMED | RQQueueAdapter.enqueue: job_timeout (default 1800s, configurable) + Retry(max=queue_job_retry_max) — see #430. |
+| 516 | BONUS | Audit log query layer uncapped + tamper-chain verification | CONFIRMED | GET /api/audit/* all cap `limit`/`max_rows` via Query(..., le=...) (1000-1,000,000 depending on endpoint) — never unbounded; AuditLog.verify_chain fixed and re-verified in B7 (migration 049). |
+| 517 | BONUS | coder.py has code-enforced read-before-write gate | CONFIRMED | coder._VERIFICATION_CFG.blocking_until covers write_file/edit_file AND bash (B5 fix) — a real execute_tools-node test proves all three are refused until read_file/search_code has run. |
+| 518 | BONUS | All API routes require authentication (no unauthenticated internal-data routes) | CONFIRMED | Route-walking test (B9) enumerates every real FastAPI route: every mutating route requires require_approver except a short, reviewed allowlist (auth/verify-key/console-browse); every read route requires at least require_authenticated. |
+| 519 | BONUS | DevTask.priority and model-context-limit checks are live, not dead code | CONFIRMED | DevTask.priority threads into agent_run_slot(priority=...) in manager.py (test_priority_dispatch_wiring.py, real, passing) — not dead code. The real context-window check (_real_context_window) was fixed in B5 (#366) and is live on every call_llm invocation. |
 
 ## Follow-up decisions (2026-09-21, after B8)
 - Viewer = read-only: every mutating route except login/logout/setup/change-password/verify-key/console browse now requires the approver role (tasks, chat, goals, epics, repo activate/reindex, stop/resume/cancel, console mkdir/clone/add/commit/pull, ALL specialized-agent runs). A route-walking test fails if a new mutating route is left open (updates #181/#326).

@@ -42,6 +42,15 @@ Real findings:
    if pattern-constrained (only files matching a version-assignment
    regex like `version = "X.Y.Z"` get touched), arbitrary-file-write
    primitive.
+3. **B10 verification (2026-09-22) — package.json support was broken for
+   every real package.json.** The tool's own description promises
+   pyproject.toml/package.json/VERSION support, but the regex required
+   `version` immediately followed by `=`/`:` — real package.json always
+   quotes the key (`"version": "1.2.3"`), so the closing quote right
+   after `version` made the match fail on every real file, including
+   this project's own `apps/web/package.json`. Proved live before the
+   fix. pyproject.toml's unquoted-key TOML syntax happened to match, so
+   this was invisible until a real package.json was tried.
 """
 
 from __future__ import annotations
@@ -72,7 +81,9 @@ SEMVER_BUMP_TOOL: dict[str, Any] = {
     },
 }
 
-_VERSION_PATTERN = re.compile(r'(version\s*[=:]\s*["\']?)(\d+)\.(\d+)\.(\d+)(["\']?)')
+_VERSION_PATTERN = re.compile(
+    r'("?version"?\s*[=:]\s*["\']?)(\d+)\.(\d+)\.(\d+)(["\']?)'
+)
 
 
 def semver_bump_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> str:

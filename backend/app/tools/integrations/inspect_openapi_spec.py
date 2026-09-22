@@ -110,7 +110,12 @@ def inspect_openapi_spec_handler(inp: dict[str, Any]) -> str:
         if ssrf_reason:
             return f"[POLICY DENIED] {ssrf_reason}"
         try:
-            spec_text, denial_reason = _ssrf_safe_curl_fetch(url, timeout=15)
+            # Full document, not the 10_000-char display cap fetch_url uses — this must
+            # parse the ENTIRE spec, and a truncated real spec previously failed to parse
+            # at all (proved live against a real ~13.8KB public spec).
+            spec_text, denial_reason = _ssrf_safe_curl_fetch(
+                url, timeout=15, max_chars=2_000_000
+            )
         except Exception as e:
             return f"[ERROR] {e}"
         if denial_reason:

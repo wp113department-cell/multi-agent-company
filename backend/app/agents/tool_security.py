@@ -145,7 +145,7 @@ def _ssrf_safe_opener() -> urllib.request.OpenerDirector:
 
 
 def _ssrf_safe_curl_fetch(
-    url: str, timeout: int = 15, max_redirects: int = 5
+    url: str, timeout: int = 15, max_redirects: int = 5, max_chars: int = 10_000
 ) -> tuple[str, str | None]:
     """Fetches `url` via curl WITHOUT curl's own `-L` auto-redirect-
     following, manually validating and following each redirect hop
@@ -166,7 +166,18 @@ def _ssrf_safe_curl_fetch(
     information is silently lost. An empty status-line response (no
     headers written at all) is how a curl-level transport failure —
     as opposed to a legitimate empty-body HTTP response, which always
-    has a status line — is distinguished here."""
+    has a status line — is distinguished here.
+
+    B9 verification note: max_chars was previously a hardcoded 10_000, truncating the body
+    BEFORE any caller got to look at it — fine as a display cap for arbitrary web page text
+    (fetch_url's own default use), but wrong for a caller (inspect_openapi_spec) that must
+    parse the ENTIRE document: a real OpenAPI spec is routinely well over 10KB, and cutting
+    it mid-token corrupts the JSON/YAML so parsing fails with a confusing generic error
+    instead of the content ever being examined. Proved live: a real public OpenAPI spec
+    (~13.8KB) failed both the JSON and YAML parse after truncation, at exactly the 10,000-
+    char boundary. Now parameterized — inspect_openapi_spec passes a much larger limit;
+    fetch_url keeps its original 10_000 default, preserving its existing display behavior.
+    """
     current_url = url
     for _ in range(max_redirects):
         reason = _ssrf_denial_reason(current_url)
@@ -208,7 +219,7 @@ def _ssrf_safe_curl_fetch(
             # curl never completed the request (DNS/connect/TLS/
             # timeout failure) — a real successful HTTP exchange
             # always writes at least a status line to -D.
-            return body[:10000] or r.stderr or "[empty response]", None
+            return body[:max_chars] or r.stderr or "[empty response]", None
 
         location: str | None = None
         for line in lines:
@@ -223,7 +234,7 @@ def _ssrf_safe_curl_fetch(
         if is_redirect and location:
             current_url = urljoin(current_url, location)
             continue
-        return body[:10000] or "[empty response]", None
+        return body[:max_chars] or "[empty response]", None
     return "", f"Too many redirects (> {max_redirects})"
 
 
