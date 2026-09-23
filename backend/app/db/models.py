@@ -401,6 +401,14 @@ class Event(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    # T2-B6 (2026-09-22, GRIDIRON_PARTIAL #383 "Full cross-repo isolation
+    # (every table)") — migration 053. NULL = unscoped/legacy, the same
+    # convention already established for IndexedFile/CallEdge/CodeEmbedding
+    # (migration 043)/MemoryEmbedding/VersionedLesson — task_id/epic_id
+    # remain the real existing query key, this is additive scoping metadata.
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("repos.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 class FailedEvent(Base):
@@ -440,6 +448,11 @@ class Artifact(Base):
     # Blocker (audit_v1.md 4.6 #4): no checksum/integrity verification
     # existed on artifacts in either backend — migration 034.
     content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # T2-B6 (2026-09-22, GRIDIRON_PARTIAL #383) — see Event.repo_id's own
+    # comment for the full convention.
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("repos.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 # ---- Phase 5 tables ----
@@ -623,6 +636,19 @@ class Repo(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    # T2-B6 (2026-09-22, GRIDIRON_PARTIAL #361 "Branch-context tracking
+    # after switching git branches") — distinct from DevTask.branch_name,
+    # which only tracks a per-task ISOLATION WORKTREE branch (a throwaway
+    # branch created for one task's own changes). This is the repo's own
+    # real "what branch is actually checked out right now" state, updated
+    # by app/tools/git/checkout.py's real handler whenever a branch-switch
+    # tool actually runs, and read via git itself (`rev-parse --abbrev-ref
+    # HEAD` after the checkout) rather than trusted from the requested
+    # target string — a target can be a tag/commit/remote ref that doesn't
+    # literally become the branch name (e.g. detached HEAD, where the real
+    # value is "HEAD"). NULL means never tracked yet (a repo cloned before
+    # this column existed, or one no checkout has run against).
+    active_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class SystemSetting(Base):
@@ -926,6 +952,11 @@ class PendingApproval(Base):
         DateTime(timezone=True), nullable=True
     )
     decided_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # T2-B6 (2026-09-22, GRIDIRON_PARTIAL #383) — see Event.repo_id's own
+    # comment for the full convention.
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("repos.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 class EpicScratchpad(Base):
@@ -950,6 +981,11 @@ class EpicScratchpad(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # T2-B6 (2026-09-22, GRIDIRON_PARTIAL #383) — see Event.repo_id's own
+    # comment for the full convention.
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("repos.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 class EpicFileLock(Base):

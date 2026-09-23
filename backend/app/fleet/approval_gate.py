@@ -106,6 +106,17 @@ async def _record_pending(
                 )
                 .values(status="superseded")
             )
+            # T2-B6 (2026-09-22, GRIDIRON_PARTIAL #383) — resolved
+            # opportunistically; a real task_id is expected to have a
+            # resolvable repo, None otherwise stays unscoped rather than
+            # a guessed value (same convention as artifacts.store's own
+            # equivalent lookup).
+            repo_id: int | None = None
+            if task_id is not None:
+                from app.db.repository import get_task_repo_id
+
+                repo_id = await get_task_repo_id(session, task_id)
+
             row = PendingApproval(
                 thread_id=thread_id,
                 task_id=task_id,
@@ -113,6 +124,7 @@ async def _record_pending(
                 action=action,
                 details=details,
                 status="pending",
+                repo_id=repo_id,
             )
             session.add(row)
             await session.commit()

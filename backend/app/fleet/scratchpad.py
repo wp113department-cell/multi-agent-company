@@ -73,6 +73,17 @@ async def write_entry(
             existing.agent_name = agent_name
             existing.expires_at = expires_at
         else:
+            # T2-B6 (2026-09-22, GRIDIRON_PARTIAL #383) — resolved once, on
+            # this key's first write only (an overwrite doesn't need to
+            # re-resolve it). Epic.repo_id already exists (migration 031);
+            # this just threads it onto the scratchpad row too, same
+            # opportunistic-population convention as the other 3 tables in
+            # this same batch.
+            from app.db.models import Epic
+
+            repo_id = (
+                await db.execute(select(Epic.repo_id).where(Epic.epic_id == epic_id))
+            ).scalar_one_or_none()
             db.add(
                 EpicScratchpad(
                     epic_id=epic_id,
@@ -80,6 +91,7 @@ async def write_entry(
                     value=value,
                     agent_name=agent_name,
                     expires_at=expires_at,
+                    repo_id=repo_id,
                 )
             )
         await db.commit()
@@ -233,6 +245,13 @@ async def write_entry_with_eviction(
             if max_entries > 0 and len(live) >= max_entries:
                 for stale_row in live[: len(live) - max_entries + 1]:
                     await db.delete(stale_row)
+            # T2-B6 (2026-09-22, GRIDIRON_PARTIAL #383) — same opportunistic
+            # resolution as write_entry() above.
+            from app.db.models import Epic
+
+            repo_id = (
+                await db.execute(select(Epic.repo_id).where(Epic.epic_id == epic_id))
+            ).scalar_one_or_none()
             db.add(
                 EpicScratchpad(
                     epic_id=epic_id,
@@ -240,6 +259,7 @@ async def write_entry_with_eviction(
                     value=value,
                     agent_name=agent_name,
                     expires_at=expires_at,
+                    repo_id=repo_id,
                 )
             )
         await db.commit()

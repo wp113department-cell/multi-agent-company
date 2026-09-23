@@ -1632,7 +1632,27 @@ class ChatAgent:
                     ):
                         return f"[DENIED] User declined to discard changes to {file_arg}"
                 return _git(["checkout", ck_target, "--", file_arg], repo)
-            return _git(["checkout", ck_target], repo)
+            result = _git(["checkout", ck_target], repo)
+            # T2-B6 (2026-09-22, GRIDIRON_PARTIAL #361) — same real-branch
+            # re-derivation as app/agents/tools.py's own git_checkout
+            # handler (see that closure's own comment): always re-read the
+            # actual current branch via git itself rather than trusting
+            # ck_target or _git()'s own text output to tell success from
+            # failure — idempotent either way (an unchanged branch on a
+            # failed checkout is simply written back to its own value).
+            try:
+                real_branch = await asyncio.to_thread(
+                    _git, ["rev-parse", "--abbrev-ref", "HEAD"], repo
+                )
+                if real_branch and not real_branch.startswith("[ERROR]"):
+                    from app.db.repository import set_repo_active_branch_by_path_sync
+
+                    await asyncio.to_thread(
+                        set_repo_active_branch_by_path_sync, repo, real_branch
+                    )
+            except Exception:
+                pass
+            return result
 
         if tool_name == "git_stash":
             gst_action = str(inp.get("action", "push"))

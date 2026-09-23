@@ -5280,6 +5280,28 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         try:
             r = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True)
             out = (r.stdout + r.stderr).strip()
+            # T2-B6 (2026-09-22, GRIDIRON_PARTIAL #361) — a whole-branch
+            # switch (not a single-file restore) genuinely changed which
+            # branch this repo is on; read the REAL post-checkout branch via
+            # git itself (never trust `target` literally — it can be a tag/
+            # remote ref/commit that leaves HEAD detached, where the real
+            # value is "HEAD") rather than assuming target==branch.
+            if r.returncode == 0 and not file_path:
+                try:
+                    branch_r = subprocess.run(
+                        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                        cwd=repo_path,
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    real_branch = branch_r.stdout.strip()
+                    if branch_r.returncode == 0 and real_branch:
+                        from app.db.repository import set_repo_active_branch_by_path_sync
+
+                        set_repo_active_branch_by_path_sync(repo_path, real_branch)
+                except Exception:
+                    pass  # best-effort — the checkout itself already succeeded
             return out or f"Checked out {target}"
         except Exception as e:
             return f"[ERROR] {e}"

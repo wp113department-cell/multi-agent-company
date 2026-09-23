@@ -169,11 +169,26 @@ async def save_artifact_async(
     if db is not None:
         try:
             from sqlalchemy import text
+
+            # T2-B6 (2026-09-22, GRIDIRON_PARTIAL #383 "Full cross-repo
+            # isolation") — resolved opportunistically, same "populate
+            # going forward, NULL for anything we can't resolve" convention
+            # as migration 043's own repo_id columns. A synthetic/non-
+            # numeric task_id (fleet scans, the Executive) correctly stays
+            # unscoped rather than a guessed value.
+            repo_id: int | None = None
+            try:
+                from app.db.repository import get_task_repo_id
+
+                repo_id = await get_task_repo_id(db, int(task_id))
+            except (ValueError, TypeError):
+                repo_id = None
+
             await db.execute(
                 text(
                     "INSERT INTO artifacts (artifact_id, task_id, type, version, storage_path, "
-                    "created_by_agent, created_at, content_sha256) VALUES "
-                    "(:aid, :tid, :atype, :version, :spath, :agent, :created_at, :sha256)"
+                    "created_by_agent, created_at, content_sha256, repo_id) VALUES "
+                    "(:aid, :tid, :atype, :version, :spath, :agent, :created_at, :sha256, :repo_id)"
                 ),
                 {
                     "aid": record.artifact_id,
@@ -184,6 +199,7 @@ async def save_artifact_async(
                     "agent": record.created_by_agent,
                     "created_at": record.created_at,
                     "sha256": record.content_sha256,
+                    "repo_id": repo_id,
                 },
             )
             await db.commit()

@@ -92,10 +92,30 @@ async def _persist_event(event: GridironEvent, db: Any) -> None:
     try:
         from sqlalchemy import text
 
+        # T2-B6 (2026-09-22, GRIDIRON_PARTIAL #383 "Full cross-repo
+        # isolation") — this is the busiest table in the whole system (every
+        # real event publish goes through here), so this deliberately does
+        # NOT do a fresh DB lookup per event. get_task_repo_id() already
+        # caches task_id->repo_id in-process forever (a task's repo never
+        # changes post-creation) — a cache hit is a plain dict read, not a
+        # round trip, so this is cheap in the overwhelmingly common case
+        # (the same task's repo_id was already resolved by an earlier real
+        # DB write on this same task). A non-numeric task_id (most fleet/
+        # scan events) or a genuine cache miss's own query failure both
+        # correctly leave this NULL/unscoped rather than block the event.
+        repo_id: int | None = None
+        try:
+            from app.db.repository import get_task_repo_id
+
+            if event.task_id is not None:
+                repo_id = await get_task_repo_id(db, int(event.task_id))
+        except (ValueError, TypeError):
+            repo_id = None
+
         await db.execute(
             text(
-                "INSERT INTO events (event_id, event_type, task_id, epic_id, payload, emitted_by, created_at) "
-                "VALUES (:eid, :etype, :tid, :epic_id, :payload, :emitted_by, :created_at)"
+                "INSERT INTO events (event_id, event_type, task_id, epic_id, payload, emitted_by, created_at, repo_id) "
+                "VALUES (:eid, :etype, :tid, :epic_id, :payload, :emitted_by, :created_at, :repo_id)"
             ),
             {
                 "eid": event.event_id,
@@ -105,6 +125,7 @@ async def _persist_event(event: GridironEvent, db: Any) -> None:
                 "payload": json.dumps(event.payload),
                 "emitted_by": event.emitted_by,
                 "created_at": event.created_at,
+                "repo_id": repo_id,
             },
         )
         await db.execute(

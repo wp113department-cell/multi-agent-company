@@ -246,6 +246,55 @@ async def resolve_repo_id_from_path(db: AsyncSession, repo_path: str) -> int | N
     return result.scalar_one_or_none()
 
 
+async def set_repo_active_branch_by_path(db: AsyncSession, repo_path: str, branch: str) -> bool:
+    """T2-B6 (2026-09-22, GRIDIRON_PARTIAL #361 "Branch-context tracking
+    after switching git branches") — same INV-1 reverse-resolve-from-path
+    exception resolve_repo_id_from_path's own docstring documents (a git
+    tool's handler only ever has repo_path, not repo_id), applied to
+    updating Repo.active_branch instead of just reading repo_id. Returns
+    whether a row was actually updated — a repo_path with no matching
+    'ready' Repo row (e.g. the platform's own self-repo, or a worktree not
+    registered as a Repo) is not an error, just nothing to update."""
+    repo_id = await resolve_repo_id_from_path(db, repo_path)
+    if repo_id is None:
+        return False
+    await db.execute(update(Repo).where(Repo.id == repo_id).values(active_branch=branch))
+    await db.commit()
+    return True
+
+
+def set_repo_active_branch_by_path_sync(repo_path: str, branch: str) -> bool:
+    """Sync bridge for set_repo_active_branch_by_path() — git_checkout's
+    real handler (app/agents/tools.py::make_chat_handlers) is a plain sync
+    closure with no AsyncSession in scope, same constraint every other
+    *_sync bridge in this module exists for. Non-fatal: returns False on
+    any failure, never raises into the tool call that already succeeded at
+    the actual git level."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> bool:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                return await set_repo_active_branch_by_path(session, repo_path, branch)
+        finally:
+            await engine.dispose()
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        logger.warning(
+            "set_repo_active_branch_by_path_sync failed for repo_path=%r: %s",
+            repo_path,
+            exc,
+        )
+        return False
+
+
 async def list_tasks(
     db: AsyncSession,
     status: str | None = None,
