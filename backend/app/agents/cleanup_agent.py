@@ -42,6 +42,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "git_blame",
         "analyze_file",
         "dead_code_detect",
+        "scan_code_hygiene",
         "organize_imports",
         "delete_file",
         "edit_file",

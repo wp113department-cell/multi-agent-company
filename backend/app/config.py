@@ -334,8 +334,8 @@ class Settings(BaseSettings):
     # changes without an operator explicitly choosing the extra 2 LLM
     # calls per subtask this adds.
     enable_security_architecture_gates: bool = Field(
-        default=False,
-        description="Run security_reviewer and architecture_reviewer as non-blocking advisory gates after each subtask's QA/review passes",
+        default=True,
+        description="Run security_reviewer, architecture_reviewer and dependency_security_agent as real quality gates after each subtask's QA/review passes — critical/high findings (security_architecture_gates_block_severities) now get one real self-correction retry through the dev agent (T2-B5, GRIDIRON_PARTIAL #453/#455) before blocking, the same safety net reviewer-blocking-findings already had, which is what makes mandatory-by-default safe here.",
     )
 
     # AUDIT_Q_BATCH18 §24 High-priority #7 gap-closure ("Only 2 of 8 quality-

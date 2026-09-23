@@ -38,6 +38,24 @@ os.environ.setdefault("RBAC_ENABLED", "false")
 # tests that mock the DB verify tokens without a users row; the revocation tests opt in
 os.environ.setdefault("JWT_REVALIDATE_AGAINST_DB", "false")
 
+# T2-B5 (2026-09-22, GRIDIRON_PARTIAL #453/#455) flipped enable_security_
+# architecture_gates's PRODUCTION default to True now that a real self-
+# correction retry loop exists for it — but a large, pre-existing slice of
+# this test suite calls run_manager()/run_epic_manager() end to end without
+# mocking security_reviewer/architecture_reviewer/dependency_security_agent
+# at all (they were never testing those gates, they predate this flag
+# mattering to them). With the gates on by default, those tests would make
+# real, unmocked Anthropic calls with this file's own dummy API key,
+# tripping the circuit breaker and failing/timing out — a real regression
+# caught live (tests/test_audit04_orchestration_fixes.py's own stated
+# invariant, "No real Anthropic API calls anywhere," broke under the new
+# default). Same fix shape as RBAC_ENABLED above: the test environment gets
+# its own explicit, documented default (off) distinct from production's;
+# any test that specifically wants to exercise the gates-enabled behavior
+# (tests/test_batch16_quality_gates.py) already opts in per-test via
+# patch.object(get_settings(), "enable_security_architecture_gates", True).
+os.environ.setdefault("ENABLE_SECURITY_ARCHITECTURE_GATES", "false")
+
 # The general unit suite mocks anthropic.Anthropic directly and expects
 # run_agent_graph() to go through the real LangGraph node path. .env sets
 # USE_GROQ=true for local manual/dev-server use — without this override the

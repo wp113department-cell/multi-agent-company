@@ -113,6 +113,17 @@ def test_unknown_ecosystem_still_rejected() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_dependency_agent_wires_the_shared_handler_by_identity() -> None:
+def test_dependency_agent_wires_the_shared_handler() -> None:
+    """T2-B5 (2026-09-22, GRIDIRON_PARTIAL #462) — no longer the exact same
+    object: make_dependency_agent_handlers now wraps check_last_release_
+    handler in a per-run closure that records which packages were actually
+    checked (real enforcement — see dep_submit_report's own comment in
+    app/agents/tools.py), so this checks delegation/behavior instead of
+    identity. A malformed/empty package still gets the exact same real
+    error the shared handler itself produces — the wrapper adds tracking,
+    it doesn't change what a call returns."""
     handlers = make_dependency_agent_handlers("/tmp")
-    assert handlers["check_last_release"] is check_last_release_handler
+    assert handlers["check_last_release"] is not check_last_release_handler
+    assert handlers["check_last_release"]({"package": ""}) == check_last_release_handler(
+        {"package": ""}
+    )

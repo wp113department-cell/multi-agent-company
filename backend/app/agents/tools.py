@@ -345,6 +345,10 @@ from app.tools.filesystem.dead_code_detect import (
     DEAD_CODE_DETECT_TOOL,
     dead_code_detect_handler,
 )
+from app.tools.filesystem.scan_code_hygiene import (
+    SCAN_CODE_HYGIENE_TOOL,
+    scan_code_hygiene_handler,
+)
 from app.tools.filesystem.import_graph import (
     IMPORT_GRAPH_TOOL,
     import_graph_handler,
@@ -620,6 +624,10 @@ from app.tools.integrations.http_request import (
 from app.tools.integrations.check_last_release import (
     CHECK_LAST_RELEASE_TOOL,
     check_last_release_handler,
+)
+from app.tools.integrations.check_dependency_conflicts import (
+    CHECK_DEPENDENCY_CONFLICTS_TOOL,
+    check_dependency_conflicts_handler,
 )
 from app.tools.integrations.inspect_github_repo import (
     INSPECT_GITHUB_REPO_TOOL,
@@ -966,6 +974,10 @@ _GIT_TAG_TOOL = GIT_TAG_TOOL
 # three of these names directly, checked proactively before wiring.
 _CALL_GRAPH_TOOL = CALL_GRAPH_TOOL
 _DEAD_CODE_DETECT_TOOL = DEAD_CODE_DETECT_TOOL
+# T2-B5 (2026-09-22, GRIDIRON_PARTIAL #396) — complements dead_code_detect
+# above with the three checks it doesn't cover: broken imports, unused
+# files, duplicate/cloned functions.
+_SCAN_CODE_HYGIENE_TOOL = SCAN_CODE_HYGIENE_TOOL
 _IMPORT_GRAPH_TOOL = IMPORT_GRAPH_TOOL
 _INSPECT_SCHEMA_TOOL = INSPECT_SCHEMA_TOOL
 _CIRCULAR_DEP_DETECT_TOOL = CIRCULAR_DEP_DETECT_TOOL
@@ -2868,6 +2880,13 @@ _DEPENDENCY_BASH_TOOL_SPEC = {
 # own try/except (ValueError, OverflowError, AttributeError).
 _CHECK_LAST_RELEASE_TOOL = CHECK_LAST_RELEASE_TOOL
 
+# T2-B5 (2026-09-22, GRIDIRON_PARTIAL #463) — a real resolvelib-backed
+# SAT-solver-style conflict check, distinct from check_last_release above
+# (that answers "is this ONE package's pinned version stale/abandoned";
+# this answers "can this SET of proposed version constraints be satisfied
+# simultaneously across their real transitive dependency trees").
+_CHECK_DEPENDENCY_CONFLICTS_TOOL = CHECK_DEPENDENCY_CONFLICTS_TOOL
+
 # --- Day 2 Tool Lists ---
 
 BUG_FIX_TOOLS = READ_ONLY_TOOLS + [
@@ -2896,6 +2915,7 @@ ARCH_REVIEWER_TOOLS = READ_ONLY_TOOLS + [
     _IMPORT_GRAPH_TOOL,
     _CIRCULAR_DEP_DETECT_TOOL,
     _DEAD_CODE_DETECT_TOOL,
+    _SCAN_CODE_HYGIENE_TOOL,
     _PARSE_AST_TOOL,
     _LIST_FUNCTIONS_TOOL,
     _LIST_CLASSES_TOOL,
@@ -2968,6 +2988,7 @@ API_DOCS_AGENT_TOOLS = READ_ONLY_TOOLS + [
 DEPENDENCY_AGENT_TOOLS = READ_ONLY_TOOLS + [
     _DEPENDENCY_BASH_TOOL_SPEC,
     _CHECK_LAST_RELEASE_TOOL,
+    _CHECK_DEPENDENCY_CONFLICTS_TOOL,
     _EDIT_FILE_TOOL_SPEC,
     _SUBMIT_DEPENDENCY_REPORT_TOOL,
 ]
@@ -3157,6 +3178,11 @@ def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     def ar_dead_code(inp: dict[str, Any]) -> str:
         return dead_code_detect_handler(root, repo_path, inp)
 
+    # T2-B5 (2026-09-22, GRIDIRON_PARTIAL #396) — see
+    # app/tools/filesystem/scan_code_hygiene.py's own module docstring.
+    def ar_scan_code_hygiene(inp: dict[str, Any]) -> str:
+        return scan_code_hygiene_handler(root, repo_path, inp)
+
     # tool_enhance.md productionization pass, tool #83 (2026-08-24) — the
     # real fix lives in the shared parse_ast_handler(); see that
     # function's own module docstring.
@@ -3196,6 +3222,7 @@ def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     handlers["import_graph"] = ar_import_graph
     handlers["circular_dep_detect"] = ar_circular_dep
     handlers["dead_code_detect"] = ar_dead_code
+    handlers["scan_code_hygiene"] = ar_scan_code_hygiene
     handlers["parse_ast"] = ar_parse_ast
     handlers["list_functions"] = ar_list_functions
     handlers["list_classes"] = ar_list_classes
@@ -3687,10 +3714,58 @@ def make_dependency_agent_handlers(repo_path: str) -> dict[str, Any]:
         target.write_text(text.replace(old_s, new_s, 1), encoding="utf-8")
         return f"Edited {rel}"
 
+    # T2-B5 (2026-09-22, GRIDIRON_PARTIAL #462 "Abandoned/unmaintained
+    # libraries (structured, enforced)") — before this, `abandoned=true`/
+    # `last_release_days_ago` were populated purely on the model following
+    # roles/dependency_agent.md's own prompt instruction to call
+    # check_last_release first, with zero code-level check backing it (the
+    # exact "trust the model's claim" gap this codebase's own
+    # enforce_in_result convention exists to close elsewhere — but
+    # enforce_in_result only overrides a single flat result field with a
+    # single verification boolean, and this needs a PER-PACKAGE check
+    # against a per-run set of what check_last_release was actually called
+    # for, which the graph's generic VerificationConfig has no primitive
+    # for). Real per-run state, closure-scoped like dep_bash/dep_edit_file
+    # above: dep_check_last_release records every package a real (non-
+    # [ERROR]) check actually ran for; dep_submit_report then corrects
+    # (never trusts) any `abandoned=true` claim for a package that was
+    # never really checked this run — same "the graph's own recorded truth
+    # wins over the model's claim" philosophy, just applied per-list-item
+    # instead of per-flag.
+    _checked_packages: set[str] = set()
+
+    def dep_check_last_release(inp: dict[str, Any]) -> str:
+        result = check_last_release_handler(inp)
+        if not result.startswith("[ERROR]"):
+            pkg = str(inp.get("package", "")).strip().lower()
+            if pkg:
+                _checked_packages.add(pkg)
+        return result
+
+    def dep_submit_report(inp: dict[str, Any]) -> str:
+        corrected = 0
+        for dep in inp.get("dependencies", []):
+            if not isinstance(dep, dict):
+                continue
+            if dep.get("abandoned") and str(dep.get("name", "")).strip().lower() not in _checked_packages:
+                dep["abandoned"] = False
+                dep.pop("last_release_days_ago", None)
+                corrected += 1
+        if corrected:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "dependency_agent: corrected %d 'abandoned' claim(s) with no "
+                "real check_last_release call this run",
+                corrected,
+            )
+        return submit_dependency_report_handler(inp)
+
     handlers["bash"] = dep_bash
-    handlers["check_last_release"] = check_last_release_handler
+    handlers["check_last_release"] = dep_check_last_release
+    handlers["check_dependency_conflicts"] = check_dependency_conflicts_handler
     handlers["edit_file"] = dep_edit_file
-    handlers["submit_dependency_report"] = submit_dependency_report_handler
+    handlers["submit_dependency_report"] = dep_submit_report
     return handlers
 
 
@@ -4054,6 +4129,7 @@ AI_ENGINEER_TOOLS: list[dict[str, Any]] = READ_ONLY_TOOLS + [
 
 CLEANUP_AGENT_TOOLS: list[dict[str, Any]] = READ_ONLY_TOOLS + [
     _DEAD_CODE_DETECT_TOOL,
+    _SCAN_CODE_HYGIENE_TOOL,
     _ORGANIZE_IMPORTS_TOOL,
     _DELETE_FILE_TOOL,
     _EDIT_FILE_TOOL_SPEC,
@@ -4452,6 +4528,11 @@ def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
     def cu_dead_code_detect(inp: dict[str, Any]) -> str:
         return dead_code_detect_handler(root, repo_path, inp)
 
+    # T2-B5 (2026-09-22, GRIDIRON_PARTIAL #396) — see
+    # app/tools/filesystem/scan_code_hygiene.py's own module docstring.
+    def cu_scan_code_hygiene(inp: dict[str, Any]) -> str:
+        return scan_code_hygiene_handler(root, repo_path, inp)
+
     def cu_find_todos(inp: dict[str, Any]) -> str:
         results: list[str] = []
         for fp in root.rglob("*.py"):
@@ -4516,6 +4597,7 @@ def make_cleanup_agent_handlers(repo_path: str) -> dict[str, Any]:
         return (stdout + stderr).strip() or "(no output)"
 
     handlers["dead_code_detect"] = cu_dead_code_detect
+    handlers["scan_code_hygiene"] = cu_scan_code_hygiene
     handlers["find_todos"] = cu_find_todos
     handlers["organize_imports"] = cu_organize_imports
     handlers["delete_file"] = cu_delete_file

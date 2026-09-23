@@ -822,8 +822,66 @@ async def _dispatch_one_subtask(
         )
 
         if not review_result.has_blocking:
-            subtask_status = "completed"
-            break
+            # T2-B5 (2026-09-22, GRIDIRON_PARTIAL #453/#455 "Security/
+            # Architecture checks (mandatory pipeline gate)") — moved INTO
+            # the dev/QA/review retry loop, from its old position after the
+            # loop entirely. Before this, a security/architecture/
+            # dependency gate finding on an otherwise-clean subtask had
+            # exactly one real outcome: halt (subtask_status="blocked"),
+            # with zero self-correction attempt of its own — the same
+            # "advisory logging, no retry loop" gap coder.py's static-check
+            # retry and the reviewer-blocking-findings retry immediately
+            # above it both already closed for their own findings. Now a
+            # gate finding is fed back through the EXACT SAME retry_context/
+            # qa_errors mechanism reviewer findings already use — the dev
+            # agent gets a real chance to fix it, then the gate re-checks
+            # the new code fresh next attempt — before this ever reaches
+            # #453/#455's own "flip enable_security_architecture_gates to
+            # default-on" step, which needs this safety net to exist first.
+            gate_blocked_reason: str | None = None
+            if get_settings().enable_security_architecture_gates:
+                try:
+                    (
+                        gate_tokens_in,
+                        gate_tokens_out,
+                        gate_blocked_reason,
+                    ) = await _run_advisory_quality_gates(
+                        task_id=task_id,
+                        subtask_id=subtask_id,
+                        repo=repo,
+                        epic_id=epic_id,
+                        db=db,
+                        agent_name=selected_agent_name,
+                    )
+                    local_tokens_in += gate_tokens_in
+                    local_tokens_out += gate_tokens_out
+                except Exception:
+                    logger.debug(
+                        "Advisory security/architecture gates failed for "
+                        "subtask %d (non-fatal, non-blocking)",
+                        subtask_id,
+                        exc_info=True,
+                    )
+                    gate_blocked_reason = None
+
+            if gate_blocked_reason is None:
+                subtask_status = "completed"
+                break
+
+            qa_errors = [
+                f"Security/architecture/dependency gate: {gate_blocked_reason}"
+            ]
+            logger.warning(
+                "Subtask %d attempt %d blocked by security/architecture/"
+                "dependency gate: %s",
+                subtask_id,
+                attempt + 1,
+                gate_blocked_reason,
+            )
+            if not should_retry(attempt + 1, max_retries):
+                break
+            await asyncio.sleep(0.5 * (2**attempt))
+            continue
 
         qa_errors = [
             f"Blocking review in {f.file}: {f.finding} → {f.recommendation}"
@@ -839,59 +897,16 @@ async def _dispatch_one_subtask(
             break
         await asyncio.sleep(0.5 * (2**attempt))
 
-    # AUDIT_Q_BATCH16 §90 gap-closure (2026-08-11) — "Quality Gates":
-    # security_reviewer/architecture_reviewer wired as real, additional
-    # nodes in the Dev→QA→Review sequence, following the same pattern as
-    # the existing run_qa/run_reviewer calls above. Opt-in
-    # (enable_security_architecture_gates, default False): only runs once
-    # the subtask already reached "completed" via the mandatory QA+review
-    # gates.
-    #
-    # AUDIT_Q_BATCH18 §24 High-priority #7 gap-closure (2026-08-12) — the
-    # above wiring made these gates *run*, but their findings were
-    # unconditionally advisory-only (logged, never blocking) and
-    # dependency_security_agent had no call site here at all, leaving only
-    # 2 of 8 real quality-gate types (lint, tests) actually mandatory
-    # despite all the others already existing as real, working agents.
-    # Both gaps close together: dependency_security_agent now runs
-    # alongside the other two (asyncio.gather, same independent-read-only-
-    # review rationale), and subtask_status is flipped to "blocked" — the
-    # exact same pre-existing blocked-subtask path every other gate in this
-    # pipeline already escalates through (task.blocked event, epic halt
-    # after MANAGER_MAX_EPIC_FAILURES blocked subtasks) — whenever a
-    # finding's severity is in security_architecture_gates_block_severities.
-    if (
-        subtask_status == "completed"
-        and get_settings().enable_security_architecture_gates
-    ):
-        try:
-            (
-                gate_tokens_in,
-                gate_tokens_out,
-                gate_blocked_reason,
-            ) = await _run_advisory_quality_gates(
-                task_id=task_id,
-                subtask_id=subtask_id,
-                repo=repo,
-                epic_id=epic_id,
-                db=db,
-            )
-            local_tokens_in += gate_tokens_in
-            local_tokens_out += gate_tokens_out
-            if gate_blocked_reason:
-                subtask_status = "blocked"
-                logger.warning(
-                    "Subtask %d blocked by security/architecture/dependency gate: %s",
-                    subtask_id,
-                    gate_blocked_reason,
-                )
-        except Exception:
-            logger.debug(
-                "Advisory security/architecture gates failed for subtask %d "
-                "(non-fatal, non-blocking)",
-                subtask_id,
-                exc_info=True,
-            )
+    # AUDIT_Q_BATCH16 §90 / AUDIT_Q_BATCH18 §24 High-priority #7 gap-closure
+    # (2026-08-11/12) — security_reviewer/architecture_reviewer/
+    # dependency_security_agent wired as real quality gates with genuine
+    # severity-based blocking (security_architecture_gates_block_severities).
+    # T2-B5 (2026-09-22, GRIDIRON_PARTIAL #453/#455) moved the actual gate
+    # call and its retry-on-finding handling INTO the loop above (see the
+    # "if not review_result.has_blocking:" block) so a gate finding gets one
+    # real self-correction attempt through the dev agent before blocking,
+    # the same way reviewer findings already do — nothing left to do here
+    # post-loop.
 
     await _subtask_slot_cm.__aexit__(None, None, None)
 
@@ -988,6 +1003,7 @@ async def _run_advisory_quality_gates(
     repo: str,
     epic_id: str | None,
     db: AsyncSession | None,
+    agent_name: str = "",
 ) -> tuple[int, int, str | None]:
     """AUDIT_Q_BATCH16 §90 gap-closure (2026-08-11) — the real call site
     `enable_security_architecture_gates` needed: security_reviewer and
@@ -1010,19 +1026,35 @@ async def _run_advisory_quality_gates(
     the start: findings that are logged and never acted on don't function
     as a gate, they function as a log line.
 
+    T2-B5 (2026-09-22, GRIDIRON_PARTIAL #456 "Performance checks (broad,
+    not just role-prompt deploys)") — adds a fourth, free (no LLM call)
+    gate: benchmark_manager.compare_to_baseline()'s existing regression
+    math, wrapped by regression_detector.check_agent() — previously only
+    ever consulted at role-PROMPT deploy time (prompt_registry.deploy())
+    despite being real, generic, and equally applicable to any agent's
+    per-run MetricsCollector history. `agent_name` (the actual dev agent
+    that worked this subtask, e.g. "backend_dev") is what gets checked — a
+    measured, real drop in that agent's benchmark_score against its own
+    stored baseline is now a real subtask-level finding, not something only
+    a role-prompt rollout could ever trip. Inert (never blocks) until real
+    baseline+history exists for that agent, same "no data yet is neutral"
+    convention as everywhere else in this pipeline — check_agent()'s own
+    RegressionReport already encodes that.
+
     Returns (tokens_in, tokens_out, block_reason) — block_reason is None
     unless a gate's finding severity is in
-    settings.security_architecture_gates_block_severities, in which case
-    it's the human-readable reason the caller flips subtask_status to
-    "blocked" over. tokens_in/out cover all three extra LLM calls so the
-    caller's real epic-wide token accounting (compute_actual_cost_usd)
-    stays correct — an advisory gate that silently omitted its own real
-    spend from cost_actual_usd would make that number quietly wrong once
-    an operator opts in.
+    settings.security_architecture_gates_block_severities (security/
+    architecture/dependency) or a real regression was measured
+    (performance). tokens_in/out cover the three extra LLM calls (the
+    regression check makes none) so the caller's real epic-wide token
+    accounting (compute_actual_cost_usd) stays correct — an advisory gate
+    that silently omitted its own real spend from cost_actual_usd would
+    make that number quietly wrong once an operator opts in.
     """
     from app.agents.architecture_reviewer import run_arch_review
     from app.agents.dependency_security_agent import run_dependency_security_agent
     from app.agents.security_reviewer import run_security_review
+    from app.fleet.regression_detector import get_regression_detector
     from app.event_bus.bus import publish_event
     from app.event_bus.models import GridironEvent
 
@@ -1068,8 +1100,33 @@ async def _run_advisory_quality_gates(
             )
             return None
 
-    security_result, arch_result, dependency_result = await asyncio.gather(
-        _run_security(), _run_architecture(), _run_dependency()
+    async def _run_regression() -> Any:
+        # T2-B5 (#456) — compare_to_baseline()'s own _get_baseline() calls
+        # asyncio.run() internally (see benchmark_manager.py), so this MUST
+        # run off this coroutine's own event loop thread, same reasoning as
+        # the three run_agent_graph()-based gates above (asyncio.to_thread).
+        if not agent_name:
+            return None
+        try:
+            return await asyncio.to_thread(
+                get_regression_detector().check_agent, agent_name
+            )
+        except Exception as exc:
+            logger.warning(
+                "Advisory regression check failed for subtask %d (agent=%s): %s",
+                subtask_id,
+                agent_name,
+                exc,
+            )
+            return None
+
+    (
+        security_result,
+        arch_result,
+        dependency_result,
+        regression_gate,
+    ) = await asyncio.gather(
+        _run_security(), _run_architecture(), _run_dependency(), _run_regression()
     )
 
     block_severities = frozenset(
@@ -1137,6 +1194,53 @@ async def _run_advisory_quality_gates(
                 logger.debug(
                     "Could not persist %s advisory findings for subtask %d",
                     label,
+                    subtask_id,
+                    exc_info=True,
+                )
+
+    # T2-B5 (#456) — regression_gate has its own shape (RegressionGate:
+    # agent_name/blocked/reason/report), not AgentResult like the three
+    # above, so it's handled separately rather than forced into that loop.
+    # No LLM tokens (it's pure math over already-collected metrics), and its
+    # own `blocked` already encodes "a real regression past
+    # benchmark_regression_threshold" — no separate severity filter needed.
+    if regression_gate is not None:
+        this_block_reason = regression_gate.reason if regression_gate.blocked else None
+        if this_block_reason and block_reason is None:
+            block_reason = this_block_reason
+        await publish_event(
+            GridironEvent(
+                event_type=(
+                    "subtask.advisory_gate_blocked"
+                    if this_block_reason
+                    else "subtask.advisory_gate_completed"
+                ),
+                task_id=str(task_id),
+                epic_id=epic_id,
+                payload={
+                    "subtask_id": subtask_id,
+                    "gate": "performance",
+                    "agent_name": agent_name,
+                    "block_reason": this_block_reason,
+                },
+                emitted_by="regression_detector",
+            ),
+            db=db,
+        )
+        if this_block_reason and db is not None:
+            try:
+                from app.db.repository import append_log
+
+                await append_log(
+                    db,
+                    task_id,
+                    "performance_advisory",
+                    f"Subtask {subtask_id}: {agent_name} performance regression — "
+                    f"[BLOCKING: {this_block_reason}]",
+                )
+            except Exception:
+                logger.debug(
+                    "Could not persist performance advisory finding for subtask %d",
                     subtask_id,
                     exc_info=True,
                 )

@@ -44,6 +44,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "analyze_file",
         "bash",
         "check_last_release",
+        "check_dependency_conflicts",
         "edit_file",
         "submit_dependency_report",
         "record_learning",
@@ -99,7 +100,11 @@ def run_dependency_agent(
         "   different risk. Set abandoned=true and last_release_days_ago on that "
         "   dependency's report entry only from this run's real check_last_release output.\n"
         "5. For any proposed upgrade: note it as 'recommended, needs testing' — do not "
-        "   modify files unless explicitly asked.\n"
+        "   modify files unless explicitly asked. If you're proposing upgrades to more "
+        "   than one package at once, call check_dependency_conflicts with the proposed "
+        "   version constraints together — a real SAT-solver-style check for whether "
+        "   they can all be satisfied simultaneously (pip/npm registry checks alone "
+        "   cannot see conflicts across the transitive dependency graph).\n"
         "6. Call submit_dependency_report with dependencies list. Each entry must have "
         "   name, current_version (from read_file), latest_version (from registry check), "
         "   upgrade_recommended (based on evidence, not assumption).\n"

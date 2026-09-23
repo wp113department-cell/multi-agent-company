@@ -13,7 +13,7 @@ on.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app.agents.agent_result import AgentResult
 
@@ -218,11 +218,115 @@ class TestRunAdvisoryQualityGates:
         assert block_reason is None
 
 
+class TestPerformanceRegressionGate:
+    """T2-B5 (2026-09-22, GRIDIRON_PARTIAL #456 "Performance checks
+    (broad, not just role-prompt deploys)") — the fourth gate,
+    regression_detector.check_agent()'s existing regression math (until
+    now only ever consulted at role-PROMPT deploy time), extended to
+    subtask-level dev-agent checks."""
+
+    def test_no_agent_name_skips_the_regression_check_entirely(self) -> None:
+        from app.agents.manager import _run_advisory_quality_gates
+
+        stack, *_ = _patch_all_three()
+        with stack, patch(
+            "app.fleet.regression_detector.get_regression_detector"
+        ) as mock_get_rd:
+            asyncio.run(
+                _run_advisory_quality_gates(
+                    task_id=1, subtask_id=1, repo="/tmp/x", epic_id=None, db=None
+                )
+            )
+        mock_get_rd.assert_not_called()
+
+    def test_a_real_measured_regression_blocks(self) -> None:
+        from app.agents.manager import _run_advisory_quality_gates
+        from app.fleet.regression_detector import RegressionGate
+
+        stack, *_ = _patch_all_three()
+        fake_gate = RegressionGate(
+            agent_name="backend_dev",
+            blocked=True,
+            reason="benchmark_score dropped 0.400 (baseline=0.900)",
+            report=Mock(),
+        )
+        with stack, patch(
+            "app.fleet.regression_detector.get_regression_detector"
+        ) as mock_get_rd:
+            mock_get_rd.return_value.check_agent.return_value = fake_gate
+            _, _, block_reason = asyncio.run(
+                _run_advisory_quality_gates(
+                    task_id=1,
+                    subtask_id=1,
+                    repo="/tmp/x",
+                    epic_id=None,
+                    db=None,
+                    agent_name="backend_dev",
+                )
+            )
+        mock_get_rd.return_value.check_agent.assert_called_once_with("backend_dev")
+        assert block_reason is not None
+        assert "0.400" in block_reason
+
+    def test_no_regression_does_not_block(self) -> None:
+        from app.agents.manager import _run_advisory_quality_gates
+        from app.fleet.regression_detector import RegressionGate
+
+        stack, *_ = _patch_all_three()
+        fake_gate = RegressionGate(
+            agent_name="backend_dev", blocked=False, reason="no regression detected", report=Mock()
+        )
+        with stack, patch(
+            "app.fleet.regression_detector.get_regression_detector"
+        ) as mock_get_rd:
+            mock_get_rd.return_value.check_agent.return_value = fake_gate
+            _, _, block_reason = asyncio.run(
+                _run_advisory_quality_gates(
+                    task_id=1,
+                    subtask_id=1,
+                    repo="/tmp/x",
+                    epic_id=None,
+                    db=None,
+                    agent_name="backend_dev",
+                )
+            )
+        assert block_reason is None
+
+    def test_regression_check_failure_is_non_fatal(self) -> None:
+        from app.agents.manager import _run_advisory_quality_gates
+
+        stack, *_ = _patch_all_three()
+        with stack, patch(
+            "app.fleet.regression_detector.get_regression_detector",
+            side_effect=RuntimeError("boom"),
+        ):
+            _, _, block_reason = asyncio.run(
+                _run_advisory_quality_gates(
+                    task_id=1,
+                    subtask_id=1,
+                    repo="/tmp/x",
+                    epic_id=None,
+                    db=None,
+                    agent_name="backend_dev",
+                )
+            )
+        assert block_reason is None
+
+
 class TestRunManagerAdvisoryGateWiring:
-    def test_disabled_by_default_gates_never_called(self) -> None:
+    def test_can_still_be_disabled_via_config(self) -> None:
+        """T2-B5 (2026-09-22, GRIDIRON_PARTIAL #453/#455) flipped
+        enable_security_architecture_gates's DEFAULT to True (the safety
+        net these gates needed — a real self-correction retry through the
+        dev agent before blocking — now exists; see
+        TestSecurityArchitectureGateRetry below). This test used to prove
+        the (then-default) disabled behavior; it now proves the opt-OUT
+        path still genuinely disables the gates, an operator who explicitly
+        doesn't want them still sees zero calls."""
         from app.agents.manager import run_manager
         from app.agents.qa import QAResult
         from app.agents.reviewer import ReviewResult
+        from app.config import get_settings
 
         with patch("app.agents.backend_dev.run_backend_dev") as mock_backend_dev, patch(
             "app.agents.qa.run_qa"
@@ -240,7 +344,9 @@ class TestRunManagerAdvisoryGateWiring:
             "app.agents.architecture_reviewer.run_arch_review"
         ) as mock_arch, patch(
             "app.agents.dependency_security_agent.run_dependency_security_agent"
-        ) as mock_dep:
+        ) as mock_dep, patch.object(
+            get_settings(), "enable_security_architecture_gates", False
+        ):
             mock_backend_dev.return_value = (["app/api/hello.py"], None, 0, 0)
             mock_qa.return_value = QAResult(
                 status="passed",
@@ -395,3 +501,75 @@ class TestRunManagerAdvisoryGateWiring:
             )
 
         assert result["status"] == "blocked"
+
+    def test_a_fixable_gate_finding_gets_a_real_retry_and_then_succeeds(self) -> None:
+        """T2-B5 (2026-09-22, GRIDIRON_PARTIAL #453/#455) — the actual new
+        capability: before this, ANY blocking gate finding halted the
+        subtask immediately with zero self-correction attempt. Now a gate
+        finding is fed back into the SAME retry loop reviewer findings
+        already use — the dev agent gets a real second attempt, and if the
+        underlying issue is genuinely fixed, the subtask completes instead
+        of blocking on a since-resolved finding."""
+        from app.agents.manager import run_manager
+        from app.agents.qa import QAResult
+        from app.agents.reviewer import ReviewResult
+        from app.config import get_settings
+
+        vulnerable = _result(
+            "completed",
+            raw={"vulnerable_package_count": 1},
+            verified=True,
+        )
+        clean = _result("completed", raw={"vulnerable_package_count": 0}, verified=True)
+
+        with patch("app.agents.backend_dev.run_backend_dev") as mock_backend_dev, patch(
+            "app.agents.qa.run_qa"
+        ) as mock_qa, patch("app.agents.reviewer.run_reviewer") as mock_reviewer, patch(
+            "app.repo_tools.worktree.get_diff", return_value="diff --git a/x b/x"
+        ), patch(
+            "app.services.git_service.git_add",
+            return_value={"ok": True, "stdout": "", "stderr": ""},
+        ), patch(
+            "app.services.git_service.git_commit",
+            return_value={"ok": True, "stdout": "", "stderr": ""},
+        ), patch(
+            "app.agents.security_reviewer.run_security_review",
+            return_value=_result("completed"),
+        ), patch(
+            "app.agents.architecture_reviewer.run_arch_review",
+            return_value=_result("completed"),
+        ), patch(
+            "app.agents.dependency_security_agent.run_dependency_security_agent",
+            side_effect=[vulnerable, clean],
+        ) as mock_dep, patch.object(
+            get_settings(), "enable_security_architecture_gates", True
+        ):
+            mock_backend_dev.return_value = (["app/api/hello.py"], None, 0, 0)
+            mock_qa.return_value = QAResult(
+                status="passed",
+                tests_run=1,
+                tests_passed=1,
+                tests_failed=0,
+                typecheck_clean=True,
+                lint_clean=True,
+                summary="ok",
+            )
+            mock_reviewer.return_value = ReviewResult(
+                verdict="approved", summary="looks good"
+            )
+
+            result = asyncio.run(
+                run_manager(
+                    task_id=999_104,
+                    subtasks=[
+                        {"id": 1, "type": "backend", "title": "t", "description": "d"}
+                    ],
+                    worktree_path="/tmp/does-not-need-to-exist",
+                    plan="plan",
+                    repo_path="/home/pc-117/Documents/CRR2906",
+                )
+            )
+
+        assert result["status"] == "completed"
+        assert mock_dep.call_count == 2  # one per attempt — real re-check, not a fluke
+        assert mock_backend_dev.call_count == 2  # the dev agent got a real second attempt

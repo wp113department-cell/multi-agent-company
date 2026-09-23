@@ -40,6 +40,7 @@ AGENT_CONTRACT: dict[str, Any] = {
         "import_graph",
         "circular_dep_detect",
         "dead_code_detect",
+        "scan_code_hygiene",
         "list_functions",
         "list_classes",
         "call_graph",
