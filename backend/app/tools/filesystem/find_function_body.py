@@ -76,7 +76,9 @@ from typing import Any
 from app.policy.engine import check_path_in_worktree
 
 
-def find_function_body_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> str:
+def find_function_body_handler(
+    root: Path, worktree_path: str, inp: dict[str, Any]
+) -> str:
     """Core find_function_body logic shared by all four real call sites."""
     rel = str(inp["path"])
     function_name = str(inp["function_name"])
@@ -109,7 +111,11 @@ def find_function_body_handler(root: Path, worktree_path: str, inp: dict[str, An
         if line.strip() == "":
             continue
         indent = len(line) - len(line.lstrip())
-        if indent <= base_indent and line.strip() and not line.strip().startswith(("@", "#")):
+        if (
+            indent <= base_indent
+            and line.strip()
+            and not line.strip().startswith(("@", "#"))
+        ):
             end = j
             break
 

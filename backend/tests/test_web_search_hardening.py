@@ -26,7 +26,12 @@ services rather than mocking them entirely (see tool #86's
 
 from __future__ import annotations
 
-from app.agents.tools import CHAT_TOOLS, RESEARCH_TOOLS, make_chat_handlers, make_research_handlers
+from app.agents.tools import (
+    CHAT_TOOLS,
+    RESEARCH_TOOLS,
+    make_chat_handlers,
+    make_research_handlers,
+)
 from app.tools.integrations.web_search import WEB_SEARCH_TOOL, web_search_handler
 
 
@@ -82,7 +87,11 @@ def test_web_search_handler_truncates_long_output(monkeypatch) -> None:
     class _HugeDDGS:
         def text(self, *args, **kwargs):
             return [
-                {"title": f"T{i}", "href": f"https://example.com/{i}", "body": "x" * 500}
+                {
+                    "title": f"T{i}",
+                    "href": f"https://example.com/{i}",
+                    "body": "x" * 500,
+                }
                 for i in range(5)
             ]
 

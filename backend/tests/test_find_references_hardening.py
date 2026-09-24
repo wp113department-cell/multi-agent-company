@@ -32,7 +32,9 @@ from app.tools.filesystem.find_references import FIND_REFERENCES_TOOL
 
 
 def _agent(repo: Path) -> ChatAgent:
-    session = ChatSession(session_id="td_find_references_hardening", repo_path=str(repo))
+    session = ChatSession(
+        session_id="td_find_references_hardening", repo_path=str(repo)
+    )
     return ChatAgent(session)
 
 
@@ -77,8 +79,7 @@ def test_canonical_read_only_handlers_flag_shaped_symbol_is_harmless(
 @pytest.mark.asyncio
 async def test_chat_agent_find_references_finds_real_usages(tmp_path: Path) -> None:
     (tmp_path / "target.py").write_text(
-        "def real_function_marker():\n    pass\n\n"
-        "real_function_marker()\n"
+        "def real_function_marker():\n    pass\n\n" "real_function_marker()\n"
     )
     agent = _agent(tmp_path)
     result = await agent._execute_tool(

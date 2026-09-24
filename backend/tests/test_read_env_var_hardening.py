@@ -17,7 +17,6 @@ delegating to the shared `read_env_var_handler()`.
 from __future__ import annotations
 
 import asyncio
-import os
 from pathlib import Path
 
 from app.agents.chat_agent import ChatAgent

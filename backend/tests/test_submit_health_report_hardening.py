@@ -75,7 +75,9 @@ class TestRealResultSink:
         handler({"status": "degraded", "checks": [], "summary": "disk low"})
         assert health_result["status"] == "degraded"
 
-    def test_make_devops_handlers_exports_the_same_object_handler_writes_to(self) -> None:
+    def test_make_devops_handlers_exports_the_same_object_handler_writes_to(
+        self,
+    ) -> None:
         handlers = make_devops_handlers("/tmp")
         handlers["submit_health_report"](
             {"status": "unhealthy", "checks": [], "summary": "db down"}

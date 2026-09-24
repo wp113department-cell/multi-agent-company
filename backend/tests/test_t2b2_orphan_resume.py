@@ -26,7 +26,9 @@ def _new_isolated_db_engine() -> object:
     return create_async_engine(get_settings().database_url, pool_pre_ping=True)
 
 
-def _make_stale_agent_run(agent_type: str, description: str = "desc") -> tuple[int, str]:
+def _make_stale_agent_run(
+    agent_type: str, description: str = "desc"
+) -> tuple[int, str]:
     from sqlalchemy import update
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -36,7 +38,9 @@ def _make_stale_agent_run(agent_type: str, description: str = "desc") -> tuple[i
         engine = _new_isolated_db_engine()
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:  # type: ignore[arg-type]
-                task = await create_task(session, "t2b2 orphan resume task", description)
+                task = await create_task(
+                    session, "t2b2 orphan resume task", description
+                )
                 run = await create_agent_run(
                     session,
                     task.id,
@@ -109,7 +113,7 @@ def test_orphan_with_a_covered_agent_type_is_resumed_not_failed_real_db() -> Non
         from app.fleet.failure_ladder import reconcile_orphaned_runs
 
         _reset_shared_engine()
-        with patch("app.agents.bug_fix.run_bug_fix", autospec=True) as mock_run:
+        with patch("app.agents.bug_fix.run_bug_fix", autospec=True):
             reconciled = asyncio.run(reconcile_orphaned_runs(threshold_seconds=900))
             assert reconciled >= 1
 

@@ -133,7 +133,9 @@ def test_repository_bridges_round_trip_directly_real_db() -> None:
         assert flag is not None
         assert flag["stop_requested"] is True
 
-        set_task_control_flag_resume_sync(task_id, "continue please", [{"path": "a.py"}])
+        set_task_control_flag_resume_sync(
+            task_id, "continue please", [{"path": "a.py"}]
+        )
         flag = get_task_control_flag_sync(task_id)
         assert flag is not None
         # set_resume clears stop_requested, mirroring TaskStream.set_resume()

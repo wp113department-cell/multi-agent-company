@@ -87,11 +87,7 @@ class TestDeadStateRemoved:
                 "manifest_read": True,
             }
         )
-        assert (
-            out_minimal
-            == out_full
-            == "Dependency report submitted"
-        )
+        assert out_minimal == out_full == "Dependency report submitted"
 
 
 # ---------------------------------------------------------------------------
@@ -122,5 +118,10 @@ class TestLegitimateUsageRegression:
 
     def test_other_dependency_agent_handlers_unaffected(self) -> None:
         handlers = make_dependency_agent_handlers("/tmp")
-        for key in ("bash", "edit_file", "check_last_release", "submit_dependency_report"):
+        for key in (
+            "bash",
+            "edit_file",
+            "check_last_release",
+            "submit_dependency_report",
+        ):
             assert key in handlers

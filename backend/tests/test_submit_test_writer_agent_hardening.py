@@ -150,6 +150,4 @@ def test_submit_accumulates_into_result_dict() -> None:
         {"summary": "Wrote 5 tests for the add() function", "findings": []}
     )
     assert out == "Submitted."
-    assert (
-        handlers["_result"]["summary"] == "Wrote 5 tests for the add() function"
-    )
+    assert handlers["_result"]["summary"] == "Wrote 5 tests for the add() function"

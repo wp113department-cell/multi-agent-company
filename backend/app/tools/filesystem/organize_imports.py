@@ -109,7 +109,9 @@ def _python_executable(root: Path) -> str:
     return str(venv_python) if venv_python.exists() else sys.executable
 
 
-def organize_imports_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> str:
+def organize_imports_handler(
+    root: Path, worktree_path: str, inp: dict[str, Any]
+) -> str:
     """Core organize_imports logic shared by all three real call sites."""
     rel = str(inp["path"])
 

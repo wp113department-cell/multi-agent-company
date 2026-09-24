@@ -42,7 +42,9 @@ from app.tools.filesystem.circular_dep_detect import CIRCULAR_DEP_DETECT_TOOL
 
 
 def _agent(repo: Path) -> ChatAgent:
-    session = ChatSession(session_id="td_circular_dep_detect_hardening", repo_path=str(repo))
+    session = ChatSession(
+        session_id="td_circular_dep_detect_hardening", repo_path=str(repo)
+    )
     return ChatAgent(session)
 
 
@@ -75,7 +77,9 @@ async def test_chat_agent_rejects_directory_outside_repo(tmp_path: Path) -> None
     _plant_real_cycle(outside)
     try:
         agent = _agent(tmp_path)
-        result = await agent._execute_tool("circular_dep_detect", {"directory": str(outside)})
+        result = await agent._execute_tool(
+            "circular_dep_detect", {"directory": str(outside)}
+        )
         assert "[POLICY DENIED]" in result
         assert "app.a" not in result
     finally:
@@ -146,7 +150,9 @@ async def test_chat_agent_permission_denied_does_not_raise(
     if os.geteuid() == 0:
         pytest.skip("root bypasses permission checks, cannot exercise this path")
     agent = _agent(tmp_path)
-    result = await agent._execute_tool("circular_dep_detect", {"directory": restricted_dir})
+    result = await agent._execute_tool(
+        "circular_dep_detect", {"directory": restricted_dir}
+    )
     assert "[POLICY DENIED]" not in result
 
 

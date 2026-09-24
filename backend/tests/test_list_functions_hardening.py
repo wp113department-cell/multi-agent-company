@@ -120,7 +120,9 @@ async def test_chat_agent_handles_permission_denied_gracefully(
     if os.geteuid() == 0:
         pytest.skip("root bypasses permission checks, cannot exercise this path")
     agent = _agent(tmp_path)
-    result = await agent._execute_tool("list_functions", {"path": restricted_parent_dir})
+    result = await agent._execute_tool(
+        "list_functions", {"path": restricted_parent_dir}
+    )
     assert result.startswith("[ERROR]")  # must not raise
 
 
@@ -149,10 +151,12 @@ def test_field_name_mismatch_factories_now_respect_requested_path(
 
     handlers = factory(str(tmp_path))
     result = handlers["list_functions"]({"path": "src/target.py"})
-    assert "real_target_function" in result, f"{factory_name}: expected function missing"
-    assert "unrelated_function" not in result, (
-        f"{factory_name}: path scoping still broken — leaked unrelated.py's contents"
-    )
+    assert (
+        "real_target_function" in result
+    ), f"{factory_name}: expected function missing"
+    assert (
+        "unrelated_function" not in result
+    ), f"{factory_name}: path scoping still broken — leaked unrelated.py's contents"
 
 
 # ---------------------------------------------------------------------------
@@ -178,9 +182,9 @@ def test_rglob_factories_reject_relative_traversal_escape(
         traversal = "../" * (depth + 2) + str(outside).lstrip("/")
         handlers = factory(str(tmp_path))
         result = handlers["list_functions"]({"path": traversal})
-        assert "secret_traversal_function" not in result, (
-            f"{factory_name}: relative-traversal worktree escape still works"
-        )
+        assert (
+            "secret_traversal_function" not in result
+        ), f"{factory_name}: relative-traversal worktree escape still works"
     finally:
         outside.unlink()
 

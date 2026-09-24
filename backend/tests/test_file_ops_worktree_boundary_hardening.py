@@ -84,7 +84,9 @@ _SINGLE_PATH_TOOLS = [
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool_name,build_args", _SINGLE_PATH_TOOLS)
-async def test_rejects_absolute_path_outside_repo(tmp_path, tool_name, build_args) -> None:
+async def test_rejects_absolute_path_outside_repo(
+    tmp_path, tool_name, build_args
+) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     outside = tmp_path / "outside"
@@ -105,7 +107,9 @@ async def test_rejects_absolute_path_outside_repo(tmp_path, tool_name, build_arg
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool_name,build_args", _SINGLE_PATH_TOOLS)
-async def test_rejects_dotdot_traversal_outside_repo(tmp_path, tool_name, build_args) -> None:
+async def test_rejects_dotdot_traversal_outside_repo(
+    tmp_path, tool_name, build_args
+) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     sibling = tmp_path / "sibling_secret.txt"
@@ -115,7 +119,9 @@ async def test_rejects_dotdot_traversal_outside_repo(tmp_path, tool_name, build_
     with patch.object(
         agent, "_confirm", new=AsyncMock(return_value=True)
     ) as mock_confirm:
-        result = await agent._execute_tool(tool_name, build_args("../sibling_secret.txt"))
+        result = await agent._execute_tool(
+            tool_name, build_args("../sibling_secret.txt")
+        )
 
     mock_confirm.assert_not_awaited()
     assert result.startswith(("[POLICY DENIED]", "[ERROR]")), f"{tool_name}: {result!r}"
@@ -145,7 +151,9 @@ async def test_rename_file_rejects_outside_repo_destination(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
-async def test_copy_file_rejects_outside_repo_source_exfiltration(tmp_path: Path) -> None:
+async def test_copy_file_rejects_outside_repo_source_exfiltration(
+    tmp_path: Path,
+) -> None:
     """The real exfiltration primitive: copy_file never validated
     from_path at all before this fix — only to_path had even the
     denylist check."""
@@ -207,7 +215,9 @@ async def test_legitimate_in_repo_file_operations_still_work(tmp_path: Path) -> 
     repo.mkdir()
     agent = _agent(repo)
 
-    r1 = await agent._execute_tool("write_file", {"path": "notes/a.txt", "content": "hello"})
+    r1 = await agent._execute_tool(
+        "write_file", {"path": "notes/a.txt", "content": "hello"}
+    )
     assert r1.startswith("Written")
 
     r2 = await agent._execute_tool(
@@ -240,7 +250,9 @@ async def test_legitimate_in_repo_file_operations_still_work(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
-async def test_replace_class_and_replace_function_still_work_in_repo(tmp_path: Path) -> None:
+async def test_replace_class_and_replace_function_still_work_in_repo(
+    tmp_path: Path,
+) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "mod.py").write_text("class Foo:\n    pass\n\n\ndef bar():\n    pass\n")
@@ -254,7 +266,11 @@ async def test_replace_class_and_replace_function_still_work_in_repo(tmp_path: P
 
     r2 = await agent._execute_tool(
         "replace_function",
-        {"path": "mod.py", "function_name": "bar", "new_code": "def bar():\n    return 1\n"},
+        {
+            "path": "mod.py",
+            "function_name": "bar",
+            "new_code": "def bar():\n    return 1\n",
+        },
     )
     assert r2.startswith("Replaced 'bar'")
 

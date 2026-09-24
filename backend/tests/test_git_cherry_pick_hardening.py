@@ -61,7 +61,9 @@ def _real_repo_with_feature_commit(tmp_path: Path) -> tuple[Path, str]:
 
 
 def _agent(repo: Path) -> ChatAgent:
-    session = ChatSession(session_id="td_git_cherry_pick_hardening", repo_path=str(repo))
+    session = ChatSession(
+        session_id="td_git_cherry_pick_hardening", repo_path=str(repo)
+    )
     return ChatAgent(session)
 
 
@@ -173,6 +175,9 @@ async def test_chat_agent_git_cherry_pick_no_commit_stages_without_committing(
     assert before_log == after_log
 
     staged = subprocess.run(
-        ["git", "diff", "--cached", "--name-only"], cwd=repo, capture_output=True, text=True
+        ["git", "diff", "--cached", "--name-only"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     assert staged == "file.txt"

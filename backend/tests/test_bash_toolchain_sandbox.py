@@ -156,9 +156,9 @@ def test_migration_bash_reaches_the_real_database_through_the_sandbox() -> None:
     from alembic.script import ScriptDirectory
 
     head = ScriptDirectory.from_config(Config("alembic.ini")).get_current_head()
-    assert head in out, (
-        f"expected the real, current alembic head ({head}) in sandboxed output, got: {out!r}"
-    )
+    assert (
+        head in out
+    ), f"expected the real, current alembic head ({head}) in sandboxed output, got: {out!r}"
 
 
 def test_migration_bash_network_default_is_host() -> None:

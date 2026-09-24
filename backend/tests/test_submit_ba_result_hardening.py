@@ -93,5 +93,7 @@ class TestLegitimateUsageRegression:
     def test_repeated_calls_do_not_accumulate_or_leak_state(self) -> None:
         handlers = make_business_analyst_handlers("/tmp")
         out1 = handlers["submit_ba_result"]({"user_stories": ["first"], "summary": "a"})
-        out2 = handlers["submit_ba_result"]({"user_stories": ["second"], "summary": "b"})
+        out2 = handlers["submit_ba_result"](
+            {"user_stories": ["second"], "summary": "b"}
+        )
         assert out1 == out2 == "Business analysis submitted"

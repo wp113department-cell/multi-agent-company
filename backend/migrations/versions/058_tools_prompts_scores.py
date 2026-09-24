@@ -54,7 +54,9 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.Column("role_names", ARRAY(sa.Text()), nullable=False, server_default="{}"),
-        sa.Column("blocked_roles", ARRAY(sa.Text()), nullable=False, server_default="{}"),
+        sa.Column(
+            "blocked_roles", ARRAY(sa.Text()), nullable=False, server_default="{}"
+        ),
         sa.Column("prompts_score", sa.Float(), nullable=False),
         sa.Column(
             "created_at",

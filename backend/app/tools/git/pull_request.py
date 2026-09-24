@@ -469,7 +469,9 @@ def create_pr_handler(repo_path: str, inp: dict[str, Any]) -> str:
         except subprocess.TimeoutExpired:
             return "[ERROR] git diff timed out while preparing PR description"
         diff = r_diff.stdout[:6000]
-        gen_title, gen_body = generate_pr_description(stat, diff, current_branch, pr_base)
+        gen_title, gen_body = generate_pr_description(
+            stat, diff, current_branch, pr_base
+        )
         pr_title = pr_title or gen_title
         pr_body = pr_body or gen_body
 
@@ -477,7 +479,9 @@ def create_pr_handler(repo_path: str, inp: dict[str, Any]) -> str:
     pr_body = _sanitize_pr_body(pr_body)
 
     if not pr_title:
-        return "[ERROR] title is required (auto-generation failed — supply one explicitly)"
+        return (
+            "[ERROR] title is required (auto-generation failed — supply one explicitly)"
+        )
 
     pr_cmd = build_gh_pr_create_command(pr_title, pr_base, pr_body, pr_draft)
     try:

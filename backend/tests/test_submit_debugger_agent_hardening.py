@@ -75,9 +75,7 @@ def test_write_file_allows_top_level_md() -> None:
             {"path": "DEBUG_ANALYSIS.md", "content": "# Debug Analysis\n"}
         )
         assert result.startswith("Written")
-        assert (
-            Path(tmp) / "DEBUG_ANALYSIS.md"
-        ).read_text() == "# Debug Analysis\n"
+        assert (Path(tmp) / "DEBUG_ANALYSIS.md").read_text() == "# Debug Analysis\n"
 
 
 def test_write_file_allows_docs_subpath() -> None:
@@ -103,7 +101,6 @@ def test_bash_still_scoped_to_test_runner_handler() -> None:
     """Regression guard: this turn's fix only touches write_file — bash
     must still be the dedicated test-runner-only handler, not the
     unrestricted chat-agent bash."""
-    from app.agents.tools import make_test_runner_bash_handler
 
     handlers = make_debugger_agent_handlers("/tmp")
     # Both are separately-constructed closures, so identity comparison

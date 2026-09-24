@@ -654,6 +654,71 @@ def _extract_file_line_citations(text: str) -> list[tuple[str, int]]:
     ]
 
 
+# T2-B10 (2026-09-24, GRIDIRON_PARTIAL #502 "Refuse to invent APIs/files/
+# functions/classes (code-checked citations)" — Task 1's own re-
+# verification of this item, DOWNGRADED: "only path:line citations are
+# checked ... invented functions/classes/APIs are not checked at all.").
+# A backtick-quoted identifier, optionally call-shaped (`foo` or `foo()`)
+# — the same citation STYLE this codebase's own role prompts already use
+# for file:line citations (see _FILE_LINE_CITATION_RE's own comment).
+_BACKTICK_IDENTIFIER_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*)\(?\)?`")
+# How close (in characters) a backtick-quoted name and a file:line citation
+# must appear in the SAME string to be treated as one claim ("`foo()` in
+# path/to/file.py:42") rather than two unrelated mentions.
+_CITATION_PROXIMITY_CHARS = 80
+
+
+def _extract_function_class_citations(
+    text: str,
+) -> list[tuple[str, str, int]]:
+    """Pairs a backtick-quoted identifier with the nearest file:line
+    citation in the same string (within _CITATION_PROXIMITY_CHARS) —
+    "`foo()` in path/to/file.py:42" style claims. Never a fabricated
+    pairing: an identifier with no citation anywhere near it (or a
+    citation with no identifier near it) yields no pair at all — this
+    only checks a claim that names BOTH an identifier AND a real citation
+    together, the same shape this codebase's own role prompts request."""
+    citations = [
+        (m.group(1), int(m.group(2)), m.start())
+        for m in _FILE_LINE_CITATION_RE.finditer(text)
+    ]
+    if not citations:
+        return []
+    pairs: list[tuple[str, str, int]] = []
+    for m in _BACKTICK_IDENTIFIER_RE.finditer(text):
+        name = m.group(1)
+        nearest = min(citations, key=lambda c: abs(c[2] - m.start()))
+        if abs(nearest[2] - m.start()) <= _CITATION_PROXIMITY_CHARS:
+            pairs.append((name, nearest[0], nearest[1]))
+    return pairs
+
+
+def _real_symbol_names_in_python_file(abs_path: str) -> set[str] | None:
+    """Every real function/class name defined in a .py file, via a real
+    AST parse — None (not an empty set) on any parse failure, so a
+    genuinely unparseable file never produces a false "invented name"
+    finding for every citation into it. Non-Python files return None too
+    (name-citation checking is honestly Python-only, matching this
+    codebase's existing ast_engine.py/cross_file_graph.py scope)."""
+    if not abs_path.endswith(".py"):
+        return None
+    try:
+        import ast as _ast_module
+
+        with open(abs_path, encoding="utf-8", errors="replace") as f:
+            source = f.read()
+        tree = _ast_module.parse(source)
+    except (OSError, SyntaxError, ValueError):
+        return None
+    names: set[str] = set()
+    for node in _ast_module.walk(tree):
+        if isinstance(
+            node, (_ast_module.FunctionDef, _ast_module.AsyncFunctionDef, _ast_module.ClassDef)
+        ):
+            names.add(node.name)
+    return names
+
+
 def _collect_strings(value: Any) -> list[str]:
     """Recursively pulls every string leaf out of a submit_* tool's raw
     input dict (which may nest lists of dicts — e.g. architecture_reviewer's
@@ -690,16 +755,27 @@ def verify_file_line_citations(
     one would be worse than the gap this closes. Never raises: a repo_root
     that doesn't exist, or an unreadable file, becomes an "unverified"
     entry, not an exception.
+
+    T2-B10 (2026-09-24, GRIDIRON_PARTIAL #502) — ALSO checks
+    `` `name()` in path:line `` -style claims against a real AST parse of
+    the cited file: `unverified_names` holds any such claim naming a
+    function/class that genuinely does not exist anywhere in that file.
+    Deliberately Python-only (see _real_symbol_names_in_python_file's own
+    docstring) and deliberately still non-blocking, for the identical
+    false-positive reason as the file:line check above — this ADDS a real
+    check where previously none existed (the audit's own core finding),
+    it does not change this function's existing flag-not-reject posture.
     """
     import os
 
     if not repo_root or not os.path.isdir(repo_root):
-        return {"checked": 0, "unverified": []}
+        return {"checked": 0, "unverified": [], "unverified_names": []}
 
     strings = _collect_strings(raw_result)
     seen: set[tuple[str, int]] = set()
     unverified: list[str] = []
     checked = 0
+    file_line_ok: set[tuple[str, int]] = set()
     for text in strings:
         for rel_path, line in _extract_file_line_citations(text):
             key = (rel_path, line)
@@ -731,8 +807,37 @@ def verify_file_line_citations(
                     unverified.append(
                         f"{rel_path}:{line} — file has only {total_lines} line(s)"
                     )
+            else:
+                file_line_ok.add(key)
 
-    return {"checked": checked, "unverified": unverified}
+    unverified_names: list[str] = []
+    seen_names: set[tuple[str, str, int]] = set()
+    symbol_cache: dict[str, set[str] | None] = {}
+    for text in strings:
+        for name, rel_path, line in _extract_function_class_citations(text):
+            key3 = (name, rel_path, line)
+            if key3 in seen_names or (rel_path, line) not in file_line_ok:
+                # Only check the NAME once its own file:line citation
+                # already checked out — a bad path/line is already
+                # reported above, and re-deriving abs_path for a citation
+                # already known bad would just duplicate that finding.
+                continue
+            seen_names.add(key3)
+            abs_path = os.path.realpath(os.path.join(repo_root, rel_path))
+            if rel_path not in symbol_cache:
+                symbol_cache[rel_path] = _real_symbol_names_in_python_file(abs_path)
+            real_names = symbol_cache[rel_path]
+            if real_names is not None and name not in real_names and len(unverified_names) < 20:
+                unverified_names.append(
+                    f"`{name}` — no such function/class in {rel_path} "
+                    f"(cited near line {line})"
+                )
+
+    return {
+        "checked": checked,
+        "unverified": unverified,
+        "unverified_names": unverified_names,
+    }
 
 
 # Stage 4 Tier 3 (2026-08-05, answer2.md Q17) — real, bounded structured

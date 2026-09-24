@@ -84,9 +84,7 @@ async def test_chat_agent_git_blame_rejects_flag_shaped_path(
 ) -> None:
     _real_repo(tmp_path)
     agent = _agent(tmp_path)
-    result = await agent._execute_tool(
-        "git_blame", {"path": "--contents=/etc/passwd"}
-    )
+    result = await agent._execute_tool("git_blame", {"path": "--contents=/etc/passwd"})
     assert "[ERROR]" in result
 
 

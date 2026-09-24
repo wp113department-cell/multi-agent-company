@@ -76,7 +76,9 @@ def test_handler_preserves_a_reasonable_requested_timeout(tmp_path) -> None:
 def test_handler_defaults_to_30_seconds_when_timeout_omitted(tmp_path) -> None:
     with patch("app.tools.execution.python_snippet.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(stdout="ok", stderr="")
-        run_python_snippet_handler(str(tmp_path), {"code": "pass"}, activate_snippet="true")
+        run_python_snippet_handler(
+            str(tmp_path), {"code": "pass"}, activate_snippet="true"
+        )
     assert mock_run.call_args.kwargs["timeout"] == 30
 
 
@@ -142,7 +144,9 @@ def test_make_chat_handlers_run_python_snippet_real_execution(tmp_path) -> None:
     assert "6" in result
 
 
-def test_make_chat_handlers_run_python_snippet_clamps_excessive_timeout(tmp_path) -> None:
+def test_make_chat_handlers_run_python_snippet_clamps_excessive_timeout(
+    tmp_path,
+) -> None:
     handlers = make_chat_handlers(str(tmp_path))
     with patch("app.tools.execution.python_snippet.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(stdout="ok", stderr="")

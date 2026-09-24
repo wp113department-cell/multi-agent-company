@@ -15,7 +15,6 @@ tests/test_gap41_composite_scoring.py's own convention.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import random
 import uuid
@@ -204,7 +203,9 @@ async def test_consolidate_group_merges_and_archives_real_rows() -> None:
                 )
                 mock_cls.return_value = mock_client
 
-                ok = await consolidate_group(session, group, "claude-haiku-4-5-20251001", 5.0)
+                ok = await consolidate_group(
+                    session, group, "claude-haiku-4-5-20251001", 5.0
+                )
 
             assert ok is True
 
@@ -251,10 +252,15 @@ async def test_consolidate_group_leaves_rows_untouched_when_llm_call_fails() -> 
             assert row is not None
             original_description = row.description
 
-            group = [_row(row.id, row.repo_id, [1.0]), _row(999999999, row.repo_id, [1.0])]
+            group = [
+                _row(row.id, row.repo_id, [1.0]),
+                _row(999999999, row.repo_id, [1.0]),
+            ]
 
             with patch("anthropic.Anthropic", side_effect=RuntimeError("network down")):
-                ok = await consolidate_group(session, group, "claude-haiku-4-5-20251001", 5.0)
+                ok = await consolidate_group(
+                    session, group, "claude-haiku-4-5-20251001", 5.0
+                )
 
             assert ok is False
             await session.refresh(row)
@@ -313,13 +319,17 @@ async def test_run_memory_consolidation_cycle_respects_the_global_group_cap(
 
         monkeypatch.setenv("MEMORY_EMBEDDINGS_CONSOLIDATION_MAX_GROUPS_PER_CYCLE", "1")
         monkeypatch.setenv("MEMORY_EMBEDDINGS_CONSOLIDATION_MIN_AGE_DAYS", "1")
-        monkeypatch.setenv("MEMORY_EMBEDDINGS_CONSOLIDATION_SIMILARITY_THRESHOLD", "0.99")
+        monkeypatch.setenv(
+            "MEMORY_EMBEDDINGS_CONSOLIDATION_SIMILARITY_THRESHOLD", "0.99"
+        )
         monkeypatch.setenv("MEMORY_EMBEDDINGS_CONSOLIDATION_MIN_GROUP_SIZE", "2")
         reset_settings_cache()
         try:
             with patch("anthropic.Anthropic") as mock_cls:
                 mock_client = MagicMock()
-                mock_client.messages.create.return_value = _mock_anthropic_response("merged")
+                mock_client.messages.create.return_value = _mock_anthropic_response(
+                    "merged"
+                )
                 mock_cls.return_value = mock_client
 
                 merged_count = await run_memory_consolidation_cycle()

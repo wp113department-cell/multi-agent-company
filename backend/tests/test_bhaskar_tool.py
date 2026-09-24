@@ -202,16 +202,12 @@ def _mock_db_for_eviction(existing, live_rows, repo_id=None):
     """
     db = AsyncMock()
     results = [MagicMock()]  # advisory lock select — value unused
-    results.append(
-        MagicMock(scalar_one_or_none=MagicMock(return_value=existing))
-    )
+    results.append(MagicMock(scalar_one_or_none=MagicMock(return_value=existing)))
     if existing is None:
         scalars_result = MagicMock()
         scalars_result.all = MagicMock(return_value=live_rows)
         results.append(MagicMock(scalars=MagicMock(return_value=scalars_result)))
-        results.append(
-            MagicMock(scalar_one_or_none=MagicMock(return_value=repo_id))
-        )
+        results.append(MagicMock(scalar_one_or_none=MagicMock(return_value=repo_id)))
     db.execute = AsyncMock(side_effect=results)
     db.add = MagicMock()
     db.delete = AsyncMock()
@@ -260,7 +256,9 @@ async def test_write_entry_with_eviction_evicts_oldest_when_at_capacity() -> Non
     oldest = MagicMock(name="oldest")
     newer = MagicMock(name="newer")
     # read_entries-equivalent ordering is created_at ASC, so oldest is first.
-    db = _mock_db_for_eviction(existing=None, live_rows=[oldest, newer, MagicMock(), MagicMock()])
+    db = _mock_db_for_eviction(
+        existing=None, live_rows=[oldest, newer, MagicMock(), MagicMock()]
+    )
     ok = await scratchpad.write_entry_with_eviction(
         "__bhaskar_tool__",
         "sig-new",
@@ -314,9 +312,7 @@ def test_handler_refuses_when_disabled(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(get_settings(), "bhaskar_tool_enabled", False)
-    result = json.loads(
-        bhaskar_tool_handler(str(tmp_path), {"task_description": "x"})
-    )
+    result = json.loads(bhaskar_tool_handler(str(tmp_path), {"task_description": "x"}))
     assert result["ok"] is False
     assert "disabled" in result["error"]
 
@@ -748,10 +744,7 @@ def test_sandbox_blocks_absolute_path_write(tmp_path: pathlib.Path) -> None:
 
 
 def test_sandbox_blocks_relative_path_traversal() -> None:
-    code = (
-        "open('../../../../etc/hostname').read()\n"
-        "print('READ_OK')"
-    )
+    code = "open('../../../../etc/hostname').read()\n" "print('READ_OK')"
     result = run_sandboxed_python(code, timeout=10)
     assert result["success"] is False
     assert "blocked" in result["output"]
@@ -791,12 +784,8 @@ def test_sandbox_blocks_reading_through_a_preexisting_symlink(
         os.symlink(str(secret), os.path.join(sandbox_dir, link_name))
         return orig_build_script(code, sandbox_dir, allow_network)
 
-    with patch.object(
-        sandbox_module, "_build_script", build_with_preexisting_symlink
-    ):
-        result = run_sandboxed_python(
-            f"print(open({link_name!r}).read())", timeout=10
-        )
+    with patch.object(sandbox_module, "_build_script", build_with_preexisting_symlink):
+        result = run_sandboxed_python(f"print(open({link_name!r}).read())", timeout=10)
     assert result["success"] is False
     assert "blocked" in result["output"]
     assert "top secret" not in result["output"]
@@ -972,9 +961,7 @@ def test_sandbox_repeated_timeouts_stay_bounded() -> None:
     real sandboxed hangs."""
     for _ in range(3):
         start = time.monotonic()
-        result = run_sandboxed_python(
-            "import time\ntime.sleep(30)", timeout=1
-        )
+        result = run_sandboxed_python("import time\ntime.sleep(30)", timeout=1)
         elapsed = time.monotonic() - start
         assert result["success"] is False
         assert elapsed < 10.0

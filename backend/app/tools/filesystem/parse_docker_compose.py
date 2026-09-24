@@ -80,7 +80,9 @@ PARSE_DOCKER_COMPOSE_TOOL: dict[str, Any] = {
 }
 
 
-def parse_docker_compose_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> str:
+def parse_docker_compose_handler(
+    root: Path, worktree_path: str, inp: dict[str, Any]
+) -> str:
     """Core parse_docker_compose logic — the one real implementation,
     reused unchanged in behavior except for the worktree-boundary
     check now applied to `path`."""

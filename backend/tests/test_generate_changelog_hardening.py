@@ -38,7 +38,9 @@ from app.tools.git.generate_changelog import GENERATE_CHANGELOG_TOOL, validate_g
 
 
 def _agent(repo: Path) -> ChatAgent:
-    session = ChatSession(session_id="td_generate_changelog_hardening", repo_path=str(repo))
+    session = ChatSession(
+        session_id="td_generate_changelog_hardening", repo_path=str(repo)
+    )
     return ChatAgent(session)
 
 
@@ -50,10 +52,14 @@ def _init_repo(repo: Path) -> None:
     subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
     (repo / "f.txt").write_text("a\n")
     subprocess.run(["git", "add", "f.txt"], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", "feat: initial commit"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "feat: initial commit"], cwd=repo, check=True
+    )
     (repo / "f.txt").write_text("a\nb\n")
     subprocess.run(["git", "add", "f.txt"], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", "fix: second commit"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "fix: second commit"], cwd=repo, check=True
+    )
 
 
 def test_generate_changelog_tool_schema() -> None:

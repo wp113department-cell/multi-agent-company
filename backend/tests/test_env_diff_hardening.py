@@ -70,9 +70,7 @@ def test_make_chat_handlers_closes_example_escape(tmp_path: Path) -> None:
     outside_b.write_text("SECRET_API_KEY=x\nEXTRA_OUTSIDE_ONLY_KEY=z\n")
 
     handlers = make_chat_handlers(str(repo))
-    result = handlers["env_diff"](
-        {"example": str(outside_a), "actual": str(outside_b)}
-    )
+    result = handlers["env_diff"]({"example": str(outside_a), "actual": str(outside_b)})
     assert "[POLICY DENIED]" in result
     assert "EXTRA_OUTSIDE_ONLY_KEY" not in result
 

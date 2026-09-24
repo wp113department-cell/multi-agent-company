@@ -186,7 +186,11 @@ def _patched_agent_for_create_pr(
         return resp
 
     def fake_run_subprocess(
-        command: str, cwd: str, timeout: int = 120, *, fail_on_nonzero_exit: bool = False
+        command: str,
+        cwd: str,
+        timeout: int = 120,
+        *,
+        fail_on_nonzero_exit: bool = False,
     ) -> str:
         gh_call_count["n"] += 1
         return "https://github.com/example/repo/pull/1"

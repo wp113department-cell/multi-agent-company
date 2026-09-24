@@ -180,7 +180,9 @@ class TestLegitimateUsageRegression:
         out = handlers["read_pdf"]({"path": "doc3.pdf"})
         assert "Hello World Three" in out
 
-    def test_nonexistent_in_worktree_file_errors_gracefully(self, tmp_path: Path) -> None:
+    def test_nonexistent_in_worktree_file_errors_gracefully(
+        self, tmp_path: Path
+    ) -> None:
         out = read_pdf_handler(tmp_path, str(tmp_path), {"path": "nope.pdf"})
         assert "[ERROR]" in out
 

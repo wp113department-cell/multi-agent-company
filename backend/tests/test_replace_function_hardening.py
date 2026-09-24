@@ -70,7 +70,11 @@ def test_refactor_agent_replace_function_no_longer_raises_keyerror(
     # LLM would send per REPLACE_FUNCTION_TOOL's schema (new_code, not
     # new_body). This used to raise KeyError('new_body') unconditionally.
     result = handlers["replace_function"](
-        {"path": "mod.py", "function_name": "foo", "new_code": "def foo():\n    return 2\n"}
+        {
+            "path": "mod.py",
+            "function_name": "foo",
+            "new_code": "def foo():\n    return 2\n",
+        }
     )
     assert not result.startswith("[ERROR]")
     assert result.startswith("Replaced 'foo'")
@@ -109,14 +113,20 @@ async def test_chat_agent_replace_function_top_level(tmp_path: Path) -> None:
     agent = _agent(str(tmp_path))
     result = await agent._execute_tool(
         "replace_function",
-        {"path": "mod.py", "function_name": "foo", "new_code": "def foo():\n    return 2\n"},
+        {
+            "path": "mod.py",
+            "function_name": "foo",
+            "new_code": "def foo():\n    return 2\n",
+        },
     )
     assert result.startswith("Replaced 'foo'")
     assert (tmp_path / "mod.py").read_text() == "def foo():\n    return 2\n"
 
 
 @pytest.mark.asyncio
-async def test_chat_agent_replace_function_protected_path_denied(tmp_path: Path) -> None:
+async def test_chat_agent_replace_function_protected_path_denied(
+    tmp_path: Path,
+) -> None:
     (tmp_path / ".env").write_text("SECRET=1")
     agent = _agent(str(tmp_path))
     result = await agent._execute_tool(
@@ -151,7 +161,11 @@ def test_make_chat_handlers_replace_function_still_works(tmp_path: Path) -> None
     (tmp_path / "mod.py").write_text("def foo():\n    return 1\n")
     handlers = make_chat_handlers(str(tmp_path))
     result = handlers["replace_function"](
-        {"path": "mod.py", "function_name": "foo", "new_code": "def foo():\n    return 2\n"}
+        {
+            "path": "mod.py",
+            "function_name": "foo",
+            "new_code": "def foo():\n    return 2\n",
+        }
     )
     assert result.startswith("Replaced 'foo'")
 
@@ -168,7 +182,11 @@ async def test_chat_agent_replace_function_preserves_next_functions_decorator(
     agent = _agent(str(tmp_path))
     result = await agent._execute_tool(
         "replace_function",
-        {"path": "mod.py", "function_name": "foo", "new_code": "def foo():\n    return 999\n"},
+        {
+            "path": "mod.py",
+            "function_name": "foo",
+            "new_code": "def foo():\n    return 999\n",
+        },
     )
     assert result.startswith("Replaced 'foo'")
     content = (tmp_path / "mod.py").read_text()
@@ -184,7 +202,11 @@ def test_handler_rejects_worktree_boundary_escape(tmp_path: Path) -> None:
     result = replace_function_handler(
         repo,
         str(repo),
-        {"path": str(outside), "function_name": "foo", "new_code": "def foo(): return 2\n"},
+        {
+            "path": str(outside),
+            "function_name": "foo",
+            "new_code": "def foo(): return 2\n",
+        },
     )
     assert result.startswith("[POLICY DENIED]")
     assert "return 1" in outside.read_text()

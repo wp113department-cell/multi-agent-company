@@ -22,7 +22,6 @@ relative one).
 from __future__ import annotations
 
 import asyncio
-import os
 from pathlib import Path
 
 from PIL import Image
@@ -155,12 +154,16 @@ class TestLegitimateUsageRegression:
         out = handlers["read_image"]({"path": "photo3.png"})
         assert "PNG" in out
 
-    def test_nonexistent_in_worktree_file_errors_gracefully(self, tmp_path: Path) -> None:
+    def test_nonexistent_in_worktree_file_errors_gracefully(
+        self, tmp_path: Path
+    ) -> None:
         out = read_image_handler(tmp_path, str(tmp_path), {"path": "nope.png"})
         assert "[ERROR]" in out
 
     def test_jpeg_format_detected(self, tmp_path: Path) -> None:
         img_path = tmp_path / "sample.jpg"
-        Image.new("RGB", (200, 150), color=(0, 128, 255)).save(str(img_path), format="JPEG")
+        Image.new("RGB", (200, 150), color=(0, 128, 255)).save(
+            str(img_path), format="JPEG"
+        )
         out = read_image_handler(tmp_path, str(tmp_path), {"path": "sample.jpg"})
         assert "200x150" in out or "JPEG" in out

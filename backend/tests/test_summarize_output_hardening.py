@@ -106,13 +106,9 @@ async def test_chat_agent_dispatch_no_longer_unknown_tool() -> None:
 
 
 def test_handler_uses_llm_and_respects_focus() -> None:
-    with patch(
-        "app.agents.tools._llm_generate_text"
-    ) as mock_llm:
+    with patch("app.agents.tools._llm_generate_text") as mock_llm:
         mock_llm.return_value = "• summary line"
-        result = summarize_output_handler(
-            {"text": "a" * 100, "focus": "errors only"}
-        )
+        result = summarize_output_handler({"text": "a" * 100, "focus": "errors only"})
         assert result == "• summary line"
         prompt_arg = mock_llm.call_args[0][0]
         assert "Focus specifically on: errors only" in prompt_arg
@@ -145,7 +141,5 @@ async def test_chat_agent_dispatch_delegates_to_shared_handler() -> None:
         "app.agents.tools._llm_generate_text",
         return_value="• delegated summary",
     ):
-        result = await agent._execute_tool(
-            "summarize_output", {"text": "some text"}
-        )
+        result = await agent._execute_tool("summarize_output", {"text": "some text"})
     assert result == "• delegated summary"

@@ -424,9 +424,7 @@ def test_handler_budget_actually_decrements_across_repeated_calls(
             "app.agents.delegation._build_adapter_registry",
             return_value={"dg_test_budget_agent": lambda *a: _fake_result()},
         ),
-        patch(
-            "app.agents.delegation._estimate_result_cost_usd", return_value=0.6
-        ),
+        patch("app.agents.delegation._estimate_result_cost_usd", return_value=0.6),
     ):
         first = handler(
             {"target_capability": "dg_test_budget_cap", "objective": "do it"}

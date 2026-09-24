@@ -127,9 +127,7 @@ async def test_chat_agent_run_background_then_kill_process_real_workflow(
 ) -> None:
     agent = _agent(tmp_path)
 
-    spawn_result = await agent._execute_tool(
-        "run_background", {"command": "sleep 300"}
-    )
+    spawn_result = await agent._execute_tool("run_background", {"command": "sleep 300"})
     assert "Started background process PID" in spawn_result
     pid = int(spawn_result.split("PID")[1].split(":")[0].strip())
 

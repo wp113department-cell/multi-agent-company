@@ -63,7 +63,12 @@ def test_old_module_level_wrapper_still_importable_and_delegates() -> None:
 class TestPathTraversalConfirmedSafe:
     def test_plain_traversal_rejected_before_any_request(self) -> None:
         out = inspect_github_repo_handler(
-            {"owner": "octocat", "repo": "Hello-World", "action": "read_file", "path": "../user"}
+            {
+                "owner": "octocat",
+                "repo": "Hello-World",
+                "action": "read_file",
+                "path": "../user",
+            }
         )
         assert out == "[ERROR] path may not contain '..'"
 
@@ -104,7 +109,9 @@ class TestLegitimateUsageRegression:
 
     def test_make_chat_handlers_real_info(self) -> None:
         handlers = make_chat_handlers(".")
-        out = handlers["inspect_github_repo"]({"owner": "octocat", "repo": "Hello-World"})
+        out = handlers["inspect_github_repo"](
+            {"owner": "octocat", "repo": "Hello-World"}
+        )
         assert "Hello-World" in out
 
     def test_chat_agent_dispatch_real_info(self) -> None:

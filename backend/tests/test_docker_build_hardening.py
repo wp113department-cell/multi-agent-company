@@ -113,7 +113,9 @@ async def test_chat_agent_docker_build_rejects_context_outside_repo(
         )
         assert result.startswith("[POLICY DENIED]")
     finally:
-        subprocess.run(["docker", "rmi", "td-exploit-proof:latest"], capture_output=True)
+        subprocess.run(
+            ["docker", "rmi", "td-exploit-proof:latest"], capture_output=True
+        )
 
 
 def test_make_chat_handlers_docker_build_rejects_context_outside_repo(
@@ -129,7 +131,9 @@ def test_make_chat_handlers_docker_build_rejects_context_outside_repo(
         )
         assert result.startswith("[POLICY DENIED]")
     finally:
-        subprocess.run(["docker", "rmi", "td-exploit-proof2:latest"], capture_output=True)
+        subprocess.run(
+            ["docker", "rmi", "td-exploit-proof2:latest"], capture_output=True
+        )
 
 
 def test_dk_docker_build_rejects_context_outside_repo(tmp_path: Path) -> None:
@@ -145,7 +149,9 @@ def test_dk_docker_build_rejects_context_outside_repo(tmp_path: Path) -> None:
         )
         assert result.startswith("[POLICY DENIED]")
     finally:
-        subprocess.run(["docker", "rmi", "td-exploit-proof3:latest"], capture_output=True)
+        subprocess.run(
+            ["docker", "rmi", "td-exploit-proof3:latest"], capture_output=True
+        )
 
 
 # ---------------------------------------------------------------------------

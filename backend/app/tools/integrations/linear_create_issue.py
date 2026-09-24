@@ -83,7 +83,9 @@ LINEAR_CREATE_ISSUE_TOOL: dict[str, object] = {
 }
 
 
-def create_linear_issue(api_key: str, title: str, description: str, team_key: str) -> str:
+def create_linear_issue(
+    api_key: str, title: str, description: str, team_key: str
+) -> str:
     """Resolves `team_key` to a real Linear team ID, then creates the
     issue. Shared by both real call sites — GraphQL variables only,
     never string-interpolated into the query text."""

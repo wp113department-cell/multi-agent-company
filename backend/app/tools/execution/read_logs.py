@@ -135,7 +135,9 @@ def read_logs_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> st
         out = f"From {newest}:\n" + r.stdout
 
     if rl_level != "all":
-        filtered = [line for line in out.splitlines() if rl_level.upper() in line.upper()]
+        filtered = [
+            line for line in out.splitlines() if rl_level.upper() in line.upper()
+        ]
         out = "\n".join(filtered)
     return out[:5000] or "(no log entries)"
 

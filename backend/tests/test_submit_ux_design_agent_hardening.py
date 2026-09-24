@@ -103,6 +103,4 @@ def test_submit_accumulates_into_result_dict() -> None:
         {"summary": "Proposed a consistent spacing scale", "findings": []}
     )
     assert out == "Submitted."
-    assert (
-        handlers["_result"]["summary"] == "Proposed a consistent spacing scale"
-    )
+    assert handlers["_result"]["summary"] == "Proposed a consistent spacing scale"

@@ -124,6 +124,6 @@ def test_dependency_agent_wires_the_shared_handler() -> None:
     it doesn't change what a call returns."""
     handlers = make_dependency_agent_handlers("/tmp")
     assert handlers["check_last_release"] is not check_last_release_handler
-    assert handlers["check_last_release"]({"package": ""}) == check_last_release_handler(
+    assert handlers["check_last_release"](
         {"package": ""}
-    )
+    ) == check_last_release_handler({"package": ""})

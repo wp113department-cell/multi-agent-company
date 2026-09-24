@@ -133,7 +133,9 @@ def test_jinja2_is_not_installed_in_this_deployment() -> None:
 
 def test_handler_renders_a_real_inline_template(tmp_path: Path) -> None:
     result = template_render_handler(
-        tmp_path, str(tmp_path), {"template": "Hello {{ name }}!", "vars": {"name": "World"}}
+        tmp_path,
+        str(tmp_path),
+        {"template": "Hello {{ name }}!", "vars": {"name": "World"}},
     )
     assert "Hello World!" in result
 

@@ -77,9 +77,7 @@ async def test_chat_agent_dispatch_closes_path_escape(tmp_path: Path) -> None:
     outside.write_text("import os\nimport sys\n\nSECRET_MARKER = 1\n")
 
     agent = _agent(str(repo))
-    result = await agent._execute_tool(
-        "find_unused_imports", {"path": str(outside)}
-    )
+    result = await agent._execute_tool("find_unused_imports", {"path": str(outside)})
     assert "[POLICY DENIED]" in result
     assert "SECRET_MARKER" not in result
 
@@ -103,9 +101,7 @@ def test_handler_closes_path_escape_directly(tmp_path: Path) -> None:
 async def test_chat_agent_dispatch_no_longer_unknown_tool(tmp_path: Path) -> None:
     (tmp_path / "unused.py").write_text("import os\n\nprint('hi')\n")
     agent = _agent(str(tmp_path))
-    result = await agent._execute_tool(
-        "find_unused_imports", {"path": "unused.py"}
-    )
+    result = await agent._execute_tool("find_unused_imports", {"path": "unused.py"})
     assert "Unknown tool" not in result
     assert "os" in result
 
@@ -118,9 +114,7 @@ async def test_chat_agent_dispatch_no_longer_unknown_tool(tmp_path: Path) -> Non
 
 def test_handler_finds_a_real_unused_import(tmp_path: Path) -> None:
     (tmp_path / "unused.py").write_text("import os\n\nprint('hi')\n")
-    result = find_unused_imports_handler(
-        tmp_path, str(tmp_path), {"path": "unused.py"}
-    )
+    result = find_unused_imports_handler(tmp_path, str(tmp_path), {"path": "unused.py"})
     assert "F401" in result
     assert "`os` imported but unused" in result
 
@@ -132,9 +126,7 @@ def test_handler_reports_clean_file(tmp_path: Path) -> None:
     inherited, unmodified, dead-in-practice code from the original
     implementation; not this tool's own turn's finding to change."""
     (tmp_path / "clean.py").write_text("import os\n\nprint(os.getcwd())\n")
-    result = find_unused_imports_handler(
-        tmp_path, str(tmp_path), {"path": "clean.py"}
-    )
+    result = find_unused_imports_handler(tmp_path, str(tmp_path), {"path": "clean.py"})
     assert "[ERROR]" not in result
     assert "F401" not in result
 
@@ -151,7 +143,5 @@ async def test_chat_agent_dispatch_finds_a_real_unused_import(
 ) -> None:
     (tmp_path / "unused.py").write_text("import os\n\nprint('hi')\n")
     agent = _agent(str(tmp_path))
-    result = await agent._execute_tool(
-        "find_unused_imports", {"path": "unused.py"}
-    )
+    result = await agent._execute_tool("find_unused_imports", {"path": "unused.py"})
     assert "F401" in result

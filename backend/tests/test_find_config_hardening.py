@@ -94,7 +94,9 @@ async def test_chat_agent_does_not_hang_on_include_flag_key(tmp_path: Path) -> N
     result = await agent._execute_tool("find_config", {"key": "--include=*"})
     elapsed = time.time() - t0
     assert "[ERROR]" in result
-    assert elapsed < 3, f"took {elapsed}s — should reject instantly, not hang until timeout"
+    assert (
+        elapsed < 3
+    ), f"took {elapsed}s — should reject instantly, not hang until timeout"
 
 
 @pytest.mark.parametrize(
@@ -126,7 +128,9 @@ def test_make_chat_handlers_does_not_hang_on_include_flag_key(tmp_path: Path) ->
 # ---------------------------------------------------------------------------
 
 
-def test_security_reviewer_actually_searches_for_the_requested_key(tmp_path: Path) -> None:
+def test_security_reviewer_actually_searches_for_the_requested_key(
+    tmp_path: Path,
+) -> None:
     (tmp_path / "config.py").write_text("MY_CUSTOM_SETTING = 'value'\n")
     handlers = make_security_reviewer_handlers(str(tmp_path))
     result = handlers["find_config"]({"key": "MY_CUSTOM_SETTING"})

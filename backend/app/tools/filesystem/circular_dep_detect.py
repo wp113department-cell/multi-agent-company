@@ -89,7 +89,9 @@ CIRCULAR_DEP_DETECT_TOOL = {
 }
 
 
-def circular_dep_detect_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> str:
+def circular_dep_detect_handler(
+    root: Path, worktree_path: str, inp: dict[str, Any]
+) -> str:
     """Core circular_dep_detect logic shared by all three real call sites."""
     directory = str(inp.get("directory", ""))
     policy = check_path_in_worktree(directory, worktree_path)

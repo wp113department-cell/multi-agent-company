@@ -44,11 +44,17 @@ def test_detects_a_genuinely_unresolvable_import(tmp_path: Path) -> None:
 
 
 def test_stdlib_and_installed_packages_are_not_flagged(tmp_path: Path) -> None:
-    _write(tmp_path, "a.py", "import os\nimport sys\nimport json\nfrom pathlib import Path\n")
+    _write(
+        tmp_path,
+        "a.py",
+        "import os\nimport sys\nimport json\nfrom pathlib import Path\n",
+    )
     assert find_broken_imports(str(tmp_path)) == []
 
 
-def test_import_error_guarded_optional_dependency_is_not_flagged(tmp_path: Path) -> None:
+def test_import_error_guarded_optional_dependency_is_not_flagged(
+    tmp_path: Path,
+) -> None:
     _write(
         tmp_path,
         "a.py",

@@ -96,7 +96,9 @@ def openapi_inspect_handler(root: Path, worktree_path: str, inp: dict[str, Any])
     try:
         text = fpath.read_text(encoding="utf-8")
         spec = (
-            yaml.safe_load(text) if fpath.suffix in (".yaml", ".yml") else json.loads(text)
+            yaml.safe_load(text)
+            if fpath.suffix in (".yaml", ".yml")
+            else json.loads(text)
         )
     except Exception as e:
         return f"[ERROR] openapi_inspect: {e}"

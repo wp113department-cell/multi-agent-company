@@ -94,7 +94,9 @@ def _run_kwargs(trace_kwarg: dict[str, str], initial_message: str) -> dict[str, 
 
 
 @pytest.mark.asyncio
-async def test_resume_trace_id_continues_real_prior_conversation_real_postgres() -> None:
+async def test_resume_trace_id_continues_real_prior_conversation_real_postgres() -> (
+    None
+):
     settings = get_settings()
     await init_agent_checkpointer(settings.database_url)
     try:

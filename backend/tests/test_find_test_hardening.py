@@ -82,9 +82,7 @@ async def test_chat_agent_dispatch_now_finds_js_style_tests(tmp_path: Path) -> N
         "});\n"
     )
     agent = _agent(str(tmp_path))
-    result = await agent._execute_tool(
-        "find_test", {"function_name": "special_widget"}
-    )
+    result = await agent._execute_tool("find_test", {"function_name": "special_widget"})
     assert "special_widget" in result
 
 

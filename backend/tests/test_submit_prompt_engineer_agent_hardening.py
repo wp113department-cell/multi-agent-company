@@ -120,6 +120,4 @@ def test_submit_accumulates_into_result_dict() -> None:
         {"summary": "Tightened the output contract in coder.md", "findings": []}
     )
     assert out == "Submitted."
-    assert (
-        handlers["_result"]["summary"] == "Tightened the output contract in coder.md"
-    )
+    assert handlers["_result"]["summary"] == "Tightened the output contract in coder.md"

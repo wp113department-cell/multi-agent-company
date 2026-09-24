@@ -206,6 +206,50 @@ def request_human_review(
 _ORPHAN_SWEEP_INTERVAL_SECONDS = 300  # check every 5 minutes
 
 
+async def _is_cross_run_looping(
+    db: Any,
+    task_id: int,
+    agent_type: str,
+    window: int | None = None,
+    exclude_run_id: str | None = None,
+) -> bool:
+    """T2-B10 (2026-09-24, GRIDIRON_PARTIAL #442 "Detect looping agents
+    (cross-run)" — Task 1's own re-verification of this item, DOWNGRADED:
+    "only within-run stall detection exists [n_stalls] ... nothing detects
+    ... an agent looping/failing repeatedly across runs.")
+
+    Real, bounded computation: the last `window` AgentRun rows for this
+    EXACT (task_id, agent_type) pair, most-recent first — EXCLUDING
+    `exclude_run_id` (the orphan currently being evaluated for resume,
+    still status="running" at this point, which would otherwise dilute
+    its own PRIOR failure history: without excluding it, a run that has
+    genuinely failed twice before but hasn't concluded THIS attempt yet
+    could never trip the "every one of the last N is failed" check, since
+    its own still-"running" row would always occupy one of the N slots).
+    Returns True only when there are at least `window` PRIOR runs AND
+    every single one ended in "failed" — never a false positive from too
+    little history (a task on its 2nd real attempt is not "looping" yet),
+    and never fabricated: reads AgentRun.status directly, the same real,
+    already-persisted field finish_agent_run() writes at every run's own
+    natural completion point.
+    """
+    from sqlalchemy import select
+
+    from app.db.models import AgentRun
+
+    window = window if window is not None else get_settings().cross_run_loop_window
+    stmt = select(AgentRun.status).where(
+        AgentRun.task_id == task_id, AgentRun.agent_type == agent_type
+    )
+    if exclude_run_id is not None:
+        stmt = stmt.where(AgentRun.id != exclude_run_id)
+    result = await db.execute(stmt.order_by(AgentRun.started_at.desc()).limit(window))
+    statuses = [row[0] for row in result.all()]
+    if len(statuses) < window:
+        return False
+    return all(s == "failed" for s in statuses)
+
+
 async def reconcile_orphaned_runs(threshold_seconds: int | None = None) -> int:
     """Find agent_runs rows stuck in status="running" with a heartbeat older
     than the threshold. T2-B2 (2026-09-22, GRIDIRON_PARTIAL #235/#236/#246)
@@ -276,12 +320,28 @@ async def reconcile_orphaned_runs(threshold_seconds: int | None = None) -> int:
             return 0
 
         resumed_ids: list[str] = []
+        looping_ids: list[str] = []
         for row in orphans:
+            if row.task_id is not None and await _is_cross_run_looping(
+                db, int(row.task_id), str(row.agent_type), exclude_run_id=str(row.id)
+            ):
+                # T2-B10 (#442) — this exact agent/task pair has already
+                # failed `cross_run_loop_window` times in a row; resuming
+                # it again would just be orphan recovery endlessly
+                # re-animating a genuinely stuck loop instead of ever
+                # letting the failure-ladder's own escalate() rung fire.
+                looping_ids.append(str(row.id))
+                continue
             resumed = await _try_resume_orphan(db, row)
             if resumed:
                 resumed_ids.append(str(row.id))
 
-        to_fail = [row for row in orphans if str(row.id) not in resumed_ids]
+        to_fail = [
+            row
+            for row in orphans
+            if str(row.id) not in resumed_ids and str(row.id) not in looping_ids
+        ]
+        looping_rows = [row for row in orphans if str(row.id) in looping_ids]
         if to_fail:
             await db.execute(
                 text(
@@ -292,6 +352,18 @@ async def reconcile_orphaned_runs(threshold_seconds: int | None = None) -> int:
                 ),
                 {"now": now, "ids": [str(row.id) for row in to_fail]},
             )
+        if looping_rows:
+            await db.execute(
+                text(
+                    "UPDATE agent_runs SET status = 'failed', "
+                    "error = 'cross-run loop detected — this agent/task pair "
+                    "has already failed repeatedly; not auto-resumed again', "
+                    "finished_at = :now "
+                    "WHERE id = ANY(:ids)"
+                ),
+                {"now": now, "ids": [str(row.id) for row in looping_rows]},
+            )
+        if to_fail or looping_rows:
             await db.commit()
 
     for row in to_fail:
@@ -302,13 +374,19 @@ async def reconcile_orphaned_runs(threshold_seconds: int | None = None) -> int:
             )
         except Exception:
             pass
+    for row in looping_rows:
+        try:
+            escalate(str(row.agent_type), "cross-run loop detected")
+        except Exception:
+            pass
 
-    if resumed_ids:
+    if resumed_ids or looping_rows:
         logger.warning(
             "Orphan recovery: resumed %d stale agent_runs from their "
-            "checkpoint, marked %d failed",
+            "checkpoint, marked %d failed (%d for looping), skipped resuming",
             len(resumed_ids),
-            len(to_fail),
+            len(to_fail) + len(looping_rows),
+            len(looping_rows),
         )
     else:
         logger.warning("Orphan recovery: reconciled %d stale agent_runs", len(to_fail))

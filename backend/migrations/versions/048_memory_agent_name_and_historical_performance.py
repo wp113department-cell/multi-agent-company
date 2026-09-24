@@ -58,30 +58,24 @@ def upgrade() -> None:
     # regexp_match returns NULL (not an error) when the pattern doesn't
     # match, so each UPDATE only ever touches rows that genuinely encode an
     # agent_name in the expected place — no fabricated values.
-    op.execute(
-        """
+    op.execute("""
         UPDATE memory_embeddings
         SET agent_name = (regexp_match(description, '^Agent: ([^\n]+)'))[1]
         WHERE category = 'architecture'
           AND description ~ '^Agent: '
-        """
-    )
-    op.execute(
-        """
+        """)
+    op.execute("""
         UPDATE memory_embeddings
         SET agent_name = (regexp_match(summary, '^Agent: ([^\n]+)'))[1]
         WHERE category = 'procedure'
           AND summary ~ '^Agent: '
-        """
-    )
-    op.execute(
-        """
+        """)
+    op.execute("""
         UPDATE memory_embeddings
         SET agent_name = substring(task_id from 7)
         WHERE category = 'learning'
           AND task_id LIKE 'fleet-%'
-        """
-    )
+        """)
 
     op.create_table(
         "agent_historical_performance",

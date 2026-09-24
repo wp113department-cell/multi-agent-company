@@ -66,9 +66,7 @@ async def test_chat_agent_find_todos_rejects_directory_outside_repo(
     secret.write_text("# TODO: rotate the real production secret\n")
     try:
         agent = _agent(tmp_path)
-        result = await agent._execute_tool(
-            "find_todos", {"directory": str(outside)}
-        )
+        result = await agent._execute_tool("find_todos", {"directory": str(outside)})
         assert "[POLICY DENIED]" in result
         assert "rotate the real production secret" not in result
     finally:

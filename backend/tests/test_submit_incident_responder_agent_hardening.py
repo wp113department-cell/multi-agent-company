@@ -79,9 +79,7 @@ def test_write_file_allows_top_level_md() -> None:
             {"path": "INCIDENT_REPORT.md", "content": "# Incident Report\n"}
         )
         assert result.startswith("Written")
-        assert (
-            Path(tmp) / "INCIDENT_REPORT.md"
-        ).read_text() == "# Incident Report\n"
+        assert (Path(tmp) / "INCIDENT_REPORT.md").read_text() == "# Incident Report\n"
 
 
 def test_write_file_allows_docs_subpath() -> None:
@@ -114,6 +112,4 @@ def test_submit_accumulates_into_result_dict() -> None:
         {"summary": "Root cause: bad deploy at 14:02 UTC", "findings": []}
     )
     assert out == "Submitted."
-    assert (
-        handlers["_result"]["summary"] == "Root cause: bad deploy at 14:02 UTC"
-    )
+    assert handlers["_result"]["summary"] == "Root cause: bad deploy at 14:02 UTC"

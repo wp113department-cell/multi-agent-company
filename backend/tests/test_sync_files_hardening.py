@@ -54,9 +54,9 @@ async def test_chat_agent_sync_files_rejects_source_outside_repo(
             "sync_files", {"source": str(outside), "paths": ["exfiltrated.txt"]}
         )
         assert "[POLICY DENIED]" in result or "[ERROR]" in result
-        assert not (tmp_path / "exfiltrated.txt").exists(), (
-            "must not read+write an outside-repo source into the repo"
-        )
+        assert not (
+            tmp_path / "exfiltrated.txt"
+        ).exists(), "must not read+write an outside-repo source into the repo"
     finally:
         outside.unlink()
 
@@ -76,9 +76,9 @@ async def test_chat_agent_sync_files_rejects_target_outside_repo(
             {"source": "source.txt", "paths": [str(outside_target)]},
         )
         assert "[POLICY DENIED]" in result
-        assert not outside_target.exists(), (
-            "must not write a target file outside the repo"
-        )
+        assert (
+            not outside_target.exists()
+        ), "must not write a target file outside the repo"
     finally:
         if outside_target.exists():
             outside_target.unlink()

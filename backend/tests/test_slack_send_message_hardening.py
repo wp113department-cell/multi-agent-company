@@ -66,7 +66,9 @@ def fake_webhook() -> Any:
 
 
 def _agent(repo: Path) -> ChatAgent:
-    session = ChatSession(session_id="td_slack_send_message_hardening", repo_path=str(repo))
+    session = ChatSession(
+        session_id="td_slack_send_message_hardening", repo_path=str(repo)
+    )
     return ChatAgent(session)
 
 

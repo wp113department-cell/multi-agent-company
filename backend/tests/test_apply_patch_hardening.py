@@ -114,7 +114,9 @@ def test_handler_applies_a_real_legit_patch(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_agent_apply_patch_applies_a_real_legit_patch(tmp_path: Path) -> None:
+async def test_chat_agent_apply_patch_applies_a_real_legit_patch(
+    tmp_path: Path,
+) -> None:
     (tmp_path / "mod.py").write_text("def foo():\n    return 1\n")
     agent = _agent(tmp_path)
     result = await agent._execute_tool(

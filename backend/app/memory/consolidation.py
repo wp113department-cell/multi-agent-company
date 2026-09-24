@@ -47,7 +47,15 @@ logger = logging.getLogger(__name__)
 # Every real category memory_embeddings rows are ever written under (see
 # app/memory/store.py's embed_* functions) — iterated one at a time so one
 # category's clustering never mixes topics from another.
-_CATEGORIES = ("task", "architecture", "failure", "learning", "procedure", "preference", "bug")
+_CATEGORIES = (
+    "task",
+    "architecture",
+    "failure",
+    "learning",
+    "procedure",
+    "preference",
+    "bug",
+)
 
 
 @dataclass
@@ -142,7 +150,10 @@ def find_consolidation_groups(
             group = [seed]
             rest = []
             for other in remaining[1:]:
-                if _cosine_similarity(seed.embedding, other.embedding) >= similarity_threshold:
+                if (
+                    _cosine_similarity(seed.embedding, other.embedding)
+                    >= similarity_threshold
+                ):
                     group.append(other)
                 else:
                     rest.append(other)
@@ -256,17 +267,27 @@ async def run_memory_consolidation_cycle() -> int:
     consolidated = 0
 
     for category in _CATEGORIES:
-        if consolidated >= settings.memory_embeddings_consolidation_max_groups_per_cycle:
+        if (
+            consolidated
+            >= settings.memory_embeddings_consolidation_max_groups_per_cycle
+        ):
             break
         try:
             async with factory() as db:
                 candidates = await _fetch_candidates(
-                    db, category, cutoff, settings.memory_embeddings_consolidation_scan_limit
+                    db,
+                    category,
+                    cutoff,
+                    settings.memory_embeddings_consolidation_scan_limit,
                 )
-                if len(candidates) < settings.memory_embeddings_consolidation_min_group_size:
+                if (
+                    len(candidates)
+                    < settings.memory_embeddings_consolidation_min_group_size
+                ):
                     continue
                 remaining_budget = (
-                    settings.memory_embeddings_consolidation_max_groups_per_cycle - consolidated
+                    settings.memory_embeddings_consolidation_max_groups_per_cycle
+                    - consolidated
                 )
                 groups = find_consolidation_groups(
                     candidates,
@@ -276,12 +297,17 @@ async def run_memory_consolidation_cycle() -> int:
                 )
                 for group in groups:
                     ok = await consolidate_group(
-                        db, group, settings.model_router, settings.lesson_compression_llm_timeout_seconds
+                        db,
+                        group,
+                        settings.model_router,
+                        settings.lesson_compression_llm_timeout_seconds,
                     )
                     if ok:
                         consolidated += 1
         except Exception as exc:
-            logger.warning("Memory consolidation cycle failed for category=%s: %s", category, exc)
+            logger.warning(
+                "Memory consolidation cycle failed for category=%s: %s", category, exc
+            )
 
     return consolidated
 
@@ -294,7 +320,9 @@ async def start_memory_consolidation_loop() -> None:
     why."""
     settings = get_settings()
     if not settings.memory_embeddings_consolidation_enabled:
-        logger.info("Memory consolidation disabled (MEMORY_EMBEDDINGS_CONSOLIDATION_ENABLED=false)")
+        logger.info(
+            "Memory consolidation disabled (MEMORY_EMBEDDINGS_CONSOLIDATION_ENABLED=false)"
+        )
         return
 
     logger.info(
@@ -310,7 +338,11 @@ async def start_memory_consolidation_loop() -> None:
         try:
             merged = await run_memory_consolidation_cycle()
             if merged:
-                logger.info("Memory consolidation cycle complete: %d group(s) merged", merged)
+                logger.info(
+                    "Memory consolidation cycle complete: %d group(s) merged", merged
+                )
         except Exception as exc:
             logger.warning("Memory consolidation cycle error: %s", exc)
-        await asyncio.sleep(settings.memory_embeddings_consolidation_interval_hours * 3600)
+        await asyncio.sleep(
+            settings.memory_embeddings_consolidation_interval_hours * 3600
+        )

@@ -112,6 +112,4 @@ def test_submit_accumulates_into_result_dict() -> None:
         }
     )
     assert out == "Submitted."
-    assert (
-        handlers["_result"]["summary"] == "Built a stdio MCP server exposing 2 tools"
-    )
+    assert handlers["_result"]["summary"] == "Built a stdio MCP server exposing 2 tools"

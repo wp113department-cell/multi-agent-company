@@ -136,7 +136,9 @@ def test_rating_route_is_authenticated_only_not_approver_only() -> None:
                 )
             elif isinstance(r, APIRoute):
                 for method in r.methods - {"HEAD", "OPTIONS"}:
-                    found.append((method, prefix + r.path, dependency_names(r, inherited)))
+                    found.append(
+                        (method, prefix + r.path, dependency_names(r, inherited))
+                    )
 
     collect(fastapi_app)
     matches = [f for f in found if f[0] == "POST" and f[1] == "/api/ratings"]

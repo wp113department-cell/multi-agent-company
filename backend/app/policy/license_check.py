@@ -37,6 +37,7 @@ Category boundaries (industry-standard, not invented for this project):
 from __future__ import annotations
 
 import importlib.metadata as _metadata
+import re
 from dataclasses import dataclass, field
 
 _DISALLOWED_SPDX_PREFIXES = (
@@ -186,6 +187,154 @@ def scan_installed_package_licenses() -> LicenseComplianceReport:
             continue
         seen.add(name)
         findings.append(_classify_one(dist))
+    findings.sort(
+        key=lambda f: (
+            f.category != "disallowed",
+            f.category != "review",
+            f.package.lower(),
+        )
+    )
+    return LicenseComplianceReport(findings=findings)
+
+
+# T2-B10 (2026-09-24, GRIDIRON_PARTIAL #331 "Licensing policy enforcement"
+# — Task 1's own re-verification of this item, DOWNGRADED:
+# "check_license_compliance scans the PLATFORM's own installed Python
+# packages ... nothing enforces a license policy on a TARGET repo's
+# dependency changes, and CI has no license job.").
+#
+# scan_installed_package_licenses() above is real but structurally cannot
+# answer "what license does THIS repo's requirements.txt actually pull
+# in" — a target repo's own dependencies are not necessarily installed in
+# this process's own venv at all. This is that missing capability: parses
+# a real requirements.txt, queries the SAME public PyPI JSON metadata
+# endpoint app.tools.integrations.check_last_release already uses for
+# real registry lookups (no local installation needed), and reuses the
+# EXACT same _classify_spdx_expression/_classify_classifier functions
+# above — one classification policy, two data sources, never a duplicated
+# or drifted rule set.
+_REQUIREMENT_NAME_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+# A real, bounded safety valve (same shape as check_batch_edit_max_files/
+# rename_symbol_max_files elsewhere in this codebase) — a requirements.txt
+# with hundreds of pins would otherwise trigger hundreds of sequential
+# network round trips in one tool call.
+_MAX_TARGET_REPO_PACKAGES = 60
+
+
+def _parse_requirements_txt(text: str) -> list[str]:
+    """Real, minimal requirements.txt parsing: one bare package name per
+    real dependency line, skipping comments/blank lines/-r includes/
+    editable installs/URL-based requirements (none of which name a real
+    PyPI package this function could look up)."""
+    names: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line or line.startswith(("-", "git+", "http://", "https://")):
+            continue
+        m = _REQUIREMENT_NAME_RE.match(line)
+        if m:
+            names.append(m.group(1))
+    return names
+
+
+def _fetch_pypi_license_fields(package: str) -> tuple[str | None, list[str]]:
+    """Real PyPI JSON API call (same curl invocation shape as
+    check_last_release_handler) — returns (license_field, classifiers).
+    Never raises: any network/parse failure returns (None, [])."""
+    import json as _json
+    import subprocess
+
+    try:
+        r = subprocess.run(
+            [
+                "curl",
+                "-s",
+                "-L",
+                "--max-time",
+                "15",
+                "--user-agent",
+                "Gridiron-Agent/1.0",
+                f"https://pypi.org/pypi/{package}/json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if r.returncode != 0 or not r.stdout:
+            return None, []
+        data = _json.loads(r.stdout)
+        info = data.get("info") or {}
+        return info.get("license"), list(info.get("classifiers") or [])
+    except Exception:
+        return None, []
+
+
+def scan_target_repo_dependency_licenses(
+    repo_path: str, requirements_filename: str = "requirements.txt"
+) -> LicenseComplianceReport | None:
+    """Real scan of a TARGET repo's own requirements.txt against live PyPI
+    license metadata — the actual gap #331 names, distinct from
+    scan_installed_package_licenses()'s platform-venv scan above. Returns
+    None (not an empty report) when the file doesn't exist — "no
+    requirements.txt" and "requirements.txt with zero real findings" are
+    genuinely different states, matching this codebase's own "no data yet
+    is neutral, never fabricated" convention."""
+    import os
+
+    req_path = os.path.join(repo_path, requirements_filename)
+    if not os.path.isfile(req_path):
+        return None
+    with open(req_path, encoding="utf-8", errors="replace") as f:
+        names = _parse_requirements_txt(f.read())
+
+    findings: list[PackageLicenseFinding] = []
+    for name in names[:_MAX_TARGET_REPO_PACKAGES]:
+        license_field, classifiers = _fetch_pypi_license_fields(name)
+        license_classifiers = [
+            c.split(" :: ", 1)[1] for c in classifiers if c.startswith("License ::")
+        ]
+        if license_classifiers:
+            combined = "; ".join(license_classifiers)
+            findings.append(
+                PackageLicenseFinding(
+                    package=name,
+                    version="",
+                    category=_classify_classifier(combined),
+                    license_source="classifier",
+                    license_value=combined,
+                )
+            )
+        elif license_field and len(license_field) <= _MAX_FREE_TEXT_LICENSE_LEN:
+            findings.append(
+                PackageLicenseFinding(
+                    package=name,
+                    version="",
+                    category=_classify_classifier(license_field),
+                    license_source="license-field",
+                    license_value=license_field,
+                )
+            )
+        elif license_field:
+            findings.append(
+                PackageLicenseFinding(
+                    package=name,
+                    version="",
+                    category="unknown",
+                    license_source="license-field",
+                    license_value=f"(unparseable — {len(license_field)} chars of license text, not a name)",
+                )
+            )
+        else:
+            findings.append(
+                PackageLicenseFinding(
+                    package=name,
+                    version="",
+                    category="unknown",
+                    license_source="none",
+                    license_value="",
+                )
+            )
+
     findings.sort(
         key=lambda f: (
             f.category != "disallowed",

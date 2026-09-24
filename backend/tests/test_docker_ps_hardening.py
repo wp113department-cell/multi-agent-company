@@ -95,12 +95,14 @@ def test_handler_honors_all_true_passes_flag() -> None:
         ("docker_agent", make_docker_agent_handlers),
     ],
 )
-def test_both_factories_honor_all_true(tmp_path: Path, factory_name: str, factory) -> None:
+def test_both_factories_honor_all_true(
+    tmp_path: Path, factory_name: str, factory
+) -> None:
     handlers = factory(str(tmp_path))
     result = handlers["docker_ps"]({"all": True})
-    assert "Exited" in result or "Created" in result, (
-        f"{factory_name} did not honor all=True"
-    )
+    assert (
+        "Exited" in result or "Created" in result
+    ), f"{factory_name} did not honor all=True"
 
 
 # ---------------------------------------------------------------------------

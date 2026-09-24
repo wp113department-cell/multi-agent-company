@@ -65,9 +65,7 @@ def analyze_error_handler(inp: dict[str, Any]) -> str:
     ae_lines = ae_error.strip().splitlines()
     exception_line = ""
     for ae_line in reversed(ae_lines):
-        if any(
-            x in ae_line for x in ("Error:", "Exception:", "Warning:", "Traceback")
-        ):
+        if any(x in ae_line for x in ("Error:", "Exception:", "Warning:", "Traceback")):
             exception_line = ae_line
             break
     frames: list[str] = []
@@ -92,7 +90,9 @@ def analyze_error_handler(inp: dict[str, Any]) -> str:
     ae_low = ae_error.lower()
     suggestions: list[str] = []
     if "modulenotfounderror" in ae_low or "importerror" in ae_low:
-        suggestions.append("→ Missing dependency — run: pip install -r requirements.txt")
+        suggestions.append(
+            "→ Missing dependency — run: pip install -r requirements.txt"
+        )
     elif "attributeerror" in ae_low:
         suggestions.append(
             "→ Object doesn't have this attribute — check spelling and type"
@@ -100,7 +100,9 @@ def analyze_error_handler(inp: dict[str, Any]) -> str:
     elif "typeerror" in ae_low:
         suggestions.append("→ Wrong argument type/count — check function signature")
     elif "keyerror" in ae_low:
-        suggestions.append("→ Dictionary key not found — use .get() or check key exists")
+        suggestions.append(
+            "→ Dictionary key not found — use .get() or check key exists"
+        )
     elif "filenotfounderror" in ae_low:
         suggestions.append("→ Path doesn't exist — verify path and working directory")
     elif "connectionrefusederror" in ae_low or "connection refused" in ae_low:
@@ -108,7 +110,9 @@ def analyze_error_handler(inp: dict[str, Any]) -> str:
             "→ Service not running — check if DB/Redis/backend is started"
         )
     elif "syntaxerror" in ae_low:
-        suggestions.append("→ Python syntax error — check brackets, colons, indentation")
+        suggestions.append(
+            "→ Python syntax error — check brackets, colons, indentation"
+        )
     elif "valueerror" in ae_low:
         suggestions.append("→ Invalid value — validate input before passing it")
     if suggestions:

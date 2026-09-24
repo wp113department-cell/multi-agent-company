@@ -116,7 +116,10 @@ def test_git_tag_unaffected_by_write_file_scoping() -> None:
 def test_submit_accumulates_into_result_dict() -> None:
     handlers = make_version_manager_agent_handlers("/tmp")
     out = handlers["submit_version_manager_agent"](
-        {"summary": "Recommend bumping requests to 2.31.0 for CVE-2023-32681", "findings": []}
+        {
+            "summary": "Recommend bumping requests to 2.31.0 for CVE-2023-32681",
+            "findings": [],
+        }
     )
     assert out == "Submitted."
     assert "CVE-2023-32681" in handlers["_result"]["summary"]

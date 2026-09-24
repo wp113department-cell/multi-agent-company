@@ -82,12 +82,16 @@ def test_unresolvable_real_conflict_is_reported_not_a_crash() -> None:
 
 def test_unknown_package_is_a_real_conflict_not_silently_resolved() -> None:
     provider = _make_fake_world(packages={}, deps={})
-    result = check_dependency_conflicts(["totally-unknown-package>=1.0"], provider=provider)
+    result = check_dependency_conflicts(
+        ["totally-unknown-package>=1.0"], provider=provider
+    )
     assert result.error is None
     assert result.resolvable is False
 
 
-def test_malformed_requirement_string_is_a_real_error_not_a_fabricated_conflict() -> None:
+def test_malformed_requirement_string_is_a_real_error_not_a_fabricated_conflict() -> (
+    None
+):
     """A parse failure and a genuine version conflict are different claims
     — matches dependency_conflict.py's own 'a failed check and a clean
     check are different claims' convention."""
@@ -105,7 +109,9 @@ def test_extras_gated_dependencies_are_skipped_not_crashed_on() -> None:
     result = check_dependency_conflicts(["a==1.0.0"], provider=provider)
     assert result.error is None
     assert result.resolvable is True
-    assert "b" not in result.resolved_versions  # extras-gated dep intentionally not pulled in
+    assert (
+        "b" not in result.resolved_versions
+    )  # extras-gated dep intentionally not pulled in
 
 
 def test_no_metadata_available_excludes_candidates_gracefully() -> None:

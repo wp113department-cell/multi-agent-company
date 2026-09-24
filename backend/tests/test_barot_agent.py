@@ -13,13 +13,11 @@ import pytest
 from app.agents.barot_agent import (
     TEMP_AGENT_EXECUTION,
     BarotDecision,
-    ToolProfilePlan,
     _validate_tool_names,
     try_fill_capability_gap,
 )
 from app.agents.temporary_agent import get_temporary_agent_pool
 from app.fleet.capability_registry import get_capability_registry
-from app.fleet.agent_registry import get_agent_registry
 
 
 def _tool_use_response(tool_names, briefing):
@@ -76,7 +74,6 @@ def test_validate_tool_names_dedupes() -> None:
 
 
 def test_declines_when_disabled(monkeypatch) -> None:
-    from app.config import get_settings
 
     monkeypatch.setenv("BAROT_AGENT_ENABLED", "false")
     import app.config as cfg_module

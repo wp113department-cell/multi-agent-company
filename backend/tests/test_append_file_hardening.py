@@ -43,13 +43,17 @@ def test_handler_rejects_absolute_path_outside_worktree(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     outside = tmp_path / "outside.txt"
-    result = append_file_handler(repo, str(repo), {"path": str(outside), "content": "x"})
+    result = append_file_handler(
+        repo, str(repo), {"path": str(outside), "content": "x"}
+    )
     assert result.startswith("[POLICY DENIED]")
     assert not outside.exists()
 
 
 def test_handler_rejects_dotenv(tmp_path: Path) -> None:
-    result = append_file_handler(tmp_path, str(tmp_path), {"path": ".env", "content": "X=1"})
+    result = append_file_handler(
+        tmp_path, str(tmp_path), {"path": ".env", "content": "X=1"}
+    )
     assert result.startswith("[POLICY DENIED]")
     assert not (tmp_path / ".env").exists()
 
@@ -60,14 +64,18 @@ def test_handler_rejects_dotenv(tmp_path: Path) -> None:
 
 
 def test_handler_creates_file_on_first_append(tmp_path: Path) -> None:
-    result = append_file_handler(tmp_path, str(tmp_path), {"path": "log.txt", "content": "line1\n"})
+    result = append_file_handler(
+        tmp_path, str(tmp_path), {"path": "log.txt", "content": "line1\n"}
+    )
     assert result == "Appended 6 bytes to log.txt"
     assert (tmp_path / "log.txt").read_text() == "line1\n"
 
 
 def test_handler_appends_to_existing_file(tmp_path: Path) -> None:
     (tmp_path / "log.txt").write_text("line1\n")
-    result = append_file_handler(tmp_path, str(tmp_path), {"path": "log.txt", "content": "line2\n"})
+    result = append_file_handler(
+        tmp_path, str(tmp_path), {"path": "log.txt", "content": "line2\n"}
+    )
     assert result == "Appended 6 bytes to log.txt"
     assert (tmp_path / "log.txt").read_text() == "line1\nline2\n"
 

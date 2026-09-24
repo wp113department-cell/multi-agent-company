@@ -584,9 +584,9 @@ class TestRunAgentGraphSignature:
         }
         actual_params = set(sig.parameters.keys())
         for param in new_params:
-            assert param in actual_params, (
-                f"New param {param!r} missing from build_agent_graph"
-            )
+            assert (
+                param in actual_params
+            ), f"New param {param!r} missing from build_agent_graph"
 
     def test_run_agent_graph_has_enable_lesson_param(
         self, mock_key: Any, mock_load: Any

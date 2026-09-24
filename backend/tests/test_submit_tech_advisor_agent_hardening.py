@@ -124,6 +124,4 @@ def test_submit_accumulates_into_result_dict() -> None:
         {"summary": "Recommend PostgreSQL over MongoDB", "findings": []}
     )
     assert out == "Submitted."
-    assert (
-        handlers["_result"]["summary"] == "Recommend PostgreSQL over MongoDB"
-    )
+    assert handlers["_result"]["summary"] == "Recommend PostgreSQL over MongoDB"

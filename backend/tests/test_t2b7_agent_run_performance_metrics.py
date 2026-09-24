@@ -36,7 +36,9 @@ def _cleanup_task_sync(task_id: int) -> None:
         engine = _engine()
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                await session.execute(delete(AgentRun).where(AgentRun.task_id == task_id))
+                await session.execute(
+                    delete(AgentRun).where(AgentRun.task_id == task_id)
+                )
                 await session.execute(delete(DevTask).where(DevTask.id == task_id))
                 await session.commit()
         finally:
@@ -68,7 +70,9 @@ class TestFinishAgentRunPersistsPerformanceMetrics:
             async def _run() -> AgentRun:
                 engine = _engine()
                 try:
-                    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                    async with async_sessionmaker(
+                        engine, expire_on_commit=False
+                    )() as session:
                         run = await create_agent_run(
                             session, task_id, "bug_fix", "claude-test-model"
                         )
@@ -110,13 +114,13 @@ class TestFinishAgentRunPersistsPerformanceMetrics:
             async def _run() -> AgentRun:
                 engine = _engine()
                 try:
-                    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                    async with async_sessionmaker(
+                        engine, expire_on_commit=False
+                    )() as session:
                         run = await create_agent_run(
                             session, task_id, "bug_fix", "claude-test-model"
                         )
-                        await finish_agent_run(
-                            session, run.id, "failed", error="boom"
-                        )
+                        await finish_agent_run(session, run.id, "failed", error="boom")
                         refreshed = await session.get(AgentRun, run.id)
                         assert refreshed is not None
                         return refreshed
@@ -155,7 +159,9 @@ class TestMetricsEndpointSurfacesRealAverages:
             async def _seed() -> None:
                 engine = _engine()
                 try:
-                    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                    async with async_sessionmaker(
+                        engine, expire_on_commit=False
+                    )() as session:
                         r1 = await create_agent_run(session, task_id, agent_type, "m")
                         await finish_agent_run(
                             session,

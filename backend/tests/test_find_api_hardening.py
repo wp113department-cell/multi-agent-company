@@ -143,9 +143,7 @@ def test_api_docs_agent_now_excludes_node_modules_too(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_chat_agent_finds_real_api_by_name(tmp_path: Path) -> None:
-    (tmp_path / "app.py").write_text(
-        '@app.get("/users")\ndef get_users():\n    pass\n'
-    )
+    (tmp_path / "app.py").write_text('@app.get("/users")\ndef get_users():\n    pass\n')
     agent = _agent(tmp_path)
     result = await agent._execute_tool("find_api", {"name": "get_users"})
     assert "get_users" in result
@@ -153,7 +151,9 @@ async def test_chat_agent_finds_real_api_by_name(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_chat_agent_empty_name_finds_all_route_handlers(tmp_path: Path) -> None:
-    (tmp_path / "app.py").write_text('@app.post("/items")\ndef create_item():\n    pass\n')
+    (tmp_path / "app.py").write_text(
+        '@app.post("/items")\ndef create_item():\n    pass\n'
+    )
     agent = _agent(tmp_path)
     result = await agent._execute_tool("find_api", {})
     assert '@app.post("/items")' in result
@@ -172,9 +172,7 @@ async def test_chat_agent_no_match_reports_cleanly(tmp_path: Path) -> None:
     [make_chat_handlers, make_security_reviewer_handlers, make_api_docs_agent_handlers],
 )
 def test_all_three_factories_find_real_api_by_name(tmp_path: Path, factory) -> None:
-    (tmp_path / "app.py").write_text(
-        '@app.get("/users")\ndef get_users():\n    pass\n'
-    )
+    (tmp_path / "app.py").write_text('@app.get("/users")\ndef get_users():\n    pass\n')
     handlers = factory(str(tmp_path))
     result = handlers["find_api"]({"name": "get_users"})
     assert "get_users" in result

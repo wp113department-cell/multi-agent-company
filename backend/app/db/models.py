@@ -174,7 +174,9 @@ class DevTask(Base):
     # rather than a guessed one. AgentRun already carries cost_estimate/
     # tokens_in/tokens_out per run; this is the missing join key to roll
     # that up per user — see get_user_usage_rollup() in db/repository.py.
-    created_by: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    created_by: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, index=True
+    )
     # T2-B7 (2026-09-24, GRIDIRON_PARTIAL #428 "Detect blocked tasks
     # (dependency-driven, not just failure-driven)") — status="blocked" was
     # already overloaded across several distinct pause reasons (a
@@ -532,7 +534,9 @@ class Epic(Base):
     # convention as DevTask.created_by's own comment; the DevTask an epic's
     # own _planning_node creates inherits this the same way it already
     # inherits repo_id (see that DevTask(...) call's comment).
-    created_by: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    created_by: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -1202,11 +1206,93 @@ class PromptsScore(Base):
         index=True,
     )
     role_names: Mapped[Any] = mapped_column(ARRAY(Text), nullable=False, default=list)
-    blocked_roles: Mapped[Any] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    blocked_roles: Mapped[Any] = mapped_column(
+        ARRAY(Text), nullable=False, default=list
+    )
     prompts_score: Mapped[float] = mapped_column(Float, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class Roadmap(Base):
+    """T2-B10 (2026-09-24, GRIDIRON_PARTIAL #498/#484 "Roadmap tracked,
+    sequenced, and re-sequenced against real progress" / "Product
+    Management (roadmap/strategy)" — Task 1's own re-verification of both
+    items, DOWNGRADED: "roadmap_agent produces a one-shot LLM-written
+    roadmap document ... with no persisted Roadmap model, no sequence
+    field, and no mechanism that re-sequences it against real completed
+    epics/tasks over time — each run is independent, nothing is 'tracked'
+    between runs.").
+
+    One row per real roadmap_agent run that actually submitted a roadmap
+    (app/agents/roadmap_agent.py). repo_id nullable for the same "not
+    every task resolves to a repo" reason every other repo-scoped table in
+    this schema already has (see resolve_repo_id_from_path's own
+    docstring). The individual initiatives live in RoadmapItem, not a
+    JSONB blob, specifically so each one can carry its own real,
+    independently-updatable `status`/`sequence_order` — see that model's
+    own docstring for the actual "tracked and re-sequenced" mechanism.
+    """
+
+    __tablename__ = "roadmaps"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("repos.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    task_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("dev_tasks.id", ondelete="SET NULL"), nullable=True
+    )
+    summary: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    items: Mapped[list["RoadmapItem"]] = relationship(
+        back_populates="roadmap", cascade="all, delete-orphan"
+    )
+
+
+class RoadmapItem(Base):
+    """T2-B10 (2026-09-24, GRIDIRON_PARTIAL #498/#484) — one initiative
+    within a Roadmap. `status` is the real "tracked ... against real
+    progress" mechanism: starts "planned", moved to "in_progress"/
+    "completed"/"superseded" via a real API call
+    (PATCH /api/roadmap/items/{id}/status) as actual work happens — not
+    inferred or guessed. `sequence_order` is the real "re-sequenced"
+    mechanism: the NEXT roadmap_agent run for the same repo reads the
+    latest Roadmap's items (see get_latest_roadmap_for_repo) and folds
+    their current phase/status/sequence into its own prompt, so a new run
+    can genuinely re-sequence remaining work around what's already
+    done/in-progress instead of regenerating a roadmap from zero context
+    every single time."""
+
+    __tablename__ = "roadmap_items"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    roadmap_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("roadmaps.id", ondelete="CASCADE"), index=True
+    )
+    phase: Mapped[str] = mapped_column(String(100))
+    initiative: Mapped[str] = mapped_column(Text)
+    impact: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    effort: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    confidence: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    dependencies: Mapped[Any] = mapped_column(ARRAY(Text), nullable=True)
+    sequence_order: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(20), default="planned")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    roadmap: Mapped[Roadmap] = relationship(back_populates="items")
 
 
 class SecurityScore(Base):
@@ -1455,4 +1541,6 @@ class AgentRating(Base):
         DateTime(timezone=True), server_default=func.now(), index=True
     )
 
-    __table_args__ = (CheckConstraint("rating IN (-1, 1)", name="ck_agent_ratings_rating"),)
+    __table_args__ = (
+        CheckConstraint("rating IN (-1, 1)", name="ck_agent_ratings_rating"),
+    )

@@ -96,7 +96,9 @@ def test_avg_retries_reflects_real_per_run_retries_and_is_persisted() -> None:
             _cleanup_agent(agent_name)
 
 
-def test_avg_retries_falls_back_to_persisted_value_with_no_ring_buffer_history() -> None:
+def test_avg_retries_falls_back_to_persisted_value_with_no_ring_buffer_history() -> (
+    None
+):
     """A fresh agent with no MetricsCollector history yet must not report a
     fabricated 0.0 as if it were a real measurement — falls back to
     whatever's already durably stored (0.0 for a brand-new agent, same as

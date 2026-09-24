@@ -81,9 +81,7 @@ def list_migrations_handler(inp: dict[str, Any]) -> str:
     move.
     """
     versions_dir = (
-        Path(__file__).resolve().parent.parent.parent.parent
-        / "migrations"
-        / "versions"
+        Path(__file__).resolve().parent.parent.parent.parent / "migrations" / "versions"
     )
     if not versions_dir.exists():
         return "[]"

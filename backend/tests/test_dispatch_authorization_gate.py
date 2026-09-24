@@ -27,7 +27,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from app.agents.base_graph import AgentRunState, VerificationConfig, _make_execute_tools_node
+from app.agents.base_graph import (
+    AgentRunState,
+    VerificationConfig,
+    _make_execute_tools_node,
+)
 
 _READ_FILE_TOOL = {
     "name": "read_file",
@@ -38,6 +42,7 @@ _READ_FILE_TOOL = {
         "required": ["path"],
     },
 }
+
 
 def _state_with_tool_call(name: str, tool_input: dict[str, Any]) -> AgentRunState:
     return {

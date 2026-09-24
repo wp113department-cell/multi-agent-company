@@ -55,7 +55,9 @@ def test_make_chat_handlers_closes_directory_escape(tmp_path: Path) -> None:
     marker.write_text("")
 
     handlers = make_chat_handlers(str(repo))
-    result = handlers["find_file"]({"name": "SECRET_MARKER.txt", "directory": str(outside)})
+    result = handlers["find_file"](
+        {"name": "SECRET_MARKER.txt", "directory": str(outside)}
+    )
     assert "[POLICY DENIED]" in result
     assert "SECRET_MARKER" not in result
 
@@ -113,7 +115,9 @@ def test_handler_finds_a_real_file_in_a_subdirectory(tmp_path: Path) -> None:
 
 
 def test_handler_reports_no_matches(tmp_path: Path) -> None:
-    result = find_file_handler(tmp_path, str(tmp_path), {"name": "nonexistent_xyzzy.py"})
+    result = find_file_handler(
+        tmp_path, str(tmp_path), {"name": "nonexistent_xyzzy.py"}
+    )
     assert "no files matching" in result
 
 

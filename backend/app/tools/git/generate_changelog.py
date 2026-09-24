@@ -140,7 +140,9 @@ def generate_changelog_handler(root: Path, inp: dict[str, Any]) -> str:
                 timeout=10,
             )
             tag_list = [t for t in tags.stdout.strip().splitlines() if t]
-            from_ref = tag_list[1] if len(tag_list) >= 2 else tag_list[0] if tag_list else ""
+            from_ref = (
+                tag_list[1] if len(tag_list) >= 2 else tag_list[0] if tag_list else ""
+            )
 
         ref_range = f"{from_ref}..{to_ref}" if from_ref else to_ref
         log = subprocess.run(

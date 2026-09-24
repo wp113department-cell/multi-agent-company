@@ -130,7 +130,7 @@ def test_already_safe_coder_handler_still_rejects_output_flag(
     exploit_target.unlink(missing_ok=True)
     try:
         handlers = make_coder_handlers(str(tmp_path), str(tmp_path))
-        result = handlers["git_diff"]({"file": f"--output={exploit_target}"})
+        handlers["git_diff"]({"file": f"--output={exploit_target}"})
         assert not exploit_target.exists()
     finally:
         exploit_target.unlink(missing_ok=True)

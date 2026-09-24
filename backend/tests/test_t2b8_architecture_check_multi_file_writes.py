@@ -14,9 +14,7 @@ Real files on disk, real circular-import detection — nothing mocked.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
-import pytest
 
 from app.tools.filesystem.apply_patch import apply_patch_handler
 from app.tools.filesystem.sync_files import sync_files_handler
@@ -102,12 +100,7 @@ def _unified_diff(path_a: str, path_b: str) -> str:
 
 class TestApplyPatchArchitectureCheck:
     def test_single_file_patch_gets_no_architecture_check(self, tmp_path: Path) -> None:
-        patch = (
-            "--- /dev/null\n"
-            "+++ only.py\n"
-            "@@ -0,0 +1,1 @@\n"
-            "+VALUE = 1\n"
-        )
+        patch = "--- /dev/null\n" "+++ only.py\n" "@@ -0,0 +1,1 @@\n" "+VALUE = 1\n"
         result = apply_patch_handler(str(tmp_path), {"patch": patch, "strip": 0})
         assert (tmp_path / "only.py").exists(), result  # sanity: patch really applied
         assert "[ARCHITECTURE CHECK]" not in result

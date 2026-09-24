@@ -357,9 +357,7 @@ class TestModelRouterOverride:
 
     def test_override_respects_custom_provider_and_tier(self):
         router = ModelRouter()
-        router.set_override(
-            "temp_x", model="gpt-test", provider="openai", tier="gpt"
-        )
+        router.set_override("temp_x", model="gpt-test", provider="openai", tier="gpt")
         cfg = router.route("temp_x")
         assert cfg.provider == "openai"
         assert cfg.tier == "gpt"

@@ -115,9 +115,7 @@ def get_file_tree_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -
             items = sorted(path.iterdir(), key=lambda p: (p.is_file(), p.name))
         except PermissionError:
             return
-        items = [
-            i for i in items if i.name not in _SKIP and not i.name.startswith(".")
-        ]
+        items = [i for i in items if i.name not in _SKIP and not i.name.startswith(".")]
         for idx, item in enumerate(items):
             connector = "└── " if idx == len(items) - 1 else "├── "
             lines.append(f"{prefix}{connector}{item.name}")

@@ -133,7 +133,9 @@ async def test_memory_write_and_read_agree_across_both_implementations(
     read_result = handlers["memory_read"]({"key": "k1"})
     assert read_result == "from_chat_agent"
 
-    write_result = handlers["memory_write"]({"key": "k1", "value": "from_batch_handler"})
+    write_result = handlers["memory_write"](
+        {"key": "k1", "value": "from_batch_handler"}
+    )
     assert write_result == "Memory written: k1"
 
     # memory_read has no chat_agent.py dispatch of its own yet (separate,

@@ -99,7 +99,11 @@ def test_handler_writes_a_real_entry_with_alternatives() -> None:
     try:
         result = decision_log_append_handler(
             repo,
-            {"decision": "use SQLite", "reason": "simplicity", "alternatives": "Postgres"},
+            {
+                "decision": "use SQLite",
+                "reason": "simplicity",
+                "alternatives": "Postgres",
+            },
         )
         assert result == "Decision logged: use SQLite"
         line = json.loads(target.read_text().splitlines()[-1])

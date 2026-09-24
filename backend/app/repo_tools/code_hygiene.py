@@ -51,9 +51,7 @@ _EXCLUDED_DIR_PARTS = {".git", "__pycache__", ".venv", "venv", "node_modules"}
 
 def _iter_py_files(root: Path) -> list[Path]:
     return [
-        fp
-        for fp in root.rglob("*.py")
-        if not (_EXCLUDED_DIR_PARTS & set(fp.parts))
+        fp for fp in root.rglob("*.py") if not (_EXCLUDED_DIR_PARTS & set(fp.parts))
     ]
 
 
@@ -74,7 +72,8 @@ def _is_guarded_by_import_error_handler(tree: ast.AST, target: ast.stmt) -> bool
         # `except Exception:` genuinely catches it too, not just the
         # narrower ImportError/ModuleNotFoundError spelling.
         return bool(
-            {"ImportError", "ModuleNotFoundError", "Exception", "BaseException"} & set(names)
+            {"ImportError", "ModuleNotFoundError", "Exception", "BaseException"}
+            & set(names)
         )
 
     for node in ast.walk(tree):
@@ -121,9 +120,9 @@ def find_broken_imports(directory: str) -> list[BrokenImport] | None:
                 if isinstance(node, ast.Import):
                     for alias in node.names:
                         top_level = alias.name.split(".")[0]
-                        if not _resolves(top_level) and not _is_guarded_by_import_error_handler(
-                            tree, node
-                        ):
+                        if not _resolves(
+                            top_level
+                        ) and not _is_guarded_by_import_error_handler(tree, node):
                             broken.append(BrokenImport(rel, node.lineno, alias.name))
                 elif isinstance(node, ast.ImportFrom):
                     if node.level and node.level > 0:
@@ -135,15 +134,17 @@ def find_broken_imports(directory: str) -> list[BrokenImport] | None:
                         if not _relative_import_resolves(fp, node.level, node.module):
                             if not _is_guarded_by_import_error_handler(tree, node):
                                 broken.append(
-                                    BrokenImport(rel, node.lineno, "." * node.level + node.module)
+                                    BrokenImport(
+                                        rel, node.lineno, "." * node.level + node.module
+                                    )
                                 )
                         continue
                     if node.module is None:
                         continue
                     top_level = node.module.split(".")[0]
-                    if not _resolves(top_level) and not _is_guarded_by_import_error_handler(
-                        tree, node
-                    ):
+                    if not _resolves(
+                        top_level
+                    ) and not _is_guarded_by_import_error_handler(tree, node):
                         broken.append(BrokenImport(rel, node.lineno, node.module))
         return broken
     finally:
@@ -201,7 +202,9 @@ def find_unused_files(directory: str) -> list[str] | None:
     referenced: set[Path] = set()
     for fp in py_files:
         try:
-            tree = ast.parse(fp.read_text(encoding="utf-8", errors="replace"), filename=str(fp))
+            tree = ast.parse(
+                fp.read_text(encoding="utf-8", errors="replace"), filename=str(fp)
+            )
         except SyntaxError:
             continue
         for node in ast.walk(tree):
@@ -251,7 +254,11 @@ def find_unused_files(directory: str) -> list[str] | None:
         if fp.name == "__init__.py":
             continue
         stem = fp.stem
-        if stem in _ENTRY_POINT_STEMS or stem.startswith("test_") or stem.endswith("_test"):
+        if (
+            stem in _ENTRY_POINT_STEMS
+            or stem.startswith("test_")
+            or stem.endswith("_test")
+        ):
             continue
         unused.append(str(fp.relative_to(root)))
     return sorted(unused)
@@ -305,7 +312,9 @@ def find_duplicate_functions(directory: str) -> list[DuplicateFunctionGroup] | N
     groups: dict[str, list[str]] = defaultdict(list)
     for fp in py_files:
         try:
-            tree = ast.parse(fp.read_text(encoding="utf-8", errors="replace"), filename=str(fp))
+            tree = ast.parse(
+                fp.read_text(encoding="utf-8", errors="replace"), filename=str(fp)
+            )
         except SyntaxError:
             continue
         rel = fp.relative_to(root)

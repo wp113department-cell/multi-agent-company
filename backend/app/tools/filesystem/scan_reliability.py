@@ -40,7 +40,9 @@ SCAN_RELIABILITY_TOOL: dict[str, Any] = {
 }
 
 
-def scan_reliability_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> str:
+def scan_reliability_handler(
+    root: Path, worktree_path: str, inp: dict[str, Any]
+) -> str:
     """Core scan_reliability logic — same (root, worktree_path, inp) shape
     as scan_code_hygiene_handler for a consistent call convention across
     the per-agent handler factories that wire both."""

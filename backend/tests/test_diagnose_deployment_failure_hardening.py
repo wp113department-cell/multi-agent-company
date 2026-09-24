@@ -113,9 +113,7 @@ async def test_chat_agent_rejects_flag_shaped_container(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_chat_agent_rejects_non_numeric_lines(tmp_path: Path) -> None:
     agent = _agent(tmp_path)
-    result = await agent._execute_tool(
-        "diagnose_deployment_failure", {"lines": "abc"}
-    )
+    result = await agent._execute_tool("diagnose_deployment_failure", {"lines": "abc"})
     assert "[ERROR]" in result
     assert "lines" in result
 
@@ -132,7 +130,9 @@ def test_both_factories_reject_flag_shaped_container(
 ) -> None:
     handlers = factory(str(tmp_path))
     result = handlers["diagnose_deployment_failure"]({"container": "-f"})
-    assert "[ERROR]" in result, f"{factory_name} did not reject the flag-shaped container"
+    assert (
+        "[ERROR]" in result
+    ), f"{factory_name} did not reject the flag-shaped container"
 
 
 # ---------------------------------------------------------------------------

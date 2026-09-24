@@ -125,6 +125,4 @@ def test_submit_accumulates_into_result_dict() -> None:
         {"summary": "Guided implementation of the retry loop", "findings": []}
     )
     assert out == "Submitted."
-    assert (
-        handlers["_result"]["summary"] == "Guided implementation of the retry loop"
-    )
+    assert handlers["_result"]["summary"] == "Guided implementation of the retry loop"

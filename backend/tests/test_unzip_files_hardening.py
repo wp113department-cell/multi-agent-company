@@ -117,9 +117,7 @@ def test_make_chat_handlers_blocks_absolute_dest_outside_worktree(
     _make_zip(repo / "a.zip", {"payload.txt": "malicious"})
 
     handlers = make_chat_handlers(str(repo))
-    result = handlers["unzip_files"](
-        {"archive": "a.zip", "dest": str(outside)}
-    )
+    result = handlers["unzip_files"]({"archive": "a.zip", "dest": str(outside)})
     assert "[POLICY DENIED]" in result
     assert not (outside / "payload.txt").exists()
 
@@ -148,9 +146,7 @@ def test_handler_blocks_archive_outside_worktree(tmp_path: Path) -> None:
     outside_zip = tmp_path / "secret.zip"
     _make_zip(outside_zip, {"secret.txt": "classified"})
 
-    result = unzip_files_handler(
-        repo, str(repo), {"archive": str(outside_zip)}
-    )
+    result = unzip_files_handler(repo, str(repo), {"archive": str(outside_zip)})
     assert "[POLICY DENIED]" in result
 
 
@@ -186,7 +182,9 @@ def test_zip_slip_via_traversal_entry_is_refuted(tmp_path: Path) -> None:
     with zipfile.ZipFile(zpath, "w") as zf:
         zf.writestr("../../../../tmp/PWNED_ZIP_SLIP.txt", "pwned")
 
-    result = unzip_files_handler(repo, str(repo), {"archive": "evil.zip", "dest": "out"})
+    result = unzip_files_handler(
+        repo, str(repo), {"archive": "evil.zip", "dest": "out"}
+    )
     assert "Extracted" in result
     assert not Path("/tmp/PWNED_ZIP_SLIP.txt").exists()
 

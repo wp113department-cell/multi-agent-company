@@ -137,9 +137,7 @@ class TestChatDispatchReachable:
         agent = _agent(".")
 
         async def _run() -> str:
-            return await agent._execute_tool(
-                "mermaid_from_schema", {"table": "agents"}
-            )
+            return await agent._execute_tool("mermaid_from_schema", {"table": "agents"})
 
         out = asyncio.run(_run())
         assert "Unknown tool" not in out

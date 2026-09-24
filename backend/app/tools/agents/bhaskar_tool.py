@@ -239,7 +239,10 @@ def bhaskar_tool_handler(
     settings = get_settings()
     if not settings.bhaskar_tool_enabled:
         return json.dumps(
-            {"ok": False, "error": "bhaskar_tool is disabled (bhaskar_tool_enabled=false)"}
+            {
+                "ok": False,
+                "error": "bhaskar_tool is disabled (bhaskar_tool_enabled=false)",
+            }
         )
 
     task_description = str(inp.get("task_description", "")).strip()

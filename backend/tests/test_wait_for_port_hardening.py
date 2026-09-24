@@ -100,7 +100,9 @@ def test_handler_allows_localhost_real_open_port() -> None:
     denylist would have."""
     srv, port = _real_open_port()
     try:
-        result = wait_for_port_handler({"host": "127.0.0.1", "port": port, "timeout": 5})
+        result = wait_for_port_handler(
+            {"host": "127.0.0.1", "port": port, "timeout": 5}
+        )
         assert "is open" in result
     finally:
         srv.close()
@@ -156,7 +158,9 @@ def test_handler_detects_a_port_that_opens_mid_wait() -> None:
     t = threading.Thread(target=_listen_after_delay)
     t.start()
     try:
-        result = wait_for_port_handler({"host": "127.0.0.1", "port": port, "timeout": 5})
+        result = wait_for_port_handler(
+            {"host": "127.0.0.1", "port": port, "timeout": 5}
+        )
         assert "is open" in result
     finally:
         t.join()
@@ -167,7 +171,9 @@ def test_make_chat_handlers_wait_for_port_still_works() -> None:
     srv, port = _real_open_port()
     try:
         handlers = make_chat_handlers("/tmp")
-        result = handlers["wait_for_port"]({"host": "127.0.0.1", "port": port, "timeout": 5})
+        result = handlers["wait_for_port"](
+            {"host": "127.0.0.1", "port": port, "timeout": 5}
+        )
         assert "is open" in result
     finally:
         srv.close()

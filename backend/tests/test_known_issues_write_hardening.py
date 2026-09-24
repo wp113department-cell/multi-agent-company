@@ -68,7 +68,8 @@ class TestChatDispatchReachable:
 
         async def _run() -> str:
             return await agent._execute_tool(
-                "known_issues_write", {"issue": "chat dispatch issue", "severity": "low"}
+                "known_issues_write",
+                {"issue": "chat dispatch issue", "severity": "low"},
             )
 
         try:
@@ -138,8 +139,12 @@ class TestLegitimateUsageRegression:
         repo = "/tmp/td_kiw_hardening_repo_e"
         _cleanup(repo)
         try:
-            known_issues_write_handler(repo, {"issue": "first issue", "severity": "low"})
-            known_issues_write_handler(repo, {"issue": "second issue", "severity": "low"})
+            known_issues_write_handler(
+                repo, {"issue": "first issue", "severity": "low"}
+            )
+            known_issues_write_handler(
+                repo, {"issue": "second issue", "severity": "low"}
+            )
             path = known_issues_path(repo)
             content = path.read_text(encoding="utf-8")
             assert "first issue" in content

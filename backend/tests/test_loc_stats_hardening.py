@@ -86,9 +86,7 @@ class TestWorktreeEscapeBlocked:
         agent = _agent(str(worktree))
 
         async def _run() -> str:
-            return await agent._execute_tool(
-                "loc_stats", {"directory": str(outside)}
-            )
+            return await agent._execute_tool("loc_stats", {"directory": str(outside)})
 
         out = asyncio.run(_run())
         assert "POLICY DENIED" in out

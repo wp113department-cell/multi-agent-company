@@ -108,9 +108,7 @@ def test_both_factories_reject_path_outside_repo(
 @pytest.mark.asyncio
 async def test_chat_agent_rejects_dotdot_traversal(tmp_path: Path) -> None:
     agent = _agent(tmp_path)
-    result = await agent._execute_tool(
-        "disk_usage", {"path": "../../../../../../etc"}
-    )
+    result = await agent._execute_tool("disk_usage", {"path": "../../../../../../etc"})
     assert "[POLICY DENIED]" in result
 
 

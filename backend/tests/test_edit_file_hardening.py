@@ -40,13 +40,17 @@ def test_edit_file_tool_schema_has_required_fields() -> None:
     ]
 
 
-def test_edit_file_handler_rejects_absolute_path_outside_worktree(tmp_path: Path) -> None:
+def test_edit_file_handler_rejects_absolute_path_outside_worktree(
+    tmp_path: Path,
+) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     outside = tmp_path / "outside.txt"
     outside.write_text("hello")
     result = edit_file_handler(
-        repo, str(repo), {"path": str(outside), "old_string": "hello", "new_string": "x"}
+        repo,
+        str(repo),
+        {"path": str(outside), "old_string": "hello", "new_string": "x"},
     )
     assert result.startswith("[POLICY DENIED]")
     assert outside.read_text() == "hello"
@@ -98,7 +102,9 @@ def test_edit_file_handler_errors_on_missing_file(tmp_path: Path) -> None:
 def test_edit_file_handler_errors_on_non_unique_old_string(tmp_path: Path) -> None:
     (tmp_path / "f.txt").write_text("aa aa")
     result = edit_file_handler(
-        tmp_path, str(tmp_path), {"path": "f.txt", "old_string": "aa", "new_string": "b"}
+        tmp_path,
+        str(tmp_path),
+        {"path": "f.txt", "old_string": "aa", "new_string": "b"},
     )
     assert "must be unique" in result
 
@@ -165,7 +171,9 @@ def test_make_edit_file_handler_factory_still_rejects_escapes(tmp_path: Path) ->
 def test_make_chat_handlers_edit_file_still_works(tmp_path: Path) -> None:
     (tmp_path / "g.txt").write_text("v1")
     handlers = make_chat_handlers(str(tmp_path))
-    result = handlers["edit_file"]({"path": "g.txt", "old_string": "v1", "new_string": "v2"})
+    result = handlers["edit_file"](
+        {"path": "g.txt", "old_string": "v1", "new_string": "v2"}
+    )
     assert result == "Edited g.txt"
 
 
@@ -184,7 +192,9 @@ def test_coder_handlers_edit_file_rejects_outside_repo(tmp_path: Path) -> None:
     outside = tmp_path / "outside.txt"
     outside.write_text("secret")
     handlers = make_coder_handlers(str(repo), str(repo))
-    result = handlers["edit_file"]({"path": str(outside), "old_string": "secret", "new_string": "x"})
+    result = handlers["edit_file"](
+        {"path": str(outside), "old_string": "secret", "new_string": "x"}
+    )
     assert result.startswith("[POLICY DENIED]")
     assert outside.read_text() == "secret"
 
@@ -219,7 +229,9 @@ def test_cleanup_agent_handlers_edit_file_rejects_outside_repo(tmp_path: Path) -
     outside = tmp_path / "outside.txt"
     outside.write_text("secret")
     handlers = make_cleanup_agent_handlers(str(repo))
-    result = handlers["edit_file"]({"path": str(outside), "old_string": "secret", "new_string": "x"})
+    result = handlers["edit_file"](
+        {"path": str(outside), "old_string": "secret", "new_string": "x"}
+    )
     assert result.startswith("[POLICY DENIED]")
     assert outside.read_text() == "secret"
 
@@ -232,6 +244,8 @@ def test_fleet_apply_handlers_edit_file_rejects_outside_repo(tmp_path: Path) -> 
     outside = tmp_path / "outside.txt"
     outside.write_text("secret")
     handlers = make_fleet_apply_handlers(str(repo), agent_name="td_edit_file_test")
-    result = handlers["edit_file"]({"path": str(outside), "old_string": "secret", "new_string": "x"})
+    result = handlers["edit_file"](
+        {"path": str(outside), "old_string": "secret", "new_string": "x"}
+    )
     assert result.startswith("[POLICY DENIED]")
     assert outside.read_text() == "secret"

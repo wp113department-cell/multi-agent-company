@@ -242,9 +242,7 @@ def test_symlink_pointing_outside_worktree_is_blocked(tmp_path: Path) -> None:
     escape_link = worktree / "innocuous_looking_link"
     escape_link.symlink_to(outside_dir)
 
-    result = check_path_in_worktree(
-        str(escape_link / "real_secret.txt"), str(worktree)
-    )
+    result = check_path_in_worktree(str(escape_link / "real_secret.txt"), str(worktree))
     assert result.allowed is False
 
 

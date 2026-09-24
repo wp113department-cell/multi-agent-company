@@ -88,9 +88,7 @@ def test_write_file_allows_top_level_md() -> None:
             {"path": "VULN_REPORT.md", "content": "# Vulnerability Report\n"}
         )
         assert result.startswith("Written")
-        assert (
-            Path(tmp) / "VULN_REPORT.md"
-        ).read_text() == "# Vulnerability Report\n"
+        assert (Path(tmp) / "VULN_REPORT.md").read_text() == "# Vulnerability Report\n"
 
 
 def test_write_file_allows_docs_subpath() -> None:

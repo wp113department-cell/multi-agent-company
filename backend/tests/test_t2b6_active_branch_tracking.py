@@ -84,7 +84,9 @@ def tmp_repo(tmp_path: Path) -> Path:
     subprocess.run(
         ["git", "commit", "-m", "init"], cwd=str(tmp_path), capture_output=True
     )
-    subprocess.run(["git", "branch", "feature-a"], cwd=str(tmp_path), capture_output=True)
+    subprocess.run(
+        ["git", "branch", "feature-a"], cwd=str(tmp_path), capture_output=True
+    )
     return tmp_path
 
 
@@ -112,7 +114,9 @@ class TestRepositoryHelperRoundTrip:
             async def _get_path() -> str:
                 engine = _engine()
                 try:
-                    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                    async with async_sessionmaker(
+                        engine, expire_on_commit=False
+                    )() as session:
                         return (await session.get(Repo, repo_id)).local_path
                 finally:
                     await engine.dispose()
@@ -156,9 +160,7 @@ class TestGitCheckoutTracksActiveBranch:
         repo_id = _make_ready_repo_sync(str(tmp_repo))
         try:
             (tmp_repo / "init.txt").write_text("changed")
-            result = handlers["git_checkout"](
-                {"target": "HEAD", "file": "init.txt"}
-            )
+            result = handlers["git_checkout"]({"target": "HEAD", "file": "init.txt"})
             assert "[ERROR]" not in result
             # a file-scoped checkout never switches branches — no DB write
             assert get_repo_active_branch_by_path_sync(str(tmp_repo)) is None

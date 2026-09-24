@@ -126,7 +126,5 @@ def find_test_handler(repo_path: str, inp: dict[str, Any]) -> str:
         except Exception:
             pass
     return (
-        "\n".join(ftest_out)[:5000]
-        if ftest_out
-        else f"No tests found for '{ftest_fn}'"
+        "\n".join(ftest_out)[:5000] if ftest_out else f"No tests found for '{ftest_fn}'"
     )

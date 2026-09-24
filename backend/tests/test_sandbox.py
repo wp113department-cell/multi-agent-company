@@ -78,9 +78,9 @@ def test_run_sandboxed_contains_a_denylist_bypassing_destructive_command(
     from app.policy.engine import check_command
 
     bypass_cmd = "find /workspace -mindepth 1 -delete"
-    assert check_command(bypass_cmd, strict=True).allowed is True, (
-        "this test's premise requires the denylist to NOT catch this command"
-    )
+    assert (
+        check_command(bypass_cmd, strict=True).allowed is True
+    ), "this test's premise requires the denylist to NOT catch this command"
 
     workspace = tmp_path / "workspace"
     outside = tmp_path / "outside_secret"
@@ -166,9 +166,9 @@ def test_run_sandboxed_kills_the_container_on_timeout_no_orphan(
         time.sleep(0.5)
     else:
         after = set(_running_sandbox_container_names())
-    assert not (after - before), (
-        f"timed-out sandbox container(s) still running: {after - before}"
-    )
+    assert not (
+        after - before
+    ), f"timed-out sandbox container(s) still running: {after - before}"
 
 
 def test_run_sandboxed_root_filesystem_is_read_only(tmp_path: Path) -> None:

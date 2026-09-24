@@ -78,38 +78,38 @@ def _fake_state() -> dict[str, object]:
 def test_agent_performance_reviewer_apply_wires_shared_submit_fix_handler() -> None:
     from app.agents import agent_performance_reviewer as mod
 
-    with patch.object(
-        mod, "run_agent_graph", return_value=_fake_state()
-    ) as mock_run:
+    with patch.object(mod, "run_agent_graph", return_value=_fake_state()) as mock_run:
         mod.run_agent_performance_reviewer_apply(request_id=1, description="x")
-    assert mock_run.call_args.kwargs["tool_handlers"]["submit_fix"] is submit_fix_handler
+    assert (
+        mock_run.call_args.kwargs["tool_handlers"]["submit_fix"] is submit_fix_handler
+    )
 
 
 def test_knowledge_curator_apply_wires_shared_submit_fix_handler() -> None:
     from app.agents import knowledge_curator as mod
 
-    with patch.object(
-        mod, "run_agent_graph", return_value=_fake_state()
-    ) as mock_run:
+    with patch.object(mod, "run_agent_graph", return_value=_fake_state()) as mock_run:
         mod.run_knowledge_curator_apply(request_id=1, description="x")
-    assert mock_run.call_args.kwargs["tool_handlers"]["submit_fix"] is submit_fix_handler
+    assert (
+        mock_run.call_args.kwargs["tool_handlers"]["submit_fix"] is submit_fix_handler
+    )
 
 
 def test_agent_debugger_apply_wires_shared_submit_fix_handler() -> None:
     from app.agents import agent_debugger as mod
 
-    with patch.object(
-        mod, "run_agent_graph", return_value=_fake_state()
-    ) as mock_run:
+    with patch.object(mod, "run_agent_graph", return_value=_fake_state()) as mock_run:
         mod.run_agent_debugger_apply(request_id=1, description="x")
-    assert mock_run.call_args.kwargs["tool_handlers"]["submit_fix"] is submit_fix_handler
+    assert (
+        mock_run.call_args.kwargs["tool_handlers"]["submit_fix"] is submit_fix_handler
+    )
 
 
 def test_quality_auditor_apply_wires_shared_submit_fix_handler() -> None:
     from app.agents import quality_auditor as mod
 
-    with patch.object(
-        mod, "run_agent_graph", return_value=_fake_state()
-    ) as mock_run:
+    with patch.object(mod, "run_agent_graph", return_value=_fake_state()) as mock_run:
         mod.run_quality_auditor_apply(request_id=1, description="x")
-    assert mock_run.call_args.kwargs["tool_handlers"]["submit_fix"] is submit_fix_handler
+    assert (
+        mock_run.call_args.kwargs["tool_handlers"]["submit_fix"] is submit_fix_handler
+    )

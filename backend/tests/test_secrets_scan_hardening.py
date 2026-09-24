@@ -67,9 +67,7 @@ async def test_chat_agent_rejects_directory_outside_repo(tmp_path: Path) -> None
     )
     try:
         agent = _agent(tmp_path)
-        result = await agent._execute_tool(
-            "secrets_scan", {"directory": str(outside)}
-        )
+        result = await agent._execute_tool("secrets_scan", {"directory": str(outside)})
         assert "[POLICY DENIED]" in result
     finally:
         (outside / "config.py").unlink()

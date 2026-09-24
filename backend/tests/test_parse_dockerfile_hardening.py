@@ -34,7 +34,7 @@ SECRET_DOCKERFILE = (
     "RUN echo SECRET_BUILD_STEP\n"
 )
 
-PUBLIC_DOCKERFILE = "FROM python:3.12\nEXPOSE 8000\nCMD [\"python\", \"app.py\"]\n"
+PUBLIC_DOCKERFILE = 'FROM python:3.12\nEXPOSE 8000\nCMD ["python", "app.py"]\n'
 
 
 def _agent(repo: str) -> ChatAgent:
@@ -154,7 +154,9 @@ class TestLegitimateUsageRegression:
         assert "python:3.12" in out
 
     def test_missing_file_error(self, tmp_path: Path) -> None:
-        out = parse_dockerfile_handler(tmp_path, str(tmp_path), {"path": "NoSuchDockerfile"})
+        out = parse_dockerfile_handler(
+            tmp_path, str(tmp_path), {"path": "NoSuchDockerfile"}
+        )
         assert "[ERROR] File not found" in out
 
     def test_empty_dockerfile(self, tmp_path: Path) -> None:

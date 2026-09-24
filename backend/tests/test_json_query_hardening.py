@@ -113,12 +113,16 @@ class TestWorktreeEscapeBlocked:
 class TestFlagCollisionBlocked:
     def test_direct_handler_dash_n_rejected(self, tmp_path: Path) -> None:
         (tmp_path / "data.json").write_text('{"name": "widget"}\n')
-        out = json_query_handler(tmp_path, str(tmp_path), {"path": "data.json", "query": "-n"})
+        out = json_query_handler(
+            tmp_path, str(tmp_path), {"path": "data.json", "query": "-n"}
+        )
         assert "[ERROR]" in out
 
     def test_direct_handler_dash_f_rejected(self, tmp_path: Path) -> None:
         (tmp_path / "data.json").write_text('{"name": "widget"}\n')
-        out = json_query_handler(tmp_path, str(tmp_path), {"path": "data.json", "query": "-f"})
+        out = json_query_handler(
+            tmp_path, str(tmp_path), {"path": "data.json", "query": "-f"}
+        )
         assert "[ERROR]" in out
 
     def test_make_chat_handlers_dash_n_rejected(self, tmp_path: Path) -> None:
@@ -156,7 +160,9 @@ class TestChatDispatchReachable:
 class TestLegitimateUsageRegression:
     def test_direct_handler_real_query(self, tmp_path: Path) -> None:
         (tmp_path / "data.json").write_text('{"name": "widget", "count": 42}\n')
-        out = json_query_handler(tmp_path, str(tmp_path), {"path": "data.json", "query": ".name"})
+        out = json_query_handler(
+            tmp_path, str(tmp_path), {"path": "data.json", "query": ".name"}
+        )
         assert "widget" in out
 
     def test_make_chat_handlers_real_query(self, tmp_path: Path) -> None:
@@ -166,5 +172,7 @@ class TestLegitimateUsageRegression:
         assert "alice" in out
 
     def test_missing_file_error(self, tmp_path: Path) -> None:
-        out = json_query_handler(tmp_path, str(tmp_path), {"path": "nope.json", "query": "."})
+        out = json_query_handler(
+            tmp_path, str(tmp_path), {"path": "nope.json", "query": "."}
+        )
         assert "[ERROR]" in out

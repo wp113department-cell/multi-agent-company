@@ -50,24 +50,30 @@ def test_uncovered_agent_returns_none_not_a_guess() -> None:
     resume with)."""
     # security_reviewer is a real, registered specialized agent that has NOT
     # been given resume_trace_id support in this batch.
-    assert resolve_resume_call(
-        "security_reviewer",
-        task_id=1,
-        trace_id="t",
-        resume_message="m",
-        repo_path="/tmp",
-    ) is None
+    assert (
+        resolve_resume_call(
+            "security_reviewer",
+            task_id=1,
+            trace_id="t",
+            resume_message="m",
+            repo_path="/tmp",
+        )
+        is None
+    )
     assert is_resumable_agent_type("security_reviewer") is False
 
 
 def test_unknown_agent_name_returns_none() -> None:
-    assert resolve_resume_call(
-        "not_a_real_agent_xyz",
-        task_id=1,
-        trace_id="t",
-        resume_message="m",
-        repo_path="/tmp",
-    ) is None
+    assert (
+        resolve_resume_call(
+            "not_a_real_agent_xyz",
+            task_id=1,
+            trace_id="t",
+            resume_message="m",
+            repo_path="/tmp",
+        )
+        is None
+    )
     assert is_resumable_agent_type("not_a_real_agent_xyz") is False
 
 

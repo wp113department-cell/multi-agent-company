@@ -60,7 +60,9 @@ def test_handler_rejects_blank_question() -> None:
     assert result == "[ERROR] question is required."
 
 
-def test_handler_failure_is_reported_not_raised(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_handler_failure_is_reported_not_raised(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def _boom(*args: object, **kwargs: object) -> None:
         raise RuntimeError("db down")
 
@@ -95,12 +97,16 @@ def test_handler_records_a_real_pending_approval_row() -> None:
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
                 rows = (
-                    await session.execute(
-                        select(PendingApproval).where(
-                            PendingApproval.agent_name == agent_name
+                    (
+                        await session.execute(
+                            select(PendingApproval).where(
+                                PendingApproval.agent_name == agent_name
+                            )
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 assert len(rows) == 1
                 assert rows[0].details["question"] == marker
                 assert rows[0].details["context"] == "some context"

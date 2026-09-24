@@ -20,9 +20,7 @@ import re
 # "steps", or "workflow" (case-insensitive) — covers every real heading
 # style already in roles/*.md ("## Process (fixed order)", "## Workflow",
 # "## Process Steps", ...) without hardcoding one exact phrase.
-_PROCESS_HEADING_RE = re.compile(
-    r"(?im)^##\s+.*\b(process|steps|workflow)\b.*$"
-)
+_PROCESS_HEADING_RE = re.compile(r"(?im)^##\s+.*\b(process|steps|workflow)\b.*$")
 # A top-level numbered list item: "1. text" / "2) text", at the start of a
 # line (allowing leading whitespace for a nested list, which the heading
 # scope below still keeps section-local).

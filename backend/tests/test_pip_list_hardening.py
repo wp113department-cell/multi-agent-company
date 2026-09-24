@@ -106,5 +106,9 @@ class TestLegitimateUsageRegression:
 
     def test_filter_narrows_results(self) -> None:
         out = pip_list_handler({"filter": "pytest"})
-        lines = [ln for ln in out.splitlines() if ln and not ln.startswith("Package") and not ln.startswith("---")]
+        lines = [
+            ln
+            for ln in out.splitlines()
+            if ln and not ln.startswith("Package") and not ln.startswith("---")
+        ]
         assert all("pytest" in ln.lower() for ln in lines)

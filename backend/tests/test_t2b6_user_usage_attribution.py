@@ -46,7 +46,9 @@ def _cleanup_task_sync(task_id: int) -> None:
         engine = _engine()
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                await session.execute(delete(AgentRun).where(AgentRun.task_id == task_id))
+                await session.execute(
+                    delete(AgentRun).where(AgentRun.task_id == task_id)
+                )
                 await session.execute(delete(DevTask).where(DevTask.id == task_id))
                 await session.commit()
         finally:
@@ -55,7 +57,9 @@ def _cleanup_task_sync(task_id: int) -> None:
     asyncio.run(_run())
 
 
-def _add_agent_run_sync(task_id: int, cost: str, tokens_in: int, tokens_out: int) -> None:
+def _add_agent_run_sync(
+    task_id: int, cost: str, tokens_in: int, tokens_out: int
+) -> None:
     async def _run() -> None:
         engine = _engine()
         try:
@@ -124,9 +128,7 @@ class TestCreatedByPopulatedAtCreation:
 
 
 class TestUserUsageRollup:
-    def test_rollup_aggregates_cost_and_tokens_for_the_real_actor(
-        self, client
-    ) -> None:
+    def test_rollup_aggregates_cost_and_tokens_for_the_real_actor(self, client) -> None:
         c, actor = client
         task_id = c.post(
             "/api/tasks",
@@ -149,9 +151,7 @@ class TestUserUsageRollup:
         finally:
             _cleanup_task_sync(task_id)
 
-    def test_actor_with_no_agent_runs_is_absent_from_the_rollup(
-        self, client
-    ) -> None:
+    def test_actor_with_no_agent_runs_is_absent_from_the_rollup(self, client) -> None:
         c, actor = client
         task_id = c.post(
             "/api/tasks",

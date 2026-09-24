@@ -74,16 +74,17 @@ def test_handler_buckets_short_description_as_xs() -> None:
 
 
 def test_handler_buckets_long_description_as_xl() -> None:
-    result = estimate_complexity_handler(
-        {"description": " ".join(["word"] * 600)}
-    )
+    result = estimate_complexity_handler({"description": " ".join(["word"] * 600)})
     assert "XL" in result
 
 
 def test_handler_counts_context_paths_toward_score() -> None:
     without = estimate_complexity_handler({"description": "add a feature"})
     with_paths = estimate_complexity_handler(
-        {"description": "add a feature", "context_paths": [f"f{i}.py" for i in range(20)]}
+        {
+            "description": "add a feature",
+            "context_paths": [f"f{i}.py" for i in range(20)],
+        }
     )
     assert "context_files=0" in without
     assert "context_files=20" in with_paths

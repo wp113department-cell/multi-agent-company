@@ -7,12 +7,7 @@ instead of a static registration-time constant.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
-from app.fleet.agent_registry import compute_live_success_rate
 from app.fleet.capability_registry import AgentCapability, CapabilityRegistry
 
 

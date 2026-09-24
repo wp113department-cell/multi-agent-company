@@ -154,7 +154,9 @@ def batch_edit_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> s
     # roll back already-written files if a write still fails part-way —
     # same protection rename_symbol's own write phase provides.
     unwritable = [
-        fp.relative_to(root).as_posix() for fp, _m, _c in planned if not os.access(fp, os.W_OK)
+        fp.relative_to(root).as_posix()
+        for fp, _m, _c in planned
+        if not os.access(fp, os.W_OK)
     ]
     if unwritable:
         return (

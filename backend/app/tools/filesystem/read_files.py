@@ -123,7 +123,10 @@ def read_files_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> s
             continue
 
         line_count = content.count("\n") + 1
-        if settings.file_fold_enabled and line_count > settings.file_fold_line_threshold:
+        if (
+            settings.file_fold_enabled
+            and line_count > settings.file_fold_line_threshold
+        ):
             from app.repo_tools.file_folding import fold_file_content
 
             folded = fold_file_content(p, settings.file_fold_max_chars)
@@ -147,7 +150,11 @@ def read_files_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> s
         parts.append(f"=== {rel} ===\n{content}")
 
     if not parts:
-        return "[ERROR] No paths provided" if not all_paths else "(no paths at this offset)"
+        return (
+            "[ERROR] No paths provided"
+            if not all_paths
+            else "(no paths at this offset)"
+        )
 
     remaining = len(all_paths) - (offset + len(paths))
     if remaining > 0:

@@ -133,7 +133,10 @@ def task_history_query(inp: dict[str, Any]) -> str:
             rows = cur.fetchall()
             if not rows:
                 return "(no task history found)"
-            lines = [f"{task_id}  {status}  {created_at}" for task_id, status, created_at in rows]
+            lines = [
+                f"{task_id}  {status}  {created_at}"
+                for task_id, status, created_at in rows
+            ]
             return "\n".join(lines)
     except Exception as e:
         return f"[ERROR] {e}"

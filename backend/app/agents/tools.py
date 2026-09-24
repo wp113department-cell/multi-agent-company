@@ -399,6 +399,10 @@ from app.tools.execution.check_license_compliance import (
     CHECK_LICENSE_COMPLIANCE_TOOL,
     check_license_compliance_handler,
 )
+from app.tools.execution.check_target_repo_license_compliance import (
+    CHECK_TARGET_REPO_LICENSE_COMPLIANCE_TOOL,
+    check_target_repo_license_compliance_handler,
+)
 from app.tools.execution.coverage_report import (
     COVERAGE_REPORT_TOOL,
     coverage_report_handler,
@@ -998,6 +1002,7 @@ _GENERATE_CHANGELOG_TOOL = GENERATE_CHANGELOG_TOOL
 _RUN_LINTER_TOOL = RUN_LINTER_TOOL
 _SECRETS_SCAN_TOOL = SECRETS_SCAN_TOOL
 _CHECK_LICENSE_COMPLIANCE_TOOL = CHECK_LICENSE_COMPLIANCE_TOOL
+_CHECK_TARGET_REPO_LICENSE_COMPLIANCE_TOOL = CHECK_TARGET_REPO_LICENSE_COMPLIANCE_TOOL
 _COVERAGE_REPORT_TOOL = COVERAGE_REPORT_TOOL
 _CPU_USAGE_TOOL = CPU_USAGE_TOOL
 _DIAGNOSE_DEPLOYMENT_FAILURE_TOOL = DIAGNOSE_DEPLOYMENT_FAILURE_TOOL
@@ -2043,14 +2048,14 @@ _LIST_DEPLOY_ARTIFACTS_TOOL = LIST_DEPLOY_ARTIFACTS_TOOL
 # above, not a repo_path-bound closure.
 # ---------------------------------------------------------------------------
 
-    # moved to app/tools/integrations/inspect_github_repo.py as
-    # INSPECT_GITHUB_REPO_TOOL / inspect_github_repo_handler() —
-    # tool_enhance.md productionization pass, tool #156 (2026-09-14).
-    # NO real bug found (audited thoroughly — see that module's own
-    # docstring); this is modularization only, same as tool #147's
-    # generate_patch. `inspect_github_repo` name kept as a thin
-    # delegating wrapper for backward compatibility — existing tests
-    # import it directly from app.agents.tools.
+# moved to app/tools/integrations/inspect_github_repo.py as
+# INSPECT_GITHUB_REPO_TOOL / inspect_github_repo_handler() —
+# tool_enhance.md productionization pass, tool #156 (2026-09-14).
+# NO real bug found (audited thoroughly — see that module's own
+# docstring); this is modularization only, same as tool #147's
+# generate_patch. `inspect_github_repo` name kept as a thin
+# delegating wrapper for backward compatibility — existing tests
+# import it directly from app.agents.tools.
 
 
 def inspect_github_repo(inp: dict[str, Any]) -> str:
@@ -2066,13 +2071,13 @@ def inspect_github_repo(inp: dict[str, Any]) -> str:
 # bound). Lists real endpoints/methods/schemas from the parsed structure.
 # ---------------------------------------------------------------------------
 
-    # moved to app/tools/integrations/inspect_openapi_spec.py as
-    # INSPECT_OPENAPI_SPEC_TOOL / inspect_openapi_spec_handler() —
-    # tool_enhance.md productionization pass, tool #157 (2026-09-14).
-    # Real finding — a cross-cutting SSRF-via-redirect bypass, also
-    # retroactively fixed for fetch_url/check_url_status/http_request
-    # — see that module's own docstring. `inspect_openapi_spec` name
-    # kept as a thin delegating wrapper for backward compatibility.
+# moved to app/tools/integrations/inspect_openapi_spec.py as
+# INSPECT_OPENAPI_SPEC_TOOL / inspect_openapi_spec_handler() —
+# tool_enhance.md productionization pass, tool #157 (2026-09-14).
+# Real finding — a cross-cutting SSRF-via-redirect bypass, also
+# retroactively fixed for fetch_url/check_url_status/http_request
+# — see that module's own docstring. `inspect_openapi_spec` name
+# kept as a thin delegating wrapper for backward compatibility.
 
 
 def inspect_openapi_spec(inp: dict[str, Any]) -> str:
@@ -2233,9 +2238,9 @@ _SUBMIT_RESULT_TOOL: dict[str, Any] = SUBMIT_RESULT_TOOL
 
 # moved to app/tools/git/commit.py as GIT_COMMIT_TOOL — tool_enhance.md productionization pass, tool #37 (2026-08-18).
 
-    # moved to app/tools/git/branch.py as GIT_BRANCH_TOOL /
-    # git_branch_handler() — tool_enhance.md productionization pass,
-    # tool #148 (2026-09-14).
+# moved to app/tools/git/branch.py as GIT_BRANCH_TOOL /
+# git_branch_handler() — tool_enhance.md productionization pass,
+# tool #148 (2026-09-14).
 
 # moved to app/tools/git/checkout.py as GIT_CHECKOUT_TOOL —
 # tool_enhance.md productionization pass, tool #35 (2026-08-18).
@@ -2244,9 +2249,9 @@ _SUBMIT_RESULT_TOOL: dict[str, Any] = SUBMIT_RESULT_TOOL
 
 # moved to app/tools/git/pull.py as GIT_PULL_TOOL — tool_enhance.md productionization pass, tool #39 (2026-08-18).
 
-    # moved to app/tools/git/fetch.py as GIT_FETCH_TOOL /
-    # git_fetch_handler() — tool_enhance.md productionization pass,
-    # tool #149 (2026-09-14).
+# moved to app/tools/git/fetch.py as GIT_FETCH_TOOL /
+# git_fetch_handler() — tool_enhance.md productionization pass,
+# tool #149 (2026-09-14).
 
 # moved to app/tools/git/restore.py as GIT_RESTORE_TOOL — tool_enhance.md productionization pass, tool #41 (2026-08-19).
 
@@ -2329,10 +2334,10 @@ _SYNC_FILES_TOOL = SYNC_FILES_TOOL
 # retroactive kill_process (tool #49) fix found along the way.
 _RUN_BACKGROUND_TOOL_DEF = RUN_BACKGROUND_TOOL
 
-    # moved to app/tools/execution/list_background_processes.py as
-    # LIST_BACKGROUND_PROCESSES_TOOL /
-    # list_background_processes_handler() — tool_enhance.md
-    # productionization pass, tool #162 (2026-09-15).
+# moved to app/tools/execution/list_background_processes.py as
+# LIST_BACKGROUND_PROCESSES_TOOL /
+# list_background_processes_handler() — tool_enhance.md
+# productionization pass, tool #162 (2026-09-15).
 
 # AUDIT_Q_BATCH01 §58 "Concurrent command execution (fan-out)" — previously
 # zero asyncio.gather/TaskGroup usage anywhere in backend/app; every
@@ -2746,9 +2751,9 @@ _UNDO_CHANGES_TOOL = {
     },
 }
 
-    # moved to app/tools/filesystem/generate_patch.py as
-    # GENERATE_PATCH_TOOL / generate_patch_handler() —
-    # tool_enhance.md productionization pass, tool #147 (2026-09-14).
+# moved to app/tools/filesystem/generate_patch.py as
+# GENERATE_PATCH_TOOL / generate_patch_handler() —
+# tool_enhance.md productionization pass, tool #147 (2026-09-14).
 
 # Batch 16 — DB extras
 # tool_enhance.md productionization pass, tool #98 (2026-08-25) — moved
@@ -3262,7 +3267,9 @@ def make_sql_agent_handlers(repo_path: str) -> dict[str, Any]:
         # statement that can modify data is refused (WRITE_BLOCKED); this
         # headless agent run has no human to approve it. The role file's
         # "blocked from DROP/DELETE" used to be enforced by the prompt alone.
-        return run_sql_handler(str(getattr(get_settings(), "database_url", "") or ""), inp)
+        return run_sql_handler(
+            str(getattr(get_settings(), "database_url", "") or ""), inp
+        )
 
     # tool_enhance.md productionization pass, tool #96 (2026-08-25) — the
     # real fix lives in the shared inspect_schema_handler(); see that
@@ -3773,7 +3780,10 @@ def make_dependency_agent_handlers(repo_path: str) -> dict[str, Any]:
         for dep in inp.get("dependencies", []):
             if not isinstance(dep, dict):
                 continue
-            if dep.get("abandoned") and str(dep.get("name", "")).strip().lower() not in _checked_packages:
+            if (
+                dep.get("abandoned")
+                and str(dep.get("name", "")).strip().lower() not in _checked_packages
+            ):
                 dep["abandoned"] = False
                 dep.pop("last_release_days_ago", None)
                 corrected += 1
@@ -3814,9 +3824,9 @@ def make_dependency_agent_handlers(repo_path: str) -> dict[str, Any]:
 
 # --- Day 3B: Memory tool specs ---
 
-    # moved to app/tools/agents/memory_read.py as MEMORY_READ_TOOL /
-    # memory_read_handler() — tool_enhance.md productionization
-    # pass, tool #167 (2026-09-15).
+# moved to app/tools/agents/memory_read.py as MEMORY_READ_TOOL /
+# memory_read_handler() — tool_enhance.md productionization
+# pass, tool #167 (2026-09-15).
 
 # moved to app/tools/agents/memory_write.py as MEMORY_WRITE_TOOL — tool_enhance.md productionization pass, tool #51 (2026-08-20).
 
@@ -3828,13 +3838,13 @@ def make_dependency_agent_handlers(repo_path: str) -> dict[str, Any]:
 # TASK_HISTORY_QUERY_TOOL / task_history_query() — tool_enhance.md
 # productionization pass, tool #118 (2026-08-26).
 
-    # moved to app/tools/agents/known_issues_read.py as
-    # KNOWN_ISSUES_READ_TOOL / known_issues_read_handler() —
-    # tool_enhance.md productionization pass, tool #160 (2026-09-15).
+# moved to app/tools/agents/known_issues_read.py as
+# KNOWN_ISSUES_READ_TOOL / known_issues_read_handler() —
+# tool_enhance.md productionization pass, tool #160 (2026-09-15).
 
-    # moved to app/tools/agents/known_issues_write.py as
-    # KNOWN_ISSUES_WRITE_TOOL / known_issues_write_handler() —
-    # tool_enhance.md productionization pass, tool #161 (2026-09-15).
+# moved to app/tools/agents/known_issues_write.py as
+# KNOWN_ISSUES_WRITE_TOOL / known_issues_write_handler() —
+# tool_enhance.md productionization pass, tool #161 (2026-09-15).
 
 # --- Day 3C: Planning + docs tool specs ---
 
@@ -3861,9 +3871,9 @@ _SUMMARIZE_FOLDER_TOOL: dict[str, Any] = SUMMARIZE_FOLDER_TOOL
 # GENERATE_API_DOCS_TEXT_TOOL / generate_api_docs_text_handler() —
 # tool_enhance.md productionization pass, tool #144 (2026-09-14).
 
-    # moved to app/tools/database/mermaid_from_schema.py as
-    # MERMAID_FROM_SCHEMA_TOOL / mermaid_from_schema_handler() —
-    # tool_enhance.md productionization pass, tool #168 (2026-09-15).
+# moved to app/tools/database/mermaid_from_schema.py as
+# MERMAID_FROM_SCHEMA_TOOL / mermaid_from_schema_handler() —
+# tool_enhance.md productionization pass, tool #168 (2026-09-15).
 
 # --- Day 2 Gap: Smart search tools ---
 
@@ -3917,9 +3927,9 @@ _SUMMARIZE_REPO_TOOL: dict[str, Any] = SUMMARIZE_REPO_TOOL
 
 # --- Day 2 Gap: File type tools ---
 
-    # moved to app/tools/filesystem/read_pdf.py as READ_PDF_TOOL /
-    # read_pdf_handler() — tool_enhance.md productionization pass,
-    # tool #177 (2026-09-15).
+# moved to app/tools/filesystem/read_pdf.py as READ_PDF_TOOL /
+# read_pdf_handler() — tool_enhance.md productionization pass,
+# tool #177 (2026-09-15).
 _READ_PDF_TOOL: dict[str, Any] = READ_PDF_TOOL
 
 # moved to app/tools/filesystem/read_image.py as READ_IMAGE_TOOL /
@@ -3940,9 +3950,9 @@ _READ_IMAGE_TOOL: dict[str, Any] = READ_IMAGE_TOOL
 
 # moved to app/tools/git/github_create_issue.py as GITHUB_CREATE_ISSUE_TOOL — tool_enhance.md productionization pass, tool #45 (2026-08-19).
 
-    # moved to app/tools/git/github_list_prs.py as
-    # GITHUB_LIST_PRS_TOOL / github_list_prs_handler() —
-    # tool_enhance.md productionization pass, tool #153 (2026-09-14).
+# moved to app/tools/git/github_list_prs.py as
+# GITHUB_LIST_PRS_TOOL / github_list_prs_handler() —
+# tool_enhance.md productionization pass, tool #153 (2026-09-14).
 
 # moved to app/tools/git/github_comment.py as GITHUB_COMMENT_TOOL — tool_enhance.md productionization pass, tool #44 (2026-08-19).
 
@@ -4128,7 +4138,9 @@ def make_performance_reviewer_handlers(repo_path: str) -> dict[str, Any]:
         # statement that can modify data is refused (WRITE_BLOCKED); this
         # headless agent run has no human to approve it. The role file's
         # "blocked from DROP/DELETE" used to be enforced by the prompt alone.
-        return run_sql_handler(str(getattr(get_settings(), "database_url", "") or ""), inp)
+        return run_sql_handler(
+            str(getattr(get_settings(), "database_url", "") or ""), inp
+        )
 
     # tool_enhance.md productionization pass, tool #98 (2026-08-25) — the
     # real fix lives in the shared explain_query_handler(); see that
@@ -4264,7 +4276,9 @@ def make_migration_agent_handlers(repo_path: str) -> dict[str, Any]:
         # statement that can modify data is refused (WRITE_BLOCKED); this
         # headless agent run has no human to approve it. The role file's
         # "blocked from DROP/DELETE" used to be enforced by the prompt alone.
-        return run_sql_handler(str(getattr(get_settings(), "database_url", "") or ""), inp)
+        return run_sql_handler(
+            str(getattr(get_settings(), "database_url", "") or ""), inp
+        )
 
     # tool_enhance.md productionization pass, tool #96 (2026-08-25) — the
     # real fix lives in the shared inspect_schema_handler(); see that
@@ -4348,7 +4362,9 @@ def make_schema_agent_handlers(repo_path: str) -> dict[str, Any]:
         # statement that can modify data is refused (WRITE_BLOCKED); this
         # headless agent run has no human to approve it. The role file's
         # "blocked from DROP/DELETE" used to be enforced by the prompt alone.
-        return run_sql_handler(str(getattr(get_settings(), "database_url", "") or ""), inp)
+        return run_sql_handler(
+            str(getattr(get_settings(), "database_url", "") or ""), inp
+        )
 
     # tool_enhance.md productionization pass, tool #96 (2026-08-25) — the
     # real fix lives in the shared inspect_schema_handler(); see that
@@ -4631,22 +4647,22 @@ def make_tech_debt_agent_handlers(repo_path: str) -> dict[str, Any]:
 # -- Git extras --
 # moved to app/tools/git/tag.py as GIT_TAG_TOOL —
 # tool_enhance.md productionization pass, tool #22 (2026-08-17).
-    # moved to app/tools/git/log_file.py as GIT_LOG_FILE_TOOL /
-    # git_log_file_handler() — tool_enhance.md productionization
-    # pass, tool #150 (2026-09-14).
+# moved to app/tools/git/log_file.py as GIT_LOG_FILE_TOOL /
+# git_log_file_handler() — tool_enhance.md productionization
+# pass, tool #150 (2026-09-14).
 # moved to app/tools/filesystem/semver_bump.py as SEMVER_BUMP_TOOL —
 # tool_enhance.md productionization pass, tool #25 (2026-08-18).
-    # moved to app/tools/git/stash_list.py as GIT_STASH_LIST_TOOL /
-    # git_stash_list_handler() — tool_enhance.md productionization
-    # pass, tool #151 (2026-09-14).
+# moved to app/tools/git/stash_list.py as GIT_STASH_LIST_TOOL /
+# git_stash_list_handler() — tool_enhance.md productionization
+# pass, tool #151 (2026-09-14).
 
 # -- Process / System --
-    # moved to app/tools/execution/list_processes.py as
-    # LIST_PROCESSES_TOOL / list_processes_handler() —
-    # tool_enhance.md productionization pass, tool #165 (2026-09-15).
-    # moved to app/tools/execution/list_open_ports.py as
-    # LIST_OPEN_PORTS_TOOL / list_open_ports_handler() —
-    # tool_enhance.md productionization pass, tool #164 (2026-09-15).
+# moved to app/tools/execution/list_processes.py as
+# LIST_PROCESSES_TOOL / list_processes_handler() —
+# tool_enhance.md productionization pass, tool #165 (2026-09-15).
+# moved to app/tools/execution/list_open_ports.py as
+# LIST_OPEN_PORTS_TOOL / list_open_ports_handler() —
+# tool_enhance.md productionization pass, tool #164 (2026-09-15).
 # moved to app/tools/execution/wait_for_port.py as
 # WAIT_FOR_PORT_TOOL / wait_for_port_handler() — tool_enhance.md
 # productionization pass, tool #207 (2026-09-16).
@@ -4668,36 +4684,36 @@ _ZIP_FILES_TOOL: dict[str, Any] = ZIP_FILES_TOOL
 # productionization pass, tool #206 (2026-09-16).
 _UNZIP_FILES_TOOL: dict[str, Any] = UNZIP_FILES_TOOL
 # moved to app/tools/filesystem/move_file.py as MOVE_FILE_TOOL — tool_enhance.md productionization pass, tool #52 (2026-08-20).
-    # moved to app/tools/filesystem/hash_file.py as HASH_FILE_TOOL /
-    # hash_file_handler() — tool_enhance.md productionization pass,
-    # tool #154 (2026-09-14).
+# moved to app/tools/filesystem/hash_file.py as HASH_FILE_TOOL /
+# hash_file_handler() — tool_enhance.md productionization pass,
+# tool #154 (2026-09-14).
 # moved to app/tools/filesystem/count_lines.py as COUNT_LINES_TOOL /
 # count_lines_handler() — tool_enhance.md productionization pass, tool
 # #129 (2026-08-26).
 
 # -- Environment --
-    # moved to app/tools/execution/read_env_var.py as
-    # READ_ENV_VAR_TOOL / read_env_var_handler() — tool_enhance.md
-    # productionization pass, tool #173 (2026-09-15).
+# moved to app/tools/execution/read_env_var.py as
+# READ_ENV_VAR_TOOL / read_env_var_handler() — tool_enhance.md
+# productionization pass, tool #173 (2026-09-15).
 _READ_ENV_VAR_TOOL: dict[str, Any] = READ_ENV_VAR_TOOL
-    # moved to app/tools/execution/list_env_vars.py as
-    # LIST_ENV_VARS_TOOL / list_env_vars_handler() — tool_enhance.md
-    # productionization pass, tool #163 (2026-09-15).
+# moved to app/tools/execution/list_env_vars.py as
+# LIST_ENV_VARS_TOOL / list_env_vars_handler() — tool_enhance.md
+# productionization pass, tool #163 (2026-09-15).
 # moved to app/tools/filesystem/env_diff.py as ENV_DIFF_TOOL /
 # env_diff_handler() — tool_enhance.md productionization pass, tool
 # #135 (2026-09-11).
 
 # -- Data format tools --
-    # moved to app/tools/filesystem/json_query.py as JSON_QUERY_TOOL /
-    # json_query_handler() — tool_enhance.md productionization pass,
-    # tool #158 (2026-09-14).
+# moved to app/tools/filesystem/json_query.py as JSON_QUERY_TOOL /
+# json_query_handler() — tool_enhance.md productionization pass,
+# tool #158 (2026-09-14).
 # moved to app/tools/filesystem/yaml_validate.py as
 # YAML_VALIDATE_TOOL / yaml_validate_handler() — tool_enhance.md
 # productionization pass, tool #120 (2026-08-26).
 
-    # moved to app/tools/filesystem/json_validate.py as
-    # JSON_VALIDATE_TOOL / json_validate_handler() — tool_enhance.md
-    # productionization pass, tool #159 (2026-09-15).
+# moved to app/tools/filesystem/json_validate.py as
+# JSON_VALIDATE_TOOL / json_validate_handler() — tool_enhance.md
+# productionization pass, tool #159 (2026-09-15).
 # moved to app/tools/filesystem/csv_preview.py as CSV_PREVIEW_TOOL /
 # csv_preview_handler() — tool_enhance.md productionization pass, tool
 # #132 (2026-09-11).
@@ -4710,29 +4726,29 @@ _READ_ENV_VAR_TOOL: dict[str, Any] = READ_ENV_VAR_TOOL
 # XML_VALIDATE_TOOL / xml_validate_handler() — tool_enhance.md
 # productionization pass, tool #208 (2026-09-16).
 _XML_VALIDATE_TOOL: dict[str, Any] = XML_VALIDATE_TOOL
-    # moved to app/tools/filesystem/read_notebook.py as
-    # READ_NOTEBOOK_TOOL / read_notebook_handler() —
-    # tool_enhance.md productionization pass, tool #175 (2026-09-15).
+# moved to app/tools/filesystem/read_notebook.py as
+# READ_NOTEBOOK_TOOL / read_notebook_handler() —
+# tool_enhance.md productionization pass, tool #175 (2026-09-15).
 _READ_NOTEBOOK_TOOL: dict[str, Any] = READ_NOTEBOOK_TOOL
-    # moved to app/tools/filesystem/parse_dockerfile.py as
-    # PARSE_DOCKERFILE_TOOL / parse_dockerfile_handler() —
-    # tool_enhance.md productionization pass, tool #171 (2026-09-15).
+# moved to app/tools/filesystem/parse_dockerfile.py as
+# PARSE_DOCKERFILE_TOOL / parse_dockerfile_handler() —
+# tool_enhance.md productionization pass, tool #171 (2026-09-15).
 _PARSE_DOCKERFILE_TOOL: dict[str, Any] = PARSE_DOCKERFILE_TOOL
-    # moved to app/tools/filesystem/parse_docker_compose.py as
-    # PARSE_DOCKER_COMPOSE_TOOL / parse_docker_compose_handler() —
-    # tool_enhance.md productionization pass, tool #170 (2026-09-15).
+# moved to app/tools/filesystem/parse_docker_compose.py as
+# PARSE_DOCKER_COMPOSE_TOOL / parse_docker_compose_handler() —
+# tool_enhance.md productionization pass, tool #170 (2026-09-15).
 _PARSE_DOCKER_COMPOSE_TOOL: dict[str, Any] = PARSE_DOCKER_COMPOSE_TOOL
-    # moved to app/tools/integrations/github_inspect_repo.py as
-    # GITHUB_INSPECT_REPO_TOOL / github_inspect_repo_handler() —
-    # tool_enhance.md productionization pass, tool #152 (2026-09-14).
-    # moved to app/tools/filesystem/openapi_inspect.py as
-    # OPENAPI_INSPECT_TOOL / openapi_inspect_handler() —
-    # tool_enhance.md productionization pass, tool #169 (2026-09-15).
+# moved to app/tools/integrations/github_inspect_repo.py as
+# GITHUB_INSPECT_REPO_TOOL / github_inspect_repo_handler() —
+# tool_enhance.md productionization pass, tool #152 (2026-09-14).
+# moved to app/tools/filesystem/openapi_inspect.py as
+# OPENAPI_INSPECT_TOOL / openapi_inspect_handler() —
+# tool_enhance.md productionization pass, tool #169 (2026-09-15).
 
 # -- Code / Docs tools --
-    # moved to app/tools/filesystem/generate_diagram.py as
-    # GENERATE_DIAGRAM_TOOL / generate_diagram_handler() —
-    # tool_enhance.md productionization pass, tool #146 (2026-09-14).
+# moved to app/tools/filesystem/generate_diagram.py as
+# GENERATE_DIAGRAM_TOOL / generate_diagram_handler() —
+# tool_enhance.md productionization pass, tool #146 (2026-09-14).
 _SUMMARIZE_OUTPUT_TOOL: dict[str, Any] = SUMMARIZE_OUTPUT_TOOL
 # moved to app/tools/filesystem/export_markdown.py as
 # EXPORT_MARKDOWN_TOOL / export_markdown_handler() — tool_enhance.md
@@ -4752,26 +4768,26 @@ _SUMMARIZE_OUTPUT_TOOL: dict[str, Any] = SUMMARIZE_OUTPUT_TOOL
 # #48/#100. No LLM-controlled input reaches this tool (empty schema),
 # so no worktree/injection surface exists. See that module's own
 # docstring for the full account.
-    # moved to app/tools/execution/loc_stats.py as LOC_STATS_TOOL /
-    # loc_stats_handler() — tool_enhance.md productionization pass,
-    # tool #166 (2026-09-15).
+# moved to app/tools/execution/loc_stats.py as LOC_STATS_TOOL /
+# loc_stats_handler() — tool_enhance.md productionization pass,
+# tool #166 (2026-09-15).
 
 # -- Package management --
 # moved to app/tools/execution/npm_install.py as NPM_INSTALL_TOOL — tool_enhance.md productionization pass, tool #53 (2026-08-20).
 # moved to app/tools/execution/npm_run.py as NPM_RUN_TOOL — tool_enhance.md productionization pass, tool #54 (2026-08-20).
 # moved to app/tools/execution/pip_install.py as PIP_INSTALL_TOOL — tool_enhance.md productionization pass, tool #55 (2026-08-20).
-    # moved to app/tools/execution/pip_list.py as PIP_LIST_TOOL /
-    # pip_list_handler() — tool_enhance.md productionization pass,
-    # tool #172 (2026-09-15).
+# moved to app/tools/execution/pip_list.py as PIP_LIST_TOOL /
+# pip_list_handler() — tool_enhance.md productionization pass,
+# tool #172 (2026-09-15).
 _PIP_LIST_TOOL: dict[str, Any] = PIP_LIST_TOOL
 
 # -- Utilities --
 # moved to app/tools/filesystem/create_directory.py as
 # CREATE_DIRECTORY_TOOL / create_directory_handler() — tool_enhance.md
 # productionization pass, tool #131 (2026-08-26).
-    # moved to app/tools/integrations/http_request.py as
-    # HTTP_REQUEST_TOOL / http_request_handler() — tool_enhance.md
-    # productionization pass, tool #155 (2026-09-14).
+# moved to app/tools/integrations/http_request.py as
+# HTTP_REQUEST_TOOL / http_request_handler() — tool_enhance.md
+# productionization pass, tool #155 (2026-09-14).
 # moved to app/tools/filesystem/base64_encode.py as
 # BASE64_ENCODE_TOOL / base64_encode_handler() — tool_enhance.md
 # productionization pass, tool #122 (2026-08-26).
@@ -5024,6 +5040,7 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _FIND_UNUSED_IMPORTS_TOOL,
     _DEPS_OUTDATED_TOOL,
     _CHECK_LICENSE_COMPLIANCE_TOOL,
+    _CHECK_TARGET_REPO_LICENSE_COMPLIANCE_TOOL,
     _LOC_STATS_TOOL,
     # Package management
     _NPM_INSTALL_TOOL,
@@ -5200,7 +5217,6 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
 
         return f"Created branch: {name}"
 
-
     # ---- append_file ----
     # moved to app/tools/filesystem/append_file.py as append_file_handler
     # — tool_enhance.md productionization pass, tool #26 (2026-08-18).
@@ -5265,7 +5281,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                     )
                     real_branch = branch_r.stdout.strip()
                     if branch_r.returncode == 0 and real_branch:
-                        from app.db.repository import set_repo_active_branch_by_path_sync
+                        from app.db.repository import (
+                            set_repo_active_branch_by_path_sync,
+                        )
 
                         set_repo_active_branch_by_path_sync(repo_path, real_branch)
                 except Exception:
@@ -5340,7 +5358,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         rel = str(inp["path"])
         if _is_protected_path(rel, repo_path):
             return f"[POLICY DENIED] Protected path: {rel}"
-        return "[BLOCKED] git_restore requires interactive session for safety confirmation"
+        return (
+            "[BLOCKED] git_restore requires interactive session for safety confirmation"
+        )
 
     # ---- run_tests ----
     # moved to app/tools/execution/run_tests.py as run_tests_handler —
@@ -5625,9 +5645,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     # against a real clean repo). Now delegates to the shared, fixed
     # handler.
     def generate_commit_msg(inp: dict[str, Any]) -> str:
-        return generate_commit_msg_handler(
-            repo_path, inp, _llm_generate_commit_message
-        )
+        return generate_commit_msg_handler(repo_path, inp, _llm_generate_commit_message)
 
     # tool_enhance.md productionization pass, tool #179 (2026-09-15) —
     # was a SEVERE flag-collision bug on `base`: git diff's own
@@ -6905,6 +6923,12 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     def check_license_compliance_h(inp: dict[str, Any]) -> str:
         return check_license_compliance_handler()
 
+    # T2-B10 (2026-09-24, GRIDIRON_PARTIAL #331) — see
+    # app/tools/execution/check_target_repo_license_compliance.py's own
+    # module docstring.
+    def check_target_repo_license_compliance_h(inp: dict[str, Any]) -> str:
+        return check_target_repo_license_compliance_handler(repo_path, inp)
+
     # tool_enhance.md productionization pass, tool #166 (2026-09-15) —
     # was a worktree-escape LINE-COUNT-STATISTICS DISCLOSURE oracle
     # (`directory` never validated, proved live) and a missing
@@ -6924,7 +6948,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         # fixed there in this same pass (see that file). Simplified here
         # to state the real constraint plainly instead of dead async
         # plumbing that could never execute.
-        return "[BLOCKED] npm_install requires interactive session for safety confirmation"
+        return (
+            "[BLOCKED] npm_install requires interactive session for safety confirmation"
+        )
 
     # tool_enhance.md productionization pass, tool #54 (2026-08-20) — real
     # gap found: same shape as npm_install_h/pip_install_h right below
@@ -6942,7 +6968,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
         # same real gap as npm_install_h above. Re-audited during tool #55
         # (2026-08-20): still correct, no changes needed — see
         # app/tools/execution/pip_install.py's own docstring.
-        return "[BLOCKED] pip_install requires interactive session for safety confirmation"
+        return (
+            "[BLOCKED] pip_install requires interactive session for safety confirmation"
+        )
 
     # tool_enhance.md productionization pass, tool #172 (2026-09-15) —
     # `filter` audited and confirmed already safe (never reaches a
@@ -7015,6 +7043,9 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["find_unused_imports"] = find_unused_imports_h
     handlers["deps_outdated"] = deps_outdated_h
     handlers["check_license_compliance"] = check_license_compliance_h
+    handlers["check_target_repo_license_compliance"] = (
+        check_target_repo_license_compliance_h
+    )
     handlers["loc_stats"] = loc_stats_h
     handlers["npm_install"] = npm_install_h
     handlers["npm_run"] = npm_run_h

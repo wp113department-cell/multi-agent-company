@@ -25,14 +25,18 @@ def test_tool_is_declared_for_both_real_consumer_agents() -> None:
 
 
 def test_architecture_reviewer_handler_runs_a_real_scan(tmp_path: Path) -> None:
-    (tmp_path / "orphan.py").write_text("def never_called():\n    pass\n", encoding="utf-8")
+    (tmp_path / "orphan.py").write_text(
+        "def never_called():\n    pass\n", encoding="utf-8"
+    )
     handlers = make_arch_reviewer_handlers(str(tmp_path))
     result = handlers["scan_code_hygiene"]({"directory": ""})
     assert "unused files" in result or "duplicate" in result or "broken" in result
 
 
 def test_cleanup_agent_handler_runs_a_real_scan(tmp_path: Path) -> None:
-    (tmp_path / "a.py").write_text("import totally_fake_module_xyz_never_real\n", encoding="utf-8")
+    (tmp_path / "a.py").write_text(
+        "import totally_fake_module_xyz_never_real\n", encoding="utf-8"
+    )
     handlers = make_cleanup_agent_handlers(str(tmp_path))
     result = handlers["scan_code_hygiene"]({"directory": ""})
     assert "totally_fake_module_xyz_never_real" in result

@@ -30,6 +30,7 @@ from app.api.chat import router as chat_router
 from app.api.specialized_agents import router as specialized_agents_router
 from app.api.activity import router as activity_router
 from app.api.ratings import router as ratings_router
+from app.api.roadmap import router as roadmap_router
 from app.api.console import router as console_router
 from app.api.fleet_dashboard import router as fleet_dashboard_router
 from app.api.approvals import router as approvals_router
@@ -839,9 +840,7 @@ async def _tools_score_compute_loop() -> None:
                             exc,
                         )
             if computed:
-                logger.info(
-                    "Tools-score compute: persisted %d repo score(s)", computed
-                )
+                logger.info("Tools-score compute: persisted %d repo score(s)", computed)
         except Exception as exc:
             logger.warning("Tools-score compute loop iteration failed: %s", exc)
 
@@ -1779,6 +1778,7 @@ app.include_router(chat_router)
 app.include_router(specialized_agents_router)
 app.include_router(activity_router)
 app.include_router(ratings_router)
+app.include_router(roadmap_router)
 app.include_router(console_router)
 app.include_router(fleet_dashboard_router)
 app.include_router(approvals_router)

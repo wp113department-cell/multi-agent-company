@@ -60,7 +60,9 @@ def _fake_npm_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     bin_dir.mkdir()
     npm_script = bin_dir / "npm"
     npm_script.write_text('#!/bin/sh\necho "FAKE_NPM_CWD=$(pwd)"\n')
-    npm_script.chmod(npm_script.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    npm_script.chmod(
+        npm_script.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH
+    )
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
 
 

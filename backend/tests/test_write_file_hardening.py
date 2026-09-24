@@ -50,7 +50,9 @@ def test_write_file_tool_schema_has_required_fields() -> None:
     assert WRITE_FILE_TOOL["input_schema"]["required"] == ["path", "content"]
 
 
-def test_write_file_handler_rejects_absolute_path_outside_worktree(tmp_path: Path) -> None:
+def test_write_file_handler_rejects_absolute_path_outside_worktree(
+    tmp_path: Path,
+) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     outside = tmp_path / "outside" / "evil.txt"
@@ -88,7 +90,9 @@ def test_write_file_handler_writes_real_content_in_repo(tmp_path: Path) -> None:
     assert (tmp_path / "nested/dir/f.txt").read_text() == "hello world"
 
 
-def test_write_file_handler_surfaces_write_errors_without_raising(tmp_path: Path) -> None:
+def test_write_file_handler_surfaces_write_errors_without_raising(
+    tmp_path: Path,
+) -> None:
     # Target a path where the parent can never be created (a file, not a
     # directory, sits where a directory is needed) — proves the try/except
     # wrapping (ported from make_chat_handlers's own implementation) still
@@ -227,7 +231,9 @@ def test_readme_agent_handlers_write_file_rejects_outside_repo(tmp_path: Path) -
     assert not outside.exists()
 
 
-def test_api_docs_agent_handlers_write_file_rejects_outside_repo(tmp_path: Path) -> None:
+def test_api_docs_agent_handlers_write_file_rejects_outside_repo(
+    tmp_path: Path,
+) -> None:
     from app.agents.tools import make_api_docs_agent_handlers
 
     repo = tmp_path / "repo"

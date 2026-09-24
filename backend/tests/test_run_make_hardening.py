@@ -29,7 +29,6 @@ is mocked.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -147,9 +146,7 @@ def test_make_chat_handlers_run_make_rejects_eval_flag_injection(
         marker.unlink()
     try:
         handlers = make_chat_handlers(str(tmp_path))
-        result = handlers["run_make"](
-            {"target": f"--eval=$(shell touch {marker})"}
-        )
+        result = handlers["run_make"]({"target": f"--eval=$(shell touch {marker})"})
         assert "[ERROR]" in result
         assert not marker.exists()
     finally:
@@ -200,9 +197,7 @@ def test_make_chat_handlers_run_make_rejects_directory_outside_repo(
         marker.unlink()
     try:
         handlers = make_chat_handlers(str(tmp_path))
-        result = handlers["run_make"](
-            {"target": "evil", "directory": str(outside_dir)}
-        )
+        result = handlers["run_make"]({"target": "evil", "directory": str(outside_dir)})
         assert "[ERROR]" in result
         assert not marker.exists()
     finally:
@@ -229,9 +224,7 @@ async def test_chat_agent_run_make_runs_a_legitimate_target(tmp_path: Path) -> N
 
 @pytest.mark.asyncio
 async def test_chat_agent_run_make_lists_targets_when_empty(tmp_path: Path) -> None:
-    (tmp_path / "Makefile").write_text(
-        "test:\n\t@echo t\n\nbuild:\n\t@echo b\n"
-    )
+    (tmp_path / "Makefile").write_text("test:\n\t@echo t\n\nbuild:\n\t@echo b\n")
     agent = _agent(tmp_path)
     result = await agent._execute_tool("run_make", {})
     assert "Targets" in result or "not parseable" in result

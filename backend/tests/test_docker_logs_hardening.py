@@ -148,7 +148,9 @@ def test_both_factories_reject_flag_shaped_container(
 ) -> None:
     handlers = factory(str(tmp_path))
     result = handlers["docker_logs"]({"container": "-f"})
-    assert "[ERROR]" in result, f"{factory_name} did not reject the flag-shaped container"
+    assert (
+        "[ERROR]" in result
+    ), f"{factory_name} did not reject the flag-shaped container"
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +172,9 @@ async def test_chat_agent_returns_real_logs(tmp_path: Path) -> None:
     "factory",
     [make_chat_handlers, make_docker_agent_handlers],
 )
-def test_both_factories_handle_missing_container_cleanly(tmp_path: Path, factory) -> None:
+def test_both_factories_handle_missing_container_cleanly(
+    tmp_path: Path, factory
+) -> None:
     handlers = factory(str(tmp_path))
     result = handlers["docker_logs"]({"container": "definitely_nonexistent_xyz123"})
     assert isinstance(result, str)

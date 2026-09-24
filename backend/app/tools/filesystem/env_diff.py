@@ -102,6 +102,7 @@ def _worktree_boundary_only(file_path: str, worktree_path: str) -> str | None:
         return f"path {file_path!r} escapes worktree boundary {worktree_path!r}"
     return None
 
+
 ENV_DIFF_TOOL: dict[str, Any] = {
     "name": "env_diff",
     "description": "Compare .env.example with .env (or a named env file) to find missing or extra variables.",

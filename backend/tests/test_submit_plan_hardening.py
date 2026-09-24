@@ -68,9 +68,7 @@ def test_validate_plan_rejects_missing_sections() -> None:
 
 def test_validate_plan_accepts_well_formed_plan() -> None:
     good_plan = (
-        "## Overview\n"
-        + "x" * 100
-        + "\n## Implementation Steps\n1. Do a thing\n"
+        "## Overview\n" + "x" * 100 + "\n## Implementation Steps\n1. Do a thing\n"
         "## Files To Inspect\n- app/main.py\n"
     )
     assert _validate_plan(good_plan) is None

@@ -117,9 +117,7 @@ async def test_chat_agent_file_exists_handles_permission_denied_gracefully(
     if os.geteuid() == 0:
         pytest.skip("root bypasses permission checks, cannot exercise this path")
     agent = _agent(tmp_path)
-    result = await agent._execute_tool(
-        "file_exists", {"path": restricted_file.name}
-    )
+    result = await agent._execute_tool("file_exists", {"path": restricted_file.name})
     assert result in ("not_found", "file")  # must not raise
 
 

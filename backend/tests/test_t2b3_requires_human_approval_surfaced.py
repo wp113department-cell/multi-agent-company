@@ -42,7 +42,10 @@ async def _run_bg_dispatch_and_capture_artifact(
 
     mock_save = AsyncMock()
     with (
-        patch("app.api.specialized_agents._load_agent_fn", return_value=lambda **kw: fake_result),
+        patch(
+            "app.api.specialized_agents._load_agent_fn",
+            return_value=lambda **kw: fake_result,
+        ),
         patch("app.artifacts.store.save_artifact_async", new=mock_save),
         patch("app.api.specialized_agents.append_log", new=AsyncMock()),
         patch("app.api.repo.get_active_repo_path", return_value="/repo"),
@@ -111,7 +114,9 @@ async def test_run_sync_surfaces_requires_human_approval_true_in_response_and_ar
     fake_result = AgentResult(
         summary="ok", status="needs_approval", requires_human_approval=True
     )
-    payload, response = await _run_sync_dispatch_and_capture("debugger_agent", fake_result)
+    payload, response = await _run_sync_dispatch_and_capture(
+        "debugger_agent", fake_result
+    )
     assert payload["requires_human_approval"] is True
     assert response.requires_human_approval is True
 
@@ -123,6 +128,8 @@ async def test_run_sync_surfaces_requires_human_approval_false_in_response_and_a
     fake_result = AgentResult(
         summary="ok", status="completed", requires_human_approval=False
     )
-    payload, response = await _run_sync_dispatch_and_capture("debugger_agent", fake_result)
+    payload, response = await _run_sync_dispatch_and_capture(
+        "debugger_agent", fake_result
+    )
     assert payload["requires_human_approval"] is False
     assert response.requires_human_approval is False

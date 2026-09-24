@@ -119,9 +119,7 @@ def _category_registry() -> list[CategoryDefinition]:
         CategoryDefinition("agents", True, get_latest_agents_score, "agents_score"),
         # T2-B7 (2026-09-24, GRIDIRON_PARTIAL #414).
         CategoryDefinition("tools", True, get_latest_tools_score, "tools_score"),
-        CategoryDefinition(
-            "prompts", True, get_latest_prompts_score, "prompts_score"
-        ),
+        CategoryDefinition("prompts", True, get_latest_prompts_score, "prompts_score"),
     ]
     categories.extend(
         CategoryDefinition(name, False, None, "") for name in _NOT_YET_IMPLEMENTED

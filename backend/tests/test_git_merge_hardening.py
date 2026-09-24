@@ -43,9 +43,6 @@ def _real_repo_with_two_branches(tmp_path: Path) -> Path:
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-qm", "feature change"], cwd=repo, check=True)
 
-    base_branch = subprocess.run(
-        ["git", "branch", "--show-current"], cwd=repo, capture_output=True, text=True
-    ).stdout.strip()
     subprocess.run(["git", "checkout", "-q", "master"], cwd=repo, check=True)
     (repo / "f.txt").write_text("main version\n")
     subprocess.run(["git", "add", "."], cwd=repo, check=True)

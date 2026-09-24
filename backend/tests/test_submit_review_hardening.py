@@ -119,7 +119,5 @@ class TestLegitimateUsageRegression:
     def test_independent_handler_instances_do_not_share_state(self) -> None:
         h1 = make_reviewer_handlers("/tmp")
         h2 = make_reviewer_handlers("/tmp")
-        h1["submit_review"](
-            {"findings": [], "verdict": "approved", "summary": "h1"}
-        )
+        h1["submit_review"]({"findings": [], "verdict": "approved", "summary": "h1"})
         assert "verdict" not in h2["_review_result"]

@@ -191,7 +191,11 @@ def run_evaluation_agent(
     # AttributeError proved live for a non-dict entry mixed into
     # `cases` — fixed with the same isinstance-filtering pattern
     # already established for tool #242's database_architect.
-    cases = [c for c in cases_raw if isinstance(c, dict)] if isinstance(cases_raw, list) else []
+    cases = (
+        [c for c in cases_raw if isinstance(c, dict)]
+        if isinstance(cases_raw, list)
+        else []
+    )
     score = _safe_float(raw.get("overall_score", 0.0))
     pass_count = int(_safe_float(raw.get("pass_count", 0)))
     fail_count = int(_safe_float(raw.get("fail_count", 0)))

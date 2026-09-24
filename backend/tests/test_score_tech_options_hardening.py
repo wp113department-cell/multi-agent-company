@@ -80,9 +80,7 @@ def test_direct_call_non_dict_option_raises_clean_valueerror() -> None:
     import pytest
 
     with pytest.raises(ValueError, match="each option must be an object"):
-        _compute_weighted_scores(
-            [{"name": "A", "criteria_scores": {"x": 3}}, 42], None
-        )
+        _compute_weighted_scores([{"name": "A", "criteria_scores": {"x": 3}}, 42], None)
 
 
 def test_direct_call_non_dict_weights_raises_clean_valueerror() -> None:

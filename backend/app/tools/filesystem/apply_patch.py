@@ -107,9 +107,7 @@ def apply_patch_handler(repo_path: str, inp: dict[str, Any]) -> str:
             return f"[POLICY DENIED] apply_patch target {tp!r} is denied by policy"
 
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".patch", delete=False
-        ) as pf:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".patch", delete=False) as pf:
             pf.write(patch_content)
             pf_name = pf.name
     except Exception as e:

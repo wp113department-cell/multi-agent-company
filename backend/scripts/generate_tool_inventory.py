@@ -120,7 +120,9 @@ def collect_agent_tool_mappings() -> dict[str, list[str]]:
         for tool_name in allowed:
             mapping.setdefault(tool_name, set()).add(agent_name)
     if errors:
-        print(f"[warn] {len(errors)} agent module(s) failed to import:", file=sys.stderr)
+        print(
+            f"[warn] {len(errors)} agent module(s) failed to import:", file=sys.stderr
+        )
         for e in errors[:20]:
             print(f"  {e}", file=sys.stderr)
     return {k: sorted(v) for k, v in mapping.items()}
@@ -209,7 +211,9 @@ def main() -> None:
             1 for t in tools if not t["has_manifest_entry"]
         ),
         "tools_with_zero_agents": sum(1 for t in tools if t["agent_count"] == 0),
-        "tools_with_zero_test_files": sum(1 for t in tools if t["test_file_count"] == 0),
+        "tools_with_zero_test_files": sum(
+            1 for t in tools if t["test_file_count"] == 0
+        ),
         "risk_level_breakdown": {
             level: sum(
                 1
@@ -223,7 +227,9 @@ def main() -> None:
     output = {"summary": summary, "tools": tools}
     out_path = REPO_ROOT / "tool_inventory.json"
     out_path.write_text(json.dumps(output, indent=2))
-    print(f"Wrote {out_path} — {summary['total_tools_with_spec']} tool specs discovered")
+    print(
+        f"Wrote {out_path} — {summary['total_tools_with_spec']} tool specs discovered"
+    )
     print(json.dumps(summary, indent=2))
 
 

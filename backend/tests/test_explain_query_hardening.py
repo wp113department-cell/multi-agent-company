@@ -148,7 +148,9 @@ def test_handler_rejects_stacked_mutating_statement(proof_table) -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_agent_dispatch_rejects_stacked_statement(tmp_path, proof_table) -> None:
+async def test_chat_agent_dispatch_rejects_stacked_statement(
+    tmp_path, proof_table
+) -> None:
     agent = _agent(str(tmp_path))
     payload = f"SELECT 1; INSERT INTO {PROOF_TABLE} VALUES (999)"
     result = await agent._execute_tool("explain_query", {"query": payload})
@@ -169,7 +171,9 @@ def test_all_three_factories_reject_stacked_statement(
     handlers = factory(str(tmp_path))
     payload = f"SELECT 1; INSERT INTO {PROOF_TABLE} VALUES (999)"
     result = handlers["explain_query"]({"query": payload})
-    assert result.startswith("[ERROR]"), f"{factory_name} did not reject the stacked statement"
+    assert result.startswith(
+        "[ERROR]"
+    ), f"{factory_name} did not reject the stacked statement"
 
 
 # ---------------------------------------------------------------------------

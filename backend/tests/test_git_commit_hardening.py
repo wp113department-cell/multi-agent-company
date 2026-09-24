@@ -66,7 +66,10 @@ def test_stage_and_commit_rejects_a_secret_bearing_file(tmp_path: Path) -> None:
     assert result.startswith("[POLICY DENIED]")
 
     staged = subprocess.run(
-        ["git", "diff", "--cached", "--name-only"], cwd=repo, capture_output=True, text=True
+        ["git", "diff", "--cached", "--name-only"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     assert staged == ""
 
@@ -99,7 +102,10 @@ def test_stage_and_commit_all_sentinel_also_scans_for_secrets(tmp_path: Path) ->
     assert result.startswith("[POLICY DENIED]")
 
     staged = subprocess.run(
-        ["git", "diff", "--cached", "--name-only"], cwd=repo, capture_output=True, text=True
+        ["git", "diff", "--cached", "--name-only"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     assert staged == ""
 
@@ -114,7 +120,10 @@ def test_stage_and_commit_flag_shaped_file_entry_does_not_widen_scope(
     assert result.startswith("[ERROR]")
 
     staged = subprocess.run(
-        ["git", "diff", "--cached", "--name-only"], cwd=repo, capture_output=True, text=True
+        ["git", "diff", "--cached", "--name-only"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     assert staged == ""
 
@@ -125,7 +134,9 @@ def test_stage_and_commit_flag_shaped_file_entry_does_not_widen_scope(
 
 
 @pytest.mark.asyncio
-async def test_chat_agent_git_commit_rejects_secret_bearing_file(tmp_path: Path) -> None:
+async def test_chat_agent_git_commit_rejects_secret_bearing_file(
+    tmp_path: Path,
+) -> None:
     repo = _real_repo(tmp_path)
     (repo / ".env").write_text(
         "AWS_SECRET_ACCESS_KEY=AKIAABCDEFGHIJKLMNOP1234567890EXAMPLE\n"

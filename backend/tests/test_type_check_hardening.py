@@ -61,9 +61,7 @@ async def test_chat_agent_dispatch_blocks_shell_injection(tmp_path: Path) -> Non
     marker = tmp_path / "PWNED_MARKER"
     payload = f"; touch {marker}; echo x"
     agent = _agent(str(tmp_path))
-    await agent._execute_tool(
-        "type_check", {"path": payload, "language": "python"}
-    )
+    await agent._execute_tool("type_check", {"path": payload, "language": "python"})
     assert not marker.exists()
 
 
@@ -84,7 +82,9 @@ def test_proves_the_original_vulnerability_shape_is_real(tmp_path: Path) -> None
     marker = tmp_path / "UNQUOTED_MARKER"
     py_path = f"; touch {marker}; echo x"
     cmd = f"true && python -m mypy {py_path} --ignore-missing-imports 2>&1 | head -60"
-    subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=str(tmp_path), timeout=30)
+    subprocess.run(
+        cmd, shell=True, capture_output=True, text=True, cwd=str(tmp_path), timeout=30
+    )
     assert marker.exists()
 
 
@@ -96,7 +96,9 @@ def test_proves_the_original_vulnerability_shape_is_real(tmp_path: Path) -> None
 
 def test_handler_runs_real_mypy_and_returns_string(tmp_path: Path) -> None:
     (tmp_path / "clean.py").write_text("x: int = 1\n")
-    result = type_check_handler(tmp_path, str(tmp_path), {"path": "clean.py", "language": "python"})
+    result = type_check_handler(
+        tmp_path, str(tmp_path), {"path": "clean.py", "language": "python"}
+    )
     assert isinstance(result, str)
     assert "mypy" in result.lower()
 

@@ -75,7 +75,9 @@ def test_empty_collector_no_agent_name() -> None:
 
 
 def test_unknown_agent_name_returns_not_found_message() -> None:
-    result = fleet_metrics_read_handler({"agent_name": "definitely-not-a-real-agent-xyz"})
+    result = fleet_metrics_read_handler(
+        {"agent_name": "definitely-not-a-real-agent-xyz"}
+    )
     assert "no recorded runs" in result
 
 

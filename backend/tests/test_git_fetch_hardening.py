@@ -47,13 +47,19 @@ def two_remotes_repo(tmp_path: Path) -> Path:
     seed = tmp_path / "seed"
     seed.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=str(seed), check=True)
-    subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=str(seed), check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@t.com"], cwd=str(seed), check=True
+    )
     subprocess.run(["git", "config", "user.name", "t"], cwd=str(seed), check=True)
     (seed / "f.txt").write_text("hi\n")
     subprocess.run(["git", "add", "f.txt"], cwd=str(seed), check=True)
     subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=str(seed), check=True)
-    subprocess.run(["git", "push", "-q", str(remote_a), "master"], cwd=str(seed), check=True)
-    subprocess.run(["git", "push", "-q", str(remote_b), "master"], cwd=str(seed), check=True)
+    subprocess.run(
+        ["git", "push", "-q", str(remote_a), "master"], cwd=str(seed), check=True
+    )
+    subprocess.run(
+        ["git", "push", "-q", str(remote_b), "master"], cwd=str(seed), check=True
+    )
 
     repo = tmp_path / "repo"
     repo.mkdir()

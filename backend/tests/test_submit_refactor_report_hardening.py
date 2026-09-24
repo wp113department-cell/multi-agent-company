@@ -40,9 +40,7 @@ def test_submit_refactor_report_tool_schema() -> None:
     ]
 
 
-def test_submit_refactor_report_appears_exactly_once_in_refactor_agent_tools() -> (
-    None
-):
+def test_submit_refactor_report_appears_exactly_once_in_refactor_agent_tools() -> None:
     names = [t["name"] for t in REFACTOR_AGENT_TOOLS]
     assert names.count("submit_refactor_report") == 1
 

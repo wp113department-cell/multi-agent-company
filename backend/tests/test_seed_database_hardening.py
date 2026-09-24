@@ -76,7 +76,9 @@ async def test_seed_database_rejects_a_shell_injection_payload(
     payload = f"seed.py; touch {marker}"
 
     agent = _agent(repo)
-    with patch.object(agent, "_confirm", new=AsyncMock(return_value=True)) as mock_confirm:
+    with patch.object(
+        agent, "_confirm", new=AsyncMock(return_value=True)
+    ) as mock_confirm:
         result = await agent._execute_tool("seed_database", {"script": payload})
 
     mock_confirm.assert_not_awaited()
@@ -119,9 +121,7 @@ async def test_seed_database_rejects_an_absolute_path_outside_the_repo(
     with patch.object(
         agent, "_confirm", new=AsyncMock(return_value=True)
     ) as mock_confirm:
-        result = await agent._execute_tool(
-            "seed_database", {"script": "/etc/hostname"}
-        )
+        result = await agent._execute_tool("seed_database", {"script": "/etc/hostname"})
 
     mock_confirm.assert_not_awaited()
     assert result.startswith(("[ERROR]", "[POLICY DENIED]"))
@@ -154,9 +154,9 @@ def test_tools_py_handler_rejects_the_same_payloads(
     handlers = make_chat_handlers(str(tmp_path))
     for payload in ["seed.py; touch /tmp/x", "/etc/hostname", "../outside.py"]:
         result = handlers["seed_database"]({"script": payload})
-        assert result.startswith(("[ERROR]", "[POLICY DENIED]")), (
-            f"payload not rejected: {payload!r}"
-        )
+        assert result.startswith(
+            ("[ERROR]", "[POLICY DENIED]")
+        ), f"payload not rejected: {payload!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +175,9 @@ async def test_seed_database_accepts_the_real_default_script_path(
 
     agent = _agent(repo)
     with (
-        patch.object(agent, "_confirm", new=AsyncMock(return_value=False)) as mock_confirm,
+        patch.object(
+            agent, "_confirm", new=AsyncMock(return_value=False)
+        ) as mock_confirm,
     ):
         result = await agent._execute_tool("seed_database", {})
 
@@ -194,7 +196,9 @@ async def test_seed_database_accepts_a_real_custom_relative_script(
     agent = _agent(repo)
     with (
         patch.object(agent, "_confirm", new=AsyncMock(return_value=True)),
-        patch("app.agents.chat_agent._run_subprocess", return_value="seeded") as mock_run,
+        patch(
+            "app.agents.chat_agent._run_subprocess", return_value="seeded"
+        ) as mock_run,
     ):
         result = await agent._execute_tool(
             "seed_database", {"script": "scripts/seed_test_data.py"}

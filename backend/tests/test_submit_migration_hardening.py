@@ -91,5 +91,11 @@ class TestLegitimateUsageRegression:
 
     def test_other_migration_agent_handlers_unaffected(self) -> None:
         handlers = make_migration_agent_handlers("/tmp")
-        for key in ("run_sql", "inspect_schema", "write_file", "bash", "submit_migration"):
+        for key in (
+            "run_sql",
+            "inspect_schema",
+            "write_file",
+            "bash",
+            "submit_migration",
+        ):
             assert key in handlers

@@ -193,7 +193,9 @@ class TestLegitimateUsageRegression:
             for i in range(5)
         ]
         (tmp_path / "many.ipynb").write_text(
-            json.dumps({"cells": cells, "metadata": {}, "nbformat": 4, "nbformat_minor": 5})
+            json.dumps(
+                {"cells": cells, "metadata": {}, "nbformat": 4, "nbformat_minor": 5}
+            )
         )
         out = read_notebook_handler(
             tmp_path, str(tmp_path), {"path": "many.ipynb", "max_cells": 2}

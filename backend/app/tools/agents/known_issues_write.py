@@ -95,6 +95,7 @@ else:
     def _mem_unlock(fh: Any) -> None:
         fcntl.flock(fh, fcntl.LOCK_UN)
 
+
 KNOWN_ISSUES_WRITE_TOOL: dict[str, Any] = {
     "name": "known_issues_write",
     "description": "Append a new known issue to the project known issues file.",

@@ -180,9 +180,7 @@ async def test_chat_agent_missing_function_errors_cleanly(tmp_path: Path) -> Non
     [make_chat_handlers, make_bug_fix_handlers, make_refactor_agent_handlers],
 )
 def test_all_three_factories_extract_real_function(tmp_path: Path, factory) -> None:
-    (tmp_path / "target.py").write_text(
-        "async def fetch_data():\n    return 42\n"
-    )
+    (tmp_path / "target.py").write_text("async def fetch_data():\n    return 42\n")
     handlers = factory(str(tmp_path))
     result = handlers["find_function_body"](
         {"path": "target.py", "function_name": "fetch_data"}

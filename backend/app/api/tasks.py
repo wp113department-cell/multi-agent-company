@@ -353,7 +353,9 @@ async def run_task(
             # discoverable, glanceable state instead of a one-shot error.
             if task.status != "blocked":
                 try:
-                    await transition_task(db, task_id, "blocked", blocked_reason="dependency")
+                    await transition_task(
+                        db, task_id, "blocked", blocked_reason="dependency"
+                    )
                 except TransitionError:
                     logger.warning(
                         "Could not persist dependency-blocked state for task %s "

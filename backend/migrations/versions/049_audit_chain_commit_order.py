@@ -68,4 +68,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute(_FUNCTION.format(reseq=""))
-    op.execute("DELETE FROM system_settings WHERE key = 'audit_chain_fork_free_since_seq'")
+    op.execute(
+        "DELETE FROM system_settings WHERE key = 'audit_chain_fork_free_since_seq'"
+    )

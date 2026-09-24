@@ -246,7 +246,8 @@ class TestDependsOnGate:
         glanceable "blocked"/"dependency" state."""
         with TestClient(app) as client:
             dep_resp = client.post(
-                "/api/tasks", json={"title": "td dep persist parent", "description": "d"}
+                "/api/tasks",
+                json={"title": "td dep persist parent", "description": "d"},
             )
             dep_id = dep_resp.json()["id"]
 
@@ -271,7 +272,9 @@ class TestDependsOnGate:
                 # crash on a "blocked" -> "blocked" self-transition.
                 run_resp2 = client.post(f"/api/tasks/{child_id}/run", json={})
                 assert run_resp2.status_code == 409
-                assert client.get(f"/api/tasks/{child_id}").json()["status"] == "blocked"
+                assert (
+                    client.get(f"/api/tasks/{child_id}").json()["status"] == "blocked"
+                )
             finally:
                 _cleanup(child_id, dep_id)
 
@@ -292,7 +295,10 @@ class TestDependsOnGate:
             )
             child_id = child_resp.json()["id"]
             try:
-                assert client.post(f"/api/tasks/{child_id}/run", json={}).status_code == 409
+                assert (
+                    client.post(f"/api/tasks/{child_id}/run", json={}).status_code
+                    == 409
+                )
                 assert (
                     client.get(f"/api/tasks/{child_id}").json()["blockedReason"]
                     == "dependency"
@@ -306,7 +312,9 @@ class TestDependsOnGate:
                         f"/api/tasks/{child_id}/run", json={"mode": "simple"}
                     )
                 assert run_resp.status_code == 200, run_resp.text
-                assert client.get(f"/api/tasks/{child_id}").json()["blockedReason"] is None
+                assert (
+                    client.get(f"/api/tasks/{child_id}").json()["blockedReason"] is None
+                )
             finally:
                 _cleanup(child_id, dep_id)
 

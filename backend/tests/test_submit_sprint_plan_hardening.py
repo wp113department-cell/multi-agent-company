@@ -83,9 +83,7 @@ class TestLegitimateUsageRegression:
     def test_make_sprint_planner_handlers_wires_submit_sprint_plan(self) -> None:
         handlers = make_sprint_planner_handlers("/tmp")
         assert "submit_sprint_plan" in handlers
-        out = handlers["submit_sprint_plan"](
-            {"goal": "Real submission", "stories": []}
-        )
+        out = handlers["submit_sprint_plan"]({"goal": "Real submission", "stories": []})
         assert out == "Sprint plan submitted"
 
     def test_repeated_calls_do_not_accumulate_or_leak_state(self) -> None:

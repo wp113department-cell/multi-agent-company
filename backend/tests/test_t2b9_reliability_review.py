@@ -62,10 +62,7 @@ class TestFindUnguardedExternalCalls:
     def test_does_not_flag_an_unrelated_dict_get_call(self, tmp_path: Path) -> None:
         # Bare `.get(...)` on an arbitrary object must never match — only
         # a real >=2-segment dotted tail (e.g. "requests.get") counts.
-        (tmp_path / "a.py").write_text(
-            "def f(d):\n"
-            "    return d.get('key')\n"
-        )
+        (tmp_path / "a.py").write_text("def f(d):\n" "    return d.get('key')\n")
         report = find_unguarded_external_calls(str(tmp_path))
         assert report.findings == []
 
@@ -128,7 +125,9 @@ class TestFindUnguardedExternalCalls:
         assert report.findings == []
         assert "No unguarded external calls" in format_reliability_report(report)
 
-    def test_nonexistent_directory_returns_an_empty_report(self, tmp_path: Path) -> None:
+    def test_nonexistent_directory_returns_an_empty_report(
+        self, tmp_path: Path
+    ) -> None:
         report = find_unguarded_external_calls(str(tmp_path / "does_not_exist"))
         assert report.findings == []
         assert report.files_scanned == 0

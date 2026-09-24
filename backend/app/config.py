@@ -957,6 +957,15 @@ class Settings(BaseSettings):
             "'failed' as orphaned. Set to 0 to disable the sweep."
         ),
     )
+    cross_run_loop_window: int = Field(
+        default=3,
+        description="T2-B10 (2026-09-24, GRIDIRON_PARTIAL #442 'Detect "
+        "looping agents (cross-run)') — reconcile_orphaned_runs() will not "
+        "auto-resume an orphan whose (task_id, agent_type) pair has failed "
+        "this many times in a row (most recent runs, real AgentRun.status "
+        "history) — it's marked failed and escalated instead of resumed "
+        "again, breaking a genuine cross-run loop.",
+    )
     # Stage 4 Cluster N (2026-08-04) — the heartbeat that feeds the sweep above
     # was a documented no-op in run_planner()/run_coder() and entirely absent
     # from run_manager()'s own pipeline, so last_heartbeat_at never left NULL

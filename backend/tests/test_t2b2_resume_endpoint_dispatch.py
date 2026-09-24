@@ -30,7 +30,9 @@ def client():
 
 
 def _new_task(client: TestClient) -> int:
-    r = client.post("/api/tasks", json={"title": "t2b2 resume dispatch", "description": "d"})
+    r = client.post(
+        "/api/tasks", json={"title": "t2b2 resume dispatch", "description": "d"}
+    )
     assert r.status_code == 201, r.text
     return int(r.json()["id"])
 
@@ -52,13 +54,17 @@ def _cleanup(task_id: int) -> None:
     asyncio.run(go())
 
 
-def test_resume_dispatches_a_covered_agent_from_its_checkpoint(client: TestClient) -> None:
+def test_resume_dispatches_a_covered_agent_from_its_checkpoint(
+    client: TestClient,
+) -> None:
     from app.db.repository import create_agent_run_sync
 
     task_id = _new_task(client)
     try:
         trace_id = f"t2b2-endpoint-{task_id}"
-        run_id = create_agent_run_sync(task_id, "bug_fix", "claude-haiku-4-5-20251001", trace_id=trace_id)
+        run_id = create_agent_run_sync(
+            task_id, "bug_fix", "claude-haiku-4-5-20251001", trace_id=trace_id
+        )
         assert run_id is not None
         assert client.post(f"/api/tasks/{task_id}/stop").status_code == 200
 
@@ -68,7 +74,9 @@ def test_resume_dispatches_a_covered_agent_from_its_checkpoint(client: TestClien
         # parameter" for every function equally), so the mock must actually
         # mirror the real one's signature.
         with patch("app.agents.bug_fix.run_bug_fix", autospec=True) as mock_run:
-            mock_run.return_value = None  # AgentResult shape not needed for this test's scope
+            mock_run.return_value = (
+                None  # AgentResult shape not needed for this test's scope
+            )
 
             r = client.post(
                 f"/api/tasks/{task_id}/resume",
@@ -85,13 +93,18 @@ def test_resume_dispatches_a_covered_agent_from_its_checkpoint(client: TestClien
             mock_run.assert_called_once()
             call_kwargs = mock_run.call_args.kwargs
             assert call_kwargs["task_id"] == task_id
-            assert call_kwargs["error_description"] == "please also handle the timeout case"
+            assert (
+                call_kwargs["error_description"]
+                == "please also handle the timeout case"
+            )
             assert call_kwargs["resume_trace_id"] == trace_id
     finally:
         _cleanup(task_id)
 
 
-def test_resume_falls_back_to_flag_only_for_an_uncovered_agent(client: TestClient) -> None:
+def test_resume_falls_back_to_flag_only_for_an_uncovered_agent(
+    client: TestClient,
+) -> None:
     """security_reviewer has not been given resume_trace_id support in this
     batch — resume must still succeed (today's pre-existing behavior), just
     without a real dispatch, never a guessed/fabricated one."""

@@ -98,13 +98,13 @@ class TestVerifyFileLineCitationsUnit:
 
     def test_no_repo_root_is_a_safe_noop(self) -> None:
         report = verify_file_line_citations("", {"summary": "foo.py:1"})
-        assert report == {"checked": 0, "unverified": []}
+        assert report == {"checked": 0, "unverified": [], "unverified_names": []}
 
     def test_nonexistent_repo_root_is_a_safe_noop(self) -> None:
         report = verify_file_line_citations(
             "/definitely/not/a/real/path/xyz", {"summary": "foo.py:1"}
         )
-        assert report == {"checked": 0, "unverified": []}
+        assert report == {"checked": 0, "unverified": [], "unverified_names": []}
 
     def test_duplicate_citations_counted_once(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
         f = tmp_path / "dup.py"

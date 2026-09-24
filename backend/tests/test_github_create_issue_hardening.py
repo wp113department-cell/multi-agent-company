@@ -75,8 +75,17 @@ def test_github_create_issue_command_no_labels() -> None:
 def test_github_create_issue_command_with_labels() -> None:
     cmd = github_create_issue_command("Bug", "desc", ["bug", "urgent"])
     assert cmd == [
-        "gh", "issue", "create", "--title", "Bug", "--body", "desc",
-        "--label", "bug", "--label", "urgent",
+        "gh",
+        "issue",
+        "create",
+        "--title",
+        "Bug",
+        "--body",
+        "desc",
+        "--label",
+        "bug",
+        "--label",
+        "urgent",
     ]
 
 
@@ -145,4 +154,6 @@ def test_make_chat_handlers_github_create_issue_real_argv(
     result = handlers["github_create_issue"](
         {"title": "Batch issue", "body": "batch body", "labels": []}
     )
-    assert "FAKE_GH_CALLED: issue create --title Batch issue --body batch body" in result
+    assert (
+        "FAKE_GH_CALLED: issue create --title Batch issue --body batch body" in result
+    )

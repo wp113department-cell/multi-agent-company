@@ -79,7 +79,9 @@ PARSE_DOCKERFILE_TOOL: dict[str, Any] = {
 }
 
 
-def parse_dockerfile_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> str:
+def parse_dockerfile_handler(
+    root: Path, worktree_path: str, inp: dict[str, Any]
+) -> str:
     """Core parse_dockerfile logic — the one real implementation,
     reused unchanged in behavior except for the worktree-boundary
     check now applied to `path`."""

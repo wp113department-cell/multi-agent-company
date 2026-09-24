@@ -97,8 +97,6 @@ def test_handler_is_idempotent(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_chat_agent_dispatch_creates_nested_directories(tmp_path: Path) -> None:
     agent = _agent(str(tmp_path))
-    result = await agent._execute_tool(
-        "create_directory", {"path": "new/nested/dir"}
-    )
+    result = await agent._execute_tool("create_directory", {"path": "new/nested/dir"})
     assert result == "Created directory: new/nested/dir"
     assert (tmp_path / "new" / "nested" / "dir").is_dir()

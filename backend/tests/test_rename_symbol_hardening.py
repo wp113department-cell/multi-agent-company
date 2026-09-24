@@ -114,7 +114,11 @@ def test_make_chat_handlers_rename_symbol_rejects_directory_outside_repo(
     handlers = make_chat_handlers(str(repo))
 
     result = handlers["rename_symbol"](
-        {"old_name": "old_function_name", "new_name": "PWNED", "directory": str(outside)}
+        {
+            "old_name": "old_function_name",
+            "new_name": "PWNED",
+            "directory": str(outside),
+        }
     )
     assert result.startswith("[POLICY DENIED]")
     assert "old_function_name" in (outside / "victim.py").read_text()
@@ -129,7 +133,11 @@ def test_refactor_agent_rename_symbol_rejects_directory_outside_repo(
     handlers = make_refactor_agent_handlers(str(repo))
 
     result = handlers["rename_symbol"](
-        {"old_name": "old_function_name", "new_name": "PWNED", "directory": str(outside)}
+        {
+            "old_name": "old_function_name",
+            "new_name": "PWNED",
+            "directory": str(outside),
+        }
     )
     assert result.startswith("[POLICY DENIED]")
     assert "old_function_name" in (outside / "victim.py").read_text()

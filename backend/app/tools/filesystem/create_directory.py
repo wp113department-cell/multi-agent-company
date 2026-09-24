@@ -66,7 +66,9 @@ CREATE_DIRECTORY_TOOL: dict[str, Any] = {
 }
 
 
-def create_directory_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> str:
+def create_directory_handler(
+    root: Path, worktree_path: str, inp: dict[str, Any]
+) -> str:
     """Core create_directory logic — the one real implementation,
     reused unchanged in behavior (worktree validation was already
     correct)."""

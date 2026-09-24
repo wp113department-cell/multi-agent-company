@@ -119,9 +119,7 @@ TEMPLATE_RENDER_TOOL: dict[str, Any] = {
 }
 
 
-def template_render_handler(
-    root: Path, worktree_path: str, inp: dict[str, Any]
-) -> str:
+def template_render_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> str:
     """Core template_render logic — the one real implementation,
     reused unchanged in behavior except for the worktree-boundary
     check now applied to `path` (both code paths) and the switch to a

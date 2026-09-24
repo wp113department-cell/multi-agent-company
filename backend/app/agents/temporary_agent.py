@@ -383,23 +383,37 @@ class TemporaryAgentPool:
         try:
             deregister_capability(role_name)
         except Exception:
-            logger.debug("scrap(%s): capability deregister failed", role_name, exc_info=True)
+            logger.debug(
+                "scrap(%s): capability deregister failed", role_name, exc_info=True
+            )
         try:
             get_agent_registry().deregister(role_name)
         except Exception:
-            logger.debug("scrap(%s): agent_registry deregister failed", role_name, exc_info=True)
+            logger.debug(
+                "scrap(%s): agent_registry deregister failed", role_name, exc_info=True
+            )
         try:
             get_model_router().clear_override(role_name)
         except Exception:
-            logger.debug("scrap(%s): model_router clear_override failed", role_name, exc_info=True)
+            logger.debug(
+                "scrap(%s): model_router clear_override failed",
+                role_name,
+                exc_info=True,
+            )
         try:
             unregister_runtime_agent_fn(role_name)
         except Exception:
-            logger.debug("scrap(%s): dynamic_agent_runtime unregister failed", role_name, exc_info=True)
+            logger.debug(
+                "scrap(%s): dynamic_agent_runtime unregister failed",
+                role_name,
+                exc_info=True,
+            )
         try:
             self._role_file_path(role_name).unlink(missing_ok=True)
         except Exception:
-            logger.debug("scrap(%s): role file cleanup failed", role_name, exc_info=True)
+            logger.debug(
+                "scrap(%s): role file cleanup failed", role_name, exc_info=True
+            )
 
         slot.scrapped = True
         slot.scrap_reason = reason
@@ -428,9 +442,7 @@ class TemporaryAgentPool:
         now = datetime.now(timezone.utc)
         with self._lock:
             expired = [
-                name
-                for name, slot in self._slots.items()
-                if slot.ttl_deadline <= now
+                name for name, slot in self._slots.items() if slot.ttl_deadline <= now
             ]
         for name in expired:
             self.scrap(name, reason="ttl_exceeded")
@@ -569,7 +581,9 @@ def _run_temporary_agent_inner(
             tool_names=tool_names, scope="planned", repo_path=effective_repo_path
         )
     except Exception as exc:
-        logger.exception("temporary_agent %s: failed to build tools/handlers", role_name)
+        logger.exception(
+            "temporary_agent %s: failed to build tools/handlers", role_name
+        )
         return AgentResult(
             summary=f"temporary_agent setup failed: {exc}",
             findings=[],

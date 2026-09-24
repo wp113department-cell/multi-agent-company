@@ -108,6 +108,4 @@ def test_submit_accumulates_into_result_dict() -> None:
         {"summary": "Audited PII handling in the user service", "findings": []}
     )
     assert out == "Submitted."
-    assert (
-        handlers["_result"]["summary"] == "Audited PII handling in the user service"
-    )
+    assert handlers["_result"]["summary"] == "Audited PII handling in the user service"

@@ -69,7 +69,9 @@ def test_handler_rejects_file_outside_worktree(tmp_path: Path) -> None:
     outside = tmp_path / "outside_VERSION"
     outside.write_text('version = "1.2.3"')
 
-    result = semver_bump_handler(repo, str(repo), {"part": "major", "file": str(outside)})
+    result = semver_bump_handler(
+        repo, str(repo), {"part": "major", "file": str(outside)}
+    )
     assert result.startswith("[POLICY DENIED]")
     assert outside.read_text() == 'version = "1.2.3"'
 

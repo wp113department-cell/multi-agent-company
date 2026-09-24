@@ -205,7 +205,9 @@ class DependencyResolutionResult:
     resolvable: bool
     resolved_versions: dict[str, str]  # only when resolvable
     conflict_summary: str | None  # only when not resolvable
-    error: str | None  # a real infrastructure failure (e.g. no network), distinct from a genuine conflict
+    error: (
+        str | None
+    )  # a real infrastructure failure (e.g. no network), distinct from a genuine conflict
 
 
 def check_dependency_conflicts(
@@ -248,7 +250,8 @@ def check_dependency_conflicts(
         return DependencyResolutionResult(
             resolvable=False,
             resolved_versions={},
-            conflict_summary=detail or "no combination of versions satisfies every constraint",
+            conflict_summary=detail
+            or "no combination of versions satisfies every constraint",
             error=None,
         )
     except Exception as exc:

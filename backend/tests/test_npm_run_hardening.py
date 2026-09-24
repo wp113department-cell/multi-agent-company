@@ -140,8 +140,6 @@ async def test_chat_agent_npm_run_real_script_execution(tmp_path: Path) -> None:
     )
 
     agent = _agent(repo)
-    result = await agent._execute_tool(
-        "npm_run", {"script": "hello", "directory": "."}
-    )
+    result = await agent._execute_tool("npm_run", {"script": "hello", "directory": "."})
 
     assert "hello-from-npm-run" in result

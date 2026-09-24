@@ -114,7 +114,9 @@ def _compute_weighted_scores(
     # further down. Proved live: weights=["not","a","dict"] crashed
     # uncaught.
     if weights is not None and not isinstance(weights, dict):
-        raise ValueError(f"weights must be an object (map), got {type(weights).__name__}")
+        raise ValueError(
+            f"weights must be an object (map), got {type(weights).__name__}"
+        )
 
     all_criteria: list[str] = []
     for opt in options:

@@ -84,7 +84,9 @@ async def test_normal_push_gets_the_generic_confirmation(tmp_path: Path) -> None
     repo = _git_repo(tmp_path)
     agent = _agent(repo)
     with (
-        patch.object(agent, "_confirm", new=AsyncMock(return_value=False)) as mock_confirm,
+        patch.object(
+            agent, "_confirm", new=AsyncMock(return_value=False)
+        ) as mock_confirm,
         patch("app.agents.chat_agent._git", return_value="pushed"),
     ):
         await agent._execute_tool("git_push", {"branch": "feature-x"})
@@ -101,12 +103,12 @@ async def test_force_push_to_a_feature_branch_gets_a_force_warning(
     repo = _git_repo(tmp_path)
     agent = _agent(repo)
     with (
-        patch.object(agent, "_confirm", new=AsyncMock(return_value=False)) as mock_confirm,
+        patch.object(
+            agent, "_confirm", new=AsyncMock(return_value=False)
+        ) as mock_confirm,
         patch("app.agents.chat_agent._git", return_value="pushed"),
     ):
-        await agent._execute_tool(
-            "git_push", {"branch": "feature-x", "force": True}
-        )
+        await agent._execute_tool("git_push", {"branch": "feature-x", "force": True})
 
     mock_confirm.assert_awaited_once()
     description = _confirm_description(mock_confirm)
@@ -124,7 +126,9 @@ async def test_force_push_to_a_protected_branch_gets_the_strongest_warning(
     repo = _git_repo(tmp_path)
     agent = _agent(repo)
     with (
-        patch.object(agent, "_confirm", new=AsyncMock(return_value=False)) as mock_confirm,
+        patch.object(
+            agent, "_confirm", new=AsyncMock(return_value=False)
+        ) as mock_confirm,
         patch("app.agents.chat_agent._git", return_value="pushed"),
     ):
         await agent._execute_tool("git_push", {"branch": "main", "force": True})
@@ -163,7 +167,9 @@ async def test_git_push_protected_branches_is_config_driven(
     agent = _agent(repo)
     monkeypatch.setattr(get_settings(), "git_push_protected_branches", ["release"])
     with (
-        patch.object(agent, "_confirm", new=AsyncMock(return_value=False)) as mock_confirm,
+        patch.object(
+            agent, "_confirm", new=AsyncMock(return_value=False)
+        ) as mock_confirm,
         patch("app.agents.chat_agent._git", return_value="pushed"),
     ):
         # 'main' is no longer configured as protected — falls back to the
@@ -275,7 +281,9 @@ async def test_chat_agent_docker_compose_up_now_requires_confirmation(
     repo = _git_repo(tmp_path)
     agent = _agent(repo)
     with (
-        patch.object(agent, "_confirm", new=AsyncMock(return_value=False)) as mock_confirm,
+        patch.object(
+            agent, "_confirm", new=AsyncMock(return_value=False)
+        ) as mock_confirm,
         patch("app.agents.chat_agent._run_subprocess", return_value="ok"),
     ):
         result = await agent._execute_tool("docker_compose", {"action": "up"})
@@ -295,7 +303,9 @@ async def test_chat_agent_docker_compose_disruptive_actions_now_ask_but_ps_does_
     repo = _git_repo(tmp_path)
     agent = _agent(repo)
     with (
-        patch.object(agent, "_confirm", new=AsyncMock(return_value=True)) as mock_confirm,
+        patch.object(
+            agent, "_confirm", new=AsyncMock(return_value=True)
+        ) as mock_confirm,
         patch("app.agents.chat_agent._run_subprocess", return_value="stopped"),
     ):
         result = await agent._execute_tool("docker_compose", {"action": "down"})

@@ -69,7 +69,9 @@ async def test_run_migration_rejects_a_shell_injection_payload_in_revision(
     marker = tmp_path / "PWNED_run_migration"
     agent = _agent(tmp_path)
 
-    with patch.object(agent, "_confirm", new=AsyncMock(return_value=True)) as mock_confirm:
+    with patch.object(
+        agent, "_confirm", new=AsyncMock(return_value=True)
+    ) as mock_confirm:
         result = await agent._execute_tool(
             "run_migration",
             {"direction": "upgrade", "revision": f"head; touch {marker}"},
@@ -133,7 +135,9 @@ async def test_run_migration_accepts_every_real_alembic_revision_shape(
 ) -> None:
     agent = _agent(tmp_path)
     with (
-        patch.object(agent, "_confirm", new=AsyncMock(return_value=True)) as mock_confirm,
+        patch.object(
+            agent, "_confirm", new=AsyncMock(return_value=True)
+        ) as mock_confirm,
         patch("app.agents.chat_agent._run_subprocess", return_value="ok") as mock_run,
     ):
         result = await agent._execute_tool(
@@ -154,7 +158,9 @@ async def test_run_migration_confirmation_still_gates_a_valid_request(
     execution, exactly as before this fix."""
     agent = _agent(tmp_path)
     with (
-        patch.object(agent, "_confirm", new=AsyncMock(return_value=False)) as mock_confirm,
+        patch.object(
+            agent, "_confirm", new=AsyncMock(return_value=False)
+        ) as mock_confirm,
         patch("app.agents.chat_agent._run_subprocess") as mock_run,
     ):
         result = await agent._execute_tool(
@@ -174,7 +180,9 @@ async def test_run_migration_downgrade_default_revision_still_works(
     for upgrade, when the caller omits it) still resolves correctly."""
     agent = _agent(tmp_path)
     with (
-        patch.object(agent, "_confirm", new=AsyncMock(return_value=True)) as mock_confirm,
+        patch.object(
+            agent, "_confirm", new=AsyncMock(return_value=True)
+        ) as mock_confirm,
         patch("app.agents.chat_agent._run_subprocess", return_value="ok") as mock_run,
     ):
         result = await agent._execute_tool("run_migration", {"direction": "downgrade"})

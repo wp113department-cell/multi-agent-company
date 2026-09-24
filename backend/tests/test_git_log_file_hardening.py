@@ -48,7 +48,9 @@ def nested_repo(tmp_path: Path) -> Path:
     subdir = parent / "subdir"
     subdir.mkdir(parents=True)
     subprocess.run(["git", "init", "-q"], cwd=str(parent), check=True)
-    subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=str(parent), check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@t.com"], cwd=str(parent), check=True
+    )
     subprocess.run(["git", "config", "user.name", "t"], cwd=str(parent), check=True)
     (subdir / "public.txt").write_text("public content\n")
     (parent / "secret.txt").write_text("SECRET_API_KEY=abc123\n")
@@ -102,9 +104,7 @@ class TestWorktreeEscapeBlocked:
         agent = _agent(str(nested_repo))
 
         async def _run() -> str:
-            return await agent._execute_tool(
-                "git_log_file", {"path": "../secret.txt"}
-            )
+            return await agent._execute_tool("git_log_file", {"path": "../secret.txt"})
 
         out = asyncio.run(_run())
         assert "POLICY DENIED" in out
@@ -128,9 +128,7 @@ class TestChatDispatchReachable:
         agent = _agent(str(nested_repo))
 
         async def _run() -> str:
-            return await agent._execute_tool(
-                "git_log_file", {"path": "public.txt"}
-            )
+            return await agent._execute_tool("git_log_file", {"path": "public.txt"})
 
         out = asyncio.run(_run())
         assert "Unknown tool" not in out

@@ -88,9 +88,7 @@ class TestWorktreeEscapeBlocked:
         worktree.mkdir()
         (tmp_path / "secret.json").write_text('{"k": "v"}\n')
 
-        out = json_validate_handler(
-            worktree, str(worktree), {"path": "../secret.json"}
-        )
+        out = json_validate_handler(worktree, str(worktree), {"path": "../secret.json"})
         assert "POLICY DENIED" in out
 
     def test_make_chat_handlers_escape_blocked(self, tmp_path: Path) -> None:

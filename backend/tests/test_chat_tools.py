@@ -7,7 +7,6 @@ Every test creates its own isolated file structure so tests can run in parallel.
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 from typing import Any

@@ -173,5 +173,7 @@ async def test_chat_agent_create_branch_from_a_real_base_branch(tmp_path: Path) 
 def test_make_chat_handlers_create_branch_real_creation(tmp_path: Path) -> None:
     repo = _real_repo(tmp_path)
     handlers = make_chat_handlers(str(repo))
-    result = handlers["create_branch"]({"name": "feature/via-handlers", "checkout": False})
+    result = handlers["create_branch"](
+        {"name": "feature/via-handlers", "checkout": False}
+    )
     assert result == "Created branch: feature/via-handlers"

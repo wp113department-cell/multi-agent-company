@@ -12,10 +12,8 @@ test_batch16_scheduler_and_metrics.py's own dependency-gate tests do.
 from __future__ import annotations
 
 import asyncio
-import uuid
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
@@ -98,9 +96,7 @@ async def _run_one_dispatch_iteration() -> list[int]:
                 continue
 
             await transition_task(db, task.id, "planning")
-            await append_log(
-                db, task.id, "pipeline", "auto-dispatched (test harness)"
-            )
+            await append_log(db, task.id, "pipeline", "auto-dispatched (test harness)")
             repo_path = resolve_task_repo_path(task)
             job_fn = (
                 launch_planning_pipeline
@@ -124,7 +120,8 @@ class TestDependencyAutoDispatch:
     def test_still_unmet_dependency_is_not_dispatched(self) -> None:
         with TestClient(app) as client:
             dep_id = client.post(
-                "/api/tasks", json={"title": "t2b7 auto still-blocked parent", "description": "d"}
+                "/api/tasks",
+                json={"title": "t2b7 auto still-blocked parent", "description": "d"},
             ).json()["id"]
             child_id = client.post(
                 "/api/tasks",
@@ -137,7 +134,10 @@ class TestDependencyAutoDispatch:
             try:
                 # Trip #428's own gate first so the row is genuinely
                 # status="blocked"/blocked_reason="dependency".
-                assert client.post(f"/api/tasks/{child_id}/run", json={}).status_code == 409
+                assert (
+                    client.post(f"/api/tasks/{child_id}/run", json={}).status_code
+                    == 409
+                )
 
                 # get_session_factory()'s shared engine is bound to the
                 # event loop the app's lifespan started on (TestClient's
@@ -147,14 +147,17 @@ class TestDependencyAutoDispatch:
                 dispatched = client.portal.call(_run_one_dispatch_iteration)
 
                 assert child_id not in dispatched
-                assert client.get(f"/api/tasks/{child_id}").json()["status"] == "blocked"
+                assert (
+                    client.get(f"/api/tasks/{child_id}").json()["status"] == "blocked"
+                )
             finally:
                 _cleanup_sync(child_id, dep_id)
 
     def test_newly_completed_dependency_gets_auto_dispatched(self) -> None:
         with TestClient(app) as client:
             dep_id = client.post(
-                "/api/tasks", json={"title": "t2b7 auto ready parent", "description": "d"}
+                "/api/tasks",
+                json={"title": "t2b7 auto ready parent", "description": "d"},
             ).json()["id"]
             child_id = client.post(
                 "/api/tasks",
@@ -165,8 +168,13 @@ class TestDependencyAutoDispatch:
                 },
             ).json()["id"]
             try:
-                assert client.post(f"/api/tasks/{child_id}/run", json={}).status_code == 409
-                assert client.get(f"/api/tasks/{child_id}").json()["status"] == "blocked"
+                assert (
+                    client.post(f"/api/tasks/{child_id}/run", json={}).status_code
+                    == 409
+                )
+                assert (
+                    client.get(f"/api/tasks/{child_id}").json()["status"] == "blocked"
+                )
 
                 _set_status_sync(dep_id, "completed")
 

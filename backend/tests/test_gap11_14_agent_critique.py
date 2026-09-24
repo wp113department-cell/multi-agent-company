@@ -112,7 +112,8 @@ def test_frontend_dev_enables_critique() -> None:
 def test_qa_enables_critique() -> None:
     with (
         patch(
-            "app.agents.qa.run_agent_graph", return_value={**_MINIMAL_FINAL_STATE, "verification": {"tests_run": True}}
+            "app.agents.qa.run_agent_graph",
+            return_value={**_MINIMAL_FINAL_STATE, "verification": {"tests_run": True}},
         ) as mock_run,
         patch("app.agents.qa.get_settings", return_value=_mock_settings()),
         patch("app.agents.qa.make_qa_handlers", return_value={}),

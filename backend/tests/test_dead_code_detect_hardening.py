@@ -44,7 +44,9 @@ from app.tools.filesystem.dead_code_detect import DEAD_CODE_DETECT_TOOL
 
 
 def _agent(repo: Path) -> ChatAgent:
-    session = ChatSession(session_id="td_dead_code_detect_hardening", repo_path=str(repo))
+    session = ChatSession(
+        session_id="td_dead_code_detect_hardening", repo_path=str(repo)
+    )
     return ChatAgent(session)
 
 
@@ -67,10 +69,14 @@ def test_dead_code_detect_appears_exactly_once_in_chat_tools() -> None:
 async def test_chat_agent_rejects_directory_outside_repo(tmp_path: Path) -> None:
     outside = tmp_path.parent / "dead_code_hardening_outside"
     outside.mkdir(exist_ok=True)
-    (outside / "secret.py").write_text("def totally_unused_secret_function():\n    return 42\n")
+    (outside / "secret.py").write_text(
+        "def totally_unused_secret_function():\n    return 42\n"
+    )
     try:
         agent = _agent(tmp_path)
-        result = await agent._execute_tool("dead_code_detect", {"directory": str(outside)})
+        result = await agent._execute_tool(
+            "dead_code_detect", {"directory": str(outside)}
+        )
         assert "[POLICY DENIED]" in result
         assert "totally_unused_secret_function" not in result
     finally:
@@ -91,7 +97,9 @@ def test_all_three_factories_reject_directory_outside_repo(
 ) -> None:
     outside = tmp_path.parent / f"dead_code_hardening_outside_{factory_name}"
     outside.mkdir(exist_ok=True)
-    (outside / "secret.py").write_text("def totally_unused_secret_function():\n    return 42\n")
+    (outside / "secret.py").write_text(
+        "def totally_unused_secret_function():\n    return 42\n"
+    )
     try:
         handlers = factory(str(tmp_path))
         result = handlers["dead_code_detect"]({"directory": str(outside)})
@@ -138,7 +146,9 @@ async def test_chat_agent_permission_denied_does_not_raise(
     if os.geteuid() == 0:
         pytest.skip("root bypasses permission checks, cannot exercise this path")
     agent = _agent(tmp_path)
-    result = await agent._execute_tool("dead_code_detect", {"directory": restricted_dir})
+    result = await agent._execute_tool(
+        "dead_code_detect", {"directory": restricted_dir}
+    )
     assert "[POLICY DENIED]" not in result
     assert "unused_inner" not in result
 

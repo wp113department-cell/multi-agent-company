@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -92,7 +91,9 @@ class TestMessageAccuracyFix:
         # This is the exact bug: previously said "No staged changes"
         # even though staged_only=False means we're checking UNSTAGED
         # changes — proved live against a real clean git repo.
-        out = generate_commit_msg_handler(str(tmp_repo), {"staged_only": False}, _no_llm)
+        out = generate_commit_msg_handler(
+            str(tmp_repo), {"staged_only": False}, _no_llm
+        )
         assert "[ERROR]" in out
         assert "No unstaged changes" in out
         assert "No staged changes" not in out
@@ -111,7 +112,9 @@ class TestMessageAccuracyFix:
         agent = _agent(str(tmp_repo))
 
         async def _run() -> str:
-            return await agent._execute_tool("generate_commit_msg", {"staged_only": False})
+            return await agent._execute_tool(
+                "generate_commit_msg", {"staged_only": False}
+            )
 
         import asyncio
 

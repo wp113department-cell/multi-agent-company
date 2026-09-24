@@ -137,4 +137,6 @@ def seed_database_handler(repo_path: str, inp: dict[str, Any]) -> str:
     if validation_error:
         return validation_error
 
-    return "[BLOCKED] seed_database requires interactive session for safety confirmation"
+    return (
+        "[BLOCKED] seed_database requires interactive session for safety confirmation"
+    )

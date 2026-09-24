@@ -35,7 +35,9 @@ def test_not_in_chat_tools() -> None:
 
 
 def test_nonexistent_repo_path_returns_empty_list_not_a_crash() -> None:
-    handler = make_list_deploy_artifacts_handler("/tmp/definitely-does-not-exist-xyz-123")
+    handler = make_list_deploy_artifacts_handler(
+        "/tmp/definitely-does-not-exist-xyz-123"
+    )
     data = json.loads(handler({}))
     assert data["deploy_artifacts"] == []
 

@@ -278,9 +278,9 @@ def test_seven_measurable_objectives_computable() -> None:
 
     # 4. verification_coverage (verification_pct on any run)
     runs = c.by_agent("bug_fix")
-    assert any(r.verification_pct > 0 for r in runs), (
-        "verification_coverage not measurable"
-    )
+    assert any(
+        r.verification_pct > 0 for r in runs
+    ), "verification_coverage not measurable"
 
     # 5. tokens consumed (proxy for cost)
     total_tokens = sum(r.tokens_in + r.tokens_out for r in runs)

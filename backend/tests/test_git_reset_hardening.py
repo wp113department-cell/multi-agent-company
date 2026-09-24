@@ -61,9 +61,7 @@ def test_git_itself_treats_the_last_reset_mode_flag_as_authoritative(
     a future git version ever changed this."""
     repo = _git_repo(tmp_path)
     _dirty(repo)
-    subprocess.run(
-        ["git", "reset", "--soft", "--hard", "HEAD"], cwd=repo, check=True
-    )
+    subprocess.run(["git", "reset", "--soft", "--hard", "HEAD"], cwd=repo, check=True)
     assert (repo / "a.txt").read_text() == "committed content"
 
 
@@ -144,10 +142,14 @@ def test_tools_py_handler_rejects_an_invalid_mode(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_chat_agent_soft_reset_runs_without_confirmation(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path)
-    subprocess.run(["git", "commit", "--allow-empty", "-q", "-m", "second"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-q", "-m", "second"], cwd=repo, check=True
+    )
     agent = _agent(repo)
     with patch.object(agent, "_confirm", new=AsyncMock()) as mock_confirm:
-        result = await agent._execute_tool("git_reset", {"mode": "soft", "ref": "HEAD~1"})
+        result = await agent._execute_tool(
+            "git_reset", {"mode": "soft", "ref": "HEAD~1"}
+        )
     mock_confirm.assert_not_awaited()
     assert "[ERROR]" not in result
 

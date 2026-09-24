@@ -719,9 +719,9 @@ def test_proposed_subtask_is_integrated_and_dispatched_in_a_later_wave(
             )
         )
 
-    assert mock_backend_dev.call_count == 2, (
-        "the dynamically-proposed subtask must have been dispatched too"
-    )
+    assert (
+        mock_backend_dev.call_count == 2
+    ), "the dynamically-proposed subtask must have been dispatched too"
     assert len(result["results"]) == 2
     assert result["dynamic_subtasks_created"] == 1
     titles = {r["type"] for r in result["results"]}
@@ -783,9 +783,9 @@ def test_halted_epic_never_dispatches_a_pending_proposal(
         )
 
     assert result["status"] == "halted"
-    assert mock_backend_dev.call_count == 1, (
-        "the halt must prevent the proposed follow-up from ever dispatching"
-    )
+    assert (
+        mock_backend_dev.call_count == 1
+    ), "the halt must prevent the proposed follow-up from ever dispatching"
     assert result["dynamic_subtasks_created"] == 0
 
 
@@ -885,9 +885,9 @@ def test_frontend_dev_proposed_subtask_is_integrated_and_dispatched_in_a_later_w
             )
         )
 
-    assert mock_frontend_dev.call_count == 2, (
-        "the dynamically-proposed subtask must have been dispatched too"
-    )
+    assert (
+        mock_frontend_dev.call_count == 2
+    ), "the dynamically-proposed subtask must have been dispatched too"
     assert len(result["results"]) == 2
     assert result["dynamic_subtasks_created"] == 1
     titles = {r["type"] for r in result["results"]}

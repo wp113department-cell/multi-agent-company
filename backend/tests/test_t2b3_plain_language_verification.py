@@ -48,9 +48,7 @@ def test_passing_gate_gets_a_plain_verified_sentence() -> None:
 
 
 def test_low_confidence_gets_a_plain_assumption_sentence_naming_the_numbers() -> None:
-    result = _run_quality_gate(
-        _state(confidence=0.3), _cfg(), {}, min_confidence=0.5
-    )
+    result = _run_quality_gate(_state(confidence=0.3), _cfg(), {}, min_confidence=0.5)
     assert result.passed is False
     assert "assumption" in result.plain_language_summary
     assert "0.30" in result.plain_language_summary
@@ -75,7 +73,10 @@ def test_unmet_critique_gets_its_own_specific_sentence() -> None:
 
 def test_invalid_schema_gets_its_own_specific_sentence() -> None:
     result = _run_quality_gate(
-        _state(), _cfg(), {"_validation_warning": "missing required field"}, min_confidence=0.0
+        _state(),
+        _cfg(),
+        {"_validation_warning": "missing required field"},
+        min_confidence=0.0,
     )
     assert result.passed is False
     assert "expected format" in result.plain_language_summary
@@ -93,7 +94,7 @@ def test_summary_flows_through_to_raw_result_quality_gate_dict() -> None:
     """End-to-end: the execute_tools node attaches plain_language_summary
     onto raw_result["_quality_gate"] alongside checks/warnings/passed, not
     just on the QualityGateResult dataclass nothing downstream ever sees."""
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
 
     from app.agents.base_graph import _make_execute_tools_node
 
@@ -115,7 +116,12 @@ def test_summary_flows_through_to_raw_result_quality_gate_dict() -> None:
             {
                 "role": "assistant",
                 "content": [
-                    {"type": "tool_use", "id": "tu1", "name": "submit_result", "input": {}}
+                    {
+                        "type": "tool_use",
+                        "id": "tu1",
+                        "name": "submit_result",
+                        "input": {},
+                    }
                 ],
             }
         ],

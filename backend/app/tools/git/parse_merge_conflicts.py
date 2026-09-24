@@ -83,7 +83,9 @@ PARSE_MERGE_CONFLICTS_TOOL: dict[str, Any] = {
 }
 
 
-def parse_merge_conflicts_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> str:
+def parse_merge_conflicts_handler(
+    root: Path, worktree_path: str, inp: dict[str, Any]
+) -> str:
     """Core parse_merge_conflicts logic shared by both real call
     sites (the make_chat_handlers() closure and chat_agent.py's own
     interactive dispatch). `path` is now read via `.get()` with an

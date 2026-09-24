@@ -87,6 +87,4 @@ def test_submit_accumulates_into_result_dict() -> None:
         {"summary": "Designed an ETL pipeline for order events", "findings": []}
     )
     assert out == "Submitted."
-    assert (
-        handlers["_result"]["summary"] == "Designed an ETL pipeline for order events"
-    )
+    assert handlers["_result"]["summary"] == "Designed an ETL pipeline for order events"

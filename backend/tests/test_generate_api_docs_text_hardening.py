@@ -95,9 +95,7 @@ async def test_chat_agent_dispatch_closes_the_escape(tmp_path: Path) -> None:
 
 def test_handler_closes_the_escape_directly(tmp_path: Path) -> None:
     outside = tmp_path / "outside.py"
-    outside.write_text(
-        '@app.get("/secret")\ndef secret_handler():\n    pass\n'
-    )
+    outside.write_text('@app.get("/secret")\ndef secret_handler():\n    pass\n')
     repo = tmp_path / "repo"
     repo.mkdir()
 

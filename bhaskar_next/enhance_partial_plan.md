@@ -50,6 +50,34 @@ order.
   orgs) not existing; that's a SKIP-list item (#376), out of scope for this platform today. Closed
   as blocked, not built around.
 
+## Next up — user-approved after T2-B10 (2026-09-24)
+All 10 batches closed (56 DONE, 2 BLOCKED, 6 INTENTIONAL/NO-CHANGE, 4 honestly PENDING — see
+`enhance_partial_tracking.md`'s own Progress table). Walked the user through the remaining 12
+non-DONE items one at a time; user agreed with the recommendation to leave 11 of them alone
+(2 blocked on missing prerequisites the user doesn't currently need — #169 multi-server, #377
+multi-tenancy; #329 needs rules the user doesn't have yet; #427/#150/#196/#198 have no real
+functional gain; #291/#300 are deliberate safety boundaries, not gaps) and to build the one with
+real, near-term value:
+
+- **#12 (Monitor streaming output, live mid-command)** — PLANNED, next real build. Converts
+  `policy/sandbox.py::run_sandboxed()` from buffer-then-return to a real streaming `docker run` +
+  incremental-read model, pushed out as `terminal_output` SSE events as they happen instead of
+  after the whole command finishes. The audit's own plan already says to build this behind a
+  feature flag, keeping the old buffered path as fallback until proven stable — that shape still
+  applies.
+  - **Real prerequisite, not yet done**: this session's own Docker Desktop File Sharing
+    reconfiguration (noted repeatedly in T2-B7/B8/B9/B10's own full-suite runs — ~89 sandbox-
+    execution tests fail with "mounts denied" until the user re-adds the project path in Docker
+    Desktop → Settings → Resources → File Sharing). Building/testing a change to the sandbox's own
+    execution model with the EXISTING sandbox tests already failing for an unrelated environmental
+    reason would make it impossible to tell a real regression from known noise — do the Docker
+    fix first, confirm `tests/test_sandbox.py` passes clean, THEN start #12.
+  - **#3/#5 (real PTY terminal, multiple terminals)** — user agreed these are worth building
+    eventually (competitive value for a coding-agent product) but are honestly a separate,
+    multi-week, full-stack project (new WebSocket/SSE endpoint + a real `xterm.js` frontend
+    component) — not scheduled as part of this initiative's remaining work, tracked here as a
+    real, named future project rather than silently dropped.
+
 ## Ledger
 Live-API spend continues in `verify_api_ledger.md`. Same rule: Groq for anything that doesn't need
 Claude specifically now that it's config-real; Claude (Haiku by default) only when the item

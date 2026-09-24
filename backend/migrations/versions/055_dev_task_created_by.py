@@ -22,7 +22,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("dev_tasks", sa.Column("created_by", sa.String(length=100), nullable=True))
+    op.add_column(
+        "dev_tasks", sa.Column("created_by", sa.String(length=100), nullable=True)
+    )
     op.create_index("ix_dev_tasks_created_by", "dev_tasks", ["created_by"])
 
 

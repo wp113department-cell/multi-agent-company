@@ -27,6 +27,11 @@ from app.agents.tools import (
     make_record_learning_handler,
 )
 from app.config import get_settings
+from app.db.repository import (
+    create_roadmap,
+    get_latest_roadmap_for_repo,
+    resolve_repo_id_from_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +161,88 @@ def make_roadmap_agent_handlers(repo_path: str) -> dict[str, Any]:
     return base
 
 
+def _fetch_latest_roadmap_context_sync(repo_path: str) -> str:
+    """T2-B10 (2026-09-24, GRIDIRON_PARTIAL #498/#484) — the real
+    "re-sequenced against real progress" mechanism: reads the actual
+    previously-persisted Roadmap for this repo (if any) and its items'
+    real, human-set status, formatted as prompt context so a NEW run can
+    genuinely build on prior state instead of regenerating from zero every
+    time. Best-effort: any failure (no repo match, DB unavailable) yields
+    an empty string, never blocks the run."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> str:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                repo_id = await resolve_repo_id_from_path(session, repo_path)
+                roadmap = await get_latest_roadmap_for_repo(session, repo_id)
+                if roadmap is None or not roadmap.items:
+                    return ""
+                lines = [
+                    "EXISTING TRACKED ROADMAP for this repo (from a prior run "
+                    f"on {roadmap.created_at:%Y-%m-%d}) — re-sequence around "
+                    "this real state, don't regenerate it from scratch. "
+                    "Initiatives marked 'completed' should generally NOT "
+                    "reappear; 'in_progress' ones should be reflected as "
+                    "already underway:"
+                ]
+                for item in roadmap.items:
+                    lines.append(f"  [{item.status}] ({item.phase}) {item.initiative}")
+                return "\n".join(lines)
+        except Exception:
+            logger.debug(
+                "roadmap_agent: could not load prior roadmap context for %s",
+                repo_path,
+                exc_info=True,
+            )
+            return ""
+        finally:
+            await engine.dispose()
+
+    try:
+        return asyncio.run(_run())
+    except Exception:
+        return ""
+
+
+def _persist_roadmap_sync(
+    repo_path: str, task_id: int | None, summary: str, items: list[dict[str, Any]]
+) -> None:
+    """Best-effort persistence of a real roadmap_agent submission — never
+    raises into the agent's own completion path (matches every other
+    *_sync bridge's non-fatal contract in this codebase)."""
+    if not items:
+        return
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> None:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                repo_id = await resolve_repo_id_from_path(session, repo_path)
+                await create_roadmap(session, repo_id, task_id, summary, items)
+        finally:
+            await engine.dispose()
+
+    try:
+        asyncio.run(_run())
+    except Exception:
+        logger.warning(
+            "roadmap_agent: failed to persist roadmap for task %s",
+            task_id,
+            exc_info=True,
+        )
+
+
 def run_roadmap_agent(
     task_id: int,
     description: str,
@@ -167,6 +254,8 @@ def run_roadmap_agent(
     repo = repo_path or str(settings.target_repo_path)
     handlers = make_roadmap_agent_handlers(repo)
     result = handlers["_result"]
+
+    prior_roadmap_context = _fetch_latest_roadmap_context_sync(repo)
 
     msg = (
         f"Task #{task_id} — {description}\n\n"
@@ -186,6 +275,7 @@ def run_roadmap_agent(
         "5. Write the roadmap document with write_file if requested.\n"
         "6. Call submit_roadmap_agent with summary, findings, roadmap, and "
         "recommendations."
+        + (f"\n\n{prior_roadmap_context}" if prior_roadmap_context else "")
     )
 
     final_state = run_agent_graph(
@@ -207,6 +297,20 @@ def run_roadmap_agent(
     )
 
     raw = final_state["result"] if final_state["result"] else result
+
+    # T2-B10 (2026-09-24, GRIDIRON_PARTIAL #498/#484) — persist a real
+    # submission so it's genuinely tracked between runs (see
+    # _fetch_latest_roadmap_context_sync's own use of this data above).
+    # Never on a blocked/unsubmitted run — an incomplete roadmap has
+    # nothing real to track yet.
+    if final_state["submitted"] and raw.get("roadmap"):
+        _persist_roadmap_sync(
+            repo,
+            task_id,
+            str(raw.get("summary", description[:100])),
+            list(raw.get("roadmap", [])),
+        )
+
     return AgentResult(
         summary=str(raw.get("summary", description[:100])),
         findings=list(raw.get("findings", [])),

@@ -36,7 +36,9 @@ CONFLICT_TEXT = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> branch\n"
 
 
 def _agent(repo: str) -> ChatAgent:
-    session = ChatSession(session_id="td_explain_merge_conflict_hardening", repo_path=repo)
+    session = ChatSession(
+        session_id="td_explain_merge_conflict_hardening", repo_path=repo
+    )
     return ChatAgent(session)
 
 
@@ -133,9 +135,7 @@ async def test_chat_agent_dispatch_still_rejects_outside_repo_path(
     outside.write_text(CONFLICT_TEXT)
 
     agent = _agent(str(repo))
-    result = await agent._execute_tool(
-        "explain_merge_conflict", {"path": str(outside)}
-    )
+    result = await agent._execute_tool("explain_merge_conflict", {"path": str(outside)})
     assert "[POLICY DENIED]" in result
 
 

@@ -19,6 +19,8 @@ from app.db.models import (
     Epic,
     PipelineState,
     Repo,
+    Roadmap,
+    RoadmapItem,
     Subtask,
     SystemSetting,
     TaskControlFlag,
@@ -250,7 +252,9 @@ async def resolve_repo_id_from_path(db: AsyncSession, repo_path: str) -> int | N
     return result.scalar_one_or_none()
 
 
-async def set_repo_active_branch_by_path(db: AsyncSession, repo_path: str, branch: str) -> bool:
+async def set_repo_active_branch_by_path(
+    db: AsyncSession, repo_path: str, branch: str
+) -> bool:
     """T2-B6 (2026-09-22, GRIDIRON_PARTIAL #361 "Branch-context tracking
     after switching git branches") — same INV-1 reverse-resolve-from-path
     exception resolve_repo_id_from_path's own docstring documents (a git
@@ -262,7 +266,9 @@ async def set_repo_active_branch_by_path(db: AsyncSession, repo_path: str, branc
     repo_id = await resolve_repo_id_from_path(db, repo_path)
     if repo_id is None:
         return False
-    await db.execute(update(Repo).where(Repo.id == repo_id).values(active_branch=branch))
+    await db.execute(
+        update(Repo).where(Repo.id == repo_id).values(active_branch=branch)
+    )
     await db.commit()
     return True
 
@@ -299,7 +305,9 @@ def set_repo_active_branch_by_path_sync(repo_path: str, branch: str) -> bool:
         return False
 
 
-async def get_repo_active_branch_by_path(db: AsyncSession, repo_path: str) -> str | None:
+async def get_repo_active_branch_by_path(
+    db: AsyncSession, repo_path: str
+) -> str | None:
     """T2-B6 (2026-09-24, GRIDIRON_PARTIAL #361) — the read side of
     set_repo_active_branch_by_path(), used to surface the tracked branch
     back into an agent's own system prompt so it knows which branch it is
@@ -685,7 +693,9 @@ async def reopen_agent_run(db: AsyncSession, run_id: str) -> None:
     await db.commit()
 
 
-async def get_task_control_flag(db: AsyncSession, task_id: str) -> TaskControlFlag | None:
+async def get_task_control_flag(
+    db: AsyncSession, task_id: str
+) -> TaskControlFlag | None:
     return await db.get(TaskControlFlag, task_id)
 
 
@@ -1286,3 +1296,90 @@ async def delete_user(db: AsyncSession, username: str) -> bool:
     await db.commit()
     count: int = getattr(result, "rowcount", 0)
     return count > 0
+
+
+# ---------------------------------------------------------------------------
+# Roadmap tracking — T2-B10 (2026-09-24, GRIDIRON_PARTIAL #498/#484)
+# ---------------------------------------------------------------------------
+
+
+async def create_roadmap(
+    db: AsyncSession,
+    repo_id: int | None,
+    task_id: int | None,
+    summary: str,
+    items: list[dict[str, Any]],
+) -> Roadmap:
+    """Persists one real roadmap_agent submission. `items` are plain dicts
+    matching submit_roadmap_agent's own schema shape (phase/initiative/
+    impact/effort/confidence/dependencies) — sequence_order is assigned
+    from each item's position in the list (the order the agent itself
+    proposed), status always starts "planned" for a brand-new roadmap."""
+    roadmap = Roadmap(repo_id=repo_id, task_id=task_id, summary=summary)
+    db.add(roadmap)
+    await db.flush()
+    for i, item in enumerate(items):
+        db.add(
+            RoadmapItem(
+                roadmap_id=roadmap.id,
+                phase=str(item.get("phase", "")),
+                initiative=str(item.get("initiative", "")),
+                impact=item.get("impact"),
+                effort=item.get("effort"),
+                confidence=item.get("confidence"),
+                dependencies=list(item.get("dependencies") or []),
+                sequence_order=i,
+            )
+        )
+    await db.commit()
+    refreshed = await get_latest_roadmap_for_repo(db, repo_id, task_id)
+    assert refreshed is not None
+    return refreshed
+
+
+async def get_latest_roadmap_for_repo(
+    db: AsyncSession, repo_id: int | None, task_id: int | None = None
+) -> Roadmap | None:
+    """The most recently created Roadmap for this repo_id (or, if repo_id
+    is None — e.g. an unscoped/legacy roadmap run — the most recent one
+    for this exact task_id instead, never a global "latest across every
+    repo" fallback that would leak an unrelated repo's roadmap). Eagerly
+    loads .items ordered by sequence_order so a caller never needs a
+    second query."""
+    stmt = select(Roadmap).options(selectinload(Roadmap.items))
+    if repo_id is not None:
+        stmt = stmt.where(Roadmap.repo_id == repo_id)
+    elif task_id is not None:
+        stmt = stmt.where(Roadmap.task_id == task_id)
+    else:
+        return None
+    stmt = stmt.order_by(Roadmap.created_at.desc()).limit(1)
+    result = await db.execute(stmt)
+    roadmap = result.scalar_one_or_none()
+    if roadmap is not None:
+        roadmap.items.sort(key=lambda i: i.sequence_order)
+    return roadmap
+
+
+async def update_roadmap_item_status(
+    db: AsyncSession, item_id: int, status: str
+) -> bool:
+    """Real, human/caller-triggered progress tracking — the actual
+    mechanism #498's "re-sequenced against real progress" wording refers
+    to: an initiative's status changes because a real caller (a human via
+    the API, or a future automated check) said so, never inferred or
+    guessed from unrelated activity. Returns False (not an error) for an
+    unknown item_id or an invalid status — matches this module's own
+    established non-throwing convention for a caller-correctable input
+    mistake."""
+    if status not in ("planned", "in_progress", "completed", "superseded"):
+        return False
+    result = await db.execute(
+        update(RoadmapItem)
+        .where(RoadmapItem.id == item_id)
+        .values(status=status)
+        .returning(RoadmapItem.id)
+    )
+    updated = result.scalar_one_or_none()
+    await db.commit()
+    return updated is not None

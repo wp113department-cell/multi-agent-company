@@ -96,7 +96,9 @@ DEAD_CODE_DETECT_TOOL = {
 }
 
 
-def dead_code_detect_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> str:
+def dead_code_detect_handler(
+    root: Path, worktree_path: str, inp: dict[str, Any]
+) -> str:
     """Core dead_code_detect logic shared by all four real call sites."""
     directory = str(inp.get("directory", ""))
     policy = check_path_in_worktree(directory, worktree_path)

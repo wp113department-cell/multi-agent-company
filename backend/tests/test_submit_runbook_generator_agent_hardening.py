@@ -104,9 +104,7 @@ def test_edit_file_allows_existing_runbook_md() -> None:
             }
         )
         assert result.startswith("Edited")
-        assert (
-            Path(tmp) / "RUNBOOK_DEPLOY.md"
-        ).read_text() == "# Deploy Runbook\n"
+        assert (Path(tmp) / "RUNBOOK_DEPLOY.md").read_text() == "# Deploy Runbook\n"
 
 
 def test_write_file_worktree_escape_still_blocked() -> None:
@@ -124,6 +122,4 @@ def test_submit_accumulates_into_result_dict() -> None:
         {"summary": "Wrote deploy and rollback runbooks", "findings": []}
     )
     assert out == "Submitted."
-    assert (
-        handlers["_result"]["summary"] == "Wrote deploy and rollback runbooks"
-    )
+    assert handlers["_result"]["summary"] == "Wrote deploy and rollback runbooks"

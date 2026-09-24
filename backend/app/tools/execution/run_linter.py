@@ -146,7 +146,9 @@ def _python_executable(root: Path) -> str:
 
 def _run(args: list[str], cwd: str, timeout: int) -> str:
     try:
-        r = subprocess.run(args, capture_output=True, text=True, cwd=cwd, timeout=timeout)
+        r = subprocess.run(
+            args, capture_output=True, text=True, cwd=cwd, timeout=timeout
+        )
         return (r.stdout + r.stderr)[:MAX_OUTPUT_CHARS] or "clean"
     except subprocess.TimeoutExpired:
         return "[ERROR] Linter timed out"
@@ -192,7 +194,9 @@ def run_linter_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> s
         web = str(root.parent / "apps" / "web")
         eslint_out = _run(["npx", "eslint", "."], web, 90)
         summary = parse_diagnostic_summary(eslint_out, "eslint")
-        results.append(f"=== eslint ==={f' {summary}' if summary else ''}\n{eslint_out}")
+        results.append(
+            f"=== eslint ==={f' {summary}' if summary else ''}\n{eslint_out}"
+        )
 
     if tool == "black":
         args = [py, "-m", "black"]

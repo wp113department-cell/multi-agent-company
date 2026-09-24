@@ -13,7 +13,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from app.agents.tools import make_chat_handlers, make_refactor_agent_handlers
 from app.tools.refactor.batch_edit import BATCH_EDIT_TOOL, batch_edit_handler
@@ -86,7 +85,11 @@ class TestBasicFindReplace:
         result = batch_edit_handler(
             tmp_path,
             str(tmp_path),
-            {"files": ["a.txt", "does_not_exist.txt"], "find": "hello", "replace": "hi"},
+            {
+                "files": ["a.txt", "does_not_exist.txt"],
+                "find": "hello",
+                "replace": "hi",
+            },
         )
         assert (tmp_path / "a.txt").read_text() == "hi"
         assert "[SKIPPED]" in result

@@ -52,10 +52,14 @@ def _init_repo(repo: Path) -> None:
     subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
     (repo / "f.txt").write_text("a\n")
     subprocess.run(["git", "add", "f.txt"], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", "feat: initial commit"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "feat: initial commit"], cwd=repo, check=True
+    )
     (repo / "f.txt").write_text("a\nb\n")
     subprocess.run(["git", "add", "f.txt"], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", "fix: second commit"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "fix: second commit"], cwd=repo, check=True
+    )
 
 
 def test_generate_release_notes_tool_schema() -> None:
@@ -122,7 +126,14 @@ async def test_chat_agent_ignores_repo_path_override(tmp_path: Path) -> None:
     import subprocess
 
     subprocess.run(
-        ["git", "commit", "--allow-empty", "-q", "-m", "feat: SECRET_OUTSIDE_RN_COMMIT"],
+        [
+            "git",
+            "commit",
+            "--allow-empty",
+            "-q",
+            "-m",
+            "feat: SECRET_OUTSIDE_RN_COMMIT",
+        ],
         cwd=outside_repo,
         check=True,
     )
@@ -145,7 +156,14 @@ def test_make_chat_handlers_ignores_repo_path_override(tmp_path: Path) -> None:
     import subprocess
 
     subprocess.run(
-        ["git", "commit", "--allow-empty", "-q", "-m", "feat: SECRET_OUTSIDE_RN_COMMIT_2"],
+        [
+            "git",
+            "commit",
+            "--allow-empty",
+            "-q",
+            "-m",
+            "feat: SECRET_OUTSIDE_RN_COMMIT_2",
+        ],
         cwd=outside_repo,
         check=True,
     )
@@ -166,9 +184,7 @@ def test_make_chat_handlers_ignores_repo_path_override(tmp_path: Path) -> None:
 async def test_chat_agent_dispatches_generate_release_notes(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     agent = _agent(tmp_path)
-    result = await agent._execute_tool(
-        "generate_release_notes", {"version": "v1.0.0"}
-    )
+    result = await agent._execute_tool("generate_release_notes", {"version": "v1.0.0"})
     assert "Unknown tool" not in result
 
 
@@ -181,9 +197,7 @@ async def test_chat_agent_dispatches_generate_release_notes(tmp_path: Path) -> N
 async def test_chat_agent_generates_real_release_notes(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     agent = _agent(tmp_path)
-    result = await agent._execute_tool(
-        "generate_release_notes", {"version": "v1.2.3"}
-    )
+    result = await agent._execute_tool("generate_release_notes", {"version": "v1.2.3"})
     assert "v1.2.3" in result
     assert "Release Notes" in result
     assert "initial commit" in result

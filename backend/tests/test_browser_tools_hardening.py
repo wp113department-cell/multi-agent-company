@@ -78,7 +78,9 @@ def test_browser_tool_schemas_have_expected_names() -> None:
 async def test_chat_agent_browser_tools_full_real_lifecycle(tmp_path: Path) -> None:
     agent = _agent(tmp_path, "td_browser_lifecycle")
     try:
-        r_open = await agent._execute_tool("browser_open", {"url": "https://example.com"})
+        r_open = await agent._execute_tool(
+            "browser_open", {"url": "https://example.com"}
+        )
         assert r_open != "[ERROR] Unknown tool: browser_open"
         assert r_open.startswith("Opened:")
         assert "Example Domain" in r_open
@@ -137,7 +139,9 @@ async def test_chat_agent_browser_open_blocks_cloud_metadata_endpoint(
 @pytest.mark.asyncio
 async def test_chat_agent_browser_open_blocks_localhost(tmp_path: Path) -> None:
     agent = _agent(tmp_path, "td_browser_ssrf_2")
-    result = await agent._execute_tool("browser_open", {"url": "http://localhost:8000/"})
+    result = await agent._execute_tool(
+        "browser_open", {"url": "http://localhost:8000/"}
+    )
     assert result.startswith("[BLOCKED]")
 
 

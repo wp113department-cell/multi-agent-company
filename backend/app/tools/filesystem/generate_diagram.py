@@ -167,7 +167,9 @@ def _real_call_flowchart(root: Path, file_path: str, description: str) -> str | 
     return "\n".join(lines)
 
 
-def generate_diagram_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> str:
+def generate_diagram_handler(
+    root: Path, worktree_path: str, inp: dict[str, Any]
+) -> str:
     """Core generate_diagram logic — the one real implementation,
     reused unchanged in behavior except for the worktree-boundary
     check now applied to `path` before either AST helper runs."""

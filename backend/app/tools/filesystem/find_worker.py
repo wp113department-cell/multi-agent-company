@@ -82,7 +82,9 @@ FIND_WORKER_TOOL: dict[str, Any] = {
     },
 }
 
-_PATTERN = r"class.*Worker|@worker|celery\.task|\.delay\(|rq.*worker|dramatiq\.actor|Consumer"
+_PATTERN = (
+    r"class.*Worker|@worker|celery\.task|\.delay\(|rq.*worker|dramatiq\.actor|Consumer"
+)
 
 
 def find_worker_handler(worktree_path: str, inp: dict[str, Any]) -> str:

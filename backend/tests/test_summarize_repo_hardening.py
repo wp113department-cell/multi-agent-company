@@ -89,9 +89,7 @@ async def test_chat_agent_dispatch_ignores_repo_path_override(tmp_path: Path) ->
     (outside / "SECRET_CONFIG.py").write_text("API_KEY = 'sk-outside-secret'\n")
 
     agent = _agent(str(repo))
-    result = await agent._execute_tool(
-        "summarize_repo", {"repo_path": str(outside)}
-    )
+    result = await agent._execute_tool("summarize_repo", {"repo_path": str(outside)})
     assert "SECRET_CONFIG" not in result
     assert "real_file.py" in result
 

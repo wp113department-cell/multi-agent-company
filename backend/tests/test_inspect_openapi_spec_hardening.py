@@ -46,7 +46,9 @@ _SAMPLE_SPEC = json.dumps(
 
 
 def _agent(repo: str) -> ChatAgent:
-    session = ChatSession(session_id="td_inspect_openapi_spec_hardening", repo_path=repo)
+    session = ChatSession(
+        session_id="td_inspect_openapi_spec_hardening", repo_path=repo
+    )
     return ChatAgent(session)
 
 
@@ -138,9 +140,7 @@ class TestLegitimateUsageRegression:
 
     def test_direct_handler_follows_legit_external_redirect(self) -> None:
         out = inspect_openapi_spec_handler(
-            {
-                "url": "https://httpbin.org/redirect-to?url=https%3A%2F%2Fexample.com"
-            }
+            {"url": "https://httpbin.org/redirect-to?url=https%3A%2F%2Fexample.com"}
         )
         # example.com's HTML is not a valid OpenAPI spec, but the fetch
         # itself must have genuinely followed the redirect (no POLICY

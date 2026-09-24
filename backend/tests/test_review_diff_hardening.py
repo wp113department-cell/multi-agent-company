@@ -128,9 +128,7 @@ class TestLegitimateUsageRegression:
 
     def test_direct_handler_real_base_ref(self, tmp_path: Path) -> None:
         repo = _git_repo_with_staged_change(tmp_path)
-        subprocess.run(
-            ["git", "commit", "-q", "-m", "second"], cwd=repo, check=True
-        )
+        subprocess.run(["git", "commit", "-q", "-m", "second"], cwd=repo, check=True)
         handlers = make_chat_handlers(str(repo))
         out = handlers["review_diff"]({"base": "HEAD~1"})
         assert "f.txt" in out

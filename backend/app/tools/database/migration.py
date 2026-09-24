@@ -113,9 +113,13 @@ def run_migration_handler(repo_path: str, inp: dict[str, Any]) -> str:
         )
 
     direction = str(inp.get("direction", "upgrade")).strip()
-    revision = str(inp.get("revision", "head" if direction == "upgrade" else "-1")).strip()
+    revision = str(
+        inp.get("revision", "head" if direction == "upgrade" else "-1")
+    ).strip()
     validation_error = validate_run_migration_inputs(direction, revision)
     if validation_error:
         return validation_error
 
-    return "[BLOCKED] run_migration requires interactive session for safety confirmation"
+    return (
+        "[BLOCKED] run_migration requires interactive session for safety confirmation"
+    )

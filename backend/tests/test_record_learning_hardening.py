@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import uuid
 
-import pytest
 
 from app.tools.agents.record_learning import (
     RECORD_LEARNING_TOOL,
@@ -77,12 +76,16 @@ def test_handler_defaults_outcome_when_omitted() -> None:
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
                 rows = (
-                    await session.execute(
-                        select(MemoryEmbedding).where(
-                            MemoryEmbedding.agent_name == agent_name
+                    (
+                        await session.execute(
+                            select(MemoryEmbedding).where(
+                                MemoryEmbedding.agent_name == agent_name
+                            )
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 assert len(rows) == 1
                 assert marker in rows[0].description
                 assert rows[0].summary == "recorded during task execution"
@@ -126,19 +129,27 @@ def test_handler_attributes_to_the_correct_agent_name() -> None:
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
                 rows_a = (
-                    await session.execute(
-                        select(MemoryEmbedding).where(
-                            MemoryEmbedding.agent_name == agent_a
+                    (
+                        await session.execute(
+                            select(MemoryEmbedding).where(
+                                MemoryEmbedding.agent_name == agent_a
+                            )
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 rows_b = (
-                    await session.execute(
-                        select(MemoryEmbedding).where(
-                            MemoryEmbedding.agent_name == agent_b
+                    (
+                        await session.execute(
+                            select(MemoryEmbedding).where(
+                                MemoryEmbedding.agent_name == agent_b
+                            )
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 assert len(rows_a) == 1
                 assert len(rows_b) == 1
                 assert "agent A" in rows_a[0].description

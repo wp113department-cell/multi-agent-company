@@ -214,8 +214,16 @@ def run_database_architect(
     # with 3 separate malformed shapes. Fixed by filtering to dict
     # entries only before building findings — non-dict entries are
     # dropped rather than crashing the whole result.
-    tables = [t for t in tables_raw if isinstance(t, dict)] if isinstance(tables_raw, list) else []
-    indexes = [i for i in indexes_raw if isinstance(i, dict)] if isinstance(indexes_raw, list) else []
+    tables = (
+        [t for t in tables_raw if isinstance(t, dict)]
+        if isinstance(tables_raw, list)
+        else []
+    )
+    indexes = (
+        [i for i in indexes_raw if isinstance(i, dict)]
+        if isinstance(indexes_raw, list)
+        else []
+    )
     return AgentResult(
         summary=f"DB architecture: {len(tables)} table ops, {len(indexes)} index recommendations. {raw.get('summary', '')}",
         findings=(

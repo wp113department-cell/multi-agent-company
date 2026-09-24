@@ -127,7 +127,9 @@ class TestAgentContractCorrected:
                 continue  # wired separately, per-call, in run_bug_fix()
             if tool == "record_learning":
                 continue  # wired separately, per-call, in run_bug_fix()
-            assert tool in handlers, f"AGENT_CONTRACT claims {tool!r} but no real handler exists"
+            assert (
+                tool in handlers
+            ), f"AGENT_CONTRACT claims {tool!r} but no real handler exists"
 
     def test_contract_still_declares_all_tools_in_manifest(self) -> None:
         for tool in AGENT_CONTRACT["allowed_tools"]:

@@ -69,6 +69,7 @@ def _call_sync_db_bridge(fn: Any, *args: Any) -> Any:
     with ThreadPoolExecutor(max_workers=1) as pool:
         return pool.submit(fn, *args).result(timeout=10)
 
+
 # Gap-closure Stage 3 Day 62 (PLAN.md, "frontend behavior under real
 # concurrent load/multiple sessions") — real measurement (not assumed)
 # found that two concurrent subscribe() calls on the same TaskStream were
@@ -86,6 +87,11 @@ def _call_sync_db_bridge(fn: Any, *args: Any) -> Any:
 # correct behavior added for the untested concurrent-subscriber case.
 _HISTORY_MAXLEN = 500
 _SUBSCRIBER_QUEUE_MAXSIZE = 500
+# T2-B10 (2026-09-24, GRIDIRON_PARTIAL #426) — see TaskStream.__init__'s own
+# comment. Bounds how stale a live cross-process Stop can be observed by an
+# already-running worker: at most this many seconds after the API process
+# durably records it.
+_ABORT_DB_RECHECK_INTERVAL_SECONDS = 3.0
 
 
 class TaskStream:
@@ -122,16 +128,31 @@ class TaskStream:
         # failing an unrelated test's "assert not stream.should_abort()" on
         # a supposedly-fresh stream.
         self._durable = durable
-        # Has this process ever locally observed/set the abort flag for this
-        # task_id? None means "no local write yet" (a freshly-created
-        # TaskStream — either the very first one ever, or a fresh one in a
-        # NEW process after a restart) — should_abort() below does exactly
-        # one cold DB read in that case (durable=True only) to pick up a
-        # flag a PREVIOUS process may have persisted before crashing, then
-        # caches the answer locally so every subsequent per-turn check
-        # (call_llm runs this every turn) stays in-memory, same latency as
-        # before this change.
-        self._abort_db_synced = False
+        # T2-B10 (2026-09-24, GRIDIRON_PARTIAL #426 "Pause / Resume /
+        # Cancel" — Task 1's own re-verification of this item, DOWNGRADED
+        # after proving live with two real subprocesses that a Stop set in
+        # one process was invisible in another). The original T2-B2 design
+        # (a one-shot `_abort_db_synced` bool) only closed the CRASH-
+        # RECOVERY half of this: a brand-new process starting AFTER a Stop
+        # was already durably recorded correctly picks it up on its first
+        # check. It did NOT close the LIVE half: an ALREADY-RUNNING worker
+        # process (the real QUEUE_BACKEND=rq scenario — the agent runs in
+        # a separate `rq worker` process for the run's entire lifetime)
+        # made its one cold check before a Stop was clicked, cached
+        # "not aborted" forever, and then — since should_abort() never
+        # touched the DB again — never observed a LATER Stop for the rest
+        # of that run. Proved live before this fix (see
+        # tests/test_t2b10_live_cross_process_stop.py's own docstring).
+        #
+        # Fixed by replacing the one-shot bool with a monotonic last-
+        # checked timestamp: 0.0 means "never checked" (still triggers an
+        # immediate cold read, same as before), and any check more than
+        # _ABORT_DB_RECHECK_INTERVAL_SECONDS after the last one re-reads
+        # the DB again — bounding real-world Stop latency to a few seconds
+        # instead of "never, for the rest of this process's life", without
+        # hammering the DB on every single per-turn should_abort() call
+        # the way an unthrottled re-read would.
+        self._abort_last_db_check: float = 0.0
 
     def push(self, event: dict[str, Any]) -> None:
         """Thread-safe push. Called from sync agent code (base_graph.py).
@@ -157,19 +178,20 @@ class TaskStream:
 
     def set_abort(self) -> None:
         self._abort_event.set()
-        self._abort_db_synced = True
+        self._abort_last_db_check = time.monotonic()
         self._write_through_stop(True)
 
     def should_abort(self) -> bool:
         if self._abort_event.is_set():
             return True
-        if not self._abort_db_synced:
-            # Cold cache: this is the first check this process has ever made
-            # for this task_id. Consult the durable flag once — this is what
-            # makes a Stop set by a process that then crashed still take
-            # effect once a fresh process (re-)creates this TaskStream,
-            # instead of silently defaulting to "not aborted" forever.
-            self._abort_db_synced = True
+        now = time.monotonic()
+        if now - self._abort_last_db_check >= _ABORT_DB_RECHECK_INTERVAL_SECONDS:
+            # Cold/periodic check: either the first check this process has
+            # ever made for this task_id (last_check starts at 0.0), or
+            # enough real time has passed since the last one that a LIVE
+            # Stop from another process is worth checking for again. See
+            # __init__'s own comment for why this replaced a one-shot bool.
+            self._abort_last_db_check = now
             if self._read_through_stop():
                 self._abort_event.set()
                 return True
@@ -177,12 +199,12 @@ class TaskStream:
 
     def clear_abort(self) -> None:
         self._abort_event.clear()
-        self._abort_db_synced = True
+        self._abort_last_db_check = time.monotonic()
         self._write_through_stop(False)
 
     def set_resume(self, message: str, files: list[dict[str, Any]]) -> None:
         self._abort_event.clear()
-        self._abort_db_synced = True
+        self._abort_last_db_check = time.monotonic()
         self._resume_payload = {"message": message, "files": files}
         self._write_through_resume(message, files)
 

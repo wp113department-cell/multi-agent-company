@@ -70,9 +70,7 @@ def test_make_chat_handlers_closes_directory_escape(tmp_path: Path) -> None:
     (outside_dir / "secret.py").write_text("x = 1\n")
 
     handlers = make_chat_handlers(str(repo))
-    result = handlers["count_lines"](
-        {"path": str(outside_dir), "pattern": "**/*.py"}
-    )
+    result = handlers["count_lines"]({"path": str(outside_dir), "pattern": "**/*.py"})
     assert "[POLICY DENIED]" in result
 
 

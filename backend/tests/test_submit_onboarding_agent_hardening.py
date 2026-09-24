@@ -140,6 +140,4 @@ def test_submit_accumulates_into_result_dict() -> None:
         {"summary": "Wrote a minimal getting-started guide", "findings": []}
     )
     assert out == "Submitted."
-    assert (
-        handlers["_result"]["summary"] == "Wrote a minimal getting-started guide"
-    )
+    assert handlers["_result"]["summary"] == "Wrote a minimal getting-started guide"

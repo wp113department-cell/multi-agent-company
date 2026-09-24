@@ -105,6 +105,7 @@ else:
     def _unlock(fh: IO[str]) -> None:
         fcntl.flock(fh, fcntl.LOCK_UN)
 
+
 MEMORY_WRITE_TOOL: dict[str, object] = {
     "name": "memory_write",
     "description": "Write a value to the per-repo memory store under a key.",

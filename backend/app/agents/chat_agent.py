@@ -163,10 +163,14 @@ from app.tools.filesystem.find_config import find_config_handler
 from app.tools.git.generate_changelog import generate_changelog_handler
 from app.tools.execution.run_linter import run_linter_handler
 from app.tools.filesystem.secrets_scan import secrets_scan_handler
-from app.tools.execution.check_license_compliance import check_license_compliance_handler
+from app.tools.execution.check_license_compliance import (
+    check_license_compliance_handler,
+)
 from app.tools.execution.coverage_report import coverage_report_handler
 from app.tools.execution.cpu_usage import cpu_usage_handler
-from app.tools.execution.diagnose_deployment_failure import gather_deployment_diagnostics
+from app.tools.execution.diagnose_deployment_failure import (
+    gather_deployment_diagnostics,
+)
 from app.tools.execution.disk_usage import disk_usage_handler
 from app.tools.execution.docker_logs import docker_logs_handler
 from app.tools.execution.docker_ps import docker_ps_handler
@@ -1581,9 +1585,7 @@ class ChatAgent:
             gc_files: list[str] = (
                 list(gc_raw_files) if isinstance(gc_raw_files, list) else ["--all"]
             )
-            return await asyncio.to_thread(
-                stage_and_commit, repo, gc_message, gc_files
-            )
+            return await asyncio.to_thread(stage_and_commit, repo, gc_message, gc_files)
 
         if tool_name == "git_branch":
             # tool_enhance.md productionization pass, tool #148
@@ -1612,7 +1614,9 @@ class ChatAgent:
                     # active_branch persistence as this module's own
                     # git_checkout dispatch above.
                     try:
-                        from app.db.repository import set_repo_active_branch_by_path_sync
+                        from app.db.repository import (
+                            set_repo_active_branch_by_path_sync,
+                        )
 
                         await asyncio.to_thread(
                             set_repo_active_branch_by_path_sync, repo, bname
@@ -1640,7 +1644,9 @@ class ChatAgent:
                         description="Discard uncommitted changes to a file",
                         details=f"git checkout {ck_target} -- {file_arg}",
                     ):
-                        return f"[DENIED] User declined to discard changes to {file_arg}"
+                        return (
+                            f"[DENIED] User declined to discard changes to {file_arg}"
+                        )
                 return _git(["checkout", ck_target, "--", file_arg], repo)
             result = _git(["checkout", ck_target], repo)
             # T2-B6 (2026-09-22, GRIDIRON_PARTIAL #361) — same real-branch
@@ -1735,9 +1741,7 @@ class ChatAgent:
                 if not gres_confirmed:
                     return f"[CANCELLED] git_restore for {gres_rel} cancelled by user"
             restore_args = (
-                ["restore"]
-                + (["--staged"] if gres_staged else [])
-                + ["--", gres_rel]
+                ["restore"] + (["--staged"] if gres_staged else []) + ["--", gres_rel]
             )
             return _git(restore_args, repo)
 
@@ -2256,7 +2260,9 @@ class ChatAgent:
                     ),
                 )
                 if not gw_confirmed:
-                    return f"[CANCELLED] git_worktree add {gw_wt_path} cancelled by user"
+                    return (
+                        f"[CANCELLED] git_worktree add {gw_wt_path} cancelled by user"
+                    )
                 return await asyncio.to_thread(
                     _git, ["worktree", "add", "--", gw_wt_path, gw_branch], repo, 30
                 )
@@ -2346,9 +2352,7 @@ class ChatAgent:
             # dispatch (this tool was never reachable from interactive
             # chat at all). Now delegates to the shared, worktree-
             # validated handler.
-            return await asyncio.to_thread(
-                generate_diagram_handler, root, repo, inp
-            )
+            return await asyncio.to_thread(generate_diagram_handler, root, repo, inp)
 
         if tool_name == "review_diff":
             # tool_enhance.md productionization pass, tool #179
@@ -2491,7 +2495,11 @@ class ChatAgent:
             if not lci_approved:
                 return "[DENIED] User declined linear_create_issue."
             return await asyncio.to_thread(
-                create_linear_issue, lci_api_key, lci_title, lci_description, lci_team_key
+                create_linear_issue,
+                lci_api_key,
+                lci_title,
+                lci_description,
+                lci_team_key,
             )
 
         if tool_name == "memory_read":
@@ -2543,7 +2551,9 @@ class ChatAgent:
             )
             if not ssm_approved:
                 return "[DENIED] User declined slack_send_message."
-            return await asyncio.to_thread(send_slack_message, ssm_webhook_url, ssm_text)
+            return await asyncio.to_thread(
+                send_slack_message, ssm_webhook_url, ssm_text
+            )
 
         if tool_name == "inspect_github_repo":
             # tool_enhance.md productionization pass, tool #156
@@ -2572,9 +2582,7 @@ class ChatAgent:
             # proved live) and a missing chat_agent.py dispatch (this
             # tool was never reachable from interactive chat at all).
             # Now delegates to the shared, worktree-validated handler.
-            return await asyncio.to_thread(
-                openapi_inspect_handler, root, repo, inp
-            )
+            return await asyncio.to_thread(openapi_inspect_handler, root, repo, inp)
 
         if tool_name == "parse_docker_compose":
             # tool_enhance.md productionization pass, tool #170
@@ -2594,9 +2602,7 @@ class ChatAgent:
             # proved live) and a missing chat_agent.py dispatch (this
             # tool was never reachable from interactive chat at all).
             # Now delegates to the shared, worktree-validated handler.
-            return await asyncio.to_thread(
-                parse_dockerfile_handler, root, repo, inp
-            )
+            return await asyncio.to_thread(parse_dockerfile_handler, root, repo, inp)
 
         if tool_name == "pip_list":
             # tool_enhance.md productionization pass, tool #172
@@ -2626,9 +2632,7 @@ class ChatAgent:
             # chat_agent.py dispatch (this tool was never reachable
             # from interactive chat at all, proved live). Now
             # delegates to the shared, worktree-validated handler.
-            return await asyncio.to_thread(
-                read_image_handler, root, repo, inp
-            )
+            return await asyncio.to_thread(read_image_handler, root, repo, inp)
 
         if tool_name == "read_notebook":
             # tool_enhance.md productionization pass, tool #175
@@ -2637,9 +2641,7 @@ class ChatAgent:
             # proved live) and a missing chat_agent.py dispatch (this
             # tool was never reachable from interactive chat at all).
             # Now delegates to the shared, worktree-validated handler.
-            return await asyncio.to_thread(
-                read_notebook_handler, root, repo, inp
-            )
+            return await asyncio.to_thread(read_notebook_handler, root, repo, inp)
 
         # ========== BATCH 4 — Testing extras ==========
 
@@ -2859,9 +2861,7 @@ class ChatAgent:
             # psql at all — the tool genuinely works for the first
             # time.
             mfs_db_url = str(getattr(get_settings(), "database_url", "") or "")
-            return await asyncio.to_thread(
-                mermaid_from_schema_handler, mfs_db_url, inp
-            )
+            return await asyncio.to_thread(mermaid_from_schema_handler, mfs_db_url, inp)
 
         # ========== BATCH 8 — Docker tools ==========
 
@@ -2928,9 +2928,7 @@ class ChatAgent:
                 # needing confirmation ("creates/starts containers... with
                 # no restriction on privileged/host-mount config"), but this
                 # real, actually-executing dispatch had no gate at all.
-                dc_cmd_preview = (
-                    f"docker compose up {'-d' if dc_detach else ''} {' '.join(dc_services)}".strip()
-                )
+                dc_cmd_preview = f"docker compose up {'-d' if dc_detach else ''} {' '.join(dc_services)}".strip()
                 dc_approved = await self._confirm(
                     description="Start containers via docker compose up",
                     details=dc_cmd_preview,
@@ -2991,7 +2989,9 @@ class ChatAgent:
                         cwd=ni_target_dir,
                         timeout=120,
                     )
-                    return (r.stdout + r.stderr).strip()[-2000:] or "npm install complete"
+                    return (r.stdout + r.stderr).strip()[
+                        -2000:
+                    ] or "npm install complete"
                 except Exception as e:
                     return f"[ERROR] npm_install: {e}"
 
@@ -3031,10 +3031,9 @@ class ChatAgent:
                         cwd=nr_target_dir,
                         timeout=180,
                     )
-                    return (
-                        (r.stdout + r.stderr).strip()[-3000:]
-                        or f"npm run {nr_script} complete"
-                    )
+                    return (r.stdout + r.stderr).strip()[
+                        -3000:
+                    ] or f"npm run {nr_script} complete"
                 except Exception as e:
                     return f"[ERROR] npm_run: {e}"
 
@@ -3182,9 +3181,7 @@ class ChatAgent:
             # Full account in dead_code_detect_handler()'s own module
             # docstring. Now delegates to that same shared, fixed
             # handler.
-            return await asyncio.to_thread(
-                dead_code_detect_handler, root, repo, inp
-            )
+            return await asyncio.to_thread(dead_code_detect_handler, root, repo, inp)
 
         if tool_name == "circular_dep_detect":
             # tool_enhance.md productionization pass, tool #97 (2026-08-25)
@@ -3199,9 +3196,7 @@ class ChatAgent:
             # reproduces here too (not raised). Full account in
             # circular_dep_detect_handler()'s own module docstring. Now
             # delegates to that same shared, fixed handler.
-            return await asyncio.to_thread(
-                circular_dep_detect_handler, root, repo, inp
-            )
+            return await asyncio.to_thread(circular_dep_detect_handler, root, repo, inp)
 
         if tool_name == "rename_symbol":
             rsym_old = str(inp["old_name"])
@@ -3279,9 +3274,7 @@ class ChatAgent:
             # chat_agent.py dispatch (this tool was never reachable
             # from interactive chat at all, proved live). Now
             # delegates to the shared, worktree-validated handler.
-            return await asyncio.to_thread(
-                read_pdf_handler, root, repo, inp
-            )
+            return await asyncio.to_thread(read_pdf_handler, root, repo, inp)
 
         if tool_name == "record_preference":
             # tool_enhance.md productionization pass, tool #178
@@ -3291,9 +3284,7 @@ class ChatAgent:
             # never reachable from interactive chat — the ONE surface
             # it was designed for, per its own module docstring —
             # proved live). Now delegates to the shared handler.
-            return await asyncio.to_thread(
-                make_record_preference_handler(), inp
-            )
+            return await asyncio.to_thread(make_record_preference_handler(), inp)
 
         if tool_name == "run_node":
             # tool_enhance.md productionization pass, tool #60 (2026-08-22)
@@ -3676,6 +3667,18 @@ class ChatAgent:
             # §85).
             return await asyncio.to_thread(check_license_compliance_handler)
 
+        if tool_name == "check_target_repo_license_compliance":
+            # T2-B10 (2026-09-24, GRIDIRON_PARTIAL #331) — see
+            # app/tools/execution/check_target_repo_license_compliance.py's
+            # own module docstring.
+            from app.tools.execution.check_target_repo_license_compliance import (
+                check_target_repo_license_compliance_handler,
+            )
+
+            return await asyncio.to_thread(
+                check_target_repo_license_compliance_handler, repo, inp
+            )
+
         if tool_name == "estimate_complexity":
             # tool_enhance.md productionization pass, tool #110
             # (2026-08-26) — this tool was "advertised but never
@@ -3771,9 +3774,7 @@ class ChatAgent:
             # second, currently unreachable make_chat_handlers()
             # implementation of this same tool) closes both before the
             # path is ever touched.
-            seeddb_validation_error = validate_seed_database_script(
-                seeddb_script, repo
-            )
+            seeddb_validation_error = validate_seed_database_script(seeddb_script, repo)
             if seeddb_validation_error:
                 return seeddb_validation_error
             seeddb_fp = root / seeddb_script
@@ -3970,9 +3971,7 @@ class ChatAgent:
             # tools
             # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131/#132/#133/#134/#135/#136/#137/#138/#139/#140.
             # Delegates to the shared, worktree-validated handler.
-            return await asyncio.to_thread(
-                find_unused_imports_handler, root, repo, inp
-            )
+            return await asyncio.to_thread(find_unused_imports_handler, root, repo, inp)
 
         if tool_name == "find_worker":
             # tool_enhance.md productionization pass, tool #142
@@ -4012,9 +4011,7 @@ class ChatAgent:
             # all, same dispatch class as tools
             # #100/#103/#110/#112/#118/#120/#122/#126/#129/#130/#131/#132/#133/#134/#135/#136/#137/#138/#139/#140/#141/#142/#144.
             # Delegates to the shared, worktree-validated handler.
-            return await asyncio.to_thread(
-                summarize_folder_handler, root, repo, inp
-            )
+            return await asyncio.to_thread(summarize_folder_handler, root, repo, inp)
 
         if tool_name == "summarize_repo":
             # tool_enhance.md productionization pass, tool #203
@@ -4059,9 +4056,7 @@ class ChatAgent:
             # reachable — jinja2 is not installed in this deployment)
             # against Jinja2 SSTI by switching to a SandboxedEnvironment.
             # Delegates to the shared, worktree-validated handler.
-            return await asyncio.to_thread(
-                template_render_handler, root, repo, inp
-            )
+            return await asyncio.to_thread(template_render_handler, root, repo, inp)
 
         if tool_name == "unzip_files":
             # tool_enhance.md productionization pass, tool #206

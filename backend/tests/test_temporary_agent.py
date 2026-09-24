@@ -24,7 +24,6 @@ from unittest.mock import patch
 import pytest
 
 from app.agents.temporary_agent import (
-    SUBMIT_TEMPORARY_AGENT_RESULT_TOOL,
     TemporaryAgentPool,
     _derive_risk_level,
     make_temporary_agent_tools_and_handlers,
@@ -33,7 +32,6 @@ from app.fleet.agent_registry import get_agent_registry
 from app.fleet.capability_registry import get_capability_registry
 from app.fleet.dynamic_agent_runtime import resolve_runtime_agent_fn
 from app.fleet.model_router import get_model_router
-
 
 # ---------------------------------------------------------------------------
 # make_temporary_agent_tools_and_handlers
@@ -75,7 +73,9 @@ def test_submit_tool_always_present_even_if_not_requested(tmp_path) -> None:
         tool_names=["read_file"], scope="planned", repo_path=str(tmp_path)
     )
     assert "submit_temporary_agent_result" in handlers
-    result = handlers["submit_temporary_agent_result"]({"summary": "x", "status": "completed"})
+    result = handlers["submit_temporary_agent_result"](
+        {"summary": "x", "status": "completed"}
+    )
     assert "submitted" in result.lower()
 
 

@@ -26,7 +26,6 @@ files and check REAL host-visible side effects — nothing is mocked.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest

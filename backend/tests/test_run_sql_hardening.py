@@ -99,7 +99,9 @@ def test_handler_treats_malicious_param_as_opaque_data_not_sql() -> None:
     stacked-statement payload must come back as a single literal row
     value, not execute as a second statement."""
     payload = "x'; SELECT 'INJECTED_STATEMENT_EXECUTED' AS marker; --"
-    result = run_sql_handler(_db_url(), {"query": "SELECT $1 AS col", "params": [payload]})
+    result = run_sql_handler(
+        _db_url(), {"query": "SELECT $1 AS col", "params": [payload]}
+    )
     # The full payload — including the semicolons and SELECT keyword —
     # must appear intact as ONE literal value, proving it was bound as
     # data, not parsed as SQL syntax.
@@ -116,7 +118,9 @@ def test_handler_treats_single_quote_param_as_opaque_data() -> None:
 
 def test_handler_treats_drop_table_shaped_param_as_opaque_data() -> None:
     payload = "'; DROP TABLE users; --"
-    result = run_sql_handler(_db_url(), {"query": "SELECT $1 AS col", "params": [payload]})
+    result = run_sql_handler(
+        _db_url(), {"query": "SELECT $1 AS col", "params": [payload]}
+    )
     assert payload in result
     assert "DROP TABLE" not in result.replace(payload, "")
 

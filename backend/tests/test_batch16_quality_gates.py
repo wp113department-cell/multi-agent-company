@@ -274,7 +274,10 @@ class TestPerformanceRegressionGate:
 
         stack, *_ = _patch_all_three()
         fake_gate = RegressionGate(
-            agent_name="backend_dev", blocked=False, reason="no regression detected", report=Mock()
+            agent_name="backend_dev",
+            blocked=False,
+            reason="no regression detected",
+            report=Mock(),
         )
         with stack, patch(
             "app.fleet.regression_detector.get_regression_detector"
@@ -572,4 +575,6 @@ class TestRunManagerAdvisoryGateWiring:
 
         assert result["status"] == "completed"
         assert mock_dep.call_count == 2  # one per attempt — real re-check, not a fluke
-        assert mock_backend_dev.call_count == 2  # the dev agent got a real second attempt
+        assert (
+            mock_backend_dev.call_count == 2
+        )  # the dev agent got a real second attempt

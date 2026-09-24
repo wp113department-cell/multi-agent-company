@@ -48,7 +48,9 @@ PUBLIC_COMPOSE = (
 
 
 def _agent(repo: str) -> ChatAgent:
-    session = ChatSession(session_id="td_parse_docker_compose_hardening", repo_path=repo)
+    session = ChatSession(
+        session_id="td_parse_docker_compose_hardening", repo_path=repo
+    )
     return ChatAgent(session)
 
 
@@ -100,7 +102,9 @@ class TestWorktreeEscapeBlocked:
         (outside / "secret-compose.yml").write_text(SECRET_COMPOSE)
 
         handlers = make_chat_handlers(str(worktree))
-        out = handlers["parse_docker_compose"]({"path": str(outside / "secret-compose.yml")})
+        out = handlers["parse_docker_compose"](
+            {"path": str(outside / "secret-compose.yml")}
+        )
         assert "POLICY DENIED" in out
 
     def test_chat_agent_dispatch_escape_blocked(self, tmp_path: Path) -> None:
@@ -167,7 +171,9 @@ class TestLegitimateUsageRegression:
         assert "nginx:latest" in out
 
     def test_missing_file_error(self, tmp_path: Path) -> None:
-        out = parse_docker_compose_handler(tmp_path, str(tmp_path), {"path": "nope.yml"})
+        out = parse_docker_compose_handler(
+            tmp_path, str(tmp_path), {"path": "nope.yml"}
+        )
         assert "[ERROR] File not found" in out
 
     def test_empty_compose_file(self, tmp_path: Path) -> None:

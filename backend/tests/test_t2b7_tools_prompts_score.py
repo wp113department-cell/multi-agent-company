@@ -25,7 +25,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from app.config import get_settings
 from app.db.models import AgentRun, DevTask, PromptsScore, Repo, ToolsScore
 from app.db.repository import create_agent_run, finish_agent_run
-from app.fleet.prompts_score import compute_prompts_score, get_latest_prompts_score, store_prompts_score
+from app.fleet.prompts_score import (
+    compute_prompts_score,
+    get_latest_prompts_score,
+    store_prompts_score,
+)
 from app.fleet.quality_score import get_quality_score
 from app.fleet.tools_score import compute_tools_score, get_latest_tools_score
 
@@ -64,9 +68,15 @@ def _cleanup_sync(repo_id: int, task_id: int) -> None:
         engine = _engine()
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                await session.execute(delete(AgentRun).where(AgentRun.task_id == task_id))
-                await session.execute(delete(ToolsScore).where(ToolsScore.repo_id == repo_id))
-                await session.execute(delete(PromptsScore).where(PromptsScore.repo_id == repo_id))
+                await session.execute(
+                    delete(AgentRun).where(AgentRun.task_id == task_id)
+                )
+                await session.execute(
+                    delete(ToolsScore).where(ToolsScore.repo_id == repo_id)
+                )
+                await session.execute(
+                    delete(PromptsScore).where(PromptsScore.repo_id == repo_id)
+                )
                 await session.execute(delete(DevTask).where(DevTask.id == task_id))
                 await session.execute(delete(Repo).where(Repo.id == repo_id))
                 await session.commit()
@@ -84,7 +94,9 @@ class TestToolsScore:
             async def _check() -> None:
                 engine = _engine()
                 try:
-                    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                    async with async_sessionmaker(
+                        engine, expire_on_commit=False
+                    )() as session:
                         result = await compute_tools_score(repo_id, session)
                         assert result is None
                 finally:
@@ -101,11 +113,17 @@ class TestToolsScore:
             async def _seed_and_compute() -> float:
                 engine = _engine()
                 try:
-                    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                    async with async_sessionmaker(
+                        engine, expire_on_commit=False
+                    )() as session:
                         r1 = await create_agent_run(session, task_id, "bug_fix", "m")
-                        await finish_agent_run(session, r1.id, "completed", tool_accuracy=1.0)
+                        await finish_agent_run(
+                            session, r1.id, "completed", tool_accuracy=1.0
+                        )
                         r2 = await create_agent_run(session, task_id, "qa", "m")
-                        await finish_agent_run(session, r2.id, "completed", tool_accuracy=0.5)
+                        await finish_agent_run(
+                            session, r2.id, "completed", tool_accuracy=0.5
+                        )
                         # A crashed run with no tool_accuracy recorded — must
                         # be excluded from the average, not counted as 0.
                         r3 = await create_agent_run(session, task_id, "reviewer", "m")
@@ -133,9 +151,13 @@ class TestToolsScore:
             async def _seed() -> None:
                 engine = _engine()
                 try:
-                    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                    async with async_sessionmaker(
+                        engine, expire_on_commit=False
+                    )() as session:
                         run = await create_agent_run(session, task_id, "bug_fix", "m")
-                        await finish_agent_run(session, run.id, "completed", tool_accuracy=0.9)
+                        await finish_agent_run(
+                            session, run.id, "completed", tool_accuracy=0.9
+                        )
                         result = await compute_tools_score(repo_id, session)
                         assert result is not None
                         # store_tools_score's own asyncio.run() bridge can't
@@ -173,13 +195,13 @@ class TestPromptsScore:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_roles_with_no_baseline_are_excluded_not_counted_as_a_pass(self) -> None:
+    async def test_roles_with_no_baseline_are_excluded_not_counted_as_a_pass(
+        self,
+    ) -> None:
         no_baseline_gate = SimpleNamespace(
             blocked=False, report=SimpleNamespace(baseline_score=None)
         )
-        mock_detector = SimpleNamespace(
-            check_agent=lambda role_name: no_baseline_gate
-        )
+        mock_detector = SimpleNamespace(check_agent=lambda role_name: no_baseline_gate)
         with (
             patch(
                 "app.fleet.agents_score._resolve_relevant_agent_names",

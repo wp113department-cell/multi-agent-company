@@ -90,9 +90,12 @@ def test_run_agent_graph_computes_guidance_steps_from_the_real_role_file() -> No
     from app.agents.base_graph import VerificationConfig, run_agent_graph
 
     with (
-        patch("app.agents.base_graph.load_role", return_value=(
-            "## Process\n1. do the first thing\n2. do the second thing\n"
-        )),
+        patch(
+            "app.agents.base_graph.load_role",
+            return_value=(
+                "## Process\n1. do the first thing\n2. do the second thing\n"
+            ),
+        ),
         patch("anthropic.Anthropic") as mock_anthropic_cls,
     ):
         mock_client = MagicMock()

@@ -143,7 +143,9 @@ async def delete_user_data(
     identity_removed = await delete_user(db, username)
     from app.auth.revocation import invalidate
 
-    invalidate(username)  # the erased account's token must stop working now, not after the TTL
+    invalidate(
+        username
+    )  # the erased account's token must stop working now, not after the TTL
 
     role_delete_result = await db.execute(
         delete(UserRole).where(UserRole.user_id == username)

@@ -123,9 +123,7 @@ async def test_chat_agent_dispatch_no_longer_unknown_tool(tmp_path: Path) -> Non
 
 
 def test_handler_summarizes_a_real_file(tmp_path: Path) -> None:
-    (tmp_path / "a.py").write_text(
-        "def foo():\n    pass\n\n\nclass Bar:\n    pass\n"
-    )
+    (tmp_path / "a.py").write_text("def foo():\n    pass\n\n\nclass Bar:\n    pass\n")
     result = summarize_folder_handler(tmp_path, str(tmp_path), {"path": "."})
     assert "a.py" in result
     assert "1 functions" in result

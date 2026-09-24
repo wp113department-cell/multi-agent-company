@@ -101,7 +101,9 @@ class TestRangedReadNeverMaterializesTheWholeFile:
         tracemalloc.start()
         try:
             out = read_file_handler(
-                tmp_path, str(tmp_path), {"path": "huge.txt", "start_line": 10, "end_line": 12}
+                tmp_path,
+                str(tmp_path),
+                {"path": "huge.txt", "start_line": 10, "end_line": 12},
             )
             _current, peak = tracemalloc.get_traced_memory()
         finally:

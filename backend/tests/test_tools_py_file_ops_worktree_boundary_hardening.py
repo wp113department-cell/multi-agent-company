@@ -41,7 +41,9 @@ from app.agents.tools import (
 )
 
 
-def test_make_chat_handlers_copy_file_rejects_outside_repo_source(tmp_path: Path) -> None:
+def test_make_chat_handlers_copy_file_rejects_outside_repo_source(
+    tmp_path: Path,
+) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     outside = tmp_path / "outside"
@@ -93,7 +95,9 @@ def test_make_chat_handlers_merge_conflict_tools_reject_outside_repo_path(
     assert "<<<<<<< HEAD" in marker.read_text()
 
 
-def test_make_chat_handlers_parse_merge_conflicts_still_works_in_repo(tmp_path: Path) -> None:
+def test_make_chat_handlers_parse_merge_conflicts_still_works_in_repo(
+    tmp_path: Path,
+) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "conflict.py").write_text("<<<<<<< HEAD\na\n=======\nb\n>>>>>>> branch\n")
@@ -103,7 +107,9 @@ def test_make_chat_handlers_parse_merge_conflicts_still_works_in_repo(tmp_path: 
     assert "hunks" in result
 
 
-def test_make_fleet_apply_handlers_write_file_rejects_outside_repo(tmp_path: Path) -> None:
+def test_make_fleet_apply_handlers_write_file_rejects_outside_repo(
+    tmp_path: Path,
+) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     outside = tmp_path / "outside"
@@ -117,7 +123,9 @@ def test_make_fleet_apply_handlers_write_file_rejects_outside_repo(tmp_path: Pat
     assert not (outside / "evil.md").exists()
 
 
-def test_make_fleet_apply_handlers_edit_file_rejects_outside_repo(tmp_path: Path) -> None:
+def test_make_fleet_apply_handlers_edit_file_rejects_outside_repo(
+    tmp_path: Path,
+) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     outside = tmp_path / "outside"
@@ -133,7 +141,9 @@ def test_make_fleet_apply_handlers_edit_file_rejects_outside_repo(tmp_path: Path
     assert target.read_text() == "original"
 
 
-def test_make_fleet_apply_handlers_write_file_still_works_in_repo(tmp_path: Path) -> None:
+def test_make_fleet_apply_handlers_write_file_still_works_in_repo(
+    tmp_path: Path,
+) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     handlers = make_fleet_apply_handlers(str(repo), agent_name="td_boundary_test")

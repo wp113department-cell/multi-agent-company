@@ -2141,9 +2141,10 @@ def _plain_language_verification_summary(
             "Unverified: the submitted result didn't match the expected "
             "format, so its content could not be structurally checked."
         )
-    if checks.get("escalation:limitation_taxonomy") is False or checks.get(
-        "escalation:alternative_proposed"
-    ) is False:
+    if (
+        checks.get("escalation:limitation_taxonomy") is False
+        or checks.get("escalation:alternative_proposed") is False
+    ):
         return (
             "Unverified: this was reported as blocked/needing a human, but "
             "without a complete explanation of why or what to try instead."
@@ -2784,16 +2785,35 @@ def _make_execute_tools_node(
                     # docstring for why a regex-detected citation shouldn't
                     # silently reject a real submission.
                     citation_check = verify_file_line_citations(repo_path, raw_result)
-                    if citation_check["unverified"]:
+                    if citation_check["unverified"] or citation_check.get(
+                        "unverified_names"
+                    ):
                         raw_result["_citation_check"] = citation_check
-                        logger.warning(
-                            "%s's %s cited %d file:line reference(s) that "
-                            "don't check out against the real repo: %s",
-                            agent_name or "agent",
-                            tu_name,
-                            len(citation_check["unverified"]),
-                            citation_check["unverified"],
-                        )
+                        if citation_check["unverified"]:
+                            logger.warning(
+                                "%s's %s cited %d file:line reference(s) that "
+                                "don't check out against the real repo: %s",
+                                agent_name or "agent",
+                                tu_name,
+                                len(citation_check["unverified"]),
+                                citation_check["unverified"],
+                            )
+                        # T2-B10 (2026-09-24, GRIDIRON_PARTIAL #502) — a
+                        # `name()` cited alongside a real file:line but not
+                        # actually defined there is exactly the "invented
+                        # function/class" hallucination this item's own
+                        # audit finding named as completely unchecked
+                        # before this.
+                        if citation_check.get("unverified_names"):
+                            logger.warning(
+                                "%s's %s cited %d function/class name(s) "
+                                "that don't exist in the file they're "
+                                "cited against: %s",
+                                agent_name or "agent",
+                                tu_name,
+                                len(citation_check["unverified_names"]),
+                                citation_check["unverified_names"],
+                            )
 
                     gate = _run_quality_gate(
                         state,

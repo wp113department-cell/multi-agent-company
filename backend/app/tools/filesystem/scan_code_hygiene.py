@@ -46,7 +46,9 @@ SCAN_CODE_HYGIENE_TOOL: dict[str, Any] = {
 }
 
 
-def scan_code_hygiene_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> str:
+def scan_code_hygiene_handler(
+    root: Path, worktree_path: str, inp: dict[str, Any]
+) -> str:
     """Core scan_code_hygiene logic — same (root, worktree_path, inp) shape
     as dead_code_detect_handler for a consistent call convention across the
     per-agent handler factories that wire both."""
@@ -75,14 +77,20 @@ def scan_code_hygiene_handler(root: Path, worktree_path: str, inp: dict[str, Any
         lines.append("✅ No broken imports detected.")
 
     if unused:
-        lines.append(f"⚠️  {len(unused)} file(s) never imported anywhere in this directory:")
+        lines.append(
+            f"⚠️  {len(unused)} file(s) never imported anywhere in this directory:"
+        )
         for f in unused:
             lines.append(f"  {f}")
     else:
-        lines.append("✅ No unused files detected (within this directory's own import graph).")
+        lines.append(
+            "✅ No unused files detected (within this directory's own import graph)."
+        )
 
     if duplicates:
-        lines.append(f"⚠️  {len(duplicates)} group(s) of structurally duplicate function(s):")
+        lines.append(
+            f"⚠️  {len(duplicates)} group(s) of structurally duplicate function(s):"
+        )
         for group in duplicates:
             lines.append("  - " + " == ".join(group.locations))
     else:

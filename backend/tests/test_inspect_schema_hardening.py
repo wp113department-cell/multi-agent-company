@@ -38,7 +38,10 @@ from app.agents.tools import (
 )
 from app.config import get_settings
 from app.models.chat import ChatSession
-from app.tools.database.inspect_schema import INSPECT_SCHEMA_TOOL, inspect_schema_handler
+from app.tools.database.inspect_schema import (
+    INSPECT_SCHEMA_TOOL,
+    inspect_schema_handler,
+)
 
 pytestmark = pytest.mark.skipif(
     not get_settings().database_url, reason="requires a real DATABASE_URL"
@@ -114,9 +117,9 @@ def test_all_four_factories_close_the_exploit(
 ) -> None:
     handlers = factory(str(tmp_path))
     result = handlers["inspect_schema"]({"table": INJECTION_PAYLOAD})
-    assert result == f"(table not found: {INJECTION_PAYLOAD})", (
-        f"{factory_name} did not close the injection"
-    )
+    assert (
+        result == f"(table not found: {INJECTION_PAYLOAD})"
+    ), f"{factory_name} did not close the injection"
 
 
 # ---------------------------------------------------------------------------

@@ -113,7 +113,9 @@ def memory_search_handler(inp: dict[str, Any]) -> str:
     try:
         results = asyncio.run(_search())
     except (TypeError, ValueError) as exc:
-        return f"[ERROR] memory_search: invalid numeric argument for top_k/repo_id: {exc}"
+        return (
+            f"[ERROR] memory_search: invalid numeric argument for top_k/repo_id: {exc}"
+        )
     except Exception as exc:
         return f"[ERROR] memory_search failed: {exc}"
     if not results:

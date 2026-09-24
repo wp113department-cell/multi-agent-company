@@ -216,7 +216,11 @@ async def test_chat_agent_replace_class_not_found(tmp_path: Path) -> None:
 
     result = await agent._execute_tool(
         "replace_class",
-        {"path": "classes.py", "class_name": "NoSuchClass", "new_code": "class NoSuchClass: pass\n"},
+        {
+            "path": "classes.py",
+            "class_name": "NoSuchClass",
+            "new_code": "class NoSuchClass: pass\n",
+        },
     )
     assert result.startswith("[ERROR] Class 'NoSuchClass' not found")
 

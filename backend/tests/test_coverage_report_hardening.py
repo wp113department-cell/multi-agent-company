@@ -41,7 +41,9 @@ from app.tools.execution.coverage_report import COVERAGE_REPORT_TOOL
 
 
 def _agent(repo: Path) -> ChatAgent:
-    session = ChatSession(session_id="td_coverage_report_hardening", repo_path=str(repo))
+    session = ChatSession(
+        session_id="td_coverage_report_hardening", repo_path=str(repo)
+    )
     return ChatAgent(session)
 
 
@@ -73,7 +75,9 @@ def test_pytest_cov_is_actually_installed() -> None:
     import pytest_cov  # noqa: F401
 
 
-def test_handler_produces_real_coverage_data_not_collection_only(tmp_path: Path) -> None:
+def test_handler_produces_real_coverage_data_not_collection_only(
+    tmp_path: Path,
+) -> None:
     _write_test_with_source(tmp_path)
     handlers = make_tech_debt_agent_handlers(str(tmp_path))
     result = handlers["coverage_report"]({"path": ".", "source": "."})
@@ -153,9 +157,7 @@ async def test_chat_agent_rejects_invalid_min_coverage(tmp_path: Path) -> None:
 async def test_chat_agent_produces_real_coverage_report(tmp_path: Path) -> None:
     _write_test_with_source(tmp_path)
     agent = _agent(tmp_path)
-    result = await agent._execute_tool(
-        "coverage_report", {"path": ".", "source": "."}
-    )
+    result = await agent._execute_tool("coverage_report", {"path": ".", "source": "."})
     assert "mymodule.py" in result
     assert "unrecognized arguments" not in result.lower()
 

@@ -136,9 +136,9 @@ def test_field_name_mismatch_factories_now_respect_requested_path(
     handlers = factory(str(tmp_path))
     result = handlers["list_classes"]({"path": "src/target.py"})
     assert "RealTargetClass" in result, f"{factory_name}: expected class missing"
-    assert "UnrelatedClass" not in result, (
-        f"{factory_name}: path scoping still broken — leaked unrelated.py's contents"
-    )
+    assert (
+        "UnrelatedClass" not in result
+    ), f"{factory_name}: path scoping still broken — leaked unrelated.py's contents"
 
 
 # ---------------------------------------------------------------------------
@@ -163,9 +163,9 @@ def test_rglob_factories_reject_relative_traversal_escape(
         traversal = "../" * (depth + 2) + str(outside).lstrip("/")
         handlers = factory(str(tmp_path))
         result = handlers["list_classes"]({"path": traversal})
-        assert "SecretTraversalClass" not in result, (
-            f"{factory_name}: relative-traversal worktree escape still works"
-        )
+        assert (
+            "SecretTraversalClass" not in result
+        ), f"{factory_name}: relative-traversal worktree escape still works"
     finally:
         outside.unlink()
 

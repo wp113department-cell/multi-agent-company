@@ -122,7 +122,10 @@ def _matches_external(dotted: str) -> str | None:
     segments = dotted.split(".")
     for pattern in _EXTERNAL_CALL_PATTERNS:
         pattern_segments = pattern.split(".")
-        if len(segments) >= len(pattern_segments) and segments[-len(pattern_segments):] == pattern_segments:
+        if (
+            len(segments) >= len(pattern_segments)
+            and segments[-len(pattern_segments) :] == pattern_segments
+        ):
             return pattern
     return None
 

@@ -27,7 +27,6 @@ is mocked.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -42,7 +41,9 @@ from app.tools.execution.run_single_test import (
 
 
 def _agent(repo: Path) -> ChatAgent:
-    session = ChatSession(session_id="td_run_single_test_hardening", repo_path=str(repo))
+    session = ChatSession(
+        session_id="td_run_single_test_hardening", repo_path=str(repo)
+    )
     return ChatAgent(session)
 
 
@@ -62,9 +63,7 @@ def test_validator_allows_no_file(tmp_path: Path) -> None:
 
 def test_validator_allows_relative_file_inside_repo(tmp_path: Path) -> None:
     (tmp_path / "tests").mkdir()
-    assert (
-        validate_run_single_test_file("tests/test_x.py", str(tmp_path)) is None
-    )
+    assert validate_run_single_test_file("tests/test_x.py", str(tmp_path)) is None
 
 
 def test_validator_rejects_absolute_file_outside_repo(tmp_path: Path) -> None:
@@ -177,9 +176,7 @@ async def test_chat_agent_run_single_test_runs_a_real_matching_test(
 ) -> None:
     tests_dir = tmp_path / "backend" / "tests"
     tests_dir.mkdir(parents=True)
-    (tests_dir / "test_sample.py").write_text(
-        "def test_pass_me():\n    assert True\n"
-    )
+    (tests_dir / "test_sample.py").write_text("def test_pass_me():\n    assert True\n")
     agent = _agent(tmp_path)
     result = await agent._execute_tool("run_single_test", {"keyword": "pass_me"})
     assert "1 passed" in result
@@ -190,9 +187,7 @@ def test_make_chat_handlers_run_single_test_runs_a_real_matching_test(
 ) -> None:
     tests_dir = tmp_path / "backend" / "tests"
     tests_dir.mkdir(parents=True)
-    (tests_dir / "test_sample.py").write_text(
-        "def test_pass_me():\n    assert True\n"
-    )
+    (tests_dir / "test_sample.py").write_text("def test_pass_me():\n    assert True\n")
     handlers = make_chat_handlers(str(tmp_path))
     result = handlers["run_single_test"]({"keyword": "pass_me"})
     assert "1 passed" in result

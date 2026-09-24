@@ -94,5 +94,7 @@ def test_submit_subtasks_handler_never_crashes_on_malformed_input() -> None:
 
 def test_submit_subtasks_handler_counts_real_list() -> None:
     handler = _extract_submit_subtasks_handler()
-    result = handler({"subtasks": [{"type": "backend", "title": "t", "description": "d"}]})
+    result = handler(
+        {"subtasks": [{"type": "backend", "title": "t", "description": "d"}]}
+    )
     assert result == "Submitted 1 subtasks"

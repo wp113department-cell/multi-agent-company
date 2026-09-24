@@ -110,5 +110,7 @@ def read_output_handler(
     try:
         max_lines = int(inp.get("lines", 50))
     except (TypeError, ValueError):
-        return f"[ERROR] read_output: 'lines' must be an integer, got {inp.get('lines')!r}"
+        return (
+            f"[ERROR] read_output: 'lines' must be an integer, got {inp.get('lines')!r}"
+        )
     return process_manager.read_output(pid, max_lines, procs, read_stream_fn)

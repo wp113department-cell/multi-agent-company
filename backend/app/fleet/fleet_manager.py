@@ -174,7 +174,11 @@ class FleetManager:
                 "No agents registered for capability %r", required_capability
             )
             return self._decline_or_fill_gap(
-                required_capability, requested_side_effects, task_id, task_description, repo_path
+                required_capability,
+                requested_side_effects,
+                task_id,
+                task_description,
+                repo_path,
             )
 
         side_effects = requested_side_effects or []
@@ -298,7 +302,11 @@ class FleetManager:
                 [c.name for c in candidates],
             )
             return self._decline_or_fill_gap(
-                required_capability, requested_side_effects, task_id, task_description, repo_path
+                required_capability,
+                requested_side_effects,
+                task_id,
+                task_description,
+                repo_path,
             )
 
         scored.sort(key=lambda t: t[0], reverse=True)
@@ -438,7 +446,9 @@ class FleetManager:
                 "slots": pool.snapshot(),
             }
         except Exception:
-            logger.debug("FleetManager.status(): barot_agent pool unavailable", exc_info=True)
+            logger.debug(
+                "FleetManager.status(): barot_agent pool unavailable", exc_info=True
+            )
 
         return {
             "registered_capabilities": self._caps.count(),

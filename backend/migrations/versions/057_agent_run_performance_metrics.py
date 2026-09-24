@@ -22,7 +22,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.add_column("agent_runs", sa.Column("retries", sa.Integer(), nullable=True))
-    op.add_column("agent_runs", sa.Column("verification_pct", sa.Float(), nullable=True))
+    op.add_column(
+        "agent_runs", sa.Column("verification_pct", sa.Float(), nullable=True)
+    )
     op.add_column("agent_runs", sa.Column("confidence", sa.Float(), nullable=True))
     op.add_column("agent_runs", sa.Column("tool_accuracy", sa.Float(), nullable=True))
 

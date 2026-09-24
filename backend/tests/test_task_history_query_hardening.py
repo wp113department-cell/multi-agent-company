@@ -119,9 +119,7 @@ def test_function_errors_cleanly_on_missing_database_url(monkeypatch) -> None:
     class _FakeSettings:
         database_url = ""
 
-    monkeypatch.setattr(
-        "app.config.get_settings", lambda: _FakeSettings()
-    )
+    monkeypatch.setattr("app.config.get_settings", lambda: _FakeSettings())
     result = task_history_query({})
     assert result == "[ERROR] DATABASE_URL not set"
 

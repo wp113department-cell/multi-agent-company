@@ -12,14 +12,26 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from app.config import get_settings
-from app.db.models import Artifact, DevTask, Epic, EpicScratchpad, Event, PendingApproval, Repo
+from app.db.models import (
+    Artifact,
+    DevTask,
+    Epic,
+    EpicScratchpad,
+    Event,
+    PendingApproval,
+    Repo,
+)
 
 
 def _engine() -> AsyncEngine:
@@ -39,7 +51,9 @@ async def _make_repo(session: AsyncSession, suffix: str) -> Repo:
 
 
 async def _make_task(session: AsyncSession, repo_id: int) -> DevTask:
-    task = DevTask(title="t2b6 task", description="d", status="blocked", repo_id=repo_id)
+    task = DevTask(
+        title="t2b6 task", description="d", status="blocked", repo_id=repo_id
+    )
     session.add(task)
     await session.flush()
     return task
@@ -68,7 +82,9 @@ async def test_artifact_repo_id_is_populated_from_the_real_task() -> None:
             ).scalar_one()
             assert row.repo_id == repo.id
 
-            await session.execute(delete(Artifact).where(Artifact.artifact_id == record.artifact_id))
+            await session.execute(
+                delete(Artifact).where(Artifact.artifact_id == record.artifact_id)
+            )
             await session.execute(delete(DevTask).where(DevTask.id == task.id))
             await session.execute(delete(Repo).where(Repo.id == repo.id))
             await session.commit()
@@ -93,7 +109,9 @@ async def test_artifact_repo_id_is_none_for_a_synthetic_task_id() -> None:
             ).scalar_one()
             assert row.repo_id is None
 
-            await session.execute(delete(Artifact).where(Artifact.artifact_id == record.artifact_id))
+            await session.execute(
+                delete(Artifact).where(Artifact.artifact_id == record.artifact_id)
+            )
             await session.commit()
     finally:
         await engine.dispose()
@@ -121,7 +139,9 @@ def test_pending_approval_repo_id_is_populated_from_the_real_task() -> None:
         async def _check() -> None:
             engine = _engine()
             try:
-                async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                async with async_sessionmaker(
+                    engine, expire_on_commit=False
+                )() as session:
                     row = (
                         await session.execute(
                             select(PendingApproval).where(
@@ -139,9 +159,13 @@ def test_pending_approval_repo_id_is_populated_from_the_real_task() -> None:
         async def _cleanup() -> None:
             engine = _engine()
             try:
-                async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                async with async_sessionmaker(
+                    engine, expire_on_commit=False
+                )() as session:
                     await session.execute(
-                        delete(PendingApproval).where(PendingApproval.thread_id == thread_id)
+                        delete(PendingApproval).where(
+                            PendingApproval.thread_id == thread_id
+                        )
                     )
                     await session.execute(delete(DevTask).where(DevTask.id == task_id))
                     await session.execute(delete(Repo).where(Repo.id == repo_id))
@@ -179,13 +203,16 @@ async def test_epic_scratchpad_repo_id_is_populated_from_the_real_epic() -> None
             row = (
                 await session.execute(
                     select(EpicScratchpad).where(
-                        EpicScratchpad.epic_id == epic_id, EpicScratchpad.key == "finding"
+                        EpicScratchpad.epic_id == epic_id,
+                        EpicScratchpad.key == "finding",
                     )
                 )
             ).scalar_one()
             assert row.repo_id == repo.id
 
-            await session.execute(delete(EpicScratchpad).where(EpicScratchpad.epic_id == epic_id))
+            await session.execute(
+                delete(EpicScratchpad).where(EpicScratchpad.epic_id == epic_id)
+            )
             await session.execute(delete(Epic).where(Epic.epic_id == epic_id))
             await session.execute(delete(Repo).where(Repo.id == repo.id))
             await session.commit()

@@ -102,9 +102,7 @@ class TestLegitimateUsageRegression:
     ) -> None:
         handlers = make_monitoring_agent_handlers("/tmp")
         assert "submit_monitoring_report" in handlers
-        out = handlers["submit_monitoring_report"](
-            {"status": "healthy", "metrics": {}}
-        )
+        out = handlers["submit_monitoring_report"]({"status": "healthy", "metrics": {}})
         assert out == "Monitoring report submitted"
 
     def test_repeated_calls_do_not_accumulate_or_leak_state(self) -> None:

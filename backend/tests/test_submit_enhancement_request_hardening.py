@@ -83,9 +83,7 @@ def test_handler_files_a_real_row_and_returns_its_id() -> None:
                     )
                 ).scalar_one()
                 await session.execute(
-                    delete(EnhancementRequest).where(
-                        EnhancementRequest.title == title
-                    )
+                    delete(EnhancementRequest).where(EnhancementRequest.title == title)
                 )
                 await session.commit()
                 return row
@@ -149,9 +147,7 @@ def test_handler_computes_real_impact_simulation_for_a_real_citation() -> None:
                     )
                 ).scalar_one()
                 await session.execute(
-                    delete(EnhancementRequest).where(
-                        EnhancementRequest.title == title
-                    )
+                    delete(EnhancementRequest).where(EnhancementRequest.title == title)
                 )
                 await session.commit()
                 return row

@@ -94,8 +94,9 @@ class TestLlmGenerateText:
         fake_response = SimpleNamespace(
             content=[SimpleNamespace(type="text", text="hello world")]
         )
-        with patch("app.agents.base_graph._make_client"), patch(
-            "app.agents.base_graph._call_anthropic", return_value=fake_response
+        with (
+            patch("app.agents.base_graph._make_client"),
+            patch("app.agents.base_graph._call_anthropic", return_value=fake_response),
         ):
             assert _llm_generate_text("prompt") == "hello world"
 
@@ -197,7 +198,11 @@ class TestCreatePrAutoGenerate:
     operations still real, only the actual `gh` CLI calls mocked."""
 
     def test_auto_generates_when_title_and_body_omitted(
-        self, handlers: dict[str, Any], tmp_repo: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+        self,
+        handlers: dict[str, Any],
+        tmp_repo: Path,
+        tmp_path_factory: pytest.TempPathFactory,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from app.config import get_settings
 
@@ -223,7 +228,11 @@ class TestCreatePrAutoGenerate:
         assert isinstance(result, str)  # gh likely unauthenticated — must not raise
 
     def test_explicit_title_and_body_skip_generation(
-        self, handlers: dict[str, Any], tmp_repo: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+        self,
+        handlers: dict[str, Any],
+        tmp_repo: Path,
+        tmp_path_factory: pytest.TempPathFactory,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from app.config import get_settings
 
@@ -248,7 +257,11 @@ class TestCreatePrAutoGenerate:
         assert isinstance(result, str)
 
     def test_missing_title_after_failed_generation_errors(
-        self, handlers: dict[str, Any], tmp_repo: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+        self,
+        handlers: dict[str, Any],
+        tmp_repo: Path,
+        tmp_path_factory: pytest.TempPathFactory,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from app.config import get_settings
 
@@ -562,9 +575,12 @@ class TestDiagnoseDeploymentFailure:
             stdout="CONTAINER ID   STATUS\nabc123   Exited (1) 2 min ago",
             stderr="",
         )
-        with patch("subprocess.run", return_value=ps_result), patch(
-            "app.agents.tools._llm_diagnose_deployment_failure",
-            return_value="Container abc123 exited with code 1.",
+        with (
+            patch("subprocess.run", return_value=ps_result),
+            patch(
+                "app.agents.tools._llm_diagnose_deployment_failure",
+                return_value="Container abc123 exited with code 1.",
+            ),
         ):
             result = handlers["diagnose_deployment_failure"]({})
         assert "docker ps -a" in result
@@ -597,9 +613,12 @@ class TestDiagnoseDeploymentFailure:
                 return subprocess.CompletedProcess(cmd, 0, inspect_json, "")
             raise AssertionError(f"unexpected cmd {cmd}")
 
-        with patch("subprocess.run", side_effect=fake_run), patch(
-            "app.agents.tools._llm_diagnose_deployment_failure",
-            return_value="OOM diagnosed.",
+        with (
+            patch("subprocess.run", side_effect=fake_run),
+            patch(
+                "app.agents.tools._llm_diagnose_deployment_failure",
+                return_value="OOM diagnosed.",
+            ),
         ):
             result = handlers["diagnose_deployment_failure"]({"container": "myapp"})
         assert "OOMKilled" in result
@@ -612,8 +631,9 @@ class TestDiagnoseDeploymentFailure:
         ps_result = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="(none)", stderr=""
         )
-        with patch("subprocess.run", return_value=ps_result), patch(
-            "app.agents.tools._llm_generate_text", return_value=""
+        with (
+            patch("subprocess.run", return_value=ps_result),
+            patch("app.agents.tools._llm_generate_text", return_value=""),
         ):
             result = handlers["diagnose_deployment_failure"]({})
         assert "[ERROR] Diagnosis generation failed" in result
@@ -707,12 +727,15 @@ class TestDeploymentGuideDocAgent:
             "tokens_out": 5,
             "submitted": True,
         }
-        with patch(
-            "app.agents.deployment_guide_doc_agent.run_agent_graph",
-            return_value=final_state,
-        ), patch(
-            "app.agents.deployment_guide_doc_agent.make_deployment_guide_doc_handlers",
-            return_value={},
+        with (
+            patch(
+                "app.agents.deployment_guide_doc_agent.run_agent_graph",
+                return_value=final_state,
+            ),
+            patch(
+                "app.agents.deployment_guide_doc_agent.make_deployment_guide_doc_handlers",
+                return_value={},
+            ),
         ):
             from app.agents.deployment_guide_doc_agent import (
                 run_deployment_guide_doc_agent,

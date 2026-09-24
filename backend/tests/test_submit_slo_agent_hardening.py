@@ -75,9 +75,7 @@ def test_write_file_blocks_monitoring_config() -> None:
 def test_write_file_allows_slo_spec_md() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         handlers = make_slo_agent_handlers(tmp)
-        result = handlers["write_file"](
-            {"path": "SLO_SPEC.md", "content": "# SLOs\n"}
-        )
+        result = handlers["write_file"]({"path": "SLO_SPEC.md", "content": "# SLOs\n"})
         assert result.startswith("Written")
         assert (Path(tmp) / "SLO_SPEC.md").read_text() == "# SLOs\n"
 
@@ -107,6 +105,4 @@ def test_submit_accumulates_into_result_dict() -> None:
         {"summary": "Defined availability and latency SLOs", "findings": []}
     )
     assert out == "Submitted."
-    assert (
-        handlers["_result"]["summary"] == "Defined availability and latency SLOs"
-    )
+    assert handlers["_result"]["summary"] == "Defined availability and latency SLOs"

@@ -184,9 +184,7 @@ def rename_in_js_source(source: str, old_name: str, new_name: str) -> tuple[str,
         nonlocal count
         if node.type == "identifier" and node.text and node.text.decode() == old_name:
             row = node.start_point[0]
-            by_line.setdefault(row, []).append(
-                (node.start_point[1], node.end_point[1])
-            )
+            by_line.setdefault(row, []).append((node.start_point[1], node.end_point[1]))
             count += 1
         for child in node.children:
             walk(child)

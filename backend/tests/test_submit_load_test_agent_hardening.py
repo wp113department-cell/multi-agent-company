@@ -97,6 +97,4 @@ def test_submit_accumulates_into_result_dict() -> None:
         {"summary": "Generated a k6 script for /api/orders", "findings": []}
     )
     assert out == "Submitted."
-    assert (
-        handlers["_result"]["summary"] == "Generated a k6 script for /api/orders"
-    )
+    assert handlers["_result"]["summary"] == "Generated a k6 script for /api/orders"

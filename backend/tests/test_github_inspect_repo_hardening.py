@@ -115,7 +115,9 @@ class TestLegitimateUsageRegression:
     @pytest.mark.slow
     def test_make_chat_handlers_inspects_real_repo(self) -> None:
         handlers = make_chat_handlers(".")
-        out = handlers["github_inspect_repo"]({"owner": "octocat", "repo": "Hello-World"})
+        out = handlers["github_inspect_repo"](
+            {"owner": "octocat", "repo": "Hello-World"}
+        )
         assert "[ERROR]" not in out
         assert "octocat/Hello-World" in out
 

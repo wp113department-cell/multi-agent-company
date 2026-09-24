@@ -54,5 +54,7 @@ def check_dependency_conflicts_handler(inp: dict[str, Any]) -> str:
             "CONFLICT: no combination of versions satisfies every constraint "
             f"simultaneously. {result.conflict_summary or ''}".strip()
         )
-    resolved = ", ".join(f"{name}=={ver}" for name, ver in sorted(result.resolved_versions.items()))
+    resolved = ", ".join(
+        f"{name}=={ver}" for name, ver in sorted(result.resolved_versions.items())
+    )
     return f"Resolvable: {resolved}" if resolved else "Resolvable (no packages needed)."

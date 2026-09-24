@@ -17,7 +17,6 @@ Every test here proves the fix against the REAL dispatch method
 
 from __future__ import annotations
 
-import os
 from unittest.mock import AsyncMock, patch
 
 import pytest

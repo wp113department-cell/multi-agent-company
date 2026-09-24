@@ -65,7 +65,9 @@ async def test_chat_agent_delete_block_is_now_dispatched(tmp_path: Path) -> None
 def test_handler_rejects_protected_path(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text("SECRET=1\n")
     result = delete_block_handler(
-        tmp_path, str(tmp_path), {"path": ".env", "start_pattern": "S", "end_pattern": "S"}
+        tmp_path,
+        str(tmp_path),
+        {"path": ".env", "start_pattern": "S", "end_pattern": "S"},
     )
     assert result.startswith("[BLOCKED]")
     assert (tmp_path / ".env").read_text() == "SECRET=1\n"
@@ -77,7 +79,9 @@ def test_handler_rejects_absolute_path_outside_worktree(tmp_path: Path) -> None:
     outside = tmp_path / "outside.py"
     outside.write_text("a\nSTART\nb\nEND\nc\n")
     result = delete_block_handler(
-        repo, str(repo), {"path": str(outside), "start_pattern": "START", "end_pattern": "END"}
+        repo,
+        str(repo),
+        {"path": str(outside), "start_pattern": "START", "end_pattern": "END"},
     )
     assert result.startswith("[BLOCKED]")
     assert "START" in outside.read_text()
@@ -91,7 +95,9 @@ def test_handler_rejects_absolute_path_outside_worktree(tmp_path: Path) -> None:
 def test_handler_deletes_a_real_block(tmp_path: Path) -> None:
     (tmp_path / "f.py").write_text("a = 1\n# START\nx = 2\ny = 3\n# END\nb = 4\n")
     result = delete_block_handler(
-        tmp_path, str(tmp_path), {"path": "f.py", "start_pattern": "# START", "end_pattern": "# END"}
+        tmp_path,
+        str(tmp_path),
+        {"path": "f.py", "start_pattern": "# START", "end_pattern": "# END"},
     )
     assert result == "Deleted 4 lines between '# START' and '# END' in f.py"
     assert (tmp_path / "f.py").read_text() == "a = 1\nb = 4\n"
@@ -100,7 +106,9 @@ def test_handler_deletes_a_real_block(tmp_path: Path) -> None:
 def test_handler_warns_when_pattern_not_found(tmp_path: Path) -> None:
     (tmp_path / "f.py").write_text("a = 1\nb = 2\n")
     result = delete_block_handler(
-        tmp_path, str(tmp_path), {"path": "f.py", "start_pattern": "NOPE", "end_pattern": "ALSO_NOPE"}
+        tmp_path,
+        str(tmp_path),
+        {"path": "f.py", "start_pattern": "NOPE", "end_pattern": "ALSO_NOPE"},
     )
     assert result == "[WARN] Block pattern not found in f.py"
     assert (tmp_path / "f.py").read_text() == "a = 1\nb = 2\n"
@@ -108,7 +116,9 @@ def test_handler_warns_when_pattern_not_found(tmp_path: Path) -> None:
 
 def test_handler_errors_on_missing_file(tmp_path: Path) -> None:
     result = delete_block_handler(
-        tmp_path, str(tmp_path), {"path": "nope.py", "start_pattern": "a", "end_pattern": "b"}
+        tmp_path,
+        str(tmp_path),
+        {"path": "nope.py", "start_pattern": "a", "end_pattern": "b"},
     )
     assert result.startswith("[ERROR]")
 

@@ -186,7 +186,10 @@ def _validate_tool_names(names: list[Any]) -> list[str]:
 
 def _extract_tool_use_input(response: Any, tool_name: str) -> dict[str, Any] | None:
     for block in getattr(response, "content", []) or []:
-        if getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == tool_name:
+        if (
+            getattr(block, "type", None) == "tool_use"
+            and getattr(block, "name", None) == tool_name
+        ):
             return dict(getattr(block, "input", {}) or {})
     return None
 
@@ -257,7 +260,9 @@ def _plan_tool_profile(
                 tool_choice={"type": "tool", "name": "plan_tool_profile"},
             )
         except Exception as exc:
-            logger.warning("barot_agent: planning call failed on model %s: %s", model, exc)
+            logger.warning(
+                "barot_agent: planning call failed on model %s: %s", model, exc
+            )
             last_reason = f"api_error: {exc}"
             _audit_planning_call(
                 task_id=task_id,
@@ -301,7 +306,9 @@ def _plan_tool_profile(
             chosen_model=model,
             outcome="success",
         )
-        return ToolProfilePlan(tool_names=tool_names, briefing=briefing, model_used=model)
+        return ToolProfilePlan(
+            tool_names=tool_names, briefing=briefing, model_used=model
+        )
 
     return ToolProfilePlan.failed(last_reason)
 
@@ -356,7 +363,9 @@ def try_fill_capability_gap(
         return BarotDecision(True, False, None, "planning_exception")
 
     if not plan.ok:
-        return BarotDecision(True, False, None, plan.failure_reason or "planning_failed")
+        return BarotDecision(
+            True, False, None, plan.failure_reason or "planning_failed"
+        )
 
     try:
         slot = pool.spawn(

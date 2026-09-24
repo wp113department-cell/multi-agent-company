@@ -36,7 +36,9 @@ from app.tools.execution.run_node import (
 
 _HAS_NODE = shutil.which("node") is not None or shutil.which("nodejs") is not None
 
-pytestmark = pytest.mark.skipif(not _HAS_NODE, reason="requires a real node/nodejs binary")
+pytestmark = pytest.mark.skipif(
+    not _HAS_NODE, reason="requires a real node/nodejs binary"
+)
 
 
 def _agent(repo: str) -> ChatAgent:
@@ -86,7 +88,9 @@ def _spy_timeout_for_node(captured: dict) -> None:
 def test_run_node_handler_clamps_unbounded_timeout(tmp_path: str) -> None:
     captured: dict = {}
     with patch("subprocess.run", side_effect=_spy_timeout_for_node(captured)):
-        run_node_handler(str(tmp_path), {"code": "console.log(1)", "timeout": 999999999})
+        run_node_handler(
+            str(tmp_path), {"code": "console.log(1)", "timeout": 999999999}
+        )
     assert captured.get("timeout") == MAX_RUN_NODE_TIMEOUT_SECONDS
 
 

@@ -87,11 +87,15 @@ def test_feedback_endpoint_persists_and_returns_404_for_unknown_id() -> None:
     memory_id = asyncio.run(_make_memory_row(task_id, marker))
     try:
         with TestClient(app) as client:
-            resp = client.post(f"/api/memory/{memory_id}/feedback", json={"helpful": True})
+            resp = client.post(
+                f"/api/memory/{memory_id}/feedback", json={"helpful": True}
+            )
             assert resp.status_code == 200, resp.text
             assert resp.json() == {"ok": True, "id": memory_id, "helpful": True}
 
-            resp2 = client.post("/api/memory/999999999/feedback", json={"helpful": False})
+            resp2 = client.post(
+                "/api/memory/999999999/feedback", json={"helpful": False}
+            )
             assert resp2.status_code == 404
     finally:
         _cleanup(task_id)
@@ -127,10 +131,16 @@ def test_feedback_route_is_authenticated_only_not_approver_only() -> None:
                 )
             elif isinstance(r, APIRoute):
                 for method in r.methods - {"HEAD", "OPTIONS"}:
-                    found.append((method, prefix + r.path, dependency_names(r, inherited)))
+                    found.append(
+                        (method, prefix + r.path, dependency_names(r, inherited))
+                    )
 
     collect(app)
-    matches = [f for f in found if f[0] == "POST" and f[1] == "/api/memory/{memory_id}/feedback"]
+    matches = [
+        f
+        for f in found
+        if f[0] == "POST" and f[1] == "/api/memory/{memory_id}/feedback"
+    ]
     assert len(matches) == 1
     _, _, deps = matches[0]
     assert "require_authenticated" in deps
@@ -183,7 +193,9 @@ async def test_positive_feedback_increases_composite_score_ranking(
                     assert row_helped.id != row_control.id  # dedup genuinely off
 
                     for _ in range(3):
-                        assert await record_memory_feedback(row_helped.id, True, session)
+                        assert await record_memory_feedback(
+                            row_helped.id, True, session
+                        )
 
                     results = await query_similar_tasks(marker, session, top_k=1000)
                 helped = next(r for r in results if r["task_id"] == task_id_helped)
