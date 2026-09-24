@@ -351,6 +351,10 @@ from app.tools.filesystem.scan_code_hygiene import (
     SCAN_CODE_HYGIENE_TOOL,
     scan_code_hygiene_handler,
 )
+from app.tools.filesystem.scan_reliability import (
+    SCAN_RELIABILITY_TOOL,
+    scan_reliability_handler,
+)
 from app.tools.filesystem.import_graph import (
     IMPORT_GRAPH_TOOL,
     import_graph_handler,
@@ -984,6 +988,7 @@ _DEAD_CODE_DETECT_TOOL = DEAD_CODE_DETECT_TOOL
 # above with the three checks it doesn't cover: broken imports, unused
 # files, duplicate/cloned functions.
 _SCAN_CODE_HYGIENE_TOOL = SCAN_CODE_HYGIENE_TOOL
+_SCAN_RELIABILITY_TOOL = SCAN_RELIABILITY_TOOL
 _IMPORT_GRAPH_TOOL = IMPORT_GRAPH_TOOL
 _INSPECT_SCHEMA_TOOL = INSPECT_SCHEMA_TOOL
 _CIRCULAR_DEP_DETECT_TOOL = CIRCULAR_DEP_DETECT_TOOL
@@ -2922,6 +2927,7 @@ ARCH_REVIEWER_TOOLS = READ_ONLY_TOOLS + [
     _CIRCULAR_DEP_DETECT_TOOL,
     _DEAD_CODE_DETECT_TOOL,
     _SCAN_CODE_HYGIENE_TOOL,
+    _SCAN_RELIABILITY_TOOL,
     _PARSE_AST_TOOL,
     _LIST_FUNCTIONS_TOOL,
     _LIST_CLASSES_TOOL,
@@ -3190,6 +3196,11 @@ def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     def ar_scan_code_hygiene(inp: dict[str, Any]) -> str:
         return scan_code_hygiene_handler(root, repo_path, inp)
 
+    # T2-B9 (2026-09-24, GRIDIRON_PARTIAL #149) — see
+    # app/tools/filesystem/scan_reliability.py's own module docstring.
+    def ar_scan_reliability(inp: dict[str, Any]) -> str:
+        return scan_reliability_handler(root, repo_path, inp)
+
     # tool_enhance.md productionization pass, tool #83 (2026-08-24) — the
     # real fix lives in the shared parse_ast_handler(); see that
     # function's own module docstring.
@@ -3230,6 +3241,7 @@ def make_arch_reviewer_handlers(repo_path: str) -> dict[str, Any]:
     handlers["circular_dep_detect"] = ar_circular_dep
     handlers["dead_code_detect"] = ar_dead_code
     handlers["scan_code_hygiene"] = ar_scan_code_hygiene
+    handlers["scan_reliability"] = ar_scan_reliability
     handlers["parse_ast"] = ar_parse_ast
     handlers["list_functions"] = ar_list_functions
     handlers["list_classes"] = ar_list_classes
