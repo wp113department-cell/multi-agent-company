@@ -72,6 +72,7 @@ Runtime verification: PASS (see tests/test_bash_tool_execution.py —
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
@@ -80,6 +81,8 @@ from typing import Any, Callable
 
 from app.config import get_settings
 from app.policy.engine import check_allowlisted_command, check_command
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Shared sandboxed-execution primitive — gap-closure Day 9 (answers.md Q21).
@@ -103,6 +106,7 @@ def _run_bash_command(
     image: str | None = None,
     network: str | None = None,
     read_only: bool = False,
+    on_output: Callable[[str, str], None] | None = None,
 ) -> tuple[str, str, int, bool]:
     """Returns (stdout, stderr, returncode, timed_out) regardless of which
     path ran the command — each call site keeps its own existing output
@@ -129,6 +133,15 @@ def _run_bash_command(
     from a bridge-network container; host.docker.internal routing was
     verified to reach the bridge gateway but NOT the loopback-only
     Postgres — network=host was the verified-working fix).
+
+    on_output (T2-B9/#12, 2026-09-24) — passed straight through to
+    run_sandboxed()'s own new streaming parameter on the sandboxed path,
+    and given the same real, incremental treatment on the host-fallback
+    path below (a plain `subprocess.Popen` + reader-thread, mirroring
+    `app.policy.sandbox._run_streaming`'s exact shape) — an operator who
+    has explicitly opted OUT of sandboxing should not silently lose live
+    output too. None (the default) is the exact original buffered
+    behavior on both paths, unchanged.
     """
     settings = get_settings()
     if settings.bash_sandbox_enabled:
@@ -143,12 +156,17 @@ def _run_bash_command(
                 image=image,
                 network=network,
                 read_only=read_only,
+                on_output=on_output,
             )
             return result.stdout, result.stderr, result.returncode, result.timed_out
         except SandboxUnavailableError as exc:
             return "", f"[SANDBOX UNAVAILABLE] {exc}", -1, False
 
     env = {**os.environ, **extra_env} if extra_env else None
+    if on_output is not None:
+        return _run_host_streaming(
+            command, cwd, timeout=timeout, env=env, on_output=on_output
+        )
     try:
         proc = subprocess.run(
             command,
@@ -161,6 +179,70 @@ def _run_bash_command(
         )
         return proc.stdout, proc.stderr, proc.returncode, False
     except subprocess.TimeoutExpired:
+        return "", f"Command timed out after {timeout}s", -1, True
+
+
+def _run_host_streaming(
+    command: str,
+    cwd: str,
+    *,
+    timeout: int,
+    env: dict[str, str] | None,
+    on_output: Callable[[str, str], None],
+) -> tuple[str, str, int, bool]:
+    """Host-process counterpart to app.policy.sandbox._run_streaming — same
+    real, line-buffered incremental-read shape, for the explicit
+    BASH_SANDBOX_ENABLED=false opt-out path. See that function's own
+    docstring for the one honest limitation (a command's own stdout
+    buffering when not attached to a real tty)."""
+    import threading
+
+    proc = subprocess.Popen(
+        command,
+        shell=True,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+
+    def _reader(stream: Any, stream_name: str, sink: list[str]) -> None:
+        try:
+            for line in iter(stream.readline, ""):
+                sink.append(line)
+                try:
+                    on_output(stream_name, line)
+                except Exception:
+                    logger.debug(
+                        "on_output callback raised for host bash execution "
+                        "(non-fatal)",
+                        exc_info=True,
+                    )
+        finally:
+            stream.close()
+
+    t_stdout = threading.Thread(
+        target=_reader, args=(proc.stdout, "stdout", stdout_lines), daemon=True
+    )
+    t_stderr = threading.Thread(
+        target=_reader, args=(proc.stderr, "stderr", stderr_lines), daemon=True
+    )
+    t_stdout.start()
+    t_stderr.start()
+
+    try:
+        returncode = proc.wait(timeout=timeout)
+        t_stdout.join(timeout=5)
+        t_stderr.join(timeout=5)
+        return "".join(stdout_lines), "".join(stderr_lines), returncode, False
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        t_stdout.join(timeout=5)
+        t_stderr.join(timeout=5)
         return "", f"Command timed out after {timeout}s", -1, True
 
 

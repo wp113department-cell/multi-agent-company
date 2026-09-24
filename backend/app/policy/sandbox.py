@@ -40,6 +40,7 @@ import logging
 import shutil
 import subprocess
 from dataclasses import dataclass
+from typing import IO, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +106,22 @@ def run_sandboxed(
     timeout: int = 120,
     env: dict[str, str] | None = None,
     read_only: bool = False,
+    on_output: Callable[[str, str], None] | None = None,
 ) -> SandboxResult:
     """Run `command` inside a fresh, `--rm` Docker container.
+
+    T2-B9/#12 (2026-09-24, GRIDIRON_PARTIAL "Monitor streaming output
+    (live, mid-command)") — `on_output`, when given, is called as
+    `on_output(stream_name, line)` ("stdout"|"stderr") for each line of
+    output AS SOON AS it's produced, via a real incremental `Popen` read
+    instead of waiting for the whole command to exit. The RETURNED
+    SandboxResult is byte-for-byte identical either way (the full output
+    is still accumulated and returned) — `on_output=None` (the default,
+    every pre-existing caller) is the exact original buffered
+    `subprocess.run(capture_output=True)` path, completely untouched. See
+    `_run_streaming()`'s own docstring for the one honest limitation this
+    doesn't solve (a command's OWN stdout buffering when not attached to a
+    real tty).
 
     read_only=True mounts the workspace `:ro` — for autonomous SCAN-phase agents, whose
     contract is "read-only until a human approves" (B8 verification: with the default rw
@@ -199,6 +214,9 @@ def run_sandboxed(
         "-c",
         command,
     ]
+    if on_output is not None:
+        return _run_streaming(docker_cmd, container_name, timeout, on_output)
+
     try:
         result = subprocess.run(
             docker_cmd, capture_output=True, text=True, timeout=timeout
@@ -223,6 +241,99 @@ def run_sandboxed(
             )
         return SandboxResult(
             stdout="",
+            stderr=f"Command timed out after {timeout}s",
+            returncode=-1,
+            timed_out=True,
+        )
+
+
+def _run_streaming(
+    docker_cmd: list[str],
+    container_name: str,
+    timeout: int,
+    on_output: Callable[[str, str], None],
+) -> SandboxResult:
+    """Real, line-buffered incremental read of `docker_cmd`'s stdout/stderr
+    as it runs — `on_output(stream_name, line)` fires for each line AS SOON
+    AS it's available on a real pipe read, not after the process exits.
+    Still accumulates the full output for the returned SandboxResult, so
+    this is a strict superset of the buffered path's own guarantees, never
+    a behavior change to the return value itself.
+
+    Honest limitation, stated up front: many CLI tools fully block-buffer
+    their OWN stdout when it isn't attached to a real tty (this is the
+    child process's own libc/runtime behavior, not something a parent
+    process reading its pipe can change) — a command with that buffering
+    style still arrives here in bursts, not truly character-by-character.
+    This closes the real, provable gap named by the audit ("wait for the
+    whole command to finish before showing anything") — it does not
+    retrofit every possible CLI tool's own I/O buffering choice, which no
+    parent-process-side fix can override without a real pty (a materially
+    bigger change, the same one item #3's "real interactive terminal"
+    already covers, tracked separately).
+
+    `on_output` exceptions are swallowed (logged at debug) — a broken
+    subscriber callback must never abort the command it's merely observing.
+    """
+    import threading
+
+    proc = subprocess.Popen(
+        docker_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
+    )
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+
+    def _reader(stream: IO[str], stream_name: str, sink: list[str]) -> None:
+        try:
+            for line in iter(stream.readline, ""):
+                sink.append(line)
+                try:
+                    on_output(stream_name, line)
+                except Exception:
+                    logger.debug(
+                        "on_output callback raised for sandboxed command "
+                        "(non-fatal — the command itself is unaffected)",
+                        exc_info=True,
+                    )
+        finally:
+            stream.close()
+
+    t_stdout = threading.Thread(
+        target=_reader, args=(proc.stdout, "stdout", stdout_lines), daemon=True
+    )
+    t_stderr = threading.Thread(
+        target=_reader, args=(proc.stderr, "stderr", stderr_lines), daemon=True
+    )
+    t_stdout.start()
+    t_stderr.start()
+
+    try:
+        returncode = proc.wait(timeout=timeout)
+        t_stdout.join(timeout=5)
+        t_stderr.join(timeout=5)
+        return SandboxResult(
+            stdout="".join(stdout_lines),
+            stderr="".join(stderr_lines),
+            returncode=returncode,
+        )
+    except subprocess.TimeoutExpired:
+        try:
+            subprocess.run(
+                ["docker", "kill", container_name], capture_output=True, timeout=15
+            )
+        except Exception:
+            logger.warning(
+                "Failed to kill timed-out sandbox container %s (may be "
+                "orphaned — will self-terminate if the command inside it "
+                "eventually exits, or persist until manually reaped)",
+                container_name,
+                exc_info=True,
+            )
+        proc.kill()
+        t_stdout.join(timeout=5)
+        t_stderr.join(timeout=5)
+        return SandboxResult(
+            stdout="".join(stdout_lines),
             stderr=f"Command timed out after {timeout}s",
             returncode=-1,
             timed_out=True,

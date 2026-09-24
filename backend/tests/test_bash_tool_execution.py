@@ -171,6 +171,7 @@ def test_scoped_bash_timeout_is_config_driven(
         image: Any = None,
         network: Any = None,
         read_only: bool = False,
+        on_output: Any = None,
     ) -> SandboxResult:
         captured["timeout"] = timeout
         return SandboxResult(stdout="ok", stderr="", returncode=0, timed_out=False)
@@ -277,3 +278,131 @@ def test_new_module_path_handlers_execute_for_real(tmp_path: Path) -> None:
     handler = make_load_test_bash_handler(str(tmp_path))
     out = handler({"command": "not-a-real-load-test-command"})
     assert out.startswith("[POLICY DENIED]")
+
+
+# ---------------------------------------------------------------------------
+# T2-B9/#12 (2026-09-24) — _run_bash_command's host-fallback streaming path
+# (_run_host_streaming), for the explicit BASH_SANDBOX_ENABLED=false opt-out.
+# The sandboxed path's own progressive-timing proof lives in
+# test_run_sandboxed_streaming.py; this proves the host path gets the same
+# real, non-buffered treatment, not just a mirrored return value.
+# ---------------------------------------------------------------------------
+
+
+def test_run_host_streaming_receives_chunks_as_produced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.tools.execution.bash import _run_bash_command
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "bash_sandbox_enabled", False)
+
+    chunks: list[tuple[str, str]] = []
+    stdout, stderr, returncode, timed_out = _run_bash_command(
+        "echo host-one; echo host-two >&2; echo host-three",
+        str(tmp_path),
+        timeout=10,
+        on_output=lambda stream, line: chunks.append((stream, line)),
+    )
+
+    assert stdout == "host-one\nhost-three\n"
+    assert stderr == "host-two\n"
+    assert returncode == 0
+    assert timed_out is False
+    assert ("stdout", "host-one\n") in chunks
+    assert ("stdout", "host-three\n") in chunks
+    assert ("stderr", "host-two\n") in chunks
+
+
+def test_run_host_streaming_chunks_arrive_progressively_not_bunched_at_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real wall-clock proof (not mocked) that the host-fallback path also
+    streams live rather than buffering until the command exits — the same
+    property test_run_sandboxed_streaming.py proves for the Docker path."""
+    import time
+
+    from app.tools.execution.bash import _run_bash_command
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "bash_sandbox_enabled", False)
+
+    timestamps: list[float] = []
+
+    stdout, stderr, returncode, timed_out = _run_bash_command(
+        "echo one; sleep 0.4; echo two; sleep 0.4; echo three",
+        str(tmp_path),
+        timeout=10,
+        on_output=lambda stream, line: timestamps.append(time.monotonic()),
+    )
+    end = time.monotonic()
+
+    assert returncode == 0
+    assert timed_out is False
+    assert len(timestamps) == 3
+    assert (end - timestamps[0]) > 0.5, (
+        "first chunk arrived too close to process exit — looks like output "
+        "is still being buffered rather than streamed on the host path"
+    )
+
+
+def test_run_host_streaming_handles_a_real_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.tools.execution.bash import _run_bash_command
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "bash_sandbox_enabled", False)
+
+    chunks: list[str] = []
+    stdout, stderr, returncode, timed_out = _run_bash_command(
+        "echo before-timeout; sleep 5",
+        str(tmp_path),
+        timeout=1,
+        on_output=lambda stream, line: chunks.append(line),
+    )
+
+    assert timed_out is True
+    assert returncode == -1
+    assert "timed out" in stderr.lower()
+    assert any("before-timeout" in c for c in chunks)
+
+
+def test_run_host_streaming_callback_exception_never_breaks_the_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.tools.execution.bash import _run_bash_command
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "bash_sandbox_enabled", False)
+
+    def bad_on_output(stream: str, line: str) -> None:
+        raise RuntimeError("a broken subscriber must not affect the command")
+
+    stdout, stderr, returncode, timed_out = _run_bash_command(
+        "echo still-works", str(tmp_path), timeout=10, on_output=bad_on_output
+    )
+
+    assert returncode == 0
+    assert timed_out is False
+    assert "still-works" in stdout
+
+
+def test_on_output_none_is_the_exact_original_host_buffered_behavior(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Zero-behavior-change proof for the host path: on_output=None (the
+    default) must still go through the original subprocess.run branch, not
+    _run_host_streaming."""
+    from app.tools.execution.bash import _run_bash_command
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "bash_sandbox_enabled", False)
+
+    stdout, stderr, returncode, timed_out = _run_bash_command(
+        "echo host-buffered", str(tmp_path), timeout=10
+    )
+
+    assert stdout.strip() == "host-buffered"
+    assert returncode == 0
+    assert timed_out is False

@@ -71,7 +71,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import Any, Callable, TypedDict, cast
 
 import anthropic
 from anthropic.types import (
@@ -628,7 +628,12 @@ def _run_subprocess(
         return f"[ERROR] {e}"
 
 
-def _run_bash_tool(command: str, cwd: str, timeout: int = 120) -> str:
+def _run_bash_tool(
+    command: str,
+    cwd: str,
+    timeout: int = 120,
+    on_output: Callable[[str, str], None] | None = None,
+) -> str:
     """Formats app.agents.tools._run_bash_command's (stdout, stderr,
     returncode, timed_out) tuple into the exact same string shape
     _run_subprocess above already produces, so this tool's output is
@@ -646,9 +651,16 @@ def _run_bash_tool(command: str, cwd: str, timeout: int = 120) -> str:
     need the target repo's own installed toolchain (venv/node_modules),
     which the minimal default sandbox image does not have — routing those
     through the sandbox too would break them, not secure them further.
+
+    on_output (T2-B9/#12, 2026-09-24, GRIDIRON_PARTIAL "Monitor streaming
+    output (live, mid-command)") — passed straight through to
+    _run_bash_command's own new streaming parameter; None (the default)
+    is the exact original buffered behavior, unchanged. This function's
+    own RETURN VALUE is identical either way — on_output is a pure side
+    channel for live updates, never a second source of truth.
     """
     stdout, stderr, returncode, timed_out = _run_bash_command(
-        command, cwd, timeout=timeout
+        command, cwd, timeout=timeout, on_output=on_output
     )
     if timed_out:
         return f"[ERROR] Command timed out after {timeout}s"
@@ -1822,7 +1834,36 @@ class ChatAgent:
                 )
                 if not approved:
                     return f"[DENIED] User declined: {command!r}"
-            return await asyncio.to_thread(_run_bash_tool, command, cwd, 120)
+
+            # T2-B9/#12 (2026-09-24, GRIDIRON_PARTIAL "Monitor streaming
+            # output (live, mid-command)") — feature-flagged (default off,
+            # per the audit's own explicit plan): pushes a real
+            # terminal_output SSE event for each line of output AS SOON AS
+            # it's produced, correlated to this same tool_use_id the
+            # already-existing tool_call/tool_result events use. The sync
+            # on_output callback runs on run_sandboxed()'s own reader
+            # thread (this whole call is under asyncio.to_thread below),
+            # so it bridges back onto THIS coroutine's event loop via
+            # run_coroutine_threadsafe rather than awaiting directly.
+            on_output = None
+            if get_settings().bash_sandbox_streaming_enabled:
+                loop = asyncio.get_running_loop()
+                tool_use_id = self._current_tool_use_id
+
+                def on_output(stream: str, line: str) -> None:  # noqa: F811
+                    asyncio.run_coroutine_threadsafe(
+                        self.session.push(
+                            {
+                                "type": "terminal_output",
+                                "tool_use_id": tool_use_id,
+                                "stream": stream,
+                                "chunk": line,
+                            }
+                        ),
+                        loop,
+                    )
+
+            return await asyncio.to_thread(_run_bash_tool, command, cwd, 120, on_output)
 
         if tool_name == "run_parallel_commands":
             rpc_raw = inp.get("commands")
