@@ -189,13 +189,16 @@ def test_signature_differs_for_different_tasks() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _mock_db_for_eviction(existing, live_rows):
+def _mock_db_for_eviction(existing, live_rows, repo_id=None):
     """Builds a mock AsyncSession whose .execute() calls, in the exact
     order write_entry_with_eviction issues them, return:
     1. the advisory-lock select (result unused)
     2. the existing-row-by-key lookup (scalar_one_or_none -> `existing`)
     3. (only when existing is None) the live-rows-for-eviction select
        (.scalars().all() -> `live_rows`)
+    4. (only when existing is None) T2-B6 (2026-09-22, GRIDIRON_PARTIAL
+       #383)'s opportunistic Epic.repo_id lookup (scalar_one_or_none ->
+       `repo_id`)
     """
     db = AsyncMock()
     results = [MagicMock()]  # advisory lock select — value unused
@@ -206,6 +209,9 @@ def _mock_db_for_eviction(existing, live_rows):
         scalars_result = MagicMock()
         scalars_result.all = MagicMock(return_value=live_rows)
         results.append(MagicMock(scalars=MagicMock(return_value=scalars_result)))
+        results.append(
+            MagicMock(scalar_one_or_none=MagicMock(return_value=repo_id))
+        )
     db.execute = AsyncMock(side_effect=results)
     db.add = MagicMock()
     db.delete = AsyncMock()
