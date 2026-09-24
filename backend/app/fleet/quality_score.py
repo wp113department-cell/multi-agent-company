@@ -4,17 +4,20 @@ layer (2026-08-05, STAGE4_BACKLOG.md).
 Combines the persisted, structured per-category score records from Tests
 (app/fleet/test_score.py), Architecture (app/fleet/architecture_score.py),
 Security (app/fleet/security_score.py), Memory (app/fleet/memory_score.py),
-and Agents (app/fleet/agents_score.py, AUDIT_Q_BATCH15 §117 gap-closure,
-2026-08-11) — the 5 categories that are production-verified today — into a
-single, extensible aggregation. Never recomputes a category's score: reads
-only each category's own get_latest_*_score(repo_id) read-back function,
-which itself only reads the last persisted row, computed and verified at
-write time by that category's own real producer.
+Agents (app/fleet/agents_score.py, AUDIT_Q_BATCH15 §117 gap-closure,
+2026-08-11), Tools (app/fleet/tools_score.py) and Prompts
+(app/fleet/prompts_score.py, both T2-B7, 2026-09-24, GRIDIRON_PARTIAL
+#414) — 7 of 9 categories production-verified today — into a single,
+extensible aggregation. Never recomputes a category's score: reads only
+each category's own get_latest_*_score(repo_id) read-back function, which
+itself only reads the last persisted row, computed and verified at write
+time by that category's own real producer.
 
-Categories not yet implemented (Documentation, Performance, Tools, Prompts —
-see STAGE4_BACKLOG.md's Cluster Q architecture review) report
-status="unavailable", reason="not_implemented" — never a
-placeholder/zero/fabricated score. A category that IS implemented but has
+Categories not yet implemented (Documentation, Performance — see
+STAGE4_BACKLOG.md's Cluster Q architecture review, and _NOT_YET_IMPLEMENTED's
+own comment below for why these two specifically still have no real signal
+to build on) report status="unavailable", reason="not_implemented" — never
+a placeholder/zero/fabricated score. A category that IS implemented but has
 no persisted score yet for a given repo (its real producer has never run
 against that repo) also reports status="unavailable", but reason="no_data"
 — distinct from "not_implemented" so a caller can tell "this category
@@ -55,11 +58,15 @@ class CategoryDefinition:
 
 # Categories with no real producer yet (Stage 4 Cluster Q architecture
 # review + the per-category re-verification pass, STAGE4_BACKLOG.md):
-#   - documentation, prompts: zero real structured signal anywhere,
-#     re-confirmed directly before this pass, not assumed.
-#   - tools: ToolCallRecord (app/fleet/metrics.py) is transient in-memory
-#     per-run data only — never persisted to any table, let alone one with
-#     repo scoping. No structured record to aggregate.
+#   - documentation: zero real structured signal anywhere, re-confirmed
+#     directly before this pass, not assumed.
+#   - tools, prompts: CLOSED, T2-B7 (2026-09-24, GRIDIRON_PARTIAL #414).
+#     "tools" reads AgentRun.tool_accuracy (migration 057, itself new this
+#     batch — see app/fleet/tools_score.py). "prompts" reads
+#     regression_detector.check_agent()'s real deploy-gate pass/fail per
+#     relevant role (see app/fleet/prompts_score.py for why this is a
+#     genuinely distinct signal from "agents" below, not a duplicate).
+#     No longer listed here — see _category_registry() below.
 #   - performance: no real app-runtime signal exists; the only real
 #     latency data (agent_benchmarks.objectives.latency_p50) measures
 #     agent orchestration time, not application performance — a different
@@ -83,8 +90,6 @@ class CategoryDefinition:
 _NOT_YET_IMPLEMENTED = (
     "documentation",
     "performance",
-    "tools",
-    "prompts",
 )
 
 
@@ -96,8 +101,10 @@ def _category_registry() -> list[CategoryDefinition]:
     from app.fleet.agents_score import get_latest_agents_score
     from app.fleet.architecture_score import get_latest_architecture_score
     from app.fleet.memory_score import get_latest_memory_score
+    from app.fleet.prompts_score import get_latest_prompts_score
     from app.fleet.security_score import get_latest_security_score
     from app.fleet.test_score import get_latest_test_score
+    from app.fleet.tools_score import get_latest_tools_score
 
     categories = [
         CategoryDefinition("tests", True, get_latest_test_score, "test_score"),
@@ -110,6 +117,11 @@ def _category_registry() -> list[CategoryDefinition]:
         CategoryDefinition("memory", True, get_latest_memory_score, "memory_score"),
         # AUDIT_Q_BATCH15 §117 gap-closure (2026-08-11).
         CategoryDefinition("agents", True, get_latest_agents_score, "agents_score"),
+        # T2-B7 (2026-09-24, GRIDIRON_PARTIAL #414).
+        CategoryDefinition("tools", True, get_latest_tools_score, "tools_score"),
+        CategoryDefinition(
+            "prompts", True, get_latest_prompts_score, "prompts_score"
+        ),
     ]
     categories.extend(
         CategoryDefinition(name, False, None, "") for name in _NOT_YET_IMPLEMENTED

@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Literal
 from fastapi import (
     APIRouter,
@@ -39,6 +40,7 @@ from app.pipeline.queue_adapter import dispatch_job
 from app.rate_limit import limiter
 from app.repo_tools.worktree import remove_worktree
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 
@@ -123,6 +125,7 @@ def _task_to_dict(task: Any, logs: list[Any] | None = None) -> dict[str, Any]:
         "title": task.title,
         "description": task.description,
         "status": task.status,
+        "blockedReason": task.blocked_reason,
         "plan": task.plan,
         "diff": task.diff,
         "filesTouched": task.files_touched or [],
@@ -337,6 +340,27 @@ async def run_task(
             if dep_task is None or dep_task.status != "completed":
                 unmet.append(int(dep_id))
         if unmet:
+            # T2-B7 (2026-09-24, GRIDIRON_PARTIAL #428) — previously this
+            # gate only ever raised a transient HTTP error; the task's own
+            # `status` was left untouched (still "pending"), so nothing in
+            # GET /api/tasks or the dashboard showed WHY a task hadn't
+            # progressed unless someone specifically retried /run and hit
+            # this same 409 again. Persisting a real "blocked" transition
+            # with blocked_reason="dependency" (only from pending/rejected
+            # — VALID_TRANSITIONS already allows "blocked" from those, see
+            # the guard above that only allows this branch from
+            # pending/rejected/blocked in the first place) makes it a
+            # discoverable, glanceable state instead of a one-shot error.
+            if task.status != "blocked":
+                try:
+                    await transition_task(db, task_id, "blocked", blocked_reason="dependency")
+                except TransitionError:
+                    logger.warning(
+                        "Could not persist dependency-blocked state for task %s "
+                        "(status changed concurrently) — the 409 below still "
+                        "reflects the real unmet-dependency check.",
+                        task_id,
+                    )
             raise HTTPException(
                 status_code=409,
                 detail=f"Task {task_id} depends on task(s) {unmet} which have "

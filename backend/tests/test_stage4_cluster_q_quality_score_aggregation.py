@@ -45,10 +45,10 @@ from app.fleet.security_score import SecurityScoreResult, store_security_score
 from app.fleet.test_score import TestScoreResult, store_test_score
 
 _NOT_YET_IMPLEMENTED = {
+    # T2-B7 (2026-09-24, GRIDIRON_PARTIAL #414) closed "tools" and
+    # "prompts" — see app/fleet/tools_score.py / prompts_score.py.
     "documentation",
     "performance",
-    "tools",
-    "prompts",
 }
 
 
@@ -109,7 +109,15 @@ def test_all_categories_unavailable_for_a_fresh_repo_with_no_scores() -> None:
         assert result.total_category_count == 9
 
         by_name = {c.name: c for c in result.categories}
-        for name in ("tests", "architecture", "security", "memory", "agents"):
+        for name in (
+            "tests",
+            "architecture",
+            "security",
+            "memory",
+            "agents",
+            "tools",
+            "prompts",
+        ):
             assert by_name[name].status == "unavailable"
             assert by_name[name].reason == "no_data"
             assert by_name[name].score is None

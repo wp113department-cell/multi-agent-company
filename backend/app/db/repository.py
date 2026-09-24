@@ -366,7 +366,9 @@ async def list_tasks(
     return rows, next_cursor
 
 
-async def transition_task(db: AsyncSession, task_id: int, new_status: str) -> DevTask:
+async def transition_task(
+    db: AsyncSession, task_id: int, new_status: str, blocked_reason: str | None = None
+) -> DevTask:
     """Atomic compare-and-swap transition (audit_v1.md 4.1/4.7 #1/#3: "no row
     locking anywhere ... task status transitions are a genuine TOCTOU race").
 
@@ -381,6 +383,16 @@ async def transition_task(db: AsyncSession, task_id: int, new_status: str) -> De
     concurrent caller sees 0 rows affected and gets TransitionError, exactly
     as if it had checked and lost a race, without ever needing a separate
     `SELECT ... FOR UPDATE` or new lock table.
+
+    T2-B7 (2026-09-24, GRIDIRON_PARTIAL #428 "Detect blocked tasks
+    (dependency-driven, not just failure-driven)") — `blocked_reason`
+    (migration 059) is ALWAYS written here, defaulting to None: a caller
+    transitioning into "blocked" for a labeled reason (currently only
+    POST /{task_id}/run's dependency gate passes "dependency") gets it
+    persisted; every other transition — including every pre-existing
+    "blocked" call site that predates this param and every transition OUT
+    of "blocked" — correctly clears it to None rather than leaving a stale
+    reason from a previous, unrelated block attached to the row.
     """
     from app.db.models import VALID_TRANSITIONS
 
@@ -392,7 +404,7 @@ async def transition_task(db: AsyncSession, task_id: int, new_status: str) -> De
         result = await db.execute(
             update(DevTask)
             .where(DevTask.id == task_id, DevTask.status.in_(allowed_sources))
-            .values(status=new_status)
+            .values(status=new_status, blocked_reason=blocked_reason)
             .returning(DevTask.id)
         )
         updated_id = result.scalar_one_or_none()
@@ -589,6 +601,10 @@ async def finish_agent_run(
     tokens_out: int | None = None,
     cost_estimate: float | None = None,
     error: str | None = None,
+    retries: int | None = None,
+    verification_pct: float | None = None,
+    confidence: float | None = None,
+    tool_accuracy: float | None = None,
 ) -> None:
     await db.execute(
         update(AgentRun)
@@ -599,6 +615,10 @@ async def finish_agent_run(
             tokens_out=tokens_out,
             cost_estimate=cost_estimate,
             error=error,
+            retries=retries,
+            verification_pct=verification_pct,
+            confidence=confidence,
+            tool_accuracy=tool_accuracy,
             finished_at=datetime.now(timezone.utc),
         )
     )
@@ -865,6 +885,10 @@ def finish_agent_run_sync(
     tokens_out: int | None = None,
     cost_estimate: float | None = None,
     error: str | None = None,
+    retries: int | None = None,
+    verification_pct: float | None = None,
+    confidence: float | None = None,
+    tool_accuracy: float | None = None,
 ) -> None:
     """Sync bridge for finish_agent_run()."""
     import asyncio
@@ -885,6 +909,10 @@ def finish_agent_run_sync(
                     tokens_out=tokens_out,
                     cost_estimate=cost_estimate,
                     error=error,
+                    retries=retries,
+                    verification_pct=verification_pct,
+                    confidence=confidence,
+                    tool_accuracy=tool_accuracy,
                 )
         finally:
             await engine.dispose()

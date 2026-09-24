@@ -798,6 +798,217 @@ async def _agents_score_compute_loop() -> None:
             logger.warning("Agents-score compute loop iteration failed: %s", exc)
 
 
+async def _tools_score_compute_loop() -> None:
+    """T2-B7 (2026-09-24, GRIDIRON_PARTIAL #414) — same "no natural single
+    trigger event, computed periodically" reasoning as
+    _agents_score_compute_loop directly above, for the "tools" category
+    (app/fleet/tools_score.py). Set TOOLS_SCORE_COMPUTE_INTERVAL_HOURS=0 to
+    disable."""
+    interval_hours = get_settings().tools_score_compute_interval_hours
+    if interval_hours <= 0:
+        logger.info(
+            "Tools-score compute loop disabled (TOOLS_SCORE_COMPUTE_INTERVAL_HOURS=0)"
+        )
+        return
+
+    while True:
+        await asyncio.sleep(interval_hours * 60 * 60)
+        try:
+            from sqlalchemy import select
+
+            from app.db.models import Repo
+            from app.db.session import get_session_factory
+            from app.fleet.tools_score import compute_tools_score, store_tools_score
+
+            factory = get_session_factory()
+            computed = 0
+            async with factory() as db:
+                result = await db.execute(select(Repo).where(Repo.status == "ready"))
+                repos = list(result.scalars().all())
+                for repo in repos:
+                    try:
+                        score = await compute_tools_score(repo.id, db)
+                        if score is None:
+                            continue  # no run with a recorded tool_accuracy yet
+                        await asyncio.to_thread(store_tools_score, repo.id, score)
+                        computed += 1
+                    except Exception as exc:
+                        logger.warning(
+                            "Tools-score compute failed for repo %s: %s",
+                            repo.id,
+                            exc,
+                        )
+            if computed:
+                logger.info(
+                    "Tools-score compute: persisted %d repo score(s)", computed
+                )
+        except Exception as exc:
+            logger.warning("Tools-score compute loop iteration failed: %s", exc)
+
+
+async def _prompts_score_compute_loop() -> None:
+    """T2-B7 (2026-09-24, GRIDIRON_PARTIAL #414) — same periodic-compute
+    reasoning as _agents_score_compute_loop, for the "prompts" category
+    (app/fleet/prompts_score.py). Set PROMPTS_SCORE_COMPUTE_INTERVAL_HOURS=0
+    to disable."""
+    interval_hours = get_settings().prompts_score_compute_interval_hours
+    if interval_hours <= 0:
+        logger.info(
+            "Prompts-score compute loop disabled (PROMPTS_SCORE_COMPUTE_INTERVAL_HOURS=0)"
+        )
+        return
+
+    while True:
+        await asyncio.sleep(interval_hours * 60 * 60)
+        try:
+            from sqlalchemy import select
+
+            from app.db.models import Repo
+            from app.db.session import get_session_factory
+            from app.fleet.prompts_score import (
+                compute_prompts_score,
+                store_prompts_score,
+            )
+
+            factory = get_session_factory()
+            computed = 0
+            async with factory() as db:
+                result = await db.execute(select(Repo).where(Repo.status == "ready"))
+                repos = list(result.scalars().all())
+                for repo in repos:
+                    try:
+                        score = await compute_prompts_score(repo.id, db)
+                        if score is None:
+                            continue  # no relevant role has a baseline yet
+                        await asyncio.to_thread(store_prompts_score, repo.id, score)
+                        computed += 1
+                    except Exception as exc:
+                        logger.warning(
+                            "Prompts-score compute failed for repo %s: %s",
+                            repo.id,
+                            exc,
+                        )
+            if computed:
+                logger.info(
+                    "Prompts-score compute: persisted %d repo score(s)", computed
+                )
+        except Exception as exc:
+            logger.warning("Prompts-score compute loop iteration failed: %s", exc)
+
+
+class _FireAndForgetBackgroundTasks:
+    """Minimal duck-typed stand-in for FastAPI's BackgroundTasks (only the
+    one method app.pipeline.queue_adapter.dispatch_job's asyncio branch
+    actually calls). T2-B7 (2026-09-24, GRIDIRON_PARTIAL #429) — a periodic
+    loop has no real Request/BackgroundTasks in scope, but should still go
+    through dispatch_job (the one real chokepoint for QUEUE_BACKEND=rq vs
+    asyncio, plus its wall-clock timeout wrapping) rather than duplicating
+    that branching here."""
+
+    def add_task(self, fn: Any, *args: Any, **kwargs: Any) -> None:
+        asyncio.create_task(fn(*args, **kwargs))
+
+
+async def _dependency_auto_dispatch_loop() -> None:
+    """T2-B7 (2026-09-24, GRIDIRON_PARTIAL #429 "Detect dependencies /
+    optimize order org-wide (auto-dispatch)") — #428's own new
+    blocked_reason="dependency" signal (POST /{task_id}/run's dependency
+    gate, app/api/tasks.py) previously required a human/caller to notice a
+    task was unblocked and manually retry /run. This is that missing
+    auto-dispatcher: scans for exactly the tasks #428 marks, re-checks
+    whether every depends_on entry has now genuinely reached "completed",
+    and dispatches the same real planning pipeline /run itself would have,
+    through the same dispatch_job() chokepoint (see
+    _FireAndForgetBackgroundTasks above). Set
+    DEPENDENCY_AUTO_DISPATCH_INTERVAL_SECONDS=0 to disable."""
+    interval_seconds = get_settings().dependency_auto_dispatch_interval_seconds
+    if interval_seconds <= 0:
+        logger.info(
+            "Dependency auto-dispatch loop disabled "
+            "(DEPENDENCY_AUTO_DISPATCH_INTERVAL_SECONDS=0)"
+        )
+        return
+
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            from sqlalchemy import select
+
+            from app.api.agents import launch_planner, launch_planning_pipeline
+            from app.db.models import DevTask
+            from app.db.repository import (
+                append_log,
+                get_task,
+                resolve_task_repo_path,
+                transition_task,
+            )
+            from app.db.session import get_session_factory
+            from app.pipeline.queue_adapter import dispatch_job
+
+            settings = get_settings()
+            factory = get_session_factory()
+            dispatched = 0
+            async with factory() as db:
+                result = await db.execute(
+                    select(DevTask).where(
+                        DevTask.status == "blocked",
+                        DevTask.blocked_reason == "dependency",
+                    )
+                )
+                candidates = list(result.scalars().all())
+                for task in candidates:
+                    try:
+                        if not task.depends_on:
+                            continue  # stale row — nothing to re-check
+                        still_unmet = False
+                        for dep_id in task.depends_on:
+                            dep_task = await get_task(db, int(dep_id))
+                            if dep_task is None or dep_task.status != "completed":
+                                still_unmet = True
+                                break
+                        if still_unmet:
+                            continue
+
+                        await transition_task(db, task.id, "planning")
+                        await append_log(
+                            db,
+                            task.id,
+                            "pipeline",
+                            "Dependencies satisfied — auto-dispatched by "
+                            "the dependency auto-dispatch loop",
+                        )
+                        repo_path = resolve_task_repo_path(task)
+                        job_fn = (
+                            launch_planning_pipeline
+                            if settings.pipeline_mode == "full"
+                            else launch_planner
+                        )
+                        await dispatch_job(
+                            _FireAndForgetBackgroundTasks(),
+                            job_fn,
+                            task.id,
+                            str(task.title),
+                            str(task.description),
+                            repo_path,
+                            priority=task.priority,
+                        )
+                        dispatched += 1
+                    except Exception as exc:
+                        logger.warning(
+                            "Dependency auto-dispatch failed for task %s: %s",
+                            task.id,
+                            exc,
+                        )
+            if dispatched:
+                logger.info(
+                    "Dependency auto-dispatch: dispatched %d newly-unblocked "
+                    "task(s)",
+                    dispatched,
+                )
+        except Exception as exc:
+            logger.warning("Dependency auto-dispatch loop iteration failed: %s", exc)
+
+
 async def _doc_agent_auto_trigger_loop() -> None:
     """Gap-closure Day 52 (Stage 2, answers.md Q41 "Auto-trigger 'when code
     changes': NO for all of the above. All four real doc agents are
@@ -1321,7 +1532,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "loop:fleet_success_rate_sync",
         "loop:prompt_auto_rollback",
         "loop:agents_score_compute",
+        "loop:tools_score_compute",
+        "loop:prompts_score_compute",
         "loop:enhancement_quality_monitor",
+        "loop:dependency_auto_dispatch",
     )
     _leader_election_engine = (
         _make_leader_election_engine(settings, pool_size=len(_leader_loop_names))
@@ -1438,10 +1652,31 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             _leader_election_engine,
         )
     )
+    tools_score_compute_task = asyncio.create_task(
+        _run_as_leader(
+            "loop:tools_score_compute",
+            _tools_score_compute_loop,
+            _leader_election_engine,
+        )
+    )
+    prompts_score_compute_task = asyncio.create_task(
+        _run_as_leader(
+            "loop:prompts_score_compute",
+            _prompts_score_compute_loop,
+            _leader_election_engine,
+        )
+    )
     enhancement_quality_monitor_task = asyncio.create_task(
         _run_as_leader(
             "loop:enhancement_quality_monitor",
             _enhancement_quality_monitor_loop,
+            _leader_election_engine,
+        )
+    )
+    dependency_auto_dispatch_task = asyncio.create_task(
+        _run_as_leader(
+            "loop:dependency_auto_dispatch",
+            _dependency_auto_dispatch_loop,
             _leader_election_engine,
         )
     )
@@ -1462,7 +1697,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     fleet_success_rate_sync_task.cancel()
     prompt_auto_rollback_task.cancel()
     agents_score_compute_task.cancel()
+    tools_score_compute_task.cancel()
+    prompts_score_compute_task.cancel()
     enhancement_quality_monitor_task.cancel()
+    dependency_auto_dispatch_task.cancel()
     bg_process_liveness_task.cancel()
     lesson_store_refresh_task.cancel()
     barot_temp_agent_ttl_task.cancel()
@@ -1482,7 +1720,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         fleet_success_rate_sync_task,
         prompt_auto_rollback_task,
         agents_score_compute_task,
+        tools_score_compute_task,
+        prompts_score_compute_task,
         enhancement_quality_monitor_task,
+        dependency_auto_dispatch_task,
         bg_process_liveness_task,
         lesson_store_refresh_task,
         barot_temp_agent_ttl_task,

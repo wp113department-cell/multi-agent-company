@@ -71,7 +71,13 @@ VALID_TRANSITIONS: dict[str, list[str]] = {
     ],
     "coding": ["testing", "blocked", "failed", "cancelled"],
     "testing": ["ready_for_review", "blocked", "failed", "cancelled"],
-    "rejected": ["planning", "cancelled"],
+    # "blocked" added (T2-B7, 2026-09-24, GRIDIRON_PARTIAL #428) — a
+    # rejected task retried via /run can have unmet dependencies just like
+    # a pending one; POST /{task_id}/run's dependency gate needs a real
+    # transition target from every status it accepts a retry from
+    # ("pending", "rejected", "blocked" — see that endpoint's own status
+    # guard), not just "pending".
+    "rejected": ["planning", "blocked", "cancelled"],
     # "coding" added (AUDIT_Q_BATCH12 §25/§29 gap-closure, 2026-08-11):
     # coder.py can now pause on request_clarification the same way
     # planner.py already could — launch_coder() lands the task in "blocked"
@@ -169,6 +175,18 @@ class DevTask(Base):
     # tokens_in/tokens_out per run; this is the missing join key to roll
     # that up per user — see get_user_usage_rollup() in db/repository.py.
     created_by: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    # T2-B7 (2026-09-24, GRIDIRON_PARTIAL #428 "Detect blocked tasks
+    # (dependency-driven, not just failure-driven)") — status="blocked" was
+    # already overloaded across several distinct pause reasons (a
+    # clarification request, a QA/review escalation halt, and now an unmet
+    # DevTask.depends_on gate) with no way to tell them apart short of
+    # re-reading agent/task logs. Mirrors Epic.halt_reason's exact shape;
+    # always written (and cleared) by transition_task() itself — see that
+    # function's own comment — never set directly. Currently only
+    # POST /{task_id}/run's dependency gate populates it ("dependency");
+    # every other pre-existing "blocked" transition leaves it None, an
+    # honest "no specific reason recorded" rather than a guessed one.
+    blocked_reason: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -280,6 +298,22 @@ class AgentRun(Base):
     cache_read_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cache_creation_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cost_estimate: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+    # T2-B7 (2026-09-24, GRIDIRON_PARTIAL #407 "Per-agent performance
+    # metrics aggregated over time (persisted, not just ring buffer)") —
+    # app/fleet/metrics.py::RunMetrics already computes all four of these
+    # per run (retries, verification_pct, confidence, the tool_accuracy
+    # property), but nothing ever persisted them past the in-process
+    # MetricsCollector ring buffer (capacity 1000, lost on process
+    # restart) — finish_agent_run's own call site in base_graph.py only
+    # ever passed tokens_in/tokens_out, leaving cost_estimate above (a
+    # column that already existed) permanently NULL too. Populated at
+    # finish_agent_run() time straight from the same RunMetrics instance
+    # already in scope there — no new computation, just wiring what was
+    # already computed through to the row that outlives the process.
+    retries: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    verification_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tool_accuracy: Mapped[float | None] = mapped_column(Float, nullable=True)
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -1118,6 +1152,58 @@ class AgentsScore(Base):
         JSONB, nullable=False, default=dict
     )
     agents_score: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class ToolsScore(Base):
+    """T2-B7 (2026-09-24, GRIDIRON_PARTIAL #414, app/fleet/tools_score.py).
+
+    Mean AgentRun.tool_accuracy (migration 057) over recent finished runs
+    scoped to a repo via the same agent_runs.task_id -> dev_tasks.repo_id
+    join AgentsScore already established. Mirrors AgentsScore's exact
+    shape (one row per computation, repo_id nullable for the same reason).
+    """
+
+    __tablename__ = "tools_scores"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("repos.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    run_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    tools_score: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class PromptsScore(Base):
+    """T2-B7 (2026-09-24, GRIDIRON_PARTIAL #414, app/fleet/prompts_score.py).
+
+    Fraction of a repo's relevant roles (same repo-derived join as
+    AgentsScore) currently passing regression_detector.check_agent()'s
+    real deploy-gate decision — a role with no stored benchmark baseline
+    yet is excluded from both role_names and the score, not counted as a
+    fabricated pass. Mirrors AgentsScore's exact shape.
+    """
+
+    __tablename__ = "prompts_scores"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("repos.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    role_names: Mapped[Any] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    blocked_roles: Mapped[Any] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    prompts_score: Mapped[float] = mapped_column(Float, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

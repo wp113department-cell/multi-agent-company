@@ -238,6 +238,78 @@ class TestDependsOnGate:
             finally:
                 _cleanup(child_id, dep_id)
 
+    def test_dependency_gate_persists_a_discoverable_blocked_state(self) -> None:
+        """T2-B7 (2026-09-24, GRIDIRON_PARTIAL #428) — before this, a task
+        stuck on an unmet dependency looked identical to a normal "pending"
+        task in GET /api/tasks unless someone specifically retried /run and
+        hit the same 409 again. Now the gate itself persists a real,
+        glanceable "blocked"/"dependency" state."""
+        with TestClient(app) as client:
+            dep_resp = client.post(
+                "/api/tasks", json={"title": "td dep persist parent", "description": "d"}
+            )
+            dep_id = dep_resp.json()["id"]
+
+            child_resp = client.post(
+                "/api/tasks",
+                json={
+                    "title": "td dep persist child",
+                    "description": "d",
+                    "depends_on": [dep_id],
+                },
+            )
+            child_id = child_resp.json()["id"]
+            try:
+                run_resp = client.post(f"/api/tasks/{child_id}/run", json={})
+                assert run_resp.status_code == 409
+
+                got = client.get(f"/api/tasks/{child_id}")
+                assert got.json()["status"] == "blocked"
+                assert got.json()["blockedReason"] == "dependency"
+
+                # Retrying the same still-unmet dependency again must not
+                # crash on a "blocked" -> "blocked" self-transition.
+                run_resp2 = client.post(f"/api/tasks/{child_id}/run", json={})
+                assert run_resp2.status_code == 409
+                assert client.get(f"/api/tasks/{child_id}").json()["status"] == "blocked"
+            finally:
+                _cleanup(child_id, dep_id)
+
+    def test_completing_the_dependency_clears_the_blocked_reason(self) -> None:
+        with TestClient(app) as client:
+            dep_resp = client.post(
+                "/api/tasks", json={"title": "td dep clear parent", "description": "d"}
+            )
+            dep_id = dep_resp.json()["id"]
+
+            child_resp = client.post(
+                "/api/tasks",
+                json={
+                    "title": "td dep clear child",
+                    "description": "d",
+                    "depends_on": [dep_id],
+                },
+            )
+            child_id = child_resp.json()["id"]
+            try:
+                assert client.post(f"/api/tasks/{child_id}/run", json={}).status_code == 409
+                assert (
+                    client.get(f"/api/tasks/{child_id}").json()["blockedReason"]
+                    == "dependency"
+                )
+
+                _set_status(dep_id, "completed")
+                with patch(
+                    "app.api.agents.launch_planner", new=AsyncMock(return_value=None)
+                ):
+                    run_resp = client.post(
+                        f"/api/tasks/{child_id}/run", json={"mode": "simple"}
+                    )
+                assert run_resp.status_code == 200, run_resp.text
+                assert client.get(f"/api/tasks/{child_id}").json()["blockedReason"] is None
+            finally:
+                _cleanup(child_id, dep_id)
+
     def test_run_allowed_once_dependency_completed(self) -> None:
         with TestClient(app) as client:
             dep_resp = client.post(

@@ -1428,6 +1428,29 @@ class Settings(BaseSettings):
         "benchmark_score of agents that actually ran against that repo). "
         "0 disables.",
     )
+    tools_score_compute_interval_hours: float = Field(
+        default=24.0,
+        description="T2-B7 (2026-09-24, GRIDIRON_PARTIAL #414) — hours between "
+        "computing and persisting each active repo's tools_score (mean real "
+        "AgentRun.tool_accuracy over recent runs scoped to that repo). "
+        "0 disables.",
+    )
+    prompts_score_compute_interval_hours: float = Field(
+        default=24.0,
+        description="T2-B7 (2026-09-24, GRIDIRON_PARTIAL #414) — hours between "
+        "computing and persisting each active repo's prompts_score (fraction "
+        "of relevant roles currently passing regression_detector's real "
+        "deploy-gate check). 0 disables.",
+    )
+    dependency_auto_dispatch_interval_seconds: float = Field(
+        default=60.0,
+        description="T2-B7 (2026-09-24, GRIDIRON_PARTIAL #429 'Detect "
+        "dependencies / optimize order org-wide (auto-dispatch)') — seconds "
+        "between scans for DevTask rows blocked_reason='dependency' whose "
+        "depends_on have all reached 'completed', auto-dispatching them "
+        "instead of requiring a human/caller to manually retry POST /run. "
+        "0 disables.",
+    )
     # AUDIT_Q_BATCH18 §69 gap-closure (2026-08-12) — "Autonomous Quality
     # Improvement" / "rollback if quality declines": real and automatic for
     # PROMPT versions (prompt_auto_rollback_* above) but not for

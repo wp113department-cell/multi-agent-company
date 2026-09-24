@@ -35,6 +35,16 @@ class AgentTypeSummary(_CamelModel):
     total_cache_read_tokens: int
     total_cache_creation_tokens: int
     cache_hit_rate: float
+    # T2-B7 (2026-09-24, GRIDIRON_PARTIAL #407) — real historical averages
+    # from agent_runs (persisted, survives a restart), not the in-process
+    # MetricsCollector ring buffer. None when no finished run for this
+    # agent_type has these columns populated yet (legacy rows predating
+    # migration 057, or every run so far still "running").
+    avg_retries: float | None
+    avg_verification_pct: float | None
+    avg_confidence: float | None
+    avg_tool_accuracy: float | None
+    total_cost_estimate: float
 
 
 class SystemMetrics(_CamelModel):
@@ -116,6 +126,11 @@ async def get_system_metrics(
             func.coalesce(func.sum(AgentRun.tokens_out), 0),
             func.coalesce(func.sum(AgentRun.cache_read_tokens), 0),
             func.coalesce(func.sum(AgentRun.cache_creation_tokens), 0),
+            func.avg(AgentRun.retries),
+            func.avg(AgentRun.verification_pct),
+            func.avg(AgentRun.confidence),
+            func.avg(AgentRun.tool_accuracy),
+            func.coalesce(func.sum(AgentRun.cost_estimate), 0),
         ).group_by(AgentRun.agent_type)
     )
     breakdown = [
@@ -127,6 +142,11 @@ async def get_system_metrics(
             total_cache_read_tokens=int(r[4]),
             total_cache_creation_tokens=int(r[5]),
             cache_hit_rate=_hit_rate(int(r[4]), int(r[5])),
+            avg_retries=float(r[6]) if r[6] is not None else None,
+            avg_verification_pct=float(r[7]) if r[7] is not None else None,
+            avg_confidence=float(r[8]) if r[8] is not None else None,
+            avg_tool_accuracy=float(r[9]) if r[9] is not None else None,
+            total_cost_estimate=float(r[10]),
         )
         for r in type_result
     ]

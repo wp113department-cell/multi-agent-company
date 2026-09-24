@@ -4133,11 +4133,24 @@ def run_agent_graph(
             try:
                 from app.db.repository import finish_agent_run_sync
 
+                # T2-B7 (2026-09-24, GRIDIRON_PARTIAL #407) — _metrics (the
+                # RunMetrics instance opened above) already has real
+                # cost_estimate_usd/retries/verification_pct/confidence/
+                # tool_accuracy computed by this point (see the "Day 10 —
+                # wire real data into the RunMetrics instance" block
+                # above, which runs before _span.__exit__() closes it) —
+                # previously none of it reached this durable row, only the
+                # in-process ring buffer that's lost on restart.
                 finish_agent_run_sync(
                     _agent_run_id,
                     "completed" if final_state.get("submitted") else "failed",
                     tokens_in=final_state.get("tokens_in", 0),
                     tokens_out=final_state.get("tokens_out", 0),
+                    cost_estimate=_metrics.cost_estimate_usd if _metrics else None,
+                    retries=_metrics.retries if _metrics else None,
+                    verification_pct=_metrics.verification_pct if _metrics else None,
+                    confidence=_metrics.confidence if _metrics else None,
+                    tool_accuracy=_metrics.tool_accuracy if _metrics else None,
                 )
             except Exception:
                 pass
