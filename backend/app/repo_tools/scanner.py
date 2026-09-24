@@ -141,6 +141,71 @@ def _extract_python_symbols(root: Node) -> list[SymbolInfo]:
     return symbols
 
 
+def rename_in_js_source(source: str, old_name: str, new_name: str) -> tuple[str, int]:
+    """T2-B8 (2026-09-24, GRIDIRON_PARTIAL #259 "Repository-wide
+    refactoring (AST-aware, all languages)") — the JS/TS counterpart to
+    app/repo_tools/ast_engine.py::_rename_in_python_source, reusing the
+    SAME real tree-sitter JS grammar (`_JS_LANG`) this module already
+    parses TS/JS files with for symbol extraction (there's still no
+    separate TypeScript grammar in use — `.ts`/`.tsx` are parsed with the
+    JS grammar here exactly as _extract_js_symbols already does, so
+    TS-specific syntax like type annotations is tolerated, not truly
+    type-aware).
+
+    Walks every real `identifier` node (not `property_identifier` —
+    deliberately does NOT rename `obj.old_name`-style member/property
+    access, only standalone identifier references: variable names,
+    function/class names, parameters) whose text matches `old_name`,
+    grouped by line, then replaces each matched span in reverse column
+    order exactly like `_rename_in_python_source` does — an identifier
+    never spans multiple lines in this grammar, so per-line grouping is
+    exact, not an approximation.
+
+    Same honest, documented limitation as the Python tokenize-based
+    version: no scope analysis, so a same-named identifier in an unrelated
+    scope (a different function's own local variable, e.g.) is renamed
+    too — this is a text-level, AST-shape-aware rename (skips string/
+    comment content, which pure regex cannot), not a semantically scoped
+    one. Raises nothing: a source tree-sitter still recovers a partial
+    parse from (its error-recovery grammar rarely raises outright) is
+    walked as-is; a completely unparseable input just yields zero
+    `identifier` matches, returned as (source, 0) — tree-sitter's own
+    error-recovery grammar means there is no SyntaxError-style exception
+    for rename_symbol()'s caller to catch here by design; a source this
+    can't meaningfully parse just yields a real, honest 0-count result
+    rather than a fallback to plain regex."""
+    parser = Parser(_JS_LANG)
+    tree = parser.parse(source.encode("utf-8"))
+
+    by_line: dict[int, list[tuple[int, int]]] = {}
+    count = 0
+
+    def walk(node: Node) -> None:
+        nonlocal count
+        if node.type == "identifier" and node.text and node.text.decode() == old_name:
+            row = node.start_point[0]
+            by_line.setdefault(row, []).append(
+                (node.start_point[1], node.end_point[1])
+            )
+            count += 1
+        for child in node.children:
+            walk(child)
+
+    walk(tree.root_node)
+    if not count:
+        return source, 0
+
+    from app.tools.filesystem._textio import split_keepends_lf
+
+    lines = split_keepends_lf(source)
+    for row, spans in by_line.items():
+        line = lines[row]
+        for col_start, col_end in sorted(spans, reverse=True):
+            line = line[:col_start] + new_name + line[col_end:]
+        lines[row] = line
+    return "".join(lines), count
+
+
 def _extract_python_imports(root: Node, content: bytes) -> list[str]:
     imports: list[str] = []
     for node in root.children:

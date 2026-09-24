@@ -949,6 +949,10 @@ from app.tools.refactor.rename_symbol import (
     RENAME_SYMBOL_TOOL as _RENAME_SYMBOL_TOOL,
     validate_rename_symbol_directory as validate_rename_symbol_directory,
 )
+from app.tools.refactor.batch_edit import (
+    BATCH_EDIT_TOOL as _BATCH_EDIT_TOOL,
+    batch_edit_handler,
+)
 
 # mypy --strict flags a renaming `as` import (`X as _X`) as not
 # "explicitly exported" when another module imports the name directly
@@ -2962,6 +2966,7 @@ REFACTOR_AGENT_TOOLS = READ_ONLY_TOOLS + [
     _CALL_GRAPH_TOOL,
     _IMPORT_GRAPH_TOOL,
     _RENAME_SYMBOL_TOOL,
+    _BATCH_EDIT_TOOL,
     _REPLACE_FUNCTION_TOOL,
     _EDIT_FILE_TOOL_SPEC,
     _WRITE_FILE_TOOL_SPEC,
@@ -3492,6 +3497,12 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
             confirm_large_batch=bool(inp.get("confirm_large_batch", False)),
         )
 
+    # T2-B8 (2026-09-24, GRIDIRON_PARTIAL #257) — the real fix lives in
+    # the shared batch_edit_handler(); see that function's own module
+    # docstring.
+    def rf_batch_edit(inp: dict[str, Any]) -> str:
+        return batch_edit_handler(root, repo_path, inp)
+
     # moved to app/tools/filesystem/replace_function.py as
     # replace_function_handler — tool_enhance.md productionization pass,
     # tool #24 (2026-08-18). Real bug found+fixed here: this handler
@@ -3531,6 +3542,7 @@ def make_refactor_agent_handlers(repo_path: str) -> dict[str, Any]:
     handlers["call_graph"] = rf_call_graph
     handlers["import_graph"] = rf_import_graph
     handlers["rename_symbol"] = rf_rename_symbol
+    handlers["batch_edit"] = rf_batch_edit
     handlers["replace_function"] = rf_replace_function
     handlers["edit_file"] = _make_edit_file_handler(root)
     handlers["write_file"] = _make_write_file_handler(root)
@@ -4885,6 +4897,7 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _DEAD_CODE_DETECT_TOOL,
     _CIRCULAR_DEP_DETECT_TOOL,
     _RENAME_SYMBOL_TOOL,
+    _BATCH_EDIT_TOOL,
     # Batch 11 — Git extras
     _GIT_REBASE_TOOL,
     _GIT_CHERRY_PICK_TOOL,
@@ -5986,6 +5999,7 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
     handlers["dead_code_detect"] = dead_code_detect_h
     handlers["circular_dep_detect"] = circular_dep_detect_h
     handlers["rename_symbol"] = rename_symbol_h
+    handlers["batch_edit"] = lambda inp: batch_edit_handler(root, repo_path, inp)
 
     # =========================================================================
     # BATCH 11 — Git extras (git_rebase, git_cherry_pick)

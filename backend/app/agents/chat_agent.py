@@ -3224,6 +3224,14 @@ class ChatAgent:
                 rsym_confirm,
             )
 
+        if tool_name == "batch_edit":
+            # T2-B8 (2026-09-24, GRIDIRON_PARTIAL #257) — the real logic
+            # lives in the shared batch_edit_handler(); see that
+            # function's own module docstring.
+            from app.tools.refactor.batch_edit import batch_edit_handler
+
+            return await asyncio.to_thread(batch_edit_handler, root, repo, inp)
+
         # ========== BATCH 11 — Git extras ==========
 
         if tool_name == "git_rebase":

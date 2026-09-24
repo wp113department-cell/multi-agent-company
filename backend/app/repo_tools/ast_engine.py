@@ -1,4 +1,10 @@
-"""Python AST analysis utilities — stdlib only, zero extra dependencies."""
+"""Python AST analysis utilities — stdlib only, zero extra top-level
+dependencies. The one exception: rename_symbol()'s JS/TS path (T2-B8,
+2026-09-24, GRIDIRON_PARTIAL #259) lazily imports
+app.repo_tools.scanner.rename_in_js_source, which depends on the
+tree-sitter packages already used elsewhere in this codebase — never
+imported at module load time, and any failure there degrades to the same
+word-boundary regex every other non-.py pattern already falls back to."""
 
 from __future__ import annotations
 
@@ -493,11 +499,17 @@ def rename_symbol(
     confirm_large_batch: bool = False,
 ) -> str:
     """Rename old_name → new_name across files matching file_pattern in
-    directory. .py files (when file_pattern selects them) use a token-based
-    rename that skips string/comment content; other file patterns (e.g.
-    "*.ts") use the original word-boundary regex substitution, since a
-    stdlib-only, zero-extra-dependency tool has no non-Python tokenizer
-    available — a documented, honest limitation, not a silent gap.
+    directory. .py files use a tokenize-based rename that skips string/
+    comment content; .js/.jsx/.ts/.tsx files (T2-B8, 2026-09-24,
+    GRIDIRON_PARTIAL #259) use a real tree-sitter identifier-node-based
+    rename with the same string/comment-skipping guarantee (see
+    app.repo_tools.scanner.rename_in_js_source's own docstring for its
+    scope — standalone identifiers only, not `obj.old_name`-style member
+    access, and no scope analysis, same class of honest limitation as the
+    Python path). Every other file pattern falls back to word-boundary
+    regex substitution, since a stdlib-only tokenizer/parser isn't
+    available for arbitrary languages — a documented, honest limitation,
+    not a silent gap.
 
     AUDIT_Q_BATCH01 §59 "Edit hundreds of files safely" — a match count
     over Settings.rename_symbol_max_files returns a dry-run preview (lists
@@ -565,6 +577,22 @@ def rename_symbol(
                 OSError,
                 tokenize.TokenError,  # unbalanced brackets / unterminated string
             ):
+                count = len(pattern.findall(original))
+                modified = pattern.sub(new_name, original) if count else original
+        elif fp.suffix in (".js", ".jsx", ".ts", ".tsx"):
+            # T2-B8 (2026-09-24, GRIDIRON_PARTIAL #259) — real tree-sitter-
+            # based identifier rename (skips string/comment content),
+            # closing the exact gap this function's own docstring used to
+            # document as an honest, permanent limitation for these
+            # extensions. Any import/runtime failure (e.g. the optional
+            # tree_sitter_javascript dependency missing) degrades to the
+            # same word-boundary regex every other non-.py pattern already
+            # uses, never a hard failure of the whole rename.
+            try:
+                from app.repo_tools.scanner import rename_in_js_source
+
+                modified, count = rename_in_js_source(original, old_name, new_name)
+            except Exception:
                 count = len(pattern.findall(original))
                 modified = pattern.sub(new_name, original) if count else original
         else:

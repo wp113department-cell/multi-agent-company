@@ -93,6 +93,18 @@ class Settings(BaseSettings):
         "against an unbounded, blast-radius write triggered by an "
         "over-broad old_name/directory combination.",
     )
+    batch_edit_max_files: int = Field(
+        default=100,
+        description="T2-B8 (2026-09-24, GRIDIRON_PARTIAL #257 'Modify 100+ "
+        "files') — batch_edit returns a dry-run preview (no writes) instead "
+        "of rewriting every file whose content actually matches when that "
+        "count exceeds this, unless the caller passes "
+        "confirm_large_batch=true. Same safety-valve shape as "
+        "rename_symbol_max_files, deliberately a lower default since "
+        "batch_edit's caller-specified file list has no glob/pattern "
+        "narrowing the blast radius the way rename_symbol's file_pattern "
+        "does.",
+    )
 
     # Pipeline behaviour
     pipeline_mode: str = Field(

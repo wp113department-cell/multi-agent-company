@@ -122,7 +122,26 @@ def apply_patch_handler(repo_path: str, inp: dict[str, Any]) -> str:
             text=True,
             timeout=30,
         )
-        return (r.stdout + r.stderr).strip() or "Patch applied"
+        result = (r.stdout + r.stderr).strip() or "Patch applied"
+
+        # T2-B8 (2026-09-24, GRIDIRON_PARTIAL #38 "Preserve architecture
+        # consistency across multi-file edits") — same real check
+        # app/repo_tools/ast_engine.py::rename_symbol() already runs after
+        # itself, extended here per the audit's own plan. Only meaningful
+        # on a real success (a failed/partial patch leaves the tree in
+        # whatever the `patch` CLI's own atomicity left it in — not this
+        # check's job to reason about); same >1-Python-file threshold as
+        # rename_symbol's own reasoning.
+        if r.returncode == 0:
+            py_targets = [tp for tp in target_paths if tp.endswith(".py")]
+            if len(py_targets) > 1:
+                from app.repo_tools.ast_engine import detect_circular_imports
+
+                consistency = detect_circular_imports(repo_path)
+                if "No circular imports detected" not in consistency:
+                    result += f"\n\n[ARCHITECTURE CHECK] {consistency}"
+
+        return result
     except FileNotFoundError:
         return "[ERROR] 'patch' command not found"
     except subprocess.TimeoutExpired:

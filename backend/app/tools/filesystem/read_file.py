@@ -121,13 +121,24 @@ def read_file_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> st
     p = root / rel
     if not p.exists():
         return f"[ERROR] File not found: {rel}"
+
+    # T2-B8 (2026-09-24, GRIDIRON_PARTIAL #255 "Edit very large files
+    # safely (streaming I/O)") — a ranged read is answered by
+    # _read_line_range_streaming() BEFORE the whole file is ever
+    # materialized as one string; see that function's own docstring for
+    # why this is the real, honest, bounded first step this audit item's
+    # own plan called for ("start with the single most-used [tool],
+    # never all at once") — read_file's own ranged-read path is the one
+    # place in this codebase where a caller already explicitly asks for
+    # only a SLICE of a potentially huge file, yet the pre-existing code
+    # still loaded the entire file into memory first to serve it.
+    if inp.get("start_line") is not None or inp.get("end_line") is not None:
+        return _read_line_range_streaming(rel, p, inp)
+
     try:
         content = str(p.read_text(encoding="utf-8"))
     except Exception as e:
         return f"[ERROR] Cannot read {rel}: {e}"
-
-    if inp.get("start_line") is not None or inp.get("end_line") is not None:
-        return _read_line_range(rel, content, inp)
 
     # Gap-closure Days 45-47 (Stage 2) — this file has "no truncation/
     # chunking safeguard" for 9,000+ line files (answers.md); a large
@@ -167,27 +178,59 @@ def read_file_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> st
     return content
 
 
-def _read_line_range(rel: str, content: str, inp: dict[str, Any]) -> str:
-    """Return lines [start_line, end_line] (1-based, inclusive) of `content`."""
+def _read_line_range_streaming(rel: str, path: Path, inp: dict[str, Any]) -> str:
+    """Return lines [start_line, end_line] (1-based, inclusive) of the file
+    at `path` — WITHOUT ever materializing its full content as one string.
+
+    T2-B8 (2026-09-24, GRIDIRON_PARTIAL #255) — the pre-existing version of
+    this function took the WHOLE file's content (already `read_text()`'d
+    in full by its caller) and only THEN sliced out the requested range —
+    meaning `read_file(path, start_line=100, end_line=105)` against a
+    multi-gigabyte file still required holding the entire file in memory
+    just to serve 6 lines of it. This version iterates the file line by
+    line instead: only the (at most MAX_RANGE_LINES) lines actually inside
+    the requested range are ever held as text; every other line is
+    counted, not stored, so peak memory is bounded by the RANGE size, not
+    the file size — genuine streaming I/O, not merely a renamed slice.
+
+    The one thing this still cannot avoid: the exact `total` line count
+    and the exact "N more line(s)" footer both require knowing precisely
+    how many lines exist beyond the requested range, which — with no
+    persistent line-count index for arbitrary files — means scanning
+    through to EOF regardless (the same real constraint `wc -l`/`sed -n`
+    face). This does not reduce total disk I/O; it reduces PEAK MEMORY,
+    which is the actual, provable "very large file" failure mode this
+    audit item names. Output is otherwise byte-for-byte identical to the
+    original full-materialization implementation — see
+    tests/test_t2b8_streaming_read_file.py.
+    """
     try:
         start = int(inp["start_line"]) if inp.get("start_line") is not None else 1
         end_raw = inp.get("end_line")
         end = int(end_raw) if end_raw is not None else start + MAX_RANGE_LINES - 1
     except (TypeError, ValueError):
         return "[ERROR] read_file: start_line/end_line must be integers"
-    lines = content.split("\n")
-    if lines and lines[-1] == "":
-        lines.pop()  # trailing newline is not an extra line
-    total = len(lines)
     if start < 1 or end < start:
         return f"[ERROR] read_file: invalid range {start}-{end} (lines are 1-based, end >= start)"
+
+    tentative_stop = min(end, start + MAX_RANGE_LINES - 1)
+    chunk: list[str] = []
+    total = 0
+    try:
+        with open(path, encoding="utf-8") as f:
+            for lineno, raw_line in enumerate(f, 1):
+                total = lineno
+                if start <= lineno <= tentative_stop:
+                    chunk.append(raw_line[:-1] if raw_line.endswith("\n") else raw_line)
+    except OSError as e:
+        return f"[ERROR] Cannot read {rel}: {e}"
+
     if start > total:
         return f"[ERROR] read_file: {rel} has only {total} line(s); start_line={start} is past the end"
+
     stop = min(end, total, start + MAX_RANGE_LINES - 1)
-    chunk = lines[start - 1 : stop]
     text = "\n".join(chunk)
-    capped_by_chars = len(text) > MAX_RANGE_CHARS
-    if capped_by_chars:
+    if len(text) > MAX_RANGE_CHARS:
         text = text[:MAX_RANGE_CHARS]
         stop = start + text.count("\n")
     header = f"[{rel}: lines {start}-{stop} of {total}]"

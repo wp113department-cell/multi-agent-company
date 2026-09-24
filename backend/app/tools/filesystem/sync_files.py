@@ -109,6 +109,7 @@ def sync_files_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> s
         return f"[ERROR] Could not read source {source}: {e}"
 
     results: list[str] = []
+    changed_py_targets: list[str] = []
     for target in targets:
         target = str(target)
         target_policy = check_path_in_worktree(target, worktree_path)
@@ -131,9 +132,28 @@ def sync_files_handler(root: Path, worktree_path: str, inp: dict[str, Any]) -> s
             results.append(
                 f"  {target}: {'created' if existing is None else 'updated'} from {source}"
             )
+            if target_path.suffix == ".py":
+                changed_py_targets.append(target)
         except Exception as e:
             results.append(f"  {target}: [ERROR] {e}")
 
-    return f"Synchronized '{source}' to {len(targets)} target(s):\n" + "\n".join(
+    result = f"Synchronized '{source}' to {len(targets)} target(s):\n" + "\n".join(
         results
     )
+
+    # T2-B8 (2026-09-24, GRIDIRON_PARTIAL #38 "Preserve architecture
+    # consistency across multi-file edits") — same real check
+    # app/repo_tools/ast_engine.py::rename_symbol() already runs after
+    # itself, extended to this tool per the audit's own plan ("After any
+    # tool that touches more than one Python file in one call, run
+    # detect_circular_imports()"). Same >1-file threshold as
+    # rename_symbol's own reasoning: only worth the extra AST pass for a
+    # real multi-file batch.
+    if len(changed_py_targets) + (1 if source_path.suffix == ".py" else 0) > 1:
+        from app.repo_tools.ast_engine import detect_circular_imports
+
+        consistency = detect_circular_imports(worktree_path)
+        if "No circular imports detected" not in consistency:
+            result += f"\n\n[ARCHITECTURE CHECK] {consistency}"
+
+    return result

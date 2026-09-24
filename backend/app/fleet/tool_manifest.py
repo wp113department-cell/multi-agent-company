@@ -794,6 +794,14 @@ TOOL_MANIFEST: dict[str, ToolManifestEntry] = {
         verification_required=True,
         risk_level="medium",
     ),
+    "batch_edit": ToolManifestEntry(
+        purpose="Apply the same find-and-replace transformation across an explicit list of files",
+        permissions=["write_repo"],
+        timeout_s=15,
+        retry_policy="none",
+        verification_required=True,
+        risk_level="medium",
+    ),
     "organize_imports": ToolManifestEntry(
         purpose="Sort and organize import statements in a file",
         permissions=["write_repo"],
