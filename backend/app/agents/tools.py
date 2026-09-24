@@ -20,6 +20,9 @@ from app.agents.tool_security import (
     _ssrf_denial_reason as _ssrf_denial_reason,
     _summarize_docker_log_patterns as _summarize_docker_log_patterns,
 )
+from app.agents.monitoring_handlers import (
+    make_monitoring_agent_handlers as make_monitoring_agent_handlers,
+)
 from app.config import get_settings
 from app.policy.engine import (
     check_allowlisted_command,
@@ -137,7 +140,6 @@ from app.tools.agents.submit_migration import (
 )
 from app.tools.agents.submit_monitoring_report import (
     SUBMIT_MONITORING_REPORT_TOOL,
-    submit_monitoring_report_handler,
 )
 from app.tools.agents.submit_perf_review import (
     SUBMIT_PERF_REVIEW_TOOL,
@@ -3769,79 +3771,10 @@ def make_dependency_agent_handlers(repo_path: str) -> dict[str, Any]:
     return handlers
 
 
-def make_monitoring_agent_handlers(repo_path: str) -> dict[str, Any]:
-    """Monitoring agent: read-only + system metrics + submit_monitoring_report. No writes."""
-    handlers = make_read_only_handlers(repo_path)
-    root = Path(repo_path)
-
-    # tool_enhance.md productionization pass, tool #105 (2026-08-25) — the
-    # real fix (this implementation had no try/except around the top
-    # subprocess call, an uncaught FileNotFoundError if top is missing)
-    # lives in the shared cpu_usage_handler(); see that function's own
-    # module docstring.
-    def mon_cpu_usage(inp: dict[str, Any]) -> str:
-        return cpu_usage_handler()
-
-    # tool_enhance.md productionization pass, tool #114 (2026-08-26) — the
-    # real fix (this implementation had no try/except around the free
-    # subprocess call, an uncaught FileNotFoundError if free is
-    # missing, and never preferred /proc/meminfo like its siblings)
-    # lives in the shared memory_usage_handler(); see that function's
-    # own module docstring.
-    def mon_memory_usage(inp: dict[str, Any]) -> str:
-        return memory_usage_handler()
-
-    # tool_enhance.md productionization pass, tool #107 (2026-08-25) — the
-    # real fix (this implementation diverged from the tool's own
-    # documented contract two ways — used `df` instead of the
-    # documented shutil.disk_usage, and defaulted to "/" instead of the
-    # documented repo root — plus had zero worktree-boundary
-    # validation) lives in the shared disk_usage_handler(); see that
-    # function's own module docstring.
-    def mon_disk_usage(inp: dict[str, Any]) -> str:
-        return disk_usage_handler(root, repo_path, inp)
-
-    # tool_enhance.md productionization pass, tool #113 (2026-08-26) — the
-    # real fix (this implementation completely IGNORED the `service`
-    # field — the tool's only documented input — and read an entirely
-    # UNDOCUMENTED `url` field instead, a real SSRF surface since tool
-    # schemas are advisory, not enforced; it also NEVER checked
-    # database connectivity despite the tool's own description
-    # promising it) lives in the shared health_check_handler(); see
-    # that function's own module docstring.
-    def mon_health_check(inp: dict[str, Any]) -> str:
-        hc_settings = get_settings()
-        return health_check_handler(
-            inp,
-            port=getattr(hc_settings, "port", 8000),
-            database_url=str(getattr(hc_settings, "database_url", "") or ""),
-        )
-
-    # tool_enhance.md productionization pass, tool #119 (2026-08-26) —
-    # was completely non-functional wherever `psql` isn't installed
-    # (proved live: "[ERROR] psql not found" on this host), and
-    # silently ignored the schema's own documented `limit` field
-    # (hardcoded LIMIT 10). Now delegates to the shared,
-    # psycopg2-backed, full-contract handler.
-    def mon_task_progress(inp: dict[str, Any]) -> str:
-        return task_progress_handler(inp)
-
-    # tool_enhance.md productionization pass, tool #116 (2026-08-26) —
-    # same worktree-escape arbitrary file READ as bf_read_logs, and
-    # the same silent divergence from the schema's documented
-    # journalctl/level contract. Now delegates to the shared,
-    # worktree-validated, full-contract handler.
-    def mon_read_logs(inp: dict[str, Any]) -> str:
-        return read_logs_handler(root, repo_path, inp)
-
-    handlers["cpu_usage"] = mon_cpu_usage
-    handlers["memory_usage"] = mon_memory_usage
-    handlers["disk_usage"] = mon_disk_usage
-    handlers["health_check"] = mon_health_check
-    handlers["task_progress"] = mon_task_progress
-    handlers["read_logs"] = mon_read_logs
-    handlers["submit_monitoring_report"] = submit_monitoring_report_handler
-    return handlers
+# make_monitoring_agent_handlers moved to app/agents/monitoring_handlers.py
+# — T2-B6 (2026-09-24, GRIDIRON_PARTIAL #162), same extraction pattern as
+# tool_security.py/conflict_resolution.py. Re-exported below for backward
+# compatibility with existing callers (app.agents.monitoring_agent, tests).
 
 
 # ===========================================================================
@@ -5228,6 +5161,16 @@ def make_chat_handlers(repo_path: str, session: Any = None) -> dict[str, Any]:
                     )
             except Exception as e:
                 return f"Branch created but checkout failed: {e}"
+            # T2-B6 (2026-09-24, GRIDIRON_PARTIAL #361) — same active_branch
+            # persistence as this module's own git_checkout handler; the
+            # checkout above already confirmed returncode == 0, so `name`
+            # is trusted directly rather than re-deriving via rev-parse.
+            try:
+                from app.db.repository import set_repo_active_branch_by_path_sync
+
+                set_repo_active_branch_by_path_sync(repo_path, name)
+            except Exception:
+                pass
             return f"Created and switched to branch: {name}"
 
         return f"Created branch: {name}"

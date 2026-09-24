@@ -1606,10 +1606,20 @@ class ChatAgent:
             if "[ERROR]" in out:
                 return out
             if do_checkout:
-                return (
-                    _git(["checkout", bname], repo)
-                    or f"Created and switched to branch: {bname}"
-                )
+                co_out = _git(["checkout", bname], repo)
+                if not co_out.startswith("[ERROR]"):
+                    # T2-B6 (2026-09-24, GRIDIRON_PARTIAL #361) — same
+                    # active_branch persistence as this module's own
+                    # git_checkout dispatch above.
+                    try:
+                        from app.db.repository import set_repo_active_branch_by_path_sync
+
+                        await asyncio.to_thread(
+                            set_repo_active_branch_by_path_sync, repo, bname
+                        )
+                    except Exception:
+                        pass
+                return co_out or f"Created and switched to branch: {bname}"
             return f"Created branch: {bname}"
 
         if tool_name == "git_checkout":
@@ -4659,12 +4669,32 @@ class ChatAgent:
                 self.session.role_detected = True
         role_directive = self.session.role_directive
 
+        # T2-B6 (2026-09-24, GRIDIRON_PARTIAL #361) — surface the tracked
+        # active_branch (kept current by git_checkout/create_branch above)
+        # into the system prompt so the agent knows which branch it's on
+        # without spending a tool call on `git branch` just to check. A
+        # cheap, best-effort DB read once per turn; absent for repos never
+        # tracked (e.g. the platform's own self-repo) — same "no data yet
+        # is neutral" convention as the rest of this codebase.
+        branch_directive = ""
+        try:
+            from app.db.repository import get_repo_active_branch_by_path_sync
+
+            active_branch = await asyncio.to_thread(
+                get_repo_active_branch_by_path_sync, self.session.repo_path
+            )
+            if active_branch:
+                branch_directive = f"\n\n[Current git branch: {active_branch}]"
+        except Exception:
+            logger.debug("active_branch lookup skipped (non-fatal)", exc_info=True)
+
         self.session.history.append({"role": "user", "content": user_message})
         memory_block = await self._memory_read_context(user_message)
         system_prompt = (
             (f"{self._system}\n\n{memory_block}" if memory_block else self._system)
             + frustration_directive
             + role_directive
+            + branch_directive
         )
 
         config = {"configurable": {"thread_id": self.session.session_id}}

@@ -115,6 +115,7 @@ async def create_epic(
         status="pending",
         cost_estimate=Decimal(str(estimate.estimated_cost_usd)),
         repo_id=body.repo_id,
+        created_by=_actor,
     )
     db.add(epic)
     await db.commit()
@@ -393,12 +394,14 @@ async def _launch_epic_manager(epic_id: str, goal: str) -> None:
             epic = result.scalar_one_or_none()
             repo_id = epic.repo_id if epic is not None else None
             repo_path = resolve_epic_repo_path(epic) if epic is not None else None
+            created_by = epic.created_by if epic is not None else None
             await run_epic_manager(
                 epic_id=epic_id,
                 goal=goal,
                 db=db,
                 repo_id=repo_id,
                 repo_path=repo_path,
+                created_by=created_by,
             )
     except Exception:
         logger.exception("Epic manager pipeline failed for epic %s", epic_id)

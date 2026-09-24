@@ -155,6 +155,20 @@ class DevTask(Base):
         ForeignKey("dev_tasks.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # T2-B6 (2026-09-24, GRIDIRON_PARTIAL #381 "Usage analytics — full
+    # per-user cost/token attribution") — the real actor identity (the
+    # authenticated username `require_approver`/`require_authenticated`
+    # already resolve at every task-creating endpoint), a plain string
+    # matching this codebase's existing actor-identity convention
+    # (User.username, UserRole.user_id, audit_log.agent_name/approved_by
+    # are all plain username strings, never a numeric FK — see User's own
+    # docstring). Nullable: legacy rows predating this column, and any
+    # task created by a non-HTTP path with no authenticated actor (e.g. a
+    # background reconciliation job), both correctly have no attribution
+    # rather than a guessed one. AgentRun already carries cost_estimate/
+    # tokens_in/tokens_out per run; this is the missing join key to roll
+    # that up per user — see get_user_usage_rollup() in db/repository.py.
+    created_by: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -480,6 +494,11 @@ class Epic(Base):
     repo_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("repos.id", ondelete="SET NULL"), nullable=True
     )
+    # T2-B6 (2026-09-24, GRIDIRON_PARTIAL #381) — same actor-identity
+    # convention as DevTask.created_by's own comment; the DevTask an epic's
+    # own _planning_node creates inherits this the same way it already
+    # inherits repo_id (see that DevTask(...) call's comment).
+    created_by: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

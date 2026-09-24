@@ -42,6 +42,7 @@ async def create_task(
     priority: str = "medium",
     project: str | None = None,
     depends_on: list[int] | None = None,
+    created_by: str | None = None,
 ) -> DevTask:
     task = DevTask(
         title=title,
@@ -51,6 +52,7 @@ async def create_task(
         priority=priority,
         project=project,
         depends_on=depends_on,
+        created_by=created_by,
     )
     db.add(task)
     await db.commit()
@@ -66,6 +68,7 @@ async def repeat_task(
     title: str | None = None,
     description: str | None = None,
     priority: str | None = None,
+    created_by: str | None = None,
 ) -> DevTask:
     """AUDIT_Q_BATCH18 §51 gap-closure (2026-08-12) — creates a genuinely
     new DevTask cloning `source`'s title/description/repo_id/project/
@@ -89,6 +92,7 @@ async def repeat_task(
         priority=priority if priority is not None else source.priority,
         project=source.project,
         repeated_from_task_id=source.id,
+        created_by=created_by,
     )
     db.add(task)
     await db.commit()
@@ -293,6 +297,49 @@ def set_repo_active_branch_by_path_sync(repo_path: str, branch: str) -> bool:
             exc,
         )
         return False
+
+
+async def get_repo_active_branch_by_path(db: AsyncSession, repo_path: str) -> str | None:
+    """T2-B6 (2026-09-24, GRIDIRON_PARTIAL #361) — the read side of
+    set_repo_active_branch_by_path(), used to surface the tracked branch
+    back into an agent's own system prompt so it knows which branch it is
+    actually on without re-running git itself. Returns None both when no
+    'ready' Repo row matches (see resolve_repo_id_from_path) and when one
+    matches but active_branch was never populated yet."""
+    repo_id = await resolve_repo_id_from_path(db, repo_path)
+    if repo_id is None:
+        return None
+    result = await db.execute(select(Repo.active_branch).where(Repo.id == repo_id))
+    return result.scalar_one_or_none()
+
+
+def get_repo_active_branch_by_path_sync(repo_path: str) -> str | None:
+    """Sync bridge for get_repo_active_branch_by_path() — same constraint
+    as set_repo_active_branch_by_path_sync's own docstring. Non-fatal:
+    returns None on any failure."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> str | None:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                return await get_repo_active_branch_by_path(session, repo_path)
+        finally:
+            await engine.dispose()
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        logger.warning(
+            "get_repo_active_branch_by_path_sync failed for repo_path=%r: %s",
+            repo_path,
+            exc,
+        )
+        return None
 
 
 async def list_tasks(

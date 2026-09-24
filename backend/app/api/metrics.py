@@ -49,6 +49,18 @@ class SystemMetrics(_CamelModel):
     agent_type_breakdown: list[AgentTypeSummary]
 
 
+class UserUsageSummary(_CamelModel):
+    created_by: str
+    task_count: int
+    run_count: int
+    total_tokens_in: int
+    total_tokens_out: int
+    total_cache_read_tokens: int
+    total_cache_creation_tokens: int
+    cache_hit_rate: float
+    total_cost_estimate: float
+
+
 class EpicCostSummary(_CamelModel):
     epic_id: str
     title: str
@@ -174,6 +186,56 @@ async def get_epic_cost_breakdown(
             )
         )
     return results
+
+
+@router.get(
+    "/users", response_model=list[UserUsageSummary], response_model_by_alias=True
+)
+async def get_user_usage_rollup(
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> Any:
+    """T2-B6 (2026-09-24, GRIDIRON_PARTIAL #381 "Usage analytics — full
+    per-user cost/token attribution"). DevTask.created_by (migration 055)
+    is the single source of truth regardless of whether the task was
+    created directly (POST /api/tasks) or inherited from its parent epic's
+    own created_by (migration 056, app/agents/manager.py's _planning_node)
+    — a plain group-by/join over the existing AgentRun cost/token columns
+    is enough, no new per-run attribution needed. Users with no attributed
+    runs yet (legacy tasks, or a non-HTTP actor) are correctly absent
+    rather than shown with guessed zeros."""
+    from app.db.models import DevTask
+
+    result = await db.execute(
+        select(
+            DevTask.created_by,
+            func.count(func.distinct(DevTask.id)),
+            func.count(AgentRun.id),
+            func.coalesce(func.sum(AgentRun.tokens_in), 0),
+            func.coalesce(func.sum(AgentRun.tokens_out), 0),
+            func.coalesce(func.sum(AgentRun.cache_read_tokens), 0),
+            func.coalesce(func.sum(AgentRun.cache_creation_tokens), 0),
+            func.coalesce(func.sum(AgentRun.cost_estimate), 0),
+        )
+        .join(AgentRun, AgentRun.task_id == DevTask.id)
+        .where(DevTask.created_by.is_not(None))
+        .group_by(DevTask.created_by)
+        .order_by(func.coalesce(func.sum(AgentRun.cost_estimate), 0).desc())
+    )
+    return [
+        UserUsageSummary(
+            created_by=r[0],
+            task_count=int(r[1]),
+            run_count=int(r[2]),
+            total_tokens_in=int(r[3]),
+            total_tokens_out=int(r[4]),
+            total_cache_read_tokens=int(r[5]),
+            total_cache_creation_tokens=int(r[6]),
+            cache_hit_rate=_hit_rate(int(r[5]), int(r[6])),
+            total_cost_estimate=float(r[7]),
+        )
+        for r in result.all()
+    ]
 
 
 def _hit_rate(cache_read: int, cache_creation: int) -> float:

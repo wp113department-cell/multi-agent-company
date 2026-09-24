@@ -1578,6 +1578,7 @@ async def run_epic_manager(
     db: AsyncSession,
     repo_path: str | None = None,
     repo_id: int | None = None,
+    created_by: str | None = None,
 ) -> EpicApprovalPackage:
     """Top-level epic orchestrator — thin wrapper around _run_epic_manager_body()
     that holds the epic concurrency slot for the whole call.
@@ -1598,7 +1599,9 @@ async def run_epic_manager(
     from app.pipeline.concurrency import epic_slot
 
     async with epic_slot():
-        return await _run_epic_manager_body(epic_id, goal, db, repo_path, repo_id)
+        return await _run_epic_manager_body(
+            epic_id, goal, db, repo_path, repo_id, created_by
+        )
 
 
 class EpicManagerState(TypedDict, total=False):
@@ -1634,6 +1637,10 @@ class EpicManagerState(TypedDict, total=False):
     # today's fallback behavior (settings.target_repo_path), same as
     # before this phase.
     repo_id: int | None
+    # T2-B6 (2026-09-24, GRIDIRON_PARTIAL #381) — same inheritance shape as
+    # repo_id above: seeded from the epic's own persisted created_by so
+    # _planning_node can inherit it onto the DevTask it creates.
+    created_by: str | None
     plan_text: str
     subtasks: list[dict[str, Any]]
     architect_plan: dict[str, Any]
@@ -1916,6 +1923,7 @@ async def _planning_node(state: EpicManagerState) -> dict[str, Any]:
         status="planning",
         epic_id=epic_id,
         repo_id=state.get("repo_id"),
+        created_by=state.get("created_by"),
     )
     db.add(task)
     await db.flush()
@@ -2356,6 +2364,7 @@ async def _run_epic_manager_body(
     db: AsyncSession,
     repo_path: str | None = None,
     repo_id: int | None = None,
+    created_by: str | None = None,
 ) -> EpicApprovalPackage:
     """The real epic orchestration logic — now a LangGraph supervisor graph
     (build_epic_manager_graph() above). Split out so run_epic_manager() can
@@ -2385,6 +2394,7 @@ async def _run_epic_manager_body(
         "db": db,
         "repo_path": repo_path,
         "repo_id": repo_id,
+        "created_by": created_by,
     }
     final_state = await graph.ainvoke(initial_state)
     package: EpicApprovalPackage = final_state["package"]

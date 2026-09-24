@@ -134,6 +134,7 @@ def _task_to_dict(task: Any, logs: list[Any] | None = None) -> dict[str, Any]:
         "repoId": task.repo_id,
         "repoName": repo.name if repo else None,
         "repeatedFromTaskId": task.repeated_from_task_id,
+        "createdBy": task.created_by,
         "createdAt": task.created_at.isoformat() if task.created_at else None,
         "updatedAt": task.updated_at.isoformat() if task.updated_at else None,
         "logs": [_log_to_dict(lg) for lg in (logs or [])],
@@ -165,6 +166,7 @@ async def create(
         priority=body.priority,
         project=body.project,
         depends_on=body.depends_on,
+        created_by=_actor,
     )
     result = _task_to_dict(task)
     await store_response(db, request, "create_task", result)
@@ -482,6 +484,7 @@ async def repeat(
         title=body.title,
         description=body.description,
         priority=body.priority,
+        created_by=_actor,
     )
 
     repo_path = resolve_task_repo_path(new_task)
