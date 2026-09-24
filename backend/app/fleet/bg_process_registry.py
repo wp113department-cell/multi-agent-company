@@ -67,7 +67,13 @@ def _registry_path() -> Path:
 # now goes through the helpers below.
 # ---------------------------------------------------------------------------
 
-_CONTAINER_NAME_RE = re.compile(r"^gridiron-bg-[0-9a-f]{12}$")
+# Q12 (2026-09-24, "Real interactive PTY terminal") — app.tools.execution.
+# pty_session.PtySession registers its own containers here too (same
+# crash-recovery/orphan-sweep machinery, reused rather than duplicated), so
+# this pattern accepts both prefixes. A tampered registry file still can
+# never make this kill an arbitrary container — only one matching either
+# real, code-generated naming scheme.
+_CONTAINER_NAME_RE = re.compile(r"^gridiron-(?:bg|pty)-[0-9a-f]{12}$")
 _FORCE_KILL_GRACE_SECONDS = 8.0
 
 

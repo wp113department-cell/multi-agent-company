@@ -1148,6 +1148,39 @@ class Settings(BaseSettings):
         "off at any time degrades to exactly today's pre-existing behavior, "
         "never a functional loss beyond the live-updates themselves.",
     )
+    pty_terminal_enabled: bool = Field(
+        default=False,
+        description="Q12 (2026-09-24, 'Real interactive PTY terminal') — when "
+        "True, exposes the GET/WebSocket /api/terminal/ws/{chat_session_id} "
+        "endpoint, which allocates a real pseudo-terminal (Python's `pty` "
+        "module) and execs a sandboxed `docker run -it` session inside it "
+        "(app.tools.execution.pty_session.PtySession) — a genuine interactive "
+        "shell with real stdin, live streaming stdout/stderr, Ctrl+C, and "
+        "terminal resize, as opposed to the request/response `bash` tool. "
+        "Default False (a brand-new execution surface, not an extension of an "
+        "existing proven one) — when False the endpoint refuses every "
+        "connection with a clear close code instead of silently degrading, "
+        "matching this project's established feature-flag-first rollout "
+        "discipline for anything that grants new command execution.",
+    )
+    pty_terminal_image: str = Field(
+        default="gridiron-bash-toolchain:latest",
+        description="Docker image for interactive PTY sessions. Defaults to "
+        "the same toolchain image bash_sandbox_toolchain_image already "
+        "builds (docker/bash-sandbox/Dockerfile) rather than "
+        "bash_sandbox_image's minimal alpine:latest default, because "
+        "PtySession execs `bash` directly (a real shell prompt needs a real "
+        "shell) — alpine's default image has no bash installed at all.",
+    )
+    pty_terminal_network: str = Field(
+        default="bridge",
+        description="Docker --network mode for interactive PTY sessions — "
+        "same choices and reasoning as bash_sandbox_network ('bridge' "
+        "default so a human's interactive session can still e.g. curl/pip "
+        "install; 'none' for deployments that can accept losing "
+        "network-dependent interactive commands in exchange for stricter "
+        "egress isolation).",
+    )
 
     # tool_enhance.md productionization pass, bash tool, follow-up
     # sandboxing-coverage extension (2026-08-15) — this is exactly the

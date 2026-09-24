@@ -27,6 +27,7 @@ from app.api.goals import router as goals_router
 from app.api.metrics import router as metrics_router
 from app.api.settings import router as settings_router
 from app.api.chat import router as chat_router
+from app.api.terminal import router as terminal_router
 from app.api.specialized_agents import router as specialized_agents_router
 from app.api.activity import router as activity_router
 from app.api.ratings import router as ratings_router
@@ -1775,6 +1776,7 @@ app.include_router(goals_router)
 app.include_router(metrics_router)
 app.include_router(settings_router)
 app.include_router(chat_router)
+app.include_router(terminal_router)
 app.include_router(specialized_agents_router)
 app.include_router(activity_router)
 app.include_router(ratings_router)
