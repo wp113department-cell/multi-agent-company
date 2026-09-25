@@ -4845,6 +4845,75 @@ _ASK_HUMAN_TO_CHOOSE_TOOL: dict[str, Any] = {
     },
 }
 
+# #500 (2026-09-25, "Conversational 'do that again'") — the only recall
+# mechanism before this was memory_hook_node's implicit semantic-similarity
+# retrieval; there was no deterministic way to resolve "do that again"/
+# "repeat the last task"/"repeat the previous fix" to a specific real task.
+# Two tools, deliberately split: find_repeatable_tasks never itself decides
+# which task the user means — it returns real candidates plus an explicit,
+# code-generated instruction to use ask_human_to_choose whenever more than
+# one plausible candidate exists, so "never silently guess" is enforced by
+# the tool's own output, not left to prompt-level judgment alone.
+# repeat_previous_task then REQUIRES a specific task_id (no "just repeat
+# the most recent one" shortcut exists) — by construction, the model must
+# have already resolved which task it means, whether unambiguously from
+# find_repeatable_tasks's own result or via a real ask_human_to_choose
+# pause, before this tool can be called at all.
+_FIND_REPEATABLE_TASKS_TOOL: dict[str, Any] = {
+    "name": "find_repeatable_tasks",
+    "description": (
+        "Look up real past tasks in this repo that the user might mean by 'do that again', "
+        "'repeat the last task', or 'repeat the previous fix'. Call this FIRST whenever the "
+        "user references a past task without giving its exact id — never guess a task_id "
+        "without calling this. Optionally filter by a keyword from what the user said."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "keyword": {
+                "type": "string",
+                "description": "A word or short phrase from the user's own reference (e.g. "
+                "'login bug') to filter candidates by title/description. Omit for 'the last "
+                "task' with no other description.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max candidates to return (default 5).",
+            },
+        },
+        "required": [],
+    },
+}
+
+_REPEAT_PREVIOUS_TASK_TOOL: dict[str, Any] = {
+    "name": "repeat_previous_task",
+    "description": (
+        "Clone a specific past task (by its real task_id, from find_repeatable_tasks or a "
+        "task_id the user stated explicitly) into a new task and dispatch it through the "
+        "real planning pipeline — the same 'repeat' a human clicking Repeat in the UI "
+        "triggers. Use description_override for 'repeat it but change X' requests; omit it "
+        "for an exact repeat."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "task_id": {
+                "type": "integer",
+                "description": "The real id of the task to repeat — must come from "
+                "find_repeatable_tasks's own results or an id the user stated explicitly, "
+                "never guessed.",
+            },
+            "description_override": {
+                "type": "string",
+                "description": "Only for 'repeat it but ...' requests — the full, updated "
+                "task description. Omitted means an exact, unmodified repeat.",
+            },
+            "title_override": {"type": "string"},
+        },
+        "required": ["task_id"],
+    },
+}
+
 CHAT_TOOLS = READ_ONLY_TOOLS + [
     _EDIT_FILE_TOOL_SPEC,
     _WRITE_FILE_TOOL_SPEC,
@@ -5054,6 +5123,9 @@ CHAT_TOOLS = READ_ONLY_TOOLS + [
     _TEMPLATE_RENDER_TOOL,
     # AUDIT_Q_BATCH07 §13 — Human interaction
     _ASK_HUMAN_TO_CHOOSE_TOOL,
+    # #500 — Conversational "do that again"
+    _FIND_REPEATABLE_TASKS_TOOL,
+    _REPEAT_PREVIOUS_TASK_TOOL,
 ]
 
 

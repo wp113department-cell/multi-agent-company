@@ -1553,6 +1553,8 @@ async def run_manager(
                 epic_id=epic_id,
                 db=db,
                 parent_agent_names=parent_agent_names,
+                task_id=task_id,
+                db_subtask_rows=_db_subtask_rows,
             )
             if new_indices:
                 if enable_fanout:

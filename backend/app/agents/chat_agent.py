@@ -3829,6 +3829,85 @@ class ChatAgent:
             chosen = next(o for o in ahtc_clean if o["id"] == selected)
             return f"Human selected: {chosen['id']} ({chosen['label']})"
 
+        if tool_name == "find_repeatable_tasks":
+            # #500 (2026-09-25, "Conversational 'do that again'") — real
+            # candidates from the actual dev_tasks table, scoped to this
+            # session's own repo when known. Deliberately never resolves
+            # ambiguity itself: the returned text explicitly tells the
+            # model to use ask_human_to_choose when more than one
+            # candidate remains, so "never silently guess" is enforced by
+            # this tool's own output, not left to prompt judgment alone.
+            frt_keyword = str(inp.get("keyword", "")).strip().lower()
+            frt_limit = int(inp.get("limit", 5) or 5)
+            from app.db.repository import list_tasks
+            from app.db.session import get_session_factory
+
+            async with get_session_factory()() as frt_db:
+                frt_rows, _ = await list_tasks(
+                    frt_db, repo_id=self.session.repo_id, limit=50
+                )
+            if frt_keyword:
+                frt_rows = [
+                    t
+                    for t in frt_rows
+                    if frt_keyword in (t.title or "").lower()
+                    or frt_keyword in (t.description or "").lower()
+                ]
+            frt_rows = frt_rows[:frt_limit]
+            if not frt_rows:
+                return (
+                    "No past tasks found"
+                    + (f" matching {frt_keyword!r}" if frt_keyword else "")
+                    + " in this repo. Ask the user for more detail rather than guessing a task_id."
+                )
+            frt_lines = [
+                f"- task_id={t.id} | status={t.status} | title={t.title!r}"
+                for t in frt_rows
+            ]
+            frt_body = "\n".join(frt_lines)
+            if len(frt_rows) == 1:
+                return (
+                    f"Found exactly one candidate:\n{frt_body}\n"
+                    "You may call repeat_previous_task with this task_id directly."
+                )
+            return (
+                f"Found {len(frt_rows)} candidates:\n{frt_body}\n"
+                "More than one plausible match — you MUST call ask_human_to_choose "
+                "to let the user pick before calling repeat_previous_task. Do not "
+                "guess which one they mean."
+            )
+
+        if tool_name == "repeat_previous_task":
+            rpt_task_id = inp.get("task_id")
+            if not isinstance(rpt_task_id, int):
+                return "[ERROR] task_id (integer) is required."
+            from app.api.tasks import repeat_and_dispatch_task
+            from app.db.repository import get_task
+            from app.db.session import get_session_factory
+            from app.main import _FireAndForgetBackgroundTasks
+
+            async with get_session_factory()() as rpt_db:
+                rpt_source = await get_task(rpt_db, rpt_task_id)
+                if rpt_source is None:
+                    return f"[ERROR] Task #{rpt_task_id} not found."
+                rpt_new_task = await repeat_and_dispatch_task(
+                    rpt_db,
+                    rpt_source,
+                    _FireAndForgetBackgroundTasks(),
+                    title=inp.get("title_override") or None,
+                    description=inp.get("description_override") or None,
+                    # No authenticated actor identity is threaded from the
+                    # chat HTTP layer down into ChatAgent today — honestly
+                    # left unattributed (created_by nullable, matches the
+                    # rest of this codebase's "no data yet is neutral"
+                    # convention) rather than fabricating one.
+                    created_by=None,
+                )
+            return (
+                f"Repeated task #{rpt_task_id} as new task #{rpt_new_task.id} "
+                f"({rpt_new_task.title!r}) — planning pipeline dispatched."
+            )
+
         if tool_name == "seed_database":
             seeddb_script = str(inp.get("script", ""))
             if not seeddb_script:

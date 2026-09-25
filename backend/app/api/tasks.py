@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -39,6 +39,9 @@ from app.middleware.rbac import require_approver, require_authenticated
 from app.pipeline.queue_adapter import dispatch_job
 from app.rate_limit import limiter
 from app.repo_tools.worktree import remove_worktree
+
+if TYPE_CHECKING:
+    from app.db.models import DevTask
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -475,6 +478,78 @@ async def restart_task(
     return {"restarted": True, "taskId": task_id}
 
 
+async def repeat_and_dispatch_task(
+    db: AsyncSession,
+    source: "DevTask",
+    background_tasks: Any,
+    *,
+    title: str | None = None,
+    description: str | None = None,
+    priority: str | None = None,
+    mode: str | None = None,
+    created_by: str | None = None,
+) -> "DevTask":
+    """The real orchestration behind POST /{task_id}/repeat — extracted
+    (#500, 2026-09-25, "Conversational 'do that again'") so a NEW chat tool
+    (app/agents/chat_agent.py) can trigger the exact same real repeat+
+    dispatch path a human clicking "repeat" in the UI gets, not a
+    second, independently-maintained copy of this orchestration that could
+    drift from it. `background_tasks` is duck-typed (only `.add_task()` is
+    called, via dispatch_job) — the HTTP route passes its own real
+    FastAPI `BackgroundTasks`; a caller with no real request in scope
+    (the chat tool) passes `app.main._FireAndForgetBackgroundTasks()`,
+    the same shim #429's own periodic dependency-auto-dispatch loop
+    already uses for this identical problem.
+
+    Raises no HTTPException — this is layer-agnostic; the HTTP route
+    translates a real error into one, the chat tool returns a plain
+    "[ERROR] ..." string like every other chat tool dispatch does.
+    """
+    from app.api.agents import launch_planning_pipeline, launch_planner
+
+    new_task = await repeat_task(
+        db,
+        source,
+        title=title,
+        description=description,
+        priority=priority,
+        created_by=created_by,
+    )
+
+    repo_path = resolve_task_repo_path(new_task)
+    await transition_task(db, new_task.id, "planning")
+    await append_log(
+        db,
+        new_task.id,
+        "pipeline",
+        f"Task repeated from #{source.id} — planning pipeline triggered",
+    )
+
+    resolved_mode = mode or get_settings().pipeline_mode
+    _clear_stale_abort(source.id)
+    if resolved_mode == "full":
+        await dispatch_job(
+            background_tasks,
+            launch_planning_pipeline,
+            new_task.id,
+            str(new_task.title),
+            str(new_task.description),
+            repo_path,
+            priority=new_task.priority,
+        )
+    else:
+        await dispatch_job(
+            background_tasks,
+            launch_planner,
+            new_task.id,
+            str(new_task.title),
+            str(new_task.description),
+            repo_path,
+            priority=new_task.priority,
+        )
+    return new_task
+
+
 @router.post("/{task_id}/repeat", status_code=201)
 @limiter.limit(get_settings().rate_limit_tasks)
 async def repeat(
@@ -498,54 +573,20 @@ async def repeat(
     created a DB row without actually running would be "clone", not
     "repeat".
     """
-    from app.api.agents import launch_planning_pipeline, launch_planner
-
     source = await get_task(db, task_id)
     if not source:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    new_task = await repeat_task(
+    new_task = await repeat_and_dispatch_task(
         db,
         source,
+        background_tasks,
         title=body.title,
         description=body.description,
         priority=body.priority,
+        mode=body.mode,
         created_by=_actor,
     )
-
-    repo_path = resolve_task_repo_path(new_task)
-    await transition_task(db, new_task.id, "planning")
-    await append_log(
-        db,
-        new_task.id,
-        "pipeline",
-        f"Task repeated from #{task_id} — planning pipeline triggered",
-    )
-
-    settings = get_settings()
-    mode = body.mode or settings.pipeline_mode
-    if mode == "full":
-        _clear_stale_abort(task_id)
-        await dispatch_job(
-            background_tasks,
-            launch_planning_pipeline,
-            new_task.id,
-            str(new_task.title),
-            str(new_task.description),
-            repo_path,
-            priority=new_task.priority,
-        )
-    else:
-        _clear_stale_abort(task_id)
-        await dispatch_job(
-            background_tasks,
-            launch_planner,
-            new_task.id,
-            str(new_task.title),
-            str(new_task.description),
-            repo_path,
-            priority=new_task.priority,
-        )
 
     return {
         "repeated": True,

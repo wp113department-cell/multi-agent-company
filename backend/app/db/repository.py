@@ -1138,6 +1138,42 @@ async def save_subtasks(
     await db.commit()
 
 
+async def add_subtask(
+    db: AsyncSession, task_id: int, subtask: dict[str, Any]
+) -> Subtask:
+    """#44 (2026-09-25, "Agents create subtasks dynamically") — real gap
+    found by direct reading: app.pipeline.dynamic_subtasks.integrate_proposals()
+    appended a dynamically-proposed subtask to the in-memory `subtasks` list
+    only — no Subtask DB row was ever created for it (confirmed:
+    app.agents.manager._dispatch_one_subtask's own status-persistence check
+    is unconditionally False for any index beyond the ORIGINAL static
+    count). A dynamically-created subtask was invisible to
+    GET /api/tasks/{id}/subtasks, and a crash mid-epic after it was
+    integrated left zero DB trace it ever existed.
+
+    Single-row counterpart to save_subtasks() (which bulk-inserts the
+    original, decomposer-produced list) — same field mapping, same
+    depends_on convention (0-based indices into the position-ordered
+    subtasks list, NOT a real foreign key, despite the column's
+    ARRAY(BigInteger) type — confirmed by save_subtasks() passing
+    st["depends_on"] straight through with no translation). Returns the
+    created row so the caller can keep its own db_subtask_rows list's
+    positions in sync with the in-memory subtasks list.
+    """
+    sub = Subtask(
+        task_id=task_id,
+        type=subtask.get("type", "backend"),
+        title=str(subtask.get("title") or "Untitled subtask"),
+        description=subtask.get("description"),
+        files_to_edit=subtask.get("files_to_edit"),
+        depends_on=subtask.get("depends_on"),
+    )
+    db.add(sub)
+    await db.commit()
+    await db.refresh(sub)
+    return sub
+
+
 async def list_subtasks(db: AsyncSession, task_id: int) -> list[Subtask]:
     result = await db.execute(
         select(Subtask).where(Subtask.task_id == task_id).order_by(Subtask.id)

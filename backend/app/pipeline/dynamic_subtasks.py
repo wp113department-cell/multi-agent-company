@@ -174,6 +174,8 @@ async def integrate_proposals(
     epic_id: str | None,
     db: AsyncSession | None,
     parent_agent_names: dict[int, str],
+    task_id: int | None = None,
+    db_subtask_rows: list[Any] | None = None,
 ) -> tuple[list[int], int]:
     """Called once per wave boundary by run_manager() — never mid-wave —
     with every proposal collected from that wave's outcomes. Mutates
@@ -189,6 +191,22 @@ async def integrate_proposals(
     every other rejection reason is logged at INFO (not a warning — a
     rejected proposal is an expected, working part of this feature, not an
     error) and simply dropped, never raised.
+
+    task_id/db_subtask_rows (2026-09-25, real gap found by direct reading
+    of app.agents.manager._dispatch_one_subtask): when both are given, a
+    real Subtask DB row is created for every integrated proposal via
+    app.db.repository.add_subtask(), and db_subtask_rows (the caller's own
+    list, mutated in place — same convention as subtasks/spawn_depth
+    above) is kept in sync at the SAME position as `subtasks`, so
+    _dispatch_one_subtask's own status-persistence check
+    (`subtask_idx < len(db_subtask_rows)`) reaches dynamically-created
+    subtasks too instead of silently never persisting their status and
+    leaving zero DB trace of them across a crash. Both optional (None
+    keeps the pre-existing in-memory-only behavior) only so this stays
+    callable from contexts genuinely without a task_id (there are none in
+    this codebase today, but the DB-work-is-optional contract this
+    function already has for epic_id/db is preserved rather than silently
+    tightened).
     """
     new_indices: list[int] = []
     for proposal in proposals:
@@ -227,12 +245,39 @@ async def integrate_proposals(
                 logger.info("Dynamic subtask proposal rejected: %s", lock_conflict)
                 continue
 
+        # Real persistence for crash/recovery (2026-09-25, real gap found by
+        # direct reading — see this function's own docstring), attempted
+        # BEFORE subtasks.append(): db_subtask_rows must stay in exact
+        # position-lockstep with `subtasks` (that's the only correlation
+        # _dispatch_one_subtask's own status-persistence check has — see
+        # its own comment on why: the decomposer's transient "id" field is
+        # not the real DB primary key). If persistence fails, treating the
+        # whole proposal as rejected (never appending to `subtasks` either)
+        # is what keeps that lockstep intact — a partial "keep in memory,
+        # degrade DB tracking" would silently desync every index integrated
+        # after this one instead.
+        if task_id is not None and db_subtask_rows is not None and db is not None:
+            try:
+                from app.db.repository import add_subtask
+
+                db_row = await add_subtask(db, task_id, built)
+            except Exception:
+                logger.warning(
+                    "Dynamic subtask proposal rejected: could not persist "
+                    "Subtask row for %r",
+                    built["title"],
+                    exc_info=True,
+                )
+                continue
+            db_subtask_rows.append(db_row)
+
         new_idx = len(subtasks)
         built["id"] = new_idx + 1
         subtasks.append(built)
         spawn_depth[new_idx] = spawn_depth.get(parent_idx, 0) + 1
         dynamic_count += 1
         new_indices.append(new_idx)
+
         logger.info(
             "Dynamic subtask integrated: idx=%d title=%r proposed_by=%s parent_idx=%d",
             new_idx,

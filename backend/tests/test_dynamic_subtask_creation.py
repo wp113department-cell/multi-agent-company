@@ -38,7 +38,8 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.config import get_settings
-from app.db.models import EpicFileLock
+from app.db.models import DevTask, EpicFileLock, Subtask
+from app.db.repository import create_task
 from app.pipeline.dynamic_subtasks import (
     integrate_proposals,
     reserve_files_for_proposal,
@@ -481,6 +482,137 @@ async def test_integrate_proposals_reserves_real_files_via_db() -> None:
             )
             await cleanup.commit()
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_integrate_proposals_persists_a_real_subtask_row_for_crash_recovery() -> (
+    None
+):
+    """Real gap found 2026-09-25 by direct reading of app.agents.manager
+    (_dispatch_one_subtask's own status-persistence check was
+    unconditionally False for any dynamically-created index): before this
+    fix, a dynamically-integrated proposal existed ONLY in the in-memory
+    `subtasks` list — nothing in dev_tasks/subtasks tables recorded it, so
+    it was invisible to GET /api/tasks/{id}/subtasks and left zero trace
+    across a crash. Proves the real fix against real Postgres: a genuine
+    Subtask row now exists, and db_subtask_rows (the position-correlated
+    list _dispatch_one_subtask's own status persistence relies on) is kept
+    in exact lockstep with `subtasks`."""
+    engine = _engine()
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        task = await create_task(
+            session, "Parent task for dynamic subtask test", "desc"
+        )
+        task_id = task.id
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            subtasks: list[dict[str, Any]] = [
+                {"title": "original", "files_to_edit": []}
+            ]
+            db_subtask_rows: list[Any] = []
+            proposal = _proposal(title="A real follow-up fix")
+            proposal["_parent_subtask_idx"] = 0
+
+            new_indices, new_count = await integrate_proposals(
+                [proposal],
+                subtasks=subtasks,
+                spawn_depth={0: 0},
+                dynamic_count=0,
+                epic_id=None,
+                db=session,
+                parent_agent_names={0: "backend_dev"},
+                task_id=task_id,
+                db_subtask_rows=db_subtask_rows,
+            )
+            assert new_indices == [1]
+            assert new_count == 1
+            # Position lockstep: db_subtask_rows[1] must correlate to the
+            # exact same subtask as subtasks[1] — the only correlation
+            # _dispatch_one_subtask's own status-persistence check relies
+            # on.
+            assert len(db_subtask_rows) == 1
+            assert db_subtask_rows[0].title == "A real follow-up fix"
+
+            result = await session.execute(
+                select(Subtask).where(Subtask.task_id == task_id)
+            )
+            rows = result.scalars().all()
+            assert len(rows) == 1
+            assert rows[0].title == "A real follow-up fix"
+            assert rows[0].id == db_subtask_rows[0].id
+            # Same 0-based-index convention the decomposer's own original
+            # subtasks already use (confirmed via save_subtasks() — not a
+            # real foreign key despite the ARRAY(BigInteger) column type).
+            assert rows[0].depends_on == [0]
+    finally:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as cleanup:
+            await cleanup.execute(delete(Subtask).where(Subtask.task_id == task_id))
+            await cleanup.execute(delete(DevTask).where(DevTask.id == task_id))
+            await cleanup.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_integrate_proposals_rejects_cleanly_on_persistence_failure_keeping_lockstep() -> (
+    None
+):
+    """If the real Subtask-row write fails, the WHOLE proposal must be
+    rejected (never appended to `subtasks` either) — a partial "keep in
+    memory, degrade DB tracking" would desync db_subtask_rows from
+    `subtasks` for every index integrated after this one, since
+    _dispatch_one_subtask's own status-persistence check has no correlation
+    mechanism other than list position."""
+    subtasks: list[dict[str, Any]] = [{"title": "original", "files_to_edit": []}]
+    db_subtask_rows: list[Any] = []
+    proposal = _proposal(title="Will fail to persist")
+    proposal["_parent_subtask_idx"] = 0
+
+    with patch(
+        "app.db.repository.add_subtask",
+        side_effect=RuntimeError("simulated DB failure"),
+    ):
+        new_indices, new_count = await integrate_proposals(
+            [proposal],
+            subtasks=subtasks,
+            spawn_depth={0: 0},
+            dynamic_count=0,
+            epic_id=None,
+            db=object(),  # any non-None sentinel — add_subtask is mocked
+            parent_agent_names={0: "backend_dev"},
+            task_id=123,
+            db_subtask_rows=db_subtask_rows,
+        )
+
+    assert new_indices == []
+    assert new_count == 0
+    assert len(subtasks) == 1  # never appended
+    assert db_subtask_rows == []  # stayed in lockstep (both empty)
+
+
+@pytest.mark.asyncio
+async def test_integrate_proposals_without_task_id_keeps_pre_existing_in_memory_only_behavior() -> (
+    None
+):
+    """Zero-behavior-change proof: every pre-existing caller that doesn't
+    pass task_id/db_subtask_rows (both default None) gets exactly the old
+    in-memory-only integration, unchanged."""
+    subtasks: list[dict[str, Any]] = [{"title": "original", "files_to_edit": []}]
+    proposal = _proposal(title="In-memory only")
+    proposal["_parent_subtask_idx"] = 0
+
+    new_indices, new_count = await integrate_proposals(
+        [proposal],
+        subtasks=subtasks,
+        spawn_depth={0: 0},
+        dynamic_count=0,
+        epic_id=None,
+        db=None,
+        parent_agent_names={0: "backend_dev"},
+    )
+
+    assert new_indices == [1]
+    assert new_count == 1
+    assert len(subtasks) == 2
 
 
 @pytest.mark.asyncio
