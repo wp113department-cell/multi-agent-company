@@ -325,6 +325,11 @@ class ChatGraphState(TypedDict, total=False):
     final_text: str
     last_error: str | None
     stop: bool
+    # UI gap-closure (2026-09-25) — a real Stop control for the interactive
+    # chat panel. Distinguishes a user-requested stop from a normal
+    # end_turn/error stop so the frontend can render "Stopped" rather than
+    # a plain completion. See ChatAgent.request_stop()'s own docstring.
+    stopped_by_user: bool
     # Gap-closure Day 16 (Stage 1.2, answers.md): _VERIFICATION_CFG below has
     # existed since this class was written but was never consulted anywhere
     # — no key on this TypedDict could even hold it, and _execute_tool_node
@@ -842,6 +847,12 @@ class ChatAgent:
 
     # default so an instance built without __init__ (tests do) still has the attribute
     _context_tokens: int = 0
+    # Same reasoning — real regression found by the existing test suite
+    # (test_batch11_chat_agent_policy_chokepoint.py and others construct
+    # ChatAgent.__new__(ChatAgent), bypassing __init__ entirely): without
+    # this class-level default, _call_llm_node/_execute_tool_node's new
+    # stop-request check raised AttributeError on any such instance.
+    _stop_requested: bool = False
 
     MAX_ITERATIONS = 30
 
@@ -880,6 +891,23 @@ class ChatAgent:
         # "don't ask again this session". Set alongside
         # _current_tool_use_id below for the same replay-safety reason.
         self._current_tool_name: str = ""
+        # UI gap-closure (2026-09-25) — the interactive chat panel had no
+        # way to stop an in-progress turn at all: the frontend's own
+        # AbortController only cancelled the CLIENT's fetch connection,
+        # never reached this server-side background task (see
+        # app/api/chat.py::_run_agent's own comment). A plain instance
+        # flag is sufficient (not a durable/distributed flag like the
+        # worker-task ActivityStreamRegistry uses) because this ChatAgent
+        # instance is already scoped to one in-memory session on one
+        # process (_chat_agents, get_or_create_chat_agent) — the same
+        # scoping self._background_processes above already relies on.
+        # Checked at node entry in _call_llm_node/_execute_tool_node, not
+        # mid-tool-call — an already-dispatched tool call (e.g. a running
+        # bash command) still runs to completion; only the NEXT LLM call
+        # or NEXT queued tool call is skipped. Reset at the top of each
+        # run()/resume() so a stop from a finished turn never blocks a
+        # later one.
+        self._stop_requested: bool = False
         self._graph = self._build_chat_graph()
         # Gap-closure Stage 1.5 (answers.md) — chat_agent.py had ZERO
         # token-budget tracking before this (confirmed by grep: no
@@ -938,6 +966,12 @@ class ChatAgent:
         except Exception:
             pass
         return get_settings().model_coder
+
+    def request_stop(self) -> None:
+        """UI gap-closure (2026-09-25) — called by
+        POST /api/chat/sessions/{id}/stop. See self._stop_requested's own
+        docstring in __init__ for the exact granularity this stops at."""
+        self._stop_requested = True
 
     # ------------------------------------------------------------------
     # Human confirmation — MASTER_AGENT_v2.md Phase 5.2, real interrupt().
@@ -4195,6 +4229,9 @@ class ChatAgent:
     # ------------------------------------------------------------------
 
     async def _call_llm_node(self, state: ChatGraphState) -> dict[str, Any]:
+        if self._stop_requested:
+            return {"stop": True, "stopped_by_user": True}
+
         iteration = state.get("iteration", 0)
         if iteration >= self.MAX_ITERATIONS:
             return {"stop": True}
@@ -4419,6 +4456,14 @@ class ChatAgent:
         return update
 
     async def _execute_tool_node(self, state: ChatGraphState) -> dict[str, Any]:
+        if self._stop_requested:
+            # Only skips tool calls not yet STARTED — a tool call already
+            # dispatched before the stop request arrived still runs to
+            # completion (this node isn't re-entered mid-tool-call).
+            # Routes to call_llm next (empty pending_tool_uses), which
+            # itself short-circuits to finalize on the same flag.
+            return {"pending_tool_uses": [], "stop": True, "stopped_by_user": True}
+
         pending = list(state.get("pending_tool_uses", []))
         tu = pending.pop(0)
         # Read by _confirm() as a replay-stable action_id — see this
@@ -4591,7 +4636,10 @@ class ChatAgent:
             state.get("final_text", ""),
             state.get("last_error"),
         )
-        await self.session.push({"type": "done"})
+        done_event: dict[str, Any] = {"type": "done"}
+        if state.get("stopped_by_user"):
+            done_event["stopped"] = True
+        await self.session.push(done_event)
         return {}
 
     def _route_after_llm(self, state: ChatGraphState) -> str:
@@ -4639,6 +4687,9 @@ class ChatAgent:
         _finalize_node is only reached when the graph actually completes.
         resume() continues a paused turn later.
         """
+        # A stop requested during a PREVIOUS, already-finished turn must
+        # never carry over and silently kill this new one.
+        self._stop_requested = False
         # Stage 4 Tier 3 (2026-08-05, answer2.md Q7: "Detect User
         # Satisfaction: NO — no sentiment/satisfaction-detection code found
         # anywhere in the agent graph") — real, bounded, code-level signal,
@@ -4789,6 +4840,9 @@ class ChatAgent:
         True on an approved confirmation, _confirm() adds the paused tool
         name to session.remembered_confirmations so the same tool
         auto-approves without pausing for the rest of this session."""
+        # An explicit approve/deny click is a deliberate continue action —
+        # a stray earlier Stop click must not silently kill it.
+        self._stop_requested = False
         config = {"configurable": {"thread_id": self.session.session_id}}
         snapshot = await self._graph.aget_state(config)
 

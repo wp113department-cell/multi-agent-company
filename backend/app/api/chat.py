@@ -352,6 +352,32 @@ async def confirm_action(
     return {"status": "ok"}
 
 
+@router.post("/sessions/{session_id}/stop")
+async def stop_chat_turn(
+    session_id: str,
+    _actor: str = Depends(require_approver),
+) -> dict[str, str]:
+    """UI gap-closure (2026-09-25) — a real Stop control for an
+    in-progress chat turn. Before this, the frontend's own
+    AbortController only ever cancelled the CLIENT's fetch connection
+    (see _event_stream's own comment on send_message) — it never reached
+    this server-side background task at all, so typing/clicking "stop"
+    had no effect on the agent. This sets a flag ChatAgent checks between
+    graph nodes (not mid-tool-call — a bash command already dispatched
+    still runs to completion; only the NEXT LLM call or queued tool call
+    is skipped) and pushes a real, distinguishable 'done' event
+    ({"stopped": true}) once the graph actually reaches finalize.
+
+    A no-op (not an error) if there's no turn in progress — matches
+    confirm_action's own tolerance for a stale/no-op call."""
+    from app.agents.chat_agent import get_or_create_chat_agent
+
+    session = await _require_session_restoring(session_id)
+    agent = get_or_create_chat_agent(session)
+    agent.request_stop()
+    return {"status": "stop_requested"}
+
+
 @router.get("/sessions/{session_id}/history")
 async def get_history(
     session_id: str,

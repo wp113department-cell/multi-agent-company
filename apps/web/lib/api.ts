@@ -682,3 +682,12 @@ export async function confirmChatAction(
 export async function deleteChatSession(sessionId: string): Promise<void> {
   await apiFetch(`/api/chat/sessions/${sessionId}`, { method: "DELETE" });
 }
+
+// UI gap-closure (2026-09-25) — a real Stop control for an in-progress
+// chat turn (backend/app/api/chat.py::stop_chat_turn).
+export async function stopChatTurn(sessionId: string): Promise<{ status: string }> {
+  const res = await apiFetch(`/api/chat/sessions/${sessionId}/stop`, {
+    method: "POST",
+  });
+  return handleResponse(res);
+}

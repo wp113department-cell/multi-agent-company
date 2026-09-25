@@ -32,10 +32,17 @@ def _drain(session: ChatSession) -> list[dict]:
 
 
 @pytest.mark.asyncio
-async def test_streaming_disabled_by_default_pushes_no_terminal_output(
-    tmp_path: Path,
+async def test_streaming_disabled_pushes_no_terminal_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert get_settings().bash_sandbox_streaming_enabled is False
+    """Real gap closed 2026-09-25: the frontend (apps/web/app/chat/
+    page.tsx) now has a real terminal_output handler, so the default
+    flipped to True (see Settings.bash_sandbox_streaming_enabled's own
+    docstring) — this test now explicitly disables it to prove the
+    original buffered fallback path still works byte-for-byte the same,
+    rather than relying on a default that's no longer False."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "bash_sandbox_streaming_enabled", False)
     session = ChatSession(session_id="t2b12_default_off", repo_path=str(tmp_path))
     agent = ChatAgent(session)
 

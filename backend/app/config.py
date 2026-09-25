@@ -1135,18 +1135,23 @@ class Settings(BaseSettings):
         description="Docker --network mode for sandboxed bash execution: 'bridge' (default, egress allowed — most real commands, e.g. package installs, need it) or 'none' (strictest, blocks all network egress/exfiltration for deployments that can accept losing network-dependent commands).",
     )
     bash_sandbox_streaming_enabled: bool = Field(
-        default=False,
+        default=True,
         description="T2-B9/#12 (2026-09-24, GRIDIRON_PARTIAL 'Monitor streaming "
         "output (live, mid-command)') — when True, the interactive chat "
         "session's own `bash` tool pushes real terminal_output SSE events as "
         "the sandboxed command's stdout/stderr actually arrive (line-buffered), "
         "instead of only returning the full output once the command exits. "
-        "Default False per the audit's own explicit plan ('change it behind a "
-        "feature flag first ... keep the old buffered path as fallback until "
-        "it's proven stable') — run_sandboxed()'s own buffered SandboxResult "
-        "return value is computed identically either way, so flipping this "
-        "off at any time degrades to exactly today's pre-existing behavior, "
-        "never a functional loss beyond the live-updates themselves.",
+        "Shipped default False behind a feature flag per the audit's own "
+        "explicit plan ('change it behind a feature flag first ... keep the "
+        "old buffered path as fallback until it's proven stable') while its "
+        "backend was the only thing that existed; flipped to True on "
+        "2026-09-25 once the frontend consumer (apps/web/app/chat/page.tsx's "
+        "terminal_output handling) was built and verified — without a "
+        "consumer, the events were being computed and pushed for nothing. "
+        "run_sandboxed()'s own buffered SandboxResult return value is "
+        "computed identically either way, so flipping this off at any time "
+        "still degrades to exactly the pre-existing buffered behavior, never "
+        "a functional loss beyond the live-updates themselves.",
     )
     pty_terminal_enabled: bool = Field(
         default=False,

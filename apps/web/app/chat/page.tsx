@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { confirmChatAction, createChatSession, deleteChatSession, listRepos } from "@/lib/api";
+import { confirmChatAction, createChatSession, deleteChatSession, listRepos, stopChatTurn } from "@/lib/api";
 import type { RepoRecord } from "@/lib/api";
 import { authHeaders } from "@/lib/auth";
 import { TerminalTabs } from "@/components/TerminalTabs";
@@ -15,8 +15,15 @@ type SseEvent =
   | { type: "text_delta"; text: string }
   | { type: "tool_call"; tool_name: string; tool_input: Record<string, unknown>; tool_use_id: string }
   | { type: "tool_result"; tool_name: string; output: string; tool_use_id: string }
+  // T2-B9/#12 UI gap-closure (2026-09-25) — the backend already pushed
+  // these (app/agents/chat_agent.py's bash dispatch, behind
+  // bash_sandbox_streaming_enabled) with no frontend handler at all, so a
+  // running bash command showed nothing until it finished no matter how
+  // long it ran. stream/chunk mirror app.tools.execution.bash's own
+  // on_output(stream_name, line) callback shape exactly.
+  | { type: "terminal_output"; tool_use_id: string; stream: "stdout" | "stderr"; chunk: string }
   | { type: "confirmation_required"; actionId: string; description: string; details: string }
-  | { type: "done" }
+  | { type: "done"; stopped?: boolean }
   | { type: "error"; message: string };
 
 interface TextMessage {
@@ -35,6 +42,10 @@ interface ToolCallMessage {
   tool_input: Record<string, unknown>;
   output?: string;
   expanded: boolean;
+  // #12 UI gap-closure — accumulated live output, shown while this call
+  // has no final `output` yet. Cleared implicitly once `output` arrives
+  // (the final tool_result rendering takes over).
+  liveOutput?: string;
 }
 
 interface ConfirmMessage {
@@ -137,13 +148,28 @@ function ToolCallBlock({ msg, onToggle }: { msg: ToolCallMessage; onToggle: () =
               {formatToolInput(msg.tool_input)}
             </pre>
           </div>
-          {msg.output !== undefined && (
+          {msg.output !== undefined ? (
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">Output</p>
               <pre className="max-h-64 overflow-y-auto overflow-x-auto rounded bg-slate-50 p-2 text-[11px] dark:bg-slate-900 dark:text-slate-300">
                 {msg.output || "(empty)"}
               </pre>
             </div>
+          ) : (
+            msg.liveOutput && (
+              // #12 UI gap-closure — real streamed output, shown WHILE the
+              // command is still running (before the final tool_result
+              // arrives). Distinct styling (dark terminal look) so it
+              // reads as "live", not a finished result.
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-500 mb-1">
+                  Live output
+                </p>
+                <pre className="max-h-64 overflow-y-auto overflow-x-auto rounded bg-slate-950 p-2 text-[11px] text-green-300">
+                  {msg.liveOutput}
+                </pre>
+              </div>
+            )
           )}
         </div>
       )}
@@ -315,6 +341,28 @@ export default function ChatPage() {
     [sessionId],
   );
 
+  // UI gap-closure (2026-09-25) — before this, there was no way to stop an
+  // in-progress turn at all: this component's own AbortController only
+  // ever cancelled the CLIENT's fetch connection, never reaching the
+  // server-side background task actually running the agent (see the SSE
+  // reconnect effect below for that same distinction). This calls the
+  // real backend stop endpoint; the turn's own "done" event (with
+  // `stopped: true`) is what actually flips `streaming` back off, exactly
+  // like a normal completion — this button doesn't touch client state
+  // directly, it just asks the server to stop for real.
+  const [stopping, setStopping] = useState(false);
+  const handleStop = useCallback(async () => {
+    if (!sessionId) return;
+    setStopping(true);
+    try {
+      await stopChatTurn(sessionId);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setStopping(false);
+    }
+  }, [sessionId]);
+
   // ---- Toggle tool call expanded ----
   const toggleTool = useCallback((id: string) => {
     setMessages((prev) =>
@@ -367,6 +415,17 @@ export default function ChatPage() {
         prev.map((m) =>
           m.kind === "tool_call" && m.tool_use_id === event.tool_use_id
             ? { ...m, output: event.output, expanded: true }
+            : m,
+        ),
+      );
+    } else if (event.type === "terminal_output") {
+      // #12 UI gap-closure — append this live chunk to the matching
+      // in-progress tool call, auto-expanding it so the user actually
+      // sees output arrive as the command runs, not just at the end.
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.kind === "tool_call" && m.tool_use_id === event.tool_use_id
+            ? { ...m, liveOutput: (m.liveOutput ?? "") + event.chunk, expanded: true }
             : m,
         ),
       );
@@ -812,22 +871,35 @@ export default function ChatPage() {
                 disabled={streaming}
                 className="flex-1 resize-none rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
               />
-              <button
-                onClick={() => void sendMessage()}
-                disabled={!input.trim() || streaming}
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 shrink-0"
-              >
-                {streaming ? (
-                  <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                  </svg>
-                ) : (
+              {streaming ? (
+                <button
+                  onClick={() => void handleStop()}
+                  disabled={stopping}
+                  title="Stop the agent"
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 shrink-0"
+                >
+                  {stopping ? (
+                    <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                  ) : (
+                    <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+                      <rect x="6" y="6" width="12" height="12" rx="1" />
+                    </svg>
+                  )}
+                </button>
+              ) : (
+                <button
+                  onClick={() => void sendMessage()}
+                  disabled={!input.trim()}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 shrink-0"
+                >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" />
                   </svg>
-                )}
-              </button>
+                </button>
+              )}
             </div>
             <p className="mt-1.5 text-[11px] text-slate-400">
               36 tools available · reads files · edits code · runs tests · manages git · asks before destructive ops
