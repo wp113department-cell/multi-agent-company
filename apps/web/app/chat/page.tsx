@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { confirmChatAction, createChatSession, deleteChatSession, listRepos } from "@/lib/api";
 import type { RepoRecord } from "@/lib/api";
 import { authHeaders } from "@/lib/auth";
+import { TerminalPanel } from "@/components/TerminalPanel";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -212,6 +213,14 @@ export default function ChatPage() {
   const [reconnecting, setReconnecting] = useState(false);
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
 
+  // Q12/#3 — real interactive PTY terminal tab. terminalEverOpened stays
+  // true once set so the WebSocket/Docker container the panel owns
+  // survives switching back to the Chat tab (display:none, not unmount) —
+  // but it starts false so a chat session that never opens a terminal
+  // never spins up a container at all.
+  const [activeView, setActiveView] = useState<"chat" | "terminal">("chat");
+  const [terminalEverOpened, setTerminalEverOpened] = useState(false);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -254,6 +263,8 @@ export default function ChatPage() {
       setSessionId(data.session_id);
       setMessages([]);
       setError(null);
+      setActiveView("chat");
+      setTerminalEverOpened(false);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -271,6 +282,8 @@ export default function ChatPage() {
     setMessages([]);
     setStreaming(false);
     setReconnecting(false);
+    setActiveView("chat");
+    setTerminalEverOpened(false);
   }, [sessionId]);
 
   // Unmount safety — mirrors the task activity feed's cleanup.
@@ -595,6 +608,35 @@ export default function ChatPage() {
         )}
       </div>
 
+      {/* Q12/#3 — Chat / Terminal tabs */}
+      {sessionId && (
+        <div className="mb-3 flex gap-1 border-b border-slate-200 dark:border-slate-700">
+          <button
+            onClick={() => setActiveView("chat")}
+            className={`px-3 py-1.5 text-sm font-medium border-b-2 -mb-px ${
+              activeView === "chat"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+            }`}
+          >
+            Chat
+          </button>
+          <button
+            onClick={() => {
+              setTerminalEverOpened(true);
+              setActiveView("terminal");
+            }}
+            className={`px-3 py-1.5 text-sm font-medium border-b-2 -mb-px ${
+              activeView === "terminal"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+            }`}
+          >
+            Terminal
+          </button>
+        </div>
+      )}
+
       {/* Session start panel */}
       {!sessionId && (
         <div className="flex flex-1 items-center justify-center">
@@ -654,8 +696,15 @@ export default function ChatPage() {
         </div>
       )}
 
+      {/* Q12/#3 — Terminal tab. Kept mounted (display:none/block, not
+          unmounted) once opened so switching back to Chat doesn't kill the
+          live WebSocket/Docker session. */}
+      {sessionId && terminalEverOpened && (
+        <TerminalPanel chatSessionId={sessionId} visible={activeView === "terminal"} />
+      )}
+
       {/* Chat area */}
-      {sessionId && (
+      {sessionId && activeView === "chat" && (
         <div className="flex flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
