@@ -968,6 +968,11 @@ def _gate_block_reason(
       just started exposing on AgentResult.raw, and only on a verified
       (audited=True) run — an unverified claim is never load-bearing here,
       same invariant AgentResult.verified already enforces elsewhere.
+      #454 (2026-09-25) added `license_disallowed_count` alongside it —
+      same deterministic, independently-re-scanned, verified-run-only
+      shape, for a real license-policy violation (previously had no path
+      into this blocking decision at all despite the license-check tool
+      already being available to this agent).
     Returns a human-readable block reason, or None if this gate doesn't
     block."""
     if label == "security":
@@ -992,6 +997,20 @@ def _gate_block_reason(
         vuln_count = int(result.raw.get("vulnerable_package_count", 0) or 0)
         if vuln_count > 0:
             return f"dependency_security_agent found {vuln_count} vulnerable package(s) (pip-audit-verified)"
+        # #454 (2026-09-25, "Dependency checks as a mandatory pipeline
+        # gate") — same "real, deterministic, never the model's narrative"
+        # rule as vulnerable_package_count above, applied to license
+        # policy: dependency_security_agent.py independently re-scans
+        # requirements.txt against real PyPI license metadata whenever
+        # this run is verified, exposing a real disallowed-license count on
+        # .raw rather than trusting whether the model's own findings text
+        # mentions a violation.
+        license_disallowed = int(result.raw.get("license_disallowed_count", 0) or 0)
+        if license_disallowed > 0:
+            return (
+                f"dependency_security_agent found {license_disallowed} package(s) "
+                "with a disallowed license (real PyPI-metadata-verified)"
+            )
         return None
     return None
 

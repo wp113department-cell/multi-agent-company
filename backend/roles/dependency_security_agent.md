@@ -4,14 +4,15 @@
 
 
 ## Role
-Audits project dependencies for known vulnerabilities using LIVE audit tooling only. Maps each advisory to the actual manifest entry, checks whether the vulnerable code path is reachable from our code, and reports fix versions. Read-only; never relies on training-data CVE recall.
+Audits project dependencies for known vulnerabilities and license-policy compliance using LIVE audit tooling only. Maps each advisory to the actual manifest entry, checks whether the vulnerable code path is reachable from our code, and reports fix versions. Read-only; never relies on training-data CVE recall.
 
 ## Process
 1. Read relevant files with read_file and search_code to identify manifests in scope (requirements.txt, package.json).
 2. Run `bash` with a `pip-audit -r requirements.txt --desc` and/or `npm audit` command (only pip-audit/npm audit invocations are allowed — anything else is policy-denied) to get real, current advisory data. This is not optional: a CVE claim not backed by this run's real tool output is not a verified finding, and the run's own `verified` flag is graph-enforced false without it.
-3. Complete the task described in the message.
-4. Use write_file to save reports or output files.
-5. Call submit_dependency_security_agent with summary, findings, and recommendations.
+3. Call `check_target_repo_license_compliance` to check the target repo's own dependencies against license policy — mention any disallowed (strong copyleft) license in your summary/findings. Note: the platform independently re-verifies this itself regardless of whether you call this tool, so skipping it only makes your own written summary less complete, not the actual enforcement.
+4. Complete the task described in the message.
+5. Use write_file to save reports or output files.
+6. Call submit_dependency_security_agent with summary, findings, and recommendations.
 
 ## Zero-hallucination rules
 - All findings must trace to actual tool output from this run's `bash` (pip-audit/npm audit) call — never from training-data CVE recall.

@@ -25,7 +25,7 @@ and removed from the ordered plan below.
 |---|---|---|
 | 1 | #500 Conversational "do that again" | DONE |
 | 2 | #44 Agents create subtasks dynamically | DONE (real gap fixed; flag stays off pending user decision) |
-| 3 | #454 Dependency checks as mandatory gate | PENDING |
+| 3 | #454 Dependency checks as mandatory gate | DONE |
 | 4 | #457 Documentation checks as mandatory gate | PENDING |
 | 5 | #297 Auto documentation lookup while coding | PENDING |
 | 6 | #58 Agent selection uses memory/past outcomes | PENDING |
@@ -157,3 +157,70 @@ flag flip. The audit's own original characterization of this item
 existing, working invariant if rushed") plus its own recommended rollout
 ("enabled only for specific epics/agents initially") both argue for
 asking rather than deciding this one alone.
+
+## #454 — Dependency checks as a mandatory pipeline gate — DONE (2026-09-25)
+
+**Real finding before writing anything (third surprise in a row)**: this
+was ALSO already substantially built. `dependency_security_agent` already
+runs as a real, mandatory, blocking gate — `Settings.
+enable_security_architecture_gates` defaults **True** (flipped during
+Task 2's T2-B5/#453/#455), running security_reviewer/architecture_reviewer/
+dependency_security_agent concurrently after every subtask, with
+`security_architecture_gates_block_severities` defaulting to
+`["critical", "high"]` (non-empty — genuinely mandatory-by-default, not
+opt-in-and-inert).
+
+**Real gap confirmed by direct reading**: `_gate_block_reason`'s own
+"dependency" branch only ever checked `vulnerable_package_count` (a real,
+deterministic, independently-re-run pip-audit count — never the model's
+narrative). `check_target_repo_license_compliance` (#331) was already one
+of this agent's `allowed_tools`, but nothing in its own role file, its
+gate-invocation prompt, or the blocking logic ever actually required or
+acted on a license check — a real license-policy violation had **no path
+into the mandatory gate's blocking decision at all**, despite the
+underlying capability already existing.
+
+**Fix applied**, same rigor as the existing vulnerability check (never
+trust the model's narrative for a blocking decision):
+- `app/agents/dependency_security_agent.py`: `run_dependency_security_agent()`
+  independently re-scans `requirements.txt` via the real
+  `scan_target_repo_dependency_licenses()` (real PyPI metadata) whenever
+  the run is graph-verified, exposing a real, deterministic
+  `license_disallowed_count` on `AgentResult.raw` — same "graph's own
+  recorded truth wins over the model's claim" pattern #462 already
+  established for abandoned-package detection, applied here to a
+  different field.
+- `app/agents/manager.py::_gate_block_reason`: the "dependency" branch now
+  also blocks on `license_disallowed_count > 0`.
+- `roles/dependency_security_agent.md` and the gate's own invocation
+  prompt updated to document license checking as a real, expected part of
+  this role (documentation only — the actual enforcement is code-driven,
+  independent of whether the model remembers to call the tool).
+
+**Deliberate scope boundary, not a gap left open**: #462 (abandoned/
+unmaintained packages) and #463 (real dependency-conflict solver) live on
+a DIFFERENT, separate agent (`dependency_agent`, not
+`dependency_security_agent`) with their own tools
+(`check_last_release`/`check_dependency_conflicts`). Bringing those into
+this SAME hot-path mandatory gate would mean a genuinely new, additional
+LLM agent call on every subtask (real added cost/latency), not a cheap
+prompt extension to an agent already being called — the same class of
+cost/behavior-increasing decision as #44's autonomy-flag question.
+Deliberately left OUT of the mandatory gate for now (available on-demand
+via `dependency_agent` as before) rather than silently expanding gate
+cost without a decision; #454's own core ask — "dependency checks
+mandatory, not merely available" — is satisfied by vulnerabilities +
+license both now genuinely blocking by default.
+
+Tests: 3 new in `tests/test_batch16_quality_gates.py` (blocks on a real
+`license_disallowed_count`, doesn't block when unverified, doesn't block
+when zero — mirrors the pre-existing vulnerability tests exactly) + 3 new
+in `tests/test_dependency_gate_license_check.py` (real end-to-end through
+`run_dependency_security_agent()` itself — mocked PyPI fetch only, per
+the sibling `test_t2b10_target_repo_license_compliance.py`'s own
+established caution against a live "this package is GPL" fixture that
+could drift; real pip-audit side of the same code path short-circuited
+since it's irrelevant to this specific fix). 44/44 across the direct +
+broader regression set (2 known pre-existing baseline failures excluded —
+same CVE-count-drift issue confirmed unrelated all day), 341/342 on a
+broader dependency/gate/manager sweep. Full backend suite pending.

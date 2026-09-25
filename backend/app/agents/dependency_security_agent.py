@@ -181,8 +181,9 @@ def run_dependency_security_agent(
         "1. Read requirements.txt, package.json, and any lockfiles to identify all dependencies.\n"
         "2. For each dependency, check the pinned version against known CVE databases.\n"
         "3. Every finding must cite: package name, current version, CVE identifier, and minimum safe version.\n"
-        "4. Write a security report with write_file if requested.\n"
-        "5. Call submit_dependency_security_agent with summary, findings, and recommendations."
+        "4. Call check_target_repo_license_compliance and mention any disallowed license in your summary.\n"
+        "5. Write a security report with write_file if requested.\n"
+        "6. Call submit_dependency_security_agent with summary, findings, and recommendations."
     )
 
     final_state = run_agent_graph(
@@ -253,6 +254,36 @@ def run_dependency_security_agent(
             logger.warning(
                 "Stage 4 Cluster Q: failed to compute/persist security_score "
                 "for task %s: %s",
+                task_id,
+                exc,
+            )
+
+        # #454 (2026-09-25, "Dependency checks as a mandatory pipeline
+        # gate") — real gap found by direct reading: this agent already
+        # ran as a mandatory blocking gate (manager.py's
+        # enable_security_architecture_gates, default True), but
+        # _gate_block_reason's own "dependency" branch only ever checked
+        # vulnerable_package_count — a license-policy violation had NO path
+        # into the blocking decision at all, even though
+        # check_target_repo_license_compliance is one of this agent's own
+        # allowed_tools (T2-B10/#331) and roles/dependency_security_agent.md
+        # lists it. Same rigor as the vulnerability check right above:
+        # independently re-scans here in code, gated on the same `verified`
+        # flag, rather than trusting whether the model's own narrative
+        # `findings` mention a violation (see #462's own precedent for
+        # exactly this "graph's own recorded truth wins over the model's
+        # claim" reasoning applied to a different field).
+        try:
+            from app.policy.license_check import scan_target_repo_dependency_licenses
+
+            license_report = scan_target_repo_dependency_licenses(
+                repo, "requirements.txt"
+            )
+            if license_report is not None:
+                raw["license_disallowed_count"] = len(license_report.disallowed)
+        except Exception as exc:
+            logger.warning(
+                "#454: failed to compute license compliance for task %s: %s",
                 task_id,
                 exc,
             )

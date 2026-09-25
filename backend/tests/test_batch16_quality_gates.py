@@ -199,6 +199,73 @@ class TestRunAdvisoryQualityGates:
 
         assert block_reason is None
 
+    def test_verified_disallowed_license_blocks(self) -> None:
+        """#454 (2026-09-25, "Dependency checks as a mandatory pipeline
+        gate") — same real, deterministic, never-the-model's-narrative
+        blocking rule as vulnerable_package_count, applied to a real
+        license-policy violation."""
+        from app.agents.manager import _run_advisory_quality_gates
+
+        stack, *_ = _patch_all_three(
+            dep=_result(
+                "completed",
+                raw={"license_disallowed_count": 1},
+                verified=True,
+            )
+        )
+        with stack:
+            _, _, block_reason = asyncio.run(
+                _run_advisory_quality_gates(
+                    task_id=1, subtask_id=1, repo="/tmp/x", epic_id=None, db=None
+                )
+            )
+
+        assert block_reason is not None
+        assert "dependency_security_agent" in block_reason
+        assert "license" in block_reason
+
+    def test_unverified_disallowed_license_does_not_block(self) -> None:
+        """Same invariant as the vulnerability case — an unverified
+        (audited=False) claim is never load-bearing."""
+        from app.agents.manager import _run_advisory_quality_gates
+
+        stack, *_ = _patch_all_three(
+            dep=_result(
+                "completed",
+                raw={"license_disallowed_count": 1},
+                verified=False,
+            )
+        )
+        with stack:
+            _, _, block_reason = asyncio.run(
+                _run_advisory_quality_gates(
+                    task_id=1, subtask_id=1, repo="/tmp/x", epic_id=None, db=None
+                )
+            )
+
+        assert block_reason is None
+
+    def test_allowed_licenses_do_not_block(self) -> None:
+        """Zero-behavior-change proof: a verified run with no disallowed
+        licenses (the common case) must not block on this field."""
+        from app.agents.manager import _run_advisory_quality_gates
+
+        stack, *_ = _patch_all_three(
+            dep=_result(
+                "completed",
+                raw={"license_disallowed_count": 0, "vulnerable_package_count": 0},
+                verified=True,
+            )
+        )
+        with stack:
+            _, _, block_reason = asyncio.run(
+                _run_advisory_quality_gates(
+                    task_id=1, subtask_id=1, repo="/tmp/x", epic_id=None, db=None
+                )
+            )
+
+        assert block_reason is None
+
     def test_empty_block_severities_restores_pure_advisory_behavior(self) -> None:
         from app.agents.manager import _run_advisory_quality_gates
         from app.config import get_settings
