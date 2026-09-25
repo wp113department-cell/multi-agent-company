@@ -852,6 +852,8 @@ async def _dispatch_one_subtask(
                         epic_id=epic_id,
                         db=db,
                         agent_name=selected_agent_name,
+                        worktree_path=worktree_path,
+                        files_changed=files_changed,
                     )
                     local_tokens_in += gate_tokens_in
                     local_tokens_out += gate_tokens_out
@@ -1023,6 +1025,8 @@ async def _run_advisory_quality_gates(
     epic_id: str | None,
     db: AsyncSession | None,
     agent_name: str = "",
+    worktree_path: str = "",
+    files_changed: list[str] | None = None,
 ) -> tuple[int, int, str | None]:
     """AUDIT_Q_BATCH16 §90 gap-closure (2026-08-11) — the real call site
     `enable_security_architecture_gates` needed: security_reviewer and
@@ -1060,12 +1064,25 @@ async def _run_advisory_quality_gates(
     convention as everywhere else in this pipeline — check_agent()'s own
     RegressionReport already encodes that.
 
+    #457 (2026-09-25, GRIDIRON_PARTIAL "Documentation checks (mandatory
+    pre-completion gate)") — adds a fifth, free (no LLM call) gate:
+    doc_coverage.py's AST scan of ONLY this subtask's own changed .py files
+    (`files_changed`/`worktree_path`) for top-level public symbols with no
+    docstring. Deliberately NOT the existing docs.py agent (an LLM-driven
+    epic-level README/changelog writer) — the audit's own plan is explicit
+    that a per-subtask gate needs a scoped-diff check, not that slower,
+    more expensive loop. Inert when `files_changed`/`worktree_path` aren't
+    passed (no data yet is neutral, same convention as the regression gate
+    above).
+
     Returns (tokens_in, tokens_out, block_reason) — block_reason is None
     unless a gate's finding severity is in
     settings.security_architecture_gates_block_severities (security/
-    architecture/dependency) or a real regression was measured
-    (performance). tokens_in/out cover the three extra LLM calls (the
-    regression check makes none) so the caller's real epic-wide token
+    architecture/dependency), a real regression was measured (performance),
+    or undocumented-symbol count exceeds
+    documentation_gate_max_undocumented_public_symbols (documentation).
+    tokens_in/out cover the three extra LLM calls (the regression and
+    documentation checks make none) so the caller's real epic-wide token
     accounting (compute_actual_cost_usd) stays correct — an advisory gate
     that silently omitted its own real spend from cost_actual_usd would
     make that number quietly wrong once an operator opts in.
@@ -1074,6 +1091,7 @@ async def _run_advisory_quality_gates(
     from app.agents.dependency_security_agent import run_dependency_security_agent
     from app.agents.security_reviewer import run_security_review
     from app.fleet.regression_detector import get_regression_detector
+    from app.repo_tools.doc_coverage import check_subtask_doc_coverage
     from app.event_bus.bus import publish_event
     from app.event_bus.models import GridironEvent
 
@@ -1139,13 +1157,33 @@ async def _run_advisory_quality_gates(
             )
             return None
 
+    async def _run_documentation() -> Any:
+        if not worktree_path or not files_changed:
+            return None
+        try:
+            return await asyncio.to_thread(
+                check_subtask_doc_coverage, worktree_path, files_changed
+            )
+        except Exception as exc:
+            logger.warning(
+                "Advisory documentation gate failed for subtask %d: %s",
+                subtask_id,
+                exc,
+            )
+            return None
+
     (
         security_result,
         arch_result,
         dependency_result,
         regression_gate,
+        doc_report,
     ) = await asyncio.gather(
-        _run_security(), _run_architecture(), _run_dependency(), _run_regression()
+        _run_security(),
+        _run_architecture(),
+        _run_dependency(),
+        _run_regression(),
+        _run_documentation(),
     )
 
     block_severities = frozenset(
@@ -1260,6 +1298,57 @@ async def _run_advisory_quality_gates(
             except Exception:
                 logger.debug(
                     "Could not persist performance advisory finding for subtask %d",
+                    subtask_id,
+                    exc_info=True,
+                )
+
+    # #457 — doc_report has its own shape (DocCoverageReport: undocumented
+    # list/count), not AgentResult, same "handled separately" treatment as
+    # regression_gate above. No LLM tokens (pure AST parsing).
+    if doc_report is not None:
+        max_allowed = get_settings().documentation_gate_max_undocumented_public_symbols
+        this_block_reason = (
+            f"{doc_report.undocumented_count} undocumented public symbol(s) in "
+            f"changed files (max allowed {max_allowed}): "
+            f"{', '.join(doc_report.undocumented[:5])}"
+            if doc_report.undocumented_count > max_allowed
+            else None
+        )
+        if this_block_reason and block_reason is None:
+            block_reason = this_block_reason
+        await publish_event(
+            GridironEvent(
+                event_type=(
+                    "subtask.advisory_gate_blocked"
+                    if this_block_reason
+                    else "subtask.advisory_gate_completed"
+                ),
+                task_id=str(task_id),
+                epic_id=epic_id,
+                payload={
+                    "subtask_id": subtask_id,
+                    "gate": "documentation",
+                    "undocumented_count": doc_report.undocumented_count,
+                    "block_reason": this_block_reason,
+                },
+                emitted_by="doc_coverage",
+            ),
+            db=db,
+        )
+        if this_block_reason and db is not None:
+            try:
+                from app.db.repository import append_log
+
+                await append_log(
+                    db,
+                    task_id,
+                    "documentation_advisory",
+                    f"Subtask {subtask_id}: {doc_report.undocumented_count} "
+                    f"undocumented public symbol(s) — [BLOCKING: {this_block_reason}]",
+                )
+            except Exception:
+                logger.debug(
+                    "Could not persist documentation advisory finding for subtask %d",
                     subtask_id,
                     exc_info=True,
                 )

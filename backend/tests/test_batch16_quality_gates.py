@@ -383,6 +383,113 @@ class TestPerformanceRegressionGate:
         assert block_reason is None
 
 
+class TestDocumentationGate:
+    """#457 (2026-09-25, GRIDIRON_PARTIAL "Documentation checks (mandatory
+    pre-completion gate)") — the fifth gate, doc_coverage.py's real AST
+    scan of a subtask's own changed .py files for undocumented public
+    symbols, run alongside the other four."""
+
+    def test_no_worktree_or_files_changed_skips_the_check_entirely(self) -> None:
+        from app.agents.manager import _run_advisory_quality_gates
+
+        stack, *_ = _patch_all_three()
+        with stack, patch(
+            "app.repo_tools.doc_coverage.check_subtask_doc_coverage"
+        ) as mock_check:
+            asyncio.run(
+                _run_advisory_quality_gates(
+                    task_id=1, subtask_id=1, repo="/tmp/x", epic_id=None, db=None
+                )
+            )
+        mock_check.assert_not_called()
+
+    def test_undocumented_public_symbols_over_threshold_blocks(self, tmp_path) -> None:
+        from app.agents.manager import _run_advisory_quality_gates
+
+        (tmp_path / "mod.py").write_text(
+            "def a():\n    pass\n\n"
+            "def b():\n    pass\n\n"
+            "def c():\n    pass\n"
+        )
+        # Uses the real settings object (default max=2); 3 undocumented > 2.
+        stack, *_ = _patch_all_three()
+        with stack:
+            _, _, block_reason = asyncio.run(
+                _run_advisory_quality_gates(
+                    task_id=1,
+                    subtask_id=1,
+                    repo="/tmp/x",
+                    epic_id=None,
+                    db=None,
+                    worktree_path=str(tmp_path),
+                    files_changed=["mod.py"],
+                )
+            )
+        assert block_reason is not None
+        assert "undocumented public symbol" in block_reason
+
+    def test_undocumented_symbols_within_threshold_does_not_block(
+        self, tmp_path
+    ) -> None:
+        from app.agents.manager import _run_advisory_quality_gates
+
+        (tmp_path / "mod.py").write_text("def a():\n    pass\n")
+        stack, *_ = _patch_all_three()
+        with stack:
+            _, _, block_reason = asyncio.run(
+                _run_advisory_quality_gates(
+                    task_id=1,
+                    subtask_id=1,
+                    repo="/tmp/x",
+                    epic_id=None,
+                    db=None,
+                    worktree_path=str(tmp_path),
+                    files_changed=["mod.py"],
+                )
+            )
+        assert block_reason is None
+
+    def test_fully_documented_file_does_not_block(self, tmp_path) -> None:
+        from app.agents.manager import _run_advisory_quality_gates
+
+        (tmp_path / "mod.py").write_text('def a():\n    """Docstring."""\n    pass\n')
+        stack, *_ = _patch_all_three()
+        with stack:
+            _, _, block_reason = asyncio.run(
+                _run_advisory_quality_gates(
+                    task_id=1,
+                    subtask_id=1,
+                    repo="/tmp/x",
+                    epic_id=None,
+                    db=None,
+                    worktree_path=str(tmp_path),
+                    files_changed=["mod.py"],
+                )
+            )
+        assert block_reason is None
+
+    def test_documentation_check_failure_is_non_fatal(self, tmp_path) -> None:
+        from app.agents.manager import _run_advisory_quality_gates
+
+        stack, *_ = _patch_all_three()
+        with stack, patch(
+            "app.repo_tools.doc_coverage.check_subtask_doc_coverage",
+            side_effect=RuntimeError("boom"),
+        ):
+            _, _, block_reason = asyncio.run(
+                _run_advisory_quality_gates(
+                    task_id=1,
+                    subtask_id=1,
+                    repo="/tmp/x",
+                    epic_id=None,
+                    db=None,
+                    worktree_path=str(tmp_path),
+                    files_changed=["mod.py"],
+                )
+            )
+        assert block_reason is None
+
+
 class TestRunManagerAdvisoryGateWiring:
     def test_can_still_be_disabled_via_config(self) -> None:
         """T2-B5 (2026-09-22, GRIDIRON_PARTIAL #453/#455) flipped

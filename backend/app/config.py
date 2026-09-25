@@ -377,6 +377,22 @@ class Settings(BaseSettings):
         description="Severities from security_reviewer/architecture_reviewer findings (and any dependency_security_agent finding on a verified/audited run) that flip subtask_status to 'blocked' instead of merely logging advisory findings. Empty list restores pure advisory-only behavior. Only consulted when enable_security_architecture_gates=True.",
     )
 
+    # #457 (2026-09-25, GRIDIRON_PARTIAL "Documentation checks (mandatory
+    # pre-completion gate)") — a fifth, free (no LLM call) gate alongside
+    # security/architecture/dependency/performance, run whenever
+    # enable_security_architecture_gates=True (no separate opt-in flag,
+    # same "already-gated umbrella" treatment #454's license check got).
+    # Threshold, not a hard 0, since a subtask can legitimately touch a
+    # file with pre-existing undocumented symbols it didn't itself add —
+    # doc_coverage.py only reports symbols missing docstrings in files the
+    # subtask's own diff touched, but can't distinguish "added this run"
+    # from "already there"; a small non-zero default absorbs that honest
+    # imprecision without making the gate toothless.
+    documentation_gate_max_undocumented_public_symbols: int = Field(
+        default=2,
+        description="Max undocumented top-level public function/class symbols allowed across a subtask's own changed .py files before the documentation gate blocks (see doc_coverage.py). Only consulted when enable_security_architecture_gates=True.",
+    )
+
     # Phase 5 — DevOps Agent bash allowlist (comma-separated command prefixes)
     devops_bash_allowlist: str = Field(
         default="git status,git log,git diff,df -h,du -sh,ls,pwd,cat,echo,free -h,uptime",

@@ -26,7 +26,7 @@ and removed from the ordered plan below.
 | 1 | #500 Conversational "do that again" | DONE |
 | 2 | #44 Agents create subtasks dynamically | DONE (real gap fixed; flag stays off pending user decision) |
 | 3 | #454 Dependency checks as mandatory gate | DONE |
-| 4 | #457 Documentation checks as mandatory gate | PENDING |
+| 4 | #457 Documentation checks as mandatory gate | DONE |
 | 5 | #297 Auto documentation lookup while coding | PENDING |
 | 6 | #58 Agent selection uses memory/past outcomes | PENDING |
 | 7 | #405 Company Brain (org knowledge for prompts/tools) | PENDING |
@@ -223,4 +223,64 @@ could drift; real pip-audit side of the same code path short-circuited
 since it's irrelevant to this specific fix). 44/44 across the direct +
 broader regression set (2 known pre-existing baseline failures excluded —
 same CVE-count-drift issue confirmed unrelated all day), 341/342 on a
-broader dependency/gate/manager sweep. Full backend suite pending.
+broader dependency/gate/manager sweep. Full backend suite: 8678 passed, 5
+failed — all 5 match the exact known pre-existing baseline
+(`test_docker_ps_hardening.py` ×3, `test_stage4_cluster_q_security_score.py`
+×2), zero new regressions. Committed `96729da2`.
+
+## #457 — Documentation checks as a mandatory pipeline gate — DONE (2026-09-25)
+
+Per the audit's own IMPLEMENTATION PLAN, deliberately did **not** reuse
+`docs.py` (the existing epic-level, LLM-driven README/changelog writer) —
+too slow/expensive to run per subtask, and not what "pre-completion gate"
+means anyway. Built the scoped-diff check the plan explicitly asked for
+instead: a fifth, free (no LLM call) gate alongside security/architecture/
+dependency/performance in `manager.py::_run_advisory_quality_gates`.
+
+- `app/repo_tools/doc_coverage.py` (new): `check_subtask_doc_coverage()` —
+  pure-AST scan (stdlib `ast`, same convention as `code_hygiene.py`/
+  `reliability_review.py`) of ONLY the subtask's own changed `.py` files
+  (`files_changed`, already computed by the dev-agent dispatch call
+  immediately above the gate call site — no new data needed), flagging
+  top-level PUBLIC (non-underscore) functions/classes with no docstring.
+  Nested/local functions are deliberately out of scope (same documented
+  boundary `reliability_review.py` already accepts for its own nested-call
+  limitation) — proven by a dedicated test
+  (`test_nested_function_is_not_flagged`).
+- `app/agents/manager.py`: `_run_advisory_quality_gates` gained
+  `worktree_path`/`files_changed` params, threaded through from the one
+  real call site inside `_dispatch_one_subtask` (both already in scope
+  there). New `_run_documentation()` gate runs concurrently with the other
+  four; handled with its own shape (`DocCoverageReport`, not `AgentResult`)
+  the same way `regression_gate` already is, not forced into the generic
+  security/architecture/dependency loop. Inert when `worktree_path`/
+  `files_changed` aren't passed — same "no data yet is neutral" convention
+  as the regression gate.
+- `app/config.py`: new `documentation_gate_max_undocumented_public_symbols`
+  (default 2, not 0) — the scan can't distinguish "this subtask just added
+  an undocumented symbol" from "this file already had one before this
+  subtask touched it", so a hard 0 would occasionally block on pre-existing
+  debt the subtask didn't create; a small non-zero threshold absorbs that
+  honest imprecision without making the gate toothless. No separate opt-in
+  flag — runs whenever `enable_security_architecture_gates=True` (already
+  the "gates enabled" umbrella #454 extended the same way), consistent with
+  not requiring operators to discover and set a second flag.
+- Benefits from the SAME retry-before-block safety net #453/#455 built:
+  a subtask that trips this gate gets one real self-correction attempt
+  (the dev agent sees the missing-docstring finding as a `qa_errors` entry
+  and can add docstrings) before the subtask actually blocks — not a
+  first-strike hard stop.
+
+Tests: 8 new in `tests/test_doc_coverage.py` (undocumented function/class
+flagged, documented function not flagged, private symbols not flagged,
+non-.py files skipped, missing/unparseable files skipped without raising,
+only the given changed files are scanned — not the whole worktree, nested
+functions out of scope) + 5 new in
+`tests/test_batch16_quality_gates.py::TestDocumentationGate` (no-data
+skip, over-threshold blocks, within-threshold doesn't block, fully
+documented doesn't block, check failure is non-fatal). 33/33 on
+`test_doc_coverage.py` + `test_batch16_quality_gates.py` together;
+`mypy --strict` clean on all 3 touched files. Broader sweep
+(`quality_gate or doc_coverage or batch16 or manager`): 274 passed, 1
+failed — reproduced passing standalone (a real-RAM-dependent resource-check
+test, unrelated, flaky only under concurrent test-suite memory pressure).
