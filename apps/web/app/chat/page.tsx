@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { confirmChatAction, createChatSession, deleteChatSession, listRepos } from "@/lib/api";
 import type { RepoRecord } from "@/lib/api";
 import { authHeaders } from "@/lib/auth";
-import { TerminalPanel } from "@/components/TerminalPanel";
+import { TerminalTabs } from "@/components/TerminalTabs";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -700,7 +700,7 @@ export default function ChatPage() {
           unmounted) once opened so switching back to Chat doesn't kill the
           live WebSocket/Docker session. */}
       {sessionId && terminalEverOpened && (
-        <TerminalPanel chatSessionId={sessionId} visible={activeView === "terminal"} />
+        <TerminalTabs chatSessionId={sessionId} visible={activeView === "terminal"} />
       )}
 
       {/* Chat area */}

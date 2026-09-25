@@ -204,7 +204,7 @@ export function TerminalPanel({ chatSessionId, visible }: TerminalPanelProps) {
 
   return (
     <div
-      className="flex flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 dark:border-slate-700"
+      className="flex flex-1 flex-col overflow-hidden bg-slate-950"
       style={{ display: visible ? "flex" : "none" }}
     >
       <div className="flex items-center justify-between border-b border-slate-800 px-3 py-2">
