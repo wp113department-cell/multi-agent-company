@@ -47,6 +47,7 @@ const NAV_LINKS = [
   { href: "/tasks", label: "Tasks" },
   { href: "/epics", label: "Epics" },
   { href: "/goals", label: "Goals" },
+  { href: "/roadmap", label: "Roadmap" },
   { href: "/console", label: "Console" },
   { href: "/agents", label: "Agents" },
   { href: "/fleet", label: "Fleet" },

@@ -238,6 +238,27 @@ export async function retryTaskPush(taskId: string): Promise<{ triggered: boolea
   return handleResponse(res);
 }
 
+// #439 (2026-09-22, "User satisfaction — real, not proxy") — POST
+// /api/ratings existed with no way for a user to actually submit one.
+export async function rateAgent(input: {
+  agentName: string;
+  rating: 1 | -1;
+  taskId?: string;
+  comment?: string;
+}): Promise<{ ok: boolean; id: number; agent_name: string; rating: number }> {
+  const res = await apiFetch("/api/ratings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      agent_name: input.agentName,
+      rating: input.rating,
+      task_id: input.taskId ?? null,
+      comment: input.comment ?? null,
+    }),
+  });
+  return handleResponse(res);
+}
+
 // ---------------------------------------------------------------------------
 // Artifacts (Phase 4)
 // ---------------------------------------------------------------------------
@@ -463,6 +484,74 @@ export async function fetchEpicCosts(): Promise<EpicCostSummary[]> {
   const res = await apiFetch("/api/metrics/epics", { cache: "no-store" });
   if (!res.ok) return [];
   return handleResponse<EpicCostSummary[]>(res);
+}
+
+// #381 (2026-09-24, "Usage analytics — full per-user cost/token
+// attribution") — GET /api/metrics/users existed with zero frontend
+// consumer until now.
+export interface UserUsageSummary {
+  createdBy: string;
+  taskCount: number;
+  runCount: number;
+  totalTokensIn: number;
+  totalTokensOut: number;
+  totalCacheReadTokens: number;
+  totalCacheCreationTokens: number;
+  cacheHitRate: number;
+  totalCostEstimate: number;
+}
+
+export async function fetchUserUsage(): Promise<UserUsageSummary[]> {
+  const res = await apiFetch("/api/metrics/users", { cache: "no-store" });
+  if (!res.ok) return [];
+  return handleResponse<UserUsageSummary[]>(res);
+}
+
+// ---------------------------------------------------------------------------
+// Roadmap (#498/#484, 2026-09-24, "Roadmap tracked, sequenced, and
+// re-sequenced against real progress") — backend existed with zero
+// frontend consumer until now.
+// ---------------------------------------------------------------------------
+
+export interface RoadmapItem {
+  id: number;
+  phase: string;
+  initiative: string;
+  impact: string;
+  effort: string;
+  confidence: string;
+  dependencies: string[];
+  sequenceOrder: number;
+  status: string; // planned | in_progress | completed | superseded
+  updatedAt: string | null;
+}
+
+export interface RoadmapRecord {
+  id: number;
+  repoId: number | null;
+  taskId: number | null;
+  summary: string;
+  createdAt: string | null;
+  items: RoadmapItem[];
+}
+
+export async function fetchRoadmap(repoId: number): Promise<RoadmapRecord | null> {
+  const res = await apiFetch(`/api/roadmap?repo_id=${repoId}`, { cache: "no-store" });
+  if (!res.ok) return null;
+  const data = await handleResponse<{ roadmap: RoadmapRecord | null }>(res);
+  return data.roadmap;
+}
+
+export async function updateRoadmapItemStatus(
+  itemId: number,
+  status: string,
+): Promise<{ ok: boolean }> {
+  const res = await apiFetch(`/api/roadmap/items/${itemId}/status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  return handleResponse(res);
 }
 
 // ---------------------------------------------------------------------------

@@ -4,8 +4,10 @@ import { useQuery } from "@tanstack/react-query";
 import {
   fetchSystemMetrics,
   fetchEpicCosts,
+  fetchUserUsage,
   type SystemMetrics,
   type EpicCostSummary,
+  type UserUsageSummary,
 } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
@@ -137,6 +139,12 @@ export default function KpisPage() {
     refetchInterval: 30_000,
   });
 
+  const { data: userUsage, isLoading: loadingUsers } = useQuery<UserUsageSummary[]>({
+    queryKey: ["user-usage"],
+    queryFn: fetchUserUsage,
+    refetchInterval: 30_000,
+  });
+
   if (loadingMetrics) {
     return (
       <div className="flex h-64 items-center justify-center text-sm text-slate-400">
@@ -162,6 +170,7 @@ export default function KpisPage() {
     : 0;
 
   const epics = epicCosts ?? [];
+  const users = userUsage ?? [];
   const sortedAgents = [...metrics.agentTypeBreakdown].sort((a, b) => b.runCount - a.runCount);
   const maxAgentRuns = sortedAgents[0]?.runCount ?? 1;
 
@@ -331,6 +340,67 @@ export default function KpisPage() {
                       </tr>
                     );
                   })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ── Section 6: Usage by user (#381) ───────────────────── */}
+      <section className="space-y-3">
+        <SectionHeader>Usage by user</SectionHeader>
+        {loadingUsers ? (
+          <p className="text-sm text-slate-400 dark:text-slate-500">Loading…</p>
+        ) : users.length === 0 ? (
+          <p className="text-sm text-slate-400 dark:text-slate-500">
+            No attributed usage yet — tasks created without a signed-in actor
+            aren&apos;t counted here.
+          </p>
+        ) : (
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 dark:border-slate-800 text-left text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                    <th className="px-4 py-3">User</th>
+                    <th className="px-4 py-3 text-right">Tasks</th>
+                    <th className="px-4 py-3 text-right">Runs</th>
+                    <th className="px-4 py-3 text-right">Tokens in</th>
+                    <th className="px-4 py-3 text-right">Tokens out</th>
+                    <th className="px-4 py-3 text-right">Cache hit</th>
+                    <th className="px-4 py-3 text-right">Est. cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((u) => (
+                    <tr
+                      key={u.createdBy}
+                      className="border-b border-slate-50 last:border-0 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                    >
+                      <td className="px-4 py-3 font-mono text-xs text-slate-700 dark:text-slate-300">
+                        {u.createdBy}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-slate-600 dark:text-slate-400">
+                        {u.taskCount}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-slate-600 dark:text-slate-400">
+                        {u.runCount}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-slate-600 dark:text-slate-400">
+                        {fmt(u.totalTokensIn)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-slate-600 dark:text-slate-400">
+                        {fmt(u.totalTokensOut)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-slate-600 dark:text-slate-400">
+                        {pct(u.cacheHitRate)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums font-medium text-slate-800 dark:text-slate-200">
+                        {usd(u.totalCostEstimate)}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

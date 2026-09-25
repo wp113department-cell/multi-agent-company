@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { DiffViewer } from "../../../components/DiffViewer";
 import { PipelineView } from "../../../components/PipelineView";
 import { StatusBadge } from "../../../components/StatusBadge";
+import { useState } from "react";
 import {
   approvePipeline,
   fetchArtifacts,
@@ -13,6 +14,7 @@ import {
   fetchTask,
   fetchTaskImages,
   fetchTaskPr,
+  rateAgent,
   rejectPipeline,
   restartTask,
   retryTaskPush,
@@ -20,6 +22,64 @@ import {
   triggerPipeline,
   updateTaskStatus,
 } from "../../../lib/api";
+
+// #439 (2026-09-22, "User satisfaction — real, not proxy") — the backend
+// endpoint (POST /api/ratings) existed with no way for a user to actually
+// submit one. No GET-my-rating endpoint exists to check for a prior
+// rating, so "already rated" is tracked only for this page view (resets on
+// reload) — a deliberate, minimal scope match to what the backend exposes,
+// not a persistence gap this component can fix on its own.
+function AgentRatingWidget({ agentName, taskId }: { agentName: string; taskId: string }) {
+  const [submitted, setSubmitted] = useState<1 | -1 | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (rating: 1 | -1) => {
+    setPending(true);
+    setError(null);
+    try {
+      await rateAgent({ agentName, rating, taskId });
+      setSubmitted(rating);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  if (submitted !== null) {
+    return (
+      <p className="text-xs text-slate-500">
+        Thanks for the feedback {submitted === 1 ? "👍" : "👎"} on {agentName}&apos;s work.
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-slate-500">Was {agentName}&apos;s work helpful?</span>
+      <button
+        type="button"
+        onClick={() => void submit(1)}
+        disabled={pending}
+        aria-label="Thumbs up"
+        className="rounded-full border border-slate-200 px-2 py-1 text-sm hover:bg-green-50 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-green-900/20"
+      >
+        👍
+      </button>
+      <button
+        type="button"
+        onClick={() => void submit(-1)}
+        disabled={pending}
+        aria-label="Thumbs down"
+        className="rounded-full border border-slate-200 px-2 py-1 text-sm hover:bg-red-50 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-red-900/20"
+      >
+        👎
+      </button>
+      {error && <span className="text-xs text-red-600">{error}</span>}
+    </div>
+  );
+}
 
 export default function TaskDetailPage() {
   const params = useParams<{ id: string }>();
@@ -386,6 +446,14 @@ export default function TaskDetailPage() {
         <div className="rounded-lg border border-slate-200 bg-white p-5">
           <h2 className="mb-2 text-sm font-semibold text-slate-700">Summary</h2>
           <p className="text-sm text-slate-700">{task.finalSummary}</p>
+        </div>
+      )}
+
+      {/* #439 — real user satisfaction rating, once there's finished work
+          from a real agent to rate. */}
+      {task.status === "completed" && task.assignedAgent && (
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+          <AgentRatingWidget agentName={task.assignedAgent} taskId={String(task.id)} />
         </div>
       )}
 
