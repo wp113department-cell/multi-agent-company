@@ -32,7 +32,7 @@ and removed from the ordered plan below.
 | 7 | #405 Company Brain (org knowledge for prompts/tools) | DONE |
 | 8 | #66 Switch tools mid-run | DONE |
 | 9 | #443 Detect hallucinating/leaking/desynced agents | DONE (scoped — see write-up) |
-| 10 | #45 + #67 Agent-to-agent delegation | PENDING |
+| 10 | #45 + #67 Agent-to-agent delegation | DONE (already built, no code needed) |
 | 11 | #227 Human takeover / step-level plan editing | PENDING |
 | — | #169 + #171 + #494 Distributed registry / horizontal scaling | SKIPPED (user decision, all three) |
 
@@ -618,3 +618,46 @@ seeded one) — a real, deliberate shape change on my own part that I'd
 missed testing for at #405's own commit time; caught by this session's own
 "always run the full suite before calling an item done" discipline rather
 than shipped silently. 18/18 in both files pass after the fix.
+
+## #45 + #67 — Agent-to-agent delegation — ALREADY DONE, no code needed (2026-09-28)
+
+Confirmed via direct reading, no new code written: `app/agents/delegation.py`
++ `app/tools/agents/delegate.py` (`delegate_to_agent` tool) already satisfy
+every requirement BOTH items' own IMPLEMENTATION PLAN asked for, built
+as its own unit ("plan14 Day 4") **well before this Task 3 initiative
+began** — the audit's "NO" verdict for both is simply stale, the same
+class of discovery this session already made for #58/#129/#90/#98.
+
+- **#45's 3 requirements** ("an explicit allow-list per agent role", "a
+  delegation-depth cap", "cost/budget propagation"): all three are real,
+  live, config-driven, and already covered by 20 passing tests
+  (`tests/test_delegation.py`) — `delegation_allowed_matrix` (source
+  agent → allowed target CAPABILITIES, default-deny outside the list),
+  `delegation_max_depth` (chain-length cap, refused before dispatch, not
+  after) + real cycle detection, and `delegation_default_budget_usd` with
+  a genuinely decrementing running balance across multiple delegations in
+  one run (a real bug in this exact area — budget not actually
+  decrementing — was found and fixed during an EARLIER productionization
+  pass, tool_enhance.md tool #3, 2026-08-15, confirmed via that file's own
+  documented "real gaps found" section).
+- **#67** ("call additional agents mid-run"): literally the same
+  mechanism from the calling agent's own perspective — `delegate_to_agent`
+  is an ordinary tool available during any covered agent's turn, invoked
+  whenever the model chooses to, mid-run, by construction (not a separate
+  pre-run-only registration).
+- Routing is capability-based (`FleetManager.select()` resolves the
+  concrete agent — never a hardcoded target name), reusing the SAME
+  performance-aware scoring mechanism #58 also depends on, not a second
+  routing system.
+- Currently wired for 3 source agents (`backend_dev`, `frontend_dev`,
+  `bug_fix`) via `delegation_allowed_matrix` — a deliberate, small,
+  curated allow-list per the plan's own "a security boundary, not
+  open-ended" requirement, not a coverage gap; expanding it to more
+  agents is an additive config change, not a redesign (per
+  `delegation.py`'s own module docstring).
+
+No production code changes — verified existing behavior with
+`pytest tests/test_delegation.py` (20/20 pass) rather than duplicating an
+already-real, already-tested mechanism, per this session's own standing
+rule: "if the current source shows that an old gap has already been
+fixed, do not recreate it."
