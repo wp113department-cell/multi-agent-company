@@ -13,6 +13,7 @@ from pathlib import Path
 
 from app.repo_tools.code_hygiene import (
     find_broken_imports,
+    find_broken_imports_in_files,
     find_duplicate_functions,
     find_unused_files,
 )
@@ -96,6 +97,58 @@ def test_unresolvable_relative_import_is_flagged(tmp_path: Path) -> None:
     result = find_broken_imports(str(tmp_path))
     assert result is not None
     assert any(b.module == ".nonexistent_module" for b in result)
+
+
+# ---------------------------------------------------------------------------
+# find_broken_imports_in_files — #297 (2026-09-28, "Use documentation while
+# coding automatically") — the scoped-diff variant used as the auto
+# doc-lookup trigger.
+# ---------------------------------------------------------------------------
+
+
+def test_scoped_empty_or_missing_directory_returns_empty_list(tmp_path: Path) -> None:
+    assert find_broken_imports_in_files(str(tmp_path / "nope"), ["a.py"]) == []
+    assert find_broken_imports_in_files(str(tmp_path), []) == []
+
+
+def test_scoped_detects_unresolvable_import_in_a_given_file(tmp_path: Path) -> None:
+    _write(tmp_path, "a.py", "import totally_fake_module_xyz_never_real\n")
+    result = find_broken_imports_in_files(str(tmp_path), ["a.py"])
+    assert len(result) == 1
+    assert result[0].module == "totally_fake_module_xyz_never_real"
+
+
+def test_scoped_only_scans_the_given_files_not_the_whole_directory(
+    tmp_path: Path,
+) -> None:
+    _write(tmp_path, "touched.py", "import totally_fake_module_xyz_never_real\n")
+    _write(tmp_path, "untouched.py", "import another_totally_fake_module_abc\n")
+    result = find_broken_imports_in_files(str(tmp_path), ["touched.py"])
+    assert len(result) == 1
+    assert result[0].file == "touched.py"
+
+
+def test_scoped_missing_file_is_skipped_not_raised(tmp_path: Path) -> None:
+    assert find_broken_imports_in_files(str(tmp_path), ["does_not_exist.py"]) == []
+
+
+def test_scoped_non_python_file_is_skipped(tmp_path: Path) -> None:
+    _write(tmp_path, "notes.md", "import fake_thing_in_markdown\n")
+    assert find_broken_imports_in_files(str(tmp_path), ["notes.md"]) == []
+
+
+def test_scoped_guarded_optional_import_is_not_flagged(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "a.py",
+        "try:\n    import totally_fake_optional_dep_xyz\nexcept ImportError:\n    pass\n",
+    )
+    assert find_broken_imports_in_files(str(tmp_path), ["a.py"]) == []
+
+
+def test_scoped_resolvable_stdlib_import_is_not_flagged(tmp_path: Path) -> None:
+    _write(tmp_path, "a.py", "import os\nimport json\n")
+    assert find_broken_imports_in_files(str(tmp_path), ["a.py"]) == []
 
 
 # ---------------------------------------------------------------------------

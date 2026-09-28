@@ -393,6 +393,27 @@ class Settings(BaseSettings):
         description="Max undocumented top-level public function/class symbols allowed across a subtask's own changed .py files before the documentation gate blocks (see doc_coverage.py). Only consulted when enable_security_architecture_gates=True.",
     )
 
+    # #297 (2026-09-28, GRIDIRON_PARTIAL "Use documentation while coding
+    # automatically (no explicit call)") — the audit's own plan explicitly
+    # rejected a generic "looks stuck, fetch docs" heuristic as too fragile
+    # and named the one narrow, high-confidence trigger it trusts: "only
+    # fire when an import fails to resolve". Real, deterministic
+    # (code_hygiene.py's own AST-based import-resolution check, no LLM
+    # judgment call about when to look something up), and bounded to a
+    # handful of real PyPI network calls per subtask attempt — default True
+    # since a broken import is, by construction, already a real bug the
+    # subtask needs to fix on its next retry attempt regardless; this only
+    # makes that fix faster by handing the dev agent real registry data
+    # instead of a bare ImportError.
+    enable_auto_doc_lookup_on_broken_import: bool = Field(
+        default=True,
+        description="When a subtask's own changed .py files contain an import that code_hygiene.py's real resolution check confirms cannot resolve, look up that package on PyPI (see doc_lookup.py) and feed the real result back to the dev agent as a retry hint, instead of only reporting a bare unresolved-import error.",
+    )
+    auto_doc_lookup_max_imports_per_attempt: int = Field(
+        default=3,
+        description="Max distinct unresolved imports looked up per subtask attempt (bounds real PyPI network calls). Only consulted when enable_auto_doc_lookup_on_broken_import=True.",
+    )
+
     # Phase 5 — DevOps Agent bash allowlist (comma-separated command prefixes)
     devops_bash_allowlist: str = Field(
         default="git status,git log,git diff,df -h,du -sh,ls,pwd,cat,echo,free -h,uptime",

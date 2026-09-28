@@ -27,7 +27,7 @@ and removed from the ordered plan below.
 | 2 | #44 Agents create subtasks dynamically | DONE (real gap fixed; flag stays off pending user decision) |
 | 3 | #454 Dependency checks as mandatory gate | DONE |
 | 4 | #457 Documentation checks as mandatory gate | DONE |
-| 5 | #297 Auto documentation lookup while coding | PENDING |
+| 5 | #297 Auto documentation lookup while coding | DONE |
 | 6 | #58 Agent selection uses memory/past outcomes | PENDING |
 | 7 | #405 Company Brain (org knowledge for prompts/tools) | PENDING |
 | 8 | #66 Switch tools mid-run | PENDING |
@@ -284,3 +284,78 @@ documented doesn't block, check failure is non-fatal). 33/33 on
 (`quality_gate or doc_coverage or batch16 or manager`): 274 passed, 1
 failed — reproduced passing standalone (a real-RAM-dependent resource-check
 test, unrelated, flaky only under concurrent test-suite memory pressure).
+
+## #297 — Auto documentation lookup while coding — DONE (2026-09-28)
+
+The audit's own IMPLEMENTATION PLAN explicitly rejected a generic "looks
+stuck, fetch docs" heuristic as too fragile ("no reliable non-regex signal
+exists") and named the ONE narrow, high-confidence trigger it trusts:
+"only fire when an import fails to resolve ... treat it as an opt-in
+suggestion the agent surfaces, not a silent automatic fetch." Built exactly
+that, reusing #396's own real import-resolution engine rather than a new
+one.
+
+- `app/repo_tools/code_hygiene.py`: refactored `find_broken_imports`'s
+  per-file scan into a shared `_scan_file_for_broken_imports()` helper, and
+  added `find_broken_imports_in_files(directory, files)` — the same real
+  resolution logic (stdlib `importlib.util.find_spec`, real on-disk
+  resolution for relative imports, `try/except (ImportError\|...)`-guarded
+  imports correctly never flagged), scoped to a specific file list instead
+  of a whole-directory scan, so it's cheap enough to run on every subtask
+  attempt.
+- `app/repo_tools/doc_lookup.py` (new): `lookup_package_doc_hint(package)`
+  — real PyPI JSON metadata fetch (same curl-based invocation convention
+  as `check_last_release.py`, not a new pattern), returning the package's
+  real summary/homepage if a PyPI project of that exact name exists, or an
+  honest "no PyPI package named X" note if it doesn't (the single most
+  common real cause: import name ≠ pip install name, e.g. `import cv2`
+  needs `opencv-python`). Never an LLM guess — real registry data or a
+  plain degraded string, never a raise.
+- `app/agents/manager.py`: wired into `_dispatch_one_subtask`'s retry loop
+  at the SAME tier as the existing `dev_error` check — right after the dev
+  agent produces its diff, before commit/QA/review. When the subtask's own
+  changed `.py` files contain an unresolvable import, up to
+  `auto_doc_lookup_max_imports_per_attempt` (default 3) real PyPI lookups
+  are done and fed into `qa_errors` — the SAME mechanism that already
+  becomes `retry_context` in the dev agent's next-attempt plan. This is the
+  literal mechanism for "documentation surfaces automatically, no explicit
+  call" — the dev agent never has to call a search/lookup tool itself; the
+  real registry data is simply present in its next prompt.
+- `app/config.py`: new `enable_auto_doc_lookup_on_broken_import` (default
+  **True** — a broken import is, by construction, already a bug the
+  subtask needs to fix on its next retry regardless, so this only makes
+  that fix faster with real data instead of a bare `ImportError`; bounded
+  to a handful of real HTTP calls, no LLM cost) and
+  `auto_doc_lookup_max_imports_per_attempt` (default 3, bounds real network
+  calls per attempt).
+- Deliberately non-blocking on its own: this never sets `gate_blocked_reason`
+  the way #453–457 do — it only forces a normal dev-retry cycle (same as a
+  `dev_error`), consistent with the plan's "opt-in suggestion... not a
+  silent automatic fetch" framing — it's advisory context for the very next
+  real attempt, not a new blocking gate.
+
+Tests: 7 new in `tests/test_t2b5_code_hygiene.py` (scoped-file variant:
+detects, only scans given files not the whole directory, missing/non-.py
+files skipped, guarded/stdlib imports not flagged) + 6 new in
+`tests/test_doc_lookup.py` (2 REAL live pypi.org lookups — a real package,
+a guaranteed-nonexistent name — plus curl-not-found/timeout/malformed-JSON/
+unexpected-shape all degrading cleanly, matching `check_last_release.py`'s
+own established real-network-test convention) + 4 new in
+`tests/test_auto_doc_lookup_gate.py` (real broken-import file on a real
+tmp_path worktree end-to-end through `run_manager()`: blocks after
+retries exhausted with the real hint text present in the SECOND dev-agent
+call's own `plan` argument — proving actual automatic delivery, not just
+that a variable was set; a self-corrected import on retry completes
+normally; disabled via config skips the scan entirely; a clean import
+doesn't affect normal completion). 36/36 new+touched tests pass;
+`mypy --strict` clean on all 4 touched files. Broader sweep (`code_hygiene
+or doc_lookup or doc_coverage or auto_doc_lookup or quality_gate or batch16
+or manager or hygiene`): after a mid-session Docker/Postgres outage (fixed
+via `systemctl --user start docker-desktop` + `docker compose up -d db
+redis`, same recovery as before), 311 passed, 4 failed — all 4 are the
+same real-RAM-dependent resource-check tests (machine had genuinely only
+673Mi free at the time, confirmed via `free -h`/`ps aux --sort=-%mem` —
+Docker's own VM, VSCode/Pylance, and open browsers accounted for the
+load), reproduced failing standalone under the same real low-memory
+condition — not a regression, the resource check is correctly reporting
+real system state. Full backend suite pending before this is pushed.

@@ -93,6 +93,51 @@ class BrokenImport:
     module: str
 
 
+def _scan_file_for_broken_imports(fp: Path, root: Path) -> list[BrokenImport]:
+    """Per-file broken-import scan shared by find_broken_imports (whole
+    directory) and find_broken_imports_in_files (a specific file list) —
+    callers must have already put `root` on sys.path for top-level
+    resolution to work."""
+    broken: list[BrokenImport] = []
+    try:
+        source = fp.read_text(encoding="utf-8", errors="replace")
+        tree = ast.parse(source, filename=str(fp))
+    except (SyntaxError, OSError):
+        return broken
+    rel = str(fp.relative_to(root))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top_level = alias.name.split(".")[0]
+                if not _resolves(
+                    top_level
+                ) and not _is_guarded_by_import_error_handler(tree, node):
+                    broken.append(BrokenImport(rel, node.lineno, alias.name))
+        elif isinstance(node, ast.ImportFrom):
+            if node.level and node.level > 0:
+                # Relative import — resolved by real file existence,
+                # not sys.path (package context for an arbitrary
+                # scanned tree isn't reliably computable otherwise).
+                if node.module is None:
+                    continue  # "from . import x" — the package itself; skip, too ambiguous to check per-name reliably
+                if not _relative_import_resolves(fp, node.level, node.module):
+                    if not _is_guarded_by_import_error_handler(tree, node):
+                        broken.append(
+                            BrokenImport(
+                                rel, node.lineno, "." * node.level + node.module
+                            )
+                        )
+                continue
+            if node.module is None:
+                continue
+            top_level = node.module.split(".")[0]
+            if not _resolves(
+                top_level
+            ) and not _is_guarded_by_import_error_handler(tree, node):
+                broken.append(BrokenImport(rel, node.lineno, node.module))
+    return broken
+
+
 def find_broken_imports(directory: str) -> list[BrokenImport] | None:
     """Real, resolvable-or-not check for every top-level import in
     `directory`'s .py files — not a claim of the LLM's own memory of
@@ -110,42 +155,40 @@ def find_broken_imports(directory: str) -> list[BrokenImport] | None:
     try:
         broken: list[BrokenImport] = []
         for fp in py_files:
-            try:
-                source = fp.read_text(encoding="utf-8", errors="replace")
-                tree = ast.parse(source, filename=str(fp))
-            except SyntaxError:
+            broken.extend(_scan_file_for_broken_imports(fp, root))
+        return broken
+    finally:
+        try:
+            sys.path.remove(root_str)
+        except ValueError:
+            pass
+
+
+def find_broken_imports_in_files(
+    directory: str, files: list[str]
+) -> list[BrokenImport]:
+    """#297 (2026-09-28, "Use documentation while coding automatically") —
+    the audit's own IMPLEMENTATION PLAN's suggested narrow, high-confidence
+    trigger: "only fire when an import fails to resolve". Same real
+    resolution logic as find_broken_imports, scoped to only the given
+    (worktree-relative) `files` — a subtask's own diff — instead of a full
+    repo scan, so it's cheap enough to run on every subtask attempt.
+    Never raises; a missing/unreadable/non-.py file is silently skipped.
+    """
+    root = Path(directory)
+    if not root.exists():
+        return []
+    root_str = str(root.resolve())
+    sys.path.insert(0, root_str)
+    try:
+        broken: list[BrokenImport] = []
+        for rel_path in files:
+            if not rel_path.endswith(".py"):
                 continue
-            rel = str(fp.relative_to(root))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Import):
-                    for alias in node.names:
-                        top_level = alias.name.split(".")[0]
-                        if not _resolves(
-                            top_level
-                        ) and not _is_guarded_by_import_error_handler(tree, node):
-                            broken.append(BrokenImport(rel, node.lineno, alias.name))
-                elif isinstance(node, ast.ImportFrom):
-                    if node.level and node.level > 0:
-                        # Relative import — resolved by real file existence,
-                        # not sys.path (package context for an arbitrary
-                        # scanned tree isn't reliably computable otherwise).
-                        if node.module is None:
-                            continue  # "from . import x" — the package itself; skip, too ambiguous to check per-name reliably
-                        if not _relative_import_resolves(fp, node.level, node.module):
-                            if not _is_guarded_by_import_error_handler(tree, node):
-                                broken.append(
-                                    BrokenImport(
-                                        rel, node.lineno, "." * node.level + node.module
-                                    )
-                                )
-                        continue
-                    if node.module is None:
-                        continue
-                    top_level = node.module.split(".")[0]
-                    if not _resolves(
-                        top_level
-                    ) and not _is_guarded_by_import_error_handler(tree, node):
-                        broken.append(BrokenImport(rel, node.lineno, node.module))
+            fp = root / rel_path
+            if not fp.exists():
+                continue
+            broken.extend(_scan_file_for_broken_imports(fp, root))
         return broken
     finally:
         try:

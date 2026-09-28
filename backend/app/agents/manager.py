@@ -641,6 +641,60 @@ async def _dispatch_one_subtask(
             await asyncio.sleep(0.5 * (2**attempt))
             continue
 
+        # #297 (2026-09-28, GRIDIRON_PARTIAL "Use documentation while coding
+        # automatically (no explicit call)") — the audit's own narrow,
+        # high-confidence trigger: an import in this subtask's own diff
+        # that a real static resolution check confirms cannot resolve.
+        # Checked before commit/QA/review, same tier as the dev_error check
+        # above, so the dev agent gets real PyPI documentation fed back
+        # through the SAME retry mechanism dev_error already uses — no
+        # explicit tool call required on its part, and never a silent
+        # context injection (it's logged, and only ever surfaced as a
+        # retry-context hint, same as any other qa_errors entry).
+        if files_changed and get_settings().enable_auto_doc_lookup_on_broken_import:
+            try:
+                from app.repo_tools.code_hygiene import find_broken_imports_in_files
+                from app.repo_tools.doc_lookup import lookup_package_doc_hint
+
+                broken_imports = await asyncio.to_thread(
+                    find_broken_imports_in_files, worktree_path, files_changed
+                )
+            except Exception:
+                logger.debug(
+                    "Auto doc-lookup broken-import scan failed for subtask %d "
+                    "(non-fatal)",
+                    subtask_id,
+                    exc_info=True,
+                )
+                broken_imports = []
+            if broken_imports:
+                max_lookups = get_settings().auto_doc_lookup_max_imports_per_attempt
+                hints = []
+                for bi in broken_imports[:max_lookups]:
+                    top_level = bi.module.lstrip(".").split(".")[0]
+                    try:
+                        hint = await asyncio.to_thread(
+                            lookup_package_doc_hint, top_level
+                        )
+                    except Exception:
+                        hint = "(doc lookup failed — non-fatal)"
+                    hints.append(
+                        f"{bi.file}:{bi.line}: import '{bi.module}' could not "
+                        f"be resolved. {hint}"
+                    )
+                qa_errors = hints
+                logger.warning(
+                    "Auto doc-lookup attempt %d subtask %d: %d unresolved "
+                    "import(s)",
+                    attempt + 1,
+                    subtask_id,
+                    len(broken_imports),
+                )
+                if not should_retry(attempt + 1, max_retries):
+                    break
+                await asyncio.sleep(0.5 * (2**attempt))
+                continue
+
         # Gap-closure (2026-07-22, Day 14 prep) — nothing in the dev-agent
         # path ever committed changes to the worktree's branch (confirmed
         # by grep before writing this: submit_patch only ever recorded
