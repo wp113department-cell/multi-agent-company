@@ -500,6 +500,13 @@ async def _dispatch_one_subtask(
     review_summary = ""
     qa_summary = ""
     review_findings: list[dict[str, Any]] = []
+    # #66 (2026-09-28, GRIDIRON_PARTIAL "Switch tools mid-run") — real,
+    # state-gated tool unlock for the dev agent's NEXT attempt. Set True
+    # only when this attempt's own gate check found a genuine
+    # security_reviewer finding (never a blanket "always available"
+    # expansion); reset False otherwise so a later, unrelated retry
+    # doesn't keep an unlock from an earlier, now-irrelevant attempt.
+    security_scan_unlocked = False
     subtask_diff = ""
 
     # Gap-closure (Audit 04 fix, ORCH-04-009): concurrency.py's semaphores
@@ -602,6 +609,7 @@ async def _dispatch_one_subtask(
                         images=images,
                         extra_env=extra_env,
                         subtask_proposal_sink=propose_sink,
+                        security_scan_unlocked=security_scan_unlocked,
                     )
                 else:
                     (
@@ -617,6 +625,7 @@ async def _dispatch_one_subtask(
                         worktree_path=worktree_path,
                         repo_path=repo,
                         extra_env=extra_env,
+                        security_scan_unlocked=security_scan_unlocked,
                         subtask_proposal_sink=propose_sink,
                     )
         except SlotAcquisitionTimeout as exc:
@@ -630,6 +639,7 @@ async def _dispatch_one_subtask(
 
         if dev_error:
             qa_errors = [f"Dev agent error: {dev_error}"]
+            security_scan_unlocked = False
             logger.warning(
                 "Dev error attempt %d subtask %d: %s",
                 attempt + 1,
@@ -683,6 +693,7 @@ async def _dispatch_one_subtask(
                         f"be resolved. {hint}"
                     )
                 qa_errors = hints
+                security_scan_unlocked = False
                 logger.warning(
                     "Auto doc-lookup attempt %d subtask %d: %d unresolved "
                     "import(s)",
@@ -766,6 +777,7 @@ async def _dispatch_one_subtask(
 
         if qa_result.status == "failed":
             qa_errors = qa_result.errors or [qa_result.summary]
+            security_scan_unlocked = False
             await publish_event(
                 GridironEvent(
                     event_type="qa.failed",
@@ -924,6 +936,11 @@ async def _dispatch_one_subtask(
                 subtask_status = "completed"
                 break
 
+            # #66 — a real, code-checked signal (this message is generated
+            # deterministically by _gate_block_reason's own "security"
+            # branch, never model-authored text), not a fragile guess.
+            security_scan_unlocked = "security_reviewer reported" in gate_blocked_reason
+
             qa_errors = [
                 f"Security/architecture/dependency gate: {gate_blocked_reason}"
             ]
@@ -944,6 +961,7 @@ async def _dispatch_one_subtask(
             for f in review_result.findings
             if f.severity == "blocking"
         ]
+        security_scan_unlocked = False
         logger.warning(
             "Reviewer blocking findings attempt %d subtask %d",
             attempt + 1,

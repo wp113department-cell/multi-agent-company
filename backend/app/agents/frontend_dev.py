@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from app.agents.base_graph import VerificationConfig, run_agent_graph
@@ -28,6 +29,7 @@ from app.tools.agents.delegate import (
     DELEGATE_TO_AGENT_TOOL,
     make_delegate_to_agent_handler,
 )
+from app.tools.filesystem.secrets_scan import SECRETS_SCAN_TOOL, secrets_scan_handler
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +155,7 @@ def run_frontend_dev(
     images: list[dict[str, str]] | None = None,
     extra_env: dict[str, str] | None = None,
     subtask_proposal_sink: list[dict[str, Any]] | None = None,
+    security_scan_unlocked: bool = False,
 ) -> tuple[list[str], str | None, int, int]:
     """Run frontend developer agent with static-check retry loop.
 
@@ -176,6 +179,11 @@ def run_frontend_dev(
     settings.dynamic_subtask_creation_enabled_agents) passes a list,
     propose_subtask is wired in and any proposal appended to it — owned
     and read by the caller, never by this function, which only appends.
+
+    security_scan_unlocked (#66, 2026-09-28): see backend_dev.py's
+    identical parameter docstring — same mechanism, same trigger
+    (manager.py's own security_reviewer gate-block signal), same one-
+    retry-attempt scope.
     """
     from app.fleet.failure_ladder import should_retry
 
@@ -222,6 +230,16 @@ def run_frontend_dev(
                 subtask_proposal_sink
             )
 
+        # #66 (2026-09-28) — real, state-gated tool unlock, not a blanket
+        # expansion: only present on the attempt right after a genuine
+        # security_reviewer gate block. Same mechanism as backend_dev.py.
+        if security_scan_unlocked:
+            wt_root = Path(worktree_path)
+            tools = tools + [SECRETS_SCAN_TOOL]
+            handlers["secrets_scan"] = lambda inp: secrets_scan_handler(
+                wt_root, worktree_path, inp
+            )
+
         base_msg = (
             f"Task ID: {task_id}, Subtask ID: {subtask_id}\n\n"
             f"Frontend Implementation Plan:\n{plan}"
@@ -235,6 +253,13 @@ def run_frontend_dev(
                 f"\n\n[SELF-CORRECTION ATTEMPT {attempt}] "
                 f"Previous attempt failed TypeScript typecheck:\n{check_error}\n"
                 "Fix all type errors before submitting."
+            )
+        if security_scan_unlocked:
+            base_msg += (
+                "\n\n[SECURITY TOOL UNLOCKED] A prior review flagged a "
+                "security finding on this subtask. You now have access to "
+                "the secrets_scan tool — use it on the files you changed "
+                "to verify and fix the flagged issue before resubmitting."
             )
 
         try:

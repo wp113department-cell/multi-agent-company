@@ -13,6 +13,7 @@ Static-check retry loop kept because mypy/ruff run OUTSIDE the LLM graph.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from app.agents.base_graph import VerificationConfig, run_agent_graph
@@ -27,6 +28,7 @@ from app.tools.agents.delegate import (
     DELEGATE_TO_AGENT_TOOL,
     make_delegate_to_agent_handler,
 )
+from app.tools.filesystem.secrets_scan import SECRETS_SCAN_TOOL, secrets_scan_handler
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +146,7 @@ def run_backend_dev(
     on_tool_call: Any = None,  # kept for backward compat — no-op
     extra_env: dict[str, str] | None = None,
     subtask_proposal_sink: list[dict[str, Any]] | None = None,
+    security_scan_unlocked: bool = False,
 ) -> tuple[list[str], str | None, int, int]:
     """Run backend developer agent with static-check retry loop.
 
@@ -166,6 +169,18 @@ def run_backend_dev(
     is wired in and any proposal the agent makes is appended to that list —
     owned and read by the caller, never by this function, which only ever
     appends.
+
+    security_scan_unlocked (#66, 2026-09-28, GRIDIRON_PARTIAL "Switch tools
+    mid-run"): False (the default) means today's exact tool list — the
+    audit's own IMPLEMENTATION PLAN required a concrete, real state signal
+    before adding any code here, not a blanket expansion. The one caller
+    (app.agents.manager._dispatch_one_subtask) sets this True only for the
+    retry attempt immediately following a real security_reviewer-triggered
+    gate block (see manager.py's own gate_blocked_reason handling) — a
+    reviewer-flagged security issue unlocks the same secrets_scan tool
+    security_reviewer itself already has, so the dev agent can actually
+    verify/fix the flagged issue instead of guessing from the finding text
+    alone. Scoped to that one retry attempt only, not a permanent grant.
     """
     from app.fleet.failure_ladder import should_retry
 
@@ -206,6 +221,16 @@ def run_backend_dev(
                 subtask_proposal_sink
             )
 
+        # #66 (2026-09-28) — real, state-gated tool unlock, not a blanket
+        # expansion: only present on the attempt right after a genuine
+        # security_reviewer gate block.
+        if security_scan_unlocked:
+            wt_root = Path(worktree_path)
+            tools = tools + [SECRETS_SCAN_TOOL]
+            handlers["secrets_scan"] = lambda inp: secrets_scan_handler(
+                wt_root, worktree_path, inp
+            )
+
         base_msg = (
             f"Task ID: {task_id}, Subtask ID: {subtask_id}\n\n"
             f"Backend Implementation Plan:\n{plan}\n\n"
@@ -218,6 +243,13 @@ def run_backend_dev(
                 f"\n\n[SELF-CORRECTION ATTEMPT {attempt}] "
                 f"Previous attempt failed static checks:\n{check_error}\n"
                 "Review the errors and fix them before submitting."
+            )
+        if security_scan_unlocked:
+            base_msg += (
+                "\n\n[SECURITY TOOL UNLOCKED] A prior review flagged a "
+                "security finding on this subtask. You now have access to "
+                "the secrets_scan tool — use it on the files you changed "
+                "to verify and fix the flagged issue before resubmitting."
             )
 
         try:

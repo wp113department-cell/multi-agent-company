@@ -30,7 +30,7 @@ and removed from the ordered plan below.
 | 5 | #297 Auto documentation lookup while coding | DONE |
 | 6 | #58 Agent selection uses memory/past outcomes | DONE |
 | 7 | #405 Company Brain (org knowledge for prompts/tools) | DONE |
-| 8 | #66 Switch tools mid-run | PENDING |
+| 8 | #66 Switch tools mid-run | DONE |
 | 9 | #443 Detect hallucinating/leaking/desynced agents | PENDING |
 | 10 | #45 + #67 Agent-to-agent delegation | PENDING |
 | 11 | #227 Human takeover / step-level plan editing | PENDING |
@@ -470,4 +470,68 @@ memory-write failure never breaks a real deploy). 10/10 new tests pass;
 `test_prompt_registry.py` tests still pass unchanged. Broader sweep
 (`prompt_registry or memory_store or memory_aware or prompt_change or
 base_graph or memory_hook`): 126 passed, 0 failed. Full backend suite
+pending before push.
+
+## #66 — Switch tools mid-run — DONE (2026-09-28)
+
+The audit's own IMPLEMENTATION PLAN was explicit: "Before writing any
+code, define the concrete trigger conditions ... This is a product
+decision first," and gave exactly one concrete illustrative example: "a
+reviewer-flagged security issue unlocks a specialized `security_scan`
+tool." Built exactly that example, as a real conditional branch in the
+graph that adds a tool spec based on a real state signal — not a blanket
+"anything goes" expansion, per the plan's own explicit warning.
+
+- Reused the already-existing, already-tested `secrets_scan` tool
+  (`app/tools/filesystem/secrets_scan.py`, the same tool `security_reviewer`
+  itself already has) rather than inventing a new scanner — `backend_dev`/
+  `frontend_dev` don't normally have it in `CODER_TOOLS`.
+- `app/agents/backend_dev.py` / `app/agents/frontend_dev.py`: both
+  `run_backend_dev`/`run_frontend_dev` gained a new
+  `security_scan_unlocked: bool = False` parameter (default preserves
+  today's exact behavior for every existing caller). When True, that one
+  retry attempt's tool list gains `SECRETS_SCAN_TOOL` and a real
+  `secrets_scan` handler bound to the subtask's own worktree, plus a short
+  prompt note telling the dev agent the tool is now available and why.
+- `app/agents/manager.py::_dispatch_one_subtask`: a new
+  `security_scan_unlocked` flag, set True only when
+  `_gate_block_reason`'s own deterministic "security_reviewer reported
+  ...finding(s)" message (never model-authored text — this codebase's own
+  generated diagnostic string, the same "graph's own recorded truth"
+  pattern used throughout this session) triggered THIS attempt's block.
+  Explicitly reset to False in every OTHER retry-triggering branch
+  (dev_error, the #297 auto-doc-lookup broken-import check, a QA failure,
+  reviewer-blocking-findings) so a stale unlock from an earlier, unrelated
+  attempt never leaks forward past an intervening non-security retry.
+  Threaded through to both dev-agent call sites.
+- Scoped to exactly one retry attempt (the one right after the block),
+  never a permanent grant — matches the plan's own "not a blanket
+  expansion" requirement.
+
+**Real bug found and fixed while writing this item's own tests**:
+`tests/conftest.py` sets `ENABLE_SECURITY_ARCHITECTURE_GATES=false` as the
+test-environment default (documented reason: most of this suite never
+mocks security_reviewer/architecture_reviewer/dependency_security_agent
+and would otherwise make real Anthropic calls) — any new test exercising
+gate-triggered behavior must explicitly opt back in via
+`patch.object(get_settings(), "enable_security_architecture_gates", True)`,
+the same thing `test_batch16_quality_gates.py` already does. Missed this
+on the first pass (silent 1-attempt no-op instead of the expected 2), caught
+by comparing a standalone reproduction (worked) against the same code
+running under pytest (didn't) before concluding the implementation itself
+was correct.
+
+Tests: 4 new unit-level (`test_security_scan_tool_unlock.py`, mocking
+`run_agent_graph` directly, same convention as
+`test_gap11_14_agent_critique.py`) proving the tool+handler are present
+only when unlocked, for both dev agents — plus 3 new manager-level
+end-to-end tests: a real security gate block unlocks the tool on exactly
+the next attempt; a non-security (architecture) block never unlocks it;
+and an unrelated QA failure sandwiched between a security block and a
+later attempt correctly leaves the unlock reset, not stale. 7/7 pass;
+`mypy --strict` clean on all 3 touched app files (test-file strictness
+matches this codebase's own existing convention — pre-existing test files
+have the identical untyped-helper pattern). Broader sweep (`backend_dev or
+frontend_dev or security_scan or quality_gate or batch16 or
+dynamic_subtask or gap11_14`): 168 passed, 0 failed. Full backend suite
 pending before push.
