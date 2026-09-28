@@ -31,7 +31,7 @@ and removed from the ordered plan below.
 | 6 | #58 Agent selection uses memory/past outcomes | DONE |
 | 7 | #405 Company Brain (org knowledge for prompts/tools) | DONE |
 | 8 | #66 Switch tools mid-run | DONE |
-| 9 | #443 Detect hallucinating/leaking/desynced agents | PENDING |
+| 9 | #443 Detect hallucinating/leaking/desynced agents | DONE (scoped — see write-up) |
 | 10 | #45 + #67 Agent-to-agent delegation | PENDING |
 | 11 | #227 Human takeover / step-level plan editing | PENDING |
 | — | #169 + #171 + #494 Distributed registry / horizontal scaling | SKIPPED (user decision, all three) |
@@ -535,3 +535,86 @@ have the identical untyped-helper pattern). Broader sweep (`backend_dev or
 frontend_dev or security_scan or quality_gate or batch16 or
 dynamic_subtask or gap11_14`): 168 passed, 0 failed. Full backend suite
 pending before push.
+
+## #443 — Detect hallucinating agents / memory leaks / sync failures — DONE (2026-09-28, scoped per the audit's own plan)
+
+The audit's own IMPLEMENTATION PLAN explicitly named this "genuinely
+missing capability, lowest priority of the NO items... treat as a
+separate research/infrastructure initiative, not a quick fix," and split
+it into two distinct sub-problems with very different real feasibility:
+
+1. **Hallucination detection** — the plan's own suggestion (an LLM self-
+   consistency check) turned out to already have a real, code-checked
+   equivalent sitting unused: #502 (T2-B10) already runs
+   `verify_file_line_citations()` at every real `submit_*` call across
+   ~76 agents, independently re-checking every cited file:line and
+   function/class name against the real repo — but it only ever LOGGED a
+   warning, never persisted or aggregated the signal into anything a
+   human or the fleet could actually query. Closed this real gap.
+2. **Memory leaks / sync failures** — the plan is explicit and correct
+   that there is **no existing hook to build on**: this platform edits
+   and reviews target repos, it does not run them under sustained load,
+   so there is nothing to profile. Left genuinely out of scope, same
+   "needs infrastructure that doesn't exist" verdict already established
+   for #169/#171/#494 elsewhere in this initiative — not silently
+   dropped, explicitly documented here as correctly unbuildable today.
+
+**Fix applied (sub-problem 1)**:
+- `app/agents/base_graph.py`: `AgentRunState` gained
+  `citation_hallucination_count: int` (new state key, defaulted to 0 in
+  `initial_state`). `execute_tools`'s existing citation-check block (the
+  one #502 already ran) now also sets a local
+  `citation_hallucination_flagged_this_turn` flag, folded into the node's
+  own final return as `state.get("citation_hallucination_count", 0) + (1
+  if flagged else 0)` — the exact same read-old-value-add-this-turn's-
+  delta pattern `reflection_unsatisfied_count` already uses for its own
+  cross-turn accumulation, not a new mechanism.
+- `app/fleet/metrics.py::RunMetrics` gained `citation_hallucinations: int
+  = 0`, wired at the same finalization point `reflection_unsatisfied`
+  already uses (`final_state.get("citation_hallucination_count", 0)`).
+- `app/db/models.py::AgentRun` gained `citation_hallucination_count`
+  (migration 061, applied to the real dev DB) — NULL for a run that
+  crashed before finishing or predates this column, never a fabricated 0.
+  `finish_agent_run`/`finish_agent_run_sync` persist it from the same
+  `RunMetrics` instance already in scope, same wiring shape as #407's own
+  four columns.
+- `app/fleet/agent_registry.py`: new `compute_citation_hallucination_rate()`
+  — real fraction of an agent type's runs with `citation_hallucination_count
+  > 0`, excluding NULL rows from the denominator (a crashed run has no real
+  signal either way), mirroring `compute_live_success_rate`'s exact
+  aggregation shape. Returns `(None, 0)` with zero real data — "never
+  hallucinated" and "never checked" are different claims.
+- `app/api/registry.py::GET /api/agents/{name}/metrics` now surfaces
+  `hallucinationFlagRate`/`hallucinationSampleSize` alongside the existing
+  `userSatisfactionRate`/`avgRetries` — the real, queryable "which agents
+  are actually hallucinating citations, how often" signal §88 Agent
+  Health Monitoring asked for.
+
+Tests: 4 new in `tests/test_batch18_citation_verification.py::
+TestCitationHallucinationCount` (bad citation increments, good citation
+doesn't, the counter genuinely accumulates across turns — not reset each
+call, no-repo_path stays a no-op) + 5 new in
+`tests/test_t443_hallucination_detection.py` (real Postgres:
+`finish_agent_run` persists/nulls the column correctly on success/failure
+paths; `compute_citation_hallucination_rate` returns `None` with no data,
+a real fraction with mixed flagged/clean runs, and correctly excludes
+NULL rows from the denominator) + 2 new in
+`tests/test_t443_hallucination_metrics_endpoint.py` (real TestClient +
+real Postgres: the endpoint surfaces a real rate/sample-size, and `None`
+when an agent has no hallucination data at all). 11/11 new tests pass;
+`mypy --strict` clean on all 6 touched app files. Broader sweep (`citation
+or t443 or agent_registry or t2b7 or registry or hallucination`): 226
+passed, 0 failed.
+
+**Real regression caught by the full backend suite, fixed same-day**: #405's
+own earlier addition of a 7th `query_memory_context` key (`prompt_changes`)
+broke two PRE-EXISTING tests that hardcoded the old 6-key shape —
+`test_b4_memory_categories.py::test_context_query_returns_all_six_sections_and_formats_them`
+and `test_memory_context_query.py::test_query_memory_context_sync_returns_empty_on_failure`.
+Both updated to include `prompt_changes` (renamed the first test to "all
+seven sections" and added an explicit `assert mem["prompt_changes"] == []`
+proving the new key is present and correctly empty for a query that never
+seeded one) — a real, deliberate shape change on my own part that I'd
+missed testing for at #405's own commit time; caught by this session's own
+"always run the full suite before calling an item done" discipline rather
+than shipped silently. 18/18 in both files pass after the fix.

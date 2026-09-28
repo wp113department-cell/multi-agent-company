@@ -219,6 +219,16 @@ async def get_agent_metrics(
 
     user_satisfaction_rate, rating_count = await get_agent_satisfaction_rate(db, name)
 
+    # #443 (2026-09-28, GRIDIRON_PARTIAL "Detect hallucinating agents /
+    # memory leaks / sync failures") — real fraction of this agent's runs
+    # where #502's citation check flagged an invented reference. None when
+    # no run has ever recorded this column, never a fabricated 0.0.
+    from app.fleet.agent_registry import compute_citation_hallucination_rate
+
+    hallucination_flag_rate, hallucination_sample_size = (
+        await compute_citation_hallucination_rate(db, name)
+    )
+
     # Persist computed metrics back
     agent.success_rate = success_rate
     agent.avg_retries = avg_retries
@@ -238,6 +248,8 @@ async def get_agent_metrics(
         "userApprovalRate": user_approval_rate,
         "userSatisfactionRate": user_satisfaction_rate,
         "ratingCount": rating_count,
+        "hallucinationFlagRate": hallucination_flag_rate,
+        "hallucinationSampleSize": hallucination_sample_size,
         "lastComputedAt": agent.last_computed_at.isoformat(),
     }
 

@@ -518,6 +518,50 @@ async def compute_live_success_rate(
     return successes / total, total
 
 
+async def compute_citation_hallucination_rate(
+    db: Any, agent_type: str
+) -> tuple[float | None, int]:
+    """#443 (2026-09-28, GRIDIRON_PARTIAL "Detect hallucinating agents /
+    memory leaks / sync failures") — real fraction of this agent's runs
+    where #502's own citation check flagged an invented file:line/function/
+    class reference (AgentRun.citation_hallucination_count > 0), same
+    aggregation shape as compute_live_success_rate above.
+
+    Only counts rows where citation_hallucination_count IS NOT NULL — a
+    run that crashed before the graph finished, or predates this column,
+    has no real signal either way and must not be counted as "0 (clean)".
+    Returns (None, 0) when there's no real data yet, never a fabricated
+    0.0 — "never seen an agent hallucinate a citation" and "never checked"
+    are different claims.
+    """
+    from sqlalchemy import case, func, select
+
+    from app.db.models import AgentRun
+
+    row = (
+        await db.execute(
+            select(
+                func.count(),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (AgentRun.citation_hallucination_count > 0, 1), else_=0
+                        )
+                    ),
+                    0,
+                ),
+            ).where(
+                AgentRun.agent_type == agent_type,
+                AgentRun.citation_hallucination_count.isnot(None),
+            )
+        )
+    ).one()
+    total, flagged = int(row[0]), int(row[1])
+    if total == 0:
+        return None, 0
+    return flagged / total, total
+
+
 # ---------------------------------------------------------------------------
 # Pre-register the 3 reference agents so they appear in Sleep state at startup
 # ---------------------------------------------------------------------------

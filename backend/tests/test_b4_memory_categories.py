@@ -140,7 +140,12 @@ async def test_every_category_round_trips_and_is_repo_isolated(repos) -> None:
             ], f"{fn.__name__} leaked repo A memory into repo B"
 
 
-async def test_context_query_returns_all_six_sections_and_formats_them(repos) -> None:
+async def test_context_query_returns_all_seven_sections_and_formats_them(repos) -> None:
+    """#405 (2026-09-28) added a 7th section (prompt_changes) to
+    query_memory_context/format_full_memory_context — this test's own name
+    and expected key set updated accordingly; prompt_changes is correctly
+    empty here since this test never seeds any (see
+    test_prompt_change_memory.py for that category's own dedicated tests)."""
     a, _ = repos
     await _seed_all_categories(a)
     async with get_async_session() as db:
@@ -166,9 +171,11 @@ async def test_context_query_returns_all_six_sections_and_formats_them(repos) ->
         "procedures",
         "preferences",
         "bugs",
+        "prompt_changes",
     }
     for key in ("tasks", "failures", "procedures", "preferences", "bugs"):
         assert mem[key], f"{key} empty"
+    assert mem["prompt_changes"] == []
     block = store.format_full_memory_context(
         mem["tasks"],
         mem["failures"],
@@ -176,6 +183,7 @@ async def test_context_query_returns_all_six_sections_and_formats_them(repos) ->
         mem["procedures"],
         mem["preferences"],
         mem["bugs"],
+        mem["prompt_changes"],
     )
     assert "circular import" in block and "frobnicator" in block
 

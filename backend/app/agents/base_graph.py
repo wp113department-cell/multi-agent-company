@@ -210,6 +210,15 @@ class AgentRunState(_AgentRunStateBase, total=False):
     reflection_unsatisfied_count: (
         int  # times reflection_node judged its own tool output unsatisfactory
     )
+    # #443 (2026-09-28, GRIDIRON_PARTIAL "Detect hallucinating agents /
+    # memory leaks / sync failures") — real per-run count of #502's own
+    # citation_check flagging a submit_* call's file:line/function/class
+    # citation as unverified against the actual repo. #502 already computed
+    # this at every real submit call but only ever logged it — never
+    # persisted or aggregated into a per-agent signal, so nothing in this
+    # pipeline could ever answer "which agents are actually hallucinating
+    # citations, how often" without grepping logs by hand.
+    citation_hallucination_count: int
     critique_result: dict[str, Any]  # last critique_node score: {criteria, all_met}
     self_review: (
         str  # reflection_node's note, delivered by execute_tools after the tool results
@@ -2554,6 +2563,12 @@ def _make_execute_tools_node(
         submitted = state["submitted"]
         quality_gate_failed = False
         clarification_requested = False
+        # #443 (2026-09-28) — set True this turn only if #502's own citation
+        # check actually flagged something; accumulated into the persistent
+        # cross-turn state["citation_hallucination_count"] in this
+        # function's own final return below (same "read old value, add this
+        # turn's delta" pattern reflection_node's own counter already uses).
+        citation_hallucination_flagged_this_turn = False
         tool_results: list[dict[str, Any]] = list(
             state.get("tool_results_buffer") or []
         )
@@ -2790,6 +2805,7 @@ def _make_execute_tools_node(
                         "unverified_names"
                     ):
                         raw_result["_citation_check"] = citation_check
+                        citation_hallucination_flagged_this_turn = True
                         if citation_check["unverified"]:
                             logger.warning(
                                 "%s's %s cited %d file:line reference(s) that "
@@ -2982,6 +2998,10 @@ def _make_execute_tools_node(
             "tool_results_buffer": [],
             "batch_requires_human_approval": False,
             "self_review": "",
+            "citation_hallucination_count": state.get(
+                "citation_hallucination_count", 0
+            )
+            + (1 if citation_hallucination_flagged_this_turn else 0),
         }
 
     return execute_tools
@@ -3932,6 +3952,7 @@ def run_agent_graph(
                 "memory_context": "",
                 "repo_context": "",
                 "reflection_unsatisfied_count": 0,
+                "citation_hallucination_count": 0,
                 "critique_result": {},
                 "critique_retries": 0,
                 "replan_count": 0,
@@ -3998,6 +4019,9 @@ def run_agent_graph(
                 _metrics.retries = final_state.get("retry_count", 0)
                 _metrics.reflection_unsatisfied = final_state.get(
                     "reflection_unsatisfied_count", 0
+                )
+                _metrics.citation_hallucinations = final_state.get(
+                    "citation_hallucination_count", 0
                 )
                 verification = final_state.get("verification") or {}
                 bool_values = [v for v in verification.values() if isinstance(v, bool)]
@@ -4172,6 +4196,9 @@ def run_agent_graph(
                     verification_pct=_metrics.verification_pct if _metrics else None,
                     confidence=_metrics.confidence if _metrics else None,
                     tool_accuracy=_metrics.tool_accuracy if _metrics else None,
+                    citation_hallucination_count=(
+                        _metrics.citation_hallucinations if _metrics else None
+                    ),
                 )
             except Exception:
                 pass

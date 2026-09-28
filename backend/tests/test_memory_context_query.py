@@ -82,6 +82,7 @@ def test_query_memory_context_sync_returns_empty_on_failure() -> None:
         "procedures": [],
         "preferences": [],
         "bugs": [],
+        "prompt_changes": [],
     }
 
 

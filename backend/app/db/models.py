@@ -316,6 +316,16 @@ class AgentRun(Base):
     verification_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     tool_accuracy: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # #443 (2026-09-28, GRIDIRON_PARTIAL "Detect hallucinating agents /
+    # memory leaks / sync failures") — same "wire what RunMetrics already
+    # computes through to a durable row" pattern as the four columns above,
+    # applied to RunMetrics.citation_hallucinations (#502's own citation
+    # check, now actually persisted instead of only logged). NULL means
+    # "no citation check ran this run" (e.g. a crashed run), never a
+    # fabricated 0.
+    citation_hallucination_count: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

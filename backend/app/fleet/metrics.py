@@ -134,6 +134,16 @@ class RunMetrics:
     # (a conservative hallucination-rate proxy — see benchmark_manager.py)
     reflection_unsatisfied: int = 0
 
+    # #443 (2026-09-28, GRIDIRON_PARTIAL "Detect hallucinating agents /
+    # memory leaks / sync failures") — real per-run count of #502's own
+    # code-checked citation verification (verify_file_line_citations)
+    # flagging a submit_* call's cited file:line/function/class as not
+    # actually existing in the real repo. A direct, per-claim hallucination
+    # signal — distinct from reflection_unsatisfied above (the model's own
+    # subjective self-judgment of its tool output, not an independently
+    # verified fact).
+    citation_hallucinations: int = 0
+
     # Final outcome
     status: str = "running"
 
@@ -248,6 +258,7 @@ class RunMetrics:
             "confidence": self.confidence,
             "confidence_miscalibrated": self.confidence_miscalibrated,
             "reflection_unsatisfied": self.reflection_unsatisfied,
+            "citation_hallucinations": self.citation_hallucinations,
             "status": self.status,
         }
 

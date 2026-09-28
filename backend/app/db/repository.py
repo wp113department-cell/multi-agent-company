@@ -613,6 +613,7 @@ async def finish_agent_run(
     verification_pct: float | None = None,
     confidence: float | None = None,
     tool_accuracy: float | None = None,
+    citation_hallucination_count: int | None = None,
 ) -> None:
     await db.execute(
         update(AgentRun)
@@ -627,6 +628,7 @@ async def finish_agent_run(
             verification_pct=verification_pct,
             confidence=confidence,
             tool_accuracy=tool_accuracy,
+            citation_hallucination_count=citation_hallucination_count,
             finished_at=datetime.now(timezone.utc),
         )
     )
@@ -899,6 +901,7 @@ def finish_agent_run_sync(
     verification_pct: float | None = None,
     confidence: float | None = None,
     tool_accuracy: float | None = None,
+    citation_hallucination_count: int | None = None,
 ) -> None:
     """Sync bridge for finish_agent_run()."""
     import asyncio
@@ -923,6 +926,7 @@ def finish_agent_run_sync(
                     verification_pct=verification_pct,
                     confidence=confidence,
                     tool_accuracy=tool_accuracy,
+                    citation_hallucination_count=citation_hallucination_count,
                 )
         finally:
             await engine.dispose()
