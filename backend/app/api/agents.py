@@ -269,20 +269,32 @@ async def launch_planning_pipeline(
 
 
 async def resume_planning_pipeline(
-    task_id: int, approved: bool, repo_path: str | None = None
+    task_id: int,
+    approved: bool,
+    repo_path: str | None = None,
+    subtask_edits: list[dict[str, Any]] | None = None,
 ) -> None:
     """
     Resume the LangGraph from its interrupt checkpoint.
     approved=True  → launch manager with subtasks (full Dev→QA→Review pipeline).
     approved=False → transition task to rejected.
+
+    subtask_edits (#227, 2026-09-28): see
+    app.pipeline.graph.apply_subtask_edits's own docstring. A malformed
+    edit (bad index, or rejecting a step another step still depends on)
+    raises SubtaskEditError, caught below and logged as a pipeline error —
+    the plan stays exactly as it was (still awaiting_approval), never
+    half-applied.
     """
-    from app.pipeline.graph import resume_pipeline
+    from app.pipeline.graph import SubtaskEditError, resume_pipeline
 
     factory = get_session_factory()
 
     async with factory() as db:
         try:
-            result = await resume_pipeline(task_id=task_id, approved=approved)
+            result = await resume_pipeline(
+                task_id=task_id, approved=approved, subtask_edits=subtask_edits
+            )
             stage = result.get("stage", "rejected")
 
             try:
@@ -333,6 +345,20 @@ async def resume_planning_pipeline(
                     db, task_id, "pipeline", "Plan rejected by human reviewer"
                 )
 
+        except SubtaskEditError as e:
+            # #227 — a malformed edit must never half-apply or corrupt the
+            # plan's dependency graph. The graph.ainvoke() call above raised
+            # BEFORE human_review_node returned any updated state, so
+            # LangGraph's own checkpoint is untouched — the task stays
+            # exactly as it was (still awaiting_approval), a real retry is
+            # always safe.
+            logger.warning(
+                "Subtask edit rejected for task %d: %s", task_id, e
+            )
+            async with factory() as db2:
+                await append_log(
+                    db2, task_id, "pipeline_error", f"Subtask edit rejected: {e}"
+                )
         except Exception as e:
             logger.exception("resume_planning_pipeline failed for task %d", task_id)
             async with factory() as db2:

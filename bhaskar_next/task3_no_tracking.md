@@ -33,7 +33,7 @@ and removed from the ordered plan below.
 | 8 | #66 Switch tools mid-run | DONE |
 | 9 | #443 Detect hallucinating/leaking/desynced agents | DONE (scoped — see write-up) |
 | 10 | #45 + #67 Agent-to-agent delegation | DONE (already built, no code needed) |
-| 11 | #227 Human takeover / step-level plan editing | PENDING |
+| 11 | #227 Human takeover / step-level plan editing | DONE (scoped — see write-up) |
 | — | #169 + #171 + #494 Distributed registry / horizontal scaling | SKIPPED (user decision, all three) |
 
 ## #500 — Conversational "do that again" — DONE (2026-09-25)
@@ -661,3 +661,99 @@ No production code changes — verified existing behavior with
 already-real, already-tested mechanism, per this session's own standing
 rule: "if the current source shows that an old gap has already been
 fixed, do not recreate it."
+
+## #227 — Human takeover / step-level plan editing — DONE, deliberately scoped (2026-09-28)
+
+The audit's own IMPLEMENTATION PLAN is explicit that a FULL solution ("a
+plan data model with individually addressable steps... the pipeline graph
+resumable from a specific mid-plan checkpoint instead of only the single
+compiled-in human_review interrupt point") is "a graph-topology change...
+not a small endpoint addition — plan it as its own project." Built the
+real, bounded, honest slice that fits inside this session instead of
+either skipping the item or silently overclaiming the full redesign:
+**edit or reject individual plan steps at the existing human_review
+interrupt**, as part of the SAME approval decision — no new interrupt
+point, no graph-topology change, because the plan's own subtasks are
+already sitting in state right there, individually addressable by
+position.
+
+**What this closes for real**: "edit plan" (yes — change a step's title/
+description before approving) and "reject one step" (yes — remove a
+specific step from the plan while approving the rest) are both real,
+tested, end-to-end capabilities now. "Take over a task" in the sense of
+"a human can directly modify the AI's plan instead of only accepting or
+rejecting it wholesale" is real.
+
+**What this deliberately does NOT close** (documented, not silently
+dropped): "resume exactly there" in the sense of re-entering the PM→
+Architect→Decomposer chain at an ARBITRARY mid-point (e.g., "redo just
+the Architect's output, keep the PM brief") would need real per-node
+checkpointing across that 3-node chain — the actual graph-topology
+change the plan calls "its own project." That remains open for a future,
+dedicated session.
+
+**Backend** (`app/pipeline/graph.py`):
+- New `apply_subtask_edits(subtasks, edits)` — pure, position-based
+  (subtasks have no independent stable id beyond list position, the same
+  convention #44's dynamic-subtask-creation work already established for
+  this exact list). Each edit is `{"index": int, "action": "edit"|
+  "reject", ...fields}`. "edit" overlays given fields onto that position;
+  "reject" removes it — but refuses (raises `SubtaskEditError`) if any
+  REMAINING subtask's `depends_on` still references the rejected index,
+  rather than silently producing a broken dependency graph. Rejecting a
+  step AND everything that depends on it together in one request is
+  allowed.
+- `human_review_node` now reads `subtask_edits` from the resume decision
+  and applies them via `apply_subtask_edits` before finalizing the plan.
+- `resume_pipeline()` gained an optional `subtask_edits` param, threaded
+  through `Command(resume={...})` — `None` (the default) is the exact
+  prior all-or-nothing behavior for every existing caller.
+- `app/api/agents.py::resume_planning_pipeline` threads it through;
+  `SubtaskEditError` is caught distinctly and logged — since the graph
+  raises BEFORE `human_review_node` returns any state update, LangGraph's
+  own checkpoint is untouched on a rejected edit, so the task stays
+  exactly `awaiting_approval` and a retry is always safe.
+- `app/api/tasks.py::POST /{task_id}/pipeline/approve` gained an optional
+  `subtask_edits` request body field, validated SYNCHRONOUSLY against the
+  currently-persisted plan (`PipelineState.subtasks_json`) for a fast
+  `400` on an obviously malformed request before dispatching the
+  background resume (which re-validates for real against whatever the
+  plan's actual current state is at that moment — defense in depth
+  against a race, not a duplicate source of truth).
+
+**Frontend** (real UI gap closed, matching this session's own established
+"backend without a UI is not actually usable" precedent from #3/#5/#12/
+#498/#439/#381): `PipelineView.tsx`'s existing read-only subtask list had
+no way to submit an edit at all. Added inline Edit/Reject controls per
+subtask, shown only while `stage === "awaiting_approval"` — Edit reveals
+title/description inputs, Reject dims the card with an Undo option. Local
+edit/reject state is lifted to the parent page
+(`app/tasks/[id]/page.tsx`) via a new `onSubtaskEditsChange` callback and
+sent through the existing `approvePipeline()` API call
+(`apps/web/lib/api.ts`, new optional `subtaskEdits` param) — approving
+with edits pending is the SAME "Approve Plan & Start Coding" button,
+no new button needed.
+
+Tests: 10 new in `tests/test_subtask_plan_edits.py` (pure
+`apply_subtask_edits` unit tests: no-op with no edits, edit overlays
+correctly without mutating the input, reject removes a leaf step, reject
+refuses when a remaining step still depends on it, rejecting a step and
+its only dependent together is allowed, out-of-range/negative index and
+unknown action are rejected, edit+reject combined in one request) + 4 new
+in `tests/test_pipeline_approve_subtask_edits.py` (real HTTP + real
+Postgres + mocked Anthropic, mirroring `test_day12_smoke_test.py`'s own
+established convention: an edit reaches `launch_manager` with the edited
+title; a rejected leaf step is actually removed from what reaches
+`launch_manager`; rejecting a step its sibling depends on returns a real
+`400` and leaves the task's status untouched; a plain approve with no
+body at all still works exactly as before). 14/14 new backend tests pass;
+`mypy --strict` clean on all 3 touched backend files; all 11 pre-existing
+pipeline/approval tests still pass unchanged.
+
+Frontend: 6 new in `components/PipelineView.test.tsx` (vitest +
+testing-library: Edit/Reject buttons shown only while awaiting approval;
+editing a title reports the exact edit shape the backend expects;
+rejecting reports a reject entry and Undo correctly removes it; a step
+edited then rejected reports only the reject, not a stale edit; local
+edit state resets when the underlying plan itself changes). Full frontend
+suite: 49/49 passed; `tsc --noEmit`, `eslint`, and `next build` all clean.

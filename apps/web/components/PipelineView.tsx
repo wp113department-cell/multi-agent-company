@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 // Backend stores snake_case keys directly from agent tool calls.
 // These interfaces match what the API actually returns.
 interface PmBrief {
@@ -58,8 +60,21 @@ interface PipelineState {
   error?: string | null;
 }
 
+// #227 (2026-09-28, GRIDIRON_PARTIAL "Take over a task / edit plan /
+// reject one step and resume exactly there") — matches the backend's own
+// app.pipeline.graph.apply_subtask_edits shape exactly: index is the
+// subtask's POSITION in the list (no independent stable id exists), same
+// convention the rest of this codebase already uses for subtasks.
+export interface SubtaskEdit {
+  index: number;
+  action: "edit" | "reject";
+  title?: string;
+  description?: string;
+}
+
 interface Props {
   pipeline: PipelineState;
+  onSubtaskEditsChange?: (edits: SubtaskEdit[]) => void;
 }
 
 const complexityColor = (c: string) =>
@@ -98,10 +113,44 @@ const stageLabel: Record<string, string> = {
 const PLANNING_STAGES = ["pm", "architect", "decomposer"];
 const CODING_STAGES = ["dev_running", "qa_running", "review_running"];
 
-export function PipelineView({ pipeline }: Props) {
+export function PipelineView({ pipeline, onSubtaskEditsChange }: Props) {
   const isPlanningRunning = PLANNING_STAGES.includes(pipeline.stage);
   const isCodingRunning = CODING_STAGES.includes(pipeline.stage);
   const isCodingDone = pipeline.stage === "dev_complete";
+  const isAwaitingApproval = pipeline.stage === "awaiting_approval";
+
+  // #227 — human takeover: per-subtask edit/reject state, keyed by list
+  // position (matches the backend's own position-based addressing).
+  // editingIndex tracks which single card currently shows input fields;
+  // edited/rejected persist across cards being opened/closed.
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [edited, setEdited] = useState<Record<number, { title: string; description: string }>>({});
+  const [rejected, setRejected] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    if (!onSubtaskEditsChange) return;
+    const edits: SubtaskEdit[] = [];
+    for (const idx of rejected) {
+      edits.push({ index: idx, action: "reject" });
+    }
+    for (const [idxStr, fields] of Object.entries(edited)) {
+      const idx = Number(idxStr);
+      if (rejected.has(idx)) continue; // reject wins over a stale edit
+      edits.push({ index: idx, action: "edit", ...fields });
+    }
+    onSubtaskEditsChange(edits);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edited, rejected]);
+
+  // Reset local edit state if the plan itself changes underneath us (e.g.
+  // a fresh pipeline run) — stale edits against a different plan would be
+  // silently wrong.
+  useEffect(() => {
+    setEditingIndex(null);
+    setEdited({});
+    setRejected(new Set());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pipeline.taskId, pipeline.subtasks?.length]);
 
   return (
     <div className="space-y-4">
@@ -223,19 +272,98 @@ export function PipelineView({ pipeline }: Props) {
           <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
             <span className="rounded bg-teal-100 px-2 py-0.5 text-xs text-teal-700">Decomposer</span>
             Subtasks ({pipeline.subtasks.length})
+            {isAwaitingApproval && (rejected.size > 0 || Object.keys(edited).length > 0) && (
+              <span className="ml-auto text-xs font-normal text-amber-700">
+                {rejected.size > 0 && `${rejected.size} step(s) rejected`}
+                {rejected.size > 0 && Object.keys(edited).length > 0 && ", "}
+                {Object.keys(edited).length > 0 && `${Object.keys(edited).length} step(s) edited`}
+              </span>
+            )}
           </h3>
           <div className="space-y-3">
             {pipeline.subtasks.map((st, idx) => {
               const files = st.files_to_edit ?? st.filesToEdit ?? [];
+              const isRejected = rejected.has(idx);
+              const isEditingThis = editingIndex === idx;
+              const current = edited[idx] ?? { title: st.title, description: st.description };
               return (
-                <div key={st.id ?? idx} className="rounded border border-slate-200 bg-white p-3">
+                <div
+                  key={st.id ?? idx}
+                  className={`rounded border p-3 ${
+                    isRejected ? "border-red-200 bg-red-50 opacity-60" : "border-slate-200 bg-white"
+                  }`}
+                >
                   <div className="mb-1 flex items-center gap-2">
                     <span className={`rounded px-2 py-0.5 text-xs font-semibold ${subtaskTypeColor(st.type)}`}>
                       {st.type}
                     </span>
-                    <span className="text-sm font-medium text-slate-800">{st.title}</span>
+                    {isEditingThis ? (
+                      <input
+                        className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm font-medium text-slate-800"
+                        value={current.title}
+                        onChange={(e) =>
+                          setEdited((prev) => ({
+                            ...prev,
+                            [idx]: { ...current, title: e.target.value },
+                          }))
+                        }
+                      />
+                    ) : (
+                      <span className={`text-sm font-medium text-slate-800 ${isRejected ? "line-through" : ""}`}>
+                        {current.title}
+                      </span>
+                    )}
+                    {isAwaitingApproval && !isRejected && (
+                      <div className="ml-auto flex gap-2">
+                        <button
+                          type="button"
+                          className="text-xs font-medium text-blue-600 hover:underline"
+                          onClick={() => setEditingIndex(isEditingThis ? null : idx)}
+                        >
+                          {isEditingThis ? "Done" : "Edit"}
+                        </button>
+                        <button
+                          type="button"
+                          className="text-xs font-medium text-red-600 hover:underline"
+                          onClick={() => setRejected((prev) => new Set(prev).add(idx))}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    )}
+                    {isAwaitingApproval && isRejected && (
+                      <button
+                        type="button"
+                        className="ml-auto text-xs font-medium text-slate-600 hover:underline"
+                        onClick={() =>
+                          setRejected((prev) => {
+                            const next = new Set(prev);
+                            next.delete(idx);
+                            return next;
+                          })
+                        }
+                      >
+                        Undo reject
+                      </button>
+                    )}
                   </div>
-                  <p className="mb-2 text-xs text-slate-600">{st.description}</p>
+                  {isEditingThis ? (
+                    <textarea
+                      className="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs text-slate-700"
+                      rows={2}
+                      value={current.description}
+                      onChange={(e) =>
+                        setEdited((prev) => ({
+                          ...prev,
+                          [idx]: { ...current, description: e.target.value },
+                        }))
+                      }
+                    />
+                  ) : (
+                    <p className={`mb-2 text-xs text-slate-600 ${isRejected ? "line-through" : ""}`}>
+                      {current.description}
+                    </p>
+                  )}
                   {files.length > 0 && (
                     <div className="font-mono text-xs text-slate-500">
                       {files.map((f) => (
@@ -247,6 +375,11 @@ export function PipelineView({ pipeline }: Props) {
               );
             })}
           </div>
+          {isAwaitingApproval && (
+            <p className="mt-3 text-xs text-slate-500">
+              Edit or reject individual steps above, then approve — your changes apply to this same plan, no re-planning needed.
+            </p>
+          )}
         </div>
       )}
 

@@ -92,6 +92,15 @@ class RejectRequest(BaseModel):
     reason: str | None = None
 
 
+class PipelineApproveRequest(BaseModel):
+    # #227 (2026-09-28, GRIDIRON_PARTIAL "Take over a task / edit plan /
+    # reject one step and resume exactly there") — each edit is
+    # {"index": int, "action": "edit"|"reject", ...fields}, matching
+    # app.pipeline.graph.apply_subtask_edits's own documented shape.
+    # None/empty (the default) is the exact prior plain-approve behavior.
+    subtask_edits: list[dict[str, Any]] | None = None
+
+
 class RunRequest(BaseModel):
     mode: str | None = (
         None  # "full" | "simple" — overrides PIPELINE_MODE env for this request
@@ -694,12 +703,25 @@ async def reject_task(
 async def pipeline_approve(
     task_id: int,
     background_tasks: BackgroundTasks,
+    body: PipelineApproveRequest = PipelineApproveRequest(),
     db: AsyncSession = Depends(get_db),
     _approver: str = Depends(require_approver),
 ) -> dict[str, Any]:
-    """Resume the LangGraph pipeline with approval → launch coder."""
+    """Resume the LangGraph pipeline with approval → launch coder.
+
+    body.subtask_edits (#227, 2026-09-28): optional per-step edits/
+    rejections applied to the plan as part of this same approval — see
+    app.pipeline.graph.apply_subtask_edits's own docstring. Validated here
+    synchronously (against the currently-persisted plan) for a fast 400 on
+    an obviously malformed request, before dispatching; the actual
+    application happens for real inside the resumed graph, which re-checks
+    the same invariant against whatever the plan's real current state is
+    at that moment (defense in depth against a race, not a duplicate
+    source of truth).
+    """
     from app.api.agents import resume_planning_pipeline
     from app.db.models import Repo
+    from app.pipeline.graph import SubtaskEditError, apply_subtask_edits
     from sqlalchemy import select
 
     task = await get_task(db, task_id)
@@ -712,6 +734,12 @@ async def pipeline_approve(
             status_code=400,
             detail=f"Pipeline is not awaiting approval (stage={ps.stage!r})",
         )
+
+    if body.subtask_edits:
+        try:
+            apply_subtask_edits(ps.subtasks_json or [], body.subtask_edits)
+        except SubtaskEditError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
 
     repo_path: str | None = None
     if task.repo_id:
@@ -728,6 +756,7 @@ async def pipeline_approve(
         task_id,
         True,
         repo_path,
+        body.subtask_edits,
         priority=task.priority,
     )
     return {"approved": True}

@@ -215,8 +215,22 @@ export async function fetchPipelineState(taskId: string): Promise<PipelineStateC
 }
 
 // Approve the PM→Architect→Decomposer plan — resumes LangGraph + starts coder
-export async function approvePipeline(taskId: string): Promise<{ approved: boolean }> {
-  const res = await apiFetch(`/api/tasks/${taskId}/pipeline/approve`, { method: "POST" });
+// subtaskEdits (#227, 2026-09-28): optional per-step edits/rejections applied
+// as part of this same approval — see PipelineView's own SubtaskEdit type and
+// the backend's app.pipeline.graph.apply_subtask_edits for the exact shape.
+export async function approvePipeline(
+  taskId: string,
+  subtaskEdits?: { index: number; action: "edit" | "reject"; title?: string; description?: string }[],
+): Promise<{ approved: boolean }> {
+  const res = await apiFetch(`/api/tasks/${taskId}/pipeline/approve`, {
+    method: "POST",
+    ...(subtaskEdits && subtaskEdits.length > 0
+      ? {
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subtask_edits: subtaskEdits }),
+        }
+      : {}),
+  });
   return handleResponse(res);
 }
 

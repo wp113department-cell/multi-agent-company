@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { DiffViewer } from "../../../components/DiffViewer";
-import { PipelineView } from "../../../components/PipelineView";
+import { PipelineView, type SubtaskEdit } from "../../../components/PipelineView";
 import { StatusBadge } from "../../../components/StatusBadge";
 import { useState } from "react";
 import {
@@ -131,9 +131,14 @@ export default function TaskDetailPage() {
     },
   });
 
+  // #227 (2026-09-28) — human takeover: per-subtask edits/rejections
+  // collected from PipelineView, applied as part of the same approval.
+  const [subtaskEdits, setSubtaskEdits] = useState<SubtaskEdit[]>([]);
+
   const approvePipelineMutation = useMutation({
-    mutationFn: () => approvePipeline(params.id),
+    mutationFn: () => approvePipeline(params.id, subtaskEdits),
     onSuccess: () => {
+      setSubtaskEdits([]);
       qc.invalidateQueries({ queryKey: ["task", params.id] });
       qc.invalidateQueries({ queryKey: ["pipeline", params.id] });
     },
@@ -359,7 +364,10 @@ export default function TaskDetailPage() {
       {pipeline && (
         <div className="rounded-lg border border-slate-200 bg-white p-5">
           <h2 className="mb-4 text-sm font-semibold text-slate-700">Planning Pipeline</h2>
-          <PipelineView pipeline={pipeline as unknown as Parameters<typeof PipelineView>[0]["pipeline"]} />
+          <PipelineView
+            pipeline={pipeline as unknown as Parameters<typeof PipelineView>[0]["pipeline"]}
+            onSubtaskEditsChange={setSubtaskEdits}
+          />
         </div>
       )}
 

@@ -84,6 +84,73 @@ def _route_after_decomposer(state: PipelineState) -> str:
     return "human_review"
 
 
+class SubtaskEditError(ValueError):
+    """Raised when a human-submitted subtask edit/reject is malformed or
+    would corrupt the plan's dependency graph."""
+
+
+def apply_subtask_edits(
+    subtasks: list[dict[str, Any]], edits: list[dict[str, Any]] | None
+) -> list[dict[str, Any]]:
+    """#227 (2026-09-28, GRIDIRON_PARTIAL "Take over a task / edit plan /
+    reject one step and resume exactly there") — the real, bounded slice of
+    this item this session builds: individually addressable, editable/
+    rejectable steps at the EXISTING human_review interrupt, not a full
+    per-step-checkpoint graph redesign (the audit's own plan calls that "a
+    graph-topology change ... its own project" — genuinely out of scope for
+    one session's addition to an already-long list).
+
+    Each edit is {"index": int, "action": "edit"|"reject", ...fields}.
+    "edit" overlays the given fields (title/description/type/files_to_edit)
+    onto subtasks[index] in place, by POSITION — the same position-lockstep
+    convention #44's own dynamic-subtask-creation work already established
+    for this exact list (a subtask has no independent stable id beyond its
+    list position). "reject" removes that subtask entirely.
+
+    Never silently produces a broken dependency graph: rejecting an index
+    that another remaining subtask's own depends_on still references raises
+    SubtaskEditError instead of guessing a renumbering — a fabricated fix
+    here would be worse than refusing the edit and asking the human to
+    reject the dependent step too (or edit its depends_on itself first).
+
+    Pure and non-mutating — returns a new list, never touches the input.
+    """
+    if not edits:
+        return subtasks
+
+    result = [dict(s) for s in subtasks]
+    rejected_indices: set[int] = set()
+
+    for edit in edits:
+        index = edit.get("index")
+        action = edit.get("action", "edit")
+        if not isinstance(index, int) or index < 0 or index >= len(subtasks):
+            raise SubtaskEditError(f"subtask index {index!r} out of range")
+        if action == "reject":
+            rejected_indices.add(index)
+        elif action == "edit":
+            for field in ("type", "title", "description", "files_to_edit"):
+                if field in edit:
+                    result[index][field] = edit[field]
+        else:
+            raise SubtaskEditError(f"unknown subtask edit action {action!r}")
+
+    if rejected_indices:
+        for i, sub in enumerate(result):
+            if i in rejected_indices:
+                continue
+            depends_on = sub.get("depends_on") or []
+            still_referenced = rejected_indices & set(depends_on)
+            if still_referenced:
+                raise SubtaskEditError(
+                    f"cannot reject subtask index(es) {sorted(still_referenced)} — "
+                    f"subtask {i} ({sub.get('title', '')!r}) still depends on it"
+                )
+        result = [s for i, s in enumerate(result) if i not in rejected_indices]
+
+    return result
+
+
 def human_review_node(state: PipelineState) -> PipelineState:
     """
     Human-in-the-loop checkpoint.
@@ -92,6 +159,14 @@ def human_review_node(state: PipelineState) -> PipelineState:
     stage='awaiting_approval'.  When the user clicks "Approve Plan" in the
     dashboard, resume_pipeline() calls ainvoke(Command(resume=...)) which
     resumes this node from after the interrupt() call.
+
+    #227 (2026-09-28) — decision may now also carry "subtask_edits": a
+    human can edit or reject individual steps of the plan as part of the
+    SAME approval decision, applied here via apply_subtask_edits() before
+    the plan is finalized. A malformed edit (bad index, or a rejected step
+    another step still depends on) blocks the whole resume with a real
+    error rather than silently corrupting the plan or the whole-or-nothing
+    approve/reject the plan already had.
     """
     updated: PipelineState = {**state, "stage": "awaiting_approval"}
 
@@ -103,10 +178,19 @@ def human_review_node(state: PipelineState) -> PipelineState:
         }
     )
 
-    # After resume: decision = {"approved": True|False}
+    # After resume: decision = {"approved": True|False, "subtask_edits": [...]}
     approved = isinstance(decision, dict) and bool(decision.get("approved", False))
+    subtask_edits = decision.get("subtask_edits") if isinstance(decision, dict) else None
+    final_subtasks = state.get("subtasks", [])
+    if approved and subtask_edits:
+        final_subtasks = apply_subtask_edits(final_subtasks, subtask_edits)
     final_stage = "done" if approved else "rejected"
-    return {**updated, "approved": approved, "stage": final_stage}
+    return {
+        **updated,
+        "approved": approved,
+        "stage": final_stage,
+        "subtasks": final_subtasks,
+    }
 
 
 def build_graph() -> Any:
@@ -204,15 +288,25 @@ async def run_planning_pipeline(
     return result
 
 
-async def resume_pipeline(task_id: int, approved: bool) -> PipelineState:
+async def resume_pipeline(
+    task_id: int,
+    approved: bool,
+    subtask_edits: list[dict[str, Any]] | None = None,
+) -> PipelineState:
     """
     Resume the paused graph after human review.
     approved=True  → stage='done', kicks off coder
     approved=False → stage='rejected'
+
+    subtask_edits (#227, 2026-09-28): optional per-step edits/rejections —
+    see apply_subtask_edits()'s own docstring for the exact shape and the
+    real dependency-graph safety check. None (the default) is the exact
+    prior all-or-nothing behavior for every existing caller.
     """
     graph = get_graph()
     config = {"configurable": {"thread_id": f"task-{task_id}"}}
     result: PipelineState = await graph.ainvoke(
-        Command(resume={"approved": approved}), config=config
+        Command(resume={"approved": approved, "subtask_edits": subtask_edits}),
+        config=config,
     )
     return result
