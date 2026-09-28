@@ -237,6 +237,26 @@ class _GeminiResponse:
         self.usage = _GeminiUsage(tokens_in, tokens_out)
 
 
+def _is_daily_quota_exhausted(exc: Any) -> bool:
+    """True when a 429's QuotaFailure violation is a PER-DAY quota (e.g.
+    GenerateRequestsPerDayPerProjectPerModel-FreeTier), as opposed to a
+    per-minute one — retrying within this process can never succeed for a
+    daily cap, so callers should fail fast instead of sleeping. Best-effort:
+    an unparseable/unexpected error body is treated as NOT a daily
+    exhaustion (falls back to the normal retry ladder) rather than
+    silently swallowing a real error the caller should see."""
+    details = getattr(exc, "details", None)
+    if not isinstance(details, dict):
+        return False
+    error = details.get("error", {})
+    for detail in error.get("details", []) or []:
+        if detail.get("@type", "").endswith("QuotaFailure"):
+            for violation in detail.get("violations", []) or []:
+                if "PerDay" in str(violation.get("quotaId", "")):
+                    return True
+    return False
+
+
 def run_gemini(
     *,
     system_prompt: str,
@@ -288,6 +308,24 @@ def run_gemini(
         except genai_errors.ClientError as exc:
             if exc.code == 429:
                 breaker.record_failure()
+                # 2026-09-28 real bug found running this for the first time:
+                # a free-tier "requests PER DAY" quota (as opposed to a
+                # per-minute one) can't clear within this process's
+                # lifetime, so the sleep-and-retry ladder below just wastes
+                # up to `30+60+90+120=300s` guaranteed to fail every time —
+                # confirmed live (a 3-test file took 543s to fail this way).
+                # Fail fast instead once the violation is unmistakably a
+                # daily cap, exactly like a CircuitBreakerOpenError already
+                # does for a different "retrying can't help" case.
+                if _is_daily_quota_exhausted(exc):
+                    logger.warning(
+                        "Gemini daily quota exhausted for model=%s — failing "
+                        "fast instead of retrying (won't clear until the "
+                        "quota resets): %s",
+                        gemini_model,
+                        exc,
+                    )
+                    raise
                 if attempt < max_retries - 1:
                     wait = 30 * (attempt + 1)
                     logger.warning(

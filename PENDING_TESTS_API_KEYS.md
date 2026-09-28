@@ -618,3 +618,117 @@ Expected baseline going in: **4521 passed, 52 skipped, 18 deselected, 0 failed**
 end of plan14 Day 3, before this Day 4 work started) — `test_delegation.py`'s 21 tests should add to
 that with zero regressions elsewhere, since every change here is additive (new module, new optional
 `GridironEvent` fields, one new tool wired into exactly one pilot agent).
+
+---
+
+## K. (2026-09-28, PAUSED — resume once ANTHROPIC_API_KEY has a real balance) Real attempt at section C, on $0 budget via Groq/Gemini — both free tiers hit genuine structural limits
+
+**Why this happened:** the real `ANTHROPIC_API_KEY` in `.env` ran out of balance (confirmed via a
+direct minimal API call: `BadRequestError: "Your credit balance is too low"`). Rather than wait idle,
+the user asked to actually attempt the `tests/pending/` run (section C, 49 collected tests as of
+today — 54 in section C's original count minus the 5 in `test_db_integration.py`, which isn't in
+the current `tests/pending/` listing) against free-tier backends first: Groq, then Gemini as a
+second option when Groq's own limit proved too tight. **Both real, both genuinely attempted — not
+simulated — and both real infra bugs found and fixed along the way. Paused (not abandoned) at the
+user's explicit instruction once the free-tier limits were confirmed structural, not a pacing
+problem: "skip all we need to go with antrpic api only ok add all in plan and lets move on next
+ones ok when i got recharge then update you ok so this task we will resume."**
+
+### K1 — Gemini added as a second temporary backend, alongside Groq
+
+New, mirrors `app/agents/groq_adapter.py`'s exact shape: `app/agents/gemini_adapter.py`,
+`app/agents/base.py::_run_via_gemini()`, `use_gemini`/`gemini_*` settings in `app/config.py`,
+`tests/gemini_compat.py`, `tests/test_day0_gemini_integration.py`, `get_gemini_breaker()` in
+`app/fleet/circuit_breaker.py`. Explicitly marked TEMPORARY/easily-removable throughout (every new
+file's own docstring lists the exact removal steps) — this is scaffolding for the $0-budget testing
+problem, not a permanent second LLM backend for this project. `google-genai==2.25.0` added to
+`requirements.txt`.
+
+Verified for real before use: the pasted Gemini key didn't match the usual `AIzaSy...` Google AI
+Studio format, so it was checked live first (a 404 model-not-found error, not a 401, confirmed the
+key itself authenticates) — then a real tool-calling round trip, then the full `run_agent_graph()`
+path end-to-end (`test_day0_gemini_integration.py -m slow`, 2/2 passed in ~8s) before relying on it
+for anything real.
+
+### K2 — Real bugs found and fixed while actually running this against real rate limits
+
+1. **Gemini's free tier for `gemini-2.5-flash` is 20 requests/DAY total**
+   (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`), not a per-minute limit — exhausted by one
+   real `test_pm_agent.py` run. Worse: `run_gemini()`'s own retry ladder (30s/60s/90s/120s sleeps)
+   kept retrying against a wall that can't clear within the process's lifetime, wasting **543
+   seconds to fail 3 tests**. Fixed: `_is_daily_quota_exhausted()` in `gemini_adapter.py` inspects
+   the real `QuotaFailure` violation for a `PerDay` quotaId and fails fast instead of sleeping.
+   Switched the default model to `gemini-flash-lite-latest` (separate, untouched quota pool,
+   confirmed live with a real tool-calling round trip).
+2. **`gemini-flash-lite-latest` then hung for the full 120s timeout on every real PM-agent call** —
+   not a 429, a raw SSL socket read timeout with zero response, only reproducible on the *real*
+   workload (full system prompt + repo context + PM's real multi-tool schema), not on the trivial
+   single-tool smoke tests that had passed earlier. Read as the "lite" model genuinely struggling
+   with a realistically-sized request, not a bug in this codebase's own adapter code.
+3. **A real, separate, more consequential Groq bug**: `groq_adapter.py`'s own `run_groq()` has an
+   app-level retry loop gated on `settings.groq_max_retries` (set to `1` in `.env` for exactly this
+   reason — fast-fail instead of sleeping) — but the Groq SDK's `groq.Groq(...)` client ALSO has its
+   own internal HTTP-level retry mechanism (default `max_retries=2`), which fires *inside*
+   `client.chat.completions.create()` and sleeps via its own backoff **before** ever raising back to
+   the app's own loop. So `GROQ_MAX_RETRIES=1` had **zero effect** — confirmed live: a test still
+   hung 90+ seconds in the SDK's own internal `_sleep_for_retry()`. Fixed: `groq.Groq(api_key=...,
+   max_retries=0)` — disables the SDK's own inner retry layer so the app's own loop is the sole
+   retry authority. Verified: the exact same test file that took 543s/363s/272s in the three earlier
+   (broken) attempts now completes in well under 60s, with clean, fast, real 429 errors instead of
+   silent multi-minute hangs.
+
+### K3 — Real, structural finding: this codebase's real agents are too large for either free tier, at any pacing
+
+Once both of the above bugs were fixed (so failures were fast and honest, not hidden by hangs), the
+real signal was: **Groq's key here gets 8,000 tokens/minute (TPM). Nearly every real agent in this
+codebase (`grep enable_planning=True app/agents/*.py` — 80+ matches, only `bhaskar_agent.py` and
+`temporary_agent.py` opt out) makes a minimum of 3 real LLM calls per run: two small planning calls
+(`_gather_facts_and_plan`, ~500-1200 max_tokens each) plus one large main call carrying the full
+system prompt + tool schemas (observed real `Requested` sizes: 5,576-6,410 tokens for pm/architect;
+10,958 tokens for `coder` — a real Groq `413 Request too large` error, since that single request
+alone exceeds the entire 8,000 TPM ceiling, unconditionally, with no amount of waiting ever fixing
+it).** This means the bottleneck is the size of a single agent's minimum call sequence relative to
+the per-minute budget, not accumulated usage from prior tests — so neither a 70s nor a 240s
+inter-test pacing gap reliably fixes it; some tests (like `coder`) can never pass on this Groq
+tier/model at all, and others (`pm`, `architect`) pass only when the real sliding window happens to
+line up favorably.
+
+**Real, measured results from the paced run** (one test at a time, Groq, `GROQ_MAX_RETRIES=1` +
+`max_retries=0` fix in place): **12 of 49 `tests/pending/` tests attempted, 0 passed.**
+- 8 — `test_api_e2e.py`: all `ConnectionRefusedError` — these need a live dev server running on
+  `localhost` (true HTTP end-to-end tests, not through the LangGraph bypass) — **unrelated to
+  Groq/Gemini entirely**, would need the same fix regardless of which LLM backend is used.
+- 3 — `test_architect_agent.py`: real `429 rate_limit_exceeded` (TPM), confirming K3 above.
+- 1 — `test_coder_agent.py::test_coder_writes_file`: real `413 Request too large` (10,958 tokens
+  requested against an 8,000 limit) — confirmed unconditionally unpassable on this Groq tier/model,
+  not a timing issue.
+
+The remaining 37 tests were not attempted this session — paused here per the user's explicit
+decision once the structural (not pacing) nature of the limit was confirmed.
+
+### K4 — Current state, and how to resume
+
+`.env` is back to `USE_GROQ=false` (Anthropic-only default) — the Groq/Gemini keys, model overrides,
+and the `GROQ_MAX_RETRIES=1`/adapter fixes are all still in place, untouched, so resuming free-tier
+testing later needs zero rediscovery. All temporary code (both adapters, both compat shims, both
+day0 integration test files) is still in the repo, each with its own "TEMPORARY, easily removable"
+docstring — nothing here needs to be built again.
+
+**To resume once `ANTHROPIC_API_KEY` has a real balance** (the real fix — Anthropic has no per-request
+size ceiling anywhere close to this codebase's real prompt sizes, and its own rate limits are
+tier-based on account spend, not a flat 8K free-tier number):
+```bash
+cd backend
+RUN_PENDING_TESTS=1 pytest tests/pending/ -v
+```
+No `GROQ_PREFERRED`/`GEMINI_PREFERRED` env vars needed — `tests/pending/conftest.py`'s own
+`_has_llm` check picks up a real `sk-ant-...` key automatically and skips the Groq/Gemini bypass
+fixtures entirely (both are no-ops whenever a real Anthropic key is present — see `_prefer_groq`/
+`_prefer_gemini`'s own definitions in that file).
+
+**If free-tier testing is ever wanted again before that** (e.g., a different Groq/Gemini account
+with a higher tier, or Groq's paid "Dev Tier"): the real per-request minimum for this codebase's
+agents is ~7,000-11,000 tokens depending on the agent (`coder` is the largest observed) — any
+free-tier key needs a TPM ceiling comfortably above that (Groq's paid Dev Tier, or Gemini's
+`gemini-2.5-flash`/`gemini-flash-lite-latest` with a higher per-minute allowance than the default
+free tier) for pacing to help at all; below that ceiling, no pacing strategy fixes it, per K3.

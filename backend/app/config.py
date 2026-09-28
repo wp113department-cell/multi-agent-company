@@ -1869,16 +1869,21 @@ class Settings(BaseSettings):
         description="Route all agent calls to Gemini instead of Anthropic. TEMPORARY testing-only backend, mirrors USE_GROQ — see gemini_adapter.py.",
     )
     gemini_model_planner: str = Field(
-        default="gemini-2.5-flash",
-        description="Gemini model for PM/Architect/Decomposer (Haiku equivalent)",
+        default="gemini-flash-lite-latest",
+        description="Gemini model for PM/Architect/Decomposer (Haiku equivalent). "
+        "2026-09-28: gemini-2.5-flash's free tier is only 20 requests/DAY "
+        "(GenerateRequestsPerDayPerProjectPerModel-FreeTier) — exhausted after "
+        "one real pm_agent test file. gemini-flash-lite-latest has its own, "
+        "separate quota pool and is confirmed working (real tool-calling "
+        "round trip verified) — use this until real per-day numbers are known.",
     )
     gemini_model_coder: str = Field(
-        default="gemini-2.5-flash",
-        description="Gemini model for Coder/QA/Review agents (Sonnet equivalent)",
+        default="gemini-flash-lite-latest",
+        description="Gemini model for Coder/QA/Review agents (Sonnet equivalent). See gemini_model_planner's own note on why not gemini-2.5-flash.",
     )
     gemini_model_router: str = Field(
-        default="gemini-2.5-flash",
-        description="Gemini model for triage/summary/heartbeat (Haiku equivalent)",
+        default="gemini-flash-lite-latest",
+        description="Gemini model for triage/summary/heartbeat (Haiku equivalent). See gemini_model_planner's own note on why not gemini-2.5-flash.",
     )
     gemini_max_retries: int = Field(
         default=5, description="Max Gemini API call retries on transient (429) errors."

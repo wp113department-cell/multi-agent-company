@@ -292,7 +292,17 @@ def run_groq(
     from app.config import get_settings
 
     settings = get_settings()
-    client = groq_module.Groq(api_key=settings.groq_api_key)
+    # 2026-09-28 real bug found running this for the first time under a
+    # real rate limit: the Groq SDK's OWN internal HTTP-level retry
+    # mechanism (default max_retries=2) fires INSIDE
+    # client.chat.completions.create() below, sleeping via its own
+    # Retry-After-aware backoff, before this function's own
+    # for-attempt-in-range(max_retries) loop ever sees a RateLimitError —
+    # so settings.groq_max_retries had zero effect on it (confirmed live:
+    # a test set GROQ_MAX_RETRIES=1 for fast-fail and still hung 90s+ in
+    # the SDK's own retry sleep). max_retries=0 disables that inner layer
+    # so this function's own loop below is the sole retry authority.
+    client = groq_module.Groq(api_key=settings.groq_api_key, max_retries=0)
     groq_model = _anthropic_model_to_groq(model, settings)
     groq_tools = _to_groq_tools(tools) if tools else []
 
