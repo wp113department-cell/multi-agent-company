@@ -1573,6 +1573,7 @@ def _make_memory_hook_node(
                 mem.get("procedures", []),
                 mem.get("preferences", []),
                 mem.get("bugs", []),
+                mem.get("prompt_changes", []),
             )
             if db_block:
                 context_blocks.append(db_block)

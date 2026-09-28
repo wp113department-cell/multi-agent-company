@@ -29,7 +29,7 @@ and removed from the ordered plan below.
 | 4 | #457 Documentation checks as mandatory gate | DONE |
 | 5 | #297 Auto documentation lookup while coding | DONE |
 | 6 | #58 Agent selection uses memory/past outcomes | DONE |
-| 7 | #405 Company Brain (org knowledge for prompts/tools) | PENDING |
+| 7 | #405 Company Brain (org knowledge for prompts/tools) | DONE |
 | 8 | #66 Switch tools mid-run | PENDING |
 | 9 | #443 Detect hallucinating/leaking/desynced agents | PENDING |
 | 10 | #45 + #67 Agent-to-agent delegation | PENDING |
@@ -416,3 +416,58 @@ hooks or fleet_manager`): 232 passed, 4 failed — the same real-RAM-
 dependent resource-check tests as #297 above (machine genuinely under
 memory pressure at test time), reproduced as pre-existing/environmental,
 not caused by this change. Full backend suite pending before push.
+
+## #405 — Company Brain (org knowledge for prompts/tools) — DONE (2026-09-28)
+
+Per the audit's own IMPLEMENTATION PLAN: "Fold PromptVersion diffs into
+memory_hook_node's embedding-based retrieval as searchable text: add a new
+embed_prompt_change() function mirroring the existing embed_bug/
+embed_preference category pattern." Built exactly that — a real diff,
+mirroring every step of the existing `embed_bug`/`query_bugs` pair rather
+than inventing a parallel storage/retrieval mechanism.
+
+- `app/memory/store.py`: new `embed_prompt_change()` (+`_sync` bridge, same
+  shape as `embed_bug_sync` since `PromptRegistry.deploy()` is a plain sync
+  method) and `query_prompt_changes()` — same near-duplicate/quality-gate/
+  importance/verified handling as every other category, category=
+  `"prompt_change"`, `task_id=f"prompt:{role_name}"` (a prompt/role change
+  has no owning DevTask, same `"fleet-{agent_name}"`-style convention
+  `embed_learning_signal` already uses). `_default_importance` gained a
+  `"prompt_change" -> 0.7` branch — the same weight as `"architecture"`,
+  since an approved+deployed prompt change is a deliberate governance
+  decision, not a routine task log line. Wired into
+  `query_memory_context()`/`query_memory_context_sync()`'s returned dict
+  (new `"prompt_changes"` key, including the sync bridge's own error-
+  fallback dict) and a new section in `format_full_memory_context()`.
+- `app/agents/base_graph.py::memory_hook_node`: now passes
+  `mem.get("prompt_changes", [])` into `format_full_memory_context()` —
+  this is the literal "folded into memory_hook_node's retrieval" the plan
+  asked for; every future agent run's pre-inference memory context can now
+  surface a relevant past prompt/role change the same way it already
+  surfaces bugs/preferences/procedures.
+- `app/fleet/prompt_registry.py::PromptRegistry.deploy()`: after a real,
+  successful deploy (file already written, DB already transitioned), computes
+  a REAL unified diff (`difflib.unified_diff`) between the version being
+  superseded (`parent_version_id`'s own content, or empty string for a
+  role's first-ever version) and the newly deployed content, then calls
+  `embed_prompt_change_sync()`. Best-effort (try/except, logged) — a
+  memory-write failure must never undo or fail a deployment that already
+  genuinely succeeded.
+
+Tests: 7 new in `tests/test_prompt_change_memory.py` (real Postgres,
+mocked only at the Voyage embedding boundary, same convention as
+`test_memory_aware_agent_selection.py`: persists a real row with
+category/outcome/task_id/files_changed correct, real semantic retrieval
+finds it back, `query_memory_context`'s dict includes the new key,
+`format_full_memory_context` includes/omits the section correctly, the
+sync bridge works and degrades to `False` on failure) + 3 new in
+`tests/test_prompt_registry_memory_wiring.py` (real `PromptRegistry`
+lifecycle, `embed_prompt_change_sync` mocked: first deploy diffs against
+empty content, second deploy diffs against the REAL parent version's
+content — proving actual content lineage, not a placeholder — and a
+memory-write failure never breaks a real deploy). 10/10 new tests pass;
+`mypy --strict` clean on all 3 touched files; all 10 pre-existing
+`test_prompt_registry.py` tests still pass unchanged. Broader sweep
+(`prompt_registry or memory_store or memory_aware or prompt_change or
+base_graph or memory_hook`): 126 passed, 0 failed. Full backend suite
+pending before push.

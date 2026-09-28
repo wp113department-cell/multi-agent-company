@@ -16,8 +16,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Any
 
@@ -336,6 +339,49 @@ class PromptRegistry:
         deployed = asyncio.run(_transition(version_id, "deployed"))
         asyncio.run(_supersede_current_deployed(row.role_name, except_id=version_id))
         _role_file_path(row.role_name).write_text(row.content, encoding="utf-8")
+
+        # #405 (2026-09-28, GRIDIRON_PARTIAL "Covers approved prompts/MCPs/
+        # tools as a distinct knowledge type") — fold this real, already-
+        # approved, already-deployed diff into the same embedding-based
+        # retrieval every other org-knowledge category uses, so a future
+        # agent working on a related role/prompt change can find it via
+        # semantic search, not just by browsing PromptRegistry's own
+        # history UI. Best-effort: a memory-write failure must never break
+        # a real deployment that already succeeded above.
+        try:
+            import difflib
+
+            from app.memory.store import embed_prompt_change_sync
+
+            old_content = ""
+            if row.parent_version_id is not None:
+                parent = asyncio.run(_get_by_id(row.parent_version_id))
+                if parent is not None:
+                    old_content = parent.content
+            diff_text = "".join(
+                difflib.unified_diff(
+                    old_content.splitlines(keepends=True),
+                    row.content.splitlines(keepends=True),
+                    fromfile=f"{row.role_name}@{row.parent_version_id or 'none'}",
+                    tofile=f"{row.role_name}@{version_id}",
+                )
+            )
+            if diff_text:
+                embed_prompt_change_sync(
+                    role_name=row.role_name,
+                    diff_text=diff_text,
+                    version_id=version_id,
+                    proposed_by=row.proposed_by,
+                )
+        except Exception:
+            logger.warning(
+                "Could not record prompt-change memory for role %s version %s "
+                "(non-fatal, deployment already succeeded)",
+                row.role_name,
+                version_id,
+                exc_info=True,
+            )
+
         return deployed
 
     def rollback(self, role_name: str) -> PromptVersionRecord:

@@ -89,6 +89,11 @@ def _default_importance(category: str, outcome: str) -> float:
         )
     if category == "architecture":
         return 0.7
+    if category == "prompt_change":
+        # #405 (2026-09-28) — an approved, deployed prompt/role change is a
+        # deliberate governance decision, same weight as an architecture
+        # decision, not a routine task log line.
+        return 0.7
     if category == "learning":
         return 0.6
     if category == "preference":
@@ -667,11 +672,11 @@ async def query_memory_context(
     repo_id: int | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Fetch similar tasks, past failures, fleet learning signals, past
-    repair procedures, stated preferences, and known bugs for a single query
-    text in one call. Returns {"tasks": [...], "failures": [...],
-    "learnings": [...], "procedures": [...], "preferences": [...],
-    "bugs": [...]} — each list uses the same shape its own query_* function
-    already returns.
+    repair procedures, stated preferences, known bugs, and approved prompt/
+    role changes for a single query text in one call. Returns {"tasks":
+    [...], "failures": [...], "learnings": [...], "procedures": [...],
+    "preferences": [...], "bugs": [...], "prompt_changes": [...]} — each
+    list uses the same shape its own query_* function already returns.
 
     repo_id (gap-closure Day 3): threaded through to every sub-query unchanged
     — see query_similar_tasks's docstring for the exact filtering semantics.
@@ -684,6 +689,9 @@ async def query_memory_context(
     # AUDIT_Q_BATCH15 §74/§113/§75/§105/§112 gap-closure (2026-08-11).
     preferences = await query_preferences(description, db, top_k=k, repo_id=repo_id)
     bugs = await query_bugs(description, db, top_k=k, repo_id=repo_id)
+    # #405 (2026-09-28, "Covers approved prompts/MCPs/tools as a distinct
+    # knowledge type").
+    prompt_changes = await query_prompt_changes(description, db, top_k=k, repo_id=repo_id)
     return {
         "tasks": tasks,
         "failures": failures,
@@ -691,6 +699,7 @@ async def query_memory_context(
         "procedures": procedures,
         "preferences": preferences,
         "bugs": bugs,
+        "prompt_changes": prompt_changes,
     }
 
 
@@ -739,6 +748,7 @@ def query_memory_context_sync(
             "procedures": [],
             "preferences": [],
             "bugs": [],
+            "prompt_changes": [],
         }
 
 
@@ -749,15 +759,17 @@ def format_full_memory_context(
     procedures: list[dict[str, Any]] | None = None,
     preferences: list[dict[str, Any]] | None = None,
     bugs: list[dict[str, Any]] | None = None,
+    prompt_changes: list[dict[str, Any]] | None = None,
 ) -> str:
     """Format tasks + failures + learnings + procedures + preferences + bugs
-    into one prompt-injection block. Each section is omitted when empty, so
-    a query with no failure history doesn't print an empty '## Past
-    failures' heading. procedures/preferences/bugs default to None (not [])
-    so existing callers that only pass the original three lists keep
-    working unchanged (AUDIT_Q_BATCH15 §74/§113/§75/§105/§112 gap-closure,
-    2026-08-11, added preferences/bugs the same additive way procedures was
-    added before them).
+    + prompt_changes into one prompt-injection block. Each section is
+    omitted when empty, so a query with no failure history doesn't print an
+    empty '## Past failures' heading. procedures/preferences/bugs/
+    prompt_changes default to None (not []) so existing callers that only
+    pass the original three lists keep working unchanged (AUDIT_Q_BATCH15
+    §74/§113/§75/§105/§112 gap-closure, 2026-08-11, added preferences/bugs
+    the same additive way procedures was added before them; #405,
+    2026-09-28, added prompt_changes the same way again).
     """
     sections: list[str] = []
 
@@ -807,6 +819,14 @@ def format_full_memory_context(
             lines.append(f"### {i}. [{b['severity']}] Task {b['task_id']}")
             lines.append(f"**Issue:** {str(b['issue'])[:300]}")
             lines.append(f"**Similarity:** {b['similarity']:.3f}\n")
+        sections.append("\n".join(lines))
+
+    if prompt_changes:
+        lines = ["## Approved prompt/role changes (engineering memory)\n"]
+        for i, pc in enumerate(prompt_changes, 1):
+            lines.append(f"### {i}. {pc['role_name']}")
+            lines.append(f"**Change:** {str(pc['diff'])[:500]}")
+            lines.append(f"**Similarity:** {pc['similarity']:.3f}\n")
         sections.append("\n".join(lines))
 
     return "\n".join(sections)
@@ -1911,6 +1931,137 @@ def embed_bug_sync(
         return False
 
 
+async def embed_prompt_change(
+    role_name: str,
+    diff_text: str,
+    db: AsyncSession,
+    version_id: int | None = None,
+    proposed_by: str | None = None,
+    repo_id: int | None = None,
+) -> MemoryEmbedding | None:
+    """#405 (2026-09-28, GRIDIRON_PARTIAL "Covers approved prompts/MCPs/
+    tools as a distinct knowledge type") — folds an approved+deployed
+    PromptVersion's real diff into the same embedding-based retrieval every
+    other organizational-knowledge category (embed_bug/embed_preference/
+    embed_procedure) already uses, mirroring their exact pattern rather
+    than inventing a parallel mechanism or a second retrieval system next
+    to the existing, governed PromptRegistry. A prompt/role change has no
+    owning DevTask, so task_id is synthesized as "prompt:{role_name}",
+    the same "fleet-{agent_name}"-style convention embed_learning_signal
+    already uses for a fleet-wide, task-less category.
+
+    diff_text: a real unified diff between the version being superseded and
+    the newly deployed content (see PromptRegistry.deploy()'s call site) —
+    never a fabricated summary of what changed.
+    """
+    settings = get_settings()
+    if not settings.memory_enabled:
+        return None
+
+    content = f"Prompt change ({role_name}): {diff_text}"[:4000]
+    vector = await _embed(content)
+
+    task_id = f"prompt:{role_name}"
+    duplicate = await _find_near_duplicate(vector, "prompt_change", repo_id, db)
+    if duplicate is not None:
+        await record_memory_access([duplicate.id], db)
+        logger.info(
+            "Memory: prompt change for %s is a near-duplicate of existing row %s — reused, not re-inserted",
+            role_name,
+            duplicate.id,
+        )
+        return duplicate
+
+    quality = evaluate_memory_quality(diff_text)
+    if quality.action == "reject":
+        logger.info(
+            "Memory: rejected low-quality prompt-change record for %s: %s",
+            role_name,
+            quality.reasons,
+        )
+        return None
+
+    try:
+        row = MemoryEmbedding(
+            task_id=task_id,
+            epic_id=None,
+            repo_id=repo_id,
+            outcome="prompt_change",
+            category="prompt_change",
+            description=diff_text[:2000],
+            summary=(
+                f"role={role_name} version={version_id} by={proposed_by or 'unknown'}"
+            )[:300],
+            files_changed=[f"roles/{role_name}.md"],
+            embedding=vector,
+            importance=(
+                _default_importance("prompt_change", "prompt_change")
+                * settings.memory_quality_draft_importance_factor
+                if quality.action == "draft"
+                else _default_importance("prompt_change", "prompt_change")
+            ),
+            verified=(
+                _default_verified("prompt_change")
+                if quality.action != "draft"
+                else False
+            ),
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+        logger.info(
+            "Memory: stored prompt change for role %s (version=%s)",
+            role_name,
+            version_id,
+        )
+        return row
+    except Exception as exc:
+        logger.warning("Memory: failed to store prompt change for %s: %s", role_name, exc)
+        await db.rollback()
+        return None
+
+
+def embed_prompt_change_sync(
+    role_name: str,
+    diff_text: str,
+    version_id: int | None = None,
+    proposed_by: str | None = None,
+    repo_id: int | None = None,
+) -> bool:
+    """Sync bridge for embed_prompt_change, same pattern as embed_bug_sync —
+    PromptRegistry.deploy() is a plain sync method (asyncio.run() internally
+    per step), so it cannot await embed_prompt_change directly. Returns True
+    on a real write, False on any failure — never raises, a memory-write
+    failure must never break a real prompt deployment."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.db.session import new_isolated_async_engine
+
+    async def _run() -> bool:
+        engine = new_isolated_async_engine()
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                row = await embed_prompt_change(
+                    role_name=role_name,
+                    diff_text=diff_text,
+                    db=session,
+                    version_id=version_id,
+                    proposed_by=proposed_by,
+                    repo_id=repo_id,
+                )
+                return row is not None
+        finally:
+            await engine.dispose()
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        logger.warning("embed_prompt_change_sync failed for %s: %s", role_name, exc)
+        return False
+
+
 async def query_bugs(
     description: str,
     db: AsyncSession,
@@ -1981,4 +2132,80 @@ async def query_bugs(
         ]
     except Exception as exc:
         logger.warning("Memory: bug query failed: %s", exc)
+        return []
+
+
+async def query_prompt_changes(
+    description: str,
+    db: AsyncSession,
+    top_k: int = 3,
+    repo_id: int | None = None,
+) -> list[dict[str, Any]]:
+    """#405 (2026-09-28) — the retrieval half of embed_prompt_change,
+    mirroring query_bugs exactly. repo_id: see query_similar_tasks's
+    docstring — prompt changes are usually unscoped (repo_id=None, a role
+    prompt is fleet-wide, not repo-specific), so the common case is every
+    row matching regardless of the caller's own repo_id."""
+    settings = get_settings()
+    if not settings.memory_enabled:
+        return []
+
+    vector = await _embed(description)
+    if vector == _ZERO_VECTOR_1536:
+        return []
+
+    try:
+        sql = text(f"""
+            WITH candidates AS (
+                SELECT id, task_id, epic_id, description, summary, embedding,
+                       created_at, reuse_count, importance, verified,
+                       helpful_count, not_helpful_count
+                FROM memory_embeddings
+                WHERE category = 'prompt_change'
+                  AND embedding IS NOT NULL
+                  AND vector_norm(embedding) > 0
+                  AND archived = false
+                  AND (CAST(:repo_id AS BIGINT) IS NULL OR repo_id IS NULL OR repo_id = CAST(:repo_id AS BIGINT))
+                ORDER BY embedding <=> CAST(:vec AS vector)
+                LIMIT :candidate_limit
+            )
+            SELECT
+                id,
+                task_id,
+                epic_id,
+                description,
+                summary,
+                1 - (embedding <=> CAST(:vec AS vector)) AS similarity,
+                {_COMPOSITE_SCORE_EXPR} AS composite_score
+            FROM candidates
+            ORDER BY {_COMPOSITE_SCORE_EXPR} DESC
+            LIMIT :k
+        """)
+        vec_str = "[" + ",".join(str(v) for v in vector) + "]"
+        params = {
+            "vec": vec_str,
+            "k": top_k,
+            "candidate_limit": top_k * settings.memory_candidate_overfetch_factor,
+            "repo_id": repo_id,
+            **_composite_score_params(settings),
+        }
+        _t0 = time.monotonic()
+        result = await db.execute(sql, params)
+        rows = result.fetchall()
+        record_retrieval_time("query_prompt_changes", (time.monotonic() - _t0) * 1000)
+        await record_memory_access([row.id for row in rows], db)
+        return [
+            {
+                "id": row.id,
+                "task_id": row.task_id,
+                "role_name": str(row.task_id).removeprefix("prompt:"),
+                "diff": row.description,
+                "summary": row.summary,
+                "similarity": float(row.similarity),
+                "composite_score": float(row.composite_score),
+            }
+            for row in rows
+        ]
+    except Exception as exc:
+        logger.warning("Memory: prompt-change query failed: %s", exc)
         return []
