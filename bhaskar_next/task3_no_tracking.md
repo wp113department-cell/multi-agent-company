@@ -28,7 +28,7 @@ and removed from the ordered plan below.
 | 3 | #454 Dependency checks as mandatory gate | DONE |
 | 4 | #457 Documentation checks as mandatory gate | DONE |
 | 5 | #297 Auto documentation lookup while coding | DONE |
-| 6 | #58 Agent selection uses memory/past outcomes | PENDING |
+| 6 | #58 Agent selection uses memory/past outcomes | DONE |
 | 7 | #405 Company Brain (org knowledge for prompts/tools) | PENDING |
 | 8 | #66 Switch tools mid-run | PENDING |
 | 9 | #443 Detect hallucinating/leaking/desynced agents | PENDING |
@@ -359,3 +359,60 @@ Docker's own VM, VSCode/Pylance, and open browsers accounted for the
 load), reproduced failing standalone under the same real low-memory
 condition — not a regression, the resource check is correctly reporting
 real system state. Full backend suite pending before this is pushed.
+
+## #58 — Agent selection uses memory/past outcomes — DONE (2026-09-28)
+
+**Real finding before writing anything (this session's pattern held
+again)**: a much earlier initiative ("plan14 follow-on #3, Memory-Aware
+Agent Selection") had already built almost the entire mechanism this item
+asks for, end to end and on by default: `memory_embeddings.agent_name`
+(migration 048), a scheduled `agent_historical_performance` rollup table +
+background loop (`agent_historical_performance_enabled=True`,
+recomputed every 6h, cache loaded at startup), and
+`FleetManager.select()` already multiplying its score by a real, capped
+`memory_performance_factor` derived from that table. All of this was
+already covered by `tests/test_memory_aware_agent_selection.py` and
+already running in production.
+
+**Real gap confirmed by direct reading**: `success_rate` (the only signal
+`memory_performance_factor` consults) is only ever computed for
+`category='task'` rows, and `agent_name` was ONLY ever populated by
+`app.memory.hooks.record_agent_run_outcome` — which is wired into
+`app/api/specialized_agents.py`'s solo-agent dispatch paths (the ~55
+standalone agents), but was **never called from `manager.py`'s own
+per-subtask dev/QA/review dispatch loop** — the highest-volume real path
+in the entire pipeline (every backend_dev/frontend_dev/qa/reviewer
+subtask inside every epic). `run_manager()`'s own two `embed_task_outcome`
+calls are correctly epic-level (aggregating however many different agents
+worked the epic's subtasks — no single attributable agent there, and the
+existing code comments already say so), so they were never going to close
+this gap; the fix had to live at the per-subtask level instead.
+
+**Fix applied**: `app/agents/manager.py::_dispatch_one_subtask` now calls
+`record_agent_run_outcome()` once per subtask, right after its final
+status is determined (completed or blocked), with the REAL agent that
+worked THAT subtask (`selected_agent_name` — e.g. `backend_dev` — not a
+guess or the epic-wide default). Builds a minimal `AgentResult` from data
+already computed at that point (review/QA summary, review findings, files
+changed) — no new computation, just routing what already exists into the
+one function (`record_agent_run_outcome`) that already knew how to
+attribute it. Resolves `repo_id` via the existing cached
+`get_task_repo_id()`. Wrapped in the same non-fatal
+try/except-log-and-continue shape every other memory write in this
+codebase uses — a memory-write failure must never break subtask dispatch.
+
+Tests: 4 new in `tests/test_manager_per_subtask_memory_outcome.py` — real
+`run_manager()` end-to-end (mocked dev/qa/reviewer, mocked `publish_event`
+so a plain sentinel can stand in for `db` without a real Postgres
+session — same convention as `test_gap_closure_days0_18.py`'s own
+`TestManagerTraceIdAndCheckpointWiring`): a completed subtask records
+`agent_name="backend_dev"`/`task_id`/`epic_id` correctly; a blocked
+subtask records `status="blocked"`; no `db` session is a harmless no-op
+(mirrors `record_agent_run_outcome`'s own "memory never breaks dispatch"
+guarantee); a `record_agent_run_outcome` failure never breaks the
+subtask's own completion. 4/4 pass; `mypy --strict` clean on
+`manager.py`. Broader sweep (`memory_aware or manager or memory_outcome or
+hooks or fleet_manager`): 232 passed, 4 failed — the same real-RAM-
+dependent resource-check tests as #297 above (machine genuinely under
+memory pressure at test time), reproduced as pre-existing/environmental,
+not caused by this change. Full backend suite pending before push.

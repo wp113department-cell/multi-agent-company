@@ -988,6 +988,50 @@ async def _dispatch_one_subtask(
     for _proposal in local_proposals:
         _proposal["_parent_subtask_idx"] = subtask_idx
 
+    # #58 (2026-09-28, GRIDIRON_PARTIAL "Considers memory (past outcomes) in
+    # selection") — plan14 follow-on #3 already built the full downstream
+    # mechanism (memory_embeddings.agent_name, the agent_historical_
+    # performance rollup, FleetManager.select()'s memory_performance_factor,
+    # all wired and on by default) but nothing ever populated agent_name for
+    # the highest-volume case: real per-subtask dev/QA/review outcomes.
+    # record_agent_run_outcome() (app/memory/hooks.py) already existed and
+    # already threads agent_name through to embed_task_outcome() — it was
+    # just never called from here, only from specialized_agents.py's
+    # SOLO-dispatched-agent paths. run_manager()'s own epic-level
+    # embed_task_outcome() calls (after this whole loop, across ALL
+    # subtasks) stay as they are — genuinely correct at that granularity,
+    # since an epic can span multiple different dev agents and has no
+    # single "the agent" to attribute to. This is the missing, precisely-
+    # scoped per-subtask-per-agent signal instead.
+    if db is not None:
+        try:
+            from app.agents.agent_result import AgentResult
+            from app.db.repository import get_task_repo_id
+            from app.memory.hooks import record_agent_run_outcome
+
+            outcome_result = AgentResult(
+                summary=(review_summary or qa_summary or f"Subtask {subtask_id}"),
+                findings=review_findings,
+                files_touched=files_changed,
+                status="completed" if subtask_status == "completed" else "blocked",
+            )
+            await record_agent_run_outcome(
+                agent_name=selected_agent_name,
+                task_id=str(task_id),
+                description=subtask_plan,
+                result=outcome_result,
+                db=db,
+                epic_id=epic_id,
+                repo_id=await get_task_repo_id(db, task_id),
+            )
+        except Exception:
+            logger.debug(
+                "Could not record per-subtask memory outcome for subtask %d "
+                "(non-fatal)",
+                subtask_id,
+                exc_info=True,
+            )
+
     return {
         "result": {
             "subtask_id": subtask_id,
