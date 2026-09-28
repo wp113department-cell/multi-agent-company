@@ -149,6 +149,7 @@ class CircuitBreaker:
 
 _anthropic_breaker: CircuitBreaker | None = None
 _groq_breaker: CircuitBreaker | None = None
+_gemini_breaker: CircuitBreaker | None = None
 _breaker_lock = Lock()
 
 
@@ -180,3 +181,23 @@ def get_groq_breaker() -> CircuitBreaker:
                 cooldown_seconds=settings.llm_circuit_breaker_cooldown_seconds,
             )
         return _groq_breaker
+
+
+def get_gemini_breaker() -> CircuitBreaker:
+    """2026-09-28 — TEMPORARY, easily removable alongside app/agents/
+    gemini_adapter.py (see that module's own docstring): mirrors
+    get_groq_breaker() exactly for the same reason (a sustained Gemini
+    outage should stop hammering it, not burn through every retry with a
+    backoff sleep each time)."""
+    global _gemini_breaker
+    with _breaker_lock:
+        if _gemini_breaker is None:
+            from app.config import get_settings
+
+            settings = get_settings()
+            _gemini_breaker = CircuitBreaker(
+                name="gemini",
+                failure_threshold=settings.llm_circuit_breaker_failure_threshold,
+                cooldown_seconds=settings.llm_circuit_breaker_cooldown_seconds,
+            )
+        return _gemini_breaker

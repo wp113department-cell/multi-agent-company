@@ -215,7 +215,7 @@ honestly below rather than silently marked done.
 
 ----- Section 10: Project Architecture Audit -----
 161. Folder structure: YES
-162. Modularity (god-module tools.py fully split): PARTIAL — real, continued progress (tools.py down to ~7,340 lines from the audit's original 12,500+), but honestly still not FULLY split; a genuinely multi-session effort. Not re-attempted in Task 3.
+162. Modularity (god-module tools.py fully split): YES (2026-09-28, reframed) — re-investigated line-by-line before assuming this needed more mechanical splitting. tools.py is 7,469 lines, but 225 of those are imports pulling real logic from 30+ dedicated modules under app/tools/ (bash, git, filesystem, SQL, docker, etc. — each with its own docstring and tests, built up across ~190 documented tool_enhance.md extraction passes). Sampled the remaining ~6,500 lines (make_sql_agent_handlers, the 160-closure make_chat_handlers, a dozen other make_*_agent_handlers factories): confirmed almost entirely thin wiring that injects repo_path/db_url and delegates to those already-extracted shared handlers, plus per-role tool-dict registration. The actual "god module" problem — tangled business logic living in one file — is genuinely resolved. What remains is a single composition/registration layer (which agent role gets which handlers), which is inherently one coordination point; fragmenting it further into ~30 more files would add indirection with no functional benefit, the exact premature abstraction this project's own engineering principles reject. User confirmed (2026-09-28) this reframe over shuffling code just to shrink a line count.
 163. Dependency management (pinning): YES
 164. Code quality (lint/type-check clean): YES
 165. Testing volume: YES
@@ -575,7 +575,7 @@ honestly below rather than silently marked done.
 413. Real 'what went well / what failed' report tied to a release event: YES
 
 ----- Section 117: Quality Score -----
-414. Aggregate quality score across all categories (9/9): PARTIAL — honestly bounded to 7/9, not 9/9. Two new real categories (tools, prompts) were added; "documentation" and "performance" genuinely have no real signal to build on yet (re-confirmed, not assumed).
+414. Aggregate quality score across all categories (9/9): PARTIAL (2026-09-28) — honestly bounded to 8/9, not 9/9. Three new real categories (tools, prompts, documentation) are now built and wired: "documentation" closed 2026-09-28 by app/fleet/documentation_score.py, reading #457's doc_coverage.py per-subtask gate pass/fail events (real, repo-scoped, persisted to the `events` table via migration 053's repo_id — a genuinely new signal source that didn't exist at the 2026-09-24 re-confirmation, since doc_coverage.py itself only landed 2026-09-25). "performance" remains genuinely without a real signal source: the only real latency data (agent_benchmarks.objectives.latency_p50) measures agent orchestration time, not the deployed target app's own runtime characteristics — this platform has no instrumentation hook into an arbitrary target repo's runtime for that. Not fixable by building a plausible-looking number; stays PARTIAL until a real per-repo performance signal exists.
 
 ----- Section 118: Safe Self-Improvement Lifecycle -----
 415. Detect: YES
@@ -735,10 +735,10 @@ PART 2 — OVERALL ANALYSIS (updated 2026-09-28)
 
 Total checkpoints evaluated: 519
 
-YES (production ready)........: 451  (86.9%)   [was 394 — +57 real gaps closed]
-PARTIAL (needs work)...........: 14  (2.7%)    [was 61 PARTIAL + 14 NO combined
-                                                75 total — 61 closed to YES/
-                                                DEFERRED, 12 stay PARTIAL as
+YES (production ready)........: 452  (87.1%)   [was 394 — +58 real gaps closed]
+PARTIAL (needs work)...........: 13  (2.5%)    [was 61 PARTIAL + 14 NO combined
+                                                75 total — 62 closed to YES/
+                                                DEFERRED, 11 stay PARTIAL as
                                                 originally scoped, 2 NO items
                                                 (#227/#443) land here scoped]
 NO (missing / real gap)........: 0  (0%)       [was 14 — 10 closed to YES,
@@ -752,7 +752,7 @@ needs an org decision first)...: 2  (already counted inside PARTIAL above)
 
 If SKIP items are excluded (they never counted against production
 readiness), effective score on the 469 checkpoints that actually matter:
-  YES: 451 (96.2%)   PARTIAL: 14 (3.0%)   NO: 0 (0%)   DEFERRED: 4 (0.9%)  (Recalculated 2026-09-28)
+  YES: 452 (96.4%)   PARTIAL: 13 (2.8%)   NO: 0 (0%)   DEFERRED: 4 (0.9%)  (Recalculated 2026-09-28)
 
 Overall estimated production readiness: substantially higher than the
 original ~66% — every closed item is backed by real code + real,
@@ -760,7 +760,7 @@ independently-run tests (see the two tracking docs referenced at the top
 of this file). The honest remaining ceiling is the 4 DEFERRED items
 (all one underlying root cause: no distributed-registry/multi-tenancy
 layer exists yet, deferred by explicit user decision, not a code gap)
-plus the 14 PARTIAL items below, ALL of which are INTENTIONAL/BLOCKED/
+plus the 13 PARTIAL items below, ALL of which are INTENTIONAL/BLOCKED/
 honestly-scoped by design, by explicit user decision, or by a still-needed
 organizational decision — reviewed one by one with the user on 2026-09-28,
 none of them left as an unexamined gap.
@@ -780,11 +780,17 @@ RESOLVED 2026-09-28 (no new code — already real, just needed recognition):
     versions, self-improvement-agent commits). User confirmed regular
     task/epic commits should correctly stay manual-only (#232) — a
     deliberate safety boundary, not a gap.
+  - (#162) Modularity (god-module tools.py fully split)  —  re-investigated
+    line-by-line: the real business logic is already extracted into 30+
+    dedicated app/tools/ modules (225 import lines, ~190 documented
+    extraction passes); the remaining ~6,500 lines are thin per-role
+    wiring/registration (make_*_agent_handlers factories, the 160-closure
+    make_chat_handlers), not tangled logic. Fragmenting that composition
+    layer further would add indirection with no functional benefit — user
+    confirmed this reframe over cosmetic code-shuffling.
 
 HONESTLY BOUNDED / SCOPED (real, substantial work done; a further slice
 deliberately left for a future, dedicated pass):
-  - (#162) Modularity (god-module tools.py fully split)  —  tools.py is
-    ~7,340 lines, down from 12,500+, but not fully split.
   - (#227) Take over a task / edit plan / reject one step and resume
     exactly there  —  edit/reject a step at the existing checkpoint is
     real and tested; true resume-from-an-arbitrary-mid-plan-checkpoint
@@ -792,9 +798,10 @@ deliberately left for a future, dedicated pass):
   - (#255) Edit very large files safely (streaming I/O)  —  read_file's
     ranged-read is real streaming; write_file/edit_file/apply_patch's
     write paths are not yet.
-  - (#414) Aggregate quality score across all categories  —  7/9, not
-    9/9; "documentation" and "performance" categories have no real
-    signal to build on yet.
+  - (#414) Aggregate quality score across all categories  —  8/9, not
+    9/9 (2026-09-28: "documentation" closed via app/fleet/
+    documentation_score.py, reading #457's real doc-gate events);
+    "performance" has no real per-repo runtime signal to build on.
   - (#443) Detect hallucinating agents / memory leaks / sync failures —
     hallucination-detection half is real and done; memory-leak/sync-
     failure half has no existing hook in this platform's architecture
@@ -905,23 +912,23 @@ You can safely ignore these for a normal production launch.
 FINAL TALLY (2026-09-28)
 ==============================================================================
 
-DONE this pass — 57 items moved PARTIAL/NO -> YES:
+DONE this pass — 58 items moved PARTIAL/NO -> YES:
 3, 5, 6, 12, 38, 43, 44, 45, 47, 58, 65, 66, 67, 71, 88, 90, 98, 100, 106,
-117, 123, 126, 129, 130, 146, 147, 149, 212, 213, 234, 235, 236, 238, 246,
-257, 259, 297, 361, 381, 383, 405, 407, 428, 429, 437, 439, 453, 454, 455,
-456, 457, 462, 463, 495, 500, 503, 505
+117, 123, 126, 129, 130, 146, 147, 149, 162, 212, 213, 234, 235, 236, 238,
+246, 257, 259, 297, 361, 381, 383, 405, 407, 428, 429, 437, 439, 453, 454,
+455, 456, 457, 462, 463, 495, 500, 503, 505
 (Full evidence for each: enhance_partial_tracking.md for the PARTIAL-origin
 items, task3_no_tracking.md for the NO-origin items, and this file's own
-#71 note above for the "already real, needed recognition" case.)
+#71/#162 notes above for the "already real, needed recognition" cases.)
 
-STILL PARTIAL — 14 items (see PART 3 above for the honest reason each one
-stays open): 150, 162, 196, 198, 227, 255, 291, 300, 329, 377, 414,
+STILL PARTIAL — 13 items (see PART 3 above for the honest reason each one
+stays open): 150, 196, 198, 227, 255, 291, 300, 329, 377, 414,
 427, 443, 509
 (2 of these — #227, #443 — originated as NO items in the original audit
 and are now honestly scoped to PARTIAL, not fully YES; the rest were
-already PARTIAL and stay PARTIAL for the reasons in PART 3 above. All 14
+already PARTIAL and stay PARTIAL for the reasons in PART 3 above. All 13
 were explicitly reviewed with the user on 2026-09-28: 8 confirmed as
-correct-as-is/deliberately deferred by their own decision, 5 are
+correct-as-is/deliberately deferred by their own decision, 4 are
 honestly-bounded real-progress items with a further slice deliberately
 left for later, and 1 (#509) is a pure rollup.)
 
@@ -933,4 +940,4 @@ scoped — #227, #443 — and 2 moved to DEFERRED — #171, #494).
 
 SKIP — 50 questions, unchanged from the original audit (see PART 4 above).
 
-Sanity check: 451 YES + 14 PARTIAL + 0 NO + 4 DEFERRED + 50 SKIP = 519. ✓
+Sanity check: 452 YES + 13 PARTIAL + 0 NO + 4 DEFERRED + 50 SKIP = 519. ✓

@@ -5,24 +5,25 @@ Combines the persisted, structured per-category score records from Tests
 (app/fleet/test_score.py), Architecture (app/fleet/architecture_score.py),
 Security (app/fleet/security_score.py), Memory (app/fleet/memory_score.py),
 Agents (app/fleet/agents_score.py, AUDIT_Q_BATCH15 §117 gap-closure,
-2026-08-11), Tools (app/fleet/tools_score.py) and Prompts
-(app/fleet/prompts_score.py, both T2-B7, 2026-09-24, GRIDIRON_PARTIAL
-#414) — 7 of 9 categories production-verified today — into a single,
-extensible aggregation. Never recomputes a category's score: reads only
-each category's own get_latest_*_score(repo_id) read-back function, which
-itself only reads the last persisted row, computed and verified at write
-time by that category's own real producer.
+2026-08-11), Tools (app/fleet/tools_score.py), Prompts
+(app/fleet/prompts_score.py, both T2-B7, 2026-09-24) and Documentation
+(app/fleet/documentation_score.py, 2026-09-28) — 8 of 9 categories
+production-verified — into a single, extensible aggregation. Never
+recomputes a category's score: reads only each category's own
+get_latest_*_score(repo_id) read-back function, which itself only reads
+the last persisted row, computed and verified at write time by that
+category's own real producer.
 
-Categories not yet implemented (Documentation, Performance — see
-STAGE4_BACKLOG.md's Cluster Q architecture review, and _NOT_YET_IMPLEMENTED's
-own comment below for why these two specifically still have no real signal
-to build on) report status="unavailable", reason="not_implemented" — never
-a placeholder/zero/fabricated score. A category that IS implemented but has
-no persisted score yet for a given repo (its real producer has never run
-against that repo) also reports status="unavailable", but reason="no_data"
-— distinct from "not_implemented" so a caller can tell "this category
-doesn't exist yet" from "this category exists but hasn't scored this repo
-yet."
+The one category not yet implemented (Performance — see
+STAGE4_BACKLOG.md's Cluster Q architecture review, and
+_NOT_YET_IMPLEMENTED's own comment below for why it specifically still has
+no real signal to build on) reports status="unavailable",
+reason="not_implemented" — never a placeholder/zero/fabricated score. A
+category that IS implemented but has no persisted score yet for a given
+repo (its real producer has never run against that repo) also reports
+status="unavailable", but reason="no_data" — distinct from
+"not_implemented" so a caller can tell "this category doesn't exist yet"
+from "this category exists but hasn't scored this repo yet."
 
 Extensibility: adding a future category (once its own score module and
 get_latest_*_score(repo_id) function exist, matching this file's own
@@ -58,8 +59,6 @@ class CategoryDefinition:
 
 # Categories with no real producer yet (Stage 4 Cluster Q architecture
 # review + the per-category re-verification pass, STAGE4_BACKLOG.md):
-#   - documentation: zero real structured signal anywhere, re-confirmed
-#     directly before this pass, not assumed.
 #   - tools, prompts: CLOSED, T2-B7 (2026-09-24, GRIDIRON_PARTIAL #414).
 #     "tools" reads AgentRun.tool_accuracy (migration 057, itself new this
 #     batch — see app/fleet/tools_score.py). "prompts" reads
@@ -67,13 +66,21 @@ class CategoryDefinition:
 #     relevant role (see app/fleet/prompts_score.py for why this is a
 #     genuinely distinct signal from "agents" below, not a duplicate).
 #     No longer listed here — see _category_registry() below.
+#   - documentation: CLOSED, 2026-09-28 (GRIDIRON_PARTIAL #414
+#     re-verification). Was "zero real structured signal anywhere" as of
+#     T2-B7 (2026-09-24) — #457's doc_coverage.py (2026-09-25) landed the
+#     day after that verdict and wired a real per-subtask documentation
+#     gate into app/agents/manager.py, whose pass/fail events are now
+#     persisted, repo-scoped signal (see app/fleet/documentation_score.py).
+#     No longer listed here — see _category_registry() below.
 #   - performance: no real app-runtime signal exists; the only real
 #     latency data (agent_benchmarks.objectives.latency_p50) measures
 #     agent orchestration time, not application performance — a different
 #     design boundary than "agents" below (that data now IS wired in for
 #     its own real purpose; "performance" would mean the deployed target
 #     app's own runtime characteristics, which this platform has no
-#     instrumentation hook into for an arbitrary target repo).
+#     instrumentation hook into for an arbitrary target repo). Still the
+#     only genuinely unimplemented category as of 2026-09-28.
 #   - agents: AUDIT_Q_BATCH15 §117 gap-closure (2026-08-11) — the design
 #     decision this comment used to describe as "not yet made" is now made
 #     and wired (app/fleet/agents_score.py): a repo-derived join through
@@ -87,10 +94,7 @@ class CategoryDefinition:
 # producer later means removing the name from here and adding a category
 # function below, registered in _category_registry() — the aggregation
 # logic itself never changes.
-_NOT_YET_IMPLEMENTED = (
-    "documentation",
-    "performance",
-)
+_NOT_YET_IMPLEMENTED = ("performance",)
 
 
 def _category_registry() -> list[CategoryDefinition]:
@@ -100,6 +104,7 @@ def _category_registry() -> list[CategoryDefinition]:
     lazy-import convention throughout app/fleet and app/agents)."""
     from app.fleet.agents_score import get_latest_agents_score
     from app.fleet.architecture_score import get_latest_architecture_score
+    from app.fleet.documentation_score import get_latest_documentation_score
     from app.fleet.memory_score import get_latest_memory_score
     from app.fleet.prompts_score import get_latest_prompts_score
     from app.fleet.security_score import get_latest_security_score
@@ -120,6 +125,13 @@ def _category_registry() -> list[CategoryDefinition]:
         # T2-B7 (2026-09-24, GRIDIRON_PARTIAL #414).
         CategoryDefinition("tools", True, get_latest_tools_score, "tools_score"),
         CategoryDefinition("prompts", True, get_latest_prompts_score, "prompts_score"),
+        # GRIDIRON_PARTIAL #414 re-verification (2026-09-28).
+        CategoryDefinition(
+            "documentation",
+            True,
+            get_latest_documentation_score,
+            "documentation_score",
+        ),
     ]
     categories.extend(
         CategoryDefinition(name, False, None, "") for name in _NOT_YET_IMPLEMENTED

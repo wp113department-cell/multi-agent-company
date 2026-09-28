@@ -896,6 +896,62 @@ async def _prompts_score_compute_loop() -> None:
             logger.warning("Prompts-score compute loop iteration failed: %s", exc)
 
 
+async def _documentation_score_compute_loop() -> None:
+    """GRIDIRON_PARTIAL #414 re-verification (2026-09-28) — same periodic-
+    compute reasoning as _agents_score_compute_loop, for the "documentation"
+    category (app/fleet/documentation_score.py). Set
+    DOCUMENTATION_SCORE_COMPUTE_INTERVAL_HOURS=0 to disable."""
+    interval_hours = get_settings().documentation_score_compute_interval_hours
+    if interval_hours <= 0:
+        logger.info(
+            "Documentation-score compute loop disabled "
+            "(DOCUMENTATION_SCORE_COMPUTE_INTERVAL_HOURS=0)"
+        )
+        return
+
+    while True:
+        await asyncio.sleep(interval_hours * 60 * 60)
+        try:
+            from sqlalchemy import select
+
+            from app.db.models import Repo
+            from app.db.session import get_session_factory
+            from app.fleet.documentation_score import (
+                compute_documentation_score,
+                store_documentation_score,
+            )
+
+            factory = get_session_factory()
+            computed = 0
+            async with factory() as db:
+                result = await db.execute(select(Repo).where(Repo.status == "ready"))
+                repos = list(result.scalars().all())
+                for repo in repos:
+                    try:
+                        score = await compute_documentation_score(repo.id, db)
+                        if score is None:
+                            continue  # no doc gate has run against this repo yet
+                        await asyncio.to_thread(
+                            store_documentation_score, repo.id, score
+                        )
+                        computed += 1
+                    except Exception as exc:
+                        logger.warning(
+                            "Documentation-score compute failed for repo %s: %s",
+                            repo.id,
+                            exc,
+                        )
+            if computed:
+                logger.info(
+                    "Documentation-score compute: persisted %d repo score(s)",
+                    computed,
+                )
+        except Exception as exc:
+            logger.warning(
+                "Documentation-score compute loop iteration failed: %s", exc
+            )
+
+
 class _FireAndForgetBackgroundTasks:
     """Minimal duck-typed stand-in for FastAPI's BackgroundTasks (only the
     one method app.pipeline.queue_adapter.dispatch_job's asyncio branch
@@ -1666,6 +1722,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             _leader_election_engine,
         )
     )
+    documentation_score_compute_task = asyncio.create_task(
+        _run_as_leader(
+            "loop:documentation_score_compute",
+            _documentation_score_compute_loop,
+            _leader_election_engine,
+        )
+    )
     enhancement_quality_monitor_task = asyncio.create_task(
         _run_as_leader(
             "loop:enhancement_quality_monitor",
@@ -1699,6 +1762,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     agents_score_compute_task.cancel()
     tools_score_compute_task.cancel()
     prompts_score_compute_task.cancel()
+    documentation_score_compute_task.cancel()
     enhancement_quality_monitor_task.cancel()
     dependency_auto_dispatch_task.cancel()
     bg_process_liveness_task.cancel()
@@ -1722,6 +1786,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         agents_score_compute_task,
         tools_score_compute_task,
         prompts_score_compute_task,
+        documentation_score_compute_task,
         enhancement_quality_monitor_task,
         dependency_auto_dispatch_task,
         bg_process_liveness_task,

@@ -91,13 +91,27 @@ def run_agent(
     on_heartbeat() called every 5 tool calls.
     on_tool_call(name, input, result) called after each tool execution.
 
-    Backend is selected by USE_GROQ setting:
-      False (default) → Anthropic SDK (prompt caching enabled)
-      True            → Groq (OpenAI-compatible, no prompt caching)
+    Backend is selected by USE_GROQ/USE_GEMINI settings (mutually
+    exclusive, enforced by Settings._require_llm_key()):
+      Neither set (default) → Anthropic SDK (prompt caching enabled)
+      USE_GROQ=true          → Groq (OpenAI-compatible, no prompt caching)
+      USE_GEMINI=true        → Gemini (TEMPORARY, easily removable — see
+                                app/agents/gemini_adapter.py's own docstring)
     """
     settings = get_settings()
     if settings.use_groq:
         return _run_via_groq(
+            role_name=role_name,
+            model=model,
+            messages=messages,
+            tools=tools,
+            tool_handlers=tool_handlers,
+            max_turns=max_turns,
+            on_heartbeat=on_heartbeat,
+            on_tool_call=on_tool_call,
+        )
+    if settings.use_gemini:
+        return _run_via_gemini(
             role_name=role_name,
             model=model,
             messages=messages,
@@ -289,6 +303,100 @@ def _run_via_groq(
             continue
 
         _nudge_count = 0  # reset on successful tool call
+
+        tool_results = []
+        _submitted = False
+        for tu in tool_uses:
+            tool_call_count += 1
+            if tool_call_count % 5 == 0 and on_heartbeat:
+                on_heartbeat()
+
+            denial = _enforce_policy(tu.name, dict(tu.input))
+            if denial:
+                result_content = f"[POLICY DENIED] {denial}"
+                logger.warning("Policy denied tool %s: %s", tu.name, denial)
+            else:
+                handler = tool_handlers.get(tu.name)
+                if handler is None:
+                    result_content = f"[ERROR] Unknown tool: {tu.name}"
+                else:
+                    try:
+                        result_content = handler(dict(tu.input))
+                    except Exception as e:
+                        result_content = f"[ERROR] {tu.name} failed: {e}"
+                        logger.exception("Tool %s raised", tu.name)
+                if tu.name.startswith("submit_"):
+                    _submitted = True
+
+            if on_tool_call:
+                on_tool_call(tu.name, dict(tu.input), result_content)
+
+            tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tu.id,
+                    "content": str(result_content),
+                }
+            )
+
+        current_messages.append({"role": "user", "content": tool_results})
+        if _submitted:
+            break
+
+    return final_text, total_in, total_out, 0, 0
+
+
+def _run_via_gemini(
+    *,
+    role_name: str,
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    tool_handlers: dict[str, Any],
+    max_turns: int,
+    on_heartbeat: Any,
+    on_tool_call: Any,
+) -> tuple[str, int, int, int, int]:
+    """TEMPORARY, easily removable — see app/agents/gemini_adapter.py's own
+    docstring for the full removal list. Mirrors _run_via_groq() exactly;
+    the only real difference is Gemini has no equivalent of Groq's
+    tool_use_failed recovery path (Gemini's function-calling doesn't hit
+    that failure mode) and no observed need for a "nudge if no tool call"
+    retry yet — added back here if real testing shows it's needed."""
+    from app.agents.gemini_adapter import run_gemini
+
+    system_prompt = load_role(role_name)
+
+    total_in = 0
+    total_out = 0
+    tool_call_count = 0
+    final_text = ""
+
+    current_messages = list(messages)
+
+    for _ in range(max_turns):
+        response = run_gemini(
+            system_prompt=system_prompt,
+            model=model,
+            messages=current_messages,
+            tools=tools,
+            max_tokens=4096,
+        )
+
+        total_in += response.usage.input_tokens
+        total_out += response.usage.output_tokens
+
+        tool_uses = []
+        for block in response.content:
+            if block.type == "text":
+                final_text = block.text
+            elif block.type == "tool_use":
+                tool_uses.append(block)
+
+        current_messages.append({"role": "assistant", "content": response.content})
+
+        if not tool_uses:
+            break
 
         tool_results = []
         _submitted = False

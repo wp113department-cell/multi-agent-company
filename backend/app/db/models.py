@@ -1225,6 +1225,34 @@ class PromptsScore(Base):
     )
 
 
+class DocumentationScore(Base):
+    """GRIDIRON_PARTIAL #414 re-verification (2026-09-28,
+    app/fleet/documentation_score.py).
+
+    Fraction of a repo's recent documentation-gate events (#457's
+    doc_coverage.py, run per-subtask by app/agents/manager.py) that passed
+    rather than blocked, read from the real, already-persisted, repo-scoped
+    `events` table (Event.repo_id, migration 053) — never recomputed here.
+    Mirrors ToolsScore/PromptsScore's exact shape.
+    """
+
+    __tablename__ = "documentation_scores"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    repo_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("repos.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    gate_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    blocked_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    documentation_score: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class Roadmap(Base):
     """T2-B10 (2026-09-24, GRIDIRON_PARTIAL #498/#484 "Roadmap tracked,
     sequenced, and re-sequenced against real progress" / "Product

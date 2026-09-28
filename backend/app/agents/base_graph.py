@@ -3773,21 +3773,27 @@ def run_agent_graph(
 
     try:
         # ------------------------------------------------------------------
-        # Groq bypass — LangGraph nodes call anthropic.Anthropic() directly.
-        # When USE_GROQ=true, delegate to run_agent() in base.py which already
-        # handles Groq routing + model name remapping via groq_adapter.py.
+        # Groq/Gemini bypass — LangGraph nodes call anthropic.Anthropic()
+        # directly. When USE_GROQ=true or USE_GEMINI=true (mutually
+        # exclusive, enforced by Settings), delegate to run_agent() in
+        # base.py which already handles the routing + model name
+        # remapping via groq_adapter.py / gemini_adapter.py (the latter
+        # TEMPORARY, easily removable — see gemini_adapter.py's own
+        # docstring for the full removal list, which includes removing
+        # this `or _gs().use_gemini` clause).
         # ------------------------------------------------------------------
         from app.config import get_settings as _gs
 
-        if _gs().use_groq:
+        if _gs().use_groq or _gs().use_gemini:
             # TEMPORARY shim, easily removable — see docs/FLEET_ENHANCEMENT_PLAN.md
             # "Testing Strategy — Groq (now) vs Anthropic (later)". Production always
             # runs on Anthropic/OpenAI; this path only exists until a real key is
             # available. Only a missing role file (synthetic/test role names with
             # no roles/<name>.md) falls through to the normal LangGraph path below —
-            # every other exception (real Groq API/network errors) still raises
-            # normally, exactly as before this shim existed, so it can never mask
-            # a real failure or silently retry into a slow/hanging fallback call.
+            # every other exception (real Groq/Gemini API/network errors) still
+            # raises normally, exactly as before this shim existed, so it can
+            # never mask a real failure or silently retry into a slow/hanging
+            # fallback call.
             try:
                 from app.agents.base import run_agent as _run_agent
 

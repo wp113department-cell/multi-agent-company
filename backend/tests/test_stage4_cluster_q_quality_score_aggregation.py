@@ -9,10 +9,11 @@ aggregation. Per user instruction:
     category score during aggregation (tested explicitly below by
     patching each category's compute_*_score() and asserting it is never
     called during get_quality_score()).
-  - Aggregate only categories that are production verified — the other 4
-    (documentation, performance, tools, prompts) report
-    status="unavailable", reason="not_implemented", never a placeholder
-    score.
+  - Aggregate only categories that are production verified — as of
+    2026-09-28 only "performance" remains status="unavailable",
+    reason="not_implemented" (tools/prompts closed T2-B7 2026-09-24,
+    documentation closed 2026-09-28 — see app/fleet/tools_score.py,
+    prompts_score.py, documentation_score.py), never a placeholder score.
   - A category that IS implemented but has no persisted row yet for a
     given repo also reports "unavailable" — reason="no_data", distinct
     from "not_implemented".
@@ -47,7 +48,8 @@ from app.fleet.test_score import TestScoreResult, store_test_score
 _NOT_YET_IMPLEMENTED = {
     # T2-B7 (2026-09-24, GRIDIRON_PARTIAL #414) closed "tools" and
     # "prompts" — see app/fleet/tools_score.py / prompts_score.py.
-    "documentation",
+    # 2026-09-28 re-verification closed "documentation" too — see
+    # app/fleet/documentation_score.py. Only "performance" remains.
     "performance",
 }
 
@@ -117,6 +119,7 @@ def test_all_categories_unavailable_for_a_fresh_repo_with_no_scores() -> None:
             "agents",
             "tools",
             "prompts",
+            "documentation",
         ):
             assert by_name[name].status == "unavailable"
             assert by_name[name].reason == "no_data"

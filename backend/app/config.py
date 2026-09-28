@@ -1552,6 +1552,13 @@ class Settings(BaseSettings):
         "of relevant roles currently passing regression_detector's real "
         "deploy-gate check). 0 disables.",
     )
+    documentation_score_compute_interval_hours: float = Field(
+        default=24.0,
+        description="GRIDIRON_PARTIAL #414 re-verification (2026-09-28) — hours "
+        "between computing and persisting each active repo's "
+        "documentation_score (fraction of recent doc_coverage.py subtask "
+        "gate events that passed rather than blocked). 0 disables.",
+    )
     dependency_auto_dispatch_interval_seconds: float = Field(
         default=60.0,
         description="T2-B7 (2026-09-24, GRIDIRON_PARTIAL #429 'Detect "
@@ -1848,6 +1855,35 @@ class Settings(BaseSettings):
         description="Groq model for triage/summary/heartbeat (Haiku equivalent)",
     )
 
+    # Gemini (optional — TEMPORARY, easily removable, see app/agents/
+    # gemini_adapter.py's own docstring for the full removal list. A
+    # second free-tier testing backend alongside Groq above, added
+    # 2026-09-28 purely because Groq's own free-tier rate limit was too
+    # tight to get through a full pending-tests pass alone.)
+    gemini_api_key: str = Field(
+        default="",
+        description="Gemini API key (from ai.google.dev). When set and USE_GEMINI=true, all agent calls use Gemini instead of Anthropic. TEMPORARY testing-only backend — see gemini_adapter.py.",
+    )
+    use_gemini: bool = Field(
+        default=False,
+        description="Route all agent calls to Gemini instead of Anthropic. TEMPORARY testing-only backend, mirrors USE_GROQ — see gemini_adapter.py.",
+    )
+    gemini_model_planner: str = Field(
+        default="gemini-2.5-flash",
+        description="Gemini model for PM/Architect/Decomposer (Haiku equivalent)",
+    )
+    gemini_model_coder: str = Field(
+        default="gemini-2.5-flash",
+        description="Gemini model for Coder/QA/Review agents (Sonnet equivalent)",
+    )
+    gemini_model_router: str = Field(
+        default="gemini-2.5-flash",
+        description="Gemini model for triage/summary/heartbeat (Haiku equivalent)",
+    )
+    gemini_max_retries: int = Field(
+        default=5, description="Max Gemini API call retries on transient (429) errors."
+    )
+
     @model_validator(mode="before")
     @classmethod
     def _load_secrets_manager_overrides(cls, values: object) -> object:
@@ -1874,6 +1910,13 @@ class Settings(BaseSettings):
     def _require_llm_key(self) -> "Settings":
         if self.use_groq and not self.groq_api_key:
             raise ValueError("GROQ_API_KEY is required when USE_GROQ=true.")
+        if self.use_gemini and not self.gemini_api_key:
+            raise ValueError("GEMINI_API_KEY is required when USE_GEMINI=true.")
+        if self.use_groq and self.use_gemini:
+            raise ValueError(
+                "USE_GROQ and USE_GEMINI cannot both be true — pick one temporary "
+                "testing backend at a time."
+            )
         return self
 
     @model_validator(mode="after")
@@ -2025,6 +2068,8 @@ class Settings(BaseSettings):
     def is_llm_key_configured(self) -> bool:
         if self.use_groq:
             return bool(self.groq_api_key)
+        if self.use_gemini:
+            return bool(self.gemini_api_key)
         return bool(self.anthropic_api_key)
 
     # Server
