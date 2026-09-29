@@ -1,0 +1,2 @@
+registered: 85 dispatchable via /api/agents: 74
+NOT dispatchable via specialized API: ['agent_advisor', 'agent_debugger', 'agent_performance_reviewer', 'architect', 'barot_agent', 'chat_agent', 'decomposer', 'knowledge_curator', 'manager', 'pm', 'quality_auditor']

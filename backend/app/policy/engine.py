@@ -148,8 +148,14 @@ def check_path_in_worktree(file_path: str, worktree_path: str) -> PolicyResult:
 
 def _normalize_command(command: str) -> str:
     """Normalize rm flag variants so all map to `rm -rf` for pattern matching."""
+    # 0. Production audit 2026-09-29: strip shell quoting/escaping used purely
+    # to split a word — `r''m -rf /`, `'rm' '-rf'`, `r\m -rf` are all plain
+    # `rm -rf` to the shell but slipped past every pattern below. Only affects
+    # the string that is MATCHED, never the command that runs; a literal
+    # "rm -rf" inside quotes was already denied before this step.
+    normalized = re.sub(r"['\"\\]", "", command)
     # 1. Expand long form flags first so later steps can see -r / -f
-    normalized = re.sub(r"--recursive\b", "-r", command)
+    normalized = re.sub(r"--recursive\b", "-r", normalized)
     normalized = re.sub(r"--force\b", "-f", normalized)
     # 2. Collapse `rm -fr` → `rm -rf`
     normalized = re.sub(r"\brm\s+-fr\b", "rm -rf", normalized)
@@ -176,6 +182,10 @@ _NON_OVERRIDABLE_PATTERNS = [
     r">\s*/dev/(sd|nvme)",
 ]
 
+# Start of a simple command: beginning of line or after a separator/subshell
+# opener, optionally preceded by VAR=value assignments or `sudo`/`env`.
+_CMD_START = r"(?:^|[;&|(`\n]|\$\()\s*(?:\w+=\S*\s+)*(?:(?:sudo|env|exec|command)\s+)*"
+
 _DENIED_COMMAND_PATTERNS = [
     r"\brm\s+-rf\b",
     r"\bkubectl\b",
@@ -187,6 +197,15 @@ _DENIED_COMMAND_PATTERNS = [
     r"\bdocker\s+push\b",
     r"\bvercel\s+deploy\b",
     r"\bheroku\b",
+    # Production audit 2026-09-29: cloud control-plane CLIs were allowed while
+    # kubectl/terraform were denied — `aws s3 rm s3://bucket --recursive` ran.
+    # Deployment and cloud mutation are human actions (PROJECT_MASTER_GUIDE
+    # SKIP #291). Matched in COMMAND position only (start, after ; & | ( ` or
+    # env assignments), so words like "az" inside `grep az file` still pass.
+    # Human-overridable (not in _NON_OVERRIDABLE_PATTERNS), like `git push`.
+    _CMD_START
+    + r"(aws|gcloud|gsutil|az|doctl|flyctl|fly|railway|netlify|firebase|serverless|sls)\s",
+    r"\bvercel\s+(--prod|promote|rollback|remove|rm)\b",
     r"\bnpm\s+run\s+deploy\b",
     r"\bpnpm\s+run\s+deploy\b",
     r"\bwget\s+https?://",

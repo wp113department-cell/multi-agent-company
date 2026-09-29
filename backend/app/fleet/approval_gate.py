@@ -202,16 +202,29 @@ async def _record_decision(thread_id: str, approved: bool, decided_by: str) -> A
             ).scalar_one_or_none()
             if row is None:
                 return None
-            await session.execute(
-                update(PendingApproval)
-                .where(PendingApproval.id == row.id)
-                .values(
-                    status="approved" if approved else "rejected",
-                    decided_at=datetime.now().astimezone(),
-                    decided_by=decided_by,
+            # Production audit 2026-09-29: the UPDATE itself is the race gate
+            # (compare-and-set on status='pending'). It used to update by id
+            # alone, so two concurrent approve/reject calls could both read
+            # the row as pending and BOTH "win" — dispatching the decision
+            # twice (double pipeline resume / double git push).
+            won = (
+                await session.execute(
+                    update(PendingApproval)
+                    .where(
+                        PendingApproval.id == row.id,
+                        PendingApproval.status == "pending",
+                    )
+                    .values(
+                        status="approved" if approved else "rejected",
+                        decided_at=datetime.now().astimezone(),
+                        decided_by=decided_by,
+                    )
+                    .returning(PendingApproval.id)
                 )
-            )
+            ).scalar_one_or_none()
             await session.commit()
+            if won is None:
+                return None
             await session.refresh(row)
             return row
     finally:

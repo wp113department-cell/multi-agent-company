@@ -2998,9 +2998,7 @@ def _make_execute_tools_node(
             "tool_results_buffer": [],
             "batch_requires_human_approval": False,
             "self_review": "",
-            "citation_hallucination_count": state.get(
-                "citation_hallucination_count", 0
-            )
+            "citation_hallucination_count": state.get("citation_hallucination_count", 0)
             + (1 if citation_hallucination_flagged_this_turn else 0),
         }
 

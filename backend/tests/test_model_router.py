@@ -80,7 +80,11 @@ class TestModelRouter:
         agents = router.all_agents()
         # 68 from Days 0-8 + 5 Day 9 fleet-enhancement agents (agent_performance_reviewer,
         # agent_debugger, agent_advisor, knowledge_curator, quality_auditor)
-        assert len(agents) == 73
+        # + 13 later agents given explicit rows by the 2026-09-29 production
+        # audit (they previously resolved silently through DEFAULT). The
+        # "every registered agent has a row" invariant itself is enforced by
+        # test_audit02_specialized_agent_call_contract.py.
+        assert len(agents) == 86
         assert "architect" in agents
         assert "coder" in agents
         assert "agent_debugger" in agents

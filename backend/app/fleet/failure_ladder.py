@@ -137,17 +137,41 @@ async def _transition_task(task_id: int, new_status: str) -> bool:
         await engine.dispose()
 
 
-def abort(task_id: str | None, reason: str, trace_id: str = "") -> bool:
+def _transition_task_sync(task_id: int, new_status: str) -> bool:
+    """Run _transition_task from sync code, whether or not the calling thread
+    already has a running event loop. Production audit 2026-09-29: run_manager()
+    is `async def` and calls abort()/request_human_review() directly, so a bare
+    asyncio.run() here raised "cannot be called from a running event loop" on
+    every call — the caller's broad except swallowed it and the ladder silently
+    did nothing. Inside a running loop the coroutine gets its own loop on a
+    short-lived worker thread (the isolated engine above is safe for that)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_transition_task(task_id, new_status))
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, _transition_task(task_id, new_status)).result()
+
+
+def abort(
+    task_id: str | None, reason: str, trace_id: str = "", *, transition: bool = True
+) -> bool:
     """Terminal failure — task cannot be recovered by a human unblocking it.
     Best-effort and non-fatal: many agent runs (Day 9 fleet agents, Executive)
     have no corresponding DevTask row, so a missing/invalid task_id is not an
-    error here, just a no-op."""
+    error here, just a no-op.
+
+    transition=False publishes the TaskFailed event only, for a caller whose
+    own code path already owns the task's status (launch_manager transitions
+    the task itself once run_manager() returns)."""
     from app.fleet.fleet_events import publish, task_failed
 
     transitioned = False
-    if task_id:
+    if task_id and transition:
         try:
-            transitioned = asyncio.run(_transition_task(int(task_id), "failed"))
+            transitioned = _transition_task_sync(int(task_id), "failed")
         except (ValueError, TypeError):
             transitioned = False
     try:
@@ -165,18 +189,23 @@ def abort(task_id: str | None, reason: str, trace_id: str = "") -> bool:
 
 
 def request_human_review(
-    task_id: str | None, agent_name: str, reason: str, trace_id: str = ""
+    task_id: str | None,
+    agent_name: str,
+    reason: str,
+    trace_id: str = "",
+    *,
+    transition: bool = True,
 ) -> bool:
     """Flag for human attention — reuses the existing "blocked" transition
     (recoverable: a human can unblock and re-run) plus review_requested().
     NOT a LangGraph interrupt()-based pause; full approval-UI wiring is
-    Day 13's scope."""
+    Day 13's scope. transition=False: see abort()."""
     from app.fleet.fleet_events import publish, review_requested
 
     transitioned = False
-    if task_id:
+    if task_id and transition:
         try:
-            transitioned = asyncio.run(_transition_task(int(task_id), "blocked"))
+            transitioned = _transition_task_sync(int(task_id), "blocked")
         except (ValueError, TypeError):
             transitioned = False
     try:

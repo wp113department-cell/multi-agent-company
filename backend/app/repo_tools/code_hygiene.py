@@ -109,9 +109,9 @@ def _scan_file_for_broken_imports(fp: Path, root: Path) -> list[BrokenImport]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 top_level = alias.name.split(".")[0]
-                if not _resolves(
-                    top_level
-                ) and not _is_guarded_by_import_error_handler(tree, node):
+                if not _resolves(top_level) and not _is_guarded_by_import_error_handler(
+                    tree, node
+                ):
                     broken.append(BrokenImport(rel, node.lineno, alias.name))
         elif isinstance(node, ast.ImportFrom):
             if node.level and node.level > 0:
@@ -131,9 +131,9 @@ def _scan_file_for_broken_imports(fp: Path, root: Path) -> list[BrokenImport]:
             if node.module is None:
                 continue
             top_level = node.module.split(".")[0]
-            if not _resolves(
-                top_level
-            ) and not _is_guarded_by_import_error_handler(tree, node):
+            if not _resolves(top_level) and not _is_guarded_by_import_error_handler(
+                tree, node
+            ):
                 broken.append(BrokenImport(rel, node.lineno, node.module))
     return broken
 

@@ -16,7 +16,12 @@ from app.pipeline.graph import SubtaskEditError, apply_subtask_edits
 def _subtasks() -> list[dict]:
     return [
         {"type": "backend", "title": "Add model", "description": "d0"},
-        {"type": "backend", "title": "Add endpoint", "description": "d1", "depends_on": [0]},
+        {
+            "type": "backend",
+            "title": "Add endpoint",
+            "description": "d1",
+            "depends_on": [0],
+        },
         {"type": "frontend", "title": "Add UI", "description": "d2", "depends_on": [1]},
     ]
 

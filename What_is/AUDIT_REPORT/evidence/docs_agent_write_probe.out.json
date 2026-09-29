@@ -1,0 +1,631 @@
+{
+ "write_docs_agents_probed": 36,
+ "created_new_code_file": [
+  "load_test_agent"
+ ],
+ "overwrote_existing_code": [],
+ "all": [
+  {
+   "agent": "accessibility_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] accessibility_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] accessibility_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "agent_roster_doc_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] Doc generator agents may only write .md files or paths under docs/. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] Doc generator agents may only write .md files or paths under docs/. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "agentic_ai_architect",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] agentic_ai_architect may only write .md files or paths under docs/ \u2014 this is a design-only role. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] agentic_ai_architect may only write .md files or paths under docs/ \u2014 this is a design-only role. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "api_designer_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] api_designer_agent may only write .md files, paths under docs/, or new API spec files (.yaml, .yml, .json). Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] api_designer_agent may only write .md files, paths under docs/, or new API spec files (.yaml, .yml, .json). Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "api_docs_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] API docs agent may only write .md files. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] API docs agent may only write .md files. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "architecture_doc_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] Doc generator agents may only write .md files or paths under docs/. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] Doc generator agents may only write .md files or paths under docs/. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "code_explainer_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] code_explainer_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] code_explainer_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "code_quality_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] code_quality_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] code_quality_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "compliance_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] compliance_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] compliance_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "cost_estimator_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] cost_estimator_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] cost_estimator_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "data_pipeline_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] data_pipeline_agent may only write .md files, paths under docs/, or new pipeline design files (.yaml, .yml). Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] data_pipeline_agent may only write .md files, paths under docs/, or new pipeline design files (.yaml, .yml). Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "debugger_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] debugger_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] debugger_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "dependency_security_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] dependency_security_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] dependency_security_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "deployment_guide_doc_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] Doc generator agents may only write .md files or paths under docs/. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] Doc generator agents may only write .md files or paths under docs/. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "devex_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] devex_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] devex_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "env_checker_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] env_checker_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] env_checker_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "feature_flag_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] feature_flag_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] feature_flag_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "incident_responder_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] incident_responder_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] incident_responder_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "infra_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] infra_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] infra_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "load_test_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": true,
+     "result": "Written evil.py (10 bytes)"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] load_test_agent may create new load-test script files but never overwrite an existing file outside docs/. Got: 'main.py' (al"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "localization_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] localization_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] localization_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "migration_guide_doc_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] Doc generator agents may only write .md files or paths under docs/. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] Doc generator agents may only write .md files or paths under docs/. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "onboarding_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] onboarding_agent may only write .md files or paths under docs/ \u2014 this agent produces a single onboarding guide, not code cha"
+    },
+    "edit_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] onboarding_agent may only edit .md files or paths under docs/ \u2014 this agent produces a single onboarding guide, not code chan"
+    }
+   },
+   "offered_write_tools": [
+    "edit_file",
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] onboarding_agent may only write .md files or paths under docs/ \u2014 this agent produces a single onboarding guide, not code cha"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "pair_programmer_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] pair_programmer_agent may only write .md files or paths under docs/ \u2014 this Analyzer-tier role guides implementation, it neve"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] pair_programmer_agent may only write .md files or paths under docs/ \u2014 this Analyzer-tier role guides implementation, it neve"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "prompt_engineer_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] prompt_engineer_agent may only write .md files or paths under docs/ (prompts/role files, drafts, audit reports) \u2014 implementi"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] prompt_engineer_agent may only write .md files or paths under docs/ (prompts/role files, drafts, audit reports) \u2014 implementi"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "readme_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] README agent may only write .md files. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] README agent may only write .md files. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "roadmap_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] roadmap_agent may only write .md files or paths under docs/ \u2014 this is a design-only role per its own Quality Gate (Zero repo"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] roadmap_agent may only write .md files or paths under docs/ \u2014 this is a design-only role per its own Quality Gate (Zero repo"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "rollback_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] rollback_agent may only write .md files or paths under docs/ \u2014 this agent produces a rollback plan document; executing rollb"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] rollback_agent may only write .md files or paths under docs/ \u2014 this agent produces a rollback plan document; executing rollb"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "runbook_generator_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] runbook_generator_agent may only write .md files or paths under docs/ \u2014 this agent produces runbook documents, not code; exe"
+    },
+    "edit_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] runbook_generator_agent may only edit .md files or paths under docs/ \u2014 this agent produces runbook documents, not code; exec"
+    }
+   },
+   "offered_write_tools": [
+    "edit_file",
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] runbook_generator_agent may only write .md files or paths under docs/ \u2014 this agent produces runbook documents, not code; exe"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "slo_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] slo_agent may only write .md files or paths under docs/ \u2014 this agent produces SLO specification documents, not code or monit"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] slo_agent may only write .md files or paths under docs/ \u2014 this agent produces SLO specification documents, not code or monit"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "spike_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] spike_agent may only write .md files or paths under docs/ \u2014 spike output is findings/recommendations, not production code. G"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] spike_agent may only write .md files or paths under docs/ \u2014 spike output is findings/recommendations, not production code. G"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "tech_advisor_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] tech_advisor_agent may only write .md files or paths under docs/ \u2014 this agent produces technology-comparison reports; implem"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] tech_advisor_agent may only write .md files or paths under docs/ \u2014 this agent produces technology-comparison reports; implem"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "test_coverage_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] test_coverage_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code per its own Quality Gate "
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] test_coverage_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code per its own Quality Gate "
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "tool_catalog_doc_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] Doc generator agents may only write .md files or paths under docs/. Got: 'evil.py'"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] Doc generator agents may only write .md files or paths under docs/. Got: 'main.py'"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "ux_design_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] ux_design_agent may only write .md files or paths under docs/ \u2014 this is a design-only role per its own Quality Gate (Zero re"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] ux_design_agent may only write .md files or paths under docs/ \u2014 this is a design-only role per its own Quality Gate (Zero re"
+   },
+   "md_write_works": true
+  },
+  {
+   "agent": "version_manager_agent",
+   "write_tools": {
+    "write_file": {
+     "code_written": false,
+     "result": "[POLICY DENIED] version_manager_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code per its own Quality Gat"
+    }
+   },
+   "offered_write_tools": [
+    "write_file"
+   ],
+   "overwrite_existing_code": {
+    "overwritten": false,
+    "result": "[POLICY DENIED] version_manager_agent may only write .md files or paths under docs/ \u2014 this role is read-only on code per its own Quality Gat"
+   },
+   "md_write_works": true
+  }
+ ]
+}

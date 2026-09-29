@@ -45,11 +45,11 @@ describe("PipelineView subtask edit/reject controls", () => {
     const onChange = vi.fn();
     renderPipeline({}, onChange);
 
-    fireEvent.click(screen.getAllByText("Edit")[0]);
+    fireEvent.click(screen.getAllByText("Edit")[0]!);
     const titleInput = screen.getByDisplayValue("Add model");
     fireEvent.change(titleInput, { target: { value: "Add renamed model" } });
 
-    const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1][0] as SubtaskEdit[];
+    const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1]![0] as SubtaskEdit[];
     expect(lastCall).toEqual([
       { index: 0, action: "edit", title: "Add renamed model", description: "d0" },
     ]);
@@ -59,12 +59,12 @@ describe("PipelineView subtask edit/reject controls", () => {
     const onChange = vi.fn();
     renderPipeline({}, onChange);
 
-    fireEvent.click(screen.getAllByText("Reject")[1]);
-    let lastCall = onChange.mock.calls[onChange.mock.calls.length - 1][0] as SubtaskEdit[];
+    fireEvent.click(screen.getAllByText("Reject")[1]!);
+    let lastCall = onChange.mock.calls[onChange.mock.calls.length - 1]![0] as SubtaskEdit[];
     expect(lastCall).toEqual([{ index: 1, action: "reject" }]);
 
     fireEvent.click(screen.getByText("Undo reject"));
-    lastCall = onChange.mock.calls[onChange.mock.calls.length - 1][0] as SubtaskEdit[];
+    lastCall = onChange.mock.calls[onChange.mock.calls.length - 1]![0] as SubtaskEdit[];
     expect(lastCall).toEqual([]);
   });
 
@@ -72,14 +72,14 @@ describe("PipelineView subtask edit/reject controls", () => {
     const onChange = vi.fn();
     renderPipeline({}, onChange);
 
-    fireEvent.click(screen.getAllByText("Edit")[0]);
+    fireEvent.click(screen.getAllByText("Edit")[0]!);
     fireEvent.change(screen.getByDisplayValue("Add model"), {
       target: { value: "edited then rejected" },
     });
     fireEvent.click(screen.getByText("Done"));
-    fireEvent.click(screen.getAllByText("Reject")[0]);
+    fireEvent.click(screen.getAllByText("Reject")[0]!);
 
-    const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1][0] as SubtaskEdit[];
+    const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1]![0] as SubtaskEdit[];
     expect(lastCall).toEqual([{ index: 0, action: "reject" }]);
   });
 
@@ -87,8 +87,8 @@ describe("PipelineView subtask edit/reject controls", () => {
     const onChange = vi.fn();
     const { rerender } = renderPipeline({}, onChange);
 
-    fireEvent.click(screen.getAllByText("Reject")[0]);
-    expect(onChange.mock.calls[onChange.mock.calls.length - 1][0]).toEqual([
+    fireEvent.click(screen.getAllByText("Reject")[0]!);
+    expect(onChange.mock.calls[onChange.mock.calls.length - 1]![0]).toEqual([
       { index: 0, action: "reject" },
     ]);
 
@@ -103,6 +103,6 @@ describe("PipelineView subtask edit/reject controls", () => {
       />,
     );
 
-    expect(onChange.mock.calls[onChange.mock.calls.length - 1][0]).toEqual([]);
+    expect(onChange.mock.calls[onChange.mock.calls.length - 1]![0]).toEqual([]);
   });
 });

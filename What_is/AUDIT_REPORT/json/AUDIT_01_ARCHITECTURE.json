@@ -1,0 +1,18 @@
+{
+  "audit_id": "01",
+  "audit_name": "Master Architecture Audit",
+  "run_date": "2026-09-29",
+  "layer_score": 92,
+  "findings": [
+    {"id": "ARCH-01-001", "severity": "High", "status": "FIXED", "file": "backend/app/fleet/failure_ladder.py", "location": "abort, request_human_review", "line": "140-205", "finding": "asyncio.run() called from async run_manager() raised RuntimeError on every call; swallowed by caller; TaskFailed/ReviewRequested never published on epic halt / exhausted retries.", "evidence": "Reproduced: 'abort RAISED: RuntimeError asyncio.run() cannot be called from a running event loop'", "production_impact": "Recovery events silently lost on failure paths.", "confidence": "High", "recommendation": "Loop-safe sync facade + transition=False for manager (status owned by launch_manager).", "effort": "Small", "verification": "tests/test_audit01_failure_ladder_in_event_loop.py"},
+    {"id": "ARCH-01-002", "severity": "Medium", "status": "FIXED", "file": "apps/web/app/login/page.tsx", "location": "DEV_LOGIN_*", "line": "7-14,112-131", "finding": "Developer Login button and dev admin password compiled into production bundle.", "evidence": ".next/static/chunks/app/login/page-*.js contained 'gridiron123'", "production_impact": "Default admin password published to every visitor.", "confidence": "High", "recommendation": "Gate on NODE_ENV === 'development'.", "effort": "Small", "verification": "apps/web/app/login/page.test.tsx; prod bundle grep = 0"},
+    {"id": "ARCH-01-003", "severity": "Medium", "status": "FIXED", "file": "apps/web/app/login/page.tsx", "location": "setup link", "line": "135", "finding": "GET link to POST-only /api/auth/setup (also 409 after auto-seed, 404 in prod).", "evidence": "OpenAPI ['post'] /api/auth/setup", "production_impact": "Dead link on login page.", "confidence": "High", "recommendation": "Replace with accurate hint.", "effort": "Small"},
+    {"id": "ARCH-01-004", "severity": "Low", "status": "FIXED (docs)", "file": "backend/app/pipeline/dispatcher.py", "location": "module", "line": "1-163", "finding": "Legacy module used only by tests; guide described it as the live dispatcher.", "evidence": "evidence/import_graph.out.json", "production_impact": "Misleading documentation.", "confidence": "High", "recommendation": "Correct guide.", "effort": "Small"},
+    {"id": "ARCH-01-005", "severity": "Low", "status": "OPEN->AUDIT-11", "file": "backend/app/fleet/providers/base.py", "location": "LLMProvider", "line": "1-39", "finding": "Unused ABC, zero references.", "evidence": "evidence/import_graph.out.json", "production_impact": "None (dead code).", "confidence": "High", "recommendation": "Remove.", "effort": "Small"},
+    {"id": "ARCH-01-006", "severity": "Low", "status": "FIXED", "file": "backend/app/agents/gemini_adapter.py", "location": "call", "line": "347-351", "finding": "No-candidates response crashed with opaque TypeError; mypy strict errors.", "evidence": "mypy: 'list[Candidate] | None' is not indexable", "production_impact": "Confusing error on Gemini safety block.", "confidence": "High", "recommendation": "Explicit RuntimeError.", "effort": "Small"}
+  ],
+  "counts": {"critical": 0, "high": 1, "medium": 2, "low": 3},
+  "open_counts": {"critical": 0, "high": 0, "medium": 0, "low": 1},
+  "not_found": ["PROJECT.md (audit spec references it; PROJECT_MASTER_GUIDE.md used instead)"],
+  "verdict": "READY"
+}

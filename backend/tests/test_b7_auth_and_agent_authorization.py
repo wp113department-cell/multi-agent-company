@@ -258,7 +258,12 @@ def test_a_viewer_cannot_run_an_agent_that_can_write_or_execute(client, world) -
 
 def test_an_approver_can_run_it_on_a_registered_repo(client, world) -> None:
     tid, repo = world
-    r, bg = _run(client, "backend_dev", "approver", tid, repo)
+    # Production audit 2026-09-29: was "backend_dev", which this endpoint can
+    # never actually run (it needs a plan + worktree from the task pipeline;
+    # the mocked background task hid the real TypeError) and is now refused
+    # with 422 up front. bug_fix is a real standalone write+bash agent, so
+    # the authorization property this test is about is unchanged.
+    r, bg = _run(client, "bug_fix", "approver", tid, repo)
     assert r.status_code == 200, r.text
     bg.assert_awaited_once()
 

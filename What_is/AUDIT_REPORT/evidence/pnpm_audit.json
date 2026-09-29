@@ -1,0 +1,248 @@
+{
+  "advisories": {
+    "1139427": {
+      "findings": [
+        {
+          "version": "3.3.17",
+          "paths": [
+            "apps__web>next>postcss>nanoid",
+            "apps__web>autoprefixer>postcss>nanoid",
+            "apps__web>postcss>nanoid",
+            "apps__web>tailwindcss>postcss>nanoid",
+            "apps__web>tailwindcss>postcss-import>postcss>nanoid",
+            "apps__web>tailwindcss>postcss-js>postcss>nanoid",
+            "apps__web>tailwindcss>postcss-load-config>postcss>nanoid",
+            "apps__web>tailwindcss>postcss-nested>postcss>nanoid",
+            "apps__web>vitest>@vitest/mocker>vite>postcss>nanoid",
+            "apps__web>vitest>vite>postcss>nanoid",
+            "apps__web>vitest>vite-node>vite>postcss>nanoid"
+          ],
+          "dev": false,
+          "optional": false,
+          "bundled": false
+        }
+      ],
+      "id": 1139427,
+      "title": "nanoid: custom generators can loop indefinitely when size is zero",
+      "module_name": "nanoid",
+      "vulnerable_versions": "<3.3.18",
+      "patched_versions": ">=3.3.18",
+      "severity": "high",
+      "cwe": "CWE-835",
+      "github_advisory_id": "GHSA-2v37-7h3g-55p8",
+      "url": "https://github.com/advisories/GHSA-2v37-7h3g-55p8"
+    },
+    "1153171": {
+      "findings": [
+        {
+          "version": "4.28.4",
+          "paths": [
+            "apps__web>autoprefixer>browserslist"
+          ],
+          "dev": true,
+          "optional": false,
+          "bundled": false
+        }
+      ],
+      "id": 1153171,
+      "title": "Browserslist: Unbounded memory growth (no cache eviction) via distinct query results, leading to eventual OOM",
+      "module_name": "browserslist",
+      "vulnerable_versions": "<=4.28.6",
+      "patched_versions": ">=4.28.7",
+      "severity": "high",
+      "cwe": "CWE-770",
+      "github_advisory_id": "GHSA-c83g-rgw3-j3cx",
+      "url": "https://github.com/advisories/GHSA-c83g-rgw3-j3cx"
+    },
+    "1153172": {
+      "findings": [
+        {
+          "version": "4.28.4",
+          "paths": [
+            "apps__web>autoprefixer>browserslist"
+          ],
+          "dev": true,
+          "optional": false,
+          "bundled": false
+        }
+      ],
+      "id": 1153172,
+      "title": "Browserslist: Uncaught crash / prototype write via untrusted browserslist-stats.json custom stats (normalizeStats)",
+      "module_name": "browserslist",
+      "vulnerable_versions": "<=4.28.6",
+      "patched_versions": ">=4.28.7",
+      "severity": "high",
+      "cwe": "CWE-248, CWE-1321",
+      "github_advisory_id": "GHSA-73wf-gq98-2v4g",
+      "url": "https://github.com/advisories/GHSA-73wf-gq98-2v4g"
+    },
+    "1193677": {
+      "findings": [
+        {
+          "version": "15.5.21",
+          "paths": [
+            "apps__web>next"
+          ],
+          "dev": false,
+          "optional": false,
+          "bundled": false
+        }
+      ],
+      "id": 1193677,
+      "title": "Next.js: Unauthenticated Remote Code Execution on windows-hosted servers",
+      "module_name": "next",
+      "vulnerable_versions": ">=13.4.0 <15.5.24",
+      "patched_versions": ">=15.5.24",
+      "severity": "critical",
+      "cwe": "CWE-22",
+      "github_advisory_id": "GHSA-p293-qw3h-jr36",
+      "url": "https://github.com/advisories/GHSA-p293-qw3h-jr36"
+    },
+    "1193683": {
+      "findings": [
+        {
+          "version": "3.2.7",
+          "paths": [
+            "apps__web>vitest"
+          ],
+          "dev": true,
+          "optional": false,
+          "bundled": false
+        }
+      ],
+      "id": 1193683,
+      "title": "Vitest: Path Traversal / Arbitrary File Read via @vitest/mocker Redirect Mock",
+      "module_name": "vitest",
+      "vulnerable_versions": ">=2.1.0 <4.1.11",
+      "patched_versions": ">=4.1.11",
+      "severity": "moderate",
+      "cwe": "CWE-22",
+      "github_advisory_id": "GHSA-82fw-gwwq-j7x9",
+      "url": "https://github.com/advisories/GHSA-82fw-gwwq-j7x9"
+    },
+    "1193684": {
+      "findings": [
+        {
+          "version": "3.2.7",
+          "paths": [
+            "apps__web>vitest>@vitest/mocker"
+          ],
+          "dev": true,
+          "optional": false,
+          "bundled": false
+        }
+      ],
+      "id": 1193684,
+      "title": "Vitest: Path Traversal / Arbitrary File Read via @vitest/mocker Redirect Mock",
+      "module_name": "@vitest/mocker",
+      "vulnerable_versions": ">=2.1.0 <4.1.11",
+      "patched_versions": ">=4.1.11",
+      "severity": "moderate",
+      "cwe": "CWE-22",
+      "github_advisory_id": "GHSA-82fw-gwwq-j7x9",
+      "url": "https://github.com/advisories/GHSA-82fw-gwwq-j7x9"
+    },
+    "1193686": {
+      "findings": [
+        {
+          "version": "2.10.40",
+          "paths": [
+            "apps__web>autoprefixer>browserslist>baseline-browser-mapping"
+          ],
+          "dev": true,
+          "optional": false,
+          "bundled": false
+        }
+      ],
+      "id": 1193686,
+      "title": "baseline-browser-mapping process termination on invalid input causes denial of service",
+      "module_name": "baseline-browser-mapping",
+      "vulnerable_versions": ">=2.0.0 <2.11.0",
+      "patched_versions": ">=2.11.0",
+      "severity": "moderate",
+      "cwe": "CWE-705",
+      "github_advisory_id": "GHSA-w5vr-8v7q-w6rv",
+      "url": "https://github.com/advisories/GHSA-w5vr-8v7q-w6rv"
+    },
+    "1193725": {
+      "findings": [
+        {
+          "version": "0.35.3",
+          "paths": [
+            "apps__web>next>sharp"
+          ],
+          "dev": false,
+          "optional": true,
+          "bundled": false
+        }
+      ],
+      "id": 1193725,
+      "title": "sharp: Vulnerabilities in libheif: GHSA-g89c-p67h-r497 and GHSA-2jg2-4ch7-h545",
+      "module_name": "sharp",
+      "vulnerable_versions": "<0.35.4",
+      "patched_versions": ">=0.35.4",
+      "severity": "high",
+      "cwe": "CWE-122",
+      "github_advisory_id": "GHSA-rgj7-g3m4-5g8c",
+      "url": "https://github.com/advisories/GHSA-rgj7-g3m4-5g8c"
+    },
+    "1193733": {
+      "findings": [
+        {
+          "version": "15.5.21",
+          "paths": [
+            "apps__web>next"
+          ],
+          "dev": false,
+          "optional": false,
+          "bundled": false
+        }
+      ],
+      "id": 1193733,
+      "title": "Next.js: Unauthenticated Remote Code Execution in Image Optimization API when AVIF files are used",
+      "module_name": "next",
+      "vulnerable_versions": ">=10.0.0 <15.5.24",
+      "patched_versions": ">=15.5.24",
+      "severity": "critical",
+      "cwe": "CWE-1395",
+      "github_advisory_id": "GHSA-2xp9-vwfh-vxw4",
+      "url": "https://github.com/advisories/GHSA-2xp9-vwfh-vxw4"
+    },
+    "1239932": {
+      "findings": [
+        {
+          "version": "8.10.0",
+          "paths": [
+            "apps__web>jsdom>undici",
+            "apps__web>vitest>jsdom>undici"
+          ],
+          "dev": true,
+          "optional": false,
+          "bundled": false
+        }
+      ],
+      "id": 1239932,
+      "title": "undici vulnerable to Denial of Service via unhandled error in WebSocket permessage-deflate decompression",
+      "module_name": "undici",
+      "vulnerable_versions": ">=8.1.0 <8.10.2",
+      "patched_versions": ">=8.10.2",
+      "severity": "moderate",
+      "cwe": "CWE-248",
+      "github_advisory_id": "GHSA-3wwx-pv8p-q78v",
+      "url": "https://github.com/advisories/GHSA-3wwx-pv8p-q78v"
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 4,
+      "high": 4,
+      "critical": 2
+    },
+    "dependencies": 26,
+    "devDependencies": 531,
+    "optionalDependencies": 125,
+    "totalDependencies": 595
+  }
+}

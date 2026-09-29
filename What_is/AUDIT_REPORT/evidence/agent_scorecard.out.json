@@ -1,0 +1,5458 @@
+{
+ "agents": [
+  {
+   "agent": "accessibility_agent",
+   "module": "app.agents.accessibility_agent",
+   "run_fns": [
+    "run_accessibility_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4661,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_accessibility_agent",
+    "record_learning",
+    "parse_ast"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_accessibility_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "accessibility_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "agent_advisor",
+   "module": "app.agents.agent_advisor",
+   "run_fns": [
+    "run_agent_advisor_scan"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "history_read": "history_read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4353,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "search_code",
+    "task_history_query",
+    "fleet_metrics_read",
+    "audit_log_read",
+    "capability_gap_scan",
+    "submit_enhancement_request",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "audit_log_read",
+    "fleet_metrics_read",
+    "submit_enhancement_request"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "agent_advisor",
+   "captured_task_id": null,
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/main.py",
+    "app/tools/agents/capability_gap_scan.py"
+   ]
+  },
+  {
+   "agent": "agent_debugger",
+   "module": "app.agents.agent_debugger",
+   "run_fns": [
+    "run_agent_debugger_scan",
+    "run_agent_debugger_apply"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "diagnosed": "diagnosed"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4361,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "read_audit_log",
+    "bash_scoped",
+    "write_repo_on_approval"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "search_code",
+    "get_file_tree",
+    "bash",
+    "audit_log_read",
+    "fleet_metrics_read",
+    "submit_enhancement_request",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [
+    "bash"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "audit_log_read",
+    "fleet_metrics_read",
+    "submit_enhancement_request"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "agent_debugger",
+   "captured_task_id": null,
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/fleet_dashboard.py",
+    "app/main.py"
+   ]
+  },
+  {
+   "agent": "agent_performance_reviewer",
+   "module": "app.agents.agent_performance_reviewer",
+   "run_fns": [
+    "run_agent_performance_reviewer_scan",
+    "run_agent_performance_reviewer_apply"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "metrics_read": "metrics_read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4568,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "read_metrics",
+    "write_repo_on_approval"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "fleet_metrics_read",
+    "web_search",
+    "submit_enhancement_request",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "fleet_metrics_read",
+    "submit_enhancement_request"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "agent_performance_reviewer",
+   "captured_task_id": null,
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/fleet_dashboard.py",
+    "app/main.py"
+   ]
+  },
+  {
+   "agent": "agent_roster_doc_agent",
+   "module": "app.agents.agent_roster_doc_agent",
+   "run_fns": [
+    "run_agent_roster_doc_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "roster_read": "roster_read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4644,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "list_registered_agents",
+    "write_file",
+    "submit_docs",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "list_registered_agents"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": false,
+   "captured_role_name": "agent_roster_doc_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py",
+    "app/main.py"
+   ]
+  },
+  {
+   "agent": "agentic_ai_architect",
+   "module": "app.agents.agentic_ai_architect",
+   "run_fns": [
+    "run_agentic_ai_architect"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6074,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_agentic_ai_architect",
+    "record_learning",
+    "parse_ast",
+    "web_search",
+    "fetch_url"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_agentic_ai_architect"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": false,
+   "captured_role_name": "agentic_ai_architect",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": []
+  },
+  {
+   "agent": "ai_engineer",
+   "module": "app.agents.ai_engineer",
+   "run_fns": [
+    "run_ai_engineer"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "code_tested": "code_tested"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6109,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_repo",
+    "execute_code"
+   ],
+   "read_only": false,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "run_python_snippet",
+    "bash",
+    "write_file",
+    "fetch_url",
+    "submit_ai_result",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "ai_engineer",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "api_designer_agent",
+   "module": "app.agents.api_designer_agent",
+   "run_fns": [
+    "run_api_designer_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4929,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_api_designer_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_api_designer_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "api_designer_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "api_docs_agent",
+   "module": "app.agents.api_docs_agent",
+   "run_fns": [
+    "run_api_docs_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "routes_found": "routes_found"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5231,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "find_route",
+    "find_api",
+    "parse_ast",
+    "list_functions",
+    "write_file",
+    "submit_docs",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "api_docs_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py",
+    "app/main.py"
+   ]
+  },
+  {
+   "agent": "architect",
+   "module": "app.agents.architect",
+   "run_fns": [],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "plan_submitted": "plan_submitted"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 8413,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo"
+   ],
+   "read_only": true,
+   "tools_passed": [],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-opus-4-8",
+   "in_agent_models_json": true,
+   "captured_role_name": null,
+   "captured_task_id": null,
+   "flags": {
+    "enable_planning": null,
+    "enable_memory": null,
+    "enable_reflection": null,
+    "enable_lesson": null
+   },
+   "capture_error": null,
+   "dispatch_sites": []
+  },
+  {
+   "agent": "architecture_doc_agent",
+   "module": "app.agents.architecture_doc_agent",
+   "run_fns": [
+    "run_architecture_doc_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "graph_read": "graph_read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5460,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "import_graph",
+    "circular_dep_detect",
+    "dead_code_detect",
+    "call_graph",
+    "parse_ast",
+    "list_functions",
+    "list_classes",
+    "write_file",
+    "submit_docs",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": false,
+   "captured_role_name": "architecture_doc_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py",
+    "app/main.py"
+   ]
+  },
+  {
+   "agent": "architecture_reviewer",
+   "module": "app.agents.architecture_reviewer",
+   "run_fns": [
+    "run_arch_review",
+    "run_architecture_reviewer_scan"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "import_graph_ran": "import_graph_ran"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6591,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "import_graph",
+    "circular_dep_detect",
+    "dead_code_detect",
+    "scan_code_hygiene",
+    "scan_reliability",
+    "parse_ast",
+    "list_functions",
+    "list_classes",
+    "call_graph",
+    "submit_arch_review",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "scan_code_hygiene",
+    "scan_reliability"
+   ],
+   "routed_model": "claude-opus-4-8",
+   "in_agent_models_json": true,
+   "captured_role_name": "architecture_reviewer",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/agents/manager.py",
+    "app/agents/tools.py",
+    "app/api/specialized_agents.py",
+    "app/db/models.py",
+    "app/fleet/architecture_score.py",
+    "app/main.py",
+    "app/tools/agents/submit_arch_review.py"
+   ]
+  },
+  {
+   "agent": "backend_dev",
+   "module": "app.agents.backend_dev",
+   "run_fns": [
+    "run_backend_dev"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "checks_run": "checks_run"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 8486,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_worktree",
+    "execute_bash"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "edit_file",
+    "write_file",
+    "git_diff",
+    "bash",
+    "submit_patch",
+    "record_learning",
+    "delegate_to_agent"
+   ],
+   "write_or_exec_in_read_only": [
+    "bash",
+    "edit_file",
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "backend_dev",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/agents/manager.py",
+    "app/agents/mobile_dev.py",
+    "app/api/specialized_agents.py",
+    "app/fleet/fleet_events.py",
+    "app/pipeline/dispatcher.py"
+   ]
+  },
+  {
+   "agent": "barot_agent",
+   "module": "app.agents.barot_agent",
+   "run_fns": [],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {},
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": false,
+   "role_chars": 0,
+   "role_missing_sections": [
+    "Non-Responsibilities",
+    "Success Criteria",
+    "Failure Conditions",
+    "Output Contract",
+    "Quality Gates",
+    "Edge Cases",
+    "Escalation"
+   ],
+   "permissions": [],
+   "read_only": true,
+   "tools_passed": [],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": false,
+   "captured_role_name": null,
+   "captured_task_id": null,
+   "flags": {
+    "enable_planning": null,
+    "enable_memory": null,
+    "enable_reflection": null,
+    "enable_lesson": null
+   },
+   "capture_error": null,
+   "dispatch_sites": []
+  },
+  {
+   "agent": "bug_fix",
+   "module": "app.agents.bug_fix",
+   "run_fns": [
+    "run_bug_fix"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "tests_passed": "tests_passed"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6721,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_repo",
+    "execute_tests"
+   ],
+   "read_only": false,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "parse_ast",
+    "call_graph",
+    "find_function_body",
+    "analyze_error",
+    "read_logs",
+    "edit_file",
+    "write_file",
+    "git_diff",
+    "submit_bug_fix",
+    "record_learning",
+    "delegate_to_agent"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "bug_fix",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/agents/api_docs_agent.py",
+    "app/agents/cicd_agent.py",
+    "app/agents/cleanup_agent.py",
+    "app/agents/delegation.py",
+    "app/agents/readme_agent.py",
+    "app/agents/sql_agent.py",
+    "app/api/specialized_agents.py",
+    "app/tools/agents/submit_bug_fix.py"
+   ]
+  },
+  {
+   "agent": "business_analyst",
+   "module": "app.agents.business_analyst",
+   "run_fns": [
+    "run_business_analyst"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "requirements_read": "requirements_read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4790,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "submit_ba_result",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "business_analyst",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "changelog_agent",
+   "module": "app.agents.changelog_agent",
+   "run_fns": [
+    "run_changelog_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "git_log_read": "git_log_read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 3491,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_repo"
+   ],
+   "read_only": false,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "generate_changelog",
+    "write_file",
+    "submit_changelog",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_changelog"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "changelog_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py",
+    "app/main.py"
+   ]
+  },
+  {
+   "agent": "chat_agent",
+   "module": "app.agents.chat_agent",
+   "run_fns": [],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": false,
+   "role_chars": 0,
+   "role_missing_sections": [
+    "Non-Responsibilities",
+    "Success Criteria",
+    "Failure Conditions",
+    "Output Contract",
+    "Quality Gates",
+    "Edge Cases",
+    "Escalation"
+   ],
+   "permissions": [
+    "read_repo",
+    "write_repo",
+    "execute_bash",
+    "git_write"
+   ],
+   "read_only": false,
+   "tools_passed": [],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": null,
+   "captured_task_id": null,
+   "flags": {
+    "enable_planning": null,
+    "enable_memory": null,
+    "enable_reflection": null,
+    "enable_lesson": null
+   },
+   "capture_error": null,
+   "dispatch_sites": []
+  },
+  {
+   "agent": "cicd_agent",
+   "module": "app.agents.cicd_agent",
+   "run_fns": [
+    "run_cicd_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "lint_passed": "lint_ran"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6443,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_repo",
+    "bash_allowlisted"
+   ],
+   "read_only": false,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "bash",
+    "edit_file",
+    "write_file",
+    "submit_cicd_report",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "cicd_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "cleanup_agent",
+   "module": "app.agents.cleanup_agent",
+   "run_fns": [
+    "run_cleanup_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "dead_code_scanned": "dead_code_scanned"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5996,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_repo"
+   ],
+   "read_only": false,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "dead_code_detect",
+    "scan_code_hygiene",
+    "organize_imports",
+    "delete_file",
+    "edit_file",
+    "bash",
+    "submit_cleanup",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "scan_code_hygiene"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "cleanup_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "code_explainer_agent",
+   "module": "app.agents.code_explainer_agent",
+   "run_fns": [
+    "run_code_explainer_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4688,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_code_explainer_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_code_explainer_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "code_explainer_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/agents/delegation.py",
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "code_quality_agent",
+   "module": "app.agents.code_quality_agent",
+   "run_fns": [
+    "run_code_quality_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4097,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_code_quality_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_code_quality_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "code_quality_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "coder",
+   "module": "app.agents.coder",
+   "run_fns": [
+    "run_coder"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "checks_run": "checks_run"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 7839,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_worktree",
+    "execute_bash"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "edit_file",
+    "write_file",
+    "git_diff",
+    "bash",
+    "submit_patch",
+    "record_learning",
+    "request_clarification"
+   ],
+   "write_or_exec_in_read_only": [
+    "bash",
+    "edit_file",
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "coder",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/agents.py",
+    "app/config.py",
+    "app/fleet/fleet_events.py",
+    "app/pipeline/bootstrap.py"
+   ]
+  },
+  {
+   "agent": "compliance_agent",
+   "module": "app.agents.compliance_agent",
+   "run_fns": [
+    "run_compliance_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4834,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_compliance_agent",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_compliance_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "compliance_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "cost_estimator_agent",
+   "module": "app.agents.cost_estimator_agent",
+   "run_fns": [
+    "run_cost_estimator_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4777,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_cost_estimator_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_cost_estimator_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "cost_estimator_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "data_pipeline_agent",
+   "module": "app.agents.data_pipeline_agent",
+   "run_fns": [
+    "run_data_pipeline_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4869,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_data_pipeline_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_data_pipeline_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "data_pipeline_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "database_architect",
+   "module": "app.agents.database_architect",
+   "run_fns": [
+    "run_database_architect"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "schema_read": "schema_read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5268,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "run_python_snippet",
+    "submit_db_design",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_db_design"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "database_architect",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "debugger_agent",
+   "module": "app.agents.debugger_agent",
+   "run_fns": [
+    "run_debugger_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5571,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs",
+    "execute_tests"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_debugger_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast",
+    "bash"
+   ],
+   "write_or_exec_in_read_only": [
+    "bash",
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_debugger_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "debugger_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "decomposer",
+   "module": "app.agents.decomposer",
+   "run_fns": [],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "subtasks_submitted": "subtasks_submitted"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 7532,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo"
+   ],
+   "read_only": true,
+   "tools_passed": [],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-opus-4-8",
+   "in_agent_models_json": true,
+   "captured_role_name": null,
+   "captured_task_id": null,
+   "flags": {
+    "enable_planning": null,
+    "enable_memory": null,
+    "enable_reflection": null,
+    "enable_lesson": null
+   },
+   "capture_error": null,
+   "dispatch_sites": []
+  },
+  {
+   "agent": "dependency_agent",
+   "module": "app.agents.dependency_agent",
+   "run_fns": [
+    "run_dependency_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "manifest_read": "manifest_read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5643,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_repo",
+    "bash_allowlisted"
+   ],
+   "read_only": false,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "bash",
+    "check_last_release",
+    "check_dependency_conflicts",
+    "edit_file",
+    "submit_dependency_report",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "check_dependency_conflicts",
+    "check_last_release"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "dependency_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py",
+    "app/tools/agents/submit_dependency_report.py"
+   ]
+  },
+  {
+   "agent": "dependency_security_agent",
+   "module": "app.agents.dependency_security_agent",
+   "run_fns": [
+    "run_dependency_security_agent",
+    "run_dependency_security_scan"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read",
+    "audited": "audited"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5551,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "bash",
+    "submit_dependency_security_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast"
+   ],
+   "write_or_exec_in_read_only": [
+    "bash",
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_dependency_security_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "dependency_security_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/agents/manager.py",
+    "app/api/specialized_agents.py",
+    "app/fleet/dependency_conflict.py",
+    "app/fleet/security_score.py",
+    "app/main.py"
+   ]
+  },
+  {
+   "agent": "deployment_guide_doc_agent",
+   "module": "app.agents.deployment_guide_doc_agent",
+   "run_fns": [
+    "run_deployment_guide_doc_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "artifacts_read": "artifacts_read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6141,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "list_deploy_artifacts",
+    "write_file",
+    "submit_docs",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "list_deploy_artifacts"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": false,
+   "captured_role_name": "deployment_guide_doc_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py",
+    "app/main.py"
+   ]
+  },
+  {
+   "agent": "devex_agent",
+   "module": "app.agents.devex_agent",
+   "run_fns": [
+    "run_devex_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4366,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_devex_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_devex_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "devex_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "devops",
+   "module": "app.agents.devops",
+   "run_fns": [
+    "run_devops"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "checks_run": "checks_run"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6237,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "execute_bash"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "bash",
+    "submit_health_report",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [
+    "bash"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "devops",
+   "captured_task_id": null,
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/agents/tools.py",
+    "app/api/specialized_agents.py",
+    "app/tools/agents/submit_health_report.py"
+   ]
+  },
+  {
+   "agent": "docker_agent",
+   "module": "app.agents.docker_agent",
+   "run_fns": [
+    "run_docker_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "build_verified": "build_ran"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6227,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_repo",
+    "docker_exec"
+   ],
+   "read_only": false,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "docker_ps",
+    "docker_logs",
+    "docker_exec",
+    "docker_compose",
+    "docker_build",
+    "docker_restart",
+    "diagnose_deployment_failure",
+    "write_file",
+    "submit_docker_report",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "docker_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "docs",
+   "module": "app.agents.docs",
+   "run_fns": [
+    "run_docs"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "docs_written": "docs_written"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5741,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_worktree"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_docs",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "docs",
+   "captured_task_id": null,
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py",
+    "app/tools/agents/submit_docs.py"
+   ]
+  },
+  {
+   "agent": "env_checker_agent",
+   "module": "app.agents.env_checker_agent",
+   "run_fns": [
+    "run_env_checker_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4723,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_env_checker_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_env_checker_agent"
+   ],
+   "routed_model": "claude-haiku-4-5-20251001",
+   "in_agent_models_json": true,
+   "captured_role_name": "env_checker_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "evaluation_agent",
+   "module": "app.agents.evaluation_agent",
+   "run_fns": [
+    "run_evaluation_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "eval_run": "eval_run"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 3578,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "execute_code"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "run_python_snippet",
+    "run_tests",
+    "submit_eval_result",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_eval_result"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "evaluation_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "executive",
+   "module": "app.agents.executive",
+   "run_fns": [
+    "run_executive"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {},
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5314,
+   "role_missing_sections": [],
+   "permissions": [
+    "write_db"
+   ],
+   "read_only": true,
+   "tools_passed": [],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-opus-4-8",
+   "in_agent_models_json": true,
+   "captured_role_name": null,
+   "captured_task_id": null,
+   "flags": {
+    "enable_planning": null,
+    "enable_memory": null,
+    "enable_reflection": null,
+    "enable_lesson": null
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/goals.py",
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "feature_flag_agent",
+   "module": "app.agents.feature_flag_agent",
+   "run_fns": [
+    "run_feature_flag_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4818,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_feature_flag_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_feature_flag_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "feature_flag_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "frontend_dev",
+   "module": "app.agents.frontend_dev",
+   "run_fns": [
+    "run_frontend_dev"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "checks_run": "checks_run"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 8462,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_worktree",
+    "execute_bash"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "edit_file",
+    "write_file",
+    "git_diff",
+    "bash",
+    "submit_patch",
+    "record_learning",
+    "delegate_to_agent"
+   ],
+   "write_or_exec_in_read_only": [
+    "bash",
+    "edit_file",
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "frontend_dev",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/agents/manager.py",
+    "app/api/agents.py",
+    "app/api/specialized_agents.py",
+    "app/fleet/fleet_events.py",
+    "app/pipeline/dispatcher.py"
+   ]
+  },
+  {
+   "agent": "incident_responder_agent",
+   "module": "app.agents.incident_responder_agent",
+   "run_fns": [
+    "run_incident_responder_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5138,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_incident_responder_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_incident_responder_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "incident_responder_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "infra_agent",
+   "module": "app.agents.infra_agent",
+   "run_fns": [
+    "run_infra_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read",
+    "dry_run_validated": "dry_run_validated"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5950,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs",
+    "execute_infra_dry_run"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_infra_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast",
+    "bash"
+   ],
+   "write_or_exec_in_read_only": [
+    "bash",
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_infra_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "infra_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "knowledge_curator",
+   "module": "app.agents.knowledge_curator",
+   "run_fns": [
+    "run_knowledge_curator_scan",
+    "run_knowledge_curator_apply"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "memory_searched": "memory_searched"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6064,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_memory"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "memory_search",
+    "memory_curate_read",
+    "memory_list_draft_lessons",
+    "submit_enhancement_request",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "memory_curate_read",
+    "memory_list_draft_lessons",
+    "memory_search",
+    "submit_enhancement_request"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "knowledge_curator",
+   "captured_task_id": null,
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/fleet_dashboard.py",
+    "app/main.py"
+   ]
+  },
+  {
+   "agent": "load_test_agent",
+   "module": "app.agents.load_test_agent",
+   "run_fns": [
+    "run_load_test_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read",
+    "smoke_tested": "smoke_tested"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5113,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs",
+    "execute_load_test"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_load_test_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast",
+    "bash"
+   ],
+   "write_or_exec_in_read_only": [
+    "bash",
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_load_test_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "load_test_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "localization_agent",
+   "module": "app.agents.localization_agent",
+   "run_fns": [
+    "run_localization_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5090,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_localization_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_localization_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "localization_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "manager",
+   "module": "app.agents.manager",
+   "run_fns": [
+    "run_manager",
+    "run_epic_manager"
+   ],
+   "contract_io": true,
+   "verification_cfg": false,
+   "enforce_in_result": {},
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5569,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_repo",
+    "database_write",
+    "event_bus_publish"
+   ],
+   "read_only": false,
+   "tools_passed": [],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-opus-4-8",
+   "in_agent_models_json": true,
+   "captured_role_name": null,
+   "captured_task_id": null,
+   "flags": {
+    "enable_planning": null,
+    "enable_memory": null,
+    "enable_reflection": null,
+    "enable_lesson": null
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/agents/base_graph.py",
+    "app/api/agents.py",
+    "app/api/epics.py",
+    "app/config.py",
+    "app/db/repository.py",
+    "app/fleet/failure_ladder.py",
+    "app/fleet/fleet_events.py",
+    "app/fleet/orchestration_analytics.py",
+    "app/pipeline/cost_controller.py",
+    "app/pipeline/dynamic_subtasks.py",
+    "app/tools/git_push_tool.py"
+   ]
+  },
+  {
+   "agent": "mcp_developer_agent",
+   "module": "app.agents.mcp_developer_agent",
+   "run_fns": [
+    "run_mcp_developer_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "tested": "tested"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6151,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_repo",
+    "execute_bash"
+   ],
+   "read_only": false,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "edit_file",
+    "write_file",
+    "bash",
+    "submit_mcp_developer_agent",
+    "record_learning",
+    "web_search",
+    "fetch_url"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_mcp_developer_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": false,
+   "captured_role_name": "mcp_developer_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": []
+  },
+  {
+   "agent": "migration_agent",
+   "module": "app.agents.migration_agent",
+   "run_fns": [
+    "run_migration_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "schema_inspected": "schema_inspected"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6166,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_repo",
+    "read_db"
+   ],
+   "read_only": false,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "run_sql",
+    "inspect_schema",
+    "write_file",
+    "bash",
+    "submit_migration",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "migration_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "migration_guide_doc_agent",
+   "module": "app.agents.migration_guide_doc_agent",
+   "run_fns": [
+    "run_migration_guide_doc_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "migrations_read": "migrations_read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5167,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "list_migrations",
+    "write_file",
+    "submit_docs",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "list_migrations"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": false,
+   "captured_role_name": "migration_guide_doc_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py",
+    "app/main.py"
+   ]
+  },
+  {
+   "agent": "mobile_dev",
+   "module": "app.agents.mobile_dev",
+   "run_fns": [
+    "run_mobile_dev"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "checks_run": "checks_run"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6581,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_worktree",
+    "execute_bash"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "edit_file",
+    "write_file",
+    "git_diff",
+    "bash",
+    "submit_patch",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [
+    "bash",
+    "edit_file",
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": false,
+   "captured_role_name": "mobile_dev",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": []
+  },
+  {
+   "agent": "monitoring_agent",
+   "module": "app.agents.monitoring_agent",
+   "run_fns": [
+    "run_monitoring_agent",
+    "run_monitoring_agent_scan"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "metrics_collected": "metrics_collected"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5186,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "read_system_metrics"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "cpu_usage",
+    "memory_usage",
+    "disk_usage",
+    "health_check",
+    "task_progress",
+    "read_logs",
+    "submit_monitoring_report",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "monitoring_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py",
+    "app/main.py",
+    "app/tools/agents/submit_monitoring_report.py"
+   ]
+  },
+  {
+   "agent": "onboarding_agent",
+   "module": "app.agents.onboarding_agent",
+   "run_fns": [
+    "run_onboarding_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4983,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_onboarding_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast",
+    "edit_file"
+   ],
+   "write_or_exec_in_read_only": [
+    "edit_file",
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_onboarding_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "onboarding_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "pair_programmer_agent",
+   "module": "app.agents.pair_programmer_agent",
+   "run_fns": [
+    "run_pair_programmer_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4746,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_pair_programmer_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_pair_programmer_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "pair_programmer_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "performance_reviewer",
+   "module": "app.agents.performance_reviewer",
+   "run_fns": [
+    "run_performance_reviewer"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "query_explained": "query_explained"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6005,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "read_db"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "find_sql",
+    "run_sql",
+    "explain_query",
+    "list_functions",
+    "submit_perf_review",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "performance_reviewer",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "planner",
+   "module": "app.agents.planner",
+   "run_fns": [
+    "run_planner"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "plan_submitted": "plan_submitted"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 7279,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "submit_plan",
+    "record_learning",
+    "request_clarification"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_plan"
+   ],
+   "routed_model": "claude-opus-4-8",
+   "in_agent_models_json": true,
+   "captured_role_name": "planner",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/agents/coder.py",
+    "app/api/agents.py",
+    "app/config.py"
+   ]
+  },
+  {
+   "agent": "pm",
+   "module": "app.agents.pm",
+   "run_fns": [],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "brief_submitted": "brief_submitted"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5574,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo"
+   ],
+   "read_only": true,
+   "tools_passed": [],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": null,
+   "captured_task_id": null,
+   "flags": {
+    "enable_planning": null,
+    "enable_memory": null,
+    "enable_reflection": null,
+    "enable_lesson": null
+   },
+   "capture_error": null,
+   "dispatch_sites": []
+  },
+  {
+   "agent": "prompt_engineer_agent",
+   "module": "app.agents.prompt_engineer_agent",
+   "run_fns": [
+    "run_prompt_engineer_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5497,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_prompt_engineer_agent",
+    "record_learning",
+    "web_search",
+    "fetch_url"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_prompt_engineer_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": false,
+   "captured_role_name": "prompt_engineer_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": []
+  },
+  {
+   "agent": "qa",
+   "module": "app.agents.qa",
+   "run_fns": [
+    "run_qa"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "tests_run": "tests_run"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 7317,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "execute_tests"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "bash",
+    "submit_qa_result",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [
+    "bash"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "qa",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/agents/delegation.py",
+    "app/agents/manager.py",
+    "app/agents/tools.py",
+    "app/api/specialized_agents.py",
+    "app/fleet/fleet_events.py",
+    "app/pipeline/dispatcher.py",
+    "app/tools/agents/submit_qa_result.py"
+   ]
+  },
+  {
+   "agent": "quality_auditor",
+   "module": "app.agents.quality_auditor",
+   "run_fns": [
+    "run_quality_auditor_scan",
+    "run_quality_auditor_apply"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "scan_ran": "scan_ran"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4793,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "bash_scoped",
+    "write_repo_on_approval"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "get_file_tree",
+    "secrets_scan",
+    "find_sql",
+    "find_config",
+    "find_api",
+    "find_route",
+    "bash",
+    "submit_enhancement_request",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [
+    "bash"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_enhancement_request"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "quality_auditor",
+   "captured_task_id": null,
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/fleet_dashboard.py",
+    "app/api/specialized_agents.py",
+    "app/main.py"
+   ]
+  },
+  {
+   "agent": "rag_engineer_agent",
+   "module": "app.agents.rag_engineer_agent",
+   "run_fns": [
+    "run_rag_engineer_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "codebase_read": "codebase_read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 3958,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_repo",
+    "execute_code"
+   ],
+   "read_only": false,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "run_python_snippet",
+    "submit_rag_design",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_rag_design"
+   ],
+   "routed_model": "claude-opus-4-8",
+   "in_agent_models_json": true,
+   "captured_role_name": "rag_engineer_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "readme_agent",
+   "module": "app.agents.readme_agent",
+   "run_fns": [
+    "run_readme_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "files_read": "files_read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5276,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "parse_ast",
+    "list_functions",
+    "list_classes",
+    "write_file",
+    "submit_docs",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "readme_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py",
+    "app/main.py"
+   ]
+  },
+  {
+   "agent": "refactor_agent",
+   "module": "app.agents.refactor_agent",
+   "run_fns": [
+    "run_refactor_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "behavior_preserved": "tests_passed"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6681,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_repo",
+    "execute_tests"
+   ],
+   "read_only": false,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "list_functions",
+    "list_classes",
+    "find_function_body",
+    "parse_ast",
+    "call_graph",
+    "import_graph",
+    "rename_symbol",
+    "batch_edit",
+    "replace_function",
+    "edit_file",
+    "write_file",
+    "git_diff",
+    "bash",
+    "submit_refactor_report",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "refactor_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "release_notes_agent",
+   "module": "app.agents.release_notes_agent",
+   "run_fns": [
+    "run_release_notes_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "git_log_read": "git_log_read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 3568,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_repo"
+   ],
+   "read_only": false,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "generate_release_notes",
+    "generate_changelog",
+    "submit_release_notes",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_release_notes"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "release_notes_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py",
+    "app/main.py"
+   ]
+  },
+  {
+   "agent": "research",
+   "module": "app.agents.research",
+   "run_fns": [
+    "run_research"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "research_submitted": "research_submitted"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 7188,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "get_file_tree",
+    "find_references",
+    "web_search",
+    "submit_research",
+    "record_learning",
+    "bhaskar_tool"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-opus-4-8",
+   "in_agent_models_json": true,
+   "captured_role_name": "research",
+   "captured_task_id": null,
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/agents/tools.py",
+    "app/api/specialized_agents.py",
+    "app/tools/agents/submit_research.py"
+   ]
+  },
+  {
+   "agent": "reviewer",
+   "module": "app.agents.reviewer",
+   "run_fns": [
+    "run_reviewer"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "diff_reviewed": "diff_reviewed"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 7758,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "submit_review",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "reviewer",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/agents/manager.py",
+    "app/agents/tools.py",
+    "app/api/agents.py",
+    "app/api/specialized_agents.py",
+    "app/fleet/fleet_events.py",
+    "app/tools/agents/submit_review.py"
+   ]
+  },
+  {
+   "agent": "roadmap_agent",
+   "module": "app.agents.roadmap_agent",
+   "run_fns": [
+    "run_roadmap_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5310,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_roadmap_agent",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_roadmap_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": false,
+   "captured_role_name": "roadmap_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": []
+  },
+  {
+   "agent": "rollback_agent",
+   "module": "app.agents.rollback_agent",
+   "run_fns": [
+    "run_rollback_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5007,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_rollback_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_rollback_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "rollback_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "runbook_generator_agent",
+   "module": "app.agents.runbook_generator_agent",
+   "run_fns": [
+    "run_runbook_generator_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5153,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_runbook_generator_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast",
+    "edit_file",
+    "yaml_validate"
+   ],
+   "write_or_exec_in_read_only": [
+    "edit_file",
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_runbook_generator_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "runbook_generator_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "schema_agent",
+   "module": "app.agents.schema_agent",
+   "run_fns": [
+    "run_schema_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "schema_inspected": "schema_inspected"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6100,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_repo",
+    "read_db"
+   ],
+   "read_only": false,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "run_sql",
+    "inspect_schema",
+    "write_file",
+    "submit_schema",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "schema_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "security_architect",
+   "module": "app.agents.security_architect",
+   "run_fns": [
+    "run_security_architect"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "codebase_read": "codebase_read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4319,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "submit_threat_model",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_threat_model"
+   ],
+   "routed_model": "claude-opus-4-8",
+   "in_agent_models_json": true,
+   "captured_role_name": "security_architect",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "security_reviewer",
+   "module": "app.agents.security_reviewer",
+   "run_fns": [
+    "run_security_review"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "scan_ran": "scan_ran"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6898,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "secrets_scan",
+    "find_sql",
+    "find_config",
+    "find_api",
+    "find_route",
+    "submit_security_report",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "security_reviewer",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/agents/delegation.py",
+    "app/agents/manager.py",
+    "app/api/specialized_agents.py",
+    "app/tools/agents/submit_security_report.py"
+   ]
+  },
+  {
+   "agent": "slo_agent",
+   "module": "app.agents.slo_agent",
+   "run_fns": [
+    "run_slo_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5094,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_slo_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_slo_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "slo_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "spike_agent",
+   "module": "app.agents.spike_agent",
+   "run_fns": [
+    "run_spike_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5208,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_spike_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast",
+    "web_search",
+    "fetch_url"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_spike_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "spike_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/agents/delegation.py",
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "sprint_planner",
+   "module": "app.agents.sprint_planner",
+   "run_fns": [
+    "run_sprint_planner"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "complexity_estimated": "complexity_estimated"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4987,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "estimate_complexity",
+    "submit_sprint_plan",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "sprint_planner",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "sql_agent",
+   "module": "app.agents.sql_agent",
+   "run_fns": [
+    "run_sql_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "verified_against_schema": "schema_inspected"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6551,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_repo",
+    "read_db"
+   ],
+   "read_only": false,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "run_sql",
+    "inspect_schema",
+    "find_sql",
+    "explain_query",
+    "edit_file",
+    "write_file",
+    "submit_sql_report",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "sql_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "style_reviewer",
+   "module": "app.agents.style_reviewer",
+   "run_fns": [
+    "run_style_reviewer"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "lint_ran": "lint_ran"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5474,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "run_linter",
+    "list_functions",
+    "list_classes",
+    "submit_style_review",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "style_reviewer",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "tech_advisor_agent",
+   "module": "app.agents.tech_advisor_agent",
+   "run_fns": [
+    "run_tech_advisor_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "scored": "scored"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6264,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "score_tech_options",
+    "submit_tech_advisor_agent",
+    "record_learning",
+    "web_search",
+    "fetch_url"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "score_tech_options",
+    "submit_tech_advisor_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": false,
+   "captured_role_name": "tech_advisor_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": []
+  },
+  {
+   "agent": "tech_debt_agent",
+   "module": "app.agents.tech_debt_agent",
+   "run_fns": [
+    "run_tech_debt_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "lint_ran": "lint_ran"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 6161,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "list_functions",
+    "list_classes",
+    "run_linter",
+    "coverage_report",
+    "submit_tech_debt",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "tech_debt_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "test_coverage_agent",
+   "module": "app.agents.test_coverage_agent",
+   "run_fns": [
+    "run_test_coverage_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read",
+    "coverage_measured": "coverage_measured"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5131,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs",
+    "execute_tests"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_test_coverage_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast",
+    "bash"
+   ],
+   "write_or_exec_in_read_only": [
+    "bash",
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_test_coverage_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "test_coverage_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py",
+    "app/fleet/test_score.py"
+   ]
+  },
+  {
+   "agent": "test_writer_agent",
+   "module": "app.agents.test_writer_agent",
+   "run_fns": [
+    "run_test_writer_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read",
+    "tests_run": "tests_run"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5714,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_code",
+    "execute_tests"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_test_writer_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast",
+    "bash"
+   ],
+   "write_or_exec_in_read_only": [
+    "bash",
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_test_writer_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "test_writer_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "tool_catalog_doc_agent",
+   "module": "app.agents.tool_catalog_doc_agent",
+   "run_fns": [
+    "run_tool_catalog_doc_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "catalog_read": "catalog_read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4688,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "list_all_tool_specs",
+    "write_file",
+    "submit_docs",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "list_all_tool_specs"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": false,
+   "captured_role_name": "tool_catalog_doc_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py",
+    "app/main.py"
+   ]
+  },
+  {
+   "agent": "user_story_generator",
+   "module": "app.agents.user_story_generator",
+   "run_fns": [
+    "run_user_story_generator"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "codebase_read": "codebase_read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 3704,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_repo"
+   ],
+   "read_only": false,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_user_stories",
+    "record_learning"
+   ],
+   "write_or_exec_in_read_only": [],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_user_stories"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "user_story_generator",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  },
+  {
+   "agent": "ux_design_agent",
+   "module": "app.agents.ux_design_agent",
+   "run_fns": [
+    "run_ux_design_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 5425,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_ux_design_agent",
+    "record_learning",
+    "parse_ast"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_ux_design_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": false,
+   "captured_role_name": "ux_design_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": []
+  },
+  {
+   "agent": "version_manager_agent",
+   "module": "app.agents.version_manager_agent",
+   "run_fns": [
+    "run_version_manager_agent"
+   ],
+   "contract_io": true,
+   "verification_cfg": true,
+   "enforce_in_result": {
+    "read": "read"
+   },
+   "dead_enforce_keys": [],
+   "registered": true,
+   "role_file": true,
+   "role_chars": 4674,
+   "role_missing_sections": [],
+   "permissions": [
+    "read_repo",
+    "write_docs"
+   ],
+   "read_only": true,
+   "tools_passed": [
+    "read_file",
+    "list_files",
+    "search_code",
+    "search_symbols",
+    "get_file_tree",
+    "git_log",
+    "read_files",
+    "file_exists",
+    "file_info",
+    "find_references",
+    "find_todos",
+    "search_imports",
+    "git_status",
+    "git_show",
+    "git_blame",
+    "analyze_file",
+    "bhaskar_tool",
+    "write_file",
+    "submit_version_manager_agent",
+    "record_learning",
+    "list_functions",
+    "parse_ast",
+    "git_tag",
+    "semver_bump"
+   ],
+   "write_or_exec_in_read_only": [
+    "write_file"
+   ],
+   "undeclared_high_risk": [],
+   "tools_not_in_manifest": [
+    "submit_version_manager_agent"
+   ],
+   "routed_model": "claude-sonnet-5",
+   "in_agent_models_json": true,
+   "captured_role_name": "version_manager_agent",
+   "captured_task_id": "424242",
+   "flags": {
+    "enable_planning": true,
+    "enable_memory": true,
+    "enable_reflection": true,
+    "enable_lesson": true
+   },
+   "capture_error": null,
+   "dispatch_sites": [
+    "app/api/specialized_agents.py"
+   ]
+  }
+ ],
+ "capability_tag_collisions": {},
+ "registered_without_contract_module": []
+}

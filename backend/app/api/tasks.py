@@ -456,10 +456,25 @@ async def restart_task(
         )
 
     # Force-reset to pending regardless of current status
-    await db.execute(
-        update(DevTask).where(DevTask.id == task_id).values(status="pending")
-    )
+    # Production audit 2026-09-29: the status check above and this reset used
+    # to be separate steps, so two overlapping restarts (a double click) both
+    # passed the check and the second raw UPDATE forced planning -> pending,
+    # launching a SECOND pipeline for the same task. The reset is now a
+    # compare-and-set: only a task still outside the active statuses resets.
+    reset_id = (
+        await db.execute(
+            update(DevTask)
+            .where(DevTask.id == task_id, DevTask.status.not_in(_ACTIVE_STATUSES))
+            .values(status="pending")
+            .returning(DevTask.id)
+        )
+    ).scalar_one_or_none()
     await db.commit()
+    if reset_id is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Task {task_id} was restarted concurrently — already running.",
+        )
 
     # Re-fetch to get fresh state for the pipeline
     task = await get_task(db, task_id)
@@ -468,7 +483,16 @@ async def restart_task(
 
     repo_path = resolve_task_repo_path(task)
 
-    await transition_task(db, task_id, "planning")
+    try:
+        await transition_task(db, task_id, "planning")
+    except TransitionError:
+        # The other half of the same race: both requests reset to pending
+        # before either moved on — transition_task's own compare-and-set
+        # lets exactly one reach "planning"; the loser is a clean 409.
+        raise HTTPException(
+            status_code=409,
+            detail=f"Task {task_id} was restarted concurrently — already running.",
+        )
     await append_log(
         db, task_id, "pipeline", "Task restarted — planning pipeline re-triggered"
     )

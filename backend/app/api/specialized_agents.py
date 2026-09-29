@@ -383,9 +383,56 @@ def _agent_call_kwargs(
     failed. Fixed generally (not per-agent-name special-cased) by calling
     the target function's real second parameter, whatever it's named —
     task_id is always first by this registry's own convention."""
-    param_names = list(inspect.signature(fn).parameters.keys())
-    second_param = param_names[1] if len(param_names) > 1 else "description"
-    return {"task_id": task_id, second_param: description, "repo_path": repo_path}
+    # Production audit 2026-09-29 (AGENT-02): the "task_id is always first"
+    # convention above is not true for every agent this router advertises —
+    # run_devops(repo_path, task_description) and run_research(task_description,
+    # repo_path) raised "unexpected keyword argument 'task_id'" on every call.
+    # Now matched by parameter NAME; the positional rule is only the fallback.
+    params = inspect.signature(fn).parameters
+    takes_any = any(p.kind is p.VAR_KEYWORD for p in params.values())
+    kwargs: dict[str, Any] = {}
+    if "task_id" in params or takes_any:
+        kwargs["task_id"] = task_id
+    desc_param = next(
+        (n for n in ("description", "task_description", "doc_request") if n in params),
+        None,
+    )
+    if desc_param is None:
+        rest = [n for n in params if n not in ("task_id", "repo_path")]
+        desc_param = rest[0] if rest else "description"
+    kwargs[desc_param] = description
+    if "repo_path" in params or takes_any:
+        kwargs["repo_path"] = repo_path
+    return kwargs
+
+
+def _standalone_run_error(agent_name: str) -> str | None:
+    """Why `agent_name` cannot run from just (task_id, description, repo_path)
+    — or None if it can. Production audit 2026-09-29: 16 advertised names
+    (e.g. qa needs files_changed+worktree_path, reviewer needs a diff,
+    executive is async and needs a DB session) raised TypeError in the
+    background task on every call while the endpoint still answered
+    "queued". These agents run inside the task pipeline (or /api/goals for
+    executive), so this router now refuses them up front instead."""
+    try:
+        fn = _load_agent_fn(agent_name)
+    except ValueError:
+        return f"Unknown agent '{agent_name}'"
+    if inspect.iscoroutinefunction(fn):
+        return (
+            f"Agent '{agent_name}' has an async entry point with its own API "
+            "(e.g. /api/goals for executive) and cannot be run from here."
+        )
+    try:
+        inspect.signature(fn).bind(
+            **_agent_call_kwargs(fn, 0, "", "")  # values irrelevant to binding
+        )
+    except TypeError as exc:
+        return (
+            f"Agent '{agent_name}' needs pipeline context ({exc}); it runs "
+            "inside the task pipeline — create and run a task instead."
+        )
+    return None
 
 
 async def _run_specialized_agent_bg(
@@ -526,7 +573,11 @@ async def list_specialized_agents() -> dict[str, Any]:
     # AUDIT_Q_BATCH14 §47 gap-closure — also advertise agents dispatchable
     # only via the dynamic-discovery fallback, so this listing reflects
     # everything actually runnable, not just the static _REGISTRY.
-    all_agents = sorted(set(SUPPORTED_AGENTS) | set(_discoverable_agent_names()))
+    all_agents = sorted(
+        name
+        for name in set(SUPPORTED_AGENTS) | set(_discoverable_agent_names())
+        if _standalone_run_error(name) is None
+    )
     return {"agents": all_agents, "count": len(all_agents)}
 
 
@@ -562,6 +613,10 @@ async def dispatch_specialized_agent(
             detail=f"No agent available for capability '{body.required_capability}'",
         )
     agent_name: str = plan["agent_name"]
+    standalone_error = _standalone_run_error(agent_name)
+    if standalone_error is not None:
+        get_fleet_manager().complete(agent_name)  # dispatch() already claimed the agent
+        raise HTTPException(status_code=422, detail=standalone_error)
     try:
         await _authorize_agent_run(request, db, agent_name, body.repo_path)
     except HTTPException:
@@ -615,6 +670,9 @@ async def run_specialized_agent(
             status_code=422,
             detail=f"Unknown agent '{agent_name}'. Supported: {SUPPORTED_AGENTS}",
         )
+    standalone_error = _standalone_run_error(agent_name)
+    if standalone_error is not None:
+        raise HTTPException(status_code=422, detail=standalone_error)
 
     await _authorize_agent_run(request, db, agent_name, body.repo_path)
 
@@ -669,6 +727,9 @@ async def run_specialized_agent_sync(
             status_code=422,
             detail=f"Unknown agent '{agent_name}'. Supported: {SUPPORTED_AGENTS}",
         )
+    standalone_error = _standalone_run_error(agent_name)
+    if standalone_error is not None:
+        raise HTTPException(status_code=422, detail=standalone_error)
 
     await _authorize_agent_run(request, db, agent_name, body.repo_path)
 

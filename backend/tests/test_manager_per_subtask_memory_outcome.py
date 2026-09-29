@@ -49,9 +49,7 @@ def _patch_common(**overrides):
     mocks["record_outcome"] = stack.enter_context(
         patch("app.memory.hooks.record_agent_run_outcome")
     )
-    stack.enter_context(
-        patch("app.db.repository.get_task_repo_id", return_value=None)
-    )
+    stack.enter_context(patch("app.db.repository.get_task_repo_id", return_value=None))
     # publish_event does a real DB insert whenever `db` is not None — mocked
     # here (same convention as test_gap_closure_days0_18.py's own
     # TestManagerTraceIdAndCheckpointWiring) so a plain sentinel object can
@@ -125,9 +123,7 @@ def test_blocked_subtask_records_a_blocked_outcome(tmp_path) -> None:
             summary="tests failed",
             errors=["assertion error"],
         )
-        mocks["reviewer"].return_value = ReviewResult(
-            verdict="approved", summary="n/a"
-        )
+        mocks["reviewer"].return_value = ReviewResult(verdict="approved", summary="n/a")
 
         asyncio.run(
             run_manager(

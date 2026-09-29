@@ -105,6 +105,7 @@ def _last_assistant_text(messages: list[dict[str, Any]]) -> str:
 def run_research(
     task_description: str,
     repo_path: str | None = None,
+    task_id: int | str | None = None,
 ) -> tuple[ResearchReport | None, str | None, int, int]:
     """Run the Research Agent. Returns (report, error, tokens_in, tokens_out)."""
     settings = get_settings()
@@ -117,6 +118,9 @@ def run_research(
 
     try:
         final_state = run_agent_graph(
+            # production audit 2026-09-29: thread the real task id so this
+            # run's activity-stream/fleet events reach the task (Day 18).
+            task_id=str(task_id) if task_id is not None else "",
             role_name="research",
             model=settings.model_planner,
             tools=RESEARCH_TOOLS,

@@ -947,9 +947,7 @@ async def _documentation_score_compute_loop() -> None:
                     computed,
                 )
         except Exception as exc:
-            logger.warning(
-                "Documentation-score compute loop iteration failed: %s", exc
-            )
+            logger.warning("Documentation-score compute loop iteration failed: %s", exc)
 
 
 class _FireAndForgetBackgroundTasks:

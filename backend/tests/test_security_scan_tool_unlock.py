@@ -68,7 +68,10 @@ def test_backend_dev_default_does_not_include_secrets_scan() -> None:
         from app.agents.backend_dev import run_backend_dev
 
         run_backend_dev(
-            task_id=1, subtask_id=2, plan="Do X", worktree_path="/tmp/wt",
+            task_id=1,
+            subtask_id=2,
+            plan="Do X",
+            worktree_path="/tmp/wt",
             repo_path="/tmp/repo",
         )
     kwargs = mock_run.call_args_list[0][1]
@@ -89,8 +92,12 @@ def test_backend_dev_unlocked_includes_secrets_scan_tool_and_handler() -> None:
         from app.agents.backend_dev import run_backend_dev
 
         run_backend_dev(
-            task_id=1, subtask_id=2, plan="Do X", worktree_path="/tmp/wt",
-            repo_path="/tmp/repo", security_scan_unlocked=True,
+            task_id=1,
+            subtask_id=2,
+            plan="Do X",
+            worktree_path="/tmp/wt",
+            repo_path="/tmp/repo",
+            security_scan_unlocked=True,
         )
     kwargs = mock_run.call_args_list[0][1]
     tool_names = {t["name"] for t in kwargs["tools"]}
@@ -112,7 +119,10 @@ def test_frontend_dev_default_does_not_include_secrets_scan() -> None:
         from app.agents.frontend_dev import run_frontend_dev
 
         run_frontend_dev(
-            task_id=1, subtask_id=2, plan="Do X", worktree_path="/tmp/wt",
+            task_id=1,
+            subtask_id=2,
+            plan="Do X",
+            worktree_path="/tmp/wt",
             repo_path="/tmp/repo",
         )
     kwargs = mock_run.call_args_list[0][1]
@@ -133,8 +143,12 @@ def test_frontend_dev_unlocked_includes_secrets_scan_tool_and_handler() -> None:
         from app.agents.frontend_dev import run_frontend_dev
 
         run_frontend_dev(
-            task_id=1, subtask_id=2, plan="Do X", worktree_path="/tmp/wt",
-            repo_path="/tmp/repo", security_scan_unlocked=True,
+            task_id=1,
+            subtask_id=2,
+            plan="Do X",
+            worktree_path="/tmp/wt",
+            repo_path="/tmp/repo",
+            security_scan_unlocked=True,
         )
     kwargs = mock_run.call_args_list[0][1]
     tool_names = {t["name"] for t in kwargs["tools"]}
@@ -204,20 +218,30 @@ def test_security_gate_block_unlocks_the_tool_on_the_very_next_attempt(
     from app.agents.manager import run_manager
 
     stack, mocks = _patch_common()
-    with stack, patch(
-        "app.agents.security_reviewer.run_security_review",
-        return_value=_sec_result("critical"),
-    ), patch(
-        "app.agents.architecture_reviewer.run_arch_review",
-        return_value=AgentResult(summary="ok", status="completed"),
-    ), patch(
-        "app.agents.dependency_security_agent.run_dependency_security_agent",
-        return_value=AgentResult(summary="ok", status="completed"),
+    with (
+        stack,
+        patch(
+            "app.agents.security_reviewer.run_security_review",
+            return_value=_sec_result("critical"),
+        ),
+        patch(
+            "app.agents.architecture_reviewer.run_arch_review",
+            return_value=AgentResult(summary="ok", status="completed"),
+        ),
+        patch(
+            "app.agents.dependency_security_agent.run_dependency_security_agent",
+            return_value=AgentResult(summary="ok", status="completed"),
+        ),
     ):
         mocks["backend_dev"].return_value = (["app/api/hello.py"], None, 0, 0)
         mocks["qa"].return_value = QAResult(
-            status="passed", tests_run=1, tests_passed=1, tests_failed=0,
-            typecheck_clean=True, lint_clean=True, summary="ok",
+            status="passed",
+            tests_run=1,
+            tests_passed=1,
+            tests_failed=0,
+            typecheck_clean=True,
+            lint_clean=True,
+            summary="ok",
         )
         mocks["reviewer"].return_value = ReviewResult(
             verdict="approved", summary="looks good"
@@ -246,24 +270,34 @@ def test_non_security_gate_block_never_unlocks_the_tool(tmp_path) -> None:
     from app.agents.manager import run_manager
 
     stack, mocks = _patch_common()
-    with stack, patch(
-        "app.agents.security_reviewer.run_security_review",
-        return_value=AgentResult(summary="ok", status="completed"),
-    ), patch(
-        "app.agents.architecture_reviewer.run_arch_review",
-        return_value=AgentResult(
-            summary="arch",
-            status="completed",
-            findings=[{"severity": "critical", "risk": "bad coupling"}],
+    with (
+        stack,
+        patch(
+            "app.agents.security_reviewer.run_security_review",
+            return_value=AgentResult(summary="ok", status="completed"),
         ),
-    ), patch(
-        "app.agents.dependency_security_agent.run_dependency_security_agent",
-        return_value=AgentResult(summary="ok", status="completed"),
+        patch(
+            "app.agents.architecture_reviewer.run_arch_review",
+            return_value=AgentResult(
+                summary="arch",
+                status="completed",
+                findings=[{"severity": "critical", "risk": "bad coupling"}],
+            ),
+        ),
+        patch(
+            "app.agents.dependency_security_agent.run_dependency_security_agent",
+            return_value=AgentResult(summary="ok", status="completed"),
+        ),
     ):
         mocks["backend_dev"].return_value = (["app/api/hello.py"], None, 0, 0)
         mocks["qa"].return_value = QAResult(
-            status="passed", tests_run=1, tests_passed=1, tests_failed=0,
-            typecheck_clean=True, lint_clean=True, summary="ok",
+            status="passed",
+            tests_run=1,
+            tests_passed=1,
+            tests_failed=0,
+            typecheck_clean=True,
+            lint_clean=True,
+            summary="ok",
         )
         mocks["reviewer"].return_value = ReviewResult(
             verdict="approved", summary="looks good"
@@ -301,17 +335,21 @@ def test_unlock_does_not_persist_past_an_unrelated_later_attempt(tmp_path) -> No
             return _sec_result("critical")
         return AgentResult(summary="ok", status="completed")
 
-    with stack, patch.object(
-        get_settings(), "manager_max_subtask_retries", 3
-    ), patch(
-        "app.agents.security_reviewer.run_security_review",
-        side_effect=_security_side_effect,
-    ), patch(
-        "app.agents.architecture_reviewer.run_arch_review",
-        return_value=AgentResult(summary="ok", status="completed"),
-    ), patch(
-        "app.agents.dependency_security_agent.run_dependency_security_agent",
-        return_value=AgentResult(summary="ok", status="completed"),
+    with (
+        stack,
+        patch.object(get_settings(), "manager_max_subtask_retries", 3),
+        patch(
+            "app.agents.security_reviewer.run_security_review",
+            side_effect=_security_side_effect,
+        ),
+        patch(
+            "app.agents.architecture_reviewer.run_arch_review",
+            return_value=AgentResult(summary="ok", status="completed"),
+        ),
+        patch(
+            "app.agents.dependency_security_agent.run_dependency_security_agent",
+            return_value=AgentResult(summary="ok", status="completed"),
+        ),
     ):
         qa_call_count = {"n": 0}
 
@@ -319,13 +357,23 @@ def test_unlock_does_not_persist_past_an_unrelated_later_attempt(tmp_path) -> No
             qa_call_count["n"] += 1
             if qa_call_count["n"] == 1:
                 return QAResult(
-                    status="failed", tests_run=1, tests_passed=0, tests_failed=1,
-                    typecheck_clean=True, lint_clean=True, summary="fail",
+                    status="failed",
+                    tests_run=1,
+                    tests_passed=0,
+                    tests_failed=1,
+                    typecheck_clean=True,
+                    lint_clean=True,
+                    summary="fail",
                     errors=["boom"],
                 )
             return QAResult(
-                status="passed", tests_run=1, tests_passed=1, tests_failed=0,
-                typecheck_clean=True, lint_clean=True, summary="ok",
+                status="passed",
+                tests_run=1,
+                tests_passed=1,
+                tests_failed=0,
+                typecheck_clean=True,
+                lint_clean=True,
+                summary="ok",
             )
 
         mocks["backend_dev"].return_value = (["app/api/hello.py"], None, 0, 0)

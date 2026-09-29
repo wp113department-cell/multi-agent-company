@@ -144,6 +144,7 @@ def run_planner(
     repo_path: str | None = None,
     on_heartbeat: Any = None,  # kept for backward compat — no-op
     on_tool_call: Any = None,  # kept for backward compat — no-op
+    images: list[dict[str, str]] | None = None,
 ) -> tuple[str, str | None, int, int]:
     """Run planner agent. Returns (plan_text, error, tokens_in, tokens_out).
 
@@ -166,10 +167,18 @@ def run_planner(
         "Read the codebase to understand the context, then submit your implementation plan "
         "using the submit_plan tool."
     )
+    # Production audit 2026-09-29 (ORCH-04-002): simple mode silently dropped
+    # the task's attached images; full mode (pm/architect) always used them.
+    if images:
+        initial_message += (
+            f"\n\n{len(images)} reference image(s) from the task are attached "
+            "below — use them when planning."
+        )
 
     try:
         final_state = run_agent_graph(
             task_id=str(task_id),
+            images=images,
             role_name="planner",
             model=settings.model_coder,
             tools=READ_ONLY_TOOLS

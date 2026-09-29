@@ -1,0 +1,493 @@
+{
+ "mutating_routes_probed": 70,
+ "anonymous_not_rejected": [],
+ "viewer_reached_approver_route": [],
+ "all": [
+  {
+   "method": "POST",
+   "path": "/api/tasks",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/tasks/{task_id}",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/tasks/{task_id}/priority",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/logs",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/run",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/restart",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/repeat",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/approve",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/reject",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/pipeline/approve",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/pipeline/reject",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/complete",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/push",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/extract-pdfs",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/images",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/tasks/{task_id}/images/{image_id}",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/repo/clone",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/repo/{repo_id}",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/repo/{repo_id}/activate",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/repo/reindex",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/epics",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/epics/{epic_id}/approve",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/epics/{epic_id}/reject",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/epics/{epic_id}/approve-cost",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/epics/{epic_id}/policy-approval",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/agents",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/agents/{name}/lifecycle",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/memory/lessons/{lesson_id}/rollback",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/memory/{memory_id}/feedback",
+   "guard": "require_authenticated",
+   "no_token": 401
+  },
+  {
+   "method": "POST",
+   "path": "/api/goals",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/settings/api-key",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/settings/api-key",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/settings/openai-key",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/settings/openai-key",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/settings/github-token",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/settings/github-token",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/settings/repos/{repo_id}/github-token",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/settings/repos/{repo_id}/github-token",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/settings/custom-secrets",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/settings/custom-secrets/{name}",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/settings/verify-key",
+   "guard": "require_authenticated",
+   "no_token": 401
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/sessions",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/sessions/{session_id}/messages",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/sessions/{session_id}/confirm",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/sessions/{session_id}/stop",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/chat/sessions/{session_id}",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/specialized-agents/dispatch",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/specialized-agents/{agent_name}/run",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/specialized-agents/{agent_name}/run-sync",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/stop",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/resume",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/cancel",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/ratings",
+   "guard": "require_authenticated",
+   "no_token": 401
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/roadmap/items/{item_id}/status",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/console/workspace/browse",
+   "guard": "require_authenticated",
+   "no_token": 401
+  },
+  {
+   "method": "POST",
+   "path": "/api/console/workspace/mkdir",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/console/repos/clone-private",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/console/repos/clone",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/console/repos/{rpath:path}/add",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/console/repos/{rpath:path}/commit",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/console/repos/{rpath:path}/push",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/console/repos/{rpath:path}/checkout",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/console/repos/{rpath:path}/pull",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/fleet/checkpoints/{checkpoint_id}/rollback",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/fleet/prompts/{role_name}/rollback",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/fleet/requests/{request_id}/approve",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/fleet/requests/{request_id}/reject",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/approvals/{thread_id}/approve",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "POST",
+   "path": "/api/approvals/{thread_id}/reject",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/privacy/user/{username}",
+   "guard": "require_approver",
+   "no_token": 401,
+   "viewer_token": 403
+  }
+ ]
+}

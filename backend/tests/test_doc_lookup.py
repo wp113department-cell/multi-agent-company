@@ -50,19 +50,13 @@ def test_malformed_json_response_degrades_cleanly() -> None:
     fake_result = type(
         "R", (), {"returncode": 0, "stdout": "not json at all", "stderr": ""}
     )()
-    with patch(
-        "app.repo_tools.doc_lookup.subprocess.run", return_value=fake_result
-    ):
+    with patch("app.repo_tools.doc_lookup.subprocess.run", return_value=fake_result):
         hint = lookup_package_doc_hint("some-package")
     assert "No PyPI package named" in hint
 
 
 def test_unexpected_json_shape_degrades_cleanly() -> None:
-    fake_result = type(
-        "R", (), {"returncode": 0, "stdout": "{}", "stderr": ""}
-    )()
-    with patch(
-        "app.repo_tools.doc_lookup.subprocess.run", return_value=fake_result
-    ):
+    fake_result = type("R", (), {"returncode": 0, "stdout": "{}", "stderr": ""})()
+    with patch("app.repo_tools.doc_lookup.subprocess.run", return_value=fake_result):
         hint = lookup_package_doc_hint("some-package")
     assert "No PyPI package named" in hint

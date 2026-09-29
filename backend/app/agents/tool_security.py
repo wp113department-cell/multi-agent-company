@@ -250,6 +250,36 @@ def _is_protected_path(path: str, worktree_path: str = "") -> bool:
     return not check_path(path).allowed
 
 
+def docs_or_new_file_write_denial(
+    rel: str,
+    repo_path: str,
+    agent_name: str,
+    new_file_exts: tuple[str, ...],
+    purpose: str,
+) -> str | None:
+    """Write scope for a non-coding agent that may also CREATE its own
+    deliverable file type (a spec, a load-test script) — production audit
+    2026-09-29. Allowed: any .md file or path under docs/ (the scope the other
+    ~33 doc/report agents already enforce inline), or a NEW file with one of
+    `new_file_exts`. Denied: overwriting any existing non-doc file — an
+    OpenAPI-designer or load-test agent must never be able to rewrite
+    app/main.py or docker-compose.yml. Returns a denial message, or None."""
+    if rel.endswith(".md") or rel.startswith("docs/"):
+        return None
+    if rel.endswith(new_file_exts):
+        if (Path(repo_path) / rel).exists():
+            return (
+                f"[POLICY DENIED] {agent_name} may create new {purpose} files but "
+                f"never overwrite an existing file outside docs/. Got: {rel!r} "
+                "(already exists)"
+            )
+        return None
+    return (
+        f"[POLICY DENIED] {agent_name} may only write .md files, paths under "
+        f"docs/, or new {purpose} files ({', '.join(new_file_exts)}). Got: {rel!r}"
+    )
+
+
 def _extract_patch_target_paths(patch_content: str, strip: int) -> list[str]:
     """Extract real target file paths from unified-diff `+++`/`---` header
     lines, applying the same `-pN` leading-component strip that the `patch`
@@ -713,7 +743,12 @@ def _real_symbol_names_in_python_file(abs_path: str) -> set[str] | None:
     names: set[str] = set()
     for node in _ast_module.walk(tree):
         if isinstance(
-            node, (_ast_module.FunctionDef, _ast_module.AsyncFunctionDef, _ast_module.ClassDef)
+            node,
+            (
+                _ast_module.FunctionDef,
+                _ast_module.AsyncFunctionDef,
+                _ast_module.ClassDef,
+            ),
         ):
             names.add(node.name)
     return names
@@ -827,7 +862,11 @@ def verify_file_line_citations(
             if rel_path not in symbol_cache:
                 symbol_cache[rel_path] = _real_symbol_names_in_python_file(abs_path)
             real_names = symbol_cache[rel_path]
-            if real_names is not None and name not in real_names and len(unverified_names) < 20:
+            if (
+                real_names is not None
+                and name not in real_names
+                and len(unverified_names) < 20
+            ):
                 unverified_names.append(
                     f"`{name}` — no such function/class in {rel_path} "
                     f"(cited near line {line})"

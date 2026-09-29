@@ -180,7 +180,9 @@ def human_review_node(state: PipelineState) -> PipelineState:
 
     # After resume: decision = {"approved": True|False, "subtask_edits": [...]}
     approved = isinstance(decision, dict) and bool(decision.get("approved", False))
-    subtask_edits = decision.get("subtask_edits") if isinstance(decision, dict) else None
+    subtask_edits = (
+        decision.get("subtask_edits") if isinstance(decision, dict) else None
+    )
     final_subtasks = state.get("subtasks", [])
     if approved and subtask_edits:
         final_subtasks = apply_subtask_edits(final_subtasks, subtask_edits)

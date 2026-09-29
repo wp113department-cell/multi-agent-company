@@ -31,9 +31,7 @@ def _cleanup(agent_name: str, task_id: int | None) -> None:
                     delete(AgentRun).where(AgentRun.agent_type == agent_name)
                 )
                 if task_id is not None:
-                    await session.execute(
-                        delete(DevTask).where(DevTask.id == task_id)
-                    )
+                    await session.execute(delete(DevTask).where(DevTask.id == task_id))
                 await session.commit()
         finally:
             await engine.dispose()

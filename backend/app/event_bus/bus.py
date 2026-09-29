@@ -212,6 +212,34 @@ async def publish_event(event: GridironEvent, db: Any = None) -> None:
             )
 
 
+async def publish_event_persisted(event: GridironEvent) -> None:
+    """publish_event() with its own short-lived DB session, for callers that
+    have no session of their own (the Fleet OS -> legacy bus forward in
+    app/fleet/fleet_events.py, delegation events). Production audit
+    2026-09-29: those callers passed no `db`, so _persist_event() returned
+    immediately — not one Fleet OS event (TaskStarted/Failed, HealthUpdated,
+    …) ever reached the `events` table, and reseed_health_from_events() found
+    nothing, silently undoing an admin's agent disable/retire on restart.
+    Must run on the loop the app's engine belongs to (callers already use the
+    captured main loop). Never raises."""
+    try:
+        from app.db.session import get_session_factory
+
+        session_cm = get_session_factory()()
+    except Exception:
+        await publish_event(event)
+        return
+    try:
+        async with session_cm as db:
+            await publish_event(event, db=db)
+    except Exception:
+        logger.debug(
+            "publish_event_persisted: session teardown failed for %s",
+            event.event_type,
+            exc_info=True,
+        )
+
+
 async def get_unprocessed_events(
     task_id: str,
     since: datetime,

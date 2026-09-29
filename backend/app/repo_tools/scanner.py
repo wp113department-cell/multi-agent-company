@@ -5,6 +5,8 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import os
+import subprocess
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -281,6 +283,49 @@ def parse_single_file(path: Path) -> tuple[list[SymbolInfo], list[str]] | None:
         return None
 
 
+def _git_visible_files(base: Path) -> list[str] | None:
+    """Files git would consider part of the project: tracked plus untracked
+    but NOT ignored (`git ls-files --cached --others --exclude-standard`).
+    None when `base` is not a git work tree (or git fails) — callers then
+    fall back to the plain directory walk.
+
+    Production audit 2026-09-29 (PERF): the plain walk ignored .gitignore, so
+    a workspace holding cloned repos under repos/ was indexed as 14,631 files
+    instead of its 1,842 tracked ones — ~75 s on every agent run, because
+    base_graph's memory_hook_node indexes the target repo per run."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            cwd=base,
+            capture_output=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return [p for p in result.stdout.decode("utf-8", "replace").split("\0") if p]
+
+
+def _candidate_files(base: Path) -> Iterator[Path]:
+    """Every file index_repository should consider, honouring _IGNORE_DIRS in
+    both modes (git-visible listing when available, else os.walk)."""
+    visible = _git_visible_files(base)
+    if visible is not None:
+        for rel in visible:
+            if any(part in _IGNORE_DIRS for part in Path(rel).parts[:-1]):
+                continue
+            path = base / rel
+            if path.is_file():
+                yield path
+        return
+    for root, dirs, files in os.walk(base):
+        # Prune ignored directories in-place
+        dirs[:] = [d for d in dirs if d not in _IGNORE_DIRS]
+        for fname in files:
+            yield Path(root) / fname
+
+
 def index_repository(
     repo_path: str,
     known_hashes: dict[str, str] | None = None,
@@ -299,55 +344,51 @@ def index_repository(
     base = Path(repo_path)
     index = RepoIndex(repo_path=repo_path)
 
-    for root, dirs, files in os.walk(base):
-        # Prune ignored directories in-place
-        dirs[:] = [d for d in dirs if d not in _IGNORE_DIRS]
+    for abs_path in _candidate_files(base):
+        fname = abs_path.name
+        if any(fnmatch.fnmatch(fname, p) for p in _IGNORE_PATTERNS):
+            continue
+        ext = Path(fname).suffix.lower()
+        lang = _LANG_MAP.get(ext)
+        if lang is None:
+            continue
 
-        for fname in files:
-            if any(fnmatch.fnmatch(fname, p) for p in _IGNORE_PATTERNS):
+        rel_path = str(abs_path.relative_to(base))
+        index.seen_paths.add(rel_path)
+
+        # Blocker (audit_v1.md 4.2 #3 / 4.8 #12): a cheap os.stat() size
+        # check BEFORE ever reading file bytes — the previous code read
+        # full file contents for every file on every walk (even an
+        # "incremental" reindex only skipped the parse afterward, not
+        # this read), with no size cap at all.
+        try:
+            if abs_path.stat().st_size > max_bytes:
                 continue
-            ext = Path(fname).suffix.lower()
-            lang = _LANG_MAP.get(ext)
-            if lang is None:
-                continue
+        except OSError:
+            continue
 
-            abs_path = Path(root) / fname
-            rel_path = str(abs_path.relative_to(base))
-            index.seen_paths.add(rel_path)
+        try:
+            content = abs_path.read_bytes()
+            chash = _content_hash(content)
+        except Exception:
+            continue
 
-            # Blocker (audit_v1.md 4.2 #3 / 4.8 #12): a cheap os.stat() size
-            # check BEFORE ever reading file bytes — the previous code read
-            # full file contents for every file on every walk (even an
-            # "incremental" reindex only skipped the parse afterward, not
-            # this read), with no size cap at all.
-            try:
-                if abs_path.stat().st_size > max_bytes:
-                    continue
-            except OSError:
-                continue
+        # Incremental: skip re-parsing if hash matches previous index
+        if known_hashes and known_hashes.get(rel_path) == chash:
+            continue
 
-            try:
-                content = abs_path.read_bytes()
-                chash = _content_hash(content)
-            except Exception:
-                continue
+        try:
+            symbols, imports = _parse_file(abs_path, lang, ext)
+        except Exception:
+            continue
 
-            # Incremental: skip re-parsing if hash matches previous index
-            if known_hashes and known_hashes.get(rel_path) == chash:
-                continue
-
-            try:
-                symbols, imports = _parse_file(abs_path, lang, ext)
-            except Exception:
-                continue
-
-            index.files[rel_path] = FileIndex(
-                path=rel_path,
-                language=ext.lstrip("."),
-                content_hash=chash,
-                symbols=symbols,
-                imports=imports,
-            )
+        index.files[rel_path] = FileIndex(
+            path=rel_path,
+            language=ext.lstrip("."),
+            content_hash=chash,
+            symbols=symbols,
+            imports=imports,
+        )
 
     return index
 

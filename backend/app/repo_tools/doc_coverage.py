@@ -55,7 +55,9 @@ def check_subtask_doc_coverage(
         except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
             continue
         for node in ast.iter_child_nodes(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if not isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+            ):
                 continue
             if node.name.startswith("_"):
                 continue

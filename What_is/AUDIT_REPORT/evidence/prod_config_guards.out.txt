@@ -1,0 +1,10 @@
+STARTS   baseline (all good)
+REFUSED  JWT disabled: Value error, JWT_AUTH_ENABLED=true is required when DEPLOYMENT_ENV=production. [type=value_error, input_value={'database
+REFUSED  RBAC disabled: Value error, RBAC_ENABLED=true is required when DEPLOYMENT_ENV=production. [type=value_error, input_value={'database_url
+REFUSED  legacy role header on: Value error, ALLOW_LEGACY_ROLE_HEADER=false is required when DEPLOYMENT_ENV=production. [type=value_error, input_value={
+REFUSED  default admin password: Value error, DEFAULT_ADMIN_PASSWORD must be a non-default value of at least 12 characters when DEPLOYMENT_ENV=production
+REFUSED  short admin password: Value error, DEFAULT_ADMIN_PASSWORD must be a non-default value of at least 12 characters when DEPLOYMENT_ENV=production
+REFUSED  no encryption key: Value error, CREDENTIAL_ENCRYPTION_KEY must be set when DEPLOYMENT_ENV=production (plaintext credential storage is not p
+REFUSED  workspace under /tmp: Value error, WORKTREES_DIR is set to '/tmp/gridiron-worktrees', under the ephemeral /tmp filesystem, which is not permit
+REFUSED  empty JWT secret: Value error, JWT_SECRET_KEY is required when JWT_AUTH_ENABLED=true. Generate one with: openssl rand -hex 32 [type=value_
+REFUSED  weak JWT secret: Value error, JWT_SECRET_KEY must be at least 32 characters when JWT_AUTH_ENABLED=true (short/guessable secrets allow tok

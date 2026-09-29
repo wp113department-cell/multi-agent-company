@@ -7,6 +7,7 @@ from typing import Any
 
 from app.agents.agent_result import AgentResult
 from app.agents.base_graph import VerificationConfig, run_agent_graph
+from app.agents.tool_security import docs_or_new_file_write_denial
 from app.agents.tools import (
     _LIST_FUNCTIONS_TOOL,
     _PARSE_AST_TOOL,
@@ -119,6 +120,25 @@ def make_load_test_agent_handlers(repo_path: str) -> dict[str, Any]:
         result.update(inp)
         return "Submitted."
 
+    # Production audit 2026-09-29 (AGENT-02): this agent's AGENT_CONTRACT
+    # declares permissions=["read_repo", "write_docs", ...] but it inherited
+    # make_chat_handlers()'s UNSCOPED write_file — proved live by the audit's
+    # docs_agent_write_probe.py, which created evil.py through it. Same class
+    # as accessibility_agent's tool #231 fix; this role also legitimately
+    # creates its own load-test script files, so new ones of that type stay allowed.
+    unscoped_write_file = base["write_file"]
+
+    def scoped_write_file(inp: dict[str, Any]) -> str:
+        denial = docs_or_new_file_write_denial(
+            str(inp.get("path", "")),
+            repo_path,
+            AGENT_CONTRACT["name"],
+            (".js", ".ts", ".py"),
+            "load-test script",
+        )
+        return denial or str(unscoped_write_file(inp))
+
+    base["write_file"] = scoped_write_file
     base["submit_load_test_agent"] = submit_h
     base["_result"] = result
     base["record_learning"] = make_record_learning_handler(AGENT_CONTRACT["name"])

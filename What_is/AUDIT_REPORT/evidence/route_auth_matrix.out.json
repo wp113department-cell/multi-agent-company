@@ -1,0 +1,776 @@
+{
+ "routes": 143,
+ "by_guard": {
+  "require_admin": 0,
+  "require_approver": 69,
+  "require_authenticated": 65,
+  "require_role": 0,
+  "NONE": 9
+ },
+ "mutating_without_guard": [
+  {
+   "method": "POST",
+   "path": "/api/auth/login",
+   "guard": "NONE"
+  },
+  {
+   "method": "POST",
+   "path": "/api/auth/refresh",
+   "guard": "NONE"
+  },
+  {
+   "method": "POST",
+   "path": "/api/auth/setup",
+   "guard": "NONE"
+  },
+  {
+   "method": "POST",
+   "path": "/api/auth/logout",
+   "guard": "NONE"
+  },
+  {
+   "method": "POST",
+   "path": "/api/auth/change-password",
+   "guard": "NONE"
+  }
+ ],
+ "get_without_guard": [
+  {
+   "method": "GET",
+   "path": "/api/auth/me",
+   "guard": "NONE"
+  },
+  {
+   "method": "GET",
+   "path": "/api/specialized-agents/agents",
+   "guard": "NONE"
+  },
+  {
+   "method": "GET",
+   "path": "/api/privacy/export/me",
+   "guard": "NONE"
+  },
+  {
+   "method": "GET",
+   "path": "/health",
+   "guard": "NONE"
+  }
+ ],
+ "all": [
+  {
+   "method": "POST",
+   "path": "/api/tasks",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/tasks",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/tasks/{task_id}",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/tasks/{task_id}",
+   "guard": "require_approver"
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/tasks/{task_id}/priority",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/logs",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/tasks/{task_id}/logs",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/run",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/restart",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/repeat",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/approve",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/reject",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/pipeline/approve",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/pipeline/reject",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/tasks/{task_id}/subtasks",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/tasks/{task_id}/pipeline",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/tasks/{task_id}/explain",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/tasks/{task_id}/diff",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/complete",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/tasks/{task_id}/pr",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/push",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/extract-pdfs",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/images",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/tasks/{task_id}/images",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/tasks/{task_id}/images/{image_id}",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/tasks/{task_id}/images/{image_id}",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/repo",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/repo/clone",
+   "guard": "require_approver"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/repo/{repo_id}",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/repo/{repo_id}/activate",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/repo/reindex",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/repo/reindex",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/repo/context",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/repo/architecture",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/repo/class-graph",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/repo/package-graph",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/tasks/{task_id}/artifacts",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/artifacts/{artifact_id}",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/auth/login",
+   "guard": "NONE"
+  },
+  {
+   "method": "GET",
+   "path": "/api/auth/me",
+   "guard": "NONE"
+  },
+  {
+   "method": "POST",
+   "path": "/api/auth/refresh",
+   "guard": "NONE"
+  },
+  {
+   "method": "POST",
+   "path": "/api/auth/setup",
+   "guard": "NONE"
+  },
+  {
+   "method": "POST",
+   "path": "/api/auth/logout",
+   "guard": "NONE"
+  },
+  {
+   "method": "POST",
+   "path": "/api/auth/change-password",
+   "guard": "NONE"
+  },
+  {
+   "method": "POST",
+   "path": "/api/epics",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/epics",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/epics/{epic_id}",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/epics/{epic_id}/approve",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/epics/{epic_id}/reject",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/epics/{epic_id}/approve-cost",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/epics/{epic_id}/policy-approval",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/epics/batch-review",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/agents",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/agents/{name}",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/agents/{name}/metrics",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/agents",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/agents/{name}/lifecycle",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/memory/patterns",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/memory/analytics",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/memory/search",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/memory/lessons",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/memory/lessons/{lesson_id}/rollback",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/memory/{memory_id}/feedback",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/goals",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/goals",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/goals/{goal_id}",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/metrics",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/metrics/epics",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/metrics/users",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/settings",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/settings/api-key",
+   "guard": "require_approver"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/settings/api-key",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/settings/openai-key",
+   "guard": "require_approver"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/settings/openai-key",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/settings/github-token",
+   "guard": "require_approver"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/settings/github-token",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/settings/repos/{repo_id}/github-token",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/settings/repos/{repo_id}/github-token",
+   "guard": "require_approver"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/settings/repos/{repo_id}/github-token",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/settings/custom-secrets",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/settings/custom-secrets",
+   "guard": "require_approver"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/settings/custom-secrets/{name}",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/settings/verify-key",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/sessions",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/sessions/{session_id}/messages",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/sessions/{session_id}/stream",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/sessions/{session_id}/confirm",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/sessions/{session_id}/stop",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/sessions/{session_id}/history",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/chat/sessions/{session_id}",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/specialized-agents/agents",
+   "guard": "NONE"
+  },
+  {
+   "method": "POST",
+   "path": "/api/specialized-agents/dispatch",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/specialized-agents/{agent_name}/run",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/specialized-agents/{agent_name}/run-sync",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/tasks/{task_id}/stream",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/stop",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/resume",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/tasks/{task_id}/cancel",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/tasks/{task_id}/tokens",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/ratings",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/roadmap",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/roadmap/items/{item_id}/status",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/console/workspace/browse",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/console/workspace/mkdir",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/console/repos/clone-private",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/console/repos/clone",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/console/repos/{rpath:path}/status",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/console/repos/{rpath:path}/log",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/console/repos/{rpath:path}/diff",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/console/repos/{rpath:path}/add",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/console/repos/{rpath:path}/commit",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/console/repos/{rpath:path}/push",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/console/repos/{rpath:path}/branches",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/console/repos/{rpath:path}/checkout",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/console/repos/{rpath:path}/pull",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/fleet/requests",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/fleet/requests/{request_id}",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/fleet/checkpoints",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/fleet/checkpoints/{checkpoint_id}/rollback",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/fleet/prompts/{role_name}/history",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/fleet/prompts/{role_name}/rollback",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/fleet/requests/{request_id}/approve",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/fleet/requests/{request_id}/reject",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/fleet/reports/cost",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/fleet/reports/health",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/fleet/reports/barot-agent-pool",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/fleet/reports/repair-patterns",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/fleet/reports/agent-memory-performance",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/fleet/reports/quality-score/{repo_id}",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/fleet/requests/stream",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/approvals/pending",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/approvals/{thread_id}",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "POST",
+   "path": "/api/approvals/{thread_id}/approve",
+   "guard": "require_approver"
+  },
+  {
+   "method": "POST",
+   "path": "/api/approvals/{thread_id}/reject",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/api/audit/recent",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/audit/trace/{trace_id}",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/audit/task/{task_id}",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/audit/approvals",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/audit/verify",
+   "guard": "require_authenticated"
+  },
+  {
+   "method": "GET",
+   "path": "/api/privacy/export/me",
+   "guard": "NONE"
+  },
+  {
+   "method": "GET",
+   "path": "/api/privacy/export/{username}",
+   "guard": "require_approver"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/privacy/user/{username}",
+   "guard": "require_approver"
+  },
+  {
+   "method": "GET",
+   "path": "/health",
+   "guard": "NONE"
+  }
+ ]
+}

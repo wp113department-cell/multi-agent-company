@@ -1,0 +1,325 @@
+{
+ "asyncio_run_wrapping_functions": 204,
+ "direct_calls_from_async": [
+  {
+   "async_caller": "app/agents/executive.py:103 run_executive",
+   "call_line": 120,
+   "calls": "run_agent_graph",
+   "defined_at": [
+    "app/agents/base_graph.py:3453 (transitive)"
+   ]
+  },
+  {
+   "async_caller": "app/agents/manager.py:273 _dispatch_one_subtask",
+   "call_line": 434,
+   "calls": "publish",
+   "defined_at": [
+    "app/fleet/versioned_memory.py:584"
+   ]
+  },
+  {
+   "async_caller": "app/agents/manager.py:1474 run_manager",
+   "call_line": 1756,
+   "calls": "request_human_review",
+   "defined_at": [
+    "app/fleet/failure_ladder.py:191 (transitive)"
+   ]
+  },
+  {
+   "async_caller": "app/agents/manager.py:1474 run_manager",
+   "call_line": 1751,
+   "calls": "escalate",
+   "defined_at": [
+    "app/fleet/failure_ladder.py:90 (transitive)"
+   ]
+  },
+  {
+   "async_caller": "app/agents/manager.py:1474 run_manager",
+   "call_line": 1730,
+   "calls": "abort",
+   "defined_at": [
+    "app/fleet/failure_ladder.py:158 (transitive)"
+   ]
+  },
+  {
+   "async_caller": "app/api/agents.py:63 launch_planning_pipeline",
+   "call_line": 124,
+   "calls": "publish",
+   "defined_at": [
+    "app/fleet/versioned_memory.py:584"
+   ]
+  },
+  {
+   "async_caller": "app/api/agents.py:63 launch_planning_pipeline",
+   "call_line": 105,
+   "calls": "publish",
+   "defined_at": [
+    "app/fleet/versioned_memory.py:584"
+   ]
+  },
+  {
+   "async_caller": "app/api/console.py:253 repo_checkout",
+   "call_line": 258,
+   "calls": "git_checkout",
+   "defined_at": [
+    "app/agents/tools.py:5327 (transitive)"
+   ]
+  },
+  {
+   "async_caller": "app/api/fleet_dashboard.py:160 rollback_checkpoint",
+   "call_line": 204,
+   "calls": "publish",
+   "defined_at": [
+    "app/fleet/versioned_memory.py:584"
+   ]
+  },
+  {
+   "async_caller": "app/api/fleet_dashboard.py:160 rollback_checkpoint",
+   "call_line": 192,
+   "calls": "rollback",
+   "defined_at": [
+    "app/fleet/prompt_registry.py:387",
+    "app/fleet/versioned_memory.py:737"
+   ]
+  },
+  {
+   "async_caller": "app/api/fleet_dashboard.py:276 rollback_prompt",
+   "call_line": 303,
+   "calls": "publish",
+   "defined_at": [
+    "app/fleet/versioned_memory.py:584"
+   ]
+  },
+  {
+   "async_caller": "app/api/registry.py:291 change_agent_lifecycle",
+   "call_line": 317,
+   "calls": "reactivate",
+   "defined_at": [
+    "app/fleet/agent_registry.py:351 (transitive)"
+   ]
+  },
+  {
+   "async_caller": "app/api/registry.py:291 change_agent_lifecycle",
+   "call_line": 315,
+   "calls": "retire",
+   "defined_at": [
+    "app/fleet/agent_registry.py:343 (transitive)"
+   ]
+  },
+  {
+   "async_caller": "app/api/registry.py:291 change_agent_lifecycle",
+   "call_line": 311,
+   "calls": "disable",
+   "defined_at": [
+    "app/fleet/agent_registry.py:330 (transitive)"
+   ]
+  },
+  {
+   "async_caller": "app/fleet/bg_process_registry.py:369 start_bg_process_liveness_loop",
+   "call_line": 426,
+   "calls": "publish",
+   "defined_at": [
+    "app/fleet/versioned_memory.py:584"
+   ]
+  },
+  {
+   "async_caller": "app/fleet/bg_process_registry.py:369 start_bg_process_liveness_loop",
+   "call_line": 399,
+   "calls": "publish",
+   "defined_at": [
+    "app/fleet/versioned_memory.py:584"
+   ]
+  },
+  {
+   "async_caller": "app/fleet/enhancement_rollback.py:182 check_and_handle_quality_decline",
+   "call_line": 263,
+   "calls": "publish",
+   "defined_at": [
+    "app/fleet/versioned_memory.py:584"
+   ]
+  },
+  {
+   "async_caller": "app/fleet/failure_ladder.py:282 reconcile_orphaned_runs",
+   "call_line": 408,
+   "calls": "escalate",
+   "defined_at": [
+    "app/fleet/failure_ladder.py:90 (transitive)"
+   ]
+  },
+  {
+   "async_caller": "app/fleet/failure_ladder.py:282 reconcile_orphaned_runs",
+   "call_line": 400,
+   "calls": "escalate",
+   "defined_at": [
+    "app/fleet/failure_ladder.py:90 (transitive)"
+   ]
+  },
+  {
+   "async_caller": "app/fleet/scratchpad.py:41 write_entry",
+   "call_line": 103,
+   "calls": "rollback",
+   "defined_at": [
+    "app/fleet/prompt_registry.py:387",
+    "app/fleet/versioned_memory.py:737"
+   ]
+  },
+  {
+   "async_caller": "app/fleet/scratchpad.py:138 clear_epic_scratchpad",
+   "call_line": 153,
+   "calls": "rollback",
+   "defined_at": [
+    "app/fleet/prompt_registry.py:387",
+    "app/fleet/versioned_memory.py:737"
+   ]
+  },
+  {
+   "async_caller": "app/fleet/scratchpad.py:157 delete_entry",
+   "call_line": 178,
+   "calls": "rollback",
+   "defined_at": [
+    "app/fleet/prompt_registry.py:387",
+    "app/fleet/versioned_memory.py:737"
+   ]
+  },
+  {
+   "async_caller": "app/fleet/scratchpad.py:182 write_entry_with_eviction",
+   "call_line": 274,
+   "calls": "rollback",
+   "defined_at": [
+    "app/fleet/prompt_registry.py:387",
+    "app/fleet/versioned_memory.py:737"
+   ]
+  },
+  {
+   "async_caller": "app/fleet/scratchpad.py:278 expire_stale_entries",
+   "call_line": 295,
+   "calls": "rollback",
+   "defined_at": [
+    "app/fleet/prompt_registry.py:387",
+    "app/fleet/versioned_memory.py:737"
+   ]
+  },
+  {
+   "async_caller": "app/main.py:542 _run_prompt_auto_rollback_once",
+   "call_line": 593,
+   "calls": "publish",
+   "defined_at": [
+    "app/fleet/versioned_memory.py:584"
+   ]
+  },
+  {
+   "async_caller": "app/memory/store.py:205 record_memory_access",
+   "call_line": 234,
+   "calls": "rollback",
+   "defined_at": [
+    "app/fleet/prompt_registry.py:387",
+    "app/fleet/versioned_memory.py:737"
+   ]
+  },
+  {
+   "async_caller": "app/memory/store.py:465 embed_task_outcome",
+   "call_line": 563,
+   "calls": "rollback",
+   "defined_at": [
+    "app/fleet/prompt_registry.py:387",
+    "app/fleet/versioned_memory.py:737"
+   ]
+  },
+  {
+   "async_caller": "app/memory/store.py:859 embed_architecture_note",
+   "call_line": 935,
+   "calls": "rollback",
+   "defined_at": [
+    "app/fleet/prompt_registry.py:387",
+    "app/fleet/versioned_memory.py:737"
+   ]
+  },
+  {
+   "async_caller": "app/memory/store.py:1071 embed_failure",
+   "call_line": 1141,
+   "calls": "rollback",
+   "defined_at": [
+    "app/fleet/prompt_registry.py:387",
+    "app/fleet/versioned_memory.py:737"
+   ]
+  },
+  {
+   "async_caller": "app/memory/store.py:1222 embed_learning_signal",
+   "call_line": 1296,
+   "calls": "rollback",
+   "defined_at": [
+    "app/fleet/prompt_registry.py:387",
+    "app/fleet/versioned_memory.py:737"
+   ]
+  },
+  {
+   "async_caller": "app/memory/store.py:1429 embed_procedure",
+   "call_line": 1523,
+   "calls": "rollback",
+   "defined_at": [
+    "app/fleet/prompt_registry.py:387",
+    "app/fleet/versioned_memory.py:737"
+   ]
+  },
+  {
+   "async_caller": "app/memory/store.py:1620 embed_preference",
+   "call_line": 1691,
+   "calls": "rollback",
+   "defined_at": [
+    "app/fleet/prompt_registry.py:387",
+    "app/fleet/versioned_memory.py:737"
+   ]
+  },
+  {
+   "async_caller": "app/memory/store.py:1827 embed_bug",
+   "call_line": 1892,
+   "calls": "rollback",
+   "defined_at": [
+    "app/fleet/prompt_registry.py:387",
+    "app/fleet/versioned_memory.py:737"
+   ]
+  },
+  {
+   "async_caller": "app/memory/store.py:1936 embed_prompt_change",
+   "call_line": 2024,
+   "calls": "rollback",
+   "defined_at": [
+    "app/fleet/prompt_registry.py:387",
+    "app/fleet/versioned_memory.py:737"
+   ]
+  },
+  {
+   "async_caller": "app/middleware/idempotency.py:86 store_response",
+   "call_line": 115,
+   "calls": "rollback",
+   "defined_at": [
+    "app/fleet/prompt_registry.py:387",
+    "app/fleet/versioned_memory.py:737"
+   ]
+  },
+  {
+   "async_caller": "app/pipeline/dispatcher.py:74 dispatch_subtask",
+   "call_line": 149,
+   "calls": "run_backend_dev",
+   "defined_at": [
+    "app/agents/backend_dev.py:139 (transitive)"
+   ]
+  },
+  {
+   "async_caller": "app/pipeline/dispatcher.py:74 dispatch_subtask",
+   "call_line": 131,
+   "calls": "run_qa",
+   "defined_at": [
+    "app/agents/qa.py:140 (transitive)"
+   ]
+  },
+  {
+   "async_caller": "app/pipeline/dispatcher.py:74 dispatch_subtask",
+   "call_line": 121,
+   "calls": "run_frontend_dev",
+   "defined_at": [
+    "app/agents/frontend_dev.py:147 (transitive)"
+   ]
+  }
+ ]
+}

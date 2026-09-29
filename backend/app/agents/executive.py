@@ -16,6 +16,7 @@ Pattern from: swe-agent RetryAgent (preserve external interface, swap internal r
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -117,7 +118,16 @@ async def run_executive(
     initial_message = f"Goal: {goal_text}\n\n" f"Generate at most {max_epics} epics."
 
     try:
-        final_state = run_agent_graph(
+        # Production audit 2026-09-29 (ORCH-04-001): run_executive is `async`
+        # (POST /api/goals awaits it) but called the synchronous graph
+        # directly on the event loop. With the Postgres agent checkpointer
+        # initialised at startup, LangGraph refuses that ("Synchronous calls to
+        # AsyncPostgresSaver are only allowed from a different thread") — every
+        # goal creation failed with HTTP 500 — and even without it, the whole
+        # LLM run blocked every other request. Same worker-thread pattern every
+        # other agent entry point already uses.
+        final_state = await asyncio.to_thread(
+            run_agent_graph,
             role_name="executive",
             model=settings.model_planner,
             tools=[],

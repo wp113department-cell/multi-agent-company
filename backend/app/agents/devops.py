@@ -115,6 +115,7 @@ def _last_assistant_text(messages: list[dict[str, Any]]) -> str:
 def run_devops(
     repo_path: str | None = None,
     task_description: str = "Run a full system health check.",
+    task_id: int | str | None = None,
 ) -> tuple[HealthReport | None, str | None, int, int]:
     """Run the DevOps Agent and return (report, error, tokens_in, tokens_out)."""
     settings = get_settings()
@@ -124,6 +125,9 @@ def run_devops(
 
     try:
         final_state = run_agent_graph(
+            # production audit 2026-09-29: thread the real task id so this
+            # run's activity-stream/fleet events reach the task (Day 18).
+            task_id=str(task_id) if task_id is not None else "",
             role_name="devops",
             model=settings.model_coder,
             tools=DEVOPS_TOOLS,

@@ -324,7 +324,7 @@ class TestManagerTraceIdAndCheckpointWiring:
 
         captured_abort_calls: list = []
 
-        def _fake_abort(task_id, reason, trace_id=""):
+        def _fake_abort(task_id, reason, trace_id="", **_kwargs):
             captured_abort_calls.append((task_id, reason, trace_id))
             return True
 

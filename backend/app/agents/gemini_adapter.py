@@ -345,10 +345,17 @@ def run_gemini(
             raise
 
     assert response is not None  # loop always either breaks with a response or raises
+    if not response.candidates:
+        # e.g. a prompt-level safety block — surface it instead of an opaque
+        # "'NoneType' object is not subscriptable" further down.
+        raise RuntimeError(
+            f"Gemini returned no candidates (prompt_feedback="
+            f"{getattr(response, 'prompt_feedback', None)})"
+        )
     candidate = response.candidates[0]
     usage = response.usage_metadata
-    tokens_in = usage.prompt_token_count if usage else 0
-    tokens_out = usage.candidates_token_count if usage else 0
+    tokens_in = (usage.prompt_token_count or 0) if usage else 0
+    tokens_out = (usage.candidates_token_count or 0) if usage else 0
 
     logger.debug(
         "Gemini call: model=%s tokens_in=%d tokens_out=%d finish=%s",

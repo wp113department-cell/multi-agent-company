@@ -63,8 +63,10 @@ _has_llm = _RUN and (
 # route through that backend regardless of whatever Anthropic key happens
 # to be present. Mutually exclusive by construction below (Groq checked
 # first) — set only one.
-_prefer_groq = _RUN and os.environ.get("GROQ_PREFERRED", "") == "1" and (
-    len(_groq_key) > 10 and _groq_key.startswith("gsk_")
+_prefer_groq = (
+    _RUN
+    and os.environ.get("GROQ_PREFERRED", "") == "1"
+    and (len(_groq_key) > 10 and _groq_key.startswith("gsk_"))
 )
 _prefer_gemini = (
     _RUN

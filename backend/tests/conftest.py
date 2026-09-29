@@ -149,3 +149,20 @@ def reset_circuit_breakers():  # type: ignore[no-untyped-def]
 
     _cb._anthropic_breaker = None
     _cb._groq_breaker = None
+
+
+@pytest.fixture(autouse=True)
+def _retrospectives_to_tmp(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Production audit 2026-09-29: release_retrospective writes its reports to
+    the REAL repo's docs/reports/retrospectives/ — every full test run left
+    RETROSPECTIVE_<sha>.md files behind in the working tree. Redirect for all
+    tests; the module's own default path is unchanged in production."""
+    from app.fleet import release_retrospective
+
+    monkeypatch.setattr(
+        release_retrospective,
+        "_REPORTS_DIR",
+        tmp_path_factory.mktemp("retrospectives"),
+    )

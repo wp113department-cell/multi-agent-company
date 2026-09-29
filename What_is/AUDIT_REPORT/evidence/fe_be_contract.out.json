@@ -1,0 +1,51 @@
+{
+ "frontend_calls": 79,
+ "unmatched": [
+  {
+   "file": "lib/api.ts",
+   "line": 111,
+   "method": "GET",
+   "url": "/api/tasks{x}",
+   "path_exists_other_methods": []
+  },
+  {
+   "file": "lib/api.ts",
+   "line": 590,
+   "method": "GET",
+   "url": "/api/agents{x}",
+   "path_exists_other_methods": []
+  },
+  {
+   "file": "app/approvals/page.tsx",
+   "line": 174,
+   "method": "GET",
+   "url": "/api/approvals/{x}/{x}",
+   "path_exists_other_methods": []
+  },
+  {
+   "file": "app/console/page.tsx",
+   "line": 14,
+   "method": "GET",
+   "url": "/api/console",
+   "path_exists_other_methods": []
+  },
+  {
+   "file": "app/fleet/page.tsx",
+   "line": 254,
+   "method": "GET",
+   "url": "/api/fleet/requests/{x}/{x}",
+   "path_exists_other_methods": []
+  },
+  {
+   "file": "app/login/page.tsx",
+   "line": 135,
+   "method": "GET",
+   "url": "/api/auth/setup",
+   "path_exists_other_methods": [
+    "POST"
+   ]
+  }
+ ],
+ "backend_ops": 143,
+ "backend_ops_with_no_frontend_caller": 77
+}

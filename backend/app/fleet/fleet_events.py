@@ -279,7 +279,7 @@ class FleetBus:
 
         try:
             import asyncio
-            from app.event_bus.bus import publish_event
+            from app.event_bus.bus import publish_event_persisted
             from app.event_bus.models import GridironEvent
 
             legacy = GridironEvent(
@@ -297,7 +297,9 @@ class FleetBus:
             # run_coroutine_threadsafe works correctly regardless of which
             # thread calls publish() from (worker thread or the loop itself).
             if _main_loop is not None and _main_loop.is_running():
-                asyncio.run_coroutine_threadsafe(publish_event(legacy), _main_loop)
+                asyncio.run_coroutine_threadsafe(
+                    publish_event_persisted(legacy), _main_loop
+                )
                 return
 
             # Fallback for contexts where the app lifespan never ran (e.g. a
@@ -307,7 +309,7 @@ class FleetBus:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
                 return
-            loop.create_task(publish_event(legacy))
+            loop.create_task(publish_event_persisted(legacy))
         except Exception:
             pass
 

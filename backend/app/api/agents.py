@@ -352,9 +352,7 @@ async def resume_planning_pipeline(
             # LangGraph's own checkpoint is untouched — the task stays
             # exactly as it was (still awaiting_approval), a real retry is
             # always safe.
-            logger.warning(
-                "Subtask edit rejected for task %d: %s", task_id, e
-            )
+            logger.warning("Subtask edit rejected for task %d: %s", task_id, e)
             async with factory() as db2:
                 await append_log(
                     db2, task_id, "pipeline_error", f"Subtask edit rejected: {e}"
@@ -395,6 +393,7 @@ async def _record_git_push_approval(
     all_files: list[str],
     diff: str,
     subtask_count: int,
+    agent_name: str = "manager",
 ) -> None:
     """Day 14 — Git Push Workflow. Registers into Day 13's generic approvals
     system (same table/API the plan-review pause already uses) rather than
@@ -424,12 +423,17 @@ async def _record_git_push_approval(
                     "subtask_count": subtask_count,
                     "diff_preview": diff[:500],
                 },
-                agent_name="manager",
+                agent_name=agent_name,
                 thread_id=f"task-{task_id}-push",
                 task_id=task_id,
                 blocking=True,
                 description=f"Git push review for task {task_id} (branch {branch_name})",
             )
+            # pr_status is documented none|pending|pushed|failed, but nothing
+            # ever set "pending" (production audit 2026-09-29).
+            from app.db.repository import update_task_pr
+
+            await update_task_pr(db, task_id, None, "pending")
             # Day 18 — Real-Time Streaming.
             try:
                 from app.services.activity_stream import push_approval_required
@@ -607,6 +611,16 @@ async def launch_manager(
 # ---- Planner Agent (simple mode: single plan, no LangGraph) ----
 
 
+async def _task_images(db: AsyncSession, task_id: int) -> list[dict[str, str]]:
+    """Task's attached reference images as Anthropic image-block inputs — the
+    same shape launch_manager builds (Day 16). Production audit 2026-09-29
+    (ORCH-04-002): used by simple mode, which previously dropped them."""
+    from app.db.repository import list_task_images
+
+    rows = await list_task_images(db, task_id)
+    return [{"media_type": r.mime_type, "data": r.base64_data} for r in rows]
+
+
 async def launch_planner(
     task_id: int, title: str, description: str, repo_path: str | None = None
 ) -> None:
@@ -631,6 +645,7 @@ async def launch_planner(
         try:
             from app.api.repo import get_active_repo_path
 
+            task_images = await _task_images(db, task_id)
             plan, error, tokens_in, tokens_out = await asyncio.to_thread(
                 run_planner,
                 task_id=task_id,
@@ -639,6 +654,7 @@ async def launch_planner(
                 repo_path=repo_path or get_active_repo_path(),
                 on_heartbeat=heartbeat,
                 on_tool_call=on_tool,
+                images=task_images or None,
             )
         except Exception as e:
             error = str(e)
@@ -813,6 +829,7 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
             custom_secrets_env.pop("GITHUB_TOKEN", None)
             custom_secrets_env.pop("ANTHROPIC_API_KEY", None)
 
+            task_images = await _task_images(db, task_id)
             files_changed, error, tokens_in, tokens_out = await asyncio.to_thread(
                 run_coder,
                 task_id=task_id,
@@ -821,6 +838,7 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
                 repo_path=effective_repo,
                 on_heartbeat=heartbeat,
                 extra_env=custom_secrets_env or None,
+                images=task_images or None,
             )
 
             cost = _estimate_cost(tokens_in, tokens_out)
@@ -891,6 +909,20 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
                 )
                 await update_task_final_summary(db, task_id, summary)
                 await append_log(db, task_id, "diff", summary)
+                # Production audit 2026-09-29 (ORCH-04-003): simple mode never
+                # recorded the git-push approval full mode records — and that
+                # call is also what sets branch_name, which POST
+                # /api/tasks/{id}/push requires, so a simple-mode task could
+                # never be pushed or turned into a PR at all.
+                await _record_git_push_approval(
+                    db,
+                    task_id,
+                    effective_repo,
+                    files_changed,
+                    diff,
+                    1,
+                    agent_name="coder",
+                )
 
         except Exception as e:
             logger.exception("Coder failed for task %d", task_id)

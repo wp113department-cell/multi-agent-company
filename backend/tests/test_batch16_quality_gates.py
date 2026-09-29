@@ -407,9 +407,7 @@ class TestDocumentationGate:
         from app.agents.manager import _run_advisory_quality_gates
 
         (tmp_path / "mod.py").write_text(
-            "def a():\n    pass\n\n"
-            "def b():\n    pass\n\n"
-            "def c():\n    pass\n"
+            "def a():\n    pass\n\n" "def b():\n    pass\n\n" "def c():\n    pass\n"
         )
         # Uses the real settings object (default max=2); 3 undocumented > 2.
         stack, *_ = _patch_all_three()

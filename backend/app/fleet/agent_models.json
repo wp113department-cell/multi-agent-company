@@ -80,5 +80,20 @@
   "test_coverage_agent":      {"provider": "anthropic", "model": "claude-sonnet-5",  "tier": "sonnet"},
   "test_writer_agent":        {"provider": "anthropic", "model": "claude-sonnet-5",  "tier": "sonnet"},
   "user_story_generator":     {"provider": "anthropic", "model": "claude-sonnet-5",  "tier": "sonnet"},
-  "version_manager_agent":    {"provider": "anthropic", "model": "claude-sonnet-5",  "tier": "sonnet"}
+  "version_manager_agent":    {"provider": "anthropic", "model": "claude-sonnet-5",  "tier": "sonnet"},
+
+  "_comment_audit_2026_09_29": "Production audit 02: the 13 entries below were registered agents with no row here, silently resolving through DEFAULT. Made explicit at the SAME model/tier they already ran on — no routing change.",
+  "agent_roster_doc_agent":   {"provider": "anthropic", "model": "claude-sonnet-5",  "tier": "sonnet"},
+  "agentic_ai_architect":     {"provider": "anthropic", "model": "claude-sonnet-5",  "tier": "sonnet"},
+  "architecture_doc_agent":   {"provider": "anthropic", "model": "claude-sonnet-5",  "tier": "sonnet"},
+  "barot_agent":              {"provider": "anthropic", "model": "claude-sonnet-5",  "tier": "sonnet"},
+  "deployment_guide_doc_agent": {"provider": "anthropic", "model": "claude-sonnet-5", "tier": "sonnet"},
+  "mcp_developer_agent":      {"provider": "anthropic", "model": "claude-sonnet-5",  "tier": "sonnet"},
+  "migration_guide_doc_agent": {"provider": "anthropic", "model": "claude-sonnet-5", "tier": "sonnet"},
+  "mobile_dev":               {"provider": "anthropic", "model": "claude-sonnet-5",  "tier": "sonnet"},
+  "prompt_engineer_agent":    {"provider": "anthropic", "model": "claude-sonnet-5",  "tier": "sonnet"},
+  "roadmap_agent":            {"provider": "anthropic", "model": "claude-sonnet-5",  "tier": "sonnet"},
+  "tech_advisor_agent":       {"provider": "anthropic", "model": "claude-sonnet-5",  "tier": "sonnet"},
+  "tool_catalog_doc_agent":   {"provider": "anthropic", "model": "claude-sonnet-5",  "tier": "sonnet"},
+  "ux_design_agent":          {"provider": "anthropic", "model": "claude-sonnet-5",  "tier": "sonnet"}
 }

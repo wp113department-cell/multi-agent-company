@@ -1,0 +1,18 @@
+{
+  "audit_id": "02",
+  "audit_name": "Master Agent Audit",
+  "run_date": "2026-09-29",
+  "layer_score": 90,
+  "findings": [
+    {"id": "AGENT-02-001", "severity": "High", "status": "FIXED", "file": "backend/app/api/specialized_agents.py", "location": "_agent_call_kwargs; /run, /run-sync, /dispatch, GET /agents", "line": "374-388", "finding": "16/80 advertised agent names could never run (signature mismatch); endpoint returned queued then background TypeError.", "evidence": "evidence/agent_api_bind_check.out.txt: 16 bind failures pre-fix", "production_impact": "API/dispatch callers get silent failures; backend_development capability dispatch always failed.", "confidence": "High", "recommendation": "Name-based kwargs; refuse pipeline-only agents with 422.", "effort": "Small"},
+    {"id": "AGENT-02-002", "severity": "High", "status": "FIXED", "file": "backend/app/agents/{api_designer_agent,data_pipeline_agent,load_test_agent}.py", "location": "make_*_handlers", "line": "n/a", "finding": "write_docs agents had unscoped write_file able to overwrite any code/config.", "evidence": "evidence/docs_agent_write_probe.py created evil.py pre-fix", "production_impact": "Prompt-injected design agent could rewrite application code.", "confidence": "High", "recommendation": "docs_or_new_file_write_denial scoping.", "effort": "Small"},
+    {"id": "AGENT-02-003", "severity": "Medium", "status": "FIXED", "file": "backend/app/agents/devops.py, research.py", "location": "run_devops, run_research", "line": "115, 105", "finding": "task_id not threaded to run_agent_graph.", "evidence": "agent_scorecard captured task_id None", "production_impact": "Runs invisible in task activity stream.", "confidence": "High", "recommendation": "Optional task_id param.", "effort": "Small"},
+    {"id": "AGENT-02-004", "severity": "Low", "status": "FIXED", "file": "backend/app/fleet/agent_models.json", "location": "table", "line": "85-99", "finding": "13 agents without explicit route.", "evidence": "agent_scorecard in_agent_models_json=false", "production_impact": "Implicit routing.", "confidence": "High", "recommendation": "Explicit rows.", "effort": "Small"},
+    {"id": "AGENT-02-005", "severity": "Low", "status": "ACCEPTED", "file": "backend/app/agents/docs.py, mobile_dev.py", "location": "run_docs, run_mobile_dev", "line": "n/a", "finding": "Registered agents not wired into pipeline.", "evidence": "no callers", "production_impact": "Guide overstated pipeline.", "confidence": "High", "recommendation": "Owner decision: document only.", "effort": "Medium"},
+    {"id": "AGENT-02-006", "severity": "Low", "status": "OPEN", "file": "backend/app/fleet/tool_manifest.py", "location": "TOOL_MANIFEST", "line": "38", "finding": "~45 agent-specific tools lack manifest entries (all read/submit).", "evidence": "agent_scorecard tools_not_in_manifest", "production_impact": "Catalogue incompleteness only.", "confidence": "High", "recommendation": "Add entries.", "effort": "Small"}
+  ],
+  "counts": {"critical": 0, "high": 2, "medium": 1, "low": 3},
+  "open_counts": {"critical": 0, "high": 0, "medium": 0, "low": 1},
+  "not_found": [],
+  "verdict": "READY"
+}

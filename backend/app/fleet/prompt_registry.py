@@ -19,13 +19,13 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-
-logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Any
 
 from app.config import get_settings
 from app.policy.engine import check_path
+
+logger = logging.getLogger(__name__)
 
 _ROLES_DIR = Path(__file__).parent.parent.parent / "roles"
 

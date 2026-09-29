@@ -87,9 +87,7 @@ def _cleanup_sync(repo_id: int) -> None:
         engine = _engine()
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                await session.execute(
-                    delete(Event).where(Event.repo_id == repo_id)
-                )
+                await session.execute(delete(Event).where(Event.repo_id == repo_id))
                 await session.execute(
                     delete(DocumentationScore).where(
                         DocumentationScore.repo_id == repo_id

@@ -63,9 +63,7 @@ def _run(worktree_path: str, backend_dev_side_effect: list) -> tuple[dict, objec
 def test_broken_import_blocks_after_retries_with_a_real_doc_hint_fed_back(
     tmp_path: Path,
 ) -> None:
-    (tmp_path / "broken.py").write_text(
-        "import totally_fake_module_xyz_never_real\n"
-    )
+    (tmp_path / "broken.py").write_text("import totally_fake_module_xyz_never_real\n")
     result, mock_backend_dev = _run(
         str(tmp_path),
         backend_dev_side_effect=[
@@ -83,9 +81,7 @@ def test_broken_import_blocks_after_retries_with_a_real_doc_hint_fed_back(
 
 
 def test_a_self_corrected_import_on_retry_completes_normally(tmp_path: Path) -> None:
-    (tmp_path / "broken.py").write_text(
-        "import totally_fake_module_xyz_never_real\n"
-    )
+    (tmp_path / "broken.py").write_text("import totally_fake_module_xyz_never_real\n")
 
     call_count = {"n": 0}
 
@@ -144,9 +140,7 @@ def test_disabled_via_config_skips_the_check_entirely(tmp_path: Path) -> None:
     from app.agents.manager import run_manager
     from app.config import get_settings
 
-    (tmp_path / "broken.py").write_text(
-        "import totally_fake_module_xyz_never_real\n"
-    )
+    (tmp_path / "broken.py").write_text("import totally_fake_module_xyz_never_real\n")
 
     with patch("app.agents.backend_dev.run_backend_dev") as mock_backend_dev, patch(
         "app.agents.qa.run_qa"

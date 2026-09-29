@@ -31,6 +31,34 @@ from app.agents.manager import (
 )
 
 
+import dataclasses
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _roomy_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Production audit 2026-09-29: the tests that expect "resources are
+    sufficient" used the REAL host's free RAM, so they failed whenever the dev
+    machine had < ~4.2 GB free (the real guard correctly halted the epic).
+    Pin the host reading to "plenty free"; tests that simulate a shortage
+    still patch run_resource_check themselves, which takes precedence."""
+    from app.fleet import resource_check as rc
+
+    real = rc.run_resource_check
+
+    def roomy(*a: object, **kw: object) -> object:
+        return dataclasses.replace(
+            real(*a, **kw),  # type: ignore[arg-type]
+            ram_available_gb=1024.0,
+            disk_free_gb=10240.0,
+            sufficient=True,
+            reasons=[],
+        )
+
+    monkeypatch.setattr(rc, "run_resource_check", roomy)
+
+
 def _new_isolated_db_engine() -> object:
     from sqlalchemy.ext.asyncio import create_async_engine
 

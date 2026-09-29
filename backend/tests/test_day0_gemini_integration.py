@@ -39,7 +39,9 @@ SUBMIT_TOOL: dict[str, Any] = {
 
 
 class TestFullGraphRunGemini:
-    def test_mini_task_runs_end_to_end(self, gemini_llm_patch: Any) -> None:  # noqa: F811
+    def test_mini_task_runs_end_to_end(
+        self, gemini_llm_patch: Any  # noqa: F811
+    ) -> None:
         """Run a real mini-task through the graph with Gemini. Agent must
         call submit_result — proves the adapter's message/tool-schema
         translation survives a real multi-turn LangGraph run, not just a

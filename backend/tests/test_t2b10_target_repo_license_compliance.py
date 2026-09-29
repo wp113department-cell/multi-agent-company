@@ -109,7 +109,9 @@ class TestScanTargetRepoDependencyLicensesRouting:
 
         def _fake_fetch(package: str) -> tuple[str | None, list[str]]:
             if package == "gpl-package":
-                return None, ["License :: OSI Approved :: GNU General Public License v3"]
+                return None, [
+                    "License :: OSI Approved :: GNU General Public License v3"
+                ]
             return None, ["License :: OSI Approved :: MIT License"]
 
         with patch(

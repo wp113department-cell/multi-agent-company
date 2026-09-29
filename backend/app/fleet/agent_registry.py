@@ -544,9 +544,7 @@ async def compute_citation_hallucination_rate(
                 func.count(),
                 func.coalesce(
                     func.sum(
-                        case(
-                            (AgentRun.citation_hallucination_count > 0, 1), else_=0
-                        )
+                        case((AgentRun.citation_hallucination_count > 0, 1), else_=0)
                     ),
                     0,
                 ),

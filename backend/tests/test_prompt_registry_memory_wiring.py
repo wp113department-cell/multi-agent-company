@@ -45,9 +45,7 @@ def _cleanup(role_name: str) -> None:
 def test_first_deploy_diffs_against_empty_content() -> None:
     role_name = "td_pr_mem_first_deploy"
     try:
-        with patch(
-            "app.memory.store.embed_prompt_change_sync"
-        ) as mock_embed:
+        with patch("app.memory.store.embed_prompt_change_sync") as mock_embed:
             pr = PromptRegistry()
             v1 = pr.propose(role_name, "Brand new role content", proposed_by="tester")
             pr.submit_for_review(v1.id)

@@ -165,7 +165,9 @@ def test_run_pip_audit_json_real_tool_call_against_known_vulnerable_package(
     assert "dependencies" in result
     score = compute_security_score(result)
     assert score.vulnerable_package_count == 1
-    assert score.total_vuln_count == 2
+    # live pip-audit: the advisory DB keeps growing for a pinned
+    # known-vulnerable version (2 CVEs when written, 4 by 2026-09-29).
+    assert score.total_vuln_count >= 2
 
 
 def test_run_pip_audit_json_real_tool_call_against_clean_package(
@@ -347,7 +349,8 @@ def test_run_dependency_security_agent_end_to_end_persists_real_score(
             "is broken"
         )
         assert latest.vulnerable_package_count == 1
-        assert latest.total_vuln_count == 2
+        # live pip-audit — advisory DB grows over time (2 when written, 4 by 2026-09-29).
+        assert latest.total_vuln_count >= 2
     finally:
         _cleanup_sync([task_id], [repo_id])
 

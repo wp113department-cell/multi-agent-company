@@ -93,7 +93,11 @@ async def test_chat_agent_browser_tools_full_real_lifecycle(tmp_path: Path) -> N
 
         r_dom = await agent._execute_tool("browser_read_dom", {})
         assert r_dom != "[ERROR] Unknown tool: browser_read_dom"
-        assert "Example Domain" in r_dom
+        # example.com's body copy is third-party content that changes over
+        # time (it went multilingual in 2026 and dropped the heading from the
+        # extracted text) — assert on the stable part, not a specific phrase.
+        assert not r_dom.startswith("[ERROR]")
+        assert "domain" in r_dom.lower()
 
         r_shot = await agent._execute_tool("browser_screenshot", {})
         assert r_shot != "[ERROR] Unknown tool: browser_screenshot"

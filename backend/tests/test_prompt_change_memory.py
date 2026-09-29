@@ -71,9 +71,9 @@ async def test_embed_prompt_change_persists_a_real_row(_mock_embed: object) -> N
             # architecture, not the generic 0.5 fallback.
             settings = get_settings()
             draft_value = 0.7 * settings.memory_quality_draft_importance_factor
-            assert row.importance == pytest.approx(0.7) or row.importance == pytest.approx(
-                draft_value
-            )
+            assert row.importance == pytest.approx(
+                0.7
+            ) or row.importance == pytest.approx(draft_value)
     finally:
         async with async_sessionmaker(engine, expire_on_commit=False)() as cleanup:
             await cleanup.execute(
@@ -93,7 +93,9 @@ async def test_query_prompt_changes_finds_the_real_row_back(
     engine = _engine()
     suffix = uuid.uuid4().hex[:8]
     role_name = f"role-pc-query-{suffix}"
-    diff = f"-you must never use eval()\n+you must never use eval() or exec() ({suffix})\n"
+    diff = (
+        f"-you must never use eval()\n+you must never use eval() or exec() ({suffix})\n"
+    )
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             row = await embed_prompt_change(

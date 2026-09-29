@@ -628,10 +628,31 @@ class TestOrch04_009_ConcurrencySlots:
             max_subtasks_within_threshold=0,
         )
 
+        # Production audit 2026-09-29: the real resource_check node runs
+        # BEFORE the cost gate this test is about, and it compares the repo's
+        # projected RAM against the host's live free RAM — so on a busy dev
+        # machine the second epic was "halted" instead of reaching
+        # pending_cost_approval. Pin the host reading to "plenty free" so this
+        # test only exercises the slot-release path it is named for.
+        import dataclasses
+
+        from app.fleet import resource_check as _rc
+
+        _real_check = _rc.run_resource_check
+
+        def _roomy_host(*a: object, **kw: object) -> object:
+            return dataclasses.replace(
+                _real_check(*a, **kw),  # type: ignore[arg-type]
+                ram_available_gb=1024.0,
+                disk_free_gb=10240.0,
+                sufficient=True,
+                reasons=[],
+            )
+
         with patch(
             "app.pipeline.cost_controller.estimate_epic_cost",
             new=AsyncMock(return_value=fake_estimate),
-        ):
+        ), patch("app.fleet.resource_check.run_resource_check", new=_roomy_host):
             from sqlalchemy.ext.asyncio import async_sessionmaker
             from sqlalchemy import delete
 
@@ -1024,3 +1045,78 @@ class TestOrch04_016_QueueAdapterDocumented:
             finally:
                 _cleanup_task(task_id)
         mock_queue.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Production audit 2026-09-29 — approval decision race (compare-and-set)
+# ---------------------------------------------------------------------------
+
+
+def test_concurrent_decisions_on_one_approval_have_exactly_one_winner() -> None:
+    """ORCH-04-007's July fix documented `UPDATE ... WHERE status='pending'`
+    as the race gate, but _record_decision updated by id only — two
+    concurrent approve/reject calls could both succeed and both dispatch.
+    Real DB, real concurrent sessions, repeated to catch interleavings."""
+    import uuid
+
+    from sqlalchemy import delete
+
+    from app.db.models import PendingApproval
+    from app.fleet.approval_gate import arecord_decision, arecord_pending
+
+    async def _trial() -> int:
+        thread_id = f"audit-race-{uuid.uuid4().hex[:10]}"
+        await arecord_pending(thread_id, "plan_review", {}, "manager")
+        results = await asyncio.gather(
+            arecord_decision(thread_id=thread_id, approved=True, decided_by="a"),
+            arecord_decision(thread_id=thread_id, approved=False, decided_by="b"),
+        )
+        engine = _new_isolated_db_engine()
+        try:
+            from sqlalchemy.ext.asyncio import async_sessionmaker
+
+            async with async_sessionmaker(engine)() as s:  # type: ignore[arg-type]
+                await s.execute(
+                    delete(PendingApproval).where(
+                        PendingApproval.thread_id == thread_id
+                    )
+                )
+                await s.commit()
+        finally:
+            await engine.dispose()  # type: ignore[attr-defined]
+        return sum(1 for r in results if r is not None)
+
+    winners = [asyncio.run(_trial()) for _ in range(15)]
+    assert winners == [1] * 15, winners
+
+
+def test_two_concurrent_restarts_launch_exactly_one_pipeline() -> None:
+    """Production audit 2026-09-29: check-then-reset race in /restart. Two
+    overlapping requests both passed the active-status check and the second
+    raw UPDATE forced planning -> pending, so the pipeline launched twice."""
+    import httpx
+
+    task_id = _create_task_with_status("blocked")
+    try:
+        with patch(
+            "app.api.agents.launch_planning_pipeline", new=AsyncMock()
+        ) as mock_launch:
+
+            async def _both() -> list[int]:
+                transport = httpx.ASGITransport(app=app)
+                async with httpx.AsyncClient(
+                    transport=transport, base_url="http://t"
+                ) as c:
+                    rs = await asyncio.gather(
+                        c.post(f"/api/tasks/{task_id}/restart"),
+                        c.post(f"/api/tasks/{task_id}/restart"),
+                    )
+                return sorted(r.status_code for r in rs)
+
+            codes = asyncio.run(_both())
+        assert codes == [200, 409], codes
+        assert mock_launch.await_count + mock_launch.call_count >= 1
+        assert mock_launch.call_count == 1, mock_launch.call_count
+        assert _get_task_status(task_id) == "planning"
+    finally:
+        _cleanup_task(task_id)

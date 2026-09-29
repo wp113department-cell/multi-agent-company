@@ -3,7 +3,9 @@
 >
 > *Author: Bhaskar Barot, AI/ML Engineer*
 > *Architecture: LangGraph 1.2.7 + FastAPI + PostgreSQL 16 (pgvector) + Next.js 15 App Router*
-> *Audit State (Updated 2026-09-28): 519 Checkpoints Evaluated | 450 YES (95.9% Effective Readiness) | 15 PARTIAL | 0 NO | 4 DEFERRED | 50 SKIP*
+> *Audit State (Updated 2026-09-28): 519 Checkpoints Evaluated | 452 YES | 13 PARTIAL | 0 NO | 4 DEFERRED | 50 SKIP*
+>
+> *Verified against the running code on 2026-09-29 by the 14-audit production suite. Every number and mechanism below was checked; corrections are marked "(verified 2026-09-29)". Proof: `What_is/AUDIT_REPORT/00_MASTER_GUIDE_VERIFICATION.md`.*
 
 ---
 
@@ -42,14 +44,14 @@
 ### What is this project in plain English?
 **Gridiron Developer Department is an autonomous, multi-agent software engineering company operating as software.** It takes any plain-English goal or issue description, designs a complete technical architecture, breaks it down into a dependency-ordered directed acyclic graph (DAG) of subtasks, assigns each subtask to the most qualified specialist AI agent from a fleet of 72+ agents, writes the code in isolated Git worktrees, runs actual compiler and test suites inside secure sandboxes, performs automated code and security reviews, updates project documentation, and submits verified GitHub Pull Requests — with human-in-the-loop sign-off gates at every critical juncture.
 
-### Live Codebase Metrics (Verified from Source & Audit):
-- **72+ Production Specialist Agents:** Distinct role identities with strictly scoped tool sets, system prompts, and verification contracts.
+### Live Codebase Metrics (verified 2026-09-29 from the running code):
+- **85 Registered Specialist Agents** (99 agent modules): distinct role identities with strictly scoped tool sets, system prompts, and verification contracts.
 - **Dynamic Meta-Agents:** Just-in-time capability synthesis (`barot_agent`), dynamic code execution engines (`bhaskar_agent`), and temporary agent pooling (`temporary_agent.py`).
-- **170+ Operational Tools:** Concrete executable tools across filesystem, AST code intelligence, execution sandboxes, git operations, browser testing, and external APIs.
-- **21 Backend API Router Modules:** Complete async REST API and real-time Server-Sent Events (SSE) streaming engine built in FastAPI.
-- **44 Database Tables:** Managed via PostgreSQL 16 + `pgvector` with 39 versioned Alembic migrations.
-- **4,000+ Automated Tests:** Rigorous pytest test suites with strict AST event-compliance scans and smoke tests.
-- **Audit Verification (519 Checkpoints across 120 Sections):** **450 YES (95.9% Effective Readiness)**, 15 PARTIAL, 0 NO, 4 DEFERRED, 50 SKIP.
+- **214 Operational Tools** in `TOOL_MANIFEST`: filesystem, AST code intelligence, execution sandboxes, git operations, browser testing, and external APIs.
+- **21 Backend API Router Modules** serving 128 paths / 143 operations: async REST API and real-time Server-Sent Events (SSE) streaming, built in FastAPI.
+- **43 ORM models / 51 live tables** (the extra 8: alembic, 4 LangGraph checkpoint tables, and the raw-SQL `audit_log`, `chat_messages`, `lessons`) on PostgreSQL 16 + `pgvector`, with **62** versioned Alembic migrations (single head `062`).
+- **8,700+ Automated Tests** (8,756 passing in the 2026-09-29 baseline run).
+- **Audit Verification (519 Checkpoints across 120 Sections):** **452 YES**, 13 PARTIAL, 0 NO, 4 DEFERRED, 50 SKIP.
 
 ---
 
@@ -77,7 +79,7 @@ Gridiron mirrors a Fortune 500 engineering department:
 | **FastAPI** | `0.139.0` | Powers the async REST API and Server-Sent Events (SSE) streaming endpoints. |
 | **Uvicorn** | `0.49.0` | High-throughput ASGI production server. |
 | **LangGraph** | `1.2.7` | Core cyclic StateGraph orchestration, human `interrupt()` gates, and durable state checkpointing. |
-| **Anthropic SDK** | `0.115.1` | Native integration with Claude 3.5 Sonnet (coding/review) and Claude 3.5/3.7 Haiku (planning/triage). |
+| **Anthropic SDK** | `0.115.1` | Native Claude integration. Routing (verified 2026-09-29, `app/fleet/agent_models.json`): `claude-sonnet-5` for most agents, `claude-opus-4-8` for architect/decomposer/planner/manager/executive/research/security_architect/rag_engineer/architecture_reviewer, `claude-haiku-4-5` for triage/routing. |
 | **SQLAlchemy (Async)** | `2.0.51` | Async ORM mapping for all 44 relational database models. |
 | **Alembic** | `1.18.5` | Version-controlled database schema migration engine (39 migrations). |
 | **Asyncpg / Psycopg3** | `0.31.0` / `3.3.4` | High-speed asynchronous PostgreSQL drivers. |
@@ -154,10 +156,10 @@ Gridiron mirrors a Fortune 500 engineering department:
                       └───────────────┬───────────────┘
                                       │
                                       ▼
-                      [ 6. Failure Recovery Ladder ] (If tests fail, self-heal up to 7 rungs)
+                      [ 6. Failure Recovery ] (bounded retry with error fed back → escalate → human review / abort — see §9.4)
                                       │
                                       ▼
-                      [ 7. Docs Agent Updates README & Changelog ]
+                      [ 7. Per-subtask quality gates ] (security / architecture / dependency / regression / docstring coverage)
                                       │
                                       ▼
                       [ 8. Git Commit to Worktree Branch ]
@@ -187,7 +189,7 @@ Gridiron mirrors a Fortune 500 engineering department:
 
 #### 3. `bhaskar_sandbox` — Hardened Python Sandbox
 - **File:** `backend/app/agents/bhaskar_sandbox.py`
-- **Role:** An isolated subprocess runner for synthesized scripts with memory limits (`256MB`), execution timeouts (`30s`), stripped environment variables (preventing credential theft), and non-root execution.
+- **Role:** An isolated subprocess runner for synthesized scripts with kernel resource limits (RLIMIT_AS memory cap, default `512MB`; RLIMIT_CPU; file-size, open-file and process-count caps), a live watchdog that kills the whole process group on timeout/quota breach, stripped environment variables (preventing credential theft), and non-root execution. (verified 2026-09-29, `bhaskar_sandbox.py:341-449`)
 
 #### 4. `temporary_agent` — Dynamic Agent Pooling & Lifecycle Manager
 - **File:** `backend/app/agents/temporary_agent.py`
@@ -209,7 +211,7 @@ Gridiron mirrors a Fortune 500 engineering department:
 11. **`reviewer`:** Performs senior-level code reviews on git diffs, checking for logic flaws and anti-patterns (`reviewer.py`).
 12. **`chat_agent`:** Interactive streaming conversational agent that can explore repos, read files, and run tools dynamically (`chat_agent.py`).
 13. **`research`:** Conducts technical research using web search and repository scans to answer technical unknowns (`research.py`).
-14. **`docs`:** Generates changelogs, updates documentation, and synchronizes READMEs after epic completion (`docs.py`).
+14. **`docs`:** LLM README/changelog writer (`docs.py`). *(verified 2026-09-29: built and tested, but **not called by the task pipeline** — the per-subtask documentation step that does run is the free AST docstring-coverage gate. Wiring this agent into the pipeline is a future enhancement, by owner decision.)*
 
 ---
 
@@ -381,6 +383,11 @@ These 5 specialized meta-agents form the **Fleet Self-Improvement Subsystem**. T
 71. **`ai_engineer`:** Implements machine learning models, inference scripts, and AI pipelines (`ai_engineer.py`).
 72. **`dependency_agent`:** Checks package registries for outdated dependencies and security patches (`dependency_agent.py`).
 
+**Also registered (verified 2026-09-29, missing from earlier versions of this list):**
+- **`roadmap_agent`:** Roadmap planning with persisted, human-editable initiative status (`GET`/`PATCH /api/roadmap`).
+- **`ux_design_agent`**, **`tech_advisor_agent`**, **`prompt_engineer_agent`**, **`agentic_ai_architect`**, **`mcp_developer_agent`:** design/advisory agents that write reports and specs (`.md`/`docs/**` only), runnable via `POST /api/specialized-agents/{name}/run`.
+- **`mobile_dev`:** Mobile developer agent. *Registered but **not yet wired**: the decomposer never emits `mobile` subtasks and the agent needs a worktree, so it cannot run standalone. Kept by owner decision.*
+
 ---
 
 ### 5.12 Automated Platform Documentation Agents (5 Agents)
@@ -448,7 +455,7 @@ Gridiron is not just a collection of isolated agents; it is an interconnected co
 ├── backend/                                → Python 3.11+ / FastAPI / LangGraph Backend
 │   ├── app/
 │   │   ├── main.py                         → FastAPI application entry point, lifespan, background loops
-│   │   ├── config.py                       → Pydantic Settings (93 configuration keys)
+│   │   ├── config.py                       → Pydantic Settings (301 configuration fields)
 │   │   ├── api/                            → 21 FastAPI Router Modules
 │   │   │   ├── tasks.py                    → Task lifecycle, planning triggers, PR creations, images
 │   │   │   ├── approvals.py                → Human approval gate endpoints (approve/reject/edit)
@@ -481,7 +488,7 @@ Gridiron is not just a collection of isolated agents; it is an interconnected co
 │   │   ├── pipeline/                       → Orchestration & Concurrency Engine
 │   │   │   ├── graph.py                    → LangGraph StateGraph (PM → Architect → Decomposer → interrupt)
 │   │   │   ├── bootstrap.py                → Blank repository detection & auto-scaffolding
-│   │   │   ├── dispatcher.py               → Topological subtask dependency dispatcher
+│   │   │   ├── dispatcher.py               → Legacy type→agent map (tests only; real ordering is manager.py's _topological_subtask_order/_waves + fleet_manager.select())
 │   │   │   ├── file_locks.py               → Advisory database-backed file locking for parallel tasks
 │   │   │   ├── conflict_guard.py           → Multi-task file overlap detection
 │   │   │   ├── dynamic_subtasks.py         → Mid-execution subtask proposal & validation
@@ -517,13 +524,13 @@ Gridiron is not just a collection of isolated agents; it is an interconnected co
 │   │   │   └── analytics.py                → Memory reuse metrics and utility analytics
 │   │   │
 │   │   └── db/                             → Database Layer
-│   │       ├── models.py                   → 44 SQLAlchemy ORM database models
+│   │       ├── models.py                   → 43 SQLAlchemy ORM database models
 │   │       ├── repository.py               → Data access object (DAO) CRUD methods
 │   │       └── session.py                  → Async database engine & connection pool
 │   │
 │   ├── roles/                              → 72 Markdown Agent System Prompts (`pm.md`, etc.)
-│   ├── migrations/                         → 39 Alembic database migration scripts
-│   └── tests/                              → 4,000+ Pytest automated test suites
+│   ├── migrations/                         → 62 Alembic database migration scripts (head: 062)
+│   └── tests/                              → 641 test files, 8,700+ pytest tests
 │
 ├── docker-compose.yml                      → Multi-container orchestration (DB, Redis, Backend, Web)
 ├── run.sh                                  → Unified startup script for backend, frontend, and database
@@ -577,23 +584,24 @@ All models inherit from SQLAlchemy `DeclarativeBase` in `backend/app/db/models.p
 - **Problem:** Agents running raw bash commands could compromise the host server.
 - **Solution:**
   1. **Policy Denylist:** `app/policy/engine.py` blocks dangerous command strings (`rm -rf`, `docker push`, `npm publish`, `.env*` reads).
-  2. **Container Sandbox:** `app/policy/sandbox.py` routes high-risk commands into an isolated Docker container with 512MB RAM, 1 CPU core, and 128 PIDs limits.
+  2. **Container Sandbox:** `app/policy/sandbox.py` routes high-risk commands into an isolated Docker container. `run_sandboxed()` defaults (verified 2026-09-29): `--memory=1g`, `--cpus=1.0`, `--pids-limit=512`, 100MB tmpfs, 120s timeout.
   3. Only the task's Git worktree is mounted. If Docker is offline, the command **fails closed** and refuses to execute on the host.
 
 ### 3. Git Worktree Isolation & Multi-Repo Workspaces
-- `app/repo_tools/worktree.py` isolates each subtask inside an independent `git worktree` at `/tmp/gridiron/worktrees/task-{id}-sub-{index}`.
+- `app/repo_tools/worktree.py` isolates each task inside its own `git worktree` at `/tmp/gridiron-worktrees/task-{id}` (or `/tmp/gridiron-worktrees/epic-{epic_id}/task-{id}` inside an epic), on branch `agent/task-{id}`; the task's subtasks work sequentially in that shared worktree (`WORKTREES_DIR` configurable, verified 2026-09-29).
 - Live codebase files on the `main` branch are never touched directly during development.
 - If a subtask aborts, the worktree folder and temporary branch are deleted with zero residual side effects on the repository.
 
-### 4. 7-Rung Failure Recovery Ladder
-When QA tests or linters fail, `app/fleet/failure_ladder.py` triggers an escalating recovery ladder:
-1. **Rung 1 — Retry with Error Context:** Re-feed the compiler/linter error back to the developer agent.
-2. **Rung 2 — Tool Parameter Adjustment:** Alter search tools or broaden AST lookups.
-3. **Rung 3 — Codebase Re-index & Context Refresh:** Invalidate AST caches and reload symbol graphs.
-4. **Rung 4 — Re-Plan Subtask:** Call the `planner` agent to restructure the subtask strategy.
-5. **Rung 5 — Alternate Specialist Dispatch:** Switch agent (e.g., from `coder` to specialized `bug_fix`).
-6. **Rung 6 — Human Clarification Escalation:** Create a `PendingApproval` asking the human for guidance.
-7. **Rung 7 — Safe Abort & Rollback:** Cleanly delete the worktree, release file locks, mark task `failed`, and alert the team.
+### 4. Failure Recovery Ladder (verified 2026-09-29)
+When QA tests, linters or review fail, recovery escalates through these real steps (`app/agents/manager.py`, `app/agents/base_graph.py`, `app/fleet/failure_ladder.py`):
+1. **Retry with error context:** the QA/review failure text is fed back to the developer agent; bounded by `MANAGER_MAX_SUBTASK_RETRIES`.
+2. **In-run self-correction:** inside every agent run, the reflection/critique loop and `_should_replan()` re-plan when reflection keeps failing, confidence is low, or a required verification key stays unmet.
+3. **Escalate:** the agent is marked degraded in the fleet registry (`escalate()`), which lowers its selection score.
+4. **Human review:** the task moves to `blocked` (recoverable; a human can unblock and re-run), a `ReviewRequested` event fires, and an alert is sent.
+5. **Abort:** once `MANAGER_MAX_EPIC_FAILURES` subtasks are blocked, the epic halts, a checkpoint snapshot is saved, and `TaskFailed` is published.
+6. **Orphan recovery:** a background sweep finds runs whose heartbeat stopped (crash) and resumes them from their checkpoint or marks them failed.
+
+(Older versions of this guide listed a "7-rung" ladder with "tool parameter adjustment", "re-index on failure" and "switch to `bug_fix`" rungs. Those rungs do not exist in the code.)
 
 ### 5. Project-Scoped Memory with LLM Conflict-Merging
 - Memories are vectorized using Voyage AI (`voyage-code-2`) and stored in PostgreSQL `pgvector`.
@@ -610,7 +618,7 @@ When QA tests or linters fail, `app/fleet/failure_ladder.py` triggers an escalat
   1. `git init` and initial file touch.
   2. Architect agent designs project scaffolding.
   3. Coder agent writes baseline files (`package.json`, `main.py`, `.gitignore`).
-  4. Commits `Initial project scaffold by Gridiron` to `main`.
+  4. Commits `chore: initial scaffold by gridiron` (author "Gridiron Bootstrap").
   5. The standard PM → Architect → Decomposer pipeline then starts cleanly.
 
 ### 8. Multimodal Visual Input Pipeline
@@ -620,7 +628,7 @@ When QA tests or linters fail, `app/fleet/failure_ladder.py` triggers an escalat
 
 ### 9. Advisory Database File Locks (Concurrency Protection)
 - When multiple subtasks run in parallel, two agents might attempt to edit the same file (e.g., `app/main.py`).
-- `app/pipeline/file_locks.py` uses `EpicFileLock` to acquire database-level leases on target file paths. If a file is locked by Subtask A, Subtask B safely waits until Subtask A commits and unlocks.
+- `app/pipeline/file_locks.py` uses `EpicFileLock` to acquire database-level leases on target file paths **per epic**, all-or-nothing (a SAVEPOINT, so a losing epic never holds a partial set). If another epic already holds any of the files, the new epic is halted with a clear `halted_conflict` reason rather than waiting. Expired leases (`EPIC_FILE_LOCK_TTL_SECONDS`) are reaped so a crashed epic cannot deadlock a file forever. (verified 2026-09-29)
 
 ### 10. Fleet OS Self-Improvement Subsystem
 - Meta-agents (`agent_debugger`, `agent_performance_reviewer`, `quality_auditor`) scan audit logs every few hours.
@@ -739,10 +747,10 @@ Use this quick-reference guide to confidently answer any technical question:
 > **Answer:** "`bhaskar_agent` is the internal engine powering `bhaskar_tool`. When an agent needs an ad-hoc computation or custom API integration not covered by built-in tools, `bhaskar_agent` researches via web search, writes self-contained Python code, executes it inside `bhaskar_sandbox` (a hardened, memory-capped, credential-scrubbed sandbox), and returns verified results."
 
 ### Q4: "How do multiple agents work in parallel without merge conflicts?"
-> **Answer:** "Gridiron enforces two safeguards: (1) **Git Worktrees:** Each subtask executes in an isolated worktree (`git worktree add -b`). (2) **Advisory Database File Locks:** `app/pipeline/file_locks.py` acquires database leases (`EpicFileLock`) on target files, ensuring parallel agents never write to the same file at the same time."
+> **Answer:** "Gridiron enforces two safeguards: (1) **Git Worktrees:** each task executes in its own isolated worktree (`git worktree add -b agent/task-{id}`), never on `main`. (2) **Database File Locks:** `app/pipeline/file_locks.py` takes all-or-nothing leases (`EpicFileLock`) on an epic's target files, so two concurrent epics can never write the same file — the second one is halted with a clear conflict reason instead."
 
 ### Q5: "How does the system recover when code fails tests?"
-> **Answer:** "It uses a deterministic **7-Rung Failure Recovery Ladder**: (1) Retry with compiler errors → (2) Tool adjustment → (3) Context refresh → (4) Re-plan subtask → (5) Switch to specialized bug fix agent → (6) Request human guidance → (7) Safe rollback and worktree deletion."
+> **Answer:** "It escalates through a real recovery ladder: (1) bounded retry with the exact test/review error fed back to the developer agent → (2) in-run critique and re-planning → (3) escalate (agent marked degraded) → (4) human review (task blocked, alert sent, recoverable) → (5) abort once too many subtasks fail (checkpoint saved, TaskFailed published) — plus a background sweep that resumes or fails runs orphaned by a crash."
 
 ### Q6: "How are credentials and security handled?"
 > **Answer:** "Credentials are encrypted at rest with AES Fernet keys in `CredentialVault`. Commands are checked against a policy denylist and executed inside ephemeral, resource-capped Docker containers. Secrets are dynamically scrubbed from all terminal outputs, databases, and streaming feeds."

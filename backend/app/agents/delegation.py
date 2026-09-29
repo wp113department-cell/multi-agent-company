@@ -148,18 +148,18 @@ def _publish_delegation_event(event: Any) -> None:
     try:
         import asyncio
 
-        from app.event_bus.bus import publish_event
+        from app.event_bus.bus import publish_event_persisted
         from app.fleet.fleet_events import get_main_loop
 
         loop = get_main_loop()
         if loop is not None and loop.is_running():
-            asyncio.run_coroutine_threadsafe(publish_event(event), loop)
+            asyncio.run_coroutine_threadsafe(publish_event_persisted(event), loop)
             return
         try:
             running = asyncio.get_running_loop()
         except RuntimeError:
             return
-        running.create_task(publish_event(event))
+        running.create_task(publish_event_persisted(event))
     except Exception:
         logger.debug("Delegation event publish failed (non-fatal)", exc_info=True)
 

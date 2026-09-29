@@ -1,0 +1,14 @@
+{
+  "audit_id": "03",
+  "audit_name": "Master Memory Audit",
+  "run_date": "2026-09-29",
+  "layer_score": 88,
+  "findings": [
+    {"id": "MEM-03-001", "severity": "High", "status": "HUMAN_ACTION_REQUIRED", "file": "backend/.env", "location": "VOYAGE_API_KEY", "line": "n/a", "finding": "No embedding key configured; all semantic memory inactive (graceful).", "evidence": "grep -c '^VOYAGE_API_KEY=.+' backend/.env -> 0; store.py:392-394, 608-610", "production_impact": "Agents receive no long-term memory context.", "confidence": "High", "recommendation": "Set VOYAGE_API_KEY; run PENDING_TESTS_API_KEYS.md L2/L3.", "effort": "Small"},
+    {"id": "MEM-03-002", "severity": "Low", "status": "ACCEPTED", "file": "backend/app/memory/store.py", "location": "query_similar_tasks", "line": "622-631", "finding": "Repo filter post-applied to HNSW candidates; selective filters may under-return.", "evidence": "SQL CTE", "production_impact": "Fewer than k results for small repos at large scale.", "confidence": "Medium", "recommendation": "Keep overfetch factor; consider pgvector iterative scans.", "effort": "Small"}
+  ],
+  "counts": {"critical": 0, "high": 1, "medium": 0, "low": 1},
+  "open_counts": {"critical": 0, "high": 1, "medium": 0, "low": 1},
+  "not_found": [],
+  "verdict": "READY (code) / credential required for operation"
+}

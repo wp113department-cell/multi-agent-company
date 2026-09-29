@@ -1,0 +1,14 @@
+{
+  "agent_modules_imported": 99,
+  "registered_capabilities": 85,
+  "tool_manifest_entries": 214,
+  "READ_ONLY_TOOLS": 17,
+  "CODER_TOOLS": 23,
+  "CHAT_TOOLS": 190,
+  "settings_fields": 301,
+  "api_paths": 128,
+  "api_operations": 143,
+  "api_router_modules_included": 21,
+  "orm_tables": 43,
+  "live_db_public_tables": 51
+}

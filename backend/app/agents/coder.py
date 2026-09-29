@@ -128,6 +128,7 @@ def run_coder(
     on_heartbeat: Any = None,  # kept for backward compat — no-op
     on_tool_call: Any = None,  # kept for backward compat — no-op
     extra_env: dict[str, str] | None = None,
+    images: list[dict[str, str]] | None = None,
 ) -> tuple[list[str], str | None, int, int]:
     """Run coder agent with static-check retry loop.
 
@@ -163,6 +164,11 @@ def run_coder(
             "Implement the plan exactly as described. "
             "When done, call submit_patch with the list of files you changed."
         )
+        if images:
+            base_msg += (
+                f"\n\n{len(images)} reference image(s) from the task are attached "
+                "below — match them where the plan concerns UI."
+            )
         if attempt > 0 and check_error:
             base_msg += (
                 f"\n\n[RETRY {attempt}] Previous attempt failed checks:\n{check_error}\n"
@@ -171,6 +177,8 @@ def run_coder(
 
         try:
             final_state = run_agent_graph(
+                # production audit 2026-09-29 (ORCH-04-002): task images
+                images=images,
                 role_name="coder",
                 model=settings.model_coder,
                 tools=CODER_TOOLS + [REQUEST_CLARIFICATION_TOOL],

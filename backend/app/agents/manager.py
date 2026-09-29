@@ -695,8 +695,7 @@ async def _dispatch_one_subtask(
                 qa_errors = hints
                 security_scan_unlocked = False
                 logger.warning(
-                    "Auto doc-lookup attempt %d subtask %d: %d unresolved "
-                    "import(s)",
+                    "Auto doc-lookup attempt %d subtask %d: %d unresolved " "import(s)",
                     attempt + 1,
                     subtask_id,
                     len(broken_imports),
@@ -1724,13 +1723,22 @@ async def run_manager(
                         label="epic_halted",
                         trace_id=manager_trace_id,
                     )
+                    # transition=False: launch_manager owns this task's status
+                    # and moves it to "blocked" (recoverable, with an alert)
+                    # once run_manager() returns — abort() only publishes the
+                    # TaskFailed event here.
                     abort(
                         str(task_id),
                         f"epic halted — {blocked_count}/{max_epic_failures} subtasks failed",
                         trace_id=manager_trace_id,
+                        transition=False,
                     )
                 except Exception:
-                    pass
+                    logger.warning(
+                        "failure ladder abort failed for task %d",
+                        task_id,
+                        exc_info=True,
+                    )
                 halted = True
                 continue
 
@@ -1750,9 +1758,14 @@ async def run_manager(
                     "manager",
                     f"subtask {subtask_id} blocked after retries",
                     trace_id=manager_trace_id,
+                    transition=False,  # see abort() above
                 )
             except Exception:
-                pass
+                logger.warning(
+                    "failure ladder human-review escalation failed for task %d",
+                    task_id,
+                    exc_info=True,
+                )
 
             overall_status = "blocked"
 

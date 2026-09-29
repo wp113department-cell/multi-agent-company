@@ -12,6 +12,12 @@ export default defineConfig({
     // which defaults to the classic runtime unless told otherwise.
     jsx: "automatic",
   },
+  // Vitest 4 (production audit 2026-09-29: upgraded from 3.x to clear
+  // GHSA path-traversal advisories in vitest/@vitest/mocker) transforms with
+  // Rolldown/Oxc instead of esbuild — same automatic-runtime setting there.
+  oxc: {
+    jsx: { runtime: "automatic" },
+  },
   test: {
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],

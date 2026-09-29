@@ -691,7 +691,9 @@ async def query_memory_context(
     bugs = await query_bugs(description, db, top_k=k, repo_id=repo_id)
     # #405 (2026-09-28, "Covers approved prompts/MCPs/tools as a distinct
     # knowledge type").
-    prompt_changes = await query_prompt_changes(description, db, top_k=k, repo_id=repo_id)
+    prompt_changes = await query_prompt_changes(
+        description, db, top_k=k, repo_id=repo_id
+    )
     return {
         "tasks": tasks,
         "failures": failures,
@@ -2016,7 +2018,9 @@ async def embed_prompt_change(
         )
         return row
     except Exception as exc:
-        logger.warning("Memory: failed to store prompt change for %s: %s", role_name, exc)
+        logger.warning(
+            "Memory: failed to store prompt change for %s: %s", role_name, exc
+        )
         await db.rollback()
         return None
 

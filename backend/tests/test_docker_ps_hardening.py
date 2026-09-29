@@ -22,6 +22,9 @@ All tests here use real `docker` subprocess calls — nothing is mocked.
 
 from __future__ import annotations
 
+import subprocess
+import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
 
@@ -57,13 +60,33 @@ def test_docker_ps_appears_exactly_once_in_chat_tools() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_handler_honors_all_true_shows_stopped_containers() -> None:
+@pytest.fixture
+def stopped_container() -> Iterator[str]:
+    """A real, never-started container (status "Created") that exists only
+    for the test. Production audit 2026-09-29: these tests used to assume the
+    host already had a stopped container lying around, so they failed on any
+    clean docker daemon (e.g. right after a Docker Desktop restart). Uses the
+    redis image this project's own compose stack already pulls."""
+    name = f"gridiron-audit-stopped-{uuid.uuid4().hex[:8]}"
+    subprocess.run(
+        ["docker", "create", "--name", name, "redis:7-alpine", "true"],
+        check=True,
+        capture_output=True,
+        timeout=60,
+    )
+    try:
+        yield name
+    finally:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=60)
+
+
+def test_handler_honors_all_true_shows_stopped_containers(
+    stopped_container: str,
+) -> None:
     """Proves the real fix: with all=True, a stopped container must
-    appear -- a real, running docker daemon on this host always has at
-    least one non-running container in its history by now (this
-    project's own dev containers), so this is a live, not synthetic,
-    proof."""
+    appear — live, real docker daemon, nothing mocked."""
     result = docker_ps_handler({"all": True})
+    assert stopped_container in result
     assert "Exited" in result or "Created" in result
 
 
@@ -96,13 +119,11 @@ def test_handler_honors_all_true_passes_flag() -> None:
     ],
 )
 def test_both_factories_honor_all_true(
-    tmp_path: Path, factory_name: str, factory
+    tmp_path: Path, factory_name: str, factory, stopped_container: str
 ) -> None:
     handlers = factory(str(tmp_path))
     result = handlers["docker_ps"]({"all": True})
-    assert (
-        "Exited" in result or "Created" in result
-    ), f"{factory_name} did not honor all=True"
+    assert stopped_container in result, f"{factory_name} did not honor all=True"
 
 
 # ---------------------------------------------------------------------------

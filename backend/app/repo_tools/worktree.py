@@ -1,11 +1,15 @@
 """Git worktree isolation — creates per-task isolated worktrees for agent code changes."""
 
+import logging
 import os
 import shutil
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 def _run(args: list[str], cwd: str) -> str:
@@ -82,16 +86,39 @@ def create_worktree(
             )
         except RuntimeError:
             shutil.rmtree(wt_path, ignore_errors=True)
-        # A `git worktree add -b <branch>` would fail if <branch> already
-        # exists from the stale attempt (branch survives worktree removal) —
-        # delete it too, best-effort, before recreating.
-        try:
-            _run(["git", "branch", "-D", branch], cwd=base_repo)
-        except RuntimeError:
-            pass
+    # A `git worktree add -b <branch>` fails if <branch> already exists. That
+    # used to be handled only when a stale DIRECTORY was also present (above).
+    # Production audit 2026-09-29: the branch alone also survives — after a
+    # reject (remove_worktree keeps it) or a reboot that wiped /tmp — so
+    # re-running a rejected task, or restarting a blocked one after a reboot,
+    # always ended "blocked". Start fresh in every case, but move the old
+    # branch aside instead of deleting it (it may hold unpushed commits).
+    try:
+        _run(["git", "worktree", "prune"], cwd=base_repo)
+    except RuntimeError:
+        pass
+    _move_stale_branch_aside(branch, base_repo)
 
     _run(["git", "worktree", "add", "-b", branch, str(wt_path)], cwd=base_repo)
     return wt_path
+
+
+def _move_stale_branch_aside(branch: str, base_repo: str) -> None:
+    exists = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+        cwd=base_repo,
+        capture_output=True,
+    )
+    if exists.returncode != 0:
+        return
+    backup = f"{branch}-stale-{datetime.now(timezone.utc):%Y%m%dT%H%M%S%f}"
+    try:
+        _run(["git", "branch", "-m", branch, backup], cwd=base_repo)
+        logger.warning("Moved stale branch %s aside as %s", branch, backup)
+    except RuntimeError:
+        # e.g. still checked out somewhere git knows about — fall back to the
+        # previous behaviour (delete) so worktree creation can proceed.
+        _run(["git", "branch", "-D", branch], cwd=base_repo)
 
 
 def get_diff(task_id: int | str, repo_path: str | None = None) -> str:

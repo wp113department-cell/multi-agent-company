@@ -732,3 +732,22 @@ agents is ~7,000-11,000 tokens depending on the agent (`coder` is the largest ob
 free-tier key needs a TPM ceiling comfortably above that (Groq's paid Dev Tier, or Gemini's
 `gemini-2.5-flash`/`gemini-flash-lite-latest` with a higher per-minute allowance than the default
 free tier) for pacing to help at all; below that ceiling, no pacing strategy fixes it, per K3.
+
+---
+
+## L. (2026-09-29) Production audit suite (files/Audit 01–14): live-LLM checks deferred
+
+The 14-audit production sign-off (reports in `What_is/AUDIT_REPORT/`) ran while
+`ANTHROPIC_API_KEY` still had no balance. At the owner's request, every audit check that
+needs a **live** model answer was skipped and is listed here instead of being passed.
+Everything else in those audits was verified against the real Postgres, Redis, API, browser
+and git, with the LLM call mocked where a test needs one.
+
+Each row says which audit and section it came from, and what to run once the key has credit.
+The matching audit report marks the same item `BLOCKED (LLM credit)`, not green.
+
+| # | Audit § | Check that needs a live LLM | How to run it once the key works |
+|---|---|---|---|
+| L1 | 02 Phase 3B | Measure whether making `submit_*` schema validation **strict** (reject + ask the model to resubmit) is safe: count how often real model outputs fail their declared `input_schema` today (currently soft: logged + result warning, `base_graph.py:2762-2776`). | Run a sample of real agent runs; grep logs for `did not match its declared input_schema`. Decide strict vs soft from the real rate. |
+| L2 | 03 Phase 1 | Live semantic memory: `_embed()` against real Voyage, then `query_similar_tasks()` returns real neighbours. **Needs `VOYAGE_API_KEY`** (not set in `backend/.env`, so semantic memory is inactive today; it degrades gracefully to "no memory"). | Set `VOYAGE_API_KEY`, then `pytest tests/pending/test_embeddings.py` and one real task end-to-end; confirm `memory_embeddings` rows have non-zero vectors. |
+| L3 | 03 Phase 1 | Versioned-lesson merge-on-conflict: `_merge_via_llm()` (Haiku tier) produces a merged draft when a new lesson is ≥ `MEMORY_MERGE_SIMILARITY_THRESHOLD` similar. Needs **both** a Voyage key (similarity) and Anthropic credit (merge). | Publish two near-duplicate lessons via `get_versioned_memory_store().publish()`; expect a v2 draft with `supersedes_id` set; promote it and confirm v1 → `superseded`. |
