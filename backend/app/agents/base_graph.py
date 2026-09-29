@@ -908,7 +908,10 @@ _CONDENSE_SUMMARY_PROMPT = (
 
 
 def _summarize_dropped_messages(
-    dropped: list[dict[str, Any]], client: anthropic.Anthropic, model_haiku: str
+    dropped: list[dict[str, Any]],
+    client: anthropic.Anthropic,
+    model_haiku: str,
+    usage_sink: list[tuple[int, int]] | None = None,
 ) -> str:
     """Real LLM-summarization condense step (roo-code src/core/condense/
     pattern) — replaces silently discarding the dropped messages with a
@@ -930,6 +933,8 @@ def _summarize_dropped_messages(
                 }
             ],
         )
+        if usage_sink is not None:
+            usage_sink.append(_usage_of(r))
         summary = _text_from_content(_serialize_content(r.content))
         return summary or "(summarization returned no content)"
     except Exception as exc:
@@ -946,6 +951,7 @@ def _condense_messages(
     tokens_in: int,
     client: anthropic.Anthropic,
     model_haiku: str,
+    usage_sink: list[tuple[int, int]] | None = None,
 ) -> tuple[list[dict[str, Any]], bool]:
     """Real LLM-summarization condense step (gap-closure Stage 1.5,
     answers.md), replacing the old pure drop-oldest _trim_messages — the
@@ -959,7 +965,9 @@ def _condense_messages(
     if selection is None:
         return messages, False
     head, dropped, tail = selection
-    summary_text = _summarize_dropped_messages(dropped, client, model_haiku)
+    summary_text = _summarize_dropped_messages(
+        dropped, client, model_haiku, usage_sink=usage_sink
+    )
     condensed = (
         head
         + [
@@ -1116,11 +1124,38 @@ def _coerce_confidence(value: Any, default: float = 0.8) -> float:
     return max(0.0, min(1.0, number))
 
 
+def _usage_of(response: Any) -> tuple[int, int]:
+    usage = getattr(response, "usage", None)
+    return (
+        int(getattr(usage, "input_tokens", 0) or 0),
+        int(getattr(usage, "output_tokens", 0) or 0),
+    )
+
+
+def _add_usage(state: Any, tokens_in: int, tokens_out: int) -> dict[str, int]:
+    """State update adding an auxiliary LLM call's tokens to the run totals.
+
+    Production audit 2026-09-29: only call_llm counted tokens. Reflection (on
+    the agent's own model, every turn, full history), critique, planning,
+    context summarisation and lesson extraction were all invisible to
+    tokens_in/tokens_out — so to MAX_TOKENS_PER_AGENT_RUN enforcement, the
+    daily cost budget and every cost report. Auxiliary calls on the Haiku
+    tier are now priced like the run's own model downstream: a deliberate
+    over- rather than under-estimate for a cost limit."""
+    if not tokens_in and not tokens_out:
+        return {}
+    return {
+        "tokens_in": int(state.get("tokens_in", 0) or 0) + tokens_in,
+        "tokens_out": int(state.get("tokens_out", 0) or 0) + tokens_out,
+    }
+
+
 def _gather_facts_and_plan(
     client: anthropic.Anthropic,
     model_haiku: str,
     task: str,
     extra_context: str = "",
+    usage_sink: list[tuple[int, int]] | None = None,
 ) -> tuple[str, str, float]:
     """The real gather-facts -> create-plan two-call sequence. Shared by
     planner_node (runs once at graph start) and replan_node (Phase 3.6,
@@ -1147,6 +1182,8 @@ def _gather_facts_and_plan(
             max_tokens=512,
             messages=[{"role": "user", "content": facts_prompt}],
         )
+        if usage_sink is not None:
+            usage_sink.append(_usage_of(r))
         facts_text = _text_from_content(_serialize_content(r.content))
     except Exception as exc:
         logger.warning("planner facts call failed: %s", exc)
@@ -1173,6 +1210,8 @@ def _gather_facts_and_plan(
             max_tokens=1200,
             messages=[{"role": "user", "content": plan_prompt}],
         )
+        if usage_sink is not None:
+            usage_sink.append(_usage_of(r2))
         plan_text = _text_from_content(_serialize_content(r2.content))
         confidence = _coerce_confidence(
             _parse_llm_json(plan_text).get("confidence"), default=0.8
@@ -1200,8 +1239,9 @@ def _make_planner_node(
         task = task_description or str(
             (state["messages"][0].get("content", "") if state["messages"] else "")
         )
+        sink: list[tuple[int, int]] = []
         facts_text, plan_text, confidence = _gather_facts_and_plan(
-            client, model_haiku, task
+            client, model_haiku, task, usage_sink=sink
         )
         logger.info("planner_node done (confidence=%.2f)", confidence)
         from app.fleet.metrics import record_phase_timing
@@ -1216,6 +1256,7 @@ def _make_planner_node(
             "plan": plan_text,
             "confidence": confidence,
             "status": "running",
+            **_add_usage(state, sum(i for i, _ in sink), sum(o for _, o in sink)),
         }
 
     return planner_node
@@ -1337,8 +1378,9 @@ def _make_replan_node(
         task = task_description or str(
             (state["messages"][0].get("content", "") if state["messages"] else "")
         )
+        sink: list[tuple[int, int]] = []
         facts_text, plan_text, confidence = _gather_facts_and_plan(
-            client, model_haiku, task, extra_context=reason
+            client, model_haiku, task, extra_context=reason, usage_sink=sink
         )
         logger.info(
             "replan_node: revising plan (reason=%s, confidence=%.2f)",
@@ -1350,6 +1392,7 @@ def _make_replan_node(
             "plan": plan_text,
             "confidence": confidence,
             "replan_count": state.get("replan_count", 0) + 1,
+            **_add_usage(state, sum(i for i, _ in sink), sum(o for _, o in sink)),
             "messages": list(state["messages"])
             + [
                 {
@@ -1752,12 +1795,14 @@ def _make_call_llm_node(
         # which the check below reports as "blocked" while the actual context was a
         # small fraction of it.
         tokens_in_so_far = state.get("context_tokens", 0)
+        _condense_usage: list[tuple[int, int]] = []
         messages, was_condensed = _condense_messages(
             list(state["messages"]),
             token_budget=context_token_budget,
             tokens_in=tokens_in_so_far,
             client=client,
             model_haiku=_condense_model,
+            usage_sink=_condense_usage,
         )
         if task_id:
             try:
@@ -1889,8 +1934,13 @@ def _make_call_llm_node(
         return {
             "messages": list(state["messages"])
             + [{"role": "assistant", "content": serialized}],
-            "tokens_in": state.get("tokens_in", 0) + response.usage.input_tokens,
-            "tokens_out": state.get("tokens_out", 0) + response.usage.output_tokens,
+            # + any context-summarisation call made while trimming above
+            "tokens_in": state.get("tokens_in", 0)
+            + response.usage.input_tokens
+            + sum(i for i, _ in _condense_usage),
+            "tokens_out": state.get("tokens_out", 0)
+            + response.usage.output_tokens
+            + sum(o for _, o in _condense_usage),
             "context_tokens": _context_size(response.usage),
         }
 
@@ -1914,6 +1964,7 @@ def _make_reflection_node(model: str) -> Callable[[AgentRunState], dict[str, Any
 
     def reflection_node(state: AgentRunState) -> dict[str, Any]:
         client = _make_client()
+        usage: dict[str, int] = {}
         try:
             r = _call_anthropic(
                 client,
@@ -1923,6 +1974,7 @@ def _make_reflection_node(model: str) -> Callable[[AgentRunState], dict[str, Any
                 + [{"role": "user", "content": REFLECTION_PROMPT}],
                 # No tools param → tool_choice=none equivalent
             )
+            usage = _add_usage(state, *_usage_of(r))
             text = _text_from_content(_serialize_content(r.content))
             satisfied = True
             try:
@@ -1942,6 +1994,7 @@ def _make_reflection_node(model: str) -> Callable[[AgentRunState], dict[str, Any
                 # handed to execute_tools, which delivers it as a text block
                 # AFTER the tool results in the same user message.
                 return {
+                    **usage,
                     "self_review": f"[Self-review]\n{text}",
                     "reflection_unsatisfied_count": state.get(
                         "reflection_unsatisfied_count", 0
@@ -1950,7 +2003,7 @@ def _make_reflection_node(model: str) -> Callable[[AgentRunState], dict[str, Any
                 }
         except Exception as exc:
             logger.warning("reflection_node failed (non-fatal): %s", exc)
-        return {}
+        return usage
 
     return reflection_node
 
@@ -2032,6 +2085,7 @@ def _make_critique_node(
         )
 
         client = _make_client()
+        usage: dict[str, int] = {}
         try:
             r = _call_anthropic(
                 client,
@@ -2043,6 +2097,7 @@ def _make_critique_node(
                 + [{"role": "user", "content": prompt}],
                 # No tools param → tool_choice=none equivalent
             )
+            usage = _add_usage(state, *_usage_of(r))
             text = _text_from_content(_serialize_content(r.content))
             data = _parse_llm_json(text)
             all_met = bool(data.get("all_met", True))
@@ -2059,7 +2114,7 @@ def _make_critique_node(
                         role_name,
                         retries_so_far,
                     )
-                return {"critique_result": critique_result}
+                return {**usage, "critique_result": critique_result}
 
             unmet = [c for c in critique_result["criteria"] if not c.get("met", True)]
             unmet_text = "\n".join(
@@ -2072,6 +2127,7 @@ def _make_critique_node(
                 role_name,
             )
             return {
+                **usage,
                 "messages": list(state["messages"])
                 + [
                     {
@@ -2089,7 +2145,7 @@ def _make_critique_node(
             }
         except Exception as exc:
             logger.warning("critique_node failed (non-fatal): %s", exc)
-            return {}
+            return usage
 
     return critique_node
 
@@ -3046,6 +3102,9 @@ def _extract_and_store_lesson(
             max_tokens=500,
             messages=[{"role": "user", "content": prompt}],
         )
+        # post-graph call: fold its tokens into the run totals before
+        # run_agent_graph records RunMetrics (production audit 2026-09-29)
+        final_state.update(_add_usage(final_state, *_usage_of(r)))  # type: ignore[typeddict-item]
         text = _text_from_content(_serialize_content(r.content))
         data = _parse_llm_json(text)
         lesson = Lesson(

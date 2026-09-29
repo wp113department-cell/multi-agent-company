@@ -37,11 +37,11 @@ A flag is never rounded up. A check that needs something not available here is m
 | — | Master Guide claim verification | `00_MASTER_GUIDE_VERIFICATION.md` | ✅ done (guide corrected) |
 | 01 | Architecture | `01_ARCHITECTURE_AUDIT_REPORT.md` | ✅ 🟢 GREEN, 1 High + 2 Medium fixed |
 | 02 | Agents | `02_AGENT_AUDIT_REPORT.md` | ✅ 🟢 GREEN, 2 High + 1 Medium fixed |
-| 03 | Memory | `03_MEMORY_AUDIT_REPORT.md` | ✅ 🟡 YELLOW (code clean; VOYAGE_API_KEY not set → semantic memory inactive) |
+| 03 | Memory | `03_MEMORY_AUDIT_REPORT.md` | ✅ 🟢 GREEN (Voyage key added, live retrieval verified; owner: add card to lift 3 req/min limit) |
 | 04 | Orchestration | `04_ORCHESTRATION_AUDIT_REPORT.md` | ✅ 🟢 GREEN, 5 High + 3 Medium fixed |
 | 05 | Security | `05_SECURITY_AUDIT_REPORT.md` | ✅ 🟢 GREEN, 1 Critical (Next.js RCE) + 1 High fixed |
 | 06 | Infrastructure | `06_INFRASTRUCTURE_AUDIT_REPORT.md` | ✅ 🟡 YELLOW (code fixed; owner: GitHub billing blocks CI, vercel.json placeholder domain) |
-| 07 | AI Evaluation | `07_AI_EVALUATION_AUDIT_REPORT.md` | pending |
+| 07 | AI Evaluation | `07_AI_EVALUATION_AUDIT_REPORT.md` | ✅ 🟡 YELLOW (1 High fixed: cost undercount; live evals BLOCKED on LLM credit) |
 | 08 | Production Readiness | `08_PRODUCTION_READINESS_AUDIT_REPORT.md` | pending |
 | 09 | Performance & Scalability | `09_PERFORMANCE_SCALABILITY_AUDIT_REPORT.md` | pending |
 | 10 | Final Consolidation | `10_FINAL_CONSOLIDATION_AUDIT_REPORT.md` | pending (last) |

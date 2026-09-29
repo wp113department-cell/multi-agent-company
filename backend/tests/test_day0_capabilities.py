@@ -510,7 +510,10 @@ class TestReflectionNodeFires:
             "tokens_out": 25,
         }
         out = node(state)
-        assert out == {}  # no new messages when satisfied
+        # no new messages when satisfied — only the call's own token usage,
+        # which is now counted in the run totals (production audit 2026-09-29)
+        assert "messages" not in out and "self_review" not in out
+        assert set(out) <= {"tokens_in", "tokens_out"}
 
 
 # ---------------------------------------------------------------------------

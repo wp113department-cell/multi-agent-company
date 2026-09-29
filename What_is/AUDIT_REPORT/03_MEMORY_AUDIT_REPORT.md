@@ -5,9 +5,13 @@
 
 ## Result
 
-🟡 **YELLOW: the memory code is correct, safe and well-guarded, but semantic (vector) memory is switched off on this deployment because no `VOYAGE_API_KEY` is configured.**
+🟢 **GREEN: the memory code is correct, safe and well-guarded, and live semantic memory is now proven end to end with a real `VOYAGE_API_KEY` (added 2026-09-29).**
 
-**Memory layer score: 88 / 100.** No code defect was found in the three memory systems. The score and the flag reflect one operational fact: without an embedding key every similarity search returns "no memory", by design. The code handles that gracefully, but the feature isn't delivering value until the key is set. Setting the key is an owner action, not a code fix; the live check is listed in `PENDING_TESTS_API_KEYS.md` §L (L2, L3).
+**Memory layer score: 94 / 100.** No code defect was found in the three memory systems. Live check (`evidence/live_memory_probe.py`, real Voyage embeddings, real Postgres): 3/3 memories stored with real 1,536-dim vectors; the query *"users cannot sign in, the authentication token endpoint is broken"* ranked the JWT-login memory first (similarity 0.782 vs 0.762 / 0.755); repo B could not see repo A's memories; test rows cleaned up.
+
+Two non-blocking notes:
+1. **Owner action (agreed): add a card at dashboard.voyageai.com.** Without one, the account is limited to 3 requests/minute (the 200M free tokens still apply after adding it). At that limit, most embeddings under real load fall back to "no memory", which is graceful but loses value.
+2. The versioned-lesson **LLM merge** step also needs Anthropic credit, so its live check stays in `PENDING_TESTS_API_KEYS.md` L3. The code path and its tests were verified.
 
 ## The three memory systems (matches the design)
 
@@ -48,7 +52,7 @@
 
 ## Findings
 
-- **id:** MEM-03-001 · **severity:** High (operational) · **status: HUMAN ACTION REQUIRED**
+- **id:** MEM-03-001 · **severity:** High (operational) · **status: RESOLVED 2026-09-29** (key added to `backend/.env`; live retrieval verified). Remaining owner action: add a card to lift the 3 requests/minute free-tier limit.
   **file:** `backend/.env` · **location:** `VOYAGE_API_KEY`
   **finding:** No embedding key is configured, so all semantic memory (task, failure, learning, procedure and lesson retrieval) is inactive on this deployment. The code degrades exactly as designed (no crash, no bad rows).
   **production_impact:** Agents get no long-term memory context; the "memory" feature silently does nothing.
@@ -64,4 +68,4 @@
 
 ## Verdict
 
-**READY in code; NOT operationally complete until `VOYAGE_API_KEY` is set.**
+**READY:** code verified, live semantic retrieval verified. The test suite keeps running without the key (`tests/conftest.py` blanks it unless `RUN_PENDING_TESTS=1`), so tests never make paid calls or write real memories.

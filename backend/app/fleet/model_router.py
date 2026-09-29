@@ -174,6 +174,11 @@ class ModelRouter:
             # Resolve relative to this file's location
             json_path = Path(__file__).parent / "agent_models.json"
         path = Path(json_path)
+        self._path = path
+        try:
+            self._mtime: float | None = path.stat().st_mtime
+        except OSError:
+            self._mtime = None
         if not path.exists():
             logger.warning(
                 "agent_models.json not found at %s — using built-in defaults", path
@@ -204,10 +209,45 @@ class ModelRouter:
         with self._lock:
             self._load(json_path)
 
+    def _reload_if_changed(self) -> None:
+        """Production audit 2026-09-29: reload() had no caller, so edits to
+        agent_models.json (whose own header says "edit this file to change
+        models") only took effect after a restart. Re-read when the file's
+        mtime changes — one stat() per route() call. A file caught mid-edit
+        (invalid JSON) keeps the previous table instead of falling back to
+        built-in defaults for every agent."""
+        path = getattr(self, "_path", None)
+        if path is None:
+            return
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return
+        if mtime == self._mtime:
+            return
+        with self._lock:
+            if mtime == self._mtime:
+                return
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(data, dict):
+                    raise ValueError("agent_models.json must be a JSON object")
+            except Exception as exc:
+                logger.warning(
+                    "agent_models.json changed but is invalid (%s) — keeping "
+                    "the previous routing table",
+                    exc,
+                )
+                self._mtime = mtime
+                return
+            self._load(path)
+            logger.info("agent_models.json changed — routing table reloaded")
+
     def route(self, agent_name: str) -> RouteConfig:
         """Return routing config for agent_name. Checks the in-memory
         override table first (see set_override), then the static
         agent_models.json table, then falls back to DEFAULT."""
+        self._reload_if_changed()
         entry = self._overrides.get(agent_name) or self._table.get(
             agent_name, self._default
         )

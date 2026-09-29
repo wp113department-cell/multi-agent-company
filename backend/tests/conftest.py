@@ -65,6 +65,16 @@ os.environ.setdefault("ENABLE_SECURITY_ARCHITECTURE_GATES", "false")
 # own fixture, so the dedicated Groq integration tests are unaffected.
 os.environ["USE_GROQ"] = "false"
 
+# Same reasoning for embeddings (2026-09-29, when a real VOYAGE_API_KEY was
+# added to .env): the unit suite assumes NO embedding key — with one, every
+# test that touches memory would make real, paid Voyage calls and write real
+# memory_embeddings / versioned_lessons rows into the shared dev database.
+# An env var beats the .env file in pydantic-settings, so this blanks it for
+# the normal suite. Only the opt-in live tests (RUN_PENDING_TESTS=1,
+# tests/pending/) keep the real key.
+if os.environ.get("RUN_PENDING_TESTS") != "1":
+    os.environ["VOYAGE_API_KEY"] = ""
+
 import pytest  # noqa: E402 — must come after env vars are set
 
 

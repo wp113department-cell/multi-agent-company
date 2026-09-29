@@ -1,0 +1,17 @@
+{
+  "audit_id": "07",
+  "audit_name": "Master AI Evaluation Audit",
+  "run_date": "2026-09-29",
+  "layer_score": 72,
+  "findings": [
+    {"id": "AIEVAL-07-001", "severity": "High", "status": "FIXED", "file": "backend/app/agents/base_graph.py", "location": "reflection_node, critique_node, _gather_facts_and_plan, _summarize_dropped_messages, _extract_and_store_lesson", "line": "n/a", "finding": "Auxiliary LLM calls not counted in run tokens.", "evidence": "Old code: 8 calls, 200 of 800 tokens recorded (test fails on HEAD)", "production_impact": "Budgets and cost reports saw ~25% of spend.", "confidence": "High", "recommendation": "Add usage of every call to state totals.", "effort": "Medium"},
+    {"id": "AIEVAL-07-002", "severity": "Medium", "status": "FIXED", "file": "backend/app/fleet/model_router.py", "location": "route/reload", "line": "200-250", "finding": "reload() never called; routing edits needed restart.", "evidence": "no callers of reload()", "production_impact": "Config change silently ignored until restart.", "confidence": "High", "recommendation": "mtime-based safe reload.", "effort": "Small"},
+    {"id": "AIEVAL-07-003", "severity": "Medium", "status": "BLOCKED", "file": "backend/tests/evals/eval_runner.py", "location": "_score_result", "line": "80-130", "finding": "Evals never run automatically; quality_checks ignored (need LLM judge).", "evidence": "pytest.ini addopts -m 'not slow'; noqa F841", "production_impact": "No automated quality signal.", "confidence": "High", "recommendation": "PENDING L4/L5.", "effort": "Medium"},
+    {"id": "AIEVAL-07-004", "severity": "Medium", "status": "BLOCKED", "file": "backend/app/fleet/regression_detector.py", "location": "gate_deploy", "line": "70-90", "finding": "Gate dormant without baselines.", "evidence": "no baseline => no regression", "production_impact": "Prompt regressions not blocked until baselines exist.", "confidence": "High", "recommendation": "PENDING L6.", "effort": "Small"},
+    {"id": "AIEVAL-07-005", "severity": "Low", "status": "ACCEPTED", "file": "backend/app/fleet/benchmark_manager.py", "location": "_compute_objectives", "line": "213-221", "finding": "hallucination_rate is a proxy; first baseline from n>=1 run.", "evidence": "code", "production_impact": "Noisy/optimistic quality signal.", "confidence": "High", "recommendation": "Min sample size; LLM-judge.", "effort": "Small"}
+  ],
+  "counts": {"critical": 0, "high": 1, "medium": 3, "low": 1},
+  "open_counts": {"critical": 0, "high": 0, "medium": 2, "low": 1},
+  "not_found": [],
+  "verdict": "READY (code) / BLOCKED on LLM credit for live evaluation"
+}

@@ -1,0 +1,8 @@
+stored memories: 3 | with real (non-zero) embeddings: 3
+query: users cannot sign in, the authentication token endpoint is broken
+  similarity=0.782  task=5461  Add JWT login endpoint. Implemented POST /api/auth/login iss
+  similarity=0.762  task=5462  Fix flaky CSV export. CSV export truncated unicode rows; swi
+  similarity=0.755  task=5467  Speed up dashboard query. Dashboard N+1 query fixed with sel
+RANKING: PASS — related memory ranked first
+ISOLATION: PASS — repo B cannot see repo A's memories
+cleanup: done

@@ -222,7 +222,9 @@ def test_critique_node_malformed_json_is_non_fatal(_load_role: Any) -> None:
     )
     with patch("app.agents.base_graph._make_client", return_value=mock_client):
         result = node(_base_state())
-    assert result == {}
+    # non-fatal: no critique decision; only the already-spent call's tokens are
+    # reported (production audit 2026-09-29 counts every LLM call)
+    assert set(result) <= {"tokens_in", "tokens_out"}
 
 
 # ---------------------------------------------------------------------------
