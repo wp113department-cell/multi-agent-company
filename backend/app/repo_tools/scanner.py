@@ -6,6 +6,8 @@ import fnmatch
 import hashlib
 import os
 import subprocess
+import threading
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -469,3 +471,54 @@ def build_package_graph(import_edges: dict[str, list[str]]) -> list[PackageEdge]
         PackageEdge(caller_package=c, callee_package=e, weight=w)
         for (c, e), w in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
     ]
+
+
+# ---------------------------------------------------------------------------
+# Warm repo-index cache (2026-09-29). base_graph's memory_hook_node indexes the
+# target repo at the start of EVERY agent run just to add a short "relevant
+# files" hint; that is ~2.8 s of parsing per run for an unchanged repo. The
+# cache key is the repo's git state (HEAD + a hash of `git status`), so any
+# commit or edit rebuilds it; non-git directories expire after 60 s.
+# ---------------------------------------------------------------------------
+
+_INDEX_CACHE: dict[str, tuple[str, float, RepoIndex]] = {}
+_INDEX_CACHE_LOCK = threading.Lock()
+_NON_GIT_TTL_SECONDS = 60.0
+
+
+def _git_state_key(base: Path) -> str | None:
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=base, capture_output=True, timeout=10
+        )
+        if head.returncode != 0:
+            return None
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "-z"],
+            cwd=base,
+            capture_output=True,
+            timeout=30,
+        )
+        digest = hashlib.sha256(status.stdout).hexdigest()[:16]
+        return f"{head.stdout.decode().strip()}:{digest}"
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def index_repository_cached(repo_path: str) -> RepoIndex:
+    """index_repository(), reused while the repo's git state is unchanged."""
+    base = Path(repo_path)
+    key = _git_state_key(base)
+    now = time.monotonic()
+    with _INDEX_CACHE_LOCK:
+        hit = _INDEX_CACHE.get(repo_path)
+    if hit is not None:
+        hit_key, stamp, idx = hit
+        if key is not None and hit_key == key:
+            return idx
+        if key is None and now - stamp < _NON_GIT_TTL_SECONDS:
+            return idx
+    idx = index_repository(repo_path)
+    with _INDEX_CACHE_LOCK:
+        _INDEX_CACHE[repo_path] = (key or "", now, idx)
+    return idx

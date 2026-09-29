@@ -109,6 +109,10 @@ def _init_otel(settings: "Settings") -> None:  # type: ignore[name-defined]  # n
         )
 
 
+# strong references so warm-up tasks aren't garbage-collected mid-flight
+_WARMUP_TASKS: set["asyncio.Task[Any]"] = set()
+
+
 async def _weekly_reindex_loop() -> None:
     """Reindex the active repo every 7 days so context/repo-intelligence
     persistence stays fresh.
@@ -1462,6 +1466,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
     except Exception as exc:
         logger.warning("Fleet agent registry bootstrap failed (non-fatal): %s", exc)
+
+    # Warm-up (2026-09-29): build the target repo's index in the background so
+    # the first agent run doesn't pay for it (scanner.index_repository_cached
+    # then serves every later run until the repo's git state changes). Never
+    # blocks startup; a failure just means the first run builds it itself.
+    try:
+        from app.repo_tools.scanner import index_repository_cached
+
+        _WARMUP_TASKS.add(
+            asyncio.create_task(
+                asyncio.to_thread(
+                    index_repository_cached, get_settings().target_repo_path
+                )
+            )
+        )
+    except Exception as exc:
+        logger.warning("Repo index warm-up not started (non-fatal): %s", exc)
 
     # AUDIT_Q_BATCH16 §89 gap-closure (2026-08-11) — re-apply any agent's
     # persisted "unhealthy" retirement from the previous process's real

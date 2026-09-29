@@ -103,7 +103,7 @@ class PipelineApproveRequest(BaseModel):
 
 class RunRequest(BaseModel):
     mode: str | None = (
-        None  # "full" | "simple" — overrides PIPELINE_MODE env for this request
+        None  # "auto" | "full" | "simple" — overrides PIPELINE_MODE for this request
     )
 
 
@@ -390,7 +390,20 @@ async def run_task(
     settings = get_settings()
     mode = body.mode or settings.pipeline_mode
 
-    if mode == "full":
+    if mode == "auto":
+        from app.api.agents import launch_router
+
+        _clear_stale_abort(task_id)
+        await dispatch_job(
+            background_tasks,
+            launch_router,
+            task_id,
+            str(task.title),
+            str(task.description),
+            repo_path,
+            priority=task.priority,
+        )
+    elif mode == "full":
         _clear_stale_abort(task_id)
         await dispatch_job(
             background_tasks,
@@ -672,8 +685,18 @@ async def approve_task(
     repo_path = resolve_task_repo_path(task)
 
     plan = str(task.plan or "")
+    # smart router (2026-09-29): a routed task carries its chosen specialists
+    # in assigned_agent (e.g. "frontend_dev"); anything else → coder, as before
+    from app.pipeline.task_router import agents_from_assigned
+
+    routed_agents = agents_from_assigned(task.assigned_agent)
     task = await transition_task(db, task_id, "coding")
-    await append_log(db, task_id, "approval", "Plan approved — coding agent starting")
+    await append_log(
+        db,
+        task_id,
+        "approval",
+        f"Plan approved — {' then '.join(routed_agents or ['coding agent'])} starting",
+    )
 
     _clear_stale_abort(task_id)
     await dispatch_job(
@@ -682,6 +705,7 @@ async def approve_task(
         task_id,
         plan,
         repo_path,
+        routed_agents,
         priority=task.priority,
     )
     return {"approved": True, "task": _task_to_dict(task)}

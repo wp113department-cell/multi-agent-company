@@ -59,3 +59,17 @@ def test_non_git_directory_falls_back_to_directory_walk(tmp_path: Path) -> None:
     (tmp_path / "pkg" / "mod.py").write_text("def f():\n    pass\n")
     idx = index_repository(str(tmp_path))
     assert "pkg/mod.py" in idx.files
+
+
+def test_cached_index_reused_until_the_repo_changes(tmp_path: Path) -> None:
+    from app.repo_tools import scanner
+
+    repo = _make_repo(tmp_path)
+    first = scanner.index_repository_cached(str(repo))
+    assert scanner.index_repository_cached(str(repo)) is first  # unchanged → reused
+    (repo / "app" / "added.py").write_text("def added():\n    pass\n")  # untracked edit
+    second = scanner.index_repository_cached(str(repo))
+    assert second is not first and "app/added.py" in second.files
+    _git(repo, "add", ".")
+    _git(repo, "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-qm", "c")
+    assert scanner.index_repository_cached(str(repo)) is not second  # new commit

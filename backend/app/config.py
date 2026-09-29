@@ -108,7 +108,19 @@ class Settings(BaseSettings):
 
     # Pipeline behaviour
     pipeline_mode: str = Field(
-        default="full", description="simple=skip planning, full=PM→Architect→Decomposer"
+        default="auto",
+        description="auto=smart router picks the fewest agents (small/medium task → "
+        "one or two specialists; large → full pipeline) | simple=planner+coder | "
+        "full=always PM→Architect→Decomposer",
+    )
+    # 2026-09-29 — see app/fleet/cost_mode.py. economy: Haiku tier, no optional
+    # aux LLM calls (planner/reflection/critique/replan/lesson), no per-subtask
+    # LLM quality gates, 15-turn cap. balanced: Sonnet cap, planner/critique/
+    # lesson on. quality: the pre-2026-09-29 behaviour. Safety controls
+    # (sandbox, policy, scoped writes, human approvals) are identical in all.
+    cost_mode: str = Field(
+        default="economy",
+        description="LLM cost profile for every agent run: economy | balanced | quality.",
     )
     max_retries: int = Field(
         default=3, description="Max self-correction retries before blocked"
@@ -2045,9 +2057,15 @@ class Settings(BaseSettings):
                 "DEPLOYMENT_ENV must be 'development', 'staging', or 'production', "
                 f"got {self.deployment_env!r}"
             )
-        if self.pipeline_mode not in ("simple", "full"):
+        if self.pipeline_mode not in ("auto", "simple", "full"):
             raise ValueError(
-                f"PIPELINE_MODE must be 'simple' or 'full', got {self.pipeline_mode!r}"
+                "PIPELINE_MODE must be 'auto', 'simple' or 'full', "
+                f"got {self.pipeline_mode!r}"
+            )
+        if self.cost_mode not in ("economy", "balanced", "quality"):
+            raise ValueError(
+                "COST_MODE must be 'economy', 'balanced' or 'quality', "
+                f"got {self.cost_mode!r}"
             )
         if self.artifact_backend not in ("db", "s3"):
             raise ValueError(

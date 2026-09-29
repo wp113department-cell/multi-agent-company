@@ -1124,6 +1124,45 @@ def _coerce_confidence(value: Any, default: float = 0.8) -> float:
     return max(0.0, min(1.0, number))
 
 
+def _with_history_cache_breakpoint(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Mark the newest message as a prompt-cache breakpoint (2026-09-29).
+
+    Only tools + system prompt were cached, so every turn re-sent the whole
+    growing conversation at full input price. With a breakpoint on the last
+    block, the next turn reads everything up to here from cache (~10% of the
+    input price) and only pays full price for what is new. Works on a copy —
+    graph state is never mutated. Uses 1 of the API's 4 cache breakpoints
+    (the system prompt uses another); below the model's minimum cacheable
+    length the API simply doesn't cache, it never errors."""
+    if not messages:
+        return messages
+    last = dict(messages[-1])
+    content = last.get("content")
+    if isinstance(content, str):
+        if not content:
+            return messages
+        last["content"] = [
+            {"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}
+        ]
+    elif isinstance(content, list) and content:
+        blocks = [dict(b) if isinstance(b, dict) else b for b in content]
+        tail = blocks[-1]
+        if not isinstance(tail, dict) or tail.get("type") not in (
+            "text",
+            "tool_result",
+            "image",
+            "tool_use",
+        ):
+            return messages
+        tail["cache_control"] = {"type": "ephemeral"}
+        last["content"] = blocks
+    else:
+        return messages
+    return [*messages[:-1], last]
+
+
 def _usage_of(response: Any) -> tuple[int, int]:
     usage = getattr(response, "usage", None)
     return (
@@ -1642,10 +1681,10 @@ def _make_memory_hook_node(
         if repo_path and not state.get("repo_context"):
             try:
                 from app.repo_tools.context_builder import build_context
-                from app.repo_tools.scanner import index_repository
+                from app.repo_tools.scanner import index_repository_cached
 
                 _t1 = time.monotonic()
-                idx = index_repository(repo_path)
+                idx = index_repository_cached(repo_path)
                 record_phase_timing(
                     state.get("trace_id", ""),
                     "file_scanning",
@@ -1887,7 +1926,7 @@ def _make_call_llm_node(
                     "cache_control": {"type": "ephemeral"},
                 }
             ],
-            messages=messages,
+            messages=_with_history_cache_breakpoint(messages),
             tools=anthropic_tools,
             **extra_kwargs,
         )
@@ -3633,6 +3672,19 @@ def run_agent_graph(
             role_name, True
         )
 
+    # Cost mode (2026-09-29, app/fleet/cost_mode.py): a profile can only turn
+    # OPTIONAL LLM calls off — it never turns on something the caller disabled.
+    from app.fleet.cost_mode import get_cost_profile
+
+    _profile = get_cost_profile()
+    enable_planning = enable_planning and _profile.planning
+    enable_reflection = enable_reflection and _profile.reflection
+    enable_critique = bool(enable_critique) and _profile.critique
+    enable_replanning = bool(enable_replanning) and _profile.replanning
+    enable_lesson = enable_lesson and _profile.lesson
+    if _profile.max_turns_cap is not None:
+        max_turns = min(max_turns, _profile.max_turns_cap)
+
     tid = resume_trace_id or trace_id or _uuid.uuid4().hex[:12]
 
     # Salvage-on-fatal-error (swe-agent attempt_autosubmission_after_error
@@ -3670,8 +3722,16 @@ def run_agent_graph(
         from app.fleet.model_router import get_model_router as _get_router
 
         _rc = _get_router().route(role_name)
-        model = _rc.model
-        logger.debug("ModelRouter: %s → %s (tier=%s)", role_name, model, _rc.tier)
+        from app.fleet.cost_mode import cap_model
+
+        model = cap_model(_rc.model, _rc.tier)
+        logger.debug(
+            "ModelRouter: %s → %s (tier=%s, cost_mode=%s)",
+            role_name,
+            model,
+            _rc.tier,
+            _profile.name,
+        )
     except Exception:
         pass  # Keep caller-provided model as fallback
 

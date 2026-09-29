@@ -20,6 +20,7 @@ import {
   retryTaskPush,
   triggerAgentRun,
   triggerPipeline,
+  triggerSmartRun,
   updateTaskStatus,
 } from "../../../lib/api";
 
@@ -121,6 +122,14 @@ export default function TaskDetailPage() {
   const runMutation = useMutation({
     mutationFn: () => triggerAgentRun(params.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["task", params.id] }),
+  });
+
+  const smartRunMutation = useMutation({
+    mutationFn: () => triggerSmartRun(params.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["task", params.id] });
+      qc.invalidateQueries({ queryKey: ["pipeline", params.id] });
+    },
   });
 
   const runPipelineMutation = useMutation({
@@ -234,11 +243,22 @@ export default function TaskDetailPage() {
         <div className="flex flex-wrap gap-2">
           {canRunPipeline && (
             <button
+              onClick={() => smartRunMutation.mutate()}
+              disabled={smartRunMutation.isPending}
+              title="Picks the fewest agents for this task — a UI-only change uses only the UI agent; a new project uses the full pipeline."
+              className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {smartRunMutation.isPending ? "Starting…" : "Smart Run (recommended, cheapest)"}
+            </button>
+          )}
+
+          {canRunPipeline && (
+            <button
               onClick={() => runPipelineMutation.mutate()}
               disabled={runPipelineMutation.isPending}
-              className="rounded bg-violet-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+              className="rounded border border-violet-300 px-4 py-1.5 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50"
             >
-              {runPipelineMutation.isPending ? "Starting…" : "Run Planning Pipeline (PM → Architect → Decompose)"}
+              {runPipelineMutation.isPending ? "Starting…" : "Full Pipeline (PM → Architect → Decompose)"}
             </button>
           )}
 
@@ -334,9 +354,9 @@ export default function TaskDetailPage() {
           )}
         </div>
 
-        {(runMutation.isError || startCodingMutation.isError || runPipelineMutation.isError || restartMutation.isError) && (
+        {(runMutation.isError || startCodingMutation.isError || runPipelineMutation.isError || smartRunMutation.isError || restartMutation.isError) && (
           <p className="mt-2 text-xs text-red-600">
-            {((runMutation.error ?? startCodingMutation.error ?? runPipelineMutation.error ?? restartMutation.error) as Error).message}
+            {((runMutation.error ?? startCodingMutation.error ?? runPipelineMutation.error ?? smartRunMutation.error ?? restartMutation.error) as Error).message}
           </p>
         )}
       </div>

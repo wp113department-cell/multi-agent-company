@@ -218,6 +218,7 @@ from langgraph.graph import END, START, StateGraph  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
+from app.fleet.cost_mode import get_cost_profile  # noqa: E402
 
 
 def compute_actual_cost_usd(tokens_in: int, tokens_out: int, settings: Any) -> float:
@@ -919,6 +920,7 @@ async def _dispatch_one_subtask(
                         agent_name=selected_agent_name,
                         worktree_path=worktree_path,
                         files_changed=files_changed,
+                        llm_gates=get_cost_profile().llm_quality_gates,
                     )
                     local_tokens_in += gate_tokens_in
                     local_tokens_out += gate_tokens_out
@@ -1142,6 +1144,7 @@ async def _run_advisory_quality_gates(
     agent_name: str = "",
     worktree_path: str = "",
     files_changed: list[str] | None = None,
+    llm_gates: bool = True,
 ) -> tuple[int, int, str | None]:
     """AUDIT_Q_BATCH16 §90 gap-closure (2026-08-11) — the real call site
     `enable_security_architecture_gates` needed: security_reviewer and
@@ -1209,6 +1212,9 @@ async def _run_advisory_quality_gates(
     from app.repo_tools.doc_coverage import check_subtask_doc_coverage
     from app.event_bus.bus import publish_event
     from app.event_bus.models import GridironEvent
+
+    async def _skipped() -> Any:
+        return None
 
     async def _run_security() -> Any:
         try:
@@ -1294,9 +1300,12 @@ async def _run_advisory_quality_gates(
         regression_gate,
         doc_report,
     ) = await asyncio.gather(
-        _run_security(),
-        _run_architecture(),
-        _run_dependency(),
+        # llm_gates=False (cost_mode economy/balanced, 2026-09-29): skip the
+        # three LLM agents — each a full agent run per subtask — but keep the
+        # free regression and docstring-coverage checks.
+        _run_security() if llm_gates else _skipped(),
+        _run_architecture() if llm_gates else _skipped(),
+        _run_dependency() if llm_gates else _skipped(),
         _run_regression(),
         _run_documentation(),
     )

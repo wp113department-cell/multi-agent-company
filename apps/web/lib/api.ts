@@ -196,6 +196,21 @@ export async function triggerAgentRun(taskId: string): Promise<{ triggered: bool
 }
 
 // ---------------------------------------------------------------------------
+// Smart run (auto mode, 2026-09-29) — the backend router picks the fewest
+// agents: a UI-only task → frontend_dev only, backend-only → backend_dev,
+// both → backend_dev then frontend_dev, a new project → the full pipeline.
+// ---------------------------------------------------------------------------
+
+export async function triggerSmartRun(taskId: string): Promise<{ triggered: boolean; mode: string }> {
+  const res = await apiFetch(`/api/tasks/${taskId}/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode: "auto" }),
+  });
+  return handleResponse(res);
+}
+
+// ---------------------------------------------------------------------------
 // Planning pipeline (full mode — PM → Architect → Decomposer)
 // ---------------------------------------------------------------------------
 

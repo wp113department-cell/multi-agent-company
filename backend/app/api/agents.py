@@ -621,6 +621,56 @@ async def _task_images(db: AsyncSession, task_id: int) -> list[dict[str, str]]:
     return [{"media_type": r.mime_type, "data": r.base64_data} for r in rows]
 
 
+async def launch_router(
+    task_id: int, title: str, description: str, repo_path: str | None = None
+) -> None:
+    """PIPELINE_MODE=auto (smart router, 2026-09-29): pick the fewest agents.
+
+    small / medium → no planning agents at all: the routed plan (the task
+    itself + which specialist(s) will do it and why) goes straight to the
+    usual plan-approval gate; on approval launch_coder runs exactly those
+    specialists. large → the full PM → Architect → Decomposer pipeline.
+    Routing costs nothing (keyword rules) or one tiny Haiku call."""
+    from app.pipeline.task_router import route_task
+
+    decision = await asyncio.to_thread(route_task, title, description)
+    factory = get_session_factory()
+    async with factory() as db:
+        await append_log(
+            db,
+            task_id,
+            "routing",
+            f"Routed as {decision.tier} → "
+            f"{', '.join(decision.agents) or 'full pipeline'} ({decision.source})",
+            rationale=decision.reason,
+        )
+    if decision.tier == "large":
+        await launch_planning_pipeline(task_id, title, description, repo_path)
+        return
+
+    plan = (
+        f"{description.strip()}\n\n---\n"
+        f"Routing: {decision.tier} task → {' then '.join(decision.agents)} "
+        f"(reason: {decision.reason}). No separate planning agents were run."
+    )
+    async with factory() as db:
+        try:
+            await update_task_plan(db, task_id, plan)
+            await update_task_assigned_agent(db, task_id, decision.assigned_agent)
+            await transition_task(db, task_id, "ready_for_review")
+            await append_log(
+                db,
+                task_id,
+                "plan",
+                "Routed plan ready — approve to start "
+                f"{' then '.join(decision.agents)}",
+            )
+        except Exception as exc:
+            logger.exception("Routing failed for task %d", task_id)
+            await transition_task(db, task_id, "blocked")
+            await append_log(db, task_id, "error", f"Routing failed: {exc}")
+
+
 async def launch_planner(
     task_id: int, title: str, description: str, repo_path: str | None = None
 ) -> None:
@@ -759,17 +809,71 @@ async def resume_planner_after_clarification(task_id: int, answer: str) -> None:
 # ---- Coder Agent (simple mode: single coder after planner) ----
 
 
-async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) -> None:
-    from app.agents.coder import run_coder
+_EXECUTOR_FNS: dict[str, tuple[str, str]] = {
+    "coder": ("app.agents.coder", "run_coder"),
+    "frontend_dev": ("app.agents.frontend_dev", "run_frontend_dev"),
+    "backend_dev": ("app.agents.backend_dev", "run_backend_dev"),
+}
+
+
+async def _run_executors(
+    executors: list[str], **kwargs: Any
+) -> tuple[list[str], str | None, int, int]:
+    """Run each chosen specialist in turn in the same worktree. Each later one
+    is told what the earlier ones already changed. Stops at the first error.
+    Only the parameters an agent actually accepts are passed (frontend_dev
+    takes images, backend_dev doesn't, coder has no subtask_id)."""
+    import importlib
+    import inspect
+
+    files: list[str] = []
+    tokens_in = tokens_out = 0
+    base_plan = str(kwargs.pop("plan"))
+    for step, name in enumerate(executors, start=1):
+        module, fn_name = _EXECUTOR_FNS[name]
+        fn = getattr(importlib.import_module(module), fn_name)
+        plan = base_plan
+        if files:
+            plan += (
+                "\n\n[Already done in this worktree by the previous step: "
+                f"{', '.join(dict.fromkeys(files))}. Build on it; do not redo it.]"
+            )
+        call: dict[str, Any] = {**kwargs, "plan": plan, "subtask_id": step}
+        params = inspect.signature(fn).parameters
+        if not any(p.kind is p.VAR_KEYWORD for p in params.values()):
+            call = {k: v for k, v in call.items() if k in params}
+        changed, error, t_in, t_out = await asyncio.to_thread(fn, **call)
+        files.extend(changed or [])
+        tokens_in += t_in
+        tokens_out += t_out
+        if error:
+            return files, f"{name}: {error}", tokens_in, tokens_out
+    return list(dict.fromkeys(files)), None, tokens_in, tokens_out
+
+
+async def launch_coder(
+    task_id: int,
+    plan: str,
+    repo_path: str | None = None,
+    agents: list[str] | None = None,
+) -> None:
+    """Run the approved plan in the task's worktree.
+
+    agents (smart router, 2026-09-29): the specialists chosen for this task,
+    run in order in the SAME worktree — e.g. ["frontend_dev"] for a UI-only
+    change, ["backend_dev", "frontend_dev"] for a change touching both.
+    None keeps the original behaviour: the general `coder` agent."""
     from app.artifacts.store import save_artifact_async
 
     settings = get_settings()
     factory = get_session_factory()
+    executors = [a for a in (agents or ["coder"]) if a in _EXECUTOR_FNS] or ["coder"]
+    run_label = "+".join(executors)
 
     async with factory() as db:
-        run = await create_agent_run(db, task_id, "coder", settings.model_coder)
+        run = await create_agent_run(db, task_id, run_label, settings.model_coder)
         run_id = str(run.id)
-        await update_task_assigned_agent(db, task_id, "coder")
+        await update_task_assigned_agent(db, task_id, run_label)
 
         wt_path = None
         try:
@@ -830,8 +934,8 @@ async def launch_coder(task_id: int, plan: str, repo_path: str | None = None) ->
             custom_secrets_env.pop("ANTHROPIC_API_KEY", None)
 
             task_images = await _task_images(db, task_id)
-            files_changed, error, tokens_in, tokens_out = await asyncio.to_thread(
-                run_coder,
+            files_changed, error, tokens_in, tokens_out = await _run_executors(
+                executors,
                 task_id=task_id,
                 plan=plan,
                 worktree_path=wt_path,
