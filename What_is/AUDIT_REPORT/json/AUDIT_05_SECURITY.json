@@ -1,0 +1,17 @@
+{
+  "audit_id": "05",
+  "audit_name": "Master Security Audit",
+  "run_date": "2026-09-29",
+  "layer_score": 90,
+  "findings": [
+    {"id": "SEC-05-001", "severity": "High", "status": "FIXED", "file": "backend/app/policy/engine.py", "location": "_normalize_command", "line": "149-165", "finding": "Quote/escape splitting bypassed the denylist.", "evidence": "policy_probe: r''m -rf / ALLOW (pre-fix)", "production_impact": "Denylist bypass (sandbox still contains).", "confidence": "High", "recommendation": "Normalise quotes/backslashes before matching.", "effort": "Small"},
+    {"id": "SEC-05-002", "severity": "Medium", "status": "FIXED", "file": "backend/app/policy/engine.py", "location": "_DENIED_COMMAND_PATTERNS", "line": "175-200", "finding": "Cloud CLIs allowed.", "evidence": "policy_probe: aws s3 rm --recursive ALLOW (pre-fix)", "production_impact": "Agent with cloud creds could mutate cloud resources.", "confidence": "High", "recommendation": "Command-position deny, human-overridable.", "effort": "Small"},
+    {"id": "SEC-05-003", "severity": "Critical", "status": "FIXED", "file": "apps/web/package.json", "location": "next", "line": "21", "finding": "next 15.5.21 with 2 critical RCE advisories.", "evidence": "pnpm audit: critical next >=10.0.0 <15.5.24", "production_impact": "Unauthenticated RCE on the web frontend.", "confidence": "High", "recommendation": "Upgrade to 15.5.26.", "effort": "Small"},
+    {"id": "SEC-05-004", "severity": "Low", "status": "FIXED", "file": "apps/web/package.json", "location": "vitest + transitive", "line": "44", "finding": "Dev tooling advisories kept CI pnpm audit gate failing.", "evidence": "pnpm audit moderate vitest", "production_impact": "Red CI gate.", "confidence": "High", "recommendation": "vitest 4 + updates.", "effort": "Small"},
+    {"id": "SEC-05-005", "severity": "Low", "status": "ACCEPTED", "file": "backend/app/api/auth.py", "location": "login", "line": "67", "finding": "Per-IP rate limit only; no per-account lockout; in-process limiter.", "evidence": "@limiter.limit(rate_limit_login)", "production_impact": "Distributed guessing slower but possible.", "confidence": "High", "recommendation": "Per-account lockout + Redis limiter.", "effort": "Medium"}
+  ],
+  "counts": {"critical": 1, "high": 1, "medium": 1, "low": 2},
+  "open_counts": {"critical": 0, "high": 0, "medium": 0, "low": 1},
+  "not_found": [],
+  "verdict": "READY"
+}

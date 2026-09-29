@@ -35,10 +35,12 @@ Two independent runtimes deploy separately:
    DATABASE_URL=postgresql+asyncpg://... alembic upgrade head
    ```
    (`migrations/env.py` reads `DATABASE_URL` directly — no separate config
-   file to edit.) 22 migrations exist as of this update (Audit 06,
-   2026-07-27) — `alembic upgrade head` always applies whichever are new
-   relative to the target DB, so this note is informational only, not
-   something you need to act on manually.
+   file to edit.) `alembic upgrade head` always applies whichever
+   migrations are new relative to the target DB (62 as of the 2026-09-29
+   production audit, single head `062`; check with `alembic heads`). The
+   full chain was verified that day on an empty database: upgrade from
+   zero, `downgrade base` and back, and a per-revision down/up/down
+   "stairway" — see `What_is/AUDIT_REPORT/evidence/migration_drills.sh`.
 
 ## 2. Backend — Railway or Render
 

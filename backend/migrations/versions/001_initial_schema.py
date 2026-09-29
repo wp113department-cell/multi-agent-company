@@ -209,7 +209,9 @@ def downgrade() -> None:
     op.drop_table("code_embeddings")
     op.drop_table("call_edges")
     op.drop_table("symbols")
-    op.drop_index("uq_indexed_files_repo_file", table_name="indexed_files")
+    # (no explicit drop of uq_indexed_files_repo_file: a later migration turns
+    # it into a UNIQUE constraint, whose index can't be dropped directly —
+    # drop_table removes it either way. Production audit 2026-09-29.)
     op.drop_table("indexed_files")
     op.drop_table("pipeline_state")
     op.drop_table("subtasks")
@@ -218,3 +220,5 @@ def downgrade() -> None:
     op.drop_table("task_logs")
     op.drop_index("ix_dev_tasks_status", table_name="dev_tasks")
     op.drop_table("dev_tasks")
+    # created at the top of upgrade(); dropped last, once nothing uses it
+    op.execute("DROP EXTENSION IF EXISTS vector")

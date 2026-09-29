@@ -1,0 +1,20 @@
+{
+  "audit_id": "06",
+  "audit_name": "Master Infrastructure Audit",
+  "run_date": "2026-09-29",
+  "layer_score": 86,
+  "findings": [
+    {"id": "INFRA-06-001", "severity": "High", "status": "OWNER_ACTION", "file": ".github/workflows/ci.yml", "location": "all jobs", "line": "n/a", "finding": "GitHub Actions jobs not started since >=2026-08-21 due to account billing/spending limit.", "evidence": "gh run view 32809569523: 'recent account payments have failed'", "production_impact": "No CI protection on main.", "confidence": "High", "recommendation": "Fix GitHub billing; re-run CI.", "effort": "Small"},
+    {"id": "INFRA-06-002", "severity": "Medium", "status": "FIXED", "file": "backend/migrations/versions/001_initial_schema.py, 004_phase6_tables.py", "location": "downgrade", "line": "208-230, 180-186", "finding": "downgrade base failed (vector extension ownership; constraint-backed index).", "evidence": "DependentObjectsStillExistError x2", "production_impact": "No full rollback path.", "confidence": "High", "recommendation": "Fix downgrade ownership.", "effort": "Small"},
+    {"id": "INFRA-06-003", "severity": "Medium", "status": "FIXED", "file": "backend/app/main.py", "location": "health", "line": "1895-1985", "finding": "/health 200 when degraded.", "evidence": "Postgres stopped mid-run: 200 {status: degraded}", "production_impact": "Healthchecks/LBs blind to DB outage.", "confidence": "High", "recommendation": "503 when degraded.", "effort": "Small"},
+    {"id": "INFRA-06-004", "severity": "Medium", "status": "FIXED", "file": "backend/.env.example", "location": "file", "line": "n/a", "finding": "174 of 301 settings undocumented.", "evidence": "evidence/config_vs_env_example.out.txt", "production_impact": "Operators unaware of critical settings.", "confidence": "High", "recommendation": "Generate section + guard test.", "effort": "Small"},
+    {"id": "INFRA-06-005", "severity": "Medium", "status": "OWNER_ACTION", "file": "vercel.json", "location": "rewrites", "line": "13-17", "finding": "Rewrite destination is placeholder api.gridiron.example.com.", "evidence": "vercel.json", "production_impact": "Vercel deploy would route API to example domain.", "confidence": "High", "recommendation": "Set real API host.", "effort": "Small"},
+    {"id": "INFRA-06-006", "severity": "Low", "status": "FIXED", "file": "docs/DEPLOYMENT.md", "location": "migrations note", "line": "36-41", "finding": "Stale migration count.", "evidence": "'22 migrations'", "production_impact": "Misleading docs.", "confidence": "High", "recommendation": "Count-independent wording.", "effort": "Small"},
+    {"id": "INFRA-06-007", "severity": "Low", "status": "ACCEPTED", "file": "backend/app/db/models.py", "location": "5 timestamp columns", "line": "n/a", "finding": "Model NOT NULL vs DB nullable; 7 naive timestamp columns (writes verified safe).", "evidence": "alembic check", "production_impact": "None observed.", "confidence": "High", "recommendation": "Align in a future migration.", "effort": "Small"},
+    {"id": "INFRA-06-008", "severity": "Low", "status": "ACCEPTED", "file": "backend/app/artifacts/s3_store.py", "location": "S3 path", "line": "n/a", "finding": "S3 backend not live-verified.", "evidence": "ARTIFACT_BACKEND=db", "production_impact": "Unknown until configured.", "confidence": "Medium", "recommendation": "Verify with a real bucket before enabling.", "effort": "Small"}
+  ],
+  "counts": {"critical": 0, "high": 1, "medium": 4, "low": 3},
+  "open_counts": {"critical": 0, "high": 1, "medium": 1, "low": 2},
+  "not_found": [],
+  "verdict": "READY (code) / owner actions required"
+}

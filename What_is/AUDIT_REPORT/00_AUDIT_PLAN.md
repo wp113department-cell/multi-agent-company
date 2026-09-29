@@ -39,8 +39,8 @@ A flag is never rounded up. A check that needs something not available here is m
 | 02 | Agents | `02_AGENT_AUDIT_REPORT.md` | ✅ 🟢 GREEN, 2 High + 1 Medium fixed |
 | 03 | Memory | `03_MEMORY_AUDIT_REPORT.md` | ✅ 🟡 YELLOW (code clean; VOYAGE_API_KEY not set → semantic memory inactive) |
 | 04 | Orchestration | `04_ORCHESTRATION_AUDIT_REPORT.md` | ✅ 🟢 GREEN, 5 High + 3 Medium fixed |
-| 05 | Security | `05_SECURITY_AUDIT_REPORT.md` | pending |
-| 06 | Infrastructure | `06_INFRASTRUCTURE_AUDIT_REPORT.md` | pending |
+| 05 | Security | `05_SECURITY_AUDIT_REPORT.md` | ✅ 🟢 GREEN, 1 Critical (Next.js RCE) + 1 High fixed |
+| 06 | Infrastructure | `06_INFRASTRUCTURE_AUDIT_REPORT.md` | ✅ 🟡 YELLOW (code fixed; owner: GitHub billing blocks CI, vercel.json placeholder domain) |
 | 07 | AI Evaluation | `07_AI_EVALUATION_AUDIT_REPORT.md` | pending |
 | 08 | Production Readiness | `08_PRODUCTION_READINESS_AUDIT_REPORT.md` | pending |
 | 09 | Performance & Scalability | `09_PERFORMANCE_SCALABILITY_AUDIT_REPORT.md` | pending |

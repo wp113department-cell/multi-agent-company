@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator
 from typing import Any
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -1905,7 +1905,7 @@ async def validation_exception_handler(
 # route still incorrectly throttled, exactly matching the k6 load-test
 # failure (46% of /health requests got 429'd at just 10 concurrent VUs).
 @limiter.exempt  # type: ignore[untyped-decorator]  # slowapi's Limiter.exempt has no upstream type annotations
-async def health() -> dict[str, object]:
+async def health(response: Response) -> dict[str, object]:
     """Liveness + readiness probe: checks DB, Redis (if enabled), S3 (if enabled)."""
     import asyncio
 
@@ -1961,6 +1961,12 @@ async def health() -> dict[str, object]:
         agent_count = 0
 
     overall = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
+    if overall != "ok":
+        # Production audit 2026-09-29: a degraded probe used to answer 200, so
+        # `curl -f /health` (the compose healthcheck), load balancers and uptime
+        # monitors kept treating a backend that had lost its database as
+        # healthy. Same JSON body; only the status code now tells the truth.
+        response.status_code = 503
     return {
         "status": overall,
         "checks": checks,

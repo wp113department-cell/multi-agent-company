@@ -181,4 +181,8 @@ def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS memory_embeddings_embedding_hnsw")
     op.drop_table("memory_embeddings")
     op.drop_table("agents")
-    op.execute("DROP EXTENSION IF EXISTS vector")
+    # Production audit 2026-09-29: the vector extension is created by 001
+    # (this migration's CREATE ... IF NOT EXISTS is a no-op after it) and 001's
+    # code_embeddings table still uses it at this point, so dropping it here
+    # made `alembic downgrade base` fail ("cannot drop extension vector because
+    # other objects depend on it"). 001's downgrade drops it last instead.
