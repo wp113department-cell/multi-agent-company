@@ -233,6 +233,11 @@ class TestRunAgentGraphImages:
         sent_messages = captured["messages"]
         content = sent_messages[0]["content"]
         assert isinstance(content, list)
+        # the newest block now carries a prompt-cache marker (2026-09-29
+        # history caching); the content itself is what this test is about
+        content = [
+            {k: v for k, v in b.items() if k != "cache_control"} for b in content
+        ]
         assert content[0] == {
             "type": "text",
             "text": "Scaffold a landing page matching this design.",
@@ -284,7 +289,15 @@ class TestRunAgentGraphImages:
             )
 
         content = captured["messages"][0]["content"]
-        assert content == "Plain text task, no images."
+        # stored state keeps the plain string; the copy SENT to the API wraps it
+        # in one text block solely to attach the history-cache marker
+        assert content == [
+            {
+                "type": "text",
+                "text": "Plain text task, no images.",
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
 
 
 _SUBMITTED_STATE = {

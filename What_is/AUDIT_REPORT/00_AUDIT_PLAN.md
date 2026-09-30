@@ -42,7 +42,7 @@ A flag is never rounded up. A check that needs something not available here is m
 | 05 | Security | `05_SECURITY_AUDIT_REPORT.md` | ✅ 🟢 GREEN, 1 Critical (Next.js RCE) + 1 High fixed |
 | 06 | Infrastructure | `06_INFRASTRUCTURE_AUDIT_REPORT.md` | ✅ 🟡 YELLOW (code fixed; owner: GitHub billing blocks CI, vercel.json placeholder domain) |
 | 07 | AI Evaluation | `07_AI_EVALUATION_AUDIT_REPORT.md` | ✅ 🟡 YELLOW (1 High fixed: cost undercount; live evals BLOCKED on LLM credit) |
-| 08 | Production Readiness | `08_PRODUCTION_READINESS_AUDIT_REPORT.md` | pending |
+| 08 | Production Readiness | `08_PRODUCTION_READINESS_AUDIT_REPORT.md` | 🟡 YELLOW (2026-09-30): 5 fixed; owner: SENTRY_DSN + alert webhook; hard daily cost cap → audit 09 |
 | 09 | Performance & Scalability | `09_PERFORMANCE_SCALABILITY_AUDIT_REPORT.md` | pending |
 | 10 | Final Consolidation | `10_FINAL_CONSOLIDATION_AUDIT_REPORT.md` | pending (last) |
 | 11 | Zero Policy | `11_ZERO_POLICY_AUDIT_REPORT.md` | pending |

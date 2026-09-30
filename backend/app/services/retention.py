@@ -129,6 +129,21 @@ async def _cleanup_checkpoints(cutoff: datetime) -> int:
             if ts < cutoff:
                 stale_thread_ids.append(str(thread_id))
 
+        # Production audit 08 (2026-09-30): never delete a thread that still
+        # has an undecided human approval — a plan left waiting longer than the
+        # retention window would otherwise lose its checkpoint and "Approve"
+        # would fail. Such threads are kept until the decision is made.
+        if stale_thread_ids:
+            pending = await db.execute(
+                text(
+                    "SELECT DISTINCT thread_id FROM pending_approvals "
+                    "WHERE status = 'pending' AND thread_id = ANY(:ids)"
+                ),
+                {"ids": stale_thread_ids},
+            )
+            waiting = {str(r[0]) for r in pending.fetchall()}
+            stale_thread_ids = [t for t in stale_thread_ids if t not in waiting]
+
         if not stale_thread_ids:
             return 0
 

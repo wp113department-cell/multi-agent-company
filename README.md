@@ -187,14 +187,15 @@ black --check .
 ### Backend (Railway / Fly.io / any Docker host)
 
 ```bash
-# Build
-docker build -f backend/Dockerfile -t gridiron-backend .
+# Build (the build context is backend/ — its Dockerfile copies
+# requirements.txt from there; building from the repo root fails)
+docker build -t gridiron-backend backend/
 
 # Run migrations before starting
-docker run --env-file .env gridiron-backend alembic upgrade head
+docker run --env-file backend/.env gridiron-backend alembic upgrade head
 
 # Start
-docker run -p 8000:8000 --env-file .env gridiron-backend \
+docker run -p 8000:8000 --env-file backend/.env gridiron-backend \
   uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 

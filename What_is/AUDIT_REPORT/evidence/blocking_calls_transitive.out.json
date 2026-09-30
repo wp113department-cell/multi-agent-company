@@ -1,0 +1,429 @@
+[
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 3611,
+  "async_fn": "_execute_tool",
+  "calls": "replace_class_handler",
+  "blocks_via": "app/tools/filesystem/replace_class.py:112 (via read_text_lf)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2976,
+  "async_fn": "_execute_tool",
+  "calls": "_docker_container_risk_reason",
+  "blocks_via": "app/agents/tool_security.py:594 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2831,
+  "async_fn": "_execute_tool",
+  "calls": "read_logs_handler",
+  "blocks_via": "app/tools/execution/read_logs.py:80 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2445,
+  "async_fn": "_execute_tool",
+  "calls": "_git",
+  "blocks_via": "app/agents/chat_agent.py:809 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2444,
+  "async_fn": "_execute_tool",
+  "calls": "_git",
+  "blocks_via": "app/agents/chat_agent.py:809 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2371,
+  "async_fn": "_execute_tool",
+  "calls": "_git",
+  "blocks_via": "app/agents/chat_agent.py:809 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2370,
+  "async_fn": "_execute_tool",
+  "calls": "_git",
+  "blocks_via": "app/agents/chat_agent.py:809 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2369,
+  "async_fn": "_execute_tool",
+  "calls": "_git",
+  "blocks_via": "app/agents/chat_agent.py:809 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2345,
+  "async_fn": "_execute_tool",
+  "calls": "_git",
+  "blocks_via": "app/agents/chat_agent.py:809 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2327,
+  "async_fn": "_execute_tool",
+  "calls": "_git",
+  "blocks_via": "app/agents/chat_agent.py:809 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2317,
+  "async_fn": "_execute_tool",
+  "calls": "_git",
+  "blocks_via": "app/agents/chat_agent.py:809 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2232,
+  "async_fn": "_execute_tool",
+  "calls": "_git",
+  "blocks_via": "app/agents/chat_agent.py:809 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2230,
+  "async_fn": "_execute_tool",
+  "calls": "_git",
+  "blocks_via": "app/agents/chat_agent.py:809 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2093,
+  "async_fn": "_execute_tool",
+  "calls": "spawn",
+  "blocks_via": "app/fleet/process_manager.py:197 (subprocess.Popen)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2049,
+  "async_fn": "_execute_tool",
+  "calls": "compare_files_handler",
+  "blocks_via": "app/tools/filesystem/compare_files.py:86 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2036,
+  "async_fn": "_execute_tool",
+  "calls": "delete_lines_handler",
+  "blocks_via": "app/tools/filesystem/delete_lines.py:74 (via read_text_lf)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2033,
+  "async_fn": "_execute_tool",
+  "calls": "replace_function_handler",
+  "blocks_via": "app/tools/filesystem/replace_function.py:124 (via read_text_lf)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2030,
+  "async_fn": "_execute_tool",
+  "calls": "insert_before_handler",
+  "blocks_via": "app/tools/filesystem/insert_before.py:91 (via read_text_lf)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2021,
+  "async_fn": "_execute_tool",
+  "calls": "insert_after_handler",
+  "blocks_via": "app/tools/filesystem/insert_after.py:96 (via read_text_lf)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2008,
+  "async_fn": "_execute_tool",
+  "calls": "insert_at_line_handler",
+  "blocks_via": "app/tools/filesystem/insert_at_line.py:93 (via read_text_lf)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 2005,
+  "async_fn": "_execute_tool",
+  "calls": "organize_imports_handler",
+  "blocks_via": "app/tools/filesystem/organize_imports.py:112 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 1792,
+  "async_fn": "_execute_tool",
+  "calls": "_git",
+  "blocks_via": "app/agents/chat_agent.py:809 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 1732,
+  "async_fn": "_execute_tool",
+  "calls": "_git",
+  "blocks_via": "app/agents/chat_agent.py:809 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 1731,
+  "async_fn": "_execute_tool",
+  "calls": "_git",
+  "blocks_via": "app/agents/chat_agent.py:809 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 1697,
+  "async_fn": "_execute_tool",
+  "calls": "_git",
+  "blocks_via": "app/agents/chat_agent.py:809 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 1696,
+  "async_fn": "_execute_tool",
+  "calls": "_git",
+  "blocks_via": "app/agents/chat_agent.py:809 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 1657,
+  "async_fn": "_execute_tool",
+  "calls": "_git",
+  "blocks_via": "app/agents/chat_agent.py:809 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 1653,
+  "async_fn": "_execute_tool",
+  "calls": "_git",
+  "blocks_via": "app/agents/chat_agent.py:809 (subprocess.run)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 1557,
+  "async_fn": "_execute_tool",
+  "calls": "append_file_handler",
+  "blocks_via": "app/tools/filesystem/append_file.py:72 (via existing_newline_style)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 1554,
+  "async_fn": "_execute_tool",
+  "calls": "edit_file_handler",
+  "blocks_via": "app/tools/filesystem/edit_file.py:104 (via read_text_lf)"
+ },
+ {
+  "file": "app/agents/chat_agent.py",
+  "line": 1551,
+  "async_fn": "_execute_tool",
+  "calls": "write_file_handler",
+  "blocks_via": "app/tools/filesystem/write_file.py:104 (via existing_newline_style)"
+ },
+ {
+  "file": "app/agents/manager.py",
+  "line": 1760,
+  "async_fn": "run_manager",
+  "calls": "escalate",
+  "blocks_via": "app/fleet/failure_ladder.py:90 (via .fail_task)"
+ },
+ {
+  "file": "app/agents/manager.py",
+  "line": 1931,
+  "async_fn": "_resource_check_node",
+  "calls": "run_resource_check",
+  "blocks_via": "app/fleet/resource_check.py:139 (via _check_virtualization)"
+ },
+ {
+  "file": "app/agents/manager.py",
+  "line": 2325,
+  "async_fn": "_coding_node",
+  "calls": "create_worktree",
+  "blocks_via": "app/repo_tools/worktree.py:61 (shutil.rmtree)"
+ },
+ {
+  "file": "app/api/agents.py",
+  "line": 97,
+  "async_fn": "launch_planning_pipeline",
+  "calls": "is_blank_repo",
+  "blocks_via": "app/pipeline/bootstrap.py:71 (subprocess.run)"
+ },
+ {
+  "file": "app/api/agents.py",
+  "line": 484,
+  "async_fn": "launch_manager",
+  "calls": "create_worktree",
+  "blocks_via": "app/repo_tools/worktree.py:61 (shutil.rmtree)"
+ },
+ {
+  "file": "app/api/agents.py",
+  "line": 916,
+  "async_fn": "launch_coder",
+  "calls": "create_worktree",
+  "blocks_via": "app/repo_tools/worktree.py:61 (shutil.rmtree)"
+ },
+ {
+  "file": "app/api/agents.py",
+  "line": 891,
+  "async_fn": "launch_coder",
+  "calls": "is_blank_repo",
+  "blocks_via": "app/pipeline/bootstrap.py:71 (subprocess.run)"
+ },
+ {
+  "file": "app/api/approvals.py",
+  "line": 214,
+  "async_fn": "dispatch_git_push_decision",
+  "calls": "remove_worktree",
+  "blocks_via": "app/repo_tools/worktree.py:146 (shutil.rmtree)"
+ },
+ {
+  "file": "app/api/registry.py",
+  "line": 315,
+  "async_fn": "change_agent_lifecycle",
+  "calls": "retire",
+  "blocks_via": "app/fleet/agent_registry.py:343 (via _notify_agent_retired)"
+ },
+ {
+  "file": "app/api/specialized_agents.py",
+  "line": 551,
+  "async_fn": "_run_specialized_agent_bg",
+  "calls": "fail",
+  "blocks_via": "app/fleet/fleet_manager.py:433 (via self._agents.fail_task)"
+ },
+ {
+  "file": "app/api/specialized_agents.py",
+  "line": 478,
+  "async_fn": "_run_specialized_agent_bg",
+  "calls": "start_task",
+  "blocks_via": "app/fleet/agent_registry.py:276 (via instance.start)"
+ },
+ {
+  "file": "app/api/specialized_agents.py",
+  "line": 605,
+  "async_fn": "dispatch_specialized_agent",
+  "calls": "dispatch",
+  "blocks_via": "app/fleet/fleet_manager.py:375 (via self._agents.try_start_task)"
+ },
+ {
+  "file": "app/api/tasks.py",
+  "line": 743,
+  "async_fn": "reject_task",
+  "calls": "remove_worktree",
+  "blocks_via": "app/repo_tools/worktree.py:146 (shutil.rmtree)"
+ },
+ {
+  "file": "app/api/tasks.py",
+  "line": 1037,
+  "async_fn": "complete_task",
+  "calls": "remove_worktree",
+  "blocks_via": "app/repo_tools/worktree.py:146 (shutil.rmtree)"
+ },
+ {
+  "file": "app/api/tasks.py",
+  "line": 1141,
+  "async_fn": "extract_pdfs",
+  "calls": "read",
+  "blocks_via": "app/tools/execution/pty_session.py:224 (via select.select)"
+ },
+ {
+  "file": "app/api/tasks.py",
+  "line": 1240,
+  "async_fn": "upload_task_images",
+  "calls": "read",
+  "blocks_via": "app/tools/execution/pty_session.py:224 (via select.select)"
+ },
+ {
+  "file": "app/api/terminal.py",
+  "line": 229,
+  "async_fn": "terminal_websocket",
+  "calls": "close",
+  "blocks_via": "app/tools/execution/pty_session.py:292 (time.sleep)"
+ },
+ {
+  "file": "app/api/terminal.py",
+  "line": 166,
+  "async_fn": "terminal_websocket",
+  "calls": "close",
+  "blocks_via": "app/tools/execution/pty_session.py:292 (time.sleep)"
+ },
+ {
+  "file": "app/api/terminal.py",
+  "line": 163,
+  "async_fn": "terminal_websocket",
+  "calls": "start",
+  "blocks_via": "app/tools/execution/pty_session.py:180 (subprocess.Popen)"
+ },
+ {
+  "file": "app/api/terminal.py",
+  "line": 152,
+  "async_fn": "terminal_websocket",
+  "calls": "close",
+  "blocks_via": "app/tools/execution/pty_session.py:292 (time.sleep)"
+ },
+ {
+  "file": "app/api/terminal.py",
+  "line": 142,
+  "async_fn": "terminal_websocket",
+  "calls": "close",
+  "blocks_via": "app/tools/execution/pty_session.py:292 (time.sleep)"
+ },
+ {
+  "file": "app/api/terminal.py",
+  "line": 135,
+  "async_fn": "terminal_websocket",
+  "calls": "close",
+  "blocks_via": "app/tools/execution/pty_session.py:292 (time.sleep)"
+ },
+ {
+  "file": "app/fleet/failure_ladder.py",
+  "line": 408,
+  "async_fn": "reconcile_orphaned_runs",
+  "calls": "escalate",
+  "blocks_via": "app/fleet/failure_ladder.py:90 (via .fail_task)"
+ },
+ {
+  "file": "app/fleet/failure_ladder.py",
+  "line": 400,
+  "async_fn": "reconcile_orphaned_runs",
+  "calls": "escalate",
+  "blocks_via": "app/fleet/failure_ladder.py:90 (via .fail_task)"
+ },
+ {
+  "file": "app/fleet/release_retrospective.py",
+  "line": 109,
+  "async_fn": "generate_release_retrospective",
+  "calls": "_resolve_period_start",
+  "blocks_via": "app/fleet/release_retrospective.py:59 (subprocess.run)"
+ },
+ {
+  "file": "app/main.py",
+  "line": 1511,
+  "async_fn": "lifespan",
+  "calls": "sweep_orphaned_processes",
+  "blocks_via": "app/fleet/bg_process_registry.py:241 (via kill_container)"
+ },
+ {
+  "file": "app/pipeline/bootstrap.py",
+  "line": 203,
+  "async_fn": "bootstrap",
+  "calls": "is_blank_repo",
+  "blocks_via": "app/pipeline/bootstrap.py:71 (subprocess.run)"
+ },
+ {
+  "file": "app/pipeline/dispatcher.py",
+  "line": 149,
+  "async_fn": "dispatch_subtask",
+  "calls": "run_backend_dev",
+  "blocks_via": "app/agents/backend_dev.py:139 (via _run_backend_checks)"
+ },
+ {
+  "file": "app/pipeline/dispatcher.py",
+  "line": 131,
+  "async_fn": "dispatch_subtask",
+  "calls": "run_qa",
+  "blocks_via": "app/agents/qa.py:140 (via run_agent_graph)"
+ },
+ {
+  "file": "app/pipeline/dispatcher.py",
+  "line": 121,
+  "async_fn": "dispatch_subtask",
+  "calls": "run_frontend_dev",
+  "blocks_via": "app/agents/frontend_dev.py:147 (via _run_frontend_checks)"
+ }
+]

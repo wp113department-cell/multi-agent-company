@@ -1,0 +1,295 @@
+{
+ "broad_handlers": 746,
+ "silent": 100,
+ "silent_around_risky_ops": 28,
+ "by_file": [
+  [
+   "app/agents/base_graph.py",
+   26
+  ],
+  [
+   "app/agents/tools.py",
+   8
+  ],
+  [
+   "app/agents/chat_agent.py",
+   7
+  ],
+  [
+   "app/fleet/failure_ladder.py",
+   6
+  ],
+  [
+   "app/repo_tools/browser_driver.py",
+   6
+  ],
+  [
+   "app/agents/bhaskar_sandbox.py",
+   4
+  ],
+  [
+   "app/agents/manager.py",
+   4
+  ],
+  [
+   "app/api/tasks.py",
+   3
+  ],
+  [
+   "app/api/agents.py",
+   2
+  ],
+  [
+   "app/api/fleet_dashboard.py",
+   2
+  ],
+  [
+   "app/api/repo.py",
+   2
+  ],
+  [
+   "app/api/terminal.py",
+   2
+  ],
+  [
+   "app/fleet/bg_process_registry.py",
+   2
+  ],
+  [
+   "app/fleet/dependency_resolver.py",
+   2
+  ],
+  [
+   "app/main.py",
+   2
+  ]
+ ],
+ "risky": [
+  {
+   "file": "app/agents/base_graph.py",
+   "line": 3888,
+   "risky": [
+    "publish"
+   ],
+   "try_first_line": "from app.fleet.agent_registry import get_agent_registry"
+  },
+  {
+   "file": "app/agents/base_graph.py",
+   "line": 4292,
+   "risky": [
+    "publish"
+   ],
+   "try_first_line": "from app.fleet.agent_registry import get_agent_registry"
+  },
+  {
+   "file": "app/agents/base_graph.py",
+   "line": 3169,
+   "risky": [
+    "publish"
+   ],
+   "try_first_line": "from app.fleet.fleet_events import lesson_published, publish"
+  },
+  {
+   "file": "app/agents/base_graph.py",
+   "line": 4163,
+   "risky": [
+    "record_"
+   ],
+   "try_first_line": "_metrics.record_tokens("
+  },
+  {
+   "file": "app/agents/base_graph.py",
+   "line": 4198,
+   "risky": [
+    "publish"
+   ],
+   "try_first_line": "from app.fleet.budget_manager import BudgetExceeded, get_budget_manager"
+  },
+  {
+   "file": "app/agents/base_graph.py",
+   "line": 4367,
+   "risky": [
+    "publish"
+   ],
+   "try_first_line": "from app.fleet.agent_registry import get_agent_registry"
+  },
+  {
+   "file": "app/agents/base_graph.py",
+   "line": 1823,
+   "risky": [
+    "publish"
+   ],
+   "try_first_line": "from app.fleet.fleet_events import health_updated, publish"
+  },
+  {
+   "file": "app/agents/base_graph.py",
+   "line": 1896,
+   "risky": [
+    "publish"
+   ],
+   "try_first_line": "from app.fleet.fleet_events import health_updated, publish"
+  },
+  {
+   "file": "app/agents/base_graph.py",
+   "line": 2838,
+   "risky": [
+    "record_"
+   ],
+   "try_first_line": "from app.fleet.metrics import get_metrics_collector"
+  },
+  {
+   "file": "app/agents/chat_agent.py",
+   "line": 4641,
+   "risky": [
+    "record_"
+   ],
+   "try_first_line": "from app.fleet.metrics import get_metrics_collector"
+  },
+  {
+   "file": "app/agents/manager.py",
+   "line": 443,
+   "risky": [
+    "publish",
+    "append_log"
+   ],
+   "try_first_line": "from app.fleet.fleet_events import publish, task_created"
+  },
+  {
+   "file": "app/agents/tools.py",
+   "line": 5361,
+   "risky": [
+    "subprocess"
+   ],
+   "try_first_line": "branch_r = subprocess.run("
+  },
+  {
+   "file": "app/api/fleet_dashboard.py",
+   "line": 214,
+   "risky": [
+    "publish"
+   ],
+   "try_first_line": "publish("
+  },
+  {
+   "file": "app/api/fleet_dashboard.py",
+   "line": 312,
+   "risky": [
+    "publish"
+   ],
+   "try_first_line": "from app.fleet.fleet_events import health_updated, publish"
+  },
+  {
+   "file": "app/api/repo.py",
+   "line": 200,
+   "risky": [
+    "commit",
+    "execute"
+   ],
+   "try_first_line": "await db.execute("
+  },
+  {
+   "file": "app/api/tasks.py",
+   "line": 744,
+   "risky": [
+    "execute"
+   ],
+   "try_first_line": "repo_path: str | None = None"
+  },
+  {
+   "file": "app/api/tasks.py",
+   "line": 1038,
+   "risky": [
+    "execute"
+   ],
+   "try_first_line": "from app.db.models import Repo"
+  },
+  {
+   "file": "app/fleet/bg_process_registry.py",
+   "line": 410,
+   "risky": [
+    "publish"
+   ],
+   "try_first_line": "from app.fleet.fleet_events import health_updated, publish"
+  },
+  {
+   "file": "app/fleet/bg_process_registry.py",
+   "line": 437,
+   "risky": [
+    "publish"
+   ],
+   "try_first_line": "from app.fleet.fleet_events import health_updated, publish"
+  },
+  {
+   "file": "app/fleet/enhancement_rollback.py",
+   "line": 273,
+   "risky": [
+    "publish"
+   ],
+   "try_first_line": "from app.fleet.fleet_events import health_updated, publish"
+  },
+  {
+   "file": "app/fleet/failure_ladder.py",
+   "line": 104,
+   "risky": [
+    "publish"
+   ],
+   "try_first_line": "publish("
+  },
+  {
+   "file": "app/fleet/failure_ladder.py",
+   "line": 186,
+   "risky": [
+    "publish"
+   ],
+   "try_first_line": "publish("
+  },
+  {
+   "file": "app/fleet/failure_ladder.py",
+   "line": 220,
+   "risky": [
+    "publish"
+   ],
+   "try_first_line": "publish("
+  },
+  {
+   "file": "app/fleet/fleet_events.py",
+   "line": 313,
+   "risky": [
+    "publish"
+   ],
+   "try_first_line": "import asyncio"
+  },
+  {
+   "file": "app/main.py",
+   "line": 608,
+   "risky": [
+    "publish"
+   ],
+   "try_first_line": "from app.fleet.fleet_events import health_updated, publish"
+  },
+  {
+   "file": "app/main.py",
+   "line": 1391,
+   "risky": [
+    "execute"
+   ],
+   "try_first_line": "await conn.execute("
+  },
+  {
+   "file": "app/tools/agents/known_issues_write.py",
+   "line": 148,
+   "risky": [
+    "embed_"
+   ],
+   "try_first_line": "from app.memory.store import embed_bug_sync"
+  },
+  {
+   "file": "app/tools/filesystem/find_test.py",
+   "line": 126,
+   "risky": [
+    "subprocess"
+   ],
+   "try_first_line": "r = subprocess.run("
+  }
+ ]
+}

@@ -755,3 +755,39 @@ The matching audit report marks the same item `BLOCKED (LLM credit)`, not green.
 | L5 | 07 Phase 4 | The tasks' natural-language `quality_checks` (e.g. "recommendations should be actionable") are read by `eval_runner._score_result` but never executed: they need an LLM judge. | Add an LLM-judge step (Haiku tier) scoring each quality check, then run L4. |
 | L6 | 07 Phase 3 | Regression gate becoming *active*: needs real agent runs → `_benchmark_baseline_loop` stores baselines → a degraded role-prompt change is blocked by `gate_deploy()`. | After ~20 real runs of one agent, propose a deliberately worse prompt for it via the self-improvement flow; expect `DeploymentBlocked`. |
 | L7 | 07 (cost) | Measure real auxiliary spend now that it is counted (reflection on the agent's own model every turn, critique, planning): compare `tokens_in` per run before/after the 2026-09-29 accounting fix on a few real tasks. | Run 3 real tasks; read `agent_runs.tokens_in/out` and `/api/metrics` cost; decide whether reflection should move to the Haiku tier. |
+
+---
+
+## M. (2026-09-30) Live run plan: $5 balance, hard cap $4, $1 reserved for the owner
+
+Rules agreed with the owner: all audits finish first without the API; live tests run LAST,
+one at a time, cheapest first; stop at a measured **$3.50** (margin under $4); **$1 is never
+touched**.
+
+**Guards**
+1. Every live run forces `COST_MODE=economy` (Haiku, no optional self-check calls). The
+   test config defaults to `quality`, which would cost several times more.
+2. Calibrate: run one cheap test, compute its exact cost from the returned token usage
+   (input, output, cache write, cache read at Haiku prices $1 / $5 / $1.25 / $0.10 per
+   million), then extrapolate before running more.
+3. A running spend ledger in this section, updated after every item; stop at $3.50.
+4. `COST_BUDGET_DAILY_USD` set to the remaining allowance for the session, as a second,
+   automatic stop (enforced before every LLM call from 2026-09-30).
+
+**Order (value per dollar)**
+
+| # | Item | Estimate (Haiku) |
+|---|---|---|
+| 1 | Calibration: one single-agent pending test | ~$0.03–0.05 |
+| 2 | L7: two real Smart Run tasks end to end (router → specialist → commit → push approval): proves the new cheap path and gives the real cost per task | ~$0.10–0.20 |
+| 3 | L3: versioned-lesson merge (Voyage + one Haiku call) | < $0.01 |
+| 4 | `tests/pending/` single-agent tests (pm, architect, decomposer, planner, coder, research, specialists) | ~$0.8–1.2 |
+| 5 | `tests/pending/` manager + pipeline end-to-end tests | ~$0.6–1.0 |
+| 6 | L4: the 11 evals (structural scoring) | ~$0.4–0.6 |
+| 7 | L1: output-format failure rate: read from the logs of items 1–6 | $0 |
+| 8 | L6: regression gate with ~20 runs of one agent (only if ≥ $0.8 remains) | ~$0.7 |
+
+**Ledger** (filled in as items run)
+
+| # | Item | Result | Measured cost | Running total |
+|---|---|---|---|---|

@@ -47,8 +47,20 @@ _background_tasks: set[asyncio.Task[Any]] = set()
 def _spawn_tracked(coro: Any) -> "asyncio.Task[Any]":
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    task.add_done_callback(_finish_tracked)
     return task
+
+
+def _finish_tracked(task: "asyncio.Task[Any]") -> None:
+    """Production audit 08 (2026-09-30): these fire-and-forget tasks
+    (heartbeats, log writes) used to be dropped on completion without anyone
+    looking at their exception — without Sentry configured, a failing DB write
+    here vanished silently."""
+    _background_tasks.discard(task)
+    if not task.cancelled() and task.exception() is not None:
+        logger.warning(
+            "Background task failed: %r", task.exception(), exc_info=task.exception()
+        )
 
 
 def _estimate_cost(tokens_in: int, tokens_out: int) -> float:

@@ -124,6 +124,40 @@ def run_your_agent(
 
 ---
 
+## 1b. Register the agent with the fleet (required — updated 2026-09-29)
+
+The code now enforces these; an agent missing any of them either never appears
+in the fleet or fails a guard test:
+
+1. **`AGENT_CONTRACT` dict + `_register()` called at import.** Copy the shape
+   from an existing agent (e.g. `app/agents/sql_agent.py`): `name` (= module
+   name), `description`, `allowed_tools` (every **high-risk** tool the agent is
+   given must be listed here, or `filter_runtime_tools` silently removes it),
+   `input_types`, `output_types`, `side_effects`, `permissions`,
+   `risk_level`, `expected_verification`, `dependencies`. `_register()` calls
+   `capability_registry.register(AgentCapability(...))` and
+   `get_agent_registry().register(name)`. Capability tags must be unique
+   fleet-wide.
+2. **A row in `backend/app/fleet/agent_models.json`** (model + tier).
+   `tests/test_audit02_specialized_agent_call_contract.py` fails if any
+   registered agent has no explicit row.
+3. **Standalone signature:** `run_your_agent(task_id, description, repo_path=None, …)`.
+   `/api/specialized-agents/{name}/run` fills `task_id`, the description
+   (parameter named `description`, `task_description` or `doc_request`) and
+   `repo_path` by **name**; an agent that needs more (a plan, a worktree, a
+   diff) is refused with 422 and can only run inside the task pipeline.
+   Pass `task_id=str(task_id)` into `run_agent_graph()` so live activity
+   events reach the task.
+4. **Write scope matches `permissions`.** A `write_docs` agent must not get the
+   unscoped `write_file` from `make_chat_handlers()` — wrap it with
+   `app.agents.tool_security.docs_or_new_file_write_denial` (see
+   `api_designer_agent.py`).
+5. The agent is auto-discovered by `/api/specialized-agents` if its module has
+   `AGENT_CONTRACT` and exactly one public `run_*` function — adding it to
+   `_REGISTRY` (section 3) is only needed for a short alias name.
+
+---
+
 ## 2. Create the role file
 
 Create `backend/roles/your_agent_name.md`.
@@ -138,9 +172,9 @@ See `backend/roles/security_architect.md` for a well-structured example.
 
 ---
 
-## 3. Wire into the dispatch registry
+## 3. (Optional) Add a short alias in the dispatch registry
 
-Open `backend/app/api/specialized_agents.py` and add one line to `_REGISTRY`:
+Only needed for an alias name — the module name is auto-discovered (section 1b). Open `backend/app/api/specialized_agents.py` and add one line to `_REGISTRY`:
 
 ```python
 _REGISTRY: dict[str, tuple[str, str]] = {
@@ -264,8 +298,10 @@ Expect a `RunAgentResponse` JSON with `status`, `summary`, `verified`, `tokens_i
 ## Checklist
 
 - [ ] `backend/app/agents/your_agent_name.py` — module with `run_*`, `make_*_handlers`, `_VERIFICATION_CFG`, `_*_TOOLS`
-- [ ] `backend/roles/your_agent_name.md` — system prompt role file
-- [ ] Entry in `_REGISTRY` in `backend/app/api/specialized_agents.py`
+- [ ] `AGENT_CONTRACT` + `_register()` at import; high-risk tools listed in `allowed_tools`
+- [ ] Row in `backend/app/fleet/agent_models.json`
+- [ ] `backend/roles/your_agent_name.md` — system prompt role file with the 7 role sections: Non-Responsibilities, Success Criteria, Failure Conditions, Output Contract, Quality Gates, Edge Cases, Escalation
+- [ ] (Optional) alias entry in `_REGISTRY` in `backend/app/api/specialized_agents.py` — auto-discovery covers the module name
 - [ ] Tests in `backend/tests/test_your_agent.py` — all passing
 - [ ] Full test suite still green (`pytest tests/ -q`)
 - [ ] `findings` field uses `list[dict]`, not `list[str]`

@@ -42,6 +42,7 @@ legitimate redirect to a real external site (`httpbin.org` →
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import subprocess
@@ -58,6 +59,10 @@ from app.policy.engine import check_command, check_path, check_path_in_worktree
 def _is_dangerous_command(command: str) -> bool:
     """Delegates to the centralized policy engine denylist."""
     return not check_command(command, strict=False).allowed
+
+
+# RFC 6052 NAT64 well-known prefix (the local-use 64:ff9b:1::/48 stays reserved)
+_NAT64_WELL_KNOWN = ipaddress.ip_network("64:ff9b::/96")
 
 
 def _ssrf_denial_reason(url: str) -> str | None:
@@ -102,6 +107,16 @@ def _ssrf_denial_reason(url: str) -> str | None:
             ip = ipaddress.ip_address(raw_addr)
         except ValueError:
             return f"Host {hostname!r} resolved to an unparseable address {raw_addr!r}"
+        # 2026-09-30: on a NAT64 network (IPv6-only hosts, some ISPs/clouds)
+        # every public IPv4 site resolves to 64:ff9b::/96 + the IPv4 address,
+        # which ipaddress classes as reserved — so ALL external fetches were
+        # refused. Judge the embedded IPv4 instead: 64:ff9b::a9fe:a9fe is
+        # still 169.254.169.254 and is still denied. Same for ::ffff:a.b.c.d.
+        if isinstance(ip, ipaddress.IPv6Address):
+            if ip.ipv4_mapped is not None:
+                ip = ip.ipv4_mapped
+            elif ip in _NAT64_WELL_KNOWN:
+                ip = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
         if (
             ip.is_private
             or ip.is_loopback
