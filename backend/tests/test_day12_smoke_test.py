@@ -29,6 +29,8 @@ in try/except with pre-set defaults).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import asyncio
 from types import SimpleNamespace
 from typing import Any
@@ -37,6 +39,8 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
 from app.main import app
+
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])  # repo root, not a machine path
 
 _SUBMIT_TOOL_STUB_INPUT: dict[str, dict[str, Any]] = {
     # Most submit_* handlers (pm/architect) ignore their input entirely —
@@ -254,7 +258,7 @@ def test_run_manager_orchestrates_one_subtask_to_completion() -> None:
                 ],
                 worktree_path="/tmp/does-not-need-to-exist-for-mocked-agents",
                 plan="Add GET /hello",
-                repo_path="/home/pc-117/Documents/CRR2906",
+                repo_path=_REPO_ROOT,
             )
         )
 
@@ -326,7 +330,7 @@ def test_run_manager_retries_after_qa_failure_then_succeeds() -> None:
                 ],
                 worktree_path="/tmp/does-not-need-to-exist-for-mocked-agents",
                 plan="Add GET /hello",
-                repo_path="/home/pc-117/Documents/CRR2906",
+                repo_path=_REPO_ROOT,
             )
         )
 

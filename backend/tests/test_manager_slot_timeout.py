@@ -11,6 +11,8 @@ would have broken that invariant for the first time.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
@@ -19,6 +21,8 @@ from unittest.mock import patch
 from app.agents.manager import run_manager
 from app.agents.qa import QAResult
 from app.pipeline.concurrency import SlotAcquisitionTimeout
+
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])  # repo root, not a machine path
 
 
 @asynccontextmanager
@@ -40,7 +44,7 @@ def test_agent_run_slot_timeout_during_dev_dispatch_is_handled_gracefully() -> N
                 ],
                 worktree_path="/tmp/does-not-need-to-exist",
                 plan="plan",
-                repo_path="/home/pc-117/Documents/CRR2906",
+                repo_path=_REPO_ROOT,
             )
         )
 
@@ -73,7 +77,7 @@ def test_subtask_slot_timeout_before_loop_starts_is_handled_gracefully() -> None
                 ],
                 worktree_path="/tmp/does-not-need-to-exist",
                 plan="plan",
-                repo_path="/home/pc-117/Documents/CRR2906",
+                repo_path=_REPO_ROOT,
             )
         )
 
@@ -104,7 +108,7 @@ def test_agent_run_slot_timeout_during_qa_dispatch_is_handled_gracefully() -> No
                 ],
                 worktree_path="/tmp/does-not-need-to-exist",
                 plan="plan",
-                repo_path="/home/pc-117/Documents/CRR2906",
+                repo_path=_REPO_ROOT,
             )
         )
 
@@ -147,7 +151,7 @@ def test_agent_run_slot_timeout_during_reviewer_dispatch_is_handled_gracefully()
                 ],
                 worktree_path="/tmp/does-not-need-to-exist",
                 plan="plan",
-                repo_path="/home/pc-117/Documents/CRR2906",
+                repo_path=_REPO_ROOT,
             )
         )
 

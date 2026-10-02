@@ -148,7 +148,7 @@ marker from `conftest.py`, same as every other agent-test file here.
 cd backend
 # Add to backend/.env:
 #   ANTHROPIC_API_KEY=sk-ant-your-key   (or USE_GROQ=true + GROQ_API_KEY=gsk_...)
-#   DATABASE_URL=postgresql+asyncpg://gridiron:gridiron@localhost:5432/gridiron_dev
+#   DATABASE_URL=postgresql+asyncpg://gridiron:gridiron_dev_only@localhost:5432/gridiron_dev
 #   VOYAGE_API_KEY=pa-your-voyage-key   (optional — only needed for test_embeddings.py)
 
 RUN_PENDING_TESTS=1 .venv/bin/pytest tests/pending/ -v

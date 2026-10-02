@@ -29,6 +29,8 @@ one literal call chain.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import asyncio
 from types import SimpleNamespace
 from typing import Any
@@ -37,6 +39,8 @@ from unittest.mock import MagicMock, patch
 import app.agents.backend_dev  # noqa: F401 — import triggers _register() into capability_registry
 from app.fleet.capability_registry import get_capability_registry
 from app.fleet.fleet_events import get_fleet_bus
+
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])  # repo root, not a machine path
 
 
 class _HierarchyChainLLM:
@@ -186,7 +190,7 @@ def test_step3_agent_bus_publishes_task_created_from_run_manager() -> None:
                 ],
                 worktree_path="/tmp/does-not-need-to-exist",
                 plan="plan",
-                repo_path="/home/pc-117/Documents/CRR2906",
+                repo_path=_REPO_ROOT,
             )
         )
 

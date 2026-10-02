@@ -12,12 +12,16 @@ These tests use the REAL functions and the real DB — no mocks of the ladder.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import asyncio
 from typing import Any
 from unittest.mock import patch
 
 from app.fleet import failure_ladder as fl
 from tests.test_failure_ladder import _delete_task, _get_status, _make_task
+
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])  # repo root, not a machine path
 
 
 def test_abort_transitions_from_inside_a_running_event_loop() -> None:
@@ -110,7 +114,7 @@ def test_run_manager_halt_really_publishes_task_failed() -> None:
                 subtasks=subtasks,
                 worktree_path="/tmp/does-not-need-to-exist",
                 plan="plan",
-                repo_path="/home/pc-117/Documents/CRR2906",
+                repo_path=_REPO_ROOT,
             )
         )
 

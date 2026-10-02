@@ -9,6 +9,8 @@ agent_registry.py, and db/models.py's VALID_TRANSITIONS in full first.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import asyncio
 
 import pytest
@@ -17,6 +19,8 @@ from app.config import get_settings
 from app.db.repository import create_task, get_task
 from app.fleet import failure_ladder as fl
 from app.fleet.agent_registry import get_agent_registry
+
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])  # repo root, not a machine path
 
 
 def _make_task(title: str = "ladder test task") -> int:
@@ -256,7 +260,7 @@ def test_run_manager_calls_escalate_and_human_review_when_subtask_blocked() -> N
                 ],
                 worktree_path="/tmp/does-not-need-to-exist",
                 plan="plan",
-                repo_path="/home/pc-117/Documents/CRR2906",
+                repo_path=_REPO_ROOT,
             )
         )
 
@@ -308,7 +312,7 @@ def test_run_manager_calls_abort_when_epic_halted() -> None:
                 subtasks=subtasks,
                 worktree_path="/tmp/does-not-need-to-exist",
                 plan="plan",
-                repo_path="/home/pc-117/Documents/CRR2906",
+                repo_path=_REPO_ROOT,
             )
         )
 

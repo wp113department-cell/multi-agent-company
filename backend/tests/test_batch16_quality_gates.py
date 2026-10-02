@@ -12,10 +12,14 @@ on.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import asyncio
 from unittest.mock import Mock, patch
 
 from app.agents.agent_result import AgentResult
+
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])  # repo root, not a machine path
 
 
 def _result(
@@ -544,7 +548,7 @@ class TestRunManagerAdvisoryGateWiring:
                     ],
                     worktree_path="/tmp/does-not-need-to-exist",
                     plan="plan",
-                    repo_path="/home/pc-117/Documents/CRR2906",
+                    repo_path=_REPO_ROOT,
                 )
             )
 
@@ -603,7 +607,7 @@ class TestRunManagerAdvisoryGateWiring:
                     ],
                     worktree_path="/tmp/does-not-need-to-exist",
                     plan="plan",
-                    repo_path="/home/pc-117/Documents/CRR2906",
+                    repo_path=_REPO_ROOT,
                 )
             )
 
@@ -671,7 +675,7 @@ class TestRunManagerAdvisoryGateWiring:
                     ],
                     worktree_path="/tmp/does-not-need-to-exist",
                     plan="plan",
-                    repo_path="/home/pc-117/Documents/CRR2906",
+                    repo_path=_REPO_ROOT,
                 )
             )
 
@@ -741,7 +745,7 @@ class TestRunManagerAdvisoryGateWiring:
                     ],
                     worktree_path="/tmp/does-not-need-to-exist",
                     plan="plan",
-                    repo_path="/home/pc-117/Documents/CRR2906",
+                    repo_path=_REPO_ROOT,
                 )
             )
 

@@ -34,7 +34,7 @@ def home_repo():
     configured allowed_workspace_parent ("/home") — pytest's tmp_path
     lives under /tmp, so these specific tests need a real directory
     under /home instead."""
-    d = tempfile.mkdtemp(dir="/home/pc-117", prefix="submit_patch_hardening_")
+    d = tempfile.mkdtemp(dir=str(Path.home()), prefix="submit_patch_hardening_")
     try:
         yield Path(d)
     finally:

@@ -1,7 +1,7 @@
 # Gridiron Developer Department
 
 **An autonomous multi-agent software engineering platform.** Give it a goal — it decomposes it into
-tasks, dispatches the right specialist agents from a fleet of 72, enforces safety policy in code at
+tasks, dispatches the right specialist agents from a fleet of 85, enforces safety policy in code at
 every step, and hands you back verified, ready-to-review work.
 
 [![License: Proprietary](https://img.shields.io/badge/license-proprietary-red.svg)](LICENSE)
@@ -21,7 +21,7 @@ every step, and hands you back verified, ready-to-review work.
 - [Environment Variables](#environment-variables)
 - [Running Tests](#running-tests)
 - [Production Deployment](#production-deployment)
-- [The Agent Fleet](#the-agent-fleet-72-agents)
+- [The Agent Fleet](#the-agent-fleet-85-agents)
 - [Safety & Security Model](#safety--security-model)
 - [Documentation](#documentation)
 - [License](#license)
@@ -32,7 +32,7 @@ every step, and hands you back verified, ready-to-review work.
 
 Most "AI coding assistant" projects are a single agent with a big system prompt. Gridiron is built
 differently — as a real engineering **department**: a planning pipeline (PM → Architect →
-Decomposer → Manager) that dispatches work to 72 specialist agents, each with its own scoped tool
+Decomposer → Manager) that dispatches work to 85 specialist agents, each with its own scoped tool
 access, its own verification contract, and its own role definition — the same way a real
 engineering org has a security reviewer who isn't also writing your database migrations.
 
@@ -60,7 +60,7 @@ What that buys you, concretely:
 apps/web/            → Next.js frontend (TypeScript, App Router)
 backend/              → FastAPI + LangGraph backend (Python 3.11+)
   app/
-    agents/          → 72 production LangGraph agents (roles/*.md are their system prompts)
+    agents/          → 85 registered agents (roles/*.md are their system prompts)
     api/             → 18 FastAPI routers
     pipeline/        → LangGraph StateGraph orchestration (PM → Architect → Decomposer → Manager)
     policy/          → Safety policy engine — command denylist, path guards, Docker sandbox
@@ -72,7 +72,7 @@ backend/              → FastAPI + LangGraph backend (Python 3.11+)
     artifacts/       → DB + S3 artifact storage
   roles/             → Agent system prompts (markdown, one per agent)
   migrations/        → Alembic migrations
-  tests/             → 3,500+ pytest tests
+  tests/             → 8,900+ pytest tests
 ```
 
 ---
@@ -102,9 +102,13 @@ pip install -r requirements.txt -r requirements-dev.txt
 
 ```bash
 cp .env.example .env
-# Edit .env — required fields:
-#   DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/gridiron
-#   ANTHROPIC_API_KEY=sk-ant-...
+# Edit .env:
+#   ANTHROPIC_API_KEY=sk-ant-...        (required)
+#   JWT_SECRET_KEY=<output of: openssl rand -hex 32>
+#   JWT_AUTH_ENABLED=true               (without these two you cannot log in:
+#                                        login answers 501, every API call 403)
+# DATABASE_URL already matches the docker-compose database below
+# (gridiron / gridiron_dev_only / gridiron_dev) — change both together.
 ```
 
 ### 3. Bring up Postgres (and Redis) via Docker
@@ -134,6 +138,24 @@ cd ..
 pnpm install
 pnpm --filter web dev   # runs on http://localhost:3000
 ```
+
+### 7. First login
+
+On the first start with `JWT_SECRET_KEY` set, the backend creates one account:
+**`admin`** (role admin) with the password from `DEFAULT_ADMIN_PASSWORD`
+(`gridiron123` in `.env.example`; production refuses to start with that value).
+Sign in at http://localhost:3000/login, then change the password — there is no
+UI for this yet, so use the API with the session cookie:
+
+```bash
+curl -c /tmp/gridiron.cookie -X POST localhost:8000/api/auth/login \
+  -H 'Content-Type: application/json' -d '{"username":"admin","password":"gridiron123"}'
+curl -b /tmp/gridiron.cookie -X POST localhost:8000/api/auth/change-password \
+  -H 'Content-Type: application/json' \
+  -d '{"current_password":"gridiron123","new_password":"<your new password>"}'
+```
+
+More users: insert them in the `users` table (roles `viewer`, `approver`, `admin`).
 
 ---
 
@@ -166,7 +188,7 @@ Full reference in `backend/.env.example`. Key variables:
 ```bash
 cd backend
 
-# Full suite — 3,500+ tests
+# Full suite — 8,900+ tests (needs the docker-compose db + Docker for sandbox tests)
 pytest tests/ -q
 
 # Include slow LLM eval tests (requires ANTHROPIC_API_KEY or USE_GROQ=true)
@@ -222,7 +244,7 @@ rq worker gridiron-high gridiron-default \
 
 ---
 
-## The Agent Fleet (72 agents)
+## The Agent Fleet (85 agents)
 
 Every agent below declares its own `AGENT_CONTRACT` — allowed tools, risk level, and a real,
 graph-enforced verification contract — and has a corresponding system prompt in `backend/roles/`.

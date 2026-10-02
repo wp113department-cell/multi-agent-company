@@ -1603,7 +1603,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                         db,
                         "admin",
                         hash_password(settings.default_admin_password),
-                        role="approver",
+                        # Production audit 14: was "approver" — the account
+                        # named admin could not do admin-only actions (user
+                        # erasure / cross-user export), so no install had one.
+                        role="admin",
                         must_change_password=True,
                     )
                     logger.info(

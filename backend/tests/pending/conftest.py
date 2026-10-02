@@ -8,21 +8,21 @@ gemini_adapter.py's own docstring for the full removal list).
     # With Anthropic:
     RUN_PENDING_TESTS=1 \\
     ANTHROPIC_API_KEY=sk-ant-your-real-key \\
-    DATABASE_URL=postgresql+asyncpg://gridiron:gridiron@localhost/gridiron_dev \\
+    DATABASE_URL=postgresql+asyncpg://gridiron:gridiron_dev_only@localhost/gridiron_dev \\
     pytest tests/pending/ -v
 
     # With Groq (temporary dev mode):
     RUN_PENDING_TESTS=1 \\
     GROQ_PREFERRED=1 \\
     GROQ_API_KEY=gsk_your-groq-key \\
-    DATABASE_URL=postgresql+asyncpg://gridiron:gridiron@localhost/gridiron_dev \\
+    DATABASE_URL=postgresql+asyncpg://gridiron:gridiron_dev_only@localhost/gridiron_dev \\
     pytest tests/pending/ -v
 
     # With Gemini (temporary dev mode):
     RUN_PENDING_TESTS=1 \\
     GEMINI_PREFERRED=1 \\
     GEMINI_API_KEY=your-real-gemini-key \\
-    DATABASE_URL=postgresql+asyncpg://gridiron:gridiron@localhost/gridiron_dev \\
+    DATABASE_URL=postgresql+asyncpg://gridiron:gridiron_dev_only@localhost/gridiron_dev \\
     pytest tests/pending/ -v
 """
 

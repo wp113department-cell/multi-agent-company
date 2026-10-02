@@ -48,6 +48,6 @@ A flag is never rounded up. A check that needs something not available here is m
 | 11 | Zero Policy | `11_ZERO_POLICY_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-02): 4 fixed incl. host-mode secret leak + vault redaction; 0 blockers |
 | 12 | End-to-End Feature Production | `12_E2E_FEATURE_PRODUCTION_AUDIT_REPORT.md` | 🟡 YELLOW (2026-10-02): real-stack journeys found+fixed 6 (Review page 500 ×2, logout 500, shadowed SSE, bad-input 500, blank title); LLM journeys L8–L10 BLOCKED on live run |
 | 13 | Operations / DR / Lifecycle | `13_OPERATIONS_DR_LIFECYCLE_AUDIT_REPORT.md` | 🟡 YELLOW (2026-10-02): real backup/restore + 5 failure drills pass; 5 fixed incl. High approver-can-erase-admin; owner: schedule backups |
-| 14 | Reproducibility / Transfer | `14_REPRODUCIBILITY_TRANSFER_AUDIT_REPORT.md` | pending |
+| 14 | Reproducibility / Transfer | `14_REPRODUCIBILITY_TRANSFER_AUDIT_REPORT.md` | 🟡 YELLOW (2026-10-02): clean clone → README → working app, 8,892 tests, 6/6 real journeys; 2 onboarding blockers + 4 fixed; open: enforce must-change-password; owner: independent operator |
 
 The machine-readable JSON sidecars required by `00b_AUDIT_STANDARDS.md` are in `json/`.

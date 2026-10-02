@@ -12,6 +12,9 @@ from pathlib import Path
 import pytest
 
 THIS_REPO = str(Path(__file__).parent.parent.parent)
+# Production audit 14: these tests read this checkout itself; pinning the
+# allowed parent to "/home" made them fail for any clone outside /home.
+THIS_REPO_PARENT = str(Path(THIS_REPO).resolve().parent)
 
 
 @pytest.fixture(autouse=True)
@@ -64,7 +67,7 @@ class TestWorkspaceService:
         assert "subdir" in names
 
     def test_is_git_repo_true(self, monkeypatch):
-        monkeypatch.setenv("ALLOWED_WORKSPACE_PARENT", "/home")
+        monkeypatch.setenv("ALLOWED_WORKSPACE_PARENT", THIS_REPO_PARENT)
         from app.config import reset_settings_cache
 
         reset_settings_cache()  # noqa: E702
@@ -131,7 +134,7 @@ class TestGitServiceUrlValidation:
 @pytest.mark.asyncio
 class TestGitServiceReadOnly:
     async def test_git_status(self, monkeypatch):
-        monkeypatch.setenv("ALLOWED_WORKSPACE_PARENT", "/home")
+        monkeypatch.setenv("ALLOWED_WORKSPACE_PARENT", THIS_REPO_PARENT)
         from app.config import reset_settings_cache
 
         reset_settings_cache()  # noqa: E702
@@ -141,7 +144,7 @@ class TestGitServiceReadOnly:
         assert result["ok"] is True
 
     async def test_git_log(self, monkeypatch):
-        monkeypatch.setenv("ALLOWED_WORKSPACE_PARENT", "/home")
+        monkeypatch.setenv("ALLOWED_WORKSPACE_PARENT", THIS_REPO_PARENT)
         from app.config import reset_settings_cache
 
         reset_settings_cache()  # noqa: E702
@@ -153,7 +156,7 @@ class TestGitServiceReadOnly:
         assert "sha" in result["commits"][0]
 
     async def test_git_diff(self, monkeypatch):
-        monkeypatch.setenv("ALLOWED_WORKSPACE_PARENT", "/home")
+        monkeypatch.setenv("ALLOWED_WORKSPACE_PARENT", THIS_REPO_PARENT)
         from app.config import reset_settings_cache
 
         reset_settings_cache()  # noqa: E702
@@ -163,7 +166,7 @@ class TestGitServiceReadOnly:
         assert result["ok"] is True  # diff may be empty string
 
     async def test_git_branch_list(self, monkeypatch):
-        monkeypatch.setenv("ALLOWED_WORKSPACE_PARENT", "/home")
+        monkeypatch.setenv("ALLOWED_WORKSPACE_PARENT", THIS_REPO_PARENT)
         from app.config import reset_settings_cache
 
         reset_settings_cache()  # noqa: E702

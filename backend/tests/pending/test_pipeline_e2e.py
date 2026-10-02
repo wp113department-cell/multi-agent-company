@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import asyncio
 from tests.pending.conftest import requires_anthropic
 
-_THIS_REPO = "/home/pc-117/Documents/CRR2906"
+_REPO_ROOT = str(Path(__file__).resolve().parents[3])  # repo root, not a machine path
+
+_THIS_REPO = _REPO_ROOT
 
 
 @requires_anthropic

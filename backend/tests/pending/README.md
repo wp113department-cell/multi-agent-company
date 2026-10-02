@@ -22,7 +22,7 @@ because they need a database. Real-DB-only integration tests (no LLM key needed)
 ```bash
 # Add to backend/.env:
 ANTHROPIC_API_KEY=sk-ant-your-key
-DATABASE_URL=postgresql+asyncpg://gridiron:gridiron@localhost:5432/gridiron_dev
+DATABASE_URL=postgresql+asyncpg://gridiron:gridiron_dev_only@localhost:5432/gridiron_dev
 VOYAGE_API_KEY=pa-your-voyage-key   # optional — enables semantic search
 
 # Run all pending tests:
