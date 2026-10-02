@@ -1,0 +1,452 @@
+{
+ "scorecard": [
+  {
+   "audit": "01",
+   "layer": "Architecture",
+   "score": 92,
+   "critical": 0,
+   "high": 1,
+   "medium": 2,
+   "low": 3,
+   "verdict": "READY"
+  },
+  {
+   "audit": "02",
+   "layer": "Agents",
+   "score": 90,
+   "critical": 0,
+   "high": 2,
+   "medium": 1,
+   "low": 3,
+   "verdict": "READY"
+  },
+  {
+   "audit": "03",
+   "layer": "Memory",
+   "score": 94,
+   "critical": 0,
+   "high": 1,
+   "medium": 0,
+   "low": 1,
+   "verdict": "READY"
+  },
+  {
+   "audit": "04",
+   "layer": "Orchestration",
+   "score": 88,
+   "critical": 0,
+   "high": 5,
+   "medium": 3,
+   "low": 1,
+   "verdict": "READY"
+  },
+  {
+   "audit": "05",
+   "layer": "Security",
+   "score": 90,
+   "critical": 1,
+   "high": 1,
+   "medium": 1,
+   "low": 2,
+   "verdict": "READY"
+  },
+  {
+   "audit": "06",
+   "layer": "Infrastructure",
+   "score": 86,
+   "critical": 0,
+   "high": 1,
+   "medium": 4,
+   "low": 3,
+   "verdict": "READY (code) / owner actions required"
+  },
+  {
+   "audit": "07",
+   "layer": "AI Evaluation",
+   "score": 72,
+   "critical": 0,
+   "high": 1,
+   "medium": 3,
+   "low": 1,
+   "verdict": "READY (code) / BLOCKED on LLM credit for live evaluation"
+  },
+  {
+   "audit": "08",
+   "layer": "Production Readiness",
+   "score": 84,
+   "critical": 0,
+   "high": 3,
+   "medium": 4,
+   "low": 0,
+   "verdict": "NOT READY (owner config + audit 09 cost cap)"
+  },
+  {
+   "audit": "09",
+   "layer": "Performance & Scalability",
+   "score": 86,
+   "critical": 0,
+   "high": 2,
+   "medium": 4,
+   "low": 4,
+   "verdict": "GREEN"
+  },
+  {
+   "audit": "11",
+   "layer": "Zero Policy",
+   "score": 85,
+   "critical": 0,
+   "high": 1,
+   "medium": 2,
+   "low": 5,
+   "verdict": "GREEN"
+  },
+  {
+   "audit": "12",
+   "layer": "End-to-End",
+   "score": 80,
+   "critical": 0,
+   "high": 4,
+   "medium": 2,
+   "low": 1,
+   "verdict": "YELLOW"
+  },
+  {
+   "audit": "13",
+   "layer": "Operations / DR",
+   "score": 82,
+   "critical": 0,
+   "high": 2,
+   "medium": 3,
+   "low": 4,
+   "verdict": "YELLOW"
+  },
+  {
+   "audit": "14",
+   "layer": "Reproducibility",
+   "score": 84,
+   "critical": 2,
+   "high": 1,
+   "medium": 3,
+   "low": 2,
+   "verdict": "YELLOW"
+  }
+ ],
+ "weighted_arithmetic": {
+  "Security": "90 x 18% = 16.20",
+  "Orchestration": "88 x 16% = 14.08",
+  "Zero Policy": "85 x 14% = 11.90",
+  "Agents": "90 x 12% = 10.80",
+  "Production Readiness": "84 x 12% = 10.08",
+  "Infrastructure": "86 x 10% = 8.60",
+  "Memory": "94 x 8% = 7.52",
+  "AI Evaluation": "72 x 5% = 3.60",
+  "Performance & Scalability": "86 x 5% = 4.30"
+ },
+ "weighted_overall": 87.08,
+ "cap_applied": false,
+ "final_score": 87.08,
+ "totals": {
+  "High": 25,
+  "Medium": 32,
+  "Low": 30,
+  "Critical": 3
+ },
+ "open_by_severity": {
+  "Low": 6,
+  "High": 4,
+  "Medium": 3
+ },
+ "open": [
+  {
+   "id": "AGENT-02-006",
+   "severity": "Low",
+   "layer": "Agents",
+   "final_status": "OPEN",
+   "finding": "~45 agent-specific tools lack manifest entries (all read/submit)."
+  },
+  {
+   "id": "INFRA-06-001",
+   "severity": "High",
+   "layer": "Infrastructure",
+   "final_status": "DEFERRED_BY_OWNER (Actions disabled until audits finish)",
+   "finding": "GitHub Actions jobs not started since >=2026-08-21 due to account billing/spending limit."
+  },
+  {
+   "id": "AIEVAL-07-003",
+   "severity": "Medium",
+   "layer": "AI Evaluation",
+   "final_status": "BLOCKED",
+   "finding": "Evals never run automatically; quality_checks ignored (need LLM judge)."
+  },
+  {
+   "id": "AIEVAL-07-004",
+   "severity": "Medium",
+   "layer": "AI Evaluation",
+   "final_status": "BLOCKED",
+   "finding": "Gate dormant without baselines."
+  },
+  {
+   "id": "PROD-08-006",
+   "severity": "High",
+   "layer": "Production Readiness",
+   "final_status": "PARTLY_DONE (Sentry DSN set + test event sent; alerts -> in-app notifications, to build)",
+   "finding": "No error tracking or alert destination configured."
+  },
+  {
+   "id": "PERF-09-010",
+   "severity": "Low",
+   "layer": "Performance & Scalability",
+   "final_status": "OWNER_CONFIG (MAX_CONCURRENT_AGENT_RUNS)",
+   "finding": "Too many concurrent runs for a 6-core host."
+  },
+  {
+   "id": "ZP-11-005",
+   "severity": "Low",
+   "layer": "Zero Policy",
+   "final_status": "OPEN",
+   "finding": "Agent-name special cases outside dispatcher."
+  },
+  {
+   "id": "ZP-11-006",
+   "severity": "Low",
+   "layer": "Zero Policy",
+   "final_status": "OPEN",
+   "finding": "~20 unused helpers."
+  },
+  {
+   "id": "ZP-11-007",
+   "severity": "Low",
+   "layer": "Zero Policy",
+   "final_status": "OPEN",
+   "finding": "Lessons not scoped per repo."
+  },
+  {
+   "id": "E2E-12-007",
+   "severity": "High",
+   "layer": "End-to-End",
+   "final_status": "BLOCKED",
+   "finding": "Plan approval, agent execution, repo chat journeys need real LLM calls."
+  },
+  {
+   "id": "OPS-13-006",
+   "severity": "High",
+   "layer": "Operations / DR",
+   "final_status": "PLANNED (docker-compose backup service, owner chose option A)",
+   "finding": "No backup schedule; no off-host copy."
+  },
+  {
+   "id": "OPS-13-009",
+   "severity": "Low",
+   "layer": "Operations / DR",
+   "final_status": "OWNER",
+   "finding": "backend/.venv in git history (131 MB pack)."
+  },
+  {
+   "id": "REPRO-14-006",
+   "severity": "Medium",
+   "layer": "Reproducibility",
+   "final_status": "OPEN",
+   "finding": "Forced password change not enforced; no UI for it."
+  }
+ ],
+ "critical_all": [
+  {
+   "id": "SEC-05-003",
+   "layer": "Security",
+   "file": "apps/web/package.json",
+   "final_status": "FIXED",
+   "finding": "next 15.5.21 with 2 critical RCE advisories."
+  },
+  {
+   "id": "REPRO-14-001",
+   "layer": "Reproducibility",
+   "file": "backend/.env.example",
+   "final_status": "FIXED",
+   "finding": "Example DB password differs from docker-compose; migrations fail."
+  },
+  {
+   "id": "REPRO-14-002",
+   "layer": "Reproducibility",
+   "file": "README.md",
+   "final_status": "FIXED",
+   "finding": "No documented login path; login 501, API 403."
+  }
+ ],
+ "high_all": [
+  {
+   "id": "ARCH-01-001",
+   "layer": "Architecture",
+   "file": "backend/app/fleet/failure_ladder.py",
+   "final_status": "FIXED",
+   "finding": "asyncio.run() called from async run_manager() raised RuntimeError on every call; swallowed by caller; TaskFailed/ReviewRequested never published on epic halt / exhausted retries."
+  },
+  {
+   "id": "AGENT-02-001",
+   "layer": "Agents",
+   "file": "backend/app/api/specialized_agents.py",
+   "final_status": "FIXED",
+   "finding": "16/80 advertised agent names could never run (signature mismatch); endpoint returned queued then background TypeError."
+  },
+  {
+   "id": "AGENT-02-002",
+   "layer": "Agents",
+   "file": "backend/app/agents/{api_designer_agent,data_pipeline_agent,load_test_agent}.py",
+   "final_status": "FIXED",
+   "finding": "write_docs agents had unscoped write_file able to overwrite any code/config."
+  },
+  {
+   "id": "MEM-03-001",
+   "layer": "Memory",
+   "file": "backend/.env",
+   "final_status": "RESOLVED",
+   "finding": "No embedding key configured; all semantic memory inactive (graceful)."
+  },
+  {
+   "id": "ORCH-04-001",
+   "layer": "Orchestration",
+   "file": "backend/app/agents/executive.py",
+   "final_status": "FIXED",
+   "finding": "Async run_executive called sync run_agent_graph on the event loop; AsyncPostgresSaver raises -> POST /api/goals always 500."
+  },
+  {
+   "id": "ORCH-04-004",
+   "layer": "Orchestration",
+   "file": "backend/app/fleet/fleet_events.py; agents/delegation.py; event_bus/bus.py",
+   "final_status": "FIXED",
+   "finding": "Fleet events forwarded without DB session; never persisted; reseed_health_from_events found nothing."
+  },
+  {
+   "id": "ORCH-04-006",
+   "layer": "Orchestration",
+   "file": "backend/app/fleet/approval_gate.py",
+   "final_status": "FIXED",
+   "finding": "Decision UPDATE by id only; concurrent approve/reject both won (15/15)."
+  },
+  {
+   "id": "ORCH-04-007",
+   "layer": "Orchestration",
+   "file": "backend/app/repo_tools/worktree.py",
+   "final_status": "FIXED",
+   "finding": "Stale agent/task-N branch without dir blocks worktree creation."
+  },
+  {
+   "id": "PERF-04-008",
+   "layer": "Orchestration",
+   "file": "backend/app/repo_tools/scanner.py",
+   "final_status": "FIXED",
+   "finding": "Per-agent-run repo index ignored .gitignore: 14,631 files, ~75 s per run."
+  },
+  {
+   "id": "SEC-05-001",
+   "layer": "Security",
+   "file": "backend/app/policy/engine.py",
+   "final_status": "FIXED",
+   "finding": "Quote/escape splitting bypassed the denylist."
+  },
+  {
+   "id": "INFRA-06-001",
+   "layer": "Infrastructure",
+   "file": ".github/workflows/ci.yml",
+   "final_status": "DEFERRED_BY_OWNER (Actions disabled until audits finish)",
+   "finding": "GitHub Actions jobs not started since >=2026-08-21 due to account billing/spending limit."
+  },
+  {
+   "id": "AIEVAL-07-001",
+   "layer": "AI Evaluation",
+   "file": "backend/app/agents/base_graph.py",
+   "final_status": "FIXED",
+   "finding": "Auxiliary LLM calls not counted in run tokens."
+  },
+  {
+   "id": "PROD-08-001",
+   "layer": "Production Readiness",
+   "file": "backend/app/agents/tool_security.py",
+   "final_status": "FIXED",
+   "finding": "NAT64 64:ff9b::/96 classed as reserved; every external fetch refused on IPv6-only networks."
+  },
+  {
+   "id": "PROD-08-006",
+   "layer": "Production Readiness",
+   "file": "backend/.env",
+   "final_status": "PARTLY_DONE (Sentry DSN set + test event sent; alerts -> in-app notifications, to build)",
+   "finding": "No error tracking or alert destination configured."
+  },
+  {
+   "id": "PROD-08-007",
+   "layer": "Production Readiness",
+   "file": "backend/app/agents/base_graph.py",
+   "final_status": "CLOSED_BY PERF-09-001 (fleet-wide pre-call daily spend cap)",
+   "finding": "Daily budget only checked after a run; no pre-call stop."
+  },
+  {
+   "id": "PERF-09-001",
+   "layer": "Performance & Scalability",
+   "file": "backend/app/fleet/spend_guard.py",
+   "final_status": "FIXED",
+   "finding": "Daily budget only checked post-run and per agent; never stopped spend."
+  },
+  {
+   "id": "PERF-09-002",
+   "layer": "Performance & Scalability",
+   "file": "backend/app/main.py",
+   "final_status": "FIXED",
+   "finding": "Default thread pool 10 < MAX_CONCURRENT_AGENT_RUNS 20; short to_thread calls starved."
+  },
+  {
+   "id": "ZP-11-001",
+   "layer": "Zero Policy",
+   "file": "backend/app/tools/execution/bash.py",
+   "final_status": "FIXED",
+   "finding": "Host-mode bash inherited the backend's full os.environ (API keys, DATABASE_URL)."
+  },
+  {
+   "id": "E2E-12-001",
+   "layer": "End-to-End",
+   "file": "backend/app/api/epics.py",
+   "final_status": "FIXED",
+   "finding": "GET /api/epics/batch-review shadowed by /{epic_id}; Review page always 500."
+  },
+  {
+   "id": "E2E-12-002",
+   "layer": "End-to-End",
+   "file": "backend/app/api/epics.py",
+   "final_status": "FIXED",
+   "finding": "naive utcnow minus aware created_at -> TypeError."
+  },
+  {
+   "id": "E2E-12-003",
+   "layer": "End-to-End",
+   "file": "backend/app/api/auth.py",
+   "final_status": "FIXED",
+   "finding": "Returned injected Response (status None): every logout 500, cookie never cleared."
+  },
+  {
+   "id": "E2E-12-007",
+   "layer": "End-to-End",
+   "file": "PENDING_TESTS_API_KEYS.md",
+   "final_status": "BLOCKED",
+   "finding": "Plan approval, agent execution, repo chat journeys need real LLM calls."
+  },
+  {
+   "id": "OPS-13-001",
+   "layer": "Operations / DR",
+   "file": "backend/app/api/privacy.py",
+   "final_status": "FIXED",
+   "finding": "Any approver could erase any account incl. admins and export anyone's data."
+  },
+  {
+   "id": "OPS-13-006",
+   "layer": "Operations / DR",
+   "file": "docs/disaster_recovery.md",
+   "final_status": "PLANNED (docker-compose backup service, owner chose option A)",
+   "finding": "No backup schedule; no off-host copy."
+  },
+  {
+   "id": "REPRO-14-003",
+   "layer": "Reproducibility",
+   "file": "backend/app/main.py",
+   "final_status": "FIXED",
+   "finding": "Seeded admin had role approver; no install had an admin."
+  }
+ ]
+}

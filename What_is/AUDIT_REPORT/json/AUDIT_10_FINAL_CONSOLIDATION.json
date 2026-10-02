@@ -1,0 +1,293 @@
+{
+ "audit_id": "10",
+ "audit_name": "Final Consolidation",
+ "run_date": "2026-10-02",
+ "inputs": [
+  "01",
+  "02",
+  "03",
+  "04",
+  "05",
+  "06",
+  "07",
+  "08",
+  "09",
+  "11",
+  "12",
+  "13",
+  "14"
+ ],
+ "scorecard": [
+  {
+   "audit": "01",
+   "layer": "Architecture",
+   "score": 92,
+   "critical": 0,
+   "high": 1,
+   "medium": 2,
+   "low": 3,
+   "verdict": "READY"
+  },
+  {
+   "audit": "02",
+   "layer": "Agents",
+   "score": 90,
+   "critical": 0,
+   "high": 2,
+   "medium": 1,
+   "low": 3,
+   "verdict": "READY"
+  },
+  {
+   "audit": "03",
+   "layer": "Memory",
+   "score": 94,
+   "critical": 0,
+   "high": 1,
+   "medium": 0,
+   "low": 1,
+   "verdict": "READY"
+  },
+  {
+   "audit": "04",
+   "layer": "Orchestration",
+   "score": 88,
+   "critical": 0,
+   "high": 5,
+   "medium": 3,
+   "low": 1,
+   "verdict": "READY"
+  },
+  {
+   "audit": "05",
+   "layer": "Security",
+   "score": 90,
+   "critical": 1,
+   "high": 1,
+   "medium": 1,
+   "low": 2,
+   "verdict": "READY"
+  },
+  {
+   "audit": "06",
+   "layer": "Infrastructure",
+   "score": 86,
+   "critical": 0,
+   "high": 1,
+   "medium": 4,
+   "low": 3,
+   "verdict": "READY (code) / owner actions required"
+  },
+  {
+   "audit": "07",
+   "layer": "AI Evaluation",
+   "score": 72,
+   "critical": 0,
+   "high": 1,
+   "medium": 3,
+   "low": 1,
+   "verdict": "READY (code) / BLOCKED on LLM credit for live evaluation"
+  },
+  {
+   "audit": "08",
+   "layer": "Production Readiness",
+   "score": 84,
+   "critical": 0,
+   "high": 3,
+   "medium": 4,
+   "low": 0,
+   "verdict": "NOT READY (owner config + audit 09 cost cap)"
+  },
+  {
+   "audit": "09",
+   "layer": "Performance & Scalability",
+   "score": 86,
+   "critical": 0,
+   "high": 2,
+   "medium": 4,
+   "low": 4,
+   "verdict": "GREEN"
+  },
+  {
+   "audit": "11",
+   "layer": "Zero Policy",
+   "score": 85,
+   "critical": 0,
+   "high": 1,
+   "medium": 2,
+   "low": 5,
+   "verdict": "GREEN"
+  },
+  {
+   "audit": "12",
+   "layer": "End-to-End",
+   "score": 80,
+   "critical": 0,
+   "high": 4,
+   "medium": 2,
+   "low": 1,
+   "verdict": "YELLOW"
+  },
+  {
+   "audit": "13",
+   "layer": "Operations / DR",
+   "score": 82,
+   "critical": 0,
+   "high": 2,
+   "medium": 3,
+   "low": 4,
+   "verdict": "YELLOW"
+  },
+  {
+   "audit": "14",
+   "layer": "Reproducibility",
+   "score": 84,
+   "critical": 2,
+   "high": 1,
+   "medium": 3,
+   "low": 2,
+   "verdict": "YELLOW"
+  }
+ ],
+ "weighted_overall": 87.08,
+ "cap_applied": false,
+ "final_score": 87.08,
+ "totals": {
+  "High": 25,
+  "Medium": 32,
+  "Low": 30,
+  "Critical": 3
+ },
+ "open_by_severity": {
+  "Low": 6,
+  "High": 4,
+  "Medium": 3
+ },
+ "open": [
+  {
+   "id": "AGENT-02-006",
+   "severity": "Low",
+   "layer": "Agents",
+   "final_status": "OPEN",
+   "finding": "~45 agent-specific tools lack manifest entries (all read/submit)."
+  },
+  {
+   "id": "INFRA-06-001",
+   "severity": "High",
+   "layer": "Infrastructure",
+   "final_status": "DEFERRED_BY_OWNER (Actions disabled until audits finish)",
+   "finding": "GitHub Actions jobs not started since >=2026-08-21 due to account billing/spending limit."
+  },
+  {
+   "id": "AIEVAL-07-003",
+   "severity": "Medium",
+   "layer": "AI Evaluation",
+   "final_status": "BLOCKED",
+   "finding": "Evals never run automatically; quality_checks ignored (need LLM judge)."
+  },
+  {
+   "id": "AIEVAL-07-004",
+   "severity": "Medium",
+   "layer": "AI Evaluation",
+   "final_status": "BLOCKED",
+   "finding": "Gate dormant without baselines."
+  },
+  {
+   "id": "PROD-08-006",
+   "severity": "High",
+   "layer": "Production Readiness",
+   "final_status": "PARTLY_DONE (Sentry DSN set + test event sent; alerts -> in-app notifications, to build)",
+   "finding": "No error tracking or alert destination configured."
+  },
+  {
+   "id": "PERF-09-010",
+   "severity": "Low",
+   "layer": "Performance & Scalability",
+   "final_status": "OWNER_CONFIG (MAX_CONCURRENT_AGENT_RUNS)",
+   "finding": "Too many concurrent runs for a 6-core host."
+  },
+  {
+   "id": "ZP-11-005",
+   "severity": "Low",
+   "layer": "Zero Policy",
+   "final_status": "OPEN",
+   "finding": "Agent-name special cases outside dispatcher."
+  },
+  {
+   "id": "ZP-11-006",
+   "severity": "Low",
+   "layer": "Zero Policy",
+   "final_status": "OPEN",
+   "finding": "~20 unused helpers."
+  },
+  {
+   "id": "ZP-11-007",
+   "severity": "Low",
+   "layer": "Zero Policy",
+   "final_status": "OPEN",
+   "finding": "Lessons not scoped per repo."
+  },
+  {
+   "id": "E2E-12-007",
+   "severity": "High",
+   "layer": "End-to-End",
+   "final_status": "BLOCKED",
+   "finding": "Plan approval, agent execution, repo chat journeys need real LLM calls."
+  },
+  {
+   "id": "OPS-13-006",
+   "severity": "High",
+   "layer": "Operations / DR",
+   "final_status": "PLANNED (docker-compose backup service, owner chose option A)",
+   "finding": "No backup schedule; no off-host copy."
+  },
+  {
+   "id": "OPS-13-009",
+   "severity": "Low",
+   "layer": "Operations / DR",
+   "final_status": "OWNER",
+   "finding": "backend/.venv in git history (131 MB pack)."
+  },
+  {
+   "id": "REPRO-14-006",
+   "severity": "Medium",
+   "layer": "Reproducibility",
+   "final_status": "OPEN",
+   "finding": "Forced password change not enforced; no UI for it."
+  }
+ ],
+ "contradictions": [
+  {
+   "earlier": "05 Security GREEN",
+   "later": "OPS-13-001, E2E-12-003",
+   "resolution": "fixed"
+  },
+  {
+   "earlier": "08 README quickstart verified",
+   "later": "REPRO-14-001/002",
+   "resolution": "fixed"
+  },
+  {
+   "earlier": "08 error envelope consistent",
+   "later": "OPS-13-002/003",
+   "resolution": "fixed"
+  },
+  {
+   "earlier": "03 live retrieval verified",
+   "later": "13 drill: dev DB embeddings are zero vectors",
+   "resolution": "not a defect (test rows)"
+  }
+ ],
+ "coverage_gaps": [
+  "task_id/trace_id confusion not re-tested this round (recommend audit 04 recheck)"
+ ],
+ "required_fixes": [
+  "backup service (OPS-13-006)",
+  "in-app failure alerts (PROD-08-006)",
+  "owner confirms Sentry event",
+  "live LLM plan L1-L10 (E2E-12-007, AIEVAL-07-003/004)",
+  "re-enable CI (INFRA-06-001)",
+  "recommended: enforce must-change-password (REPRO-14-006)"
+ ],
+ "release_decision": "NOT READY FOR PRODUCTION (external users); READY for local single-owner use"
+}
