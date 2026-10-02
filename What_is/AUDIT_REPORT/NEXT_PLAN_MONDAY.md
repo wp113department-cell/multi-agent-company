@@ -69,7 +69,8 @@ Same method as step 3.
 Done since this plan was written: audit 10, backups (running, `./backups`), Sentry (live; it caught a real bug, fixed), in-app alerts, forced password change, Antigravity cross-check (GREEN, pushed), Qoder fixes for 5 High + 12 Medium/Low (commit `0a6378b3`, **local, not pushed**). Owner re-enabled GitHub Actions.
 
 **Pending, in order:**
-1. **Verify and push the Qoder fixes:** full backend suite, real-browser journeys (the page tour now fails on 404), mocked e2e; then `git push`.
+1. **Run the whole CI pipeline locally BEFORE pushing** (owner rule, 2026-10-02: GitHub Actions is back on, so a red push breaks the pipeline). Read `.github/workflows/*.yml` and run every job's steps exactly as CI does: same Python/Node versions, lint, black, mypy, backend tests, frontend typecheck/lint/vitest/build, pip-audit/pnpm audit, migrations check. Also run the real-browser journeys (the page tour now fails on 404) and the mocked e2e.
+   **Only when every step is green:** `git push`, then watch the GitHub Actions run until it passes. If anything fails, fix it locally first and never push a known-red state.
 2. **Check the first GitHub Actions run** on `main`. If green → audit 06 GREEN.
 3. **Write `CROSS_CHECK_QODER.md`** (same format as the Antigravity one) and update audit 10 + the tracker.
 4. **Owner decisions (Qoder):**
