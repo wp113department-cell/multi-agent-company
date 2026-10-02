@@ -38,10 +38,17 @@ export function isApprover(): boolean {
   return role === "approver" || role === "admin";
 }
 
+/** The backend's error message: `{error: {message}}` envelope or FastAPI `{detail}`. */
+function errorMessage(body: Record<string, unknown>, status: number): string {
+  const envelope = (body?.error as { message?: string } | undefined)?.message;
+  const detail = typeof body?.detail === "string" ? body.detail : undefined;
+  return envelope ?? detail ?? `HTTP ${status}`;
+}
+
 export async function login(
   username: string,
   password: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; mustChangePassword?: boolean }> {
   try {
     const res = await fetch("/api/auth/login", {
       method: "POST",
@@ -50,12 +57,12 @@ export async function login(
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      return { ok: false, error: body.detail || `HTTP ${res.status}` };
+      return { ok: false, error: errorMessage(body, res.status) };
     }
     const data = await res.json();
     if (data.username && typeof data.role === "string") {
       localStorage.setItem(ROLE_KEY, data.role);
-      return { ok: true };
+      return { ok: true, mustChangePassword: data.must_change_password === true };
     }
     return { ok: false, error: "No token in response" };
   } catch (e) {
@@ -67,4 +74,29 @@ export async function logout(): Promise<void> {
   if (typeof window !== "undefined") localStorage.removeItem(ROLE_KEY);
   await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
   window.location.href = "/login";
+}
+
+/**
+ * Change the signed-in user's password (POST /api/auth/change-password).
+ * Production audit 14: the server blocks every other API call while the
+ * account must change its password; this is how the login page unlocks it.
+ */
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch("/api/auth/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return { ok: false, error: errorMessage(body, res.status) };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
 }

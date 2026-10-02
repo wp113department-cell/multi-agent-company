@@ -61,7 +61,7 @@ All four are scheduled, and none needs a redesign.
 **Closed (21 + 2 above):** ARCH-01-001 · AGENT-02-001 · AGENT-02-002 · MEM-03-001 · ORCH-04-001 · ORCH-04-004 · ORCH-04-006 · ORCH-04-007 · PERF-04-008 · SEC-05-001 · AIEVAL-07-001 · PROD-08-001 · PROD-08-007 (closed by PERF-09-001) · PERF-09-001 · PERF-09-002 · ZP-11-001 · E2E-12-001 · E2E-12-002 · E2E-12-003 · OPS-13-001 · REPRO-14-003. Each has its file, evidence and test in its source report.
 
 **Other open items (not release-blocking):**
-- **Medium:** AIEVAL-07-003/004 (evals and the quality gate need LLM runs, same live plan as E2E-12-007); REPRO-14-006 (forced password change not enforced; production refuses the default password, which limits the risk).
+- **Medium:** AIEVAL-07-003/004 (evals and the quality gate need LLM runs, same live plan as E2E-12-007). REPRO-14-006 was fixed the same day (forced password change now enforced).
 - **Low:** AGENT-02-006, ZP-11-005/006/007, PERF-09-010 (owner config), OPS-13-009 (owner).
 
 ## 5. Recurring bug patterns from the project's history
@@ -122,7 +122,7 @@ The reason is the spec's rule: every High must be either resolved, or accepted w
 | 3 | Owner confirms the Sentry test event `1d8bc3d7…` arrived | PROD-08-006 | Owner | Sentry → Issues |
 | 4 | Live LLM plan (Haiku, economy, throwaway repo, ≤ $3.50): L1–L10 including journeys C/D/G | E2E-12-007, AIEVAL-07-003/004 | Medium (runs, not code) | Each recorded in the `PENDING_TESTS_API_KEYS.md` ledger |
 | 5 | Re-enable GitHub Actions after billing; one green CI run | INFRA-06-001 | Owner + Small | Green workflow on `main` |
-| 6 | (Recommended) Enforce the forced password change on the server + a change-password form on the login page | REPRO-14-006 | Medium | Seeded admin blocked until changed; journey test |
+| 6 | ✅ **DONE 2026-10-02** · (Recommended) Enforce the forced password change on the server + a change-password form on the login page | REPRO-14-006 | Medium | Seeded admin blocked until changed; journey test |
 
 After 1–5, re-run this consolidation (`python3 evidence/consolidate.py`). With no open High and no open Critical, the rule gives **READY**.
 

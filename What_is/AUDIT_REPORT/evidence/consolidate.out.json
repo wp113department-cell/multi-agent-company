@@ -154,7 +154,7 @@
  "open_by_severity": {
   "Low": 6,
   "High": 2,
-  "Medium": 3
+  "Medium": 2
  },
  "open": [
   {
@@ -226,13 +226,6 @@
    "layer": "Operations / DR",
    "final_status": "OWNER",
    "finding": "backend/.venv in git history (131 MB pack)."
-  },
-  {
-   "id": "REPRO-14-006",
-   "severity": "Medium",
-   "layer": "Reproducibility",
-   "final_status": "OPEN",
-   "finding": "Forced password change not enforced; no UI for it."
   }
  ],
  "critical_all": [

@@ -255,4 +255,9 @@ async def change_password(
         db, current_user.username, hash_password(body.new_password)
     )
     logger.info("Password changed for user: %s", current_user.username)
+    from app.middleware.password_change import forget
+
+    forget(
+        current_user.username
+    )  # the API unlocks immediately, not after the cache TTL
     return {"status": "changed", "username": current_user.username}

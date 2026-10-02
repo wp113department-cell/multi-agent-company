@@ -36,6 +36,7 @@ from app.api.console import router as console_router
 from app.api.fleet_dashboard import router as fleet_dashboard_router
 from app.api.approvals import router as approvals_router
 from app.api.notifications import router as notifications_router
+from app.middleware.password_change import PasswordChangeRequiredMiddleware
 from app.api.audit import router as audit_router
 from app.api.privacy import router as privacy_router
 
@@ -1870,6 +1871,9 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 app.add_middleware(SlowAPIMiddleware)
+
+# Production audit 14 (REPRO-14-006): enforce must_change_password server-side.
+app.add_middleware(PasswordChangeRequiredMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

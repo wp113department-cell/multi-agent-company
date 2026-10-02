@@ -161,7 +161,7 @@
  "open_by_severity": {
   "Low": 6,
   "High": 2,
-  "Medium": 3
+  "Medium": 2
  },
  "open": [
   {
@@ -233,13 +233,6 @@
    "layer": "Operations / DR",
    "final_status": "OWNER",
    "finding": "backend/.venv in git history (131 MB pack)."
-  },
-  {
-   "id": "REPRO-14-006",
-   "severity": "Medium",
-   "layer": "Reproducibility",
-   "final_status": "OPEN",
-   "finding": "Forced password change not enforced; no UI for it."
   }
  ],
  "contradictions": [
@@ -270,9 +263,8 @@
  "required_fixes": [
   "live LLM plan L1-L10 (E2E-12-007, AIEVAL-07-003/004) - owner go",
   "re-enable CI (INFRA-06-001) - owner",
-  "owner sets GRIDIRON_BACKUP_DIR",
-  "recommended: enforce must-change-password (REPRO-14-006)"
+  "owner sets GRIDIRON_BACKUP_DIR"
  ],
  "release_decision": "NOT READY FOR PRODUCTION (external users); READY for local single-owner use",
- "update_2026_10_02": "PROD-08-006 fixed (Sentry + in-app alerts); OPS-13-006 fixed in code (backup service), owner sets folder"
+ "update_2026_10_02": "PROD-08-006 fixed (Sentry + in-app alerts); OPS-13-006 fixed in code (backup service), owner sets folder; REPRO-14-006 fixed (forced password change enforced)"
 }

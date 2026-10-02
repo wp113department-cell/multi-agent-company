@@ -24,7 +24,16 @@ async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promi
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    const body = await res.json().catch(() => ({})) as Record<string, unknown>;
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    // Production audit 14: the account must change its password first.
+    if (
+      res.status === 403 &&
+      (body?.error as { reason?: string } | undefined)?.reason === "password_change_required" &&
+      typeof window !== "undefined" &&
+      !window.location.pathname.startsWith("/login")
+    ) {
+      window.location.assign("/login?change=1");
+    }
     // FastAPI returns { detail: "..." } or { detail: [{ msg: "..." }] } for validation errors
     const detail = body?.detail;
     let msg: string;
@@ -118,11 +127,19 @@ export async function fetchTask(taskId: string): Promise<DevTask> {
   return handleResponse<DevTask>(res);
 }
 
-export async function createTask(input: { title: string; description: string; repoId?: number | null }): Promise<DevTask> {
+export async function createTask(input: {
+  title: string;
+  description: string;
+  repoId?: number | null;
+}): Promise<DevTask> {
   const res = await apiFetch(`/api/tasks`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title: input.title, description: input.description, repo_id: input.repoId ?? null }),
+    body: JSON.stringify({
+      title: input.title,
+      description: input.description,
+      repo_id: input.repoId ?? null,
+    }),
   });
   return handleResponse<DevTask>(res);
 }
@@ -163,7 +180,10 @@ export async function fetchTaskImages(taskId: string): Promise<TaskImageMeta[]> 
   return data.images;
 }
 
-export async function deleteTaskImage(taskId: string, imageId: number): Promise<{ deleted: boolean }> {
+export async function deleteTaskImage(
+  taskId: string,
+  imageId: number,
+): Promise<{ deleted: boolean }> {
   const res = await apiFetch(`/api/tasks/${taskId}/images/${imageId}`, { method: "DELETE" });
   return handleResponse(res);
 }
@@ -201,7 +221,9 @@ export async function triggerAgentRun(taskId: string): Promise<{ triggered: bool
 // both → backend_dev then frontend_dev, a new project → the full pipeline.
 // ---------------------------------------------------------------------------
 
-export async function triggerSmartRun(taskId: string): Promise<{ triggered: boolean; mode: string }> {
+export async function triggerSmartRun(
+  taskId: string,
+): Promise<{ triggered: boolean; mode: string }> {
   const res = await apiFetch(`/api/tasks/${taskId}/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -235,7 +257,12 @@ export async function fetchPipelineState(taskId: string): Promise<PipelineStateC
 // the backend's app.pipeline.graph.apply_subtask_edits for the exact shape.
 export async function approvePipeline(
   taskId: string,
-  subtaskEdits?: { index: number; action: "edit" | "reject"; title?: string; description?: string }[],
+  subtaskEdits?: {
+    index: number;
+    action: "edit" | "reject";
+    title?: string;
+    description?: string;
+  }[],
 ): Promise<{ approved: boolean }> {
   const res = await apiFetch(`/api/tasks/${taskId}/pipeline/approve`, {
     method: "POST",
@@ -337,7 +364,12 @@ export async function createEpic(input: {
   title: string;
   description: string;
   complexityMultiplier?: number;
-}): Promise<{ epicId: string; status: string; costEstimate: number; requiresCostApproval: boolean }> {
+}): Promise<{
+  epicId: string;
+  status: string;
+  costEstimate: number;
+  requiresCostApproval: boolean;
+}> {
   const res = await apiFetch("/api/epics", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -666,7 +698,10 @@ export async function fetchCustomSecrets(): Promise<string[]> {
   return data.names;
 }
 
-export async function saveCustomSecret(name: string, value: string): Promise<{ saved: boolean; name: string }> {
+export async function saveCustomSecret(
+  name: string,
+  value: string,
+): Promise<{ saved: boolean; name: string }> {
   const res = await apiFetch("/api/settings/custom-secrets", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -675,7 +710,9 @@ export async function saveCustomSecret(name: string, value: string): Promise<{ s
   return handleResponse(res);
 }
 
-export async function deleteCustomSecret(name: string): Promise<{ deleted: boolean; name: string }> {
+export async function deleteCustomSecret(
+  name: string,
+): Promise<{ deleted: boolean; name: string }> {
   const res = await apiFetch(`/api/settings/custom-secrets/${encodeURIComponent(name)}`, {
     method: "DELETE",
   });

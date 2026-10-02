@@ -31,7 +31,8 @@ test("A1 — wrong password is refused and stays on /login", async ({ page }) =>
   await page.getByRole("button", { name: "Sign in" }).click();
   expect((await resp).status()).toBe(401);
   await expect(page).toHaveURL(/\/login/);
-  await expect(page.getByRole("alert").or(page.getByText(/invalid|incorrect/i))).toBeVisible();
+  // the backend's own message is shown, not a bare "HTTP 401" (audit 14)
+  await expect(page.getByText("Invalid username or password")).toBeVisible();
 });
 
 test("A2 — real login sets an httpOnly session cookie", async ({ page, context }) => {
@@ -144,6 +145,29 @@ test("Alerts — a task that gets blocked shows up in the in-app bell", async ({
   await expect(entry).toBeVisible();
   await entry.click();
   await expect(page).toHaveURL(new RegExp(`/tasks/${second}$`));
+});
+
+test("A5 — an account that must change its password is blocked until it does", async ({ page }) => {
+  const user = process.env.E2E_FLAG_USER;
+  const pass = process.env.E2E_FLAG_PASS;
+  test.skip(!user || !pass, "needs a throwaway account with must_change_password=true");
+  await page.goto("/login");
+  await page.getByLabel("Username").fill(user!);
+  await page.getByLabel("Password").fill(pass!);
+  await page.getByRole("button", { name: "Sign in" }).click();
+
+  // Server refuses ordinary API calls until the password is changed.
+  await expect(page.getByRole("form", { name: "Change password" })).toBeVisible();
+  const blocked = await page.request.get("/api/tasks?limit=1");
+  expect(blocked.status()).toBe(403);
+  expect((await blocked.json()).error.reason).toBe("password_change_required");
+
+  const fresh = `New-${Date.now()}-pass`;
+  await page.getByLabel("New password", { exact: true }).fill(fresh);
+  await page.getByLabel("Confirm new password").fill(fresh);
+  await page.getByRole("button", { name: "Change password" }).click();
+  await expect(page).toHaveURL(/\/repo/);
+  expect((await page.request.get("/api/tasks?limit=1")).status()).toBe(200);
 });
 
 test("A4 — logout ends the session; protected pages redirect to /login", async ({ page }) => {

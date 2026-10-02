@@ -1,33 +1,147 @@
 {
-  "audit_id": "14",
-  "audit_name": "Independent Reproducibility / Maintainability / Transfer",
-  "run_date": "2026-10-02",
-  "layer_score": 84,
-  "clean_room": {
-    "source": "git clone of HEAD 33bbd03c into /tmp",
-    "pip_install": "PASS (357s, pip check clean)",
-    "migrations_empty_db": "PASS after REPRO-14-001",
-    "backend_start": "PASS (0 warnings)",
-    "first_login_recipe": "PASS after REPRO-14-002/003",
-    "frontend_install_frozen_lockfile": "PASS",
-    "next_build": "PASS",
-    "quality_commands": "PASS (mypy 496 files, ruff, black, tsc, eslint, vitest 52/52)",
-    "real_browser_journeys": "6/6 PASS",
-    "full_backend_suite": {"passed": 8892, "skipped": 57, "failed_flaky_concurrency": 10, "failed_real_fixed": 5}
+ "audit_id": "14",
+ "audit_name": "Independent Reproducibility / Maintainability / Transfer",
+ "run_date": "2026-10-02",
+ "layer_score": 84,
+ "clean_room": {
+  "source": "git clone of HEAD 33bbd03c into /tmp",
+  "pip_install": "PASS (357s, pip check clean)",
+  "migrations_empty_db": "PASS after REPRO-14-001",
+  "backend_start": "PASS (0 warnings)",
+  "first_login_recipe": "PASS after REPRO-14-002/003",
+  "frontend_install_frozen_lockfile": "PASS",
+  "next_build": "PASS",
+  "quality_commands": "PASS (mypy 496 files, ruff, black, tsc, eslint, vitest 52/52)",
+  "real_browser_journeys": "6/6 PASS",
+  "full_backend_suite": {
+   "passed": 8892,
+   "skipped": 57,
+   "failed_flaky_concurrency": 10,
+   "failed_real_fixed": 5
+  }
+ },
+ "findings": [
+  {
+   "id": "REPRO-14-001",
+   "severity": "Critical",
+   "status": "FIXED",
+   "file": "backend/.env.example",
+   "location": "DATABASE_URL",
+   "finding": "Example DB password differs from docker-compose; migrations fail.",
+   "evidence": "clean room: asyncpg InvalidPasswordError",
+   "production_impact": "Every newcomer blocked at step 4.",
+   "confidence": "High",
+   "recommendation": "Match compose default.",
+   "effort": "Small"
   },
-  "findings": [
-    {"id": "REPRO-14-001", "severity": "Critical", "status": "FIXED", "file": "backend/.env.example", "location": "DATABASE_URL", "finding": "Example DB password differs from docker-compose; migrations fail.", "evidence": "clean room: asyncpg InvalidPasswordError", "production_impact": "Every newcomer blocked at step 4.", "confidence": "High", "recommendation": "Match compose default.", "effort": "Small"},
-    {"id": "REPRO-14-002", "severity": "Critical", "status": "FIXED", "file": "README.md", "location": "Quick Start", "finding": "No documented login path; login 501, API 403.", "evidence": "clean room curl", "production_impact": "Newcomer cannot use the app.", "confidence": "High", "recommendation": "Document JWT settings and first login.", "effort": "Small"},
-    {"id": "REPRO-14-003", "severity": "High", "status": "FIXED", "file": "backend/app/main.py", "location": "admin seeding", "finding": "Seeded admin had role approver; no install had an admin.", "evidence": "clean room users table: admin|approver", "production_impact": "Admin-only actions impossible.", "confidence": "High", "recommendation": "Seed role admin.", "effort": "Small"},
-    {"id": "REPRO-14-004", "severity": "Medium", "status": "FIXED", "file": "backend/.env.example", "location": "TARGET_REPO_PATH", "finding": "Machine-specific absolute path.", "evidence": "/home/pc-117/Documents/CRR2906", "production_impact": "Agents target missing path.", "confidence": "High", "recommendation": "Use . with guidance.", "effort": "Small"},
-    {"id": "REPRO-14-005", "severity": "Medium", "status": "FIXED", "file": "backend/tests (10 files)", "location": "hardcoded paths / /home workspace pin", "finding": "Tests tied to this machine and checkout location.", "evidence": "clean room: 5 test_git_service failures outside /home", "production_impact": "Suite fails on other machines.", "confidence": "High", "recommendation": "Compute from __file__.", "effort": "Small"},
-    {"id": "REPRO-14-006", "severity": "Medium", "status": "OPEN", "file": "backend/app/api/auth.py; apps/web", "location": "must_change_password", "finding": "Forced password change not enforced; no UI for it.", "evidence": "seeded admin created task 201 before change", "production_impact": "Default password may stay in use (non-production).", "confidence": "High", "recommendation": "Server-side gate + login-page change form.", "effort": "Medium"},
-    {"id": "REPRO-14-007", "severity": "Low", "status": "FIXED", "file": "backend/.env.example", "location": "DEVOPS_BASH_ALLOWLIST", "finding": "Unquoted value with spaces breaks shell sourcing.", "evidence": "bash: status,git: command not found", "production_impact": "Shell-based env loading fails.", "confidence": "High", "recommendation": "Quote.", "effort": "Small"},
-    {"id": "REPRO-14-008", "severity": "Low", "status": "FIXED", "file": "README.md", "location": "counts", "finding": "Stale agent/test counts.", "evidence": "72 vs 85; 3,500 vs 8,900", "production_impact": "Misleading docs.", "confidence": "High", "recommendation": "Update.", "effort": "Small"}
-  ],
-  "timezone_locale": "PASS (UTC+14, LANG=C, 210 time-sensitive tests)",
-  "blocked": ["Independent human operator on a different machine (owner)"],
-  "counts": {"critical": 2, "high": 1, "medium": 3, "low": 2},
-  "open_counts": {"critical": 0, "high": 0, "medium": 1, "low": 0},
-  "verdict": "YELLOW"
+  {
+   "id": "REPRO-14-002",
+   "severity": "Critical",
+   "status": "FIXED",
+   "file": "README.md",
+   "location": "Quick Start",
+   "finding": "No documented login path; login 501, API 403.",
+   "evidence": "clean room curl",
+   "production_impact": "Newcomer cannot use the app.",
+   "confidence": "High",
+   "recommendation": "Document JWT settings and first login.",
+   "effort": "Small"
+  },
+  {
+   "id": "REPRO-14-003",
+   "severity": "High",
+   "status": "FIXED",
+   "file": "backend/app/main.py",
+   "location": "admin seeding",
+   "finding": "Seeded admin had role approver; no install had an admin.",
+   "evidence": "clean room users table: admin|approver",
+   "production_impact": "Admin-only actions impossible.",
+   "confidence": "High",
+   "recommendation": "Seed role admin.",
+   "effort": "Small"
+  },
+  {
+   "id": "REPRO-14-004",
+   "severity": "Medium",
+   "status": "FIXED",
+   "file": "backend/.env.example",
+   "location": "TARGET_REPO_PATH",
+   "finding": "Machine-specific absolute path.",
+   "evidence": "/home/pc-117/Documents/CRR2906",
+   "production_impact": "Agents target missing path.",
+   "confidence": "High",
+   "recommendation": "Use . with guidance.",
+   "effort": "Small"
+  },
+  {
+   "id": "REPRO-14-005",
+   "severity": "Medium",
+   "status": "FIXED",
+   "file": "backend/tests (10 files)",
+   "location": "hardcoded paths / /home workspace pin",
+   "finding": "Tests tied to this machine and checkout location.",
+   "evidence": "clean room: 5 test_git_service failures outside /home",
+   "production_impact": "Suite fails on other machines.",
+   "confidence": "High",
+   "recommendation": "Compute from __file__.",
+   "effort": "Small"
+  },
+  {
+   "id": "REPRO-14-006",
+   "severity": "Medium",
+   "status": "FIXED",
+   "file": "backend/app/api/auth.py; apps/web",
+   "location": "must_change_password",
+   "finding": "Forced password change not enforced; no UI for it.",
+   "evidence": "seeded admin created task 201 before change",
+   "production_impact": "Default password may stay in use (non-production).",
+   "confidence": "High",
+   "recommendation": "Server-side gate + login-page change form.",
+   "effort": "Medium",
+   "resolution": "2026-10-02: PasswordChangeRequiredMiddleware (DB flag, 15s cache; refresh cannot bypass) + login-page change step + api redirect; tests/test_audit14_password_change_enforced.py, lib/auth.test.ts, e2e-real A5"
+  },
+  {
+   "id": "REPRO-14-007",
+   "severity": "Low",
+   "status": "FIXED",
+   "file": "backend/.env.example",
+   "location": "DEVOPS_BASH_ALLOWLIST",
+   "finding": "Unquoted value with spaces breaks shell sourcing.",
+   "evidence": "bash: status,git: command not found",
+   "production_impact": "Shell-based env loading fails.",
+   "confidence": "High",
+   "recommendation": "Quote.",
+   "effort": "Small"
+  },
+  {
+   "id": "REPRO-14-008",
+   "severity": "Low",
+   "status": "FIXED",
+   "file": "README.md",
+   "location": "counts",
+   "finding": "Stale agent/test counts.",
+   "evidence": "72 vs 85; 3,500 vs 8,900",
+   "production_impact": "Misleading docs.",
+   "confidence": "High",
+   "recommendation": "Update.",
+   "effort": "Small"
+  }
+ ],
+ "timezone_locale": "PASS (UTC+14, LANG=C, 210 time-sensitive tests)",
+ "blocked": [
+  "Independent human operator on a different machine (owner)"
+ ],
+ "counts": {
+  "critical": 2,
+  "high": 1,
+  "medium": 3,
+  "low": 2
+ },
+ "open_counts": {
+  "critical": 0,
+  "high": 0,
+  "medium": 0,
+  "low": 0
+ },
+ "verdict": "YELLOW"
 }
