@@ -1,19 +1,121 @@
 {
-  "audit_id": "08",
-  "audit_name": "Master Production Readiness Audit",
-  "run_date": "2026-09-30",
-  "layer_score": 84,
-  "findings": [
-    {"id": "PROD-08-001", "severity": "High", "status": "FIXED", "file": "backend/app/agents/tool_security.py", "location": "_ssrf_denial_reason", "line": "63-140", "finding": "NAT64 64:ff9b::/96 classed as reserved; every external fetch refused on IPv6-only networks.", "evidence": "httpbin.org resolved to 64:ff9b::22e3:ed1a -> POLICY DENIED; 8 real-network tests failed", "production_impact": "fetch_url/web_search/http_request/inspect_openapi_spec unusable on NAT64 hosts.", "confidence": "High", "recommendation": "Judge embedded IPv4.", "effort": "Small"},
-    {"id": "PROD-08-002", "severity": "Medium", "status": "FIXED", "file": "backend/app/api/agents.py", "location": "_spawn_tracked", "line": "47-65", "finding": "Background task exceptions discarded silently.", "evidence": "done-callback only discarded the task", "production_impact": "Failed heartbeat/log writes invisible without Sentry.", "confidence": "High", "recommendation": "Log exception in done-callback.", "effort": "Small"},
-    {"id": "PROD-08-003", "severity": "Medium", "status": "FIXED", "file": "backend/app/services/retention.py", "location": "_cleanup_checkpoints", "line": "76-160", "finding": "Stale-thread deletion ignored pending approvals.", "evidence": "tests/test_audit08_retention_keeps_pending_approvals.py fails on HEAD", "production_impact": "Plan awaiting approval >30 days cannot be approved.", "confidence": "High", "recommendation": "Exclude threads with pending approvals.", "effort": "Small"},
-    {"id": "PROD-08-004", "severity": "Medium", "status": "FIXED", "file": "README.md", "location": "Backend deploy", "line": "186-200", "finding": "docker build from repo root fails; --env-file path wrong.", "evidence": "no requirements.txt at root; Dockerfile COPY requirements.txt", "production_impact": "Documented deploy fails.", "confidence": "High", "recommendation": "Build context backend/.", "effort": "Small"},
-    {"id": "PROD-08-005", "severity": "Medium", "status": "FIXED", "file": "docs/ADD_A_NEW_AGENT.md", "location": "whole", "line": "n/a", "finding": "Guide stale vs enforced contract (AGENT_CONTRACT/_register, agent_models row, role sections, signature).", "evidence": "grep: no AGENT_CONTRACT/_register/agent_models", "production_impact": "New agents silently not registered.", "confidence": "High", "recommendation": "Update guide.", "effort": "Small"},
-    {"id": "PROD-08-006", "severity": "High", "status": "OWNER_ACTION", "file": "backend/.env", "location": "SENTRY_DSN, ALERT_WEBHOOK_URL, SLACK_WEBHOOK_URL", "line": "n/a", "finding": "No error tracking or alert destination configured.", "evidence": "all empty", "production_impact": "Failures only visible in logs.", "confidence": "High", "recommendation": "Configure DSN + webhook.", "effort": "Small"},
-    {"id": "PROD-08-007", "severity": "High", "status": "OPEN->AUDIT-09", "file": "backend/app/agents/base_graph.py", "location": "post-run budget check", "line": "4170-4200", "finding": "Daily budget only checked after a run; no pre-call stop.", "evidence": "check_daily only post-graph", "production_impact": "Daily cap does not stop spend.", "confidence": "High", "recommendation": "Pre-call daily guard + pre-dispatch refusal.", "effort": "Medium"}
-  ],
-  "counts": {"critical": 0, "high": 3, "medium": 4, "low": 0},
-  "open_counts": {"critical": 0, "high": 2, "medium": 0, "low": 0},
-  "not_found": [],
-  "verdict": "NOT READY (owner config + audit 09 cost cap)"
+ "audit_id": "08",
+ "audit_name": "Master Production Readiness Audit",
+ "run_date": "2026-09-30",
+ "layer_score": 84,
+ "findings": [
+  {
+   "id": "PROD-08-001",
+   "severity": "High",
+   "status": "FIXED",
+   "file": "backend/app/agents/tool_security.py",
+   "location": "_ssrf_denial_reason",
+   "line": "63-140",
+   "finding": "NAT64 64:ff9b::/96 classed as reserved; every external fetch refused on IPv6-only networks.",
+   "evidence": "httpbin.org resolved to 64:ff9b::22e3:ed1a -> POLICY DENIED; 8 real-network tests failed",
+   "production_impact": "fetch_url/web_search/http_request/inspect_openapi_spec unusable on NAT64 hosts.",
+   "confidence": "High",
+   "recommendation": "Judge embedded IPv4.",
+   "effort": "Small"
+  },
+  {
+   "id": "PROD-08-002",
+   "severity": "Medium",
+   "status": "FIXED",
+   "file": "backend/app/api/agents.py",
+   "location": "_spawn_tracked",
+   "line": "47-65",
+   "finding": "Background task exceptions discarded silently.",
+   "evidence": "done-callback only discarded the task",
+   "production_impact": "Failed heartbeat/log writes invisible without Sentry.",
+   "confidence": "High",
+   "recommendation": "Log exception in done-callback.",
+   "effort": "Small"
+  },
+  {
+   "id": "PROD-08-003",
+   "severity": "Medium",
+   "status": "FIXED",
+   "file": "backend/app/services/retention.py",
+   "location": "_cleanup_checkpoints",
+   "line": "76-160",
+   "finding": "Stale-thread deletion ignored pending approvals.",
+   "evidence": "tests/test_audit08_retention_keeps_pending_approvals.py fails on HEAD",
+   "production_impact": "Plan awaiting approval >30 days cannot be approved.",
+   "confidence": "High",
+   "recommendation": "Exclude threads with pending approvals.",
+   "effort": "Small"
+  },
+  {
+   "id": "PROD-08-004",
+   "severity": "Medium",
+   "status": "FIXED",
+   "file": "README.md",
+   "location": "Backend deploy",
+   "line": "186-200",
+   "finding": "docker build from repo root fails; --env-file path wrong.",
+   "evidence": "no requirements.txt at root; Dockerfile COPY requirements.txt",
+   "production_impact": "Documented deploy fails.",
+   "confidence": "High",
+   "recommendation": "Build context backend/.",
+   "effort": "Small"
+  },
+  {
+   "id": "PROD-08-005",
+   "severity": "Medium",
+   "status": "FIXED",
+   "file": "docs/ADD_A_NEW_AGENT.md",
+   "location": "whole",
+   "line": "n/a",
+   "finding": "Guide stale vs enforced contract (AGENT_CONTRACT/_register, agent_models row, role sections, signature).",
+   "evidence": "grep: no AGENT_CONTRACT/_register/agent_models",
+   "production_impact": "New agents silently not registered.",
+   "confidence": "High",
+   "recommendation": "Update guide.",
+   "effort": "Small"
+  },
+  {
+   "id": "PROD-08-006",
+   "severity": "High",
+   "status": "FIXED",
+   "file": "backend/.env",
+   "location": "SENTRY_DSN, ALERT_WEBHOOK_URL, SLACK_WEBHOOK_URL",
+   "line": "n/a",
+   "finding": "No error tracking or alert destination configured.",
+   "evidence": "all empty",
+   "production_impact": "Failures only visible in logs.",
+   "confidence": "High",
+   "recommendation": "Configure DSN + webhook.",
+   "effort": "Small",
+   "resolution": "2026-10-02: Sentry DSN set (development env) + test event; in-app alerts: GET /api/notifications + NavBar bell/toast; tests/test_audit08_in_app_notifications.py, components/NotificationBell.test.tsx, e2e-real Alerts journey"
+  },
+  {
+   "id": "PROD-08-007",
+   "severity": "High",
+   "status": "OPEN->AUDIT-09",
+   "file": "backend/app/agents/base_graph.py",
+   "location": "post-run budget check",
+   "line": "4170-4200",
+   "finding": "Daily budget only checked after a run; no pre-call stop.",
+   "evidence": "check_daily only post-graph",
+   "production_impact": "Daily cap does not stop spend.",
+   "confidence": "High",
+   "recommendation": "Pre-call daily guard + pre-dispatch refusal.",
+   "effort": "Medium"
+  }
+ ],
+ "counts": {
+  "critical": 0,
+  "high": 3,
+  "medium": 4,
+  "low": 0
+ },
+ "open_counts": {
+  "critical": 0,
+  "high": 2,
+  "medium": 0,
+  "low": 0
+ },
+ "not_found": [],
+ "verdict": "NOT READY (owner config + audit 09 cost cap)"
 }

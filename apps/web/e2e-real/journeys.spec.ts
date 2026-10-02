@@ -118,6 +118,34 @@ test("Page tour — every page renders against the real backend with no 5xx or e
   expect(problems, problems.join("\n")).toEqual([]);
 });
 
+test("Alerts — a task that gets blocked shows up in the in-app bell", async ({ page }) => {
+  await login(page);
+  const stamp = Date.now();
+  const mk = async (title: string, dependsOn?: number[]) => {
+    const r = await page.request.post("/api/tasks", {
+      data: { title, description: "audit 08 alerts journey", depends_on: dependsOn },
+    });
+    expect(r.status()).toBe(201);
+    return (await r.json()).id as number;
+  };
+  const first = await mk(`audit08 alert dep ${stamp}`);
+  const blockedTitle = `audit08 alert blocked ${stamp}`;
+  const second = await mk(blockedTitle, [first]);
+
+  // Real dependency gate: refuses to start and blocks the task ($0, no agent run).
+  const run = await page.request.post(`/api/tasks/${second}/run`, { data: {} });
+  expect(run.status()).toBe(409);
+
+  await page.goto("/tasks");
+  const bell = page.getByRole("button", { name: /Notifications, \d+ unread/ });
+  await expect(bell).toBeVisible({ timeout: 20_000 });
+  await bell.click();
+  const entry = page.getByRole("dialog", { name: "Task alerts" }).getByText(blockedTitle);
+  await expect(entry).toBeVisible();
+  await entry.click();
+  await expect(page).toHaveURL(new RegExp(`/tasks/${second}$`));
+});
+
 test("A4 — logout ends the session; protected pages redirect to /login", async ({ page }) => {
   await login(page);
   const r = await page.request.post("/api/auth/logout");

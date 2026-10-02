@@ -160,7 +160,7 @@
  },
  "open_by_severity": {
   "Low": 6,
-  "High": 4,
+  "High": 2,
   "Medium": 3
  },
  "open": [
@@ -191,13 +191,6 @@
    "layer": "AI Evaluation",
    "final_status": "BLOCKED",
    "finding": "Gate dormant without baselines."
-  },
-  {
-   "id": "PROD-08-006",
-   "severity": "High",
-   "layer": "Production Readiness",
-   "final_status": "PARTLY_DONE (Sentry DSN set + test event sent; alerts -> in-app notifications, to build)",
-   "finding": "No error tracking or alert destination configured."
   },
   {
    "id": "PERF-09-010",
@@ -233,13 +226,6 @@
    "layer": "End-to-End",
    "final_status": "BLOCKED",
    "finding": "Plan approval, agent execution, repo chat journeys need real LLM calls."
-  },
-  {
-   "id": "OPS-13-006",
-   "severity": "High",
-   "layer": "Operations / DR",
-   "final_status": "PLANNED (docker-compose backup service, owner chose option A)",
-   "finding": "No backup schedule; no off-host copy."
   },
   {
    "id": "OPS-13-009",
@@ -282,12 +268,11 @@
   "task_id/trace_id confusion not re-tested this round (recommend audit 04 recheck)"
  ],
  "required_fixes": [
-  "backup service (OPS-13-006)",
-  "in-app failure alerts (PROD-08-006)",
-  "owner confirms Sentry event",
-  "live LLM plan L1-L10 (E2E-12-007, AIEVAL-07-003/004)",
-  "re-enable CI (INFRA-06-001)",
+  "live LLM plan L1-L10 (E2E-12-007, AIEVAL-07-003/004) - owner go",
+  "re-enable CI (INFRA-06-001) - owner",
+  "owner sets GRIDIRON_BACKUP_DIR",
   "recommended: enforce must-change-password (REPRO-14-006)"
  ],
- "release_decision": "NOT READY FOR PRODUCTION (external users); READY for local single-owner use"
+ "release_decision": "NOT READY FOR PRODUCTION (external users); READY for local single-owner use",
+ "update_2026_10_02": "PROD-08-006 fixed (Sentry + in-app alerts); OPS-13-006 fixed in code (backup service), owner sets folder"
 }

@@ -153,7 +153,7 @@
  },
  "open_by_severity": {
   "Low": 6,
-  "High": 4,
+  "High": 2,
   "Medium": 3
  },
  "open": [
@@ -184,13 +184,6 @@
    "layer": "AI Evaluation",
    "final_status": "BLOCKED",
    "finding": "Gate dormant without baselines."
-  },
-  {
-   "id": "PROD-08-006",
-   "severity": "High",
-   "layer": "Production Readiness",
-   "final_status": "PARTLY_DONE (Sentry DSN set + test event sent; alerts -> in-app notifications, to build)",
-   "finding": "No error tracking or alert destination configured."
   },
   {
    "id": "PERF-09-010",
@@ -226,13 +219,6 @@
    "layer": "End-to-End",
    "final_status": "BLOCKED",
    "finding": "Plan approval, agent execution, repo chat journeys need real LLM calls."
-  },
-  {
-   "id": "OPS-13-006",
-   "severity": "High",
-   "layer": "Operations / DR",
-   "final_status": "PLANNED (docker-compose backup service, owner chose option A)",
-   "finding": "No backup schedule; no off-host copy."
   },
   {
    "id": "OPS-13-009",
@@ -368,7 +354,7 @@
    "id": "PROD-08-006",
    "layer": "Production Readiness",
    "file": "backend/.env",
-   "final_status": "PARTLY_DONE (Sentry DSN set + test event sent; alerts -> in-app notifications, to build)",
+   "final_status": "FIXED",
    "finding": "No error tracking or alert destination configured."
   },
   {
@@ -438,7 +424,7 @@
    "id": "OPS-13-006",
    "layer": "Operations / DR",
    "file": "docs/disaster_recovery.md",
-   "final_status": "PLANNED (docker-compose backup service, owner chose option A)",
+   "final_status": "FIXED_PENDING_OWNER_PATH (backup service built + verified; owner sets GRIDIRON_BACKUP_DIR)",
    "finding": "No backup schedule; no off-host copy."
   },
   {

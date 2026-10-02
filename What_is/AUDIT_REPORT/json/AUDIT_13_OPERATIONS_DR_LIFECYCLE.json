@@ -1,34 +1,168 @@
 {
-  "audit_id": "13",
-  "audit_name": "Operations / Disaster Recovery / Lifecycle",
-  "run_date": "2026-10-02",
-  "layer_score": 82,
-  "drills": {
-    "backup": {"seconds": 3.5, "size_mb": 4.2, "result": "PASS"},
-    "restore_empty_db": {"seconds": 7.1, "result": "PASS"},
-    "restore_new_server": {"result": "PASS"},
-    "app_on_restored_db": {"seconds_to_healthy": 7.2, "vector_search": "PASS"},
-    "redis_down": "PASS",
-    "postgres_down": "PASS_AFTER_FIX",
-    "backend_kill_9": "PASS_AFTER_FIX",
-    "invalid_llm_key": "PASS_AFTER_FIX",
-    "circuit_breaker": "PASS"
+ "audit_id": "13",
+ "audit_name": "Operations / Disaster Recovery / Lifecycle",
+ "run_date": "2026-10-02",
+ "layer_score": 82,
+ "drills": {
+  "backup": {
+   "seconds": 3.5,
+   "size_mb": 4.2,
+   "result": "PASS"
   },
-  "rto_seconds_machine": 18,
-  "rpo": "UNBOUNDED (no backup schedule) - owner action",
-  "findings": [
-    {"id": "OPS-13-001", "severity": "High", "status": "FIXED", "file": "backend/app/api/privacy.py", "location": "delete_user_data, export_user_data", "finding": "Any approver could erase any account incl. admins and export anyone's data.", "evidence": "drill: approver DELETE /api/privacy/user/admin -> 200", "production_impact": "Admin lockout; personal data exposure.", "confidence": "High", "recommendation": "require_admin + last-admin guard.", "effort": "Small"},
-    {"id": "OPS-13-002", "severity": "Medium", "status": "FIXED", "file": "backend/app/main.py", "location": "unhandled_exception_handler; app/db/errors.py", "finding": "DB outage returned text/plain 500 and 'Auth configuration error'.", "evidence": "drill: Postgres stopped", "production_impact": "Outage indistinguishable from bug.", "confidence": "High", "recommendation": "503 + Retry-After JSON.", "effort": "Small"},
-    {"id": "OPS-13-003", "severity": "Medium", "status": "FIXED", "file": "backend/app/middleware/rbac.py", "location": "token re-check except blocks", "finding": "DB outage reported as 401 Invalid token.", "evidence": "drill: list tasks 401 during outage", "production_impact": "All users logged out by DB blip.", "confidence": "High", "recommendation": "503 when DB unavailable.", "effort": "Small"},
-    {"id": "OPS-13-004", "severity": "Medium", "status": "FIXED", "file": "backend/app/fleet/failure_ladder.py", "location": "reconcile_orphaned_runs", "finding": "Crash left task in coding forever.", "evidence": "drill kill -9; tests/test_audit13_orphan_blocks_task.py fails on old code", "production_impact": "Phantom running tasks.", "confidence": "High", "recommendation": "Block task with reason orphaned.", "effort": "Small"},
-    {"id": "OPS-13-005", "severity": "Low", "status": "FIXED", "file": "backend/app/main.py", "location": "http_exception_handler", "finding": "Dropped exception headers.", "evidence": "Retry-After missing", "production_impact": "Clients cannot back off.", "confidence": "High", "recommendation": "Pass headers through.", "effort": "Small"},
-    {"id": "OPS-13-006", "severity": "High", "status": "OWNER_ACTION", "file": "docs/disaster_recovery.md", "location": "Scheduling", "finding": "No backup schedule; no off-host copy.", "evidence": "no cron/timer/compose/CI job references backup_db.sh", "production_impact": "Unbounded data loss on disk failure.", "confidence": "High", "recommendation": "Daily cron (recipe provided) + off-host copy.", "effort": "Small"},
-    {"id": "OPS-13-007", "severity": "Low", "status": "FIXED", "file": "backend/app/api/specialized_agents.py", "location": "run-sync except", "finding": "Provider failure returned 500.", "evidence": "drill invalid key", "production_impact": "Misleading status.", "confidence": "High", "recommendation": "502.", "effort": "Small"},
-    {"id": "OPS-13-008", "severity": "Low", "status": "DOCUMENTED", "file": "docs/disaster_recovery.md", "location": "Secret rotation", "finding": "No rotation runbook.", "evidence": "grep rotat docs: none", "production_impact": "Unsafe rotation (UI override, encryption key).", "confidence": "High", "recommendation": "Runbook added.", "effort": "Small"},
-    {"id": "OPS-13-009", "severity": "Low", "status": "OWNER", "file": ".git", "location": "commits 8e9b879f, 7784b970", "finding": "backend/.venv in git history (131 MB pack).", "evidence": "git log -- backend/.venv", "production_impact": "Slow clones.", "confidence": "High", "recommendation": "History rewrite if wanted.", "effort": "Medium"}
-  ],
-  "secret_history_scan": {"commits": 613, "real_secrets": 0},
-  "counts": {"critical": 0, "high": 2, "medium": 3, "low": 4},
-  "open_counts": {"critical": 0, "high": 1, "medium": 0, "low": 1},
-  "verdict": "YELLOW"
+  "restore_empty_db": {
+   "seconds": 7.1,
+   "result": "PASS"
+  },
+  "restore_new_server": {
+   "result": "PASS"
+  },
+  "app_on_restored_db": {
+   "seconds_to_healthy": 7.2,
+   "vector_search": "PASS"
+  },
+  "redis_down": "PASS",
+  "postgres_down": "PASS_AFTER_FIX",
+  "backend_kill_9": "PASS_AFTER_FIX",
+  "invalid_llm_key": "PASS_AFTER_FIX",
+  "circuit_breaker": "PASS"
+ },
+ "rto_seconds_machine": 18,
+ "rpo": "UNBOUNDED (no backup schedule) - owner action",
+ "findings": [
+  {
+   "id": "OPS-13-001",
+   "severity": "High",
+   "status": "FIXED",
+   "file": "backend/app/api/privacy.py",
+   "location": "delete_user_data, export_user_data",
+   "finding": "Any approver could erase any account incl. admins and export anyone's data.",
+   "evidence": "drill: approver DELETE /api/privacy/user/admin -> 200",
+   "production_impact": "Admin lockout; personal data exposure.",
+   "confidence": "High",
+   "recommendation": "require_admin + last-admin guard.",
+   "effort": "Small"
+  },
+  {
+   "id": "OPS-13-002",
+   "severity": "Medium",
+   "status": "FIXED",
+   "file": "backend/app/main.py",
+   "location": "unhandled_exception_handler; app/db/errors.py",
+   "finding": "DB outage returned text/plain 500 and 'Auth configuration error'.",
+   "evidence": "drill: Postgres stopped",
+   "production_impact": "Outage indistinguishable from bug.",
+   "confidence": "High",
+   "recommendation": "503 + Retry-After JSON.",
+   "effort": "Small"
+  },
+  {
+   "id": "OPS-13-003",
+   "severity": "Medium",
+   "status": "FIXED",
+   "file": "backend/app/middleware/rbac.py",
+   "location": "token re-check except blocks",
+   "finding": "DB outage reported as 401 Invalid token.",
+   "evidence": "drill: list tasks 401 during outage",
+   "production_impact": "All users logged out by DB blip.",
+   "confidence": "High",
+   "recommendation": "503 when DB unavailable.",
+   "effort": "Small"
+  },
+  {
+   "id": "OPS-13-004",
+   "severity": "Medium",
+   "status": "FIXED",
+   "file": "backend/app/fleet/failure_ladder.py",
+   "location": "reconcile_orphaned_runs",
+   "finding": "Crash left task in coding forever.",
+   "evidence": "drill kill -9; tests/test_audit13_orphan_blocks_task.py fails on old code",
+   "production_impact": "Phantom running tasks.",
+   "confidence": "High",
+   "recommendation": "Block task with reason orphaned.",
+   "effort": "Small"
+  },
+  {
+   "id": "OPS-13-005",
+   "severity": "Low",
+   "status": "FIXED",
+   "file": "backend/app/main.py",
+   "location": "http_exception_handler",
+   "finding": "Dropped exception headers.",
+   "evidence": "Retry-After missing",
+   "production_impact": "Clients cannot back off.",
+   "confidence": "High",
+   "recommendation": "Pass headers through.",
+   "effort": "Small"
+  },
+  {
+   "id": "OPS-13-006",
+   "severity": "High",
+   "status": "FIXED_PENDING_OWNER_PATH",
+   "file": "docs/disaster_recovery.md",
+   "location": "Scheduling",
+   "finding": "No backup schedule; no off-host copy.",
+   "evidence": "no cron/timer/compose/CI job references backup_db.sh",
+   "production_impact": "Unbounded data loss on disk failure.",
+   "confidence": "High",
+   "recommendation": "Daily cron (recipe provided) + off-host copy.",
+   "effort": "Small",
+   "resolution": "2026-10-02: docker-compose backup service (profile backup), verified 3 runs + retention + restore; owner to set GRIDIRON_BACKUP_DIR on another disk"
+  },
+  {
+   "id": "OPS-13-007",
+   "severity": "Low",
+   "status": "FIXED",
+   "file": "backend/app/api/specialized_agents.py",
+   "location": "run-sync except",
+   "finding": "Provider failure returned 500.",
+   "evidence": "drill invalid key",
+   "production_impact": "Misleading status.",
+   "confidence": "High",
+   "recommendation": "502.",
+   "effort": "Small"
+  },
+  {
+   "id": "OPS-13-008",
+   "severity": "Low",
+   "status": "DOCUMENTED",
+   "file": "docs/disaster_recovery.md",
+   "location": "Secret rotation",
+   "finding": "No rotation runbook.",
+   "evidence": "grep rotat docs: none",
+   "production_impact": "Unsafe rotation (UI override, encryption key).",
+   "confidence": "High",
+   "recommendation": "Runbook added.",
+   "effort": "Small"
+  },
+  {
+   "id": "OPS-13-009",
+   "severity": "Low",
+   "status": "OWNER",
+   "file": ".git",
+   "location": "commits 8e9b879f, 7784b970",
+   "finding": "backend/.venv in git history (131 MB pack).",
+   "evidence": "git log -- backend/.venv",
+   "production_impact": "Slow clones.",
+   "confidence": "High",
+   "recommendation": "History rewrite if wanted.",
+   "effort": "Medium"
+  }
+ ],
+ "secret_history_scan": {
+  "commits": 613,
+  "real_secrets": 0
+ },
+ "counts": {
+  "critical": 0,
+  "high": 2,
+  "medium": 3,
+  "low": 4
+ },
+ "open_counts": {
+  "critical": 0,
+  "high": 1,
+  "medium": 0,
+  "low": 1
+ },
+ "verdict": "YELLOW"
 }

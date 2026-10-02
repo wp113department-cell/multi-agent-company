@@ -35,6 +35,7 @@ from app.api.roadmap import router as roadmap_router
 from app.api.console import router as console_router
 from app.api.fleet_dashboard import router as fleet_dashboard_router
 from app.api.approvals import router as approvals_router
+from app.api.notifications import router as notifications_router
 from app.api.audit import router as audit_router
 from app.api.privacy import router as privacy_router
 
@@ -1899,6 +1900,7 @@ app.include_router(roadmap_router)
 app.include_router(console_router)
 app.include_router(fleet_dashboard_router)
 app.include_router(approvals_router)
+app.include_router(notifications_router)
 app.include_router(audit_router)
 app.include_router(privacy_router)
 

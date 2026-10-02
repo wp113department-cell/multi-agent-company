@@ -38,8 +38,7 @@ CLOSED_BY = {
 OWNER_DECISIONS = {
     "INFRA-06-001": "DEFERRED_BY_OWNER (Actions disabled until audits finish)",
     "INFRA-06-005": "NOT_APPLICABLE (no domain; local-only deployment)",
-    "PROD-08-006": "PARTLY_DONE (Sentry DSN set + test event sent; alerts -> in-app notifications, to build)",
-    "OPS-13-006": "PLANNED (docker-compose backup service, owner chose option A)",
+    "OPS-13-006": "FIXED_PENDING_OWNER_PATH (backup service built + verified; owner sets GRIDIRON_BACKUP_DIR)",
     "PERF-09-010": "OWNER_CONFIG (MAX_CONCURRENT_AGENT_RUNS)",
 }
 DONE = ("FIXED", "RESOLVED", "DOCUMENTED")
@@ -47,6 +46,8 @@ DONE = ("FIXED", "RESOLVED", "DOCUMENTED")
 rows, all_findings = [], []
 for f in sorted(glob.glob("json/AUDIT_*.json")):
     num = Path(f).name.split("_")[1]
+    if num == "10":  # this audit's own output, not an input
+        continue
     d = json.load(open(f))
     sev = Counter(x.get("severity", "?") for x in d.get("findings", []))
     for x in d.get("findings", []):

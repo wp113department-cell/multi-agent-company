@@ -45,18 +45,20 @@ All four are scheduled, and none needs a redesign.
 
 **Open Critical: 0.**
 
-## 4. Master High list (25; 21 closed, 4 open)
+## 4. Master High list (25; 23 closed, 2 open)
 
-**Open (all four block "ready for real users"):**
+> **Update 2026-10-02 (same day, after this audit):** PROD-08-006 fixed (Sentry live + in-app failure alerts built and verified in a real browser); OPS-13-006 fixed in code (daily backup service, verified incl. restore). The owner only has to set the backup folder.
+
+**Open (both waiting on the owner):**
 
 | ID | Layer | Finding | State |
 |---|---|---|---|
-| OPS-13-006 | Operations | Backups never scheduled; no off-host copy | PLANNED: owner chose a docker-compose backup service |
-| PROD-08-006 | Production Readiness | No error tracking / alert destination | **Partly done today:** Sentry DSN set, test event sent. In-app failure alerts still to build (owner's choice instead of Slack/Discord) |
-| E2E-12-007 | End-to-End | Plan approval, agent execution, repo chat never verified end to end in a browser (need paid LLM calls) | BLOCKED until the owner starts the live LLM plan |
+| E2E-12-007 | End-to-End | Plan approval, agent execution, repo chat never verified end to end in a browser (need paid LLM calls) | BLOCKED: owner gives the go for the live LLM plan |
 | INFRA-06-001 | Infrastructure | CI has not run since ≥ 2026-08-21 | DEFERRED BY OWNER (Actions disabled until the audits finish). Mitigation: the full suite runs locally (8,892 passed from a clean clone) |
 
-**Closed (21):** ARCH-01-001 · AGENT-02-001 · AGENT-02-002 · MEM-03-001 · ORCH-04-001 · ORCH-04-004 · ORCH-04-006 · ORCH-04-007 · PERF-04-008 · SEC-05-001 · AIEVAL-07-001 · PROD-08-001 · PROD-08-007 (closed by PERF-09-001) · PERF-09-001 · PERF-09-002 · ZP-11-001 · E2E-12-001 · E2E-12-002 · E2E-12-003 · OPS-13-001 · REPRO-14-003. Each has its file, evidence and test in its source report.
+**Closed today after the audit:** OPS-13-006 (backup service; `docker compose --profile backup up -d backup` + `GRIDIRON_BACKUP_DIR`) · PROD-08-006 (Sentry + `GET /api/notifications` + NavBar bell/toast).
+
+**Closed (21 + 2 above):** ARCH-01-001 · AGENT-02-001 · AGENT-02-002 · MEM-03-001 · ORCH-04-001 · ORCH-04-004 · ORCH-04-006 · ORCH-04-007 · PERF-04-008 · SEC-05-001 · AIEVAL-07-001 · PROD-08-001 · PROD-08-007 (closed by PERF-09-001) · PERF-09-001 · PERF-09-002 · ZP-11-001 · E2E-12-001 · E2E-12-002 · E2E-12-003 · OPS-13-001 · REPRO-14-003. Each has its file, evidence and test in its source report.
 
 **Other open items (not release-blocking):**
 - **Medium:** AIEVAL-07-003/004 (evals and the quality gate need LLM runs, same live plan as E2E-12-007); REPRO-14-006 (forced password change not enforced; production refuses the default password, which limits the risk).
@@ -109,14 +111,14 @@ Each was resolved by the **later** audit finding and fixing the problem. They're
 ### ❌ NOT READY FOR PRODUCTION (real external users)
 ### ✅ READY for local, single-owner use (the current deployment)
 
-The reason is the spec's rule: every High must be either resolved, or accepted with a documented mitigation. Four are neither yet. None is a code-design problem.
+The reason is the spec's rule: every High must be either resolved, or accepted with a documented mitigation. When this audit ran, four were neither; two were fixed the same day (backups, alerts). **The remaining two wait only on the owner:** the go for the live LLM test run, and re-enabling CI. None is a code-design problem.
 
 ## 9. Fixes required before re-review (ordered)
 
 | # | Fix | Closes | Size | How to verify |
 |---|---|---|---|---|
-| 1 | Add an opt-in `backup` service to `docker-compose.yml` running `scripts/backup_db.sh` daily into an owner-chosen off-host folder (14 kept) | OPS-13-006 | Small (1 file + docs) | Start it; a verified `.dump` appears; restore it into a throwaway DB (the audit-13 procedure) |
-| 2 | In-app failure alerts: when a task becomes blocked or failed, the NavBar shows a bell/toast with a list (backend event → API → UI), with tests | PROD-08-006 (rest) | Medium (few files) | Force a blocked task in the real stack; the notification appears; a Playwright check in `e2e-real` |
+| 1 | ✅ **DONE 2026-10-02** · Add an opt-in `backup` service to `docker-compose.yml` running `scripts/backup_db.sh` daily into an owner-chosen off-host folder (14 kept) | OPS-13-006 | Small (1 file + docs) | Start it; a verified `.dump` appears; restore it into a throwaway DB (the audit-13 procedure) |
+| 2 | ✅ **DONE 2026-10-02** · In-app failure alerts: when a task becomes blocked or failed, the NavBar shows a bell/toast with a list (backend event → API → UI), with tests | PROD-08-006 (rest) | Medium (few files) | Force a blocked task in the real stack; the notification appears; a Playwright check in `e2e-real` |
 | 3 | Owner confirms the Sentry test event `1d8bc3d7…` arrived | PROD-08-006 | Owner | Sentry → Issues |
 | 4 | Live LLM plan (Haiku, economy, throwaway repo, ≤ $3.50): L1–L10 including journeys C/D/G | E2E-12-007, AIEVAL-07-003/004 | Medium (runs, not code) | Each recorded in the `PENDING_TESTS_API_KEYS.md` ledger |
 | 5 | Re-enable GitHub Actions after billing; one green CI run | INFRA-06-001 | Owner + Small | Green workflow on `main` |

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { logout, isAuthenticated, authHeaders } from "../lib/auth";
+import { NotificationBell } from "./NotificationBell";
 
 function ThemeToggle() {
   const [dark, setDark] = useState(false);
@@ -208,6 +209,7 @@ export function NavBar() {
           </Link>
         ))}
         <div className="mx-1 h-4 w-px bg-slate-200 dark:bg-slate-700" />
+        <NotificationBell authed={authed} />
         <ThemeToggle />
         {authed && (
           <button
