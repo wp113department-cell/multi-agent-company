@@ -1892,14 +1892,6 @@ TOOL_MANIFEST: dict[str, ToolManifestEntry] = {
         verification_required=False,
         risk_level="low",
     ),
-    "type": ToolManifestEntry(
-        purpose="Return the inferred type of a variable or expression",
-        permissions=["read_repo"],
-        timeout_s=5,
-        retry_policy="none",
-        verification_required=False,
-        risk_level="low",
-    ),
 }
 
 
