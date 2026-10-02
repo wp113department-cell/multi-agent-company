@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import uuid
 
 import pytest
 
@@ -38,13 +39,27 @@ _HAS_DOCKER = shutil.which("docker") is not None
 
 
 def _real_running_container() -> str | None:
+    """The test's own throwaway container (no host mounts). Picking whatever
+    `docker ps` listed first made this test depend on the machine: on
+    2026-10-02 it picked the backup service, whose host mount the policy
+    correctly refuses."""
     if not _HAS_DOCKER:
         return None
+    image = "redis:7-alpine"  # already pulled for docker-compose
+    have = subprocess.run(["docker", "image", "inspect", image], capture_output=True)
+    if have.returncode != 0:
+        return None
+    name = f"td-docker-exec-{uuid.uuid4().hex[:8]}"
     r = subprocess.run(
-        ["docker", "ps", "--format", "{{.Names}}"], capture_output=True, text=True
+        ["docker", "run", "-d", "--rm", "--name", name, image, "sleep", "120"],
+        capture_output=True,
+        text=True,
     )
-    names = [n for n in r.stdout.splitlines() if n.strip()]
-    return names[0] if names else None
+    return name if r.returncode == 0 else None
+
+
+def _remove_container(name: str) -> None:
+    subprocess.run(["docker", "rm", "-f", name], capture_output=True)
 
 
 pytestmark = pytest.mark.skipif(not _HAS_DOCKER, reason="requires a real docker binary")
@@ -130,8 +145,12 @@ async def test_chat_agent_docker_exec_real_command_in_real_container(tmp_path) -
     container = _real_running_container()
     if container is None:
         pytest.skip("no real running container available")
-    agent = _agent(str(tmp_path))
-    result = await agent._execute_tool(
-        "docker_exec", {"container": container, "command": "echo hello_from_container"}
-    )
-    assert "hello_from_container" in result
+    try:
+        agent = _agent(str(tmp_path))
+        result = await agent._execute_tool(
+            "docker_exec",
+            {"container": container, "command": "echo hello_from_container"},
+        )
+        assert "hello_from_container" in result
+    finally:
+        _remove_container(container)
