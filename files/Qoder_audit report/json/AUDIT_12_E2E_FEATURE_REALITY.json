@@ -1,0 +1,177 @@
+{
+  "audit_id": "12",
+  "audit_name": "Master End-to-End Feature Production Audit (feature reality, wiring, UI/API/DB coverage, E2E journeys A-H)",
+  "run_date": "2026-10-02T13:20:00+05:30",
+  "baseline_commit": "c927c44bf410e188287f32b2cf54e0529c642025",
+  "baseline_note": "Series baseline is c927c44b (\"Production audits 09 and 11\"); audits 01-11 ran against disk state 33bbd03c. This audit reads the CURRENT tree at HEAD 90dac23bad223ec39413c485d1ddb68f9646975e (\"Production audit 14\", committed 2026-10-02 12:56 +0530), which includes the parallel repair commits ecd4905a (\"Production audit 12\": real-stack e2e journeys; Review page/logout/shadowed-route fixes), 33bbd03c (\"Production audit 13\": DR drills, admin-only erasure) and 90dac23b (audit 14: README clean-room reproduction; default admin role fixed to 'admin' in main.py:1603-1607). Those commits are the object under audit, not proof. The 5 consolidated High findings (H-1..H-5) were re-verified at 90dac23b: H-1 (agents.py:615-620, no transition_task), H-2 (agents.py:33-34 constants), H-3 (roles/bhaskar_agent.md absent), H-4 (20 registered loop names vs 16-name _leader_loop_names tuple; 36 total occurrences), H-5 (cost-approval loop) all still OPEN.",
+  "worktree_state": "Read-only: no code and no project files modified. Only outputs: files/Qoder_audit report/12_MASTER_E2E_FEATURE_REALITY_AUDIT.md and files/Qoder_audit report/json/AUDIT_12_E2E_FEATURE_REALITY.json. git status: clean worktree; untracked only files/Qoder_audit report/, files/Antigravity_audit_report/ (a parallel audit series' outputs, not used as evidence), What_is/AUDIT_REPORT/NEXT_PLAN_MONDAY.md. Runtime probes executed read-only: curl to :3100 (200), curl to :8000 (connection refused), ss -ltn port listing, git log/status/diff.",
+  "layer_score": 74,
+  "findings": [
+    {
+      "id": "PROD-12-101",
+      "severity": "High",
+      "file": "backend/app/api/epics.py, backend/app/agents/manager.py",
+      "location": "approve-cost handler at epics.py:317-347; cost gate node manager.py:2036-2126; route manager.py:2532-2535",
+      "line": "epics.py:339 (asyncio.create_task(_launch_epic_manager(epic_id, epic.description))); manager.py:2058-2126 (re-halt); manager.py:2126 (return stage='pending_cost_approval')",
+      "finding": "Epic cost approval is a deterministic dead-end loop (feature F-09 BROKEN). Clicking Approve cost sets epic.status='pending' and relaunches the SAME manager graph, whose _cost_estimate_node recomputes estimate_epic_cost(subtask_count=5, db=db) with unchanged inputs and, when estimate.requires_approval, sets the epic BACK to 'pending_cost_approval' with the same halt_reason and routes to END. No cost-approved signal is persisted or consumed anywhere ('cost_approved' = 0 grep hits in backend/). The user's approval click re-launches the manager and the epic reliably re-halts.",
+      "evidence": "FE button: apps/web/app/epics/[id]/page.tsx:151-154 -> lib/api.ts:376 approveCost -> POST /api/epics/{id}/approve-cost (epics.py:317). Handler: epics.py:329 status check, :338 epic.status='pending', :339 relaunch. Cost gate: manager.py:2036-2126; requires_approval branch :2062-2126; route _route_after_cost_estimate :2532-2535 ('pending_cost_approval' -> END). estimate_epic_cost is deterministic for fixed inputs (pipeline/cost_controller.py:139-198: historical averages or config coefficients, subtask_count=5 fixed at the call site). grep -rn 'cost_approved' backend/ -> 0 hits.",
+      "production_impact": "Any epic whose estimate exceeds settings.cost_approval_threshold can never proceed via the approval button; the only workaround is scope reduction below threshold or manual DB intervention. High-severity usability/flow defect, no data loss, no security impact.",
+      "confidence": "High (source-level deterministic trace; runtime UNVERIFIED in read-only mode)",
+      "recommendation": "Persist the approval (e.g., epic.cost_approved_by/at) and have _cost_estimate_node honor it (skip halt when an approval newer than the estimate exists), or remove the re-estimate on relaunch by passing a pre-approved flag through run_epic_manager.",
+      "effort": "M"
+    },
+    {
+      "id": "PROD-12-102",
+      "severity": "High",
+      "file": "backend/app/api/agents.py",
+      "location": "launch_manager generic exception handler",
+      "line": "agents.py:615-620",
+      "finding": "On generic manager-pipeline exception the handler marks pipeline state 'blocked', appends a log and sends an alert but NEVER calls transition_task — unlike the success/blocked path above it and the launch_coder pattern (:1043-1048). The task is abandoned mid-state, breaking Journey E's terminal-state guarantee. This is merged finding H-1 (ARCH-01-001 = ORCH-04-101), re-verified OPEN at 90dac23b.",
+      "evidence": "agents.py:613-620 (except Exception -> update_pipeline_state(db2, task_id, 'blocked') + append_log + send_task_alert; no transition_task); contrast agents.py:1043-1048 and :257-277.",
+      "production_impact": "Tasks whose manager run crashes never reach a terminal task state; downstream lists/metrics/exports show them as live forever until manually reconciled.",
+      "confidence": "High (static)",
+      "recommendation": "Add the same terminal transition_task call used by the success path (accepted as known limitation in Audit 10; flagged here as the highest-priority one-liner).",
+      "effort": "S"
+    },
+    {
+      "id": "PROD-12-103",
+      "severity": "High",
+      "file": "backend/roles/",
+      "location": "bhaskar agent role file missing",
+      "line": "backend/roles/bhaskar_agent.md (ABSENT; 86 role files present)",
+      "finding": "The bhaskar agent is registered (AGENT_CONTRACT / discovery) but its role prompt file does not exist, so any routing to it resolves to an agent that cannot run — feature F-34 BROKEN. Cross-ref AGENT-02-001 (Audit 02); re-verified ABSENT at 90dac23b.",
+      "evidence": "ls backend/roles/ | grep -i bhaskar -> no match; 86 role files; AGENT-02-001 in json/AUDIT_02_AGENTS.json.",
+      "production_impact": "Specialized routing that selects bhaskar fails at run time (no role instructions); bounded to that agent's paths.",
+      "confidence": "High (static)",
+      "recommendation": "Add the missing role file or remove the agent from the registry/dispatch map.",
+      "effort": "S"
+    },
+    {
+      "id": "PROD-12-104",
+      "severity": "Low",
+      "file": "backend/app/pipeline/dispatcher.py",
+      "location": "whole module — advertised capability-tag dispatch is unwired",
+      "line": "dispatcher.py:1-15 (docstring promise), :49 (pick_agent_by_tag 'proof point'), :76 (dispatch_subtask)",
+      "finding": "Feature F-33 UNWIRED: the module claims 'new agents inserted via SQL get dispatched with zero code change' but has zero application importers; production selection flows through FleetManager.select() (fleet_manager.py:78) + specialized_agents importlib discovery (specialized_agents.py:200-227). Cross-ref PROD-11-101.",
+      "evidence": "grep 'pipeline.dispatcher' in backend/app -> 0 hits; only tests/test_dispatcher.py and tests/test_agent_registry.py import it.",
+      "production_impact": "None at runtime (dead path); false capability claim persists in code and docs.",
+      "confidence": "High (reachability scan from Audit 11)",
+      "recommendation": "Delete module+tests, or actually wire it and remove the duplicated selection concern.",
+      "effort": "S"
+    },
+    {
+      "id": "PROD-12-105",
+      "severity": "Low",
+      "file": "apps/web/app/stream/",
+      "location": "bare /stream route has no page",
+      "line": "apps/web/app/stream/ contains only error.tsx and [taskId]/; apps/web/e2e-real/journeys.spec.ts PAGES includes '/stream'",
+      "finding": "Navigating to /stream (no task id) serves Next's 404 because there is no page.tsx for the bare segment, while the committed real-stack E2E page tour explicitly iterates '/stream' and asserts 'no 5xx, not bounced to /login, no error boundary' — assertions that pass vacuously on a 404. Test intent vs artifact mismatch.",
+      "evidence": "ls apps/web/app/stream/ -> error.tsx, [taskId]; journeys.spec.ts PAGES array (read this audit).",
+      "production_impact": "Cosmetic; a user hitting /stream directly gets a 404 instead of a helpful redirect (e.g., to /tasks).",
+      "confidence": "High (static)",
+      "recommendation": "Add app/stream/page.tsx redirecting to /tasks, or remove '/stream' from the tour and rely on /stream/{taskId}.",
+      "effort": "S"
+    },
+    {
+      "id": "PROD-12-106",
+      "severity": "Low",
+      "file": "backend/app/api/ (multiple), apps/web/",
+      "location": "backend-only surfaces without UI consumers",
+      "line": "auth.py:121,131,219 (me/refresh/change-password); activity.py:205,257 (cancel/tokens); registry.py:257,290 (agents create/lifecycle); fleet_dashboard.py reports (cost etc.); repo.py:506-616 (reindex/context/architecture/class-graph/package-graph); memory.py:41-247 (6); privacy.py:103-132 (3); audit.py:57-99 (5); specialized_agents 4; epics.py:348 policy-approval",
+      "finding": "A set of fully implemented backend surfaces has no frontend consumer. Each has a plausible consumer class (admin/API/agent-internal) or a documented 'no UI yet' note (README for change-password), but the product decision (UI vs intentionally API-only) is unresolved. Cross-ref PROD-11-103 (test-only APIs) — this list is the FE-facing counterpart.",
+      "evidence": "Complete FE call-site extraction: 49 apiFetch calls in apps/web/lib/api.ts + direct fetch/EventSource/WebSocket in 16 files; none reference the listed endpoints (greps recorded this audit).",
+      "production_impact": "None at runtime; product-completeness question — some capabilities (task cancel, agent lifecycle) are unreachable by end users.",
+      "confidence": "High (static call-site extraction)",
+      "recommendation": "Triage per endpoint: add UI, mark as API-only in docs, or remove.",
+      "effort": "M"
+    }
+  ],
+  "counts": {"critical": 0, "high": 3, "medium": 0, "low": 3, "total": 6},
+  "feature_counts": {
+    "discovered": 34,
+    "production_ready": 0,
+    "verified_static": 29,
+    "partial": 2,
+    "broken": 2,
+    "unwired": 1,
+    "blocked_external": 0,
+    "conflict": 0,
+    "deferred": 0,
+    "unknown": 0,
+    "runtime_gates_unverified": 21,
+    "note": "PRODUCTION_READY = 0 is the honest count under the brief's strict rule (Gate F runtime + LLM-gated Gate G cannot be executed in read-only mode; backend :8000 down, no real ANTHROPIC key, no E2E credentials). verified_static counts features whose full static wiring (UI->FE call->route->service->DB) was evidenced at 90dac23b."
+  },
+  "e2e_journeys": [
+    {"journey": "A — Login/dashboard/protected API/logout", "static_trace": "COMPLETE", "test_artifact": "apps/web/e2e-real/journeys.spec.ts A1-A4 (real stack, committed ecd4905a)", "runtime": "UNVERIFIED (backend down; E2E_USER/E2E_PASS unavailable)"},
+    {"journey": "B — Create task to pipeline", "static_trace": "COMPLETE", "test_artifact": "journeys.spec.ts B (asserts 201 + API re-read persistence)", "runtime": "UNVERIFIED"},
+    {"journey": "C — Plan approval (PM->Arch->Decomposer->approve->manager)", "static_trace": "COMPLETE (approvals.py:63-277; tasks.py:762,827; approval_gate async)", "test_artifact": "LLM-gated (excluded by spec header; PENDING_TESTS_API_KEYS.md)", "runtime": "UNVERIFIED (paid LLM)"},
+    {"journey": "D — Agent execution (subtask->agent->worktree->tools->tests->reviewer)", "static_trace": "COMPLETE (manager graph; FleetManager.select fleet_manager.py:78; specialized_agents.py:200-227)", "test_artifact": "LLM-gated (deferred)", "runtime": "UNVERIFIED"},
+    {"journey": "E — Failure recovery", "static_trace": "IMPLEMENTED with gap (fleet/failure_ladder.py; H-1 exception path PROD-12-102)", "test_artifact": "backend/tests/test_failure_ladder.py exists", "runtime": "UNVERIFIED"},
+    {"journey": "F — Terminal", "static_trace": "COMPLETE (chat page TerminalTabs -> WS /api/terminal/ws/{chatSessionId} backend/app/api/terminal.py:131)", "test_artifact": "component tests only (TerminalPanel.test.tsx)", "runtime": "UNVERIFIED"},
+    {"journey": "G — Repository chat", "static_trace": "COMPLETE (chat.py:136-421; EventSource :215; confirm :321)", "test_artifact": "LLM-gated (deferred)", "runtime": "UNVERIFIED"},
+    {"journey": "H — Fleet enhancement", "static_trace": "COMPLETE (fleet_dashboard.py:486 approve -> _run_apply_phase:383; impact/rollback; main.py:646 monitor)", "test_artifact": "unit tests (test_batch18_enhancement_*.py)", "runtime": "UNVERIFIED"}
+  ],
+  "runtime_evidence": {
+    "executed": [
+      "curl -s http://localhost:3100/login -> 200 (production Next build serving)",
+      "curl http://localhost:8000/health -> connection refused (backend DOWN)",
+      "ss -ltn -> :5432 Postgres LISTEN; :6379 Redis LISTEN; :3100 LISTEN",
+      "git log/status -> HEAD 90dac23b; clean worktree; untracked audit folders only"
+    ],
+    "not_executed": [
+      "Playwright real-stack run (needs backend :8000 + E2E_USER/E2E_PASS)",
+      "Any backend HTTP 2xx verification (backend down)",
+      "Any LLM-dependent journey (no real ANTHROPIC_API_KEY; PENDING_TESTS_API_KEYS.md)",
+      "Any live DB query, browser DOM inspection, or screenshot evidence"
+    ],
+    "repro_commands": [
+      "backend/.venv/bin/uvicorn app.main:app --port 8000 (Postgres/Redis already up)",
+      "cd apps/web && npx playwright test -c playwright.real.config.ts (after creating throwaway approver user)",
+      "run LLM-gated suites per PENDING_TESTS_API_KEYS.md with a real ANTHROPIC_API_KEY"
+    ]
+  },
+  "green_flag_checklist": [
+    {"condition": "Every required feature verified", "met": false, "note": "runtime gates unverified (read-only mode)"},
+    {"condition": "Every required feature wired", "met": false, "note": "F-33 unwired; all other FE->BE calls resolve"},
+    {"condition": "Backend verified", "met": true, "note": "static route/handler level only"},
+    {"condition": "Frontend verified", "met": true, "note": "static call-site level only; no browser run"},
+    {"condition": "Database verified", "met": false, "note": "no live queries performed"},
+    {"condition": "Runtime verified", "met": false, "note": "backend down; LLM-gated"},
+    {"condition": "Security verified", "met": true, "note": "static: auth deps on routes; prior security audit 88/100"},
+    {"condition": "E2E verified", "met": false, "note": "suite committed but not executed this audit"},
+    {"condition": "Regression verified", "met": false, "note": "read-only: no repairs, nothing to regress"},
+    {"condition": "No critical unknowns", "met": true, "note": "critical paths statically traced"},
+    {"condition": "No unresolved critical defects", "met": false, "note": "none critical, but 2 High feature defects open (PROD-12-101/102)"},
+    {"condition": "No unresolved feature/API wiring gaps", "met": true, "note": "apart from F-33 and documented backend-only surfaces"}
+  ],
+  "verified_clean_summary": [
+    "FE->BE contract fully mapped and consistent: all 49 apiFetch call sites in apps/web/lib/api.ts plus direct fetch/EventSource/WebSocket usage in 16 more files resolve to registered backend routes (tasks, epics, goals, roadmap, metrics, repo, settings, chat, fleet, console, approvals, agents, ratings, artifacts, activity, auth). Zero FE calls to nonexistent endpoints, zero wrong-method calls found.",
+    "All 3 frontend SSE streams match backend streaming routes: /api/tasks/{id}/stream (activity.py:48), /api/chat/sessions/{id}/stream (chat.py:215), /api/fleet/requests/stream (fleet_dashboard.py:115 with the stream-shadowing fix comment at :114).",
+    "Terminal WebSocket protocol matches backend contract: TerminalPanel builds ws://.../api/terminal/ws/{chatSessionId} (TerminalPanel.tsx:107-111), resize/ctrl_c message shapes and close codes documented against backend/app/api/terminal.py.",
+    "Image/artifact URLs resolve: /api/tasks/{id}/images/{img} img src -> tasks.py:1303 GET; /api/artifacts/{id} href -> artifacts.py:37 GET.",
+    "Settings vault fully wired: all 5 FE-called settings endpoints exist (api-key settings.py:91/110, openai-key :128/144, github-token :161/177, custom-secrets :290-327, verify-key :344); the settings page's direct fetches (:21,:34) match openai-key/verify-key handlers.",
+    "Console page: 11 repo-operation calls all match console.py routes (:100-263); two additional routes (clone-private :133, workspace/mkdir :113) serve /repo page and private-clone flows.",
+    "Review page (fixed in ecd4905a) calls /api/epics/batch-review (epics.py:175) + approve/reject (:249,:283) + pipeline approve/reject (tasks.py:762,:827) — all MATCH.",
+    "Intentional redirects verified as redirects, not dead pages: / -> /tasks, /cost -> /metrics, /onboarding -> /repo; middleware PUBLIC_PATHS permits only /login, /api/auth/login, /api/auth/setup (middleware.ts:3).",
+    "A real-stack Playwright E2E suite exists and is committed: apps/web/e2e-real/journeys.spec.ts (7 tests: A1-A4 login/logout/session, B create-task persistence, page tour over 16 pages; serial; nothing mocked) + playwright.real.config.ts (baseURL :3100, starts nothing). It was NOT executed during this read-only audit.",
+    "No mock/hardcoded-data pages found: all 21 pages call real APIs (lib/api.ts, direct fetch, EventSource, WebSocket) or are intentional redirects; components receive live props.",
+    "LLM-test deferral is documented, not hidden: PENDING_TESTS_API_KEYS.md at repo root accounts for every skipped/deselected LLM-gated test, and backend/tests/pending/ holds the relocation suite (conftest.py, test_coder_agent.py, test_decomposer_agent.py, test_pipeline_e2e.py)."
+  ],
+  "not_found": [
+    "Any runtime proof of feature behavior (no backend HTTP 2xx, no browser session, no DB query executed this audit)",
+    "Any Playwright execution result for journeys A-H at 90dac23b",
+    "Any FE consumer for the backend-only surfaces listed in PROD-12-106",
+    "Any persisted 'cost approved' signal consumed by the manager (0 grep hits for cost_approved) — root cause of PROD-12-101",
+    "Any page.tsx for the bare /stream route (PROD-12-105)",
+    "Any application importer of pipeline/dispatcher.py (PROD-12-104)"
+  ],
+  "cross_audit_flags": [
+    "PROD-12-101 upgrades PROD-09-101 from 'High, dead-end' to a source-level deterministic proof of the approve->relaunch->re-halt loop at 90dac23b (epics.py:339 + manager.py:2058-2126 consume no approval).",
+    "PROD-12-102 = merged H-1 of Audit 10 (ARCH-01-001 = ORCH-04-101); PROD-12-103 = AGENT-02-001; both re-verified OPEN at 90dac23b.",
+    "PROD-12-104 restates PROD-11-101 (dispatcher orphan) as a feature-level UNWIRED capability.",
+    "PROD-12-106 is the FE-facing counterpart of PROD-11-103 (test-only production APIs); keep one item per side to avoid double counting in the final consolidation.",
+    "Repo-movement note: the audited tree contains commits from a parallel repair series (ecd4905a, 33bbd03c, 90dac23b) plus its reports under files/Antigravity_audit_report/ — those reports were NOT used as evidence for any finding here (brief 2.2 excludes prior audit claims); all evidence is first-hand from the current files and the commands in runtime_evidence.",
+    "Read-only constraint: the brief's repair-and-retest mandate (6, 46-69) was overridden by the governing user instruction; no repairs were performed, so the REGRESSION status is not applicable and runtime gates remain UNVERIFIED by design."
+  ],
+  "verdict": "NOT GREEN — PRODUCTION FEATURE AUDIT INCOMPLETE (0 critical; 2 broken feature paths + 1 unwired capability; all runtime gates unverified in read-only mode; static wiring coverage complete and consistent)"
+}

@@ -1,0 +1,124 @@
+{
+  "audit_id": "14",
+  "audit_name": "Master Independent Reproducibility, Maintainability & Transfer Audit (clean-room reproduction, operational transfer, knowledge handoff)",
+  "run_date": "2026-10-02T13:55:00+05:30",
+  "baseline_commit": "90dac23bad223ec39413c485d1ddb68f9646975e",
+  "baseline_note": "Series baseline c927c44b; audits 01-13 of this series all executed at HEAD 90dac23b (\"Production audit 14\", committed 2026-10-02 12:56 +0530). This audit re-tested prior claims rather than trusting them (brief §1); it found and resolved ONE contradiction: Audit 13's statically-verified 'graceful shutdown' is contradicted by an executed 3/3 SIGTERM shutdown failure at this same HEAD (PROD-14-101).",
+  "worktree_state": "Read-only: no code and no project files modified. Outputs: files/Qoder_audit report/14_MASTER_REPRODUCIBILITY_TRANSFER_AUDIT.md and files/Qoder_audit report/json/AUDIT_14_REPRODUCIBILITY_TRANSFER.json only. Executed isolated tests with full cleanup: (A) clean git clone into /tmp (removed after); (B) throwaway DB qoder14_migrate_test (dropped; only gridiron_dev+postgres remain); (H) throwaway DB qoder14_auth_test (dropped; cookie/login temp files removed); (E) rq burst worker on empty queues (no jobs executed; no LLM calls); (F) backend boot on :8000 and :8001 then SIGTERM (processes exited; ports free). No regressions introduced; nothing repaired (read-only constraint).",
+  "reproducibility_status": "partially reproducible",
+  "final_status": "BLOCKED — INDEPENDENT TRANSFER VERIFICATION INCOMPLETE",
+  "score_policy_note": "Per brief §81 no single numeric score is reported; status words + per-subsystem §82 statuses are used instead.",
+  "findings": [
+    {
+      "id": "PROD-14-101",
+      "severity": "High",
+      "file": "backend/app/main.py",
+      "location": "leader-election shared engine pool starvation; every SIGTERM shutdown aborts; maintenance loops silently die",
+      "line": "1342 (max_overflow=0); 1375 (async with engine.connect() in _run_as_leader — connection held for the whole run_loop); 1620-1648 (pool_size=len(_leader_loop_names)=16 while ~23 _run_as_leader tasks are created); 1799-1846 (23 cancel + await lists); 1847-1850 (await task catches ONLY asyncio.CancelledError); 1855-1859 (engine dispose + close_checkpointer/close_agent_checkpointer/close_chat_checkpointer — skipped on the failure path)",
+      "finding": "The shared leader-election engine is sized pool_size=16 (len of the 16-name _leader_loop_names tuple, main.py:1628-1648) with max_overflow=0, but ~23 _run_as_leader tasks consume it and each leader holds its connection for the entire loop lifetime. Beyond 16, leader tasks block inside engine.connect() until SQLAlchemy's 30 s pool timeout raises sqlalchemy.exc.TimeoutError; the exception is stored in the never-awaited task (no runtime log). At SIGTERM, shutdown cancels all tasks and awaits each; cancellation does not interrupt a checkout-blocked task, so the stored TimeoutError re-raises through 'await task' (main.py:1848), aborting the lifespan: 'Application shutdown failed. Exiting.' — engine dispose and all three checkpointer closes at 1855-1859 never run.",
+      "evidence": "EXECUTED 3/3 runs (SIGTERM at t+50s, t+120s, and on a throwaway-DB run): traceback main.py:1848 (await task) -> main.py:1375 (_run_as_leader -> engine.connect()) -> pool/impl.py:163 -> 'sqlalchemy.exc.TimeoutError: QueuePool limit of size 16 overflow 0 reached, connection timed out, timeout 30.00' -> 'ERROR: Application shutdown failed. Exiting.' /health returned 200 immediately before shutdown in every run ({status:ok, checks:{db:ok}, agents:85}). In the 120 s run only 19 loops logged 'Leader election: this instance is leader for ...'; loop:dependency_auto_dispatch, loop:bg_process_liveness, loop:lesson_store_refresh, loop:barot_temp_agent_ttl logged none. Code comment at main.py:1620-1623 claims the pool is 'sized so every loop can hold its own lock-holding connection concurrently' — false (23 > 16). Cross-ref H-4 (16-name tuple vs 20+ registered loops). Contradicts Audit 13's static shutdown verification (recorded per brief §1).",
+      "production_impact": "(1) Ungraceful teardown on every deploy/restart: leader engine not disposed, 3 checkpointers not closed, uvicorn exits ERROR; (2) leader-gated maintenance loops (e.g., dependency_auto_dispatch, bg_process_liveness, lesson_store_refresh, barot_temp_agent_ttl) starve and die silently on the leader instance — coverage shrinks with no alert because the exception is never retrieved; (3) CI cannot catch it: no test SIGTERMs a started app.",
+      "confidence": "High (3 of 3 executed reproductions with full traceback)",
+      "recommendation": "Minimal fix per brief §85: size the pool >= number of consuming tasks (+overflow headroom) or give each loop a dedicated connection; catch TimeoutError inside _run_as_leader (log + sleep(retry) + continue) so a starved loop self-heals instead of dying; catch Exception (not only CancelledError) per task in the shutdown await loop so one bad task cannot skip teardown; add a SIGTERM clean-shutdown test to CI.",
+      "effort": "S-M"
+    },
+    {
+      "id": "PROD-14-102",
+      "severity": "Low",
+      "file": "repository-wide (tags/artifacts)",
+      "location": "release traceability stale",
+      "line": "git tag: v1.0.0/v1.1.0 (2026-07-15), v1.2.0 (2026-07-16); HEAD 90dac23b is 530 commits beyond v1.2.0; apps/web/.next/BUILD_ID=M5LWPUOEqjKn0J4vvrBdv not linked to any commit",
+      "finding": "The audited production revision has no release tag and no build stamp mapping built artifacts (frontend bundle) to a commit; artifact-to-source tracing relies on manual commit-hash bookkeeping, and changelog/release notes have not been produced since v1.2.0.",
+      "evidence": "Executed: git for-each-ref tags (dates above); git log v1.2.0..HEAD --oneline | wc -l = 530; cat apps/web/.next/BUILD_ID.",
+      "production_impact": "Deployed artifact cannot be definitively matched to source without manual records; incident forensics and rollback-to-known-release depend on memory.",
+      "confidence": "High (executed)",
+      "recommendation": "Tag the audited revision (e.g., v1.3.0) and stamp the commit SHA into build metadata (frontend build env + /health response).",
+      "effort": "S"
+    }
+  ],
+  "counts": {"critical": 0, "high": 1, "medium": 0, "low": 1, "total": 2},
+  "executed_evidence": {
+    "test_A_clean_clone": {"status": "PASS", "detail": "git clone to temp dir: HEAD 90dac23b (matches audited revision); git status --porcelain = 0 lines; 1948 tracked files; .venv/node_modules/.env/backend/.env/apps/web/.env.local all absent in clone; all key files present (.env.example x3, requirements.txt, package.json, pnpm-lock.yaml, docker-compose.yml, README.md, scripts/backup_db.sh). Temp dir removed."},
+    "test_B_empty_db_migration_chain": {"status": "PASS", "detail": "createdb qoder14_migrate_test -> DATABASE_URL override -> alembic upgrade head -> full chain OK -> alembic_version=062 (head), 47 public tables. DROP verified; only gridiron_dev + postgres remain."},
+    "test_C_backend_import": {"status": "PASS", "detail": "python -c 'import app.main' OK on Python 3.12 venv (strict mypy 0/496 from baseline)."},
+    "test_E_worker_bootstrap": {"status": "PASS", "detail": "Queues empty (LLEN rq:queue:default=0; no rq:* keys) -> rq worker gridiron-high gridiron-default --url redis://localhost:6379/0 --burst (v2.10.0): started, subscribing, listening, cleaned registries, 'done, quitting', exit 0. No jobs executed; no LLM calls."},
+    "test_F_backend_health": {"status": "PASS", "detail": "uvicorn app.main:app -> /health 200 {'status':'ok','checks':{'db':'ok'},'db':'ok','agents':85} at t+22s and t+85s (two runs). Port released after exit."},
+    "test_F_shutdown": {"status": "FAIL (3/3)", "detail": "SIGTERM -> 'Shutting down' -> Traceback main.py:1848 await task -> main.py:1375 engine.connect -> sqlalchemy.exc.TimeoutError QueuePool limit of size 16 overflow 0 reached, connection timed out, timeout 30.00 -> 'ERROR: Application shutdown failed. Exiting.' teardown at main.py:1855-1859 skipped. See PROD-14-101."},
+    "test_H_zero_to_login": {"status": "PASS", "detail": "Throwaway DB qoder14_auth_test: empty -> alembic upgrade head -> rev 062 -> uvicorn :8001 with DATABASE_URL override + fresh JWT_SECRET_KEY + JWT_AUTH_ENABLED=true + DEFAULT_ADMIN_PASSWORD -> /health 200 -> POST /api/auth/login admin/<default> -> 200 {'token_type':'bearer','role':'admin','username':'admin','must_change_password':true} -> GET /api/auth/me with cookie -> 200 -> GET /api/tasks without auth -> 401. Cleanup: DB dropped (only gridiron_dev+postgres remain); cookie/login temp files removed."},
+    "audit_13_restore_drill_reference": {"status": "RESTORE_VERIFIED (dev scale)", "detail": "pg_dump -Fc 4.84 MB / 444 TOC / ~1.8 s -> pg_restore --exit-on-error ~7.5 s into disposable DB -> identical counts (alembic 1@062, dev_tasks 414, agent_runs 91, task_logs 108) -> cleanup verified."},
+    "not_executed": ["frontend build from clean clone", "full E2E journeys (Playwright real-stack suite exists but not run; LLM-gated)", "production deployment", "rollback exercise", "agent/tool runtime execution (no LLM keys)", "independent HUMAN handoff (no second engineer available)"]
+  },
+  "transfer_matrix_summary": {
+    "TRANSFERRED": ["source checkout @ HEAD", "configuration templates + override behavior", "database create + migrate (empty→062)", "backend build/boot/health", "authentication + 401 boundary"],
+    "PARTIALLY_TRANSFERRED": ["dependency install manifests (pins/lockfiles verified; fresh pip install not executed)", "workers (burst bootstrap only)", "frontend (prebuilt ;3100 serving; no clean build)", "backup/restore (dev scale)", "release traceability (commit hashes only; PROD-14-102)"],
+    "NOT_TRANSFERRED": ["graceful shutdown/restart (PROD-14-101, fails 3/3)", "rollback (never exercised)"],
+    "BLOCKED": ["agents/tools runtime (LLM-gated)", "deployment (no production env)", "incident rehearsal", "knowledge transfer to a human (no second engineer)"]
+  },
+  "maintainability_status": {
+    "backend_core": "MAINTAINABLE (strict mypy 0/496; 8900+ tests; module reachability clean; 23 non-test TODOs)",
+    "leader_loop_layer": "HIGH_RISK (PROD-14-101; stale 'all 9' comment misstating 16-name tuple vs ~23 tasks)",
+    "frontend": "MAINTAINABLE (typed api.ts layer; 1 TODO; prebuilt bundle)",
+    "migrations": "NEEDS_DOCUMENTATION (alembic check drift, Audit 13 PROD-13-101)",
+    "infrastructure": "MAINTAINABLE (compose dev/prod, Dockerfiles, CI Linux+Windows+FE, 45/45 pinned deps)",
+    "documentation": "MAINTAINABLE (100 docs; README 446 lines complete quickstart; DR 207; DEPLOYMENT 174)",
+    "release_process": "NEEDS_DOCUMENTATION (last tag 2026-07-16; HEAD +530 commits)"
+  },
+  "green_flag_checklist": [
+    {"condition": "clean checkout succeeds", "status": "PASS (executed)"},
+    {"condition": "clean environment setup succeeds", "status": "PARTIAL (existing venv; clean pip install not executed)"},
+    {"condition": "dependencies reproducible", "status": "PARTIAL (45/45 pins + lockfile; fresh install not executed)"},
+    {"condition": "configuration is understood", "status": "PASS (templates tracked; Test H env overrides honored)"},
+    {"condition": "database can be created/migrated", "status": "PASS (executed: empty → rev 062, 47 tables)"},
+    {"condition": "frontend can be built", "status": "NOT EXECUTED"},
+    {"condition": "backend can be built", "status": "PASS (import + boot)"},
+    {"condition": "workers can be started", "status": "PASS (burst bootstrap)"},
+    {"condition": "critical agents can execute", "status": "BLOCKED (no LLM keys)"},
+    {"condition": "critical tools work", "status": "NOT EXECUTED"},
+    {"condition": "critical E2E journeys work", "status": "NOT EXECUTED (suite exists)"},
+    {"condition": "authentication works", "status": "PASS (executed zero-to-login)"},
+    {"condition": "authorization works", "status": "PASS (401 boundary executed; RBAC matrix static)"},
+    {"condition": "isolation is verified", "status": "STATIC ONLY (Audits 03/05)"},
+    {"condition": "production deployment is reproducible", "status": "NOT EXECUTED"},
+    {"condition": "rollback is verified", "status": "NOT EXERCISED"},
+    {"condition": "backup restore is verified", "status": "PASS (RESTORE_VERIFIED, dev scale — Audit 13)"},
+    {"condition": "disaster recovery is verified", "status": "PARTIAL (restore only)"},
+    {"condition": "upgrade path is verified", "status": "PASS (head applied; empty→062 executed) + Audit 13 PROD-13-104 gap"},
+    {"condition": "critical incidents can be diagnosed", "status": "NO REHEARSAL"},
+    {"condition": "critical runbooks work", "status": "PARTIAL (backup/restore drill-executed)"},
+    {"condition": "documentation matches reality", "status": "PASS (spot-checked; stale items confined to the two findings)"},
+    {"condition": "no critical tribal knowledge remains", "status": "NO INDEPENDENT HUMAN HANDOFF PERFORMED (core BLOCKED item)"},
+    {"condition": "production artifacts are traceable", "status": "FAIL (PROD-14-102)"},
+    {"condition": "no critical unresolved regression exists", "status": "PASS (no repairs; baseline suite green-minus-env)"},
+    {"condition": "no critical unknown blocks confidence", "status": "FAIL (shutdown defect + unexecuted runtime gates)"}
+  ],
+  "human_decisions": [
+    "Schedule the §104 independent human handoff with a second engineer (the single core blocking gate).",
+    "Approve and schedule the PROD-14-101 fix before the next production deploy (recommended: pool sizing + TimeoutError self-heal + per-task Exception catch + CI SIGTERM test).",
+    "Adopt a release/versioning policy: tag the audited revision and stamp commit SHA into build metadata (PROD-14-102)."
+  ],
+  "cross_audit_flags": [
+    "CONTRADICTION RESOLVED (brief §1): Audit 13 (static) claimed graceful shutdown verified; executed evidence at the same HEAD shows 3/3 SIGTERM shutdown failure — final consolidated truth updated here (PROD-14-101). File 15 master summary must carry this correction.",
+    "PROD-14-101 is the executed proof of previously-static H-4 (16-name _leader_loop_names tuple vs 20+ registered loops — pool sized 16 vs ~23 consuming tasks).",
+    "Audit 13 PROD-13-101 (alembic drift), PROD-13-102 (RTO/RPO undefined), PROD-13-103 (backups dormant) remain open and un-recounted here.",
+    "Audit 12's runtime gates (backend was DOWN then) were partially satisfied here: backend boot/health/auth now executed at this HEAD.",
+    "The §108 multi-file output tree was consolidated into the single numbered report + JSON sidecar per the engagement's mandated output convention (disclosed in the report §0)."
+  ],
+  "verified_clean_summary": [
+    "Clean clone reproduces exactly: HEAD 90dac23b, clean status, 1,948 tracked files, zero hidden ignored-but-required files; all three env templates tracked.",
+    "Dependencies are pinned: backend/requirements.txt 45/45 '==' pins; requirements-dev.txt pinned; pnpm-lock.yaml tracked for the frontend workspace.",
+    "Empty-database reproduction PASSED: 60+ migration chain from zero reaches rev 062 with 47 public tables, no errors.",
+    "Zero-to-login PASSED on a throwaway DB: admin auto-provisioning works (login 200 role=admin must_change_password=true), session cookie works (/me 200), authz boundary rejects unauthenticated access (401).",
+    "RQ worker bootstraps cleanly in burst mode on empty queues (exit 0) with the documented command.",
+    "README quickstart maps to real files/commands end-to-end (clone → venv → pip → cp .env.example → compose db → alembic → uvicorn → pnpm dev → login); next.config.mjs defaults NEXT_PUBLIC_API_URL to http://localhost:8000 so the frontend step works without a .env.local.",
+    "Restore remains RESTORE_VERIFIED at dev scale (Audit 13 drill; parity 1@062, 414, 91, 108).",
+    "No machine-specific paths in backend code/scripts (single grep hit is a comment quoting a slowapi error message); 100 tracked docs; 23 non-test backend TODOs and 1 frontend TODO only."
+  ],
+  "not_found": [
+    "Any hidden/untracked-but-required file needed for a clean start (clean clone inspection)",
+    "Any hardcoded developer-machine path in backend/app or scripts (only one comment hit)",
+    "Any release tag or build stamp mapping the audited HEAD / running frontend bundle to a source revision",
+    "Any CI test that SIGTERMs a started application (which is why PROD-14-101 passes CI)",
+    "Any independent human operator record (handoff never performed)"
+  ],
+  "verdict": "BLOCKED — INDEPENDENT TRANSFER VERIFICATION INCOMPLETE (reproducibility: partially reproducible; 0 critical, 1 high, 0 medium, 1 low; core reproduction gates passed by execution — clone, deps manifests, empty-DB migrations, boot/health, zero-to-login, worker bootstrap, restore drill — while the independent HUMAN handoff, production deployment, rollback, frontend clean build and LLM journeys remain unexecuted; PROD-14-101 shutdown failure reproduced 3/3)"
+}

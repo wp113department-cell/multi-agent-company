@@ -1,0 +1,116 @@
+{
+  "audit_id": "09",
+  "audit_name": "Master Performance & Scalability Audit (Concurrency, Blocking Calls, DB, Token/Cost, Frontend, Scalability)",
+  "run_date": "2026-10-02T13:05:00+05:30",
+  "baseline_commit": "c927c44bf410e188287f32b2cf54e0529c642025",
+  "baseline_note": "Evidence pinned to the audit-wide baseline c927c44b (\"Production audits 09 and 11\", 2026-10-02 11:11 +0530); HEAD advanced twice during the series (ecd4905a \"Production audit 12\" then 33bbd03c \"Production audit 13\"). The baseline commit itself already contains the perf fixes labeled \"Production audit 09\" (thread-pool sizing, slot-acquisition timeout 2100s, fleet spend_guard, worktree retention) — everything was audited as it exists on disk at 33bbd03c, i.e. with those fixes present.",
+  "worktree_state": "This audit modified no code and no project files; it wrote only files/Qoder_audit report/09_PERFORMANCE_SCALABILITY_AUDIT.md and files/Qoder_audit report/json/AUDIT_09_PERFORMANCE_SCALABILITY.json (plus one temporary AST-scan script under the audit folder, deleted after use). Read-only method: full reads of pipeline/concurrency.py, fleet/budget_manager.py, fleet/spend_guard.py, pipeline/cost_controller.py, pipeline/conflict_guard.py, pipeline/file_locks.py, repo_tools/context_builder.py, services/activity_stream.py, db/session.py, api/budget_gate.py, api/activity.py, manager.py cost/graph nodes, api/epics.py; one AST scan of all backend/app/**/*.py for blocking calls inside async defs (3 hits, all verified to_thread-wrapped); targeted greps (to_thread sites, HNSW DDL, <=> operators, check_daily callers, requires_approval/cost_approved). Static analysis only — not load-tested.",
+  "layer_score": 78,
+  "findings": [
+    {
+      "id": "PROD-09-101",
+      "severity": "High",
+      "file": "backend/app/agents/manager.py, backend/app/api/epics.py, apps/web/app/epics/[id]/page.tsx",
+      "location": "_cost_estimate_node / approve_epic_cost / approve_epic — the cost-approval gate has no working resume path",
+      "line": "manager.py:2036-2127,2532-2535,2638-2649; epics.py:250-280,318-345; epics/[id]/page.tsx:52-53,153-157",
+      "finding": "For an epic over the $1.00 cost_approval_threshold, _cost_estimate_node sets status=pending_cost_approval and routes to END. The UI's 'Approve Cost & Start Agents' calls POST /api/epics/{id}/approve-cost → approve_epic_cost sets status=pending and relaunches _launch_epic_manager, whose graph.ainvoke re-enters at START; resource_check → cost_estimate is an unconditional edge chain, there is no cost_approved/skip flag anywhere in app/ (grep: 0 hits), the epic row loaded in the node is unused (# noqa: F841), and the estimate inputs are unchanged — so requires_approval is still True and the epic is deterministically re-blocked. The other endpoint POST /api/epics/{id}/approve accepts pending_cost_approval, sets status=approved, and never relaunches; no code consumes an epic in 'approved' status — that path strands the epic. No test covers either resume direction (the three relevant modules only exercise the block direction; the only test touching /approve-cost asserts its rate/budget dependency).",
+      "evidence": "manager.py:2056 (# noqa: F841 unused epic), 2058 (estimate_epic_cost(subtask_count=5, db=db)), 2066-2127 (pending_cost_approval + halt), 2579-2590 (unconditional resource_check→cost_estimate), 2638-2649 (graph.ainvoke re-enters at START); epics.py:335-339 (status='pending' + relaunch), 261-267 (status='approved', no relaunch); grep cost_approved → 0 hits; tests: test_phase51_epic_manager_graph.py:319-360,483-507 / test_audit04_orchestration_fixes.py:611-716 / tests/pending/test_manager_integration.py:96-121 (block direction only); test_audit09_spend_guard.py:179 (dependency presence only).",
+      "production_impact": "Every epic whose pre-flight estimate exceeds $1 is permanently stuck: the headline remedy ('approve to proceed at the current scope') cannot succeed; the only operator workaround is raising COST_APPROVAL_THRESHOLD in config. Spend stays bounded (nothing runs) — a workflow dead-end, not a money-loss bug.",
+      "confidence": "High (full call chain statically traced; not live-executed — read-only audit)",
+      "recommendation": "Persist approval on the epic (e.g. cost_approved_at set by approve_epic_cost) and honor it in _cost_estimate_node for the current estimate (re-gate only if the refreshed estimate materially exceeds what was approved); make approve_epic's acceptance of pending_cost_approval either relaunch or be restricted to ready_for_review; add a regression test running block → approve → planning reached.",
+      "effort": "M"
+    },
+    {
+      "id": "PROD-09-102",
+      "severity": "Medium",
+      "file": "backend/app/agents/manager.py",
+      "location": "pre-flight gate hardcodes subtask_count=5; the refined post-planning estimate is stored but never re-gated",
+      "line": "manager.py:2058,2199-2206; graph edge manager.py:2590",
+      "finding": "The approval gate evaluates estimate_epic_cost(subtask_count=5) before planning exists. After planning, the real count is known — refined_estimate = estimate_epic_cost(subtask_count=len(subtasks), db=db) — and it updates Epic.cost_estimate only; the graph then continues planning → conflict_check unconditionally and no second approval check exists anywhere (grep requires_approval: only the one node). At the config fallback rate (~$0.030/subtask) a 5-subtask estimate is ≈$0.15 while a 34-subtask plan is ≈$1.02 — so the gate can pass an epic that, once planned, is well over the threshold without human approval; conversely a genuinely small plan is conservatively blocked by the placeholder (and then hits PROD-09-101's dead end).",
+      "evidence": "manager.py:2058 (subtask_count=5 literal), 2199-2206 (refined estimate → Epic.cost_estimate only), 2590 (planning→conflict_check unconditional); config-grounded arithmetic (4k in × $3/M + 1.2k out × $15/M); grep requires_approval → single node.",
+      "production_impact": "The 'human approval before money is spent' decision can be made on an assumption that planning later invalidates; the fleet-wide daily cap ($25) still bounds total damage.",
+      "confidence": "High (code-verified)",
+      "recommendation": "After computing refined_estimate, if refined_estimate.requires_approval and the epic was not explicitly approved at that materially larger amount, route back through the same pending_cost_approval state with the refined numbers in the halt reason.",
+      "effort": "S–M"
+    },
+    {
+      "id": "PROD-09-103",
+      "severity": "Medium",
+      "file": "backend/app/repo_tools/context_builder.py",
+      "location": "_context_cache is unbounded and its per-repo invalidation can never match (keys are SHA-256 hashes; invalidators pass paths)",
+      "line": "context_builder.py:22-38,79-82,165-166; callers api/repo.py:184,444",
+      "finding": "_context_cache[key] = ContextResult where key = sha256(task_description|repo_path). Entries are added per distinct task description and never evicted (no max size, no TTL, no LRU). invalidate_context_cache(repo_path) filters with 'repo_path in str(k)' — comparing a repo path against a hex digest, which can never be true; both real callers (api/repo.py:184 after clone, :444 after reindex) pass a path, so the only invalidation that ever works is the full clear with None, which nobody calls. Consequences: (a) monotonic memory growth ∝ distinct tasks run, for process lifetime; (b) after a re-index, cached ContextResults built from the old index keep being served to planning — stale file lists/dependency chains until restart. Both silent.",
+      "evidence": "context_builder.py:25-27 (sha256 key), 36 (substring test repo_path in str(k)), 165-166 (store); api/repo.py:184,444 (both callers pass local_path/repo_path).",
+      "production_impact": "Slow unbounded memory growth on long-lived deployments, plus silently stale repo context after re-index/re-clone until process restart.",
+      "confidence": "High (code-verified)",
+      "recommendation": "Key by (task_description, repo_path) tuple instead of a hash (fixes invalidation with a one-line change), store the repo path in ContextResult, and cap the dict (LRU or size cap) so growth is bounded.",
+      "effort": "S"
+    },
+    {
+      "id": "PROD-09-104",
+      "severity": "Low",
+      "file": "backend/app/api/epics.py",
+      "location": "GET /api/epics returns every epic ever created with no pagination while the UI polls it every 5s",
+      "line": "epics.py:150-170",
+      "finding": "The endpoint executes select(Epic).order_by(Epic.created_at.desc()) with no limit/cursor and returns every epic ever created; the frontend epics page polls at 5s. Every open dashboard tab re-downloads the entire epic table every 5 seconds — response size and JSON serialization grow linearly with lifetime epic count. Contrast: the tasks list is correctly cursor-paginated (repository.py:353-375, limit ≤ 100).",
+      "evidence": "epics.py:150-170 (unbounded select); frontend polling survey (epics page 5s, Audit 08 §6); repository.py:353-375 (the correct pattern).",
+      "production_impact": "None at demo data sizes; at thousands of epics it becomes the heaviest periodic request in the app (self-inflicted polling load).",
+      "confidence": "High (code-verified; scale impact reasoned, not load-tested)",
+      "recommendation": "Add the same cursor/limit shape as list_tasks (the status filter already exists in the query for batch-review).",
+      "effort": "S"
+    },
+    {
+      "id": "PROD-09-105",
+      "severity": "Low",
+      "file": "backend/app/fleet/budget_manager.py",
+      "location": "check_daily()/check_daily_db() are dead code; check_daily_db's docstring cites a caller that no longer calls it",
+      "line": "budget_manager.py:132-199; base_graph.py:1791-1795 (stale comment)",
+      "finding": "Production daily-cap enforcement moved to spend_guard (stronger: pre-call SDK gate + Redis ledger + DB floor). check_daily() has test-only callers; check_daily_db() — built specifically as the DB-accurate daily check ('Real callers (base_graph.py's post-run budget check)') — has zero callers anywhere in app/ or tests/; the post-run block it describes now calls bm.check_run() + spend_guard.check() (base_graph.py:4204-4219). The stale comment at 1791-1795 still claims check_daily 'only ran AFTER' runs.",
+      "evidence": "budget_manager.py:132-199; grep check_daily_db → zero non-definition callers; base_graph.py:4204-4219 (real post-run path); base_graph.py:1791-1795 (stale comment).",
+      "production_impact": "None at runtime (the effective cap is enforced); maintenance hazard — two unwired methods imply enforcement that doesn't exist through them.",
+      "confidence": "High",
+      "recommendation": "Delete both methods (or rewire check_daily_db into the post-run path for defense-in-depth) and fix the stale comments. Cross-ref Audit 11 (dead code).",
+      "effort": "S"
+    },
+    {
+      "id": "PROD-09-106",
+      "severity": "Low",
+      "file": "backend/app/pipeline/concurrency.py",
+      "location": "_subtask_sems grows for the process lifetime; per-epic semaphores are never pruned",
+      "line": "concurrency.py:118,153-158,218-227",
+      "finding": "_subtask_sems[epic_id] is created on first use and removed only by reset_for_testing(). Across a long-lived process, one PrioritySemaphore per epic ever run accumulates. Zero other readers/writers in app/ (grep). Correctness unaffected (a stale semaphore for a finished epic is unreachable); bytes-scale leak per epic.",
+      "evidence": "concurrency.py:118 (_subtask_sems dict), 153-158 (created on first use), 218-227 (only reset_for_testing removes); grep → no other accessors.",
+      "production_impact": "Bytes-scale memory growth per epic over process lifetime; hygiene issue only.",
+      "confidence": "High (code-verified)",
+      "recommendation": "Delete the entry in _finalize_node alongside release_epic_files() (the same lifecycle point already exists).",
+      "effort": "S"
+    }
+  ],
+  "counts": {"critical": 0, "high": 1, "medium": 2, "low": 3, "total": 6},
+  "verified_clean_summary": [
+    "Concurrency correctness: all three semaphores traced to real acquisition sites — epic_slot wraps the whole orchestration body (manager.py:1847-1851) and releases on every early-return path (test_audit04 proves two sequential pending_cost_approval runs cannot hang); agent_run_slot wraps each LLM-calling stage (596/754/836); subtask_slot via manual __aenter__/__aexit__ (521-525 … 986) with the documented invariant. Worst case 10 epics × 5 subtasks contending for 20 global slots ⇒ bounded queueing, each wait capped at slot_acquisition_timeout_seconds=2100 > max_run_time_seconds=1800, and an exhausted wait produces a visible blocked subtask (SlotAcquisitionTimeout, 'possible deadlock').",
+    "conflict_guard.check_file_conflicts() is called once per epic (not per subtask) and does 1+E queries with E ≤ 10 → ≤ 55 small indexed queries fleet-wide; the advisory read is backed by a real DB-enforced lock (file_locks.py reserve_epic_files: UNIQUE(file_path) + SAVEPOINT all-or-nothing + TTL reaping, migration 039). Not O(n²).",
+    "Blocking-call audit VERIFIED CLEAN via AST scan of all 496 backend/app/*.py: 3 candidate hits, all verified as sync helpers dispatched via await asyncio.to_thread (chat_agent.py:3079/3121/3162 wrapped at 3092/3134/3172); 0 sync requests.* calls; the single time.sleep (base_graph.py:2570) lives in a sync helper executed as part of the sync agent graph in a worker thread. Method and its cross-function limitation stated in the report.",
+    "DB performance: pool_size=20 + max_overflow=10 from real config fields (db_pool_size/db_pool_max_overflow, config.py:807,817); server-side statement_timeout 30s via asyncpg server_settings on every pooled connection; N+1 sweep clean (cursor-paginated list_tasks with limit ≤ 100, selectinload(DevTask.repo) and selectinload(Epic.repo), fleet_dashboard aggregate GROUP BYs, structurally enforced by async SQLAlchemy MissingGreenlet).",
+    "HNSW indexes exist for all three vector tables (memory_embeddings 004:90-91, versioned_lessons 020:27-28, code_embeddings 032:29-30) with matching <=> vector_cosine_ops operators at every similarity query; the composite-ranking sort that cannot use HNSW is handled by two-stage retrieval (inner CTE LIMIT k × memory_candidate_overfetch_factor(10), outer re-rank — store.py:600-635).",
+    "Token/cost controls at three levels, all verified: (1) spend_guard.install() wraps the Anthropic SDK Messages/AsyncMessages create+stream at class level from app/__init__.py:5 — every call in-process is pre-checked; Redis INCRBYFLOAT ledger with in-process fallback; post-response usage priced by tier incl. cache multipliers; spent_today_with_db_floor() floors by today's agent_runs. (2) require_daily_budget 429 dependency on tasks/approvals/specialized-agents/epics. (3) Preventive per-turn token stop (base_graph.py:1791-1825) + post-run block (4195-4233).",
+    "Context-window strategy: _condense_messages keeps head[0]+tail[-4], summarizes the middle via one Haiku call (max 512 tokens), folds the summary usage into run totals, emits an explicit placeholder on failure (no silent loss), fires approaching_limit at 80%, and has a real-window safety net; chat restore bounded at chat_history_restore_limit=200.",
+    "Frontend performance: all polling intervals ≥ 3s; SSE heartbeat 15s; per-subscriber asyncio.Queue(maxsize=500) with drop-on-full + warning; finally-based client-disconnect cleanup; stream registry capped at 256 streams with idle (1h)/terminal eviction; 3s-bounded DB recheck for abort flags (no per-call queries).",
+    "Scalability (static): default thread pool explicitly sized max_concurrent_agent_runs + max(16, cpu+4) = 36 on this 6-core host (fixes the documented 10-thread starvation); first likely shared bottleneck is the DB pool (30 connections) once API handlers + ~23 background loops are added; pool waits raise TimeoutError after 30s, not silently; worktree cleanup on reject/complete/approve paths + retention of terminal-state worktrees older than 7 days; memory growth inventory: only PROD-09-103 and PROD-09-106 unbounded."
+  ],
+  "not_found": [
+    "pool_recycle / pool_recycle=3600 anywhere in session.py or config.py (grep: 0 hits) — cited by external Audit 09's evidence",
+    "EPIC_BUDGET_USD setting (grep: 0 hits) — the enforced ceiling is cost_budget_daily_usd ($25, fleet-wide daily, via spend_guard)",
+    "cost_approved flag / any approved-bypass in the cost-estimate gate (grep: 0 hits) — root of PROD-09-101",
+    "Any consumer of epic status 'approved' (grep of status transitions: none)",
+    "Any caller of check_daily_db() outside tests (grep: zero non-definition callers)",
+    "maxlen=500 deque in api/activity.py (0 occurrences; the real artifact is asyncio.Queue(maxsize=500) in services/activity_stream.py:89,332-334)"
+  ],
+  "cross_audit_flags": [
+    "External Audit 09 (ANTIGRAVITY, score 94/100, 1 Low) PERF-09-001 recommends 'Expose DB_POOL_SIZE/DB_MAX_OVERFLOW as environment variables' — the fields already exist (config.py:807,817, env-exposed); its evidence claims pool_recycle=3600 which does not exist (grep: 0). Stale finding.",
+    "External Audit 09 table states max_concurrent_subtasks=4 — actual default 5 (config.py:831-833); and attributes maxlen=500 to app/api/activity.py — the real artifact is a per-subscriber asyncio.Queue(maxsize=500) in services/activity_stream.py:89,332-334.",
+    "External Audit 09 cites EPIC_BUDGET_USD as the enforced spend ceiling — no such setting exists; the real enforced ceiling is COST_BUDGET_DAILY_USD via fleet/spend_guard.py.",
+    "External Audit 09's 94/100 predates-and-misses the still-open defects found here, including a High (dead-end cost approval, PROD-09-101) it did not report, while the perf items it did influence (thread pool, slot timeout, spend guard, worktree retention) were real fixes already landed at the baseline. Also: their series shipped no 17_* report (only 01-16 present) — relevant to deliverable file 17."
+  ],
+  "verdict": "READY"
+}

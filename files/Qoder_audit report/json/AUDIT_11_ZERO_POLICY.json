@@ -1,0 +1,89 @@
+{
+  "audit_id": "11",
+  "audit_name": "Master Zero Policy Audit (Hallucination, Hardcoding, Prompt/Context Leakage, Memory Leakage, Dead Code, Duplicate Logic, Infinite Loops, Circular Dependencies, Silent Exceptions, Production Blockers)",
+  "run_date": "2026-10-02T13:20:00+05:30",
+  "baseline_commit": "c927c44bf410e188287f32b2cf54e0529c642025",
+  "baseline_note": "Evidence pinned to the audit-wide baseline c927c44b (\"Production audits 09 and 11\", 2026-10-02 11:11 +0530); HEAD advanced twice during the series (ecd4905a \"Production audit 12\" then 33bbd03c \"Production audit 13\"). Everything was audited as it exists on disk at 33bbd03c; no cited file changed while this audit ran.",
+  "worktree_state": "This audit modified no code and no project files; it wrote only files/Qoder_audit report/11_MASTER_ZERO_POLICY_AUDIT.md and files/Qoder_audit report/json/AUDIT_11_ZERO_POLICY.json (plus two temporary read-only scanner scripts under the audit folder, deleted after use). Read-only method: (1) definition-usage scanner over all 496 backend/app/**/*.py top-level def/class names with tree-wide word-boundary occurrence counts (159 candidates -> 156 classified as false positives: FastAPI route decorators, importlib-dispatched agent run_* modules via specialized_agents._discover_agent_fn, standard test-reset helpers); (2) module reachability scanner over every dotted app.x.y path across backend/**/*.py (0 never-imported modules); (3) earlier AST import-cycle scan (496 modules, 98 cycle groups); (4) targeted greps + reads of base_graph.py enforcement blocks, tools.py registries, event_bus/, policy/engine_v2.py, fleet/approval_gate.py, fleet/scratchpad.py, fleet/fleet_manager.py, pipeline/dispatcher.py, api/specialized_agents.py, app/fleet/agent_models.json. Static analysis only.",
+  "layer_score": 82,
+  "findings": [
+    {
+      "id": "PROD-11-101",
+      "severity": "Low",
+      "file": "backend/app/pipeline/dispatcher.py",
+      "location": "whole module (dispatch_subtask at line 76) — production-orphan kept alive only by its own tests",
+      "line": "dispatcher.py:76,49,44; tests/test_dispatcher.py; tests/test_agent_registry.py",
+      "finding": "The module's docstring advertises 'Phase 6 upgrade: capability-tag dispatch ... new agents inserted via SQL get dispatched with zero code change' and calls pick_agent_by_tag 'the proof point'. In reality the module has zero importers anywhere outside tests/ — production agent selection flows through app/fleet/fleet_manager.py::FleetManager.select() (fleet_manager.py:78) and app/api/specialized_agents.py's _REGISTRY/_discover_agent_fn (dynamic run_* discovery from AGENT_CONTRACT). get_agent_for_type() and pick_agent_by_tag() are called only from within dispatch_subtask() itself.",
+      "evidence": "grep -rn 'pipeline.dispatcher' app/ -> 0 hits; total non-test occurrences of dispatch_subtask = 0 (only tests/test_dispatcher.py:7 and tests/test_agent_registry.py:129); docstring claim in dispatcher.py:1-15; docs/reports/PHASE_4_TEST_REPORT.md, PHASE_6_TEST_REPORT.md, AUDIT_01_ARCHITECTURE.md reference the module.",
+      "production_impact": "None at runtime (dead path). Maintenance hazard: its tests pass forever regardless of production routing, and the docstring's dispatch claim is false for the shipped system.",
+      "confidence": "High (static call-graph + reachability scan)",
+      "recommendation": "Delete the module and its tests, or actually wire capability-tag dispatch in and remove the duplicated concerns from FleetManager.select.",
+      "effort": "S"
+    },
+    {
+      "id": "PROD-11-102",
+      "severity": "Low",
+      "file": "backend/app/db/models.py, backend/app/event_bus/models.py, backend/app/policy/engine_v2.py, backend/app/fleet/test_score.py, backend/app/agents/temporary_agent.py, backend/app/api/registry.py, backend/app/api/epics.py, backend/app/api/repo.py",
+      "location": "zero-reference member cluster: 1 unused ORM model, 2 unused event constructors, 1 unused policy check, 1 unused trend reader, 1 unused reset helper, 4 unused Pydantic response models",
+      "line": "db/models.py:474 (FailedEvent); event_bus/models.py:187 (architecture_ready), 229 (review_completed); policy/engine_v2.py:85 (check_files_against_policies); fleet/test_score.py:167 (get_test_score_trend); agents/temporary_agent.py:494 (reset_temporary_agent_pool); api/registry.py:27,32 (AgentResponse, MetricsResponse); api/epics.py (EpicResponse); api/repo.py (RepoResponse)",
+      "finding": "Ten members whose tree-wide occurrence count equals their definition count (1-2) — genuinely unreferenced. FailedEvent is the ORM mapping of the failed_events table, which production writes via raw SQL (event_bus/bus.py:161 INSERT, main.py:358 dead-letter sweep, pipeline/queue_adapter.py:377) — the ORM class itself is never used. architecture_ready/review_completed are event-constructor helpers whose siblings are exercised by tests but which no code (not even tests) calls. The four Pydantic models are unreferenced and none of the three API files declares response_model= on any route (grep: 0).",
+      "evidence": "Definition-usage scanner over 496 modules: per-name word-boundary counts (each equals definition count); response_model= grep over registry.py/epics.py/repo.py -> 0; failed_events raw-SQL writers at event_bus/bus.py:161, main.py:358, queue_adapter.py:377.",
+      "production_impact": "None at runtime; maintenance/readability cost and an advertised-but-unused API surface (two event constructors).",
+      "confidence": "High (scanner + manual verification of each member)",
+      "recommendation": "Delete the listed members (or annotate as deliberately-kept API stubs); keep the failed_events raw-SQL path unchanged.",
+      "effort": "S"
+    },
+    {
+      "id": "PROD-11-103",
+      "severity": "Low",
+      "file": "backend/app/policy/engine_v2.py, backend/app/fleet/approval_gate.py, backend/app/fleet/scratchpad.py, backend/app/services/retention.py, backend/app/artifacts/s3_store.py, backend/app/fleet/metrics.py, backend/app/event_bus/redis_streams.py, backend/app/fleet/fleet_events.py, backend/app/fleet/tool_manifest.py, backend/app/fleet/architecture_score.py, backend/app/fleet/security_score.py",
+      "location": "test-only production APIs — functions whose only callers live in tests/",
+      "line": "engine_v2.py:59,112,158 (check_file_against_policies, has_approval, match_pattern_sync); approval_gate.py:263,268 (get_pending, record_decision — production uses aget_pending/arecord_decision); scratchpad.py:278 (expire_stale_entries); retention.py:287 (enforce_retention_policy — production runs _run_cleanup via start_retention_loop); s3_store.py (delete_artifact_s3, list_artifacts_s3); metrics.py (configure_tracer_provider, new_trace_id); redis_streams.py (stream_length); fleet_events.py (memory_created, translate_legacy_to_fleet, get_fleet_bus); tool_manifest.py (get_high_risk_tools); architecture_score.py/security_score.py (trend readers)",
+      "finding": "A consistent pattern: these functions are exercised by the test suite but have zero production callers. engine_v2's only production-used function is record_approval (api/epics.py:356); approval_gate's production path is the async pair (arecord_decision/arequest_human_input used by chat_agent.py:1005,1029,1072,1132,1180 and base_graph.py:3008); retention's live path is _run_cleanup inside start_retention_loop (main.py:1439). Standard test-reset helpers (reset_for_testing, reset_client, reset_docker_probe_cache, reset_model_router, etc.) were excluded as legitimate test infrastructure.",
+      "evidence": "Per-name occurrence counts across backend/**/*.py (definition + test files only, cross-checked against production import sites); production import greps for each async/live counterpart.",
+      "production_impact": "None at runtime; drift hazard — a test suite that stays green on code paths the product abandoned gives false confidence and taxes every refactor.",
+      "confidence": "High (occurrence counting + import-site verification)",
+      "recommendation": "Triage deliberately: wire each function into the production path it was meant for, or delete it together with its tests.",
+      "effort": "S-M"
+    }
+  ],
+  "counts": {"critical": 0, "high": 0, "medium": 0, "low": 3, "total": 3},
+  "zero_policy_compliance_table": [
+    {"policy": "Zero Hallucination", "status": "FULLY COMPLIANT", "evidence": "Schema validation of every submit_* payload (base_graph.py:2884-2893) feeds checks['policy:schema_valid'] which is part of gate.passed (:2387) -> _requires_human_approval (:2976-2978); citation verification flags fabrications (:2920-2934 -> _citation_check + telemetry counter at :3119, non-blocking by documented design); 94 VerificationConfig instantiations incl. reviewer set_by+enforce_in_result (reviewer.py:69-75), bug_fix blocking_until read-before-edit (bug_fix.py:69-80); 86 role prompts require read/search evidence."},
+    {"policy": "Zero Hardcoding", "status": "FULLY COMPLIANT", "evidence": "Models/routing in app/fleet/agent_models.json + config.py; CORS/retries/timeouts/budgets/pools all config fields; no secret literals (grep); agent_name== only in dispatch/routing branches (manager.py:597 frontend_dev)."},
+    {"policy": "Zero Prompt/Context Leakage", "status": "FULLY COMPLIANT", "evidence": "Per-run AgentRunState isolation; scoped chat memory with bounded restore (200); bash extra_env redaction (bash.py:101-128,229-249); no cross-agent bleed found."},
+    {"policy": "Zero Memory Leakage", "status": "PARTIALLY COMPLIANT", "evidence": "Bounded: LessonStore (pop(0) FIFO, lesson_store_capacity), activity streams (256 cap, maxsize=500 queues), chat restore; all fire-and-forget sites tracked or caught (_spawn_tracked, logger.exception, cancel+await). Violations cross-referenced from Audit 09: PROD-09-103 (_context_cache unbounded + never-matching invalidation) and PROD-09-106 (_subtask_sems never pruned)."},
+    {"policy": "Zero Dead Code / Unused Imports / Orphan Files", "status": "PARTIALLY COMPLIANT", "evidence": "Module level CLEAN: reachability scan over 496 modules found 0 never-imported modules. Member level: PROD-11-101 (pipeline/dispatcher.py production-orphan), PROD-11-102 (10-member zero-reference cluster), PROD-11-103 (test-only APIs), plus cross-ref PROD-09-105 (dead budget methods). Minor observations: stale '36 CHAT_TOOLS' comment at chat_agent.py:1284 (actual 190 tools), unadvertised web_search handler."},
+    {"policy": "Zero Duplicate Logic", "status": "PARTIALLY COMPLIANT", "evidence": "policy/engine.py (live security denylists) vs policy/engine_v2.py (only record_approval wired); budget_manager.check_daily* (dead) vs live spend_guard (PROD-09-105); sync/async duplicate pairs with one side unwired (PROD-11-103); dispatcher.py routing duplicates FleetManager.select() (PROD-11-101)."},
+    {"policy": "Zero Infinite Loops", "status": "FULLY COMPLIANT", "evidence": "All four while True sites bounded (failure_ladder.py:550, consolidation.py:337, bhaskar_sandbox.py:485, process_manager.py:103); graph loop terminates via n_stalls >= max_stalls=3 -> checkpoint + escalate + request_human_review (base_graph.py:3365-3368,4235-4270); no recursion_limit override (LangGraph default backstop)."},
+    {"policy": "Zero Circular Dependencies", "status": "FULLY COMPLIANT", "evidence": "AST scan of 496 modules -> 98 cycle groups; 97 broken by deferred function-local imports; single pure top-level cycle is app.event_bus package __init__ re-export (bus <-> __init__), benign via Python submodule fallback; import app.main clean."},
+    {"policy": "Zero Silent Exceptions / Emergency Brakes", "status": "PARTIALLY COMPLIANT", "evidence": "Census 781 except Exception sites, 61 pass-swallows; every sampled critical-path swallow is deliberate documented telemetry/fallback (manager.py:573,750,832; chat_agent.py:496,966; pm.py:127; decomposer.py:146; tasks.py:59); exc_info=True where it matters (tasks.py:756,1052; bash.py:287); reflection/critique log-and-continue (base_graph.py:2063-2064,2205-2206); historical launch shape fixed (_spawn_tracked). Partial because sampled, not exhaustive."},
+    {"policy": "Zero Production Blockers", "status": "NONE FOUND", "evidence": "Zero Critical findings across audits 01-09+11; nearest item PROD-09-101 (High, cost-approval resume dead-end) is bounded by the $25/day fleet spend guard with an operator workaround."}
+  ],
+  "verified_clean_summary": [
+    "Hallucination enforcement is mechanized, not aspirational: the quality gate's passed value includes checks.get('policy:schema_valid', True) at base_graph.py:2387, so schema-invalid submit_* payloads deterministically flip _requires_human_approval; the citation checker feeds _citation_check plus a telemetry counter; VerificationConfigs enforce tool-evidence (git_diff->diff_reviewed with enforce_in_result; bug-fix read-before-edit via blocking_until) across 94 instantiations.",
+    "Hardcoding: agent model map lives in app/fleet/agent_models.json (85 agents incl. ux_design_agent/mobile_dev/agentic_ai_architect at lines 87-98); all operational constants are config.py fields; zero hardcoded secrets; name-equality branches only where dispatch genuinely branches.",
+    "Prompt/context leakage: per-run AgentRunState; per-session chat memory with bounded restore; secret env redaction in the bash tool; no cross-agent or cross-tenant context bleed found.",
+    "Infinite loops: all 4 while True sites bounded; the agent graph cannot spin — stall counter (base_graph.py:3365, threshold 3366-3368, max_stalls default 3) forces checkpoint+escalate+human review at run end (4235-4270); no recursion_limit override relies on the LangGraph default as backstop.",
+    "Circular dependencies: 496 modules scanned; only 1 pure top-level cycle (event_bus package re-export pattern, benign via submodule fallback); all other 97 cycle groups contain deliberate deferred imports; app imports cleanly.",
+    "Module graph has ZERO orphan module files: the reachability scan found every dotted app.x.y module name imported somewhere in backend/**/*.py (min 1 occurrence outside its own file).",
+    "Test-only scan false positives correctly classified and excluded: FastAPI route handlers (decorator-registered, e.g. activate_repo repo.py:386-387, get_artifact_route artifacts.py:37-38), dynamically-dispatched agent run_* modules (specialized_agents.py:200-227 _discover_agent_fn imports app.agents.<name> and requires a unique run_* from the module with AGENT_CONTRACT), and standard test-reset helpers (reset_for_testing, reset_client, reset_docker_probe_cache, reset_model_router, reset_orchestration_time_stats, reset_rq_adapter, reset_local_for_tests all used by tests).",
+    "Audit 13's error-contract exception handlers are live: http_exception_handler and validation_exception_handler are registered via @app.exception_handler decorators (main.py:1939-1953), not dead code as the name-occurrence count alone would suggest.",
+    "Silent-exception sampling: agent-switch telemetry (manager.py:573,750,832), chat reader-thread and model-router fallback (chat_agent.py:496,966), stream-push guards (pm.py:127, decomposer.py:146), flag housekeeping (tasks.py:59) — all deliberate, documented, and non-critical to correctness; sites that matter log exc_info=True."
+  ],
+  "not_found": [
+    "Any production importer of pipeline/dispatcher.py (grep 'pipeline.dispatcher' in app/ -> 0; only tests import it)",
+    "Any app/-side caller of dispatch_subtask, pick_agent_by_tag, or get_agent_for_type outside the module itself",
+    "Any reference to FailedEvent ORM class, architecture_ready, review_completed, check_files_against_policies, get_test_score_trend, reset_temporary_agent_pool anywhere (incl. tests)",
+    "Any response_model= usage in api/registry.py, api/epics.py, api/repo.py (the 4 response models there are unreferenced)",
+    "Any never-imported module in backend/app (reachability scan: 0 of 496)",
+    "Any false-negative omission of the ChatTools comment: chat_agent.py:1284 still says '36 CHAT_TOOLS' while the actual CHAT_TOOLS list contains 190 unique tools"
+  ],
+  "cross_audit_flags": [
+    "Memory-leakage violations are cross-referenced, not re-numbered, to avoid double counting in Audit 10: PROD-09-103 (context cache unbounded + never-matching invalidation, Medium) and PROD-09-106 (_subtask_sems never pruned, Low) are the only two real memory-leak items found across the series.",
+    "Dead-code counts include PROD-09-105 (BudgetManager.check_daily/check_daily_db dead; stale docstring) from Audit 09 — this audit's member-level scans confirm no additional production-orphan modules beyond pipeline/dispatcher.py.",
+    "PROD-09-101 (High, cost-approval dead-end) is the nearest-to-blocker artifact in the entire series and is NOT re-counted here; the Zero Production Blockers list is empty under the stated definition (no data loss/corruption, security breach, unrecoverable hang, or silent financial loss).",
+    "Method note for consolidation: name-occurrence scanners must classify FastAPI decorator routes, importlib-dispatched agent modules (specialized_agents._discover_agent_fn), and test-reset helpers as reachable before declaring dead code — 156 of 159 raw candidates were false positives; the external series' simpler grep-style claims should be weighted accordingly."
+  ],
+  "verdict": "READY"
+}

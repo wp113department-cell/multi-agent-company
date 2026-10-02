@@ -1,0 +1,89 @@
+{
+  "audit_id": "08",
+  "audit_name": "Master Production Readiness Audit (Tests, Startup/Health, Observability, Data Safety, Rate Limiting, Docs, Release Decision)",
+  "run_date": "2026-10-02T13:02:00+05:30",
+  "baseline_commit": "c927c44bf410e188287f32b2cf54e0529c642025",
+  "baseline_note": "Evidence pinned to the audit-wide baseline c927c44b (\"Production audits 09 and 11\", 2026-10-02 11:11 +0530). HEAD advanced twice while the audit series ran: ecd4905a (\"Production audit 12\") then 33bbd03c (\"Production audit 13\", 12:07:59 +0530). Audit 13 added the {error:{code,message}} exception handlers, db/errors.py, the DR doc, and Sentry/main.py changes — all cited from on-disk content AFTER both commits. No cited file changed while this audit ran.",
+  "worktree_state": "This audit modified no code and no project files; it wrote only files/Qoder_audit report/08_MASTER_PRODUCTION_READINESS_AUDIT.md and files/Qoder_audit report/json/AUDIT_08_PRODUCTION_READINESS.json. Live read-only runs, all hygiene-preserving (PYTHONDONTWRITEBYTECODE=1, -p no:cacheprovider): mypy app/ --strict (0 errors / 496 files, EXIT=0); pytest tests/ --collect-only -q (8,964 of 8,989 collected, 25 deselected); the full suite pytest tests/ -q --timeout=120 (37 failed / 8,870 passed / 55 skipped / 25 deselected / 30 warnings in 1643.48s — final tallies patched into §2.3 after the background run completed); frontend pnpm typecheck / lint / test (tsc 0, eslint 0, vitest 9 files / 52 tests passed). No project file, DB schema, or deployment state was modified.",
+  "layer_score": 86,
+  "findings": [
+    {
+      "id": "PROD-08-101",
+      "severity": "Medium",
+      "file": "backend/app/rate_limit.py, apps/web/next.config.mjs",
+      "location": "get_remote_address keying + Limiter construction vs the shipped frontend-proxy topology",
+      "line": "rate_limit.py:25-29; next.config.mjs:58-65; NavBar.tsx:150-152; tasks/[id]/page.tsx:92-112",
+      "finding": "Rate limiting is keyed to the direct TCP peer (request.client.host; uvicorn runs without --proxy-headers and no code reads X-Forwarded-For) and stored per-process in memory. In the shipped deployment the Next.js server rewrites /api/* server-side to the backend, so every end user of one frontend instance shares one bucket: 200/min default and 10/min on login. The UI is poll-heavy per open tab (NavBar badge 5s = 12 req/min on every page; task detail 4 parallel polls at 3-5s ≈ 57 req/min), so ~3 concurrent users with a task page open collectively exceed the shared 200/min default — producing real, intermittent 429s, while direct hits to the exposed backend port (8000 in compose) bypass per-IP throttling unevenly.",
+      "evidence": "Installed slowapi util.py:20-27 (get_remote_address returns request.client.host); next.config.mjs:58-65 rewrites /api/* server-side; compose sets NEXT_PUBLIC_API_URL=http://backend:8000; polling arithmetic from the UI survey (NavBar 5s, tasks list 4s, task detail 3/4/5/5s, epics 5s, approvals 5s); limits configurable at config.py:2126-2145 (defaults+topology mismatch, not a hardcoded dead end).",
+      "production_impact": "Availability for teams beyond ~2-3 simultaneously active users through the bundled proxy (false 429s), and uneven brute-force protection when clients can reach the backend directly. Single-user/self-hosted/direct-API deployments are unaffected.",
+      "confidence": "High (code-verified; not load-tested through the proxy)",
+      "recommendation": "Any one closes it: key by authenticated user (jwt sub, falling back to IP); or trust/parse X-Forwarded-For behind a documented trusted proxy AND have the Next proxy forward it; and/or raise RATE_LIMIT_DEFAULT for the proxied deployment with the arithmetic documented in docs/DEPLOYMENT.md.",
+      "effort": "S–M"
+    },
+    {
+      "id": "PROD-08-103",
+      "severity": "Low",
+      "file": "backend/app/rate_limit.py",
+      "location": "Limiter construction — no storage_uri, so slowapi uses per-process in-memory storage",
+      "line": "rate_limit.py:25-29",
+      "finding": "The Limiter is constructed without storage_uri (slowapi default in-memory), so effective limits multiply N× across uvicorn workers/replicas — e.g. the 10/min login cap becomes 20/min with two workers. There is no config knob for a Redis-backed limiter even though Redis is already a first-class dependency (RQ/streams). Latent today (single replica), silent the moment a second replica is added.",
+      "evidence": "rate_limit.py:25-29 (no storage_uri argument); no rate-limit storage field in config.py; compose/CI never run multiple backend replicas today.",
+      "production_impact": "None at single-replica scale; the control degrades silently (limits multiply) as soon as a second replica or worker is added.",
+      "confidence": "High (static; standard slowapi semantics)",
+      "recommendation": "Add an optional RATE_LIMIT_STORAGE_URI setting passed to Limiter(storage_uri=...) (slowapi supports redis:// natively), defaulted unset to preserve current behavior.",
+      "effort": "S"
+    },
+    {
+      "id": "PROD-08-102",
+      "severity": "Low",
+      "file": "backend/app/main.py, backend/app/rate_limit.py, apps/web/lib/api.ts",
+      "location": "429 responses deviate from the app-wide {error:{code,message}} contract; UI degrades to a generic message",
+      "line": "main.py:1870; api.ts:28-38",
+      "finding": "main.py registers slowapi's built-in _rate_limit_exceeded_handler, which returns {\"error\": \"Rate limit exceeded: <limit>\"} — error is a string, not the object every other handler produces. The frontend's fallback reads body.error.message, which is undefined for a string, so the user sees 'Request failed: 429' instead of the real reason. Cosmetic/UX only — throttling still works.",
+      "evidence": "slowapi 0.1.10 extension.py:76-87 (verified in the installed package); main.py:1870 registration; apps/web/lib/api.ts:28-38 fallback chain.",
+      "production_impact": "Operators and users lose the self-explanatory throttling message at exactly the moment they need it; no functional effect.",
+      "confidence": "High",
+      "recommendation": "Replace the registered handler with a 3-line wrapper emitting {\"error\":{\"code\":\"429\",\"message\": str(exc.detail)}} (keeping slowapi's header injection via limiter._inject_headers).",
+      "effort": "S"
+    },
+    {
+      "id": "PROD-08-104",
+      "severity": "Low",
+      "file": "README.md, docs/ADD_A_NEW_AGENT.md, docs/DEPLOYMENT.md, docs/disaster_recovery.md",
+      "location": "Documentation drift — broken PROJECT.md link and stale counts (6 individually verified items)",
+      "line": "README.md:10,64,436; ADD_A_NEW_AGENT.md:278; DEPLOYMENT.md:122-134; disaster_recovery.md:50",
+      "finding": "Six verified drift items: (1) README.md:436 links PROJECT.md, which no longer exists (deleted in e2f2f14d, not tracked); (2) README.md:64 says 18 FastAPI routers, main.py includes 21; (3) README badge says '3,500+ passing' while the same file says 8,900+; (4) ADD_A_NEW_AGENT.md:278 says 'All 934+ tests must pass', the suite collects 8,964; (5) DEPLOYMENT.md:122-134 shows '/health agents: 72' and alarms below 72 while the fleet is ~85; (6) disaster_recovery.md:50 says no systemd-timer is shipped while scripts/systemd/gridiron-backup.{service,timer} are in-tree.",
+      "evidence": "Each item verified against the filesystem/git/code (filesystem + git ls-files for PROJECT.md; main.py:1883-1903 router count; collection tally 8,964; AGENT_CONTRACT count ~85; in-tree systemd templates).",
+      "production_impact": "An operator following README hits a dead file link; doc-count mismatches erode trust in exactly the places (fleet size, test counts, health thresholds) an evaluator would check first. No runtime effect.",
+      "confidence": "High",
+      "recommendation": "One docs pass: repoint the PROJECT.md link (docs/BUILD_PLAN_COMPLETION.md + IMPLEMENTATION_PROGRESS.md), refresh the three counts, correct the DR sentence to 'templates are shipped; scheduling is not enabled by the codebase'.",
+      "effort": "S"
+    }
+  ],
+  "counts": {"critical": 0, "high": 0, "medium": 1, "low": 3, "total": 4},
+  "verified_clean_summary": [
+    "Type/quality gates: mypy app/ --strict = 0 errors over 496 source files (stricter than CI's own gate); frontend tsc --noEmit, eslint ., and vitest (9 files / 52 tests) all clean; CI runs the identical gates.",
+    "Full backend suite live run: 37 failed / 8,870 passed / 55 skipped / 25 deselected / 30 warnings in 27:23 — all 37 failures traced to this workstation's environment (27 × '/bin/sh: 1: python: not found' subprocess-PATH cluster; 4 × network dependency scans (pip-audit absent / npm registry unreachable); 3 × Postgres TooManyConnectionsError during the suite; 2 × 120s network clone hangs in test_b1_clone_security; 1 × async timing flake in test_chat_stop_control). Zero errors this run.",
+    "Skip/xfail: all 49 skip markers are environment-conditional or opt-in (real DATABASE_URL, Docker, npm/node/curl/gh/k6, network, POSIX-only RLIMIT_FSIZE, tests/pending's RUN_PENDING_TESTS=1 + real-LLM-key gate); zero real xfails.",
+    "Startup/shutdown/health: lifespan cancels then awaits all 23 background tasks; disposes the leader-election engine and closes all three checkpointers in order; /health really checks DB + Redis (if enabled) + S3 (if enabled) + live agent count and returns 503 when degraded; rate-limit-exempt; compose topology explicit (db/redis healthchecks, one-shot migrate service, backend healthcheck, rq/frontend profiles).",
+    "Observability: Sentry with AsyncioIntegration (asserted by its own test, including that a failed init cannot take the app down); OTEL provider built eagerly; structured trace-correlated JSON logging (contextvars propagate through asyncio.to_thread); webhook alerts swallow all errors and fire from real call sites; unhandled exceptions and HTTP exceptions share the {error:{code,message}} shape (429 is the single exception — PROD-08-102).",
+    "Data safety: retention archives (never deletes) and explicitly skips LangGraph threads with pending human approvals; worktree removal only for terminal-state tasks; idempotency keys deleted on their own TTL; archived logs retrievable via include_archived=true; single-commit-per-handler convention enforced by an AST test.",
+    "Backups/DR: scripts/backup_db.sh and restore_db.sh with pg_restore --list self-verification; docs/disaster_recovery.md documents a measured 2026-10-02 drill (51-table dump in 3.5s → restore 7.1s → app healthy 7.2s → RTO < 1 minute at current size); opt-in systemd backup timer templates shipped; PITR honestly deferred to the provider layer.",
+    "Rate limiting is genuinely working: slowapi 0.1.10's _find_route_handler never resolved include_router routes on Starlette 1.3.1 (every real route silently unthrottled; /health was the only limited route — k6 surfaced it); rate_limit.py:73-93 monkeypatches the resolver recursively with a documented reproduction; login brute-force is really capped at 10/min/IP, dispatch routes at 30-60/min.",
+    "Docs accuracy: README quickstart, 85-agent count, 8,900+ test count, DEPLOYMENT commands, ADD_A_NEW_AGENT contract, and every P0/P1 item of SELLABILITY_GAP.md verified individually against code (except the six PROD-08-104 drift items)."
+  ],
+  "not_found": [
+    "PROJECT.md — deleted from the repo (3,507 lines removed in e2f2f14d, not tracked); README still links it",
+    "The external Audit-08's cited RateLimiter class / self._requests defaultdict in rate_limit.py — zero occurrences on disk (rate_limit.py is a 94-line slowapi module)",
+    "backend/app/services/recovery.py (cited by the external Audit-08) — does not exist; reconcile_orphaned_runs() lives at app/fleet/failure_ladder.py:327",
+    "Change-password UI in apps/web — zero references (README accurately says 'no UI yet')",
+    "pip-audit binary on this workstation (its absence causes the stage4 security-score cluster)",
+    "uvicorn --proxy-headers / trusted forwarder configuration anywhere in the repo"
+  ],
+  "cross_audit_flags": [
+    "External Audit-08 (ANTIGRAVITY) PROD-08-001 cites code that does not exist (RateLimiter class, defaultdict _requests in rate_limit.py) and a non-existent file services/recovery.py; its underlying concern (rate-limit weakness) is legitimate and independently confirmed as PROD-08-101/103 here.",
+    "External Audit-08's 95/100 with zero real findings omits the real issues found here (PROD-08-101 Medium; 102/103/104 Lows) — weight their 95 accordingly in Audit 10 consolidation.",
+    "Live-run delta vs the baseline (audit-05) run: 37 failed/8,870 passed/0 errors now vs 90 failed/8,772 passed/6 errors then — fewer env clusters triggered this run; both runs' failures are 100% environment-attributed, CI is the authoritative gate."
+  ],
+  "verdict": "READY"
+}

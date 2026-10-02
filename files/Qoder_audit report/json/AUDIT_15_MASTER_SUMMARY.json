@@ -1,0 +1,131 @@
+{
+  "audit_id": "15",
+  "audit_name": "Master Summary — Green / Yellow / Red Classification of All Audits (01–14)",
+  "run_date": "2026-10-02T13:50:00+05:30",
+  "type": "summary deliverable — consolidation only; no new findings, no new claims",
+  "baseline_commit": "series: c927c44b (01–07) → 33bbd03c (08–11) → 90dac23bad223ec39413c485d1ddb68f9646975e (12–14, HEAD)",
+  "source_sidecars": [
+    "json/AUDIT_01_ARCHITECTURE.json",
+    "json/AUDIT_02_AGENTS.json",
+    "json/AUDIT_03_MEMORY.json",
+    "json/AUDIT_04_ORCHESTRATION.json",
+    "json/AUDIT_05_SECURITY.json",
+    "json/AUDIT_06_INFRASTRUCTURE.json",
+    "json/AUDIT_07_AI_EVALUATION.json",
+    "json/AUDIT_08_PRODUCTION_READINESS.json",
+    "json/AUDIT_09_PERFORMANCE_SCALABILITY.json",
+    "json/AUDIT_10_FINAL_CONSOLIDATION.json",
+    "json/AUDIT_11_ZERO_POLICY.json",
+    "json/AUDIT_12_E2E_FEATURE_REALITY.json",
+    "json/AUDIT_13_OPERATIONS_DR_LIFECYCLE.json",
+    "json/AUDIT_14_REPRODUCIBILITY_TRANSFER.json"
+  ],
+  "classification_rules": {
+    "GREEN": "verdict READY; no unresolved High; all findings bounded (Medium/Low)",
+    "YELLOW": "verdict READY but >=1 unresolved High root cause accepted as known limitation, or executed evidence weakens the acceptance",
+    "RED": "NOT GREEN verdict: broken feature path, dormant operational capability, or contradicted documentation confirmed by evidence",
+    "BLOCKED": "verification cannot be completed (missing access/environment/decision); status words used instead of scores"
+  },
+  "audit_classification": [
+    {"audit": "01", "name": "Architecture", "layer_score": 82, "findings": {"critical": 0, "high": 2, "medium": 2, "low": 3}, "verdict": "READY", "flag": "YELLOW", "note": "H-1, H-2 originate here"},
+    {"audit": "02", "name": "Agents", "layer_score": 80, "findings": {"critical": 0, "high": 1, "medium": 1, "low": 2}, "verdict": "READY", "flag": "YELLOW", "note": "H-3 originates here"},
+    {"audit": "03", "name": "Memory", "layer_score": 80, "findings": {"critical": 0, "high": 0, "medium": 3, "low": 3}, "verdict": "READY", "flag": "GREEN", "note": ""},
+    {"audit": "04", "name": "Orchestration", "layer_score": 74, "findings": {"critical": 0, "high": 2, "medium": 3, "low": 4}, "verdict": "READY", "flag": "YELLOW", "note": "H-4 originates here; co-founded H-1"},
+    {"audit": "05", "name": "Security", "layer_score": 88, "findings": {"critical": 0, "high": 0, "medium": 2, "low": 3}, "verdict": "READY", "flag": "GREEN", "note": ""},
+    {"audit": "06", "name": "Infrastructure", "layer_score": 92, "findings": {"critical": 0, "high": 0, "medium": 0, "low": 3}, "verdict": "READY", "flag": "GREEN", "note": ""},
+    {"audit": "07", "name": "AI Evaluation", "layer_score": 85, "findings": {"critical": 0, "high": 0, "medium": 1, "low": 4}, "verdict": "READY", "flag": "GREEN", "note": "LLM eval suite excluded by default (Low, EVAL-07-102); catalogued in file 16"},
+    {"audit": "08", "name": "Production Readiness", "layer_score": 86, "findings": {"critical": 0, "high": 0, "medium": 1, "low": 3}, "verdict": "READY", "flag": "GREEN", "note": ""},
+    {"audit": "09", "name": "Performance & Scalability", "layer_score": 78, "findings": {"critical": 0, "high": 1, "medium": 2, "low": 3}, "verdict": "READY", "flag": "YELLOW", "note": "H-5 originates here"},
+    {"audit": "10", "name": "Final Consolidation", "layer_score": 83, "layer_score_note": "weighted overall (82.83 rounded); not a new layer score", "findings": {"critical": 0, "high": 5, "medium": 15, "low": 31}, "verdict": "READY FOR PRODUCTION", "flag": "YELLOW", "note": "release decision superseded by executed evidence of #12–#14; finding register (H-1…H-5) stands"},
+    {"audit": "11", "name": "Zero Policy", "layer_score": 82, "findings": {"critical": 0, "high": 0, "medium": 0, "low": 3}, "verdict": "READY", "flag": "GREEN", "note": ""},
+    {"audit": "12", "name": "E2E Feature Reality", "layer_score": 74, "findings": {"critical": 0, "high": 3, "medium": 0, "low": 3}, "verdict": "NOT GREEN — PRODUCTION FEATURE AUDIT INCOMPLETE", "flag": "RED", "note": "2 broken feature paths + 1 unwired capability confirmed; 21 runtime gates unverified in read-only mode"},
+    {"audit": "13", "name": "Operations / DR / Lifecycle", "layer_score": 78, "findings": {"critical": 0, "high": 0, "medium": 3, "low": 3}, "verdict": "NOT GREEN — OPERATIONAL PRODUCTION AUDIT INCOMPLETE", "flag": "RED", "note": "backups dormant; RTO/RPO undefined; alembic drift; ops gates unexecuted; only executed gate RESTORE_VERIFIED (dev scale)"},
+    {"audit": "14", "name": "Reproducibility / Transfer", "layer_score": null, "layer_score_note": "no numeric score per brief §81; status words only", "findings": {"critical": 0, "high": 1, "medium": 0, "low": 1}, "verdict": "BLOCKED — INDEPENDENT TRANSFER VERIFICATION INCOMPLETE", "flag": "BLOCKED", "note": "reproducibility: partially reproducible; shutdown failure reproduced 3/3 (PROD-14-101)"}
+  ],
+  "counts": {
+    "audits_executed": 14,
+    "raw_findings_01_09_11_to_14": {"critical": 0, "high": 10, "medium": 18, "low": 38, "total": 66},
+    "consolidated_register_audit_10": {"critical": 0, "high": 5, "medium": 15, "low": 31, "total": 51},
+    "unique_findings_all": {"critical": 0, "high_root_causes": 5, "medium": 18, "low": 38},
+    "high_reconfirmations": {"PROD-12-101": "= H-5", "PROD-12-102": "= H-1", "PROD-12-103": "= H-3", "PROD-14-101": "= H-4 class, escalated by executed evidence"}
+  },
+  "master_high_register": [
+    {"master_id": "MH-1", "source_ids": ["H-1", "ARCH-01-001", "ORCH-04-101", "PROD-12-102"], "summary": "Launch-handler exception path never transitions the task (stuck in coding; preserve_worktree skipped)", "file": "backend/app/api/agents.py:615-620", "status_at_head": "OPEN", "executed_proof": null},
+    {"master_id": "MH-2", "source_ids": ["H-2", "ARCH-01-002"], "summary": "Simple-mode cost estimates ~3.75x understated (hardcoded Haiku-era constants vs configured Sonnet-era rates)", "file": "backend/app/api/agents.py:33-34", "status_at_head": "OPEN", "executed_proof": null},
+    {"master_id": "MH-3", "source_ids": ["H-3", "AGENT-02-001", "PROD-12-103"], "summary": "roles/bhaskar_agent.md missing; bhaskar_tool default-enabled but always fails (ok=false, 0 tokens)", "file": "backend/app/agents/bhaskar_agent.py:186-187", "status_at_head": "OPEN", "executed_proof": "runtime-proved at baseline"},
+    {"master_id": "MH-4", "source_ids": ["H-4", "ORCH-04-102", "PROD-14-101"], "summary": "Leader-election engine pool_size=16 / max_overflow=0 vs ~23 leader tasks: dead loops (static) + SIGTERM shutdown failure with skipped teardown (executed, 3/3)", "file": "backend/app/main.py:1323-1348,1628-1648,1846-1859", "status_at_head": "OPEN", "executed_proof": "sqlalchemy QueuePool TimeoutError at main.py:1848 -> 1375; 'Application shutdown failed'; teardown (engine dispose + 3 checkpointers) skipped; reproduced 3/3 runs"},
+    {"master_id": "MH-5", "source_ids": ["H-5", "PROD-09-101", "PROD-12-101"], "summary": "Epic cost-approval gate has no working resume path; >$1 epics deterministically re-block (cost_approved flag: 0 hits)", "file": "backend/app/manager.py:2036-2127,2532-2535; api/epics.py:250-280", "status_at_head": "OPEN", "executed_proof": null}
+  ],
+  "medium_register_count": 18,
+  "low_register_count": 38,
+  "executed_evidence_summary": [
+    "clean clone at 90dac23b: PASS (0 dirty, 1948 files, no hidden required files)",
+    "empty-DB alembic upgrade head: PASS (rev 062, 47 public tables)",
+    "import app.main: PASS",
+    "backend boot + /health 200 (agents:85): PASS",
+    "zero-to-login on throwaway DB (login 200 role=admin, /me 200, unauth /tasks 401): PASS",
+    "rq worker burst bootstrap (v2.10.0, exit 0): PASS",
+    "restore drill pg_dump -> pg_restore --exit-on-error: RESTORE_VERIFIED (dev scale; parity rev 062, dev_tasks 414, agent_runs 91, task_logs 108)",
+    "SIGTERM graceful shutdown: FAIL 3/3 (PROD-14-101)"
+  ],
+  "release_decision_reconciliation": {
+    "audit_10_decision": "READY FOR PRODUCTION (83/100; 0 Critical; Highs accepted with documented mitigations)",
+    "superseded_by": "Audits 12–14 executed evidence at HEAD 90dac23b",
+    "reasons": [
+      "H-4 acceptance rationale ('quality-maintenance loops only; restart-mitigated') invalidated in part: executed evidence shows pool starvation breaks graceful shutdown 3/3 with skipped teardown; consumer count now ~23 vs pool 16",
+      "H-5/H-1/H-3 re-confirmed as broken feature paths from UI/FE wiring (#12)",
+      "Backup capability found dormant (#13 PROD-13-103)",
+      "Independent-operator transfer could not complete (#14 BLOCKED)"
+    ],
+    "no_factual_contradictions_between_audits": true
+  },
+  "series_final_verdict": "NOT GREEN — PRODUCTION READINESS NOT CERTIFIED",
+  "gates": {
+    "p0_critical_blockers": 0,
+    "p1_unresolved_high_root_causes": 5,
+    "operational_capabilities_dormant_or_undefined": 3,
+    "green_flag_checklist_audit_14": "14/26 met, 12 open",
+    "large_unverified_surfaces": ["live-LLM suites (file 16)", "production-scale DR", "chaos/soak/rollback journeys", "independent-operator handoff"]
+  },
+  "verified_clean_summary": "0 Critical findings across 14 audits; strong verified layers (Infrastructure 92, Security 88, Production Readiness 86, AI Evaluation 85, Architecture 82, Zero Policy 82); 8,900+ backend tests; strict mypy 0 errors / 496 modules; 62 linear migrations single head 062; documented quickstart sufficient to drive all executed reproduction gates.",
+  "remediation_order": {
+    "P1_before_cutover": [
+      "MH-4 / PROD-14-101: size leader engine from the registration tuple (or max_overflow >= 7); add SIGTERM clean-shutdown CI test (S; one line + one test)",
+      "MH-1 / PROD-12-102: transition_task + preserve_worktree on launch-manager exception path (S)",
+      "MH-5 / PROD-12-101: persist cost approval; honor in _cost_estimate_node; add block-approve-planning regression test (M)",
+      "MH-3 / PROD-12-103: add roles/bhaskar_agent.md + load_role regression test for every role_name literal (S)",
+      "MH-2: read configured cost rates instead of hardcoded constants (S)"
+    ],
+    "P2_operational_hardening": [
+      "PROD-13-101: resolve alembic check drift (include_object exclusions or migrations)",
+      "PROD-13-103/104: install backup timer; pre-migration dump in upgrade path",
+      "PROD-13-102: define RTO/RPO; validate at production scale",
+      "PROD-13-105/106 + PROD-14-102: maintenance mode; rotation tooling; release tag + build stamp"
+    ],
+    "P3_quality_backlog": ["18 Medium findings", "38 Low findings"]
+  },
+  "human_decisions": [
+    "LLM verification budget — run the live-LLM catalog (file 16) or accept unverified status",
+    "RTO/RPO targets (drives backup cadence / PITR investment)",
+    "Production-scale DR drill environment",
+    "Explicit acceptance of remaining Highs if cutting over before P1 fixes (not recommended)",
+    "Licensing: LICENSE is 'All Rights Reserved' (Bhaskar Barot); third-party transfer needs owner decision"
+  ],
+  "verified_clean": [
+    "All 14 audit reports + 14 JSON sidecars present and mutually consistent on shared facts",
+    "Raw vs consolidated counts reconciled (6 raw Highs 01-09+11 -> 5 unique; #12/#14 high IDs are re-confirmations/escalations)"
+  ],
+  "not_found": [
+    "No audit in the series reported a Critical finding",
+    "No factual contradiction between any two audits",
+    "No executed production-scale DR/chaos/soak evidence exists in the repository or was produced by this engagement"
+  ],
+  "cross_audit_flags": [
+    {"flag": "04<->14", "detail": "H-4 (ORCH-04-102) static pool starvation escalated to executed shutdown failure by PROD-14-101; merged register entry MH-4"},
+    {"flag": "09<->12", "detail": "PROD-09-101 (H-5) re-confirmed as FE dead-end PROD-12-101"},
+    {"flag": "01/04<->12", "detail": "H-1 re-confirmed from feature path as PROD-12-102"},
+    {"flag": "02<->12", "detail": "H-3 re-confirmed from feature path as PROD-12-103"},
+    {"flag": "13<->14", "detail": "Restore drill evidence carried forward; PROD-14-101 contradicts #10's H-4 acceptance rationale"}
+  ],
+  "verdict": "NOT GREEN — PRODUCTION READINESS NOT CERTIFIED (0 Critical; 5 unique unresolved High root causes with 2 execution-confirmed failure manifestations; 3 dormant/undefined operational capabilities; large unverified surface: live-LLM suites, production-scale DR, chaos/soak, independent-operator handoff)"
+}

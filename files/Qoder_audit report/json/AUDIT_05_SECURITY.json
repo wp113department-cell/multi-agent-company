@@ -1,0 +1,113 @@
+{
+  "audit_id": "05",
+  "audit_name": "Master Security Audit",
+  "run_date": "2026-10-02T11:58:44+05:30",
+  "baseline_commit": "c927c44bf410e188287f32b2cf54e0529c642025",
+  "baseline_note": "Evidence pinned to the audit-wide baseline c927c44b (\"Production audits 09 and 11\", 2026-10-02 11:11 +0530). Baseline drift escalated during this audit: HEAD moved to ecd4905ac0e8a79c6a0b793009e0a3897de8162a (\"Production audit 12\", 11:41:51 +0530) while the baseline pytest suite was still running, and additional uncommitted drift appeared afterwards (modified backend/app/api/auth.py, backend/app/main.py, backend/app/middleware/rbac.py; untracked backend/app/db/errors.py, backend/tests/test_audit13_db_outage_responses.py, files/Antigravity_audit_report/). auth.py/main.py/rbac.py are security-relevant files under active external modification; every citation in this audit was re-verified against on-disk content at read time, but later audits must re-confirm those line numbers.",
+  "worktree_state": "This audit modified no code and no project files; it wrote only files/Qoder_audit report/05_SECURITY_AUDIT.md and files/Qoder_audit report/json/AUDIT_05_SECURITY.json. External drift observed during the audit (not caused by it): modified backend/app/api/auth.py, backend/app/main.py, backend/app/middleware/rbac.py; untracked backend/app/db/errors.py, backend/tests/test_audit13_db_outage_responses.py, files/Antigravity_audit_report/ (a concurrent 'audit 13' process was observed, including a What_is/AUDIT_REPORT/evidence/secret_history_scan.py runner). The live SEC-05-101 reproduction's hung git/pytest processes were cleaned up before writing this report.",
+  "layer_score": 88,
+  "findings": [
+    {
+      "id": "SEC-05-101",
+      "severity": "Medium",
+      "file": "backend/app/api/repo.py, backend/app/services/git_service.py",
+      "location": "_clone_and_activate clone/pull await; _run_git timeout cancel path; _auth_env",
+      "line": "repo.py:121-144 (no timeout on proc.communicate, L144); git_service.py:207-218 (_auth_env sets GIT_TERMINAL_PROMPT=0 at 217 but not GIT_ASKPASS), 230-260 (wait_for 300s at 251; kill parent only at 253; second await communicate at 254)",
+      "finding": "A wrong/expired credential does not fail fast: on a 401, git consults GIT_ASKPASS before giving up. The app never neutralizes GIT_ASKPASS (only GIT_TERMINAL_PROMPT=0), and neither clone path can recover from a prompting askpass helper: (1) _clone_and_activate awaits proc.communicate() with no timeout at all - the background task is pinned forever and the Repo row stays status='cloning' with no error; (2) _run_git's asyncio.wait_for timeout kills only the direct git child, then awaits a second proc.communicate() which cannot return while surviving grandchildren (git-remote-http, askpass) hold the stdout/stderr pipe write ends (orphaned-pipe cancel gap) - the baseline suite shows the test exceeding a 600s pytest-timeout although its only bounded inner call is the 300s path.",
+      "evidence": "Live reproduction 2026-10-02: pytest tests/test_b1_clone_security.py::test_wrong_token_fails_and_is_not_echoed hangs reproducibly in isolation (45s pytest-timeout fired twice). Hang process tree: git clone -- http://127.0.0.1:44529/repo.git (pid 67023) -> git remote-http / git-remote-http (67024/67025) -> /bin/sh /usr/share/qoder-ide/resources/app/extensions/git/dist/askpass.sh \"Password for 'http://127.0.0.1:44529'\" (67063) -> qoder-ide askpass-main.js (67066). /proc/67023/environ shows GIT_ASKPASS=/usr/share/qoder-ide/resources/app/extensions/git/dist/askpass.sh and VSCODE_GIT_ASKPASS_NODE/MAIN alongside the app's own GIT_TERMINAL_PROMPT=0. Baseline suite: both clone tests hit the 600s pytest-timeout (/tmp/qoder_full_suite.log lines 14763-14872, FAILED list lines 15569-15570 of /tmp/qoder_failures.txt); for test_background_clone_and_pull_use_env_credentials_not_url (test file line 511) the captured log (suite log lines 14874-14878) shows two successful authenticated clones ('Repo cloned and activated' twice) followed by the hang in step 3, the wrong-token clone, with no 'Clone failed' line ever emitted (repo.py:156 unreached).",
+      "production_impact": "In any deployment whose service environment exports GIT_ASKPASS or a GUI credential helper (desktop/IDE-hosted dev instances; interactive terminals), a user entering a wrong/expired PAT pins the clone background task indefinitely and leaves the repo permanently status='cloning' with no error, timeout, or retry. In a clean server environment (no askpass/TTY) git fails fast, which is why CI cannot catch it. Independently of environment, defect (1) makes every credential-failure clone unbounded by design.",
+      "confidence": "High (live repro + process-level environment evidence + code-level cancel-gap analysis)",
+      "recommendation": "Set GIT_ASKPASS=/bin/true, SSH_ASKPASS=/bin/true and disable credential helpers (extend GIT_CONFIG_* or -c credential.helper=) in _auth_env and repo.py:111-115 alongside GIT_TERMINAL_PROMPT=0; wrap _clone_and_activate's communicate() in asyncio.wait_for with start_new_session=True and os.killpg on timeout; apply the same process-group kill to _run_git's timeout path (git_service.py:252-255); on timeout set Repo.status='error' with a 'clone timed out' message.",
+      "effort": "S-M"
+    },
+    {
+      "id": "SEC-05-102",
+      "severity": "Medium",
+      "file": "backend/app/policy/engine_v2.py",
+      "location": "v2 gating functions vs production call sites; epics.py policy-approval endpoint",
+      "line": "engine_v2.py:1-5 (docstring claim), 59-82, 85-109, 112-131 (check_file_against_policies / check_files_against_policies / has_approval - zero production callers); api/epics.py:348-374 (record_approval only wired function, called at 356)",
+      "finding": "Policy Engine v2 is documented as 'Adds approval rules on top of the v1 hard-coded denylist... adding a rule = DB insert', but its entire enforcement half has no production call site: check_file_against_policies / check_files_against_policies / has_approval are referenced only by backend/tests/pending/test_manager_integration.py:128 (repo-wide grep; tests/test_policy_v2.py:7 exercises only match_pattern_sync). The only wired function is record_approval, reached via POST /{epic_id}/policy-approval (approver-gated). Nothing ever reads a recorded approval or blocks on a blocking=True policy match, so DB policies gate nothing. Additionally the unwired matchers compare raw file_path strings without normalization (engine_v2.py:72/97; no realpath/normpath), so ./secrets/x, secrets/../secrets/x or absolute paths would dodge any *secrets* rule if wired as-is.",
+      "evidence": "Grep for engine_v2 across backend: exactly 3 files (api/epics.py:356, tests/pending/test_manager_integration.py:128, tests/test_policy_v2.py:7). No write chokepoint (base_graph._policy_check, base_graph.py:1042-1102) or handler guard consults the policies/policy_approvals tables. _glob_to_regex (engine_v2.py:18-38) then regex.match(file_path) at 72 with no path normalization.",
+      "production_impact": "A misleading control: operators inserting a blocking policy row (or relying on the documented second approval layer) get no enforcement - only an approval audit trail. No active bypass of the v1 floor exists; the gap is between a documented capability and its real wiring.",
+      "confidence": "High (absence of callers verified by exhaustive grep)",
+      "recommendation": "Either wire check_files_against_policies + has_approval into _policy_check before the v1 floor (with realpath-normalized paths and 'no approval => deny' for blocking rules), or explicitly mark v2 gating as dormant-not-enforced in the module docstring and endpoint description. Cross-flagged to audits 11 (dead code) and 12 (feature wiring).",
+      "effort": "M"
+    },
+    {
+      "id": "SEC-05-103",
+      "severity": "Low",
+      "file": "backend/app/agents/tools.py, backend/app/tools/execution/bash.py",
+      "location": "QA/devops scoped bash allowlist - absolute-path reads not confined to worktree in host-fallback mode",
+      "line": "tools.py:1513-1529 (_QA_ALLOWED_PREFIXES incl. 'cat ' at 1524 and 'head ' at 1525), 1795-1813 (QA bash: allowlist-only check at 1797), 1838-1856 (devops bash; allowlist from settings.devops_bash_allowlist, config.py:430); bash.py:178-194 (sandbox branch) vs 196-213 (host branch, shell=True, no containment)",
+      "finding": "The QA bash allowlist admits 'cat ' and 'head ' prefixes and validates only through check_allowlisted_command (which correctly rejects chaining metacharacters). Arguments are never confined to the worktree. With the default BASH_SANDBOX_ENABLED=true the command runs in the sandbox container (only cwd mounted), so cat /etc/passwd reads the container's own file - contained. With the explicit operator opt-out BASH_SANDBOX_ENABLED=false, _run_bash_command_raw executes on the host via subprocess.run(shell=True), so cat /etc/passwd, cat ~/.ssh/config or any service-user-readable absolute path is returned into the model context and LLM providers.",
+      "evidence": "tools.py:1797 (check_allowlisted_command only), bash.py:178-194 vs 196-213; config.py:1178-1181 (bash_sandbox_enabled default True - the gap is opt-out-mode only).",
+      "production_impact": "Confined to deployments that explicitly disable the sandbox (a documented escape hatch for hosts that cannot run Docker). Read-only exposure of host files readable by the service user to the model context; not a write or execution escalation.",
+      "confidence": "High",
+      "recommendation": "For read-only prefixes ('cat ', 'head '), reject absolute paths and '..' segments (or resolve and require worktree containment) independent of sandbox mode; keep the existing metachar rejection.",
+      "effort": "S"
+    },
+    {
+      "id": "SEC-05-104",
+      "severity": "Low",
+      "file": ".github/workflows/ci.yml, backend/requirements.txt, backend/requirements-dev.txt",
+      "location": "supply-chain gates: interpreter version mismatch, dev-requirements not audited, local pip-audit absent, one standing ignore",
+      "line": "ci.yml:17-18 and 60-63 (Python 3.11) vs local backend/.venv (3.12); ci.yml:346 (pip-audit -r requirements.txt only); ci.yml:68/187 (requirements-dev.txt installed but never audited); ci.yml:328-346 (|| true removal per SEC-05-019 verified in place; GHSA-jfh8-c2jp-5 ignore documented at 337-345)",
+      "finding": "(a) CI typechecks/tests on Python 3.11 while the deployed audited venv is 3.12 - version-specific behavior untested in CI; (b) the blocking pip-audit gate covers requirements.txt only; requirements-dev.txt (pytest/mypy/ruff/black/plugins toolchain) is never audited; (c) pip-audit is not installed in the local venv (baseline failures '[Errno 2] No such file or directory: pip-audit'), so the CVE status of current pins could not be re-verified locally during this audit - per the brief, no CVE numbers are asserted; (d) one standing --ignore-vuln (GHSA-jfh8-c2jp-5) exists with an in-file justification - acceptable documented-exception pattern, but should be re-reviewed per release.",
+      "evidence": "ci.yml:17-18/60-63; local pytest tracebacks under python3.12; ci.yml:346 command line; requirements.txt 46 lines fully ==-pinned; requirements-dev.txt referenced for install (ci.yml:68/187) but absent from the audit step; /tmp/qoder_failures.txt pip-audit [Errno 2] entries.",
+      "production_impact": "Hygiene/informational: dev toolchain vulnerabilities would not gate CI; interpreter drift can mask version-specific dependency behavior. Python-jose/ecdsa migration to PyJWT verified done (ci.yml:337-345, requirements.txt:33).",
+      "confidence": "High",
+      "recommendation": "Extend the pip-audit job to -r requirements.txt -r requirements-dev.txt; align CI to 3.12 (or document 3.11 as the supported floor); install pip-audit in the dev venv so the audit is locally reproducible.",
+      "effort": "S"
+    },
+    {
+      "id": "SEC-05-105",
+      "severity": "Low",
+      "file": "backend/app/policy/sandbox.py",
+      "location": "module docstring ('Rollout scope, honestly stated') vs implemented routing",
+      "line": "sandbox.py:19-29 vs bash.py:146-176, config.py:1178-1181 and 1243-1269, tools.py:1802-1809 (QA), 1846-1852 (devops)",
+      "finding": "The module docstring states the sandbox is wired into 'the three fully-generic, denylist-only bash tools' and that 'the other ~12 already-allowlist-scoped bash handlers (test-runner, dependency-audit, QA, devops, etc.) are intentionally NOT wired to this yet'. The code contradicts this: _run_bash_command_raw routes every caller through run_sandboxed when bash_sandbox_enabled is True (default), and the toolchain-needing variants pass a real toolchain image plus per-variant network overrides - directly observed in the QA (tools.py:1807-1808) and devops (1850-1851) handlers. The stale statement misled this audit's own initial scoping (an apparent 'QA reads host files' issue that is actually contained by the default sandbox).",
+      "evidence": "sandbox.py:19-29; bash.py:146-176 (routing + image/network pass-through); config.py:1178-1181 (default True), 1243-1269 (toolchain image + network=host overrides for test_runner/qa/refactor/migration); tools.py:1802-1809, 1846-1852.",
+      "production_impact": "Documentation-only: operators/future auditors may believe most bash variants run unsandboxed, mis-assess risk, or skip prerequisite setup (building gridiron-bash-toolchain:latest). Same doc-vs-code contradiction class as ORCH-04-106; cross-flagged to audit 11.",
+      "confidence": "High",
+      "recommendation": "Update the docstring to the current rollout reality (denylist-only variants -> minimal image; toolchain variants -> toolchain image + documented network exceptions; host fallback only on explicit opt-out).",
+      "effort": "S"
+    }
+  ],
+  "counts": {
+    "critical": 0,
+    "high": 0,
+    "medium": 2,
+    "low": 3,
+    "total": 5
+  },
+  "verified_clean_summary": [
+    "Path denylist real and tested: engine.py:78-109 (.env/.env.*, secrets/, pem/key/pfx/p12, id_rsa*, .github/workflows pair-scan, .git); tests/test_policy.py 28 tests, 0 failures in baseline.",
+    "Worktree containment for every write-capable tool: check_path_in_worktree (engine.py:121-141, realpath) + _is_protected_path sweep across all filesystem/* handlers (e.g. delete_file.py:97) and coder write_file/edit_file (tools.py:1711, 1744).",
+    "Command denylist enforced at central chokepoint for both graphs: base_graph._policy_check (base_graph.py:1042-1102), called at 2766 and chat_agent.py:4605; ~60 patterns incl. rm -rf, git push, kubectl, cloud CLIs, curl/wget, sudo; quote-stripping normalization (engine.py:149-165); non-overridable tier (175-183) + is_command_override_eligible (284-295).",
+    "Allowlist chaining metachars rejected before prefix match: check_allowlisted_command (engine.py:298-318, regex 252) - QA chain-bypass question answered: not bypassable.",
+    "Docker sandbox default-on, fail-closed, minimal mounts: sandbox.py:96-247 (--rm, unique name + docker kill on timeout, --read-only root + tmpfs, non-root UID/GID, caps, only cwd mounted, ro for SCAN); SandboxUnavailableError never silently falls back (170-176); config default True (config.py:1178-1181).",
+    "Credential vault: Fernet enc:v1: + legacy plaintext passthrough; SecretStr with expose_secrets serialization gate; get_env_vars() single extraction point (credential_vault.py:151-160); production requires CREDENTIAL_ENCRYPTION_KEY (config.py:1981-1995); reserved names blocklist (_RESERVED_SECRET_NAMES, settings.py, SEC-05-011).",
+    "Injection paths minimal: GITHUB_TOKEN/ANTHROPIC_API_KEY popped before extra_env (agents.py:528-533, ~944-956); host env drops secret-looking names (bash.py:101-117); extra_env values redacted in output (bash.py:120-128, 245-250); chat tool-result redaction (chat_agent.py:4677); git token never in argv/URL/remote (git_service.py:207-218 + test_b1_clone_security on-disk/argv assertions).",
+    "Audit log: names-only vault audit (credential_vault.py:261-272), append-only AuditLog with dual ring+DB write, DB failure logged not swallowed (audit_log.py:600-604, 614-625).",
+    "AuthN/AuthZ: AST sweep of 75 mutation routes - only /login /setup /logout lack auth deps (intentional; login rate-limited 10/min config.py:2126-2145; setup 404-prod/409-after-first-user; logout cookie-clear); every approve/reject endpoint require_approver (rbac.py:40-120); legacy header opt-in default False (config.py:483); production validators (config.py:1947-2023); admin seeded once must_change_password=True (main.py:1583-1614); CORS default localhost:3000 (config.py:2113, main.py:1870-1878).",
+    "Prompt injection: manifest-derived wrap set (base_graph.py:2464-2482, forgery-safe) + flag set (2485-2498) incl. bash; 10 tests in test_phase63_prompt_injection_defense.py; chat confirmation delegates to centralized check_command (tool_security.py:59-61) and the chokepoint still denies at chat_agent.py:4605; run_parallel_commands refuses dangerous subcommands (1908-1940); one-shot no-session fail-closed BLOCKED (5170-5235).",
+    "Supply-chain gates blocking: pip-audit (ci.yml:328-346, || true removed per SEC-05-019), pnpm audit (227-241), eslint without || true (246-253); requirements.txt fully ==-pinned."
+  ],
+  "not_found": [
+    "No live policy bypass found (path escape, command denylist, allowlist chaining, tool-name reframing all checked; 28 policy tests pass).",
+    "Policy Engine v2 enforcement call sites (check_file_against_policies / check_files_against_policies / has_approval have zero production callers -> SEC-05-102).",
+    "Local pip-audit CVE re-verification (tool not installed in the venv; no CVE numbers asserted per brief instruction).",
+    "Full-repo secret-value scan (out of brief scope; a concurrent external process was observed running What_is/AUDIT_REPORT/evidence/secret_history_scan.py - results belong to that process).",
+    "Second alternate policy engine beyond engine_v2 (governance.py and license_check.py reviewed as separate concerns; no other denylist engine found)."
+  ],
+  "cross_audit_flags": [
+    "Baseline drift escalation: HEAD c927c44b -> ecd4905a (\"Production audit 12\") mid-suite, plus post-commit uncommitted drift in security-relevant files (api/auth.py, main.py, middleware/rbac.py modified; db/errors.py, test_audit13_db_outage_responses.py, files/Antigravity_audit_report/ untracked). Audits 06-14 must re-confirm line numbers in those files before citing them; audit 10 (consolidation) must reconcile which baseline each audit used.",
+    "The 2 baseline failures reported as '[REDACTED] security test mismatches' (tests/test_bash_sandbox_wiring.py, tests/test_credential_vault.py) were resolved as a mid-commit collection race, NOT product bugs: the test files were rewritten inside commit c927c44b while the suite had imported the pre-commit source; live re-run on the current tree passes (2 passed in 3.91 s; old source verified via git show c927c44b^). Audit 17 must not file them as genuine failures.",
+    "The 2 remaining security-adjacent baseline failures (test_b1_clone_security.py timeouts) are SEC-05-101: environment-triggered by GIT_ASKPASS exported in the IDE terminal that ran the suite; would not reproduce in clean CI. Audit 08/16/17 should classify them as environment-conditional, and audit 17 should note the tests themselves are high-value (their assertions on argv/on-disk token absence are sound).",
+    "engine_v2 dead gating -> cross-flagged to audit 11 (dead code inventory) and audit 12 (feature wiring / dead features): the /policy-approval endpoint exists and writes rows that nothing consumes.",
+    "sandbox.py stale rollout docstring -> audit 11 (documentation-contradicts-code class, sibling of ORCH-04-106).",
+    "CI Python 3.11 vs local venv 3.12 interpreter mismatch -> audits 06 (CI/CD) and 14 (reproducibility/transfer).",
+    "Baseline full-suite: 90 failed / 8772 passed / 85 skipped / 6 errors in 40:36; failure clusters attributed in audit 08 analysis (env 'python' PATH missing in subprocess-spawning tests, 'pip-audit' absent, 2 clone hangs, 2 collection-race redaction tests, plus the mid-commit race effects). Source logs: /tmp/qoder_full_suite.log, /tmp/qoder_failures.txt."
+  ],
+  "verdict": "READY"
+}

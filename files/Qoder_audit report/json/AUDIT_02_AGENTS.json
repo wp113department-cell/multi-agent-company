@@ -1,0 +1,76 @@
+{
+  "audit_id": "02",
+  "audit_name": "Master Agent Audit",
+  "run_date": "2026-10-02T11:26:00+05:30",
+  "baseline_commit": "c927c44bf410e188287f32b2cf54e0529c642025",
+  "baseline_note": "Audit 01 was recorded at baseline 846021aa (2026-09-30). HEAD advanced to c927c44b (\"Production audits 09 and 11\", 2026-10-02) before audit-02 evidence collection; all audit-02 findings were gathered and re-verified at this checkout.",
+  "worktree_state": "clean tracked tree; 2 untracked entries (files/Qoder_audit report/, files/Antigravity_audit_report/); not modified by this audit",
+  "layer_score": 80,
+  "findings": [
+    {
+      "id": "AGENT-02-001",
+      "severity": "High",
+      "file": "backend/app/agents/bhaskar_agent.py (+ missing backend/roles/bhaskar_agent.md)",
+      "location": "run_bhaskar_agent → run_agent_graph(role_name=\"bhaskar_agent\", ...)",
+      "line": "bhaskar_agent.py:186-187; base_graph.py:3449 → 1737 (load_role); base.py:39-41 (raise); caught at bhaskar_agent.py:205-215",
+      "finding": "load_role() raises FileNotFoundError for a missing roles/<name>.md (base.py:39-41). build_agent_graph calls _make_call_llm_node unconditionally (base_graph.py:3449), which calls load_role(role_name) at node-construction time (base_graph.py:1737). There is no roles/bhaskar_agent.md (roles/ has 86 files, zero matching bhaskar). run_agent_graph raises before any LLM call; run_bhaskar_agent's own except catches it and returns ok=false. Every bhaskar_tool call fails, with zero tokens spent, on every path.",
+      "evidence": "Runtime-proved at HEAD c927c44b (fails before any API call): .venv/bin/python -c \"from app.agents.bhaskar_agent import run_bhaskar_agent; print(run_bhaskar_agent('Write a script that prints hello','','/tmp'))\" → {'ok': False, 'code': '', 'result_summary': '', 'tested_output': '', 'error': 'bhaskar_agent run failed: Role file not found: /home/pc-117/Documents/CRR2906/backend/roles/bhaskar_agent.md', 'tokens_in': 0, 'tokens_out': 0}. Feature default-enabled (config.py:1802-1805) and wired into chat_agent.py:115,4302-4312; tools.py:78-80,1348,1668-1674,1693; and ≥8 agent tool lists (bug_fix.py:55, mcp_developer_agent.py:69, migration_agent.py:51, user_story_generator.py:39, evaluation_agent.py:39, devex_agent.py:43, ux_design_agent.py:55, test_coverage_agent.py:46). Tests never exercise the real path — tests/test_bhaskar_tool.py:983-1026 monkeypatches run_agent_graph, so CI stays green.",
+      "production_impact": "The advertised on-demand tool synthesis capability never works: agents and chat users asking for a missing tool always get the structured failure. bhaskar_tool is non-functional while appearing wired, tested and enabled.",
+      "confidence": "High (runtime proof + static chain)",
+      "recommendation": "Add backend/roles/bhaskar_agent.md (7 standard sections + Karpathy variant), or extend the graph to accept an inline system prompt for this call. Add a regression test asserting load_role() succeeds for every role_name= literal passed to run_agent_graph anywhere in app/.",
+      "effort": "Small"
+    },
+    {
+      "id": "AGENT-02-002",
+      "severity": "Medium",
+      "file": "backend/app/agents/base_graph.py + backend/app/tools/agents/submit_*.py (27 handlers)",
+      "location": "submit handling in _make_execute_tools_node",
+      "line": "base_graph.py:2879-2893 (jsonschema warn-only), 2894-2906 (enforce_in_result override), 2920-2950 (citation check), 2952-2974 (quality gate)",
+      "finding": "Submission payloads are schema-validated at the shared chokepoint but violations only log a warning and attach _validation_warning; the submission is still accepted. 0 of 27 submit tools use pydantic/BaseModel; handlers mostly dict.update(inp)/.get(). Mitigations exist: enforce_in_result overwrites model-claimed result fields with harness truth; file:line citations are verified against the repo; a quality gate runs; the sampled consumer qa.py:257-272 uses fail-closed defaults. But nothing known reads _validation_warning, so a schema-invalid submission is materially indistinguishable from a valid one at most call sites.",
+      "evidence": "ls app/tools/agents/submit_*.py | wc -l → 27; grep -l 'pydantic|BaseModel' app/tools/agents/submit_*.py → 0; base_graph.py:2883-2893 warning-only handling; qa.py:260-272 fail-closed raw.get(...) defaults; submit_qa_result.py:114-116 qa_result.update(inp).",
+      "production_impact": "Malformed-but-accepted submissions flow into result dicts; consumers that do not individually default fail-closed may act on bad data. The trust boundary is advisory, not enforced.",
+      "confidence": "High (behavior), Medium (downstream blast radius — one consumer sampled)",
+      "recommendation": "Decide explicitly: reject submissions that fail their declared input_schema (at least for high-risk/coder-class agents), or document the deliberate warn-only choice and make at least the quality gate read _validation_warning. Optionally adopt pydantic models per submit tool.",
+      "effort": "Small–Medium"
+    },
+    {
+      "id": "AGENT-02-003",
+      "severity": "Low",
+      "file": "backend/roles/*.md",
+      "location": "30 role files without a Karpathy section (monitoring_agent, security_architect, business_analyst, research, evaluation_agent, quality_auditor, knowledge_curator, agent_debugger, agent_advisor, pm, sprint_planner, manager + 18 more)",
+      "line": "n/a (per-file)",
+      "finding": "Karpathy variants exist and are correctly category-mapped where present — 55/85 files (Review 18, Engineering 15, Analysis 13, Design 9) — but 30 files have none, including agents whose direct category peers have one (monitoring_agent vs infra_agent; security_architect vs security_reviewer).",
+      "evidence": "grep -l 'Karpathy .* Principles' roles/*.md | wc -l → 55; grep -ri karpathy roles/monitoring_agent.md → empty.",
+      "production_impact": "Prompt-level behavioral variance between same-category agents; a reader cannot rely on a uniform quality baseline. No runtime breakage.",
+      "confidence": "High",
+      "recommendation": "Add the matching variant section to the 30 files, or document deliberately that advisory/doc/coordination roles are exempt.",
+      "effort": "Small (docs only)"
+    },
+    {
+      "id": "AGENT-02-004",
+      "severity": "Low",
+      "file": "backend/app/agents/chat_agent.py",
+      "location": "module-level _chat_agents session map",
+      "line": "412-420 (_chat_agents dict, get_or_create_chat_agent), 437 (delete_chat_agent); no lock present (re-checked at HEAD c927c44b)",
+      "finding": "The session→agent map is module-level with a check-then-set and a pop, with no lock. Today all callers are async route handlers on the single event loop with no await between check and set, so it is serialized in practice. The per-instance _background_processes map (line 882) is confirmed per-instance (the known fix is intact).",
+      "evidence": "chat_agent.py:412-420, 437; callers only app/api/chat.py routes (chat.py:200,343,380,426); grep at HEAD c927c44b shows no lock around _chat_agents.",
+      "production_impact": "None today. If a caller later invokes these from a worker thread, concurrent get/create can leak two ChatAgents for one session, orphaning background processes the second instance cannot stop.",
+      "confidence": "High (pattern), Medium (impact scenario)",
+      "recommendation": "Add a small lock around get/create/pop, or document the event-loop-only invariant.",
+      "effort": "Small"
+    }
+  ],
+  "counts": {"critical": 0, "high": 1, "medium": 1, "low": 2},
+  "not_found": [
+    "PROJECT.md — still absent (same as Audit 01; all counts re-derived from code)",
+    "No capability-tag collisions — runtime-verified 170 tags over 85 registered agents, zero duplicates",
+    "No dead enforce_in_result keys — corrected scan (RHS verif-key semantics per base_graph.py:2894-2906) found 0 across all 93 VerificationConfig instances; the initial 4 flags (cicd/docker/refactor/sql agents) were a scan-side false positive, disproven by reading the overwrite semantics",
+    "No hardcoded model strings — grep '\"claude-' across app/agents/*.py = 0 hits",
+    "No injection-prone role instructions — grep (obey / follow-instructions / ignore-previous patterns) across roles/ = 0 hits",
+    "No dead agents / module-level orphans — all 104 modules classified; every non-infra module has at least one real non-test path; zero-caller run fns resolved to scan-loop / apply-API / registry-API / dynamic-API dispatch",
+    "0 model-route mismatches — runtime get_model_router().route() for all 85 registered agents vs agent_models.json (86 entries)",
+    "No missing role files among agents that call load_role — except bhaskar_agent (finding 001 itself); barot_agent never calls load_role; temporary_agent has roles/temporary_agent.md; chat_agent loads roles/chat.md",
+    "No write/bash tools on the named read-only agents (reviewer, security_reviewer, architecture_reviewer, monitoring_agent) — scan write=[]"
+  ],
+  "verdict": "READY"
+}

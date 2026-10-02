@@ -1,0 +1,145 @@
+{
+  "audit_id": "10",
+  "audit_name": "Master Final Consolidation Audit (Release-Readiness Board — merge of audits 01-09 + 11, weighted score, release decision)",
+  "run_date": "2026-10-02T13:35:00+05:30",
+  "baseline_commit": "c927c44bf410e188287f32b2cf54e0529c642025",
+  "baseline_note": "Input reports 01-09 + 11 were pinned to baseline c927c44b (\"Production audits 09 and 11\", 2026-10-02 11:11 +0530). Every consolidated High finding was re-verified on current disk at 33bbd03c (\"Production audit 13\") before the release decision: all five remain OPEN. PROJECT.md (the brief's source of truth #1) no longer exists — deleted in e2f2f14d; historical bug classes were reconstructed from in-code audit-traceability comments. No cited file changed while this audit ran.",
+  "worktree_state": "This audit modified no code and no project files; it wrote only files/Qoder_audit report/10_MASTER_FINAL_CONSOLIDATION_AUDIT.md and files/Qoder_audit report/json/AUDIT_10_FINAL_CONSOLIDATION.json. Method: all 10 JSON sidecars parsed programmatically (layer scores, counts, verdicts, every Critical/High finding extracted and deduplicated); current-disk re-verification of the five Highs via targeted reads (api/agents.py:30-36,610-625; roles/ listing; main.py loop registration name-set diff vs tuple; cost_approved grep). No findings re-derived; none softened.",
+  "layer_score": 83,
+  "layer_score_note": "83 = weighted overall Production Readiness (82.83 rounded, arithmetic in §7 of the MD). NOT a new layer score — consolidation output per brief Phase 2.",
+  "findings": [
+    {
+      "id": "H-1 (merged: ARCH-01-001 + ORCH-04-101)",
+      "severity": "High",
+      "file": "backend/app/api/agents.py",
+      "location": "launch_manager generic exception handler — never transitions the task (merged duplicate found independently by Audit 01 and Audit 04)",
+      "line": "agents.py:615-620; correct patterns at 257-277 (planning) and 1043-1048 (launch_coder)",
+      "finding": "When launch_manager raises, the handler sets pipeline_state='blocked' and alerts but never calls transition_task(); the task stays in 'coding' (or 'ready_for_review' if failure precedes the coding transition) with no API/UI recovery (restart_task 409s active statuses; only the undocumented manual PATCH works). Exception path also skips preserve_worktree.",
+      "evidence": "Source audits 01 (ARCH-01-001) and 04 (ORCH-04-101), same file/lines/root cause. Re-verified at 33bbd03c: agents.py:615-620 still has update_pipeline_state + append_log + send_task_alert only, no transition_task.",
+      "production_impact": "Tasks hitting an unexpected manager exception are orphaned in an active status; manual DB/PATCH intervention required. No data loss.",
+      "confidence": "High (two independent audits + current-disk re-verification)",
+      "recommendation": "Mirror the planning fix: guarded update_pipeline_state + transition_task(db2, task_id, 'blocked'); call preserve_worktree(task_id) first.",
+      "effort": "S",
+      "source_reports": ["01", "04"],
+      "status_at_head": "OPEN — accepted known limitation; mitigation: manual PATCH escape hatch (api/tasks.py:231-244) + cancel path"
+    },
+    {
+      "id": "H-2 (= ARCH-01-002)",
+      "severity": "High",
+      "file": "backend/app/api/agents.py",
+      "location": "simple-mode cost estimates use hardcoded Haiku-era constants (~3.75x understated)",
+      "line": "agents.py:33-34 (defs), 727/960 (callers); correct path manager.py:246-248; config.py:192-201",
+      "finding": "_COST_PER_INPUT_TOKEN=0.0000008 / _COST_PER_OUTPUT_TOKEN=0.000004 vs configured Sonnet-era rates 0.000003/0.000015 — agent_runs.cost_estimate and dashboards understate simple-mode spend ~3.75x. Constants bypass config entirely.",
+      "evidence": "Source Audit 01 (ARCH-01-002). Re-verified at 33bbd03c: constants still present at agents.py:33-34.",
+      "production_impact": "Cost reporting/aggregates wrong for simple-mode runs; real spend still bounded by spend_guard pre-call gate + ledger (enforcement independent of these estimates).",
+      "confidence": "High",
+      "recommendation": "Remove the constants; use get_settings().cost_per_input_token/cost_per_output_token (or manager.compute_actual_cost_usd).",
+      "effort": "S",
+      "source_reports": ["01"],
+      "status_at_head": "OPEN — accepted known limitation; mitigation: spend_guard caps actual spend"
+    },
+    {
+      "id": "H-3 (= AGENT-02-001)",
+      "severity": "High",
+      "file": "backend/app/agents/bhaskar_agent.py (+ missing backend/roles/bhaskar_agent.md)",
+      "location": "bhaskar_tool always fails: load_role() raises FileNotFoundError at graph construction",
+      "line": "bhaskar_agent.py:186-187 -> base_graph.py:3449 -> base.py:39-41; caught bhaskar_agent.py:205-215",
+      "finding": "roles/bhaskar_agent.md does not exist; every bhaskar_tool call returns a structured ok=false with zero tokens. Default-enabled (config.py:1802-1805), wired into chat + >=8 agent tool lists; tests monkeypatch run_agent_graph so CI stays green.",
+      "evidence": "Source Audit 02 (AGENT-02-001), runtime-proved at baseline. Re-verified at 33bbd03c: file still absent (roles/ has 86 files, none matching bhaskar).",
+      "production_impact": "Advertised on-demand tool synthesis never works; failure is graceful with zero spend.",
+      "confidence": "High (runtime-proved)",
+      "recommendation": "Add the role file (7 standard sections) + regression test asserting load_role() for every role_name= literal in app/.",
+      "effort": "S",
+      "source_reports": ["02"],
+      "status_at_head": "OPEN — accepted known limitation; mitigation: graceful structured failure, no spend"
+    },
+    {
+      "id": "H-4 (= ORCH-04-102)",
+      "severity": "High",
+      "file": "backend/app/main.py",
+      "location": "leader-election engine sized from a 16-name tuple while 20 loops are registered — 4 singleton loops permanently dead on every default deployment",
+      "line": "main.py:1628-1645 (16 names) vs 1665-1792 (20 _run_as_leader registrations); sizing 1341-1343,1647 (pool_size=16, max_overflow=0); connection held for loop lifetime 1374-1398",
+      "finding": "Four registered loops absent from the tuple: loop:versioned_lesson_consolidation, loop:memory_embeddings_consolidation, loop:agent_historical_performance_rollup, loop:documentation_score_compute. With max_overflow=0, 4 of 20 tasks block on checkout, hit the 30s pool timeout, raise TimeoutError outside any try — permanently dead, no retry, no health check surface.",
+      "evidence": "Source Audit 04 (ORCH-04-102). Re-verified at 33bbd03c: name-set diff = 20 unique loop names vs 16-name tuple; pool_size=len(_leader_loop_names)=16; max_overflow=0.",
+      "production_impact": "Four quality-maintenance loops (lesson/embedding consolidation, performance rollup, docs score) silently never run + recurring startup TimeoutError cluster. Memory degrades gracefully; no user-facing operation depends on them.",
+      "confidence": "High (static, deterministic)",
+      "recommendation": "One line: size the engine from a single (lock_name, loop) tuple list, or set max_overflow >= 4 as stopgap. Highest-value fix in the register.",
+      "effort": "S",
+      "source_reports": ["04"],
+      "status_at_head": "OPEN — accepted known limitation; mitigation: quality-maintenance only; fix is one line"
+    },
+    {
+      "id": "H-5 (= PROD-09-101)",
+      "severity": "High",
+      "file": "backend/app/agents/manager.py, backend/app/api/epics.py, apps/web/app/epics/[id]/page.tsx",
+      "location": "cost-approval gate has no working resume path",
+      "line": "manager.py:2036-2127,2532-2535,2638-2649; epics.py:250-280,318-345; epics/[id]/page.tsx:52-53,153-157",
+      "finding": "Epics over COST_APPROVAL_THRESHOLD ($1.00) halt to pending_cost_approval; 'Approve Cost & Start Agents' relaunches the manager which deterministically re-blocks (no cost_approved flag anywhere); the other approve endpoint strands the epic at status 'approved' with no relaunch. No test covers the approve direction.",
+      "evidence": "Source Audit 09 (PROD-09-101). Verified during Audit 09 at HEAD: grep cost_approved -> 0 hits; unconditional edge chain manager.py:2579-2590.",
+      "production_impact": "Workflow dead-end for >$1 epics; nothing runs while blocked (spend bounded); operator workaround = raise threshold.",
+      "confidence": "High (full call chain traced statically)",
+      "recommendation": "Persist approval on the epic and honor it in _cost_estimate_node; add block->approve->planning regression test.",
+      "effort": "M",
+      "source_reports": ["09"],
+      "status_at_head": "OPEN — accepted known limitation; mitigation: raise COST_APPROVAL_THRESHOLD; spend bounded"
+    }
+  ],
+  "counts": {"critical": 0, "high": 5, "medium": 15, "low": 31, "total": 51},
+  "counts_note": "Consolidated series totals: 6 raw Highs -> 5 unique after merging ARCH-01-001 + ORCH-04-101 (same root cause); 15 Medium + 31 Low as reported by the 10 sidecars; 0 Critical. The findings[] array above lists the 5 consolidated Highs; Medium/Low remain in their source sidecars.",
+  "scorecard": [
+    {"layer": "01 Architecture", "score": 82, "critical": 0, "high": 2, "medium": 2, "low": 3, "verdict": "READY"},
+    {"layer": "02 Agents", "score": 80, "critical": 0, "high": 1, "medium": 1, "low": 2, "verdict": "READY"},
+    {"layer": "03 Memory", "score": 80, "critical": 0, "high": 0, "medium": 3, "low": 3, "verdict": "READY"},
+    {"layer": "04 Orchestration", "score": 74, "critical": 0, "high": 2, "medium": 3, "low": 4, "verdict": "READY"},
+    {"layer": "05 Security", "score": 88, "critical": 0, "high": 0, "medium": 2, "low": 3, "verdict": "READY"},
+    {"layer": "06 Infrastructure", "score": 92, "critical": 0, "high": 0, "medium": 0, "low": 3, "verdict": "READY"},
+    {"layer": "07 AI Evaluation", "score": 85, "critical": 0, "high": 0, "medium": 1, "low": 4, "verdict": "READY"},
+    {"layer": "08 Production Readiness", "score": 86, "critical": 0, "high": 0, "medium": 1, "low": 3, "verdict": "READY"},
+    {"layer": "09 Performance & Scalability", "score": 78, "critical": 0, "high": 1, "medium": 2, "low": 3, "verdict": "READY"},
+    {"layer": "11 Zero Policy", "score": 82, "critical": 0, "high": 0, "medium": 0, "low": 3, "verdict": "READY"}
+  ],
+  "weighted_assessment": {
+    "weights_applied": {"Security": 0.18, "Orchestration": 0.16, "Zero Policy": 0.14, "Agents": 0.12, "Production Readiness": 0.12, "Infrastructure": 0.10, "Memory": 0.08, "AI Evaluation": 0.05, "Performance & Scalability": 0.05},
+    "contributions": {"Security": 15.84, "Orchestration": 11.84, "Zero Policy": 11.48, "Agents": 9.60, "Production Readiness": 10.32, "Infrastructure": 9.20, "Memory": 6.40, "AI Evaluation": 4.25, "Performance & Scalability": 3.90},
+    "weighted_sum": 82.83,
+    "critical_cap_rule": "Checked and NOT triggered — 0 Critical in Security, Orchestration, and Zero Policy (cap would set <= 60).",
+    "final_score": 83,
+    "architecture_note": "Architecture (82) is reported in the scorecard but deliberately unweighted — the brief's weighting table does not list it; kept exactly as specified."
+  },
+  "cross_cutting_patterns": [
+    {"pattern": "feature wired into only one of two task-lifecycle entry points", "this_round": "ONE NEW INSTANCE: H-1 (launch_manager exception path lacks the transition that launch_planning_pipeline and launch_coder both have). Historical fixes in the other two paths verified holding. H-5 is the related 'block wired, resume not' variant."},
+    {"pattern": "module built with zero real callers", "this_round": "NEW instances (all Low): pipeline/dispatcher.py production-orphan (PROD-11-101); test-only API surface (PROD-11-103); dead budget methods (PROD-09-105); zero-reference member cluster (PROD-11-102). Old suspects (tool_discovery, versioned_memory, fleet_checkpoint) verified to have real call sites — NOT instances. Module-level scan: 0 orphan files."},
+    {"pattern": "tz-aware datetime written to naive DB column", "this_round": "NO new instance. Historical instance (failure_ladder, found 2026-08-04) fixed + documented in-line (failure_ladder.py:358-372). 56/61 DateTime columns timezone=True; the 4 naive archived_at columns written only via explicit naive-UTC conversion at their single writer (retention.py:53,234,241). Coverage note: no dedicated full-schema tz sweep this round."},
+    {"pattern": "sync asyncio.run() facade called from already-async code", "this_round": "NO new instance. Bridge pattern deliberate/documented (store.py:712-745, embeddings.py:150-203; isolated engines per bridge). Audit 09 AST scan: 0 unwrapped blocking calls in async contexts; no async caller of a bridge exists."},
+    {"pattern": "task_id/trace_id confusion in events", "this_round": "NO new instance. Covered by Audits 01/04 (event bus, telemetry correlation); no confusion surfaced. Coverage note: no dedicated field-by-field trace sweep — minor gap flagged, not a finding."}
+  ],
+  "contradictions": [
+    "NONE between the 10 series reports. Corroboration recorded: Audits 01 and 04 independently found the same launch-handler defect (merged as H-1). Baseline-drift check: reports 01-07 cite c927c44b, consolidation re-verified at 33bbd03c — all five Highs still open, no cited behavior changed.",
+    "Gap disclosed per brief: PROJECT.md (source of truth #1) no longer exists in the repository (deleted in e2f2f14d); historical bug classes reconstructed from in-code audit-traceability comments. All findings were verified against live code, so the absence does not affect them."
+  ],
+  "release_decision": "READY FOR PRODUCTION",
+  "release_decision_rationale": "Gate condition 1: zero unresolved Critical findings across all 10 reports (met — 0 Critical). Gate condition 2: all High findings either resolved or explicitly accepted as known limitations with documented mitigations (met via the H-1..H-5 acceptance register; two fixes, H-4 and H-1, strongly recommended before scaling beyond a single-operator deployment; ordered pre-scale fix list provided).",
+  "recommended_pre_scale_fixes_ordered": [
+    "H-4: one-line leader-loop tuple/pool sizing fix (main.py) — revives 4 dead singleton loops",
+    "H-1: launch-handler transition_task + preserve_worktree (api/agents.py)",
+    "H-5: cost-approval resume path (manager.py + api/epics.py + UI)",
+    "H-2: remove hardcoded cost constants (api/agents.py:33-34)",
+    "H-3: add roles/bhaskar_agent.md + load_role regression test"
+  ],
+  "post_launch_monitoring_priorities": [
+    "DB pool wait/timeouts first — H-4 guarantees a recurring 4x30s TimeoutError cluster at every startup until fixed; then the shared 30-connection pool under API + ~23 background loops",
+    "Sentry error events — AsyncioIntegration wired and tested; expect near-silence except H-4 timeouts",
+    "Stuck tasks in 'coding' — the H-1 signature; pair with the manual-PATCH runbook",
+    "429 rate-limit frequency — PROD-08-101 shared-bucket arithmetic on proxy deployments",
+    "Spend guard daily total + cost-estimate drift — H-2 3.75x understatement corrupts simple-mode dashboards only",
+    "pending_cost_approval occurrences — any epic landing there is stuck until H-5 is fixed",
+    "Background-loop liveness — confirm all 20 leader loops acquire locks (H-4's four never do)",
+    "Worktree/disk retention + checkpoint cleanup — the healthy retention loop's 24h cycle keeps worktrees bounded"
+  ],
+  "not_found": [
+    "Any unresolved Critical finding across audits 01-09 + 11 (0 found)",
+    "Any contradiction between the 10 series reports requiring manual re-check",
+    "PROJECT.md — deleted from the repository (e2f2f14d); disclosed as a source gap per the brief's rule"
+  ],
+  "verdict": "READY"
+}

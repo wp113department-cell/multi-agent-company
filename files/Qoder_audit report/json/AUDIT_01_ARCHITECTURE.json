@@ -1,0 +1,109 @@
+{
+  "audit_id": "01",
+  "audit_name": "Master Architecture Audit",
+  "run_date": "2026-10-02T11:30:00+05:30",
+  "baseline_commit": "846021aa0c41b29170797f1c30f3c1c3271d3115",
+  "worktree_state": "45 uncommitted entries (pre-existing sessions; not modified by this audit)",
+  "layer_score": 82,
+  "findings": [
+    {
+      "id": "ARCH-01-001",
+      "severity": "High",
+      "file": "backend/app/api/agents.py",
+      "location": "launch_manager (exception handler)",
+      "line": "615-620",
+      "finding": "When run_manager() or any step of launch_manager raises, the handler updates pipeline_state to blocked and logs, but never calls transition_task(), so dev_tasks.status stays 'coding' (set at line 500). launch_coder (line 1047) and launch_planning_pipeline (lines 271-277) both do the transition correctly. restart_task refuses tasks in (planning, coding, testing) with 409, so a stuck task has no self-service recovery. The exception path also skips preserve_worktree (which the normal blocked path calls at line 600).",
+      "evidence": "agents.py:615-619: 'except Exception as e: ... await update_pipeline_state(db2, task_id, \"blocked\"); await append_log(db2, task_id, \"pipeline_error\", f\"Manager failed: {e}\")' — no transition_task. Compare agents.py:1047 'await transition_task(db2, task_id, \"blocked\")' and agents.py:272-273 'await update_pipeline_state(db2, task_id, \"blocked\"); await transition_task(db2, task_id, \"blocked\")'.",
+      "production_impact": "Any unexpected exception during full-pipeline coding leaves the task permanently in 'coding', UI stale, restart returns 409; worktree not preserved. Requires manual DB intervention.",
+      "confidence": "High",
+      "recommendation": "In the except block, call update_pipeline_state + transition_task(db2, task_id, 'blocked') inside a try/except (TransitionError, ValueError) guard (copy agents.py:271-277), and call preserve_worktree(task_id) before the alert.",
+      "effort": "Small"
+    },
+    {
+      "id": "ARCH-01-002",
+      "severity": "High",
+      "file": "backend/app/api/agents.py",
+      "location": "_COST_PER_INPUT_TOKEN / _COST_PER_OUTPUT_TOKEN / _estimate_cost",
+      "line": "33-34, 66-69 (defs); 727, 960 (callers)",
+      "finding": "Simple-mode cost estimates use hardcoded constants 0.0000008/0.000004 ('Haiku-era' comment) while coder agents run claude-sonnet-5 (config.py:32-34) and the configured rates are 0.000003/0.000015 (config.py:192-201). Recorded cost_estimate is ~3.75x understated. Full mode computes correctly via compute_actual_cost_usd using settings (manager.py:246-248). Constants bypass config entirely.",
+      "evidence": "agents.py:33-34 '_COST_PER_INPUT_TOKEN = 0.0000008' / '_COST_PER_OUTPUT_TOKEN = 0.000004'; agents.py:960 'cost = _estimate_cost(tokens_in, tokens_out)'; manager.py:246-248 'cost: float = tokens_in * settings.cost_per_input_token + tokens_out * (settings.cost_per_output_token)'; config.py:193 'default=0.000003'.",
+      "production_impact": "agent_runs.cost_estimate and all cost dashboards/aggregates understate real simple-mode spend by ~3.75x; cost/budget decisions are wrong while real money is spent at full rate.",
+      "confidence": "High",
+      "recommendation": "Remove the two constants; make _estimate_cost read get_settings().cost_per_input_token/cost_per_output_token (or reuse manager.compute_actual_cost_usd).",
+      "effort": "Small"
+    },
+    {
+      "id": "ARCH-01-003",
+      "severity": "Medium",
+      "file": "backend/app/agents/prompt_engineer_agent.py, backend/app/agents/ux_design_agent.py",
+      "location": "run_prompt_engineer_agent (line 165), run_ux_design_agent (line 148), _register hooks",
+      "line": "prompt_engineer_agent.py:165,228; ux_design_agent.py:148,213",
+      "finding": "Both agents have role files, agent_models.json entries (lines 94,98), tests, and auto-register at startup via ensure_all_agents_registered (capability_registry.py:158-181; main.py:1489-1491). But no code statically calls their run functions; their capabilities ('prompt_engineering', 'ui_ux_design', 'design_system_review') are requested nowhere — the manager only ever requests 'frontend_development'/'backend_development' (manager.py:392-397); and the frontend never calls /api/specialized-agents (zero references). Only theoretical path: raw POST /api/specialized-agents/dispatch with the exact capability string.",
+      "evidence": "manager.py:392-396: 'required_capability = (\"frontend_development\" if subtask_type == \"frontend\" else \"backend_development\")'; prompt_engineer_agent.py:238 'capabilities=[\"prompt_engineering\"]'; ux_design_agent.py:224 'capabilities=[\"ui_ux_design\", \"design_system_review\"]'; repo-wide grep for those capability strings outside the two files: 0 hits; grep 'specialized' in apps/web: one stale comment only (roadmap/page.tsx:20).",
+      "production_impact": "Two advertised capabilities cannot be exercised by any product surface; silent dead weight likely to drift; capability coverage claims are misleading.",
+      "confidence": "Medium",
+      "recommendation": "Either wire them to a real entry point (subtask-type mapping or a /agents UI button calling /{name}/run), or mark API-only in roster docs; add a smoke test that every registered capability is requestable somewhere.",
+      "effort": "Medium"
+    },
+    {
+      "id": "ARCH-01-004",
+      "severity": "Medium",
+      "file": "backend/app/agents/base_graph.py, backend/app/main.py",
+      "location": "init_agent_checkpointer / run_agent_graph(resume_trace_id)",
+      "line": "base_graph.py:65-96, 3572, 3618-3674; main.py:1566-1567, 1854-1855",
+      "finding": "Audit prompt 01's premise 'base_graph.py agents do not have a checkpointer' is stale: base_graph has _agent_checkpointer (AsyncPostgresSaver via init_agent_checkpointer, MemorySaver fallback), compiled at line 3572, wired in lifespan (main.py:1566-1567, 1854-1855), and implements resume via resume_trace_id (T2-B2). Remaining difference vs pipeline graph is resume mechanics, not checkpointer presence.",
+      "evidence": "base_graph.py:65 '_agent_checkpointer: Any = MemorySaver()'; base_graph.py:69 'async def init_agent_checkpointer(database_url: str) -> None:'; base_graph.py:3572 'return g.compile(checkpointer=_agent_checkpointer)'; main.py:1567 'await init_agent_checkpointer(settings.database_url)'; base_graph.py:3674 'resume_trace_id: str = \"\"' with 56-line design comment 3618-3673.",
+      "production_impact": "Fixes driven from the stale premise would target a non-existent state and miss the real invariants (resume re-enters at START; tool_handler reconstruction requirements).",
+      "confidence": "High",
+      "recommendation": "No code change; carry this corrected fact into audits 04/08/12 and cross-check the T2-B2 resume tests in the baseline run.",
+      "effort": "Small"
+    },
+    {
+      "id": "ARCH-01-005",
+      "severity": "Low",
+      "file": "backend/app (cross-cutting)",
+      "location": "module import graph",
+      "line": "n/a (structural)",
+      "finding": "AST scan of 345 modules found 28 import cycles (e.g. db.repository -> security.credential_vault -> fleet.audit_log -> fleet.fleet_events -> event_bus.bus -> db.repository; the tools/delegate/delegation family). Three cycles spot-verified to be broken by lazy function-level imports; app boots and mypy passes (497 files), so none are runtime-breaking today. Latent fragility under refactoring.",
+      "evidence": "Scan: 345 modules analyzed, 28 cycles. repository.py top-level app imports = lines 14-15 only (app.config, app.db.models); credential_vault.py top-level app imports = none.",
+      "production_impact": "None today; any refactor promoting a lazy import to module level can create a real circular-import startup failure.",
+      "confidence": "Medium",
+      "recommendation": "Add import-linter forbidden-contract CI check or an AST test; document the 28-cycle list in one place.",
+      "effort": "Medium"
+    },
+    {
+      "id": "ARCH-01-006",
+      "severity": "Low",
+      "file": "backend/app/api/agents.py, backend/app/agents/manager.py",
+      "location": "launch_manager",
+      "line": "470-620 (no create_agent_run; compare agents.py:886)",
+      "finding": "launch_coder (agents.py:886) and launch_planner (agents.py:695) create AgentRun rows with heartbeats; launch_manager creates none anywhere (grep: zero create_agent_run/finish_agent_run in agents.py manager section and in manager.py). The manager/phasing loop is invisible to run metrics, heartbeat monitoring and orphan recovery.",
+      "evidence": "agents.py:886 'run = await create_agent_run(db, task_id, run_label, settings.model_coder)'; grep -n 'create_agent_run|finish_agent_run' app/agents/manager.py -> empty.",
+      "production_impact": "Manager-phase time not attributed in agent runs; no heartbeat exists for a hung manager loop between dispatches (only its sub-agents' own heartbeats).",
+      "confidence": "Medium",
+      "recommendation": "Decide explicitly: add a lightweight AgentRun row around launch_manager, or document intentional exclusion.",
+      "effort": "Small"
+    },
+    {
+      "id": "ARCH-01-007",
+      "severity": "Low",
+      "file": "backend/app/memory/store.py, backend/app/event_bus/redis_streams.py, backend/app/tools/execution/health_check.py",
+      "location": "module-level constants",
+      "line": "store.py:375-376; redis_streams.py:29; health_check.py:103",
+      "finding": "Residual behavior-affecting constants outside config.py. Audit-named fixes are intact (CORS configurable config.py:2114; USE_GROQ=false tests/conftest.py:66). Candidates: _EMBED_ATTEMPTS=3, _EMBED_BACKOFF_SECONDS=0.5, _MAXLEN=10_000 (redis stream memory bound), hardcoded http://localhost:{port}/health.",
+      "evidence": "store.py:375-376 '_EMBED_ATTEMPTS = 3' / '_EMBED_BACKOFF_SECONDS = 0.5'; redis_streams.py:29 '_MAXLEN = 10_000'; health_check.py:103 'f\"http://localhost:{port}/health\"'; config.py:2114 CORS default present.",
+      "production_impact": "Ops cannot tune embedding retry or stream retention without a deploy; localhost health URL breaks if host/port changes.",
+      "confidence": "Medium",
+      "recommendation": "Migrate the listed items into Settings with current values as defaults; leave pure tool tuning constants as-is.",
+      "effort": "Small"
+    }
+  ],
+  "counts": {"critical": 0, "high": 2, "medium": 2, "low": 3},
+  "not_found": [
+    "PROJECT.md — referenced by all audit prompts as ground truth; does not exist anywhere in the repo (nearest: README.md, files/What_is/PROJECT_MASTER_GUIDE.md)",
+    "No 9th FleetEventType — verified exactly 8 canonical types (fleet_events.py:41-49)",
+    "No module-level orphans in app/fleet (49 modules) or app/agents (all audit-named wirings verified present)",
+    "No FE/BE camelCase drift in sampled routes (tasks, pipeline, eps, repo, metrics, roadmap, agents, settings, chat)"
+  ],
+  "verdict": "READY"
+}

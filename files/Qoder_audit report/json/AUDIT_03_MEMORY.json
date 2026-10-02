@@ -1,0 +1,106 @@
+{
+  "audit_id": "03",
+  "audit_name": "Master Memory Audit",
+  "run_date": "2026-10-02T11:37:00+05:30",
+  "baseline_commit": "c927c44bf410e188287f32b2cf54e0529c642025",
+  "baseline_note": "All audit-03 evidence gathered at HEAD c927c44b (\"Production audits 09 and 11\", 2026-10-02 11:11 +0530). During evidence collection an independent, concurrent process (its inline comments say \"Production audit 12\") modified working-tree files; HEAD never moved. No memory-layer file was touched by that process, and every citation in this audit was verified against the memory-layer files as they stand at c927c44b.",
+  "worktree_state": "HEAD unchanged at c927c44b. Working-tree drift from the concurrent process (not this audit): modified backend/app/api/epics.py (11:26), backend/app/api/fleet_dashboard.py (11:26), backend/app/api/auth.py (11:34); untracked What_is/AUDIT_REPORT/evidence/*, apps/web/e2e-real/, apps/web/playwright.real.config.ts, backend/tests/test_audit12_route_reachability.py. This audit modified no code; it wrote only files/Qoder_audit report/.",
+  "layer_score": 80,
+  "findings": [
+    {
+      "id": "MEM-03-001",
+      "severity": "Medium",
+      "file": "backend/app/memory/store.py",
+      "location": "query_similar_tasks -> candidates CTE (the only query_* without a category/outcome predicate)",
+      "line": "609-621; contrast siblings 1013, 1172, 1368, 1555, 1762, 2092, 2168",
+      "finding": "Task rows are stored with outcome='completed'|'blocked' and the model-default category='task' (models.py:754-756), while every other write site stores a distinct outcome/category. query_similar_tasks filters on neither, so a failure/preference/bug/prompt-change row is returned as a 'similar past task'. Because query_memory_context (684-696) also runs the 7 category-specific queries, the same non-task row can appear twice in one injected block — once under 'Similar past tasks' (format_memory_context, 837-851) and once under its own section (format_full_memory_context, 757-834).",
+      "evidence": "store.py:609-621 (WHERE = embedding NOT NULL + vector_norm>0 + archived=false + repo filter only); write sites verified for all 8 categories; models.py:754-756 (category default 'task'); consumed by memory_hook_node on every agent run (base_graph.py:1652-1670), the pipeline prefetch (pipeline/graph.py:245-258 -> state.py:24 -> pm.py:130-131,156 / architect.py:146,160 / decomposer.py:153,159), and GET /api/memory/search (api/memory.py:157-159). No test pins the expected behavior: test_b4_memory_categories.py:248-294 only exercises the archived filter; test at 143-188 seeds all categories with identical text and asserts non-emptiness only.",
+      "production_impact": "The top-3 'similar past tasks' slots injected into every agent's prompt can be entirely non-task rows, mislabeled by their outcome string; duplicated rows waste the 3000-token injection budget (config.py:673-680) and dilute retrieval precision. Silent — nothing logs the mixing.",
+      "confidence": "High (SQL verified; absence of filter is unambiguous)",
+      "recommendation": "Add AND category = 'task' (or outcome IN ('completed','blocked')) to the candidates CTE; add a real-DB test seeding all 8 categories and asserting the tasks section contains only task rows.",
+      "effort": "Small"
+    },
+    {
+      "id": "MEM-03-002",
+      "severity": "Medium",
+      "file": "backend/app/main.py",
+      "location": "_versioned_lesson_consolidation_loop — consolidation branch vs the 'Also repair' block",
+      "line": "256-284 (continue at 259-260; repair block at 273-284)",
+      "finding": "Loop body is: sleep -> try { if not memory_consolidation_enabled: continue; consolidate() } -> also reembed_zero_vector_rows(). When an operator sets MEMORY_CONSOLIDATION_ENABLED=false (a documented, supported switch — config.py:1715-1717, loop docstring 250-253), the continue restarts the loop and skips the zero-vector repair block entirely. reembed_zero_vector_rows has no other scheduled caller in production (only call site main.py:277-280; store.py:425 def; tests only).",
+      "evidence": "main.py:259-260 vs 273-284; comment at 273-274 documents the repair as an independent concern, but control flow couples it to the consolidation switch. reembed_zero_vector_rows no-ops without a key (store.py:432-433) and repairs <=50 rows/cycle (limit default at 426).",
+      "production_impact": "After a Voyage outage (or any backlog of dead rows), an operator who disables consolidation — precisely the cost-conscious configuration — silently loses the only automatic recovery path for rows deliberately written \"stored... but dead\" (test_b4_memory_store.py:260-285). Dead rows stay unsearchable until a key appears and repair runs, or 180-day retention archives them.",
+      "confidence": "High (deterministic control flow)",
+      "recommendation": "Move the repair block above the continue (own try/except, own cadence), or restructure as two independent guarded sections; give repair its own switch if the coupling is unwanted by design.",
+      "effort": "Small"
+    },
+    {
+      "id": "MEM-03-003",
+      "severity": "Medium",
+      "file": "backend/app/memory/store.py (+ backend/app/agents/base_graph.py caller)",
+      "location": "query_memory_context / query_memory_context_sync / memory_hook_node",
+      "line": "store.py:684-696 (7 sequential awaits); sub-queries embed at 594-598, 1159-1161, 1355-1357, 1542-1544, 1749-1751, 2081-2083, 2157-2159; sync bridge 708-754; caller base_graph.py:1652-1654",
+      "finding": "For one identical description, the 7 sub-queries each perform their own Voyage embedding round-trip (via _embed, which also runs the sync client in a thread) and are awaited strictly serially, followed by up to 7 record_memory_access updates. The sync bridge additionally creates a throwaway DB engine + a fresh event loop per agent run. With VOYAGE_API_KEY set (the production-config case) this is 7 duplicate HTTP calls for one text per agent run start; with no key it short-circuits cheaply (zero-vector, 597-598).",
+      "evidence": "Cited lines; callers: every agent run (memory_hook_node, base_graph.py:1629-1678) — cost multiplies by concurrent runs (max_concurrent_agent_runs=20, config.py:804-805); the pipeline prefetch (graph.py:257) calls only query_similar_tasks (single embed) — the 7x cost is the agent-run path.",
+      "production_impact": "~1-3 s of serialized provider latency added before every agent's inference when the key is configured (plus 7 DB round-trips); 20 concurrent runs emit 140 embedding requests for 20 unique texts. Invisible in metrics except the aggregate memory_retrieval phase timing.",
+      "confidence": "High (code path); Medium on exact latency magnitude (provider-dependent)",
+      "recommendation": "Embed once in query_memory_context and pass the vector (or a lazy embedder) into the sub-queries; consider asyncio.gather for the independent reads; optionally reuse a single engine for the sync bridge.",
+      "effort": "Medium"
+    },
+    {
+      "id": "MEM-03-004",
+      "severity": "Low",
+      "file": "backend/app/memory/store.py (+ inaccurate claim in backend/app/agents/base_graph.py comment)",
+      "location": "write path embed_task_outcome (and siblings) vs _embed / _find_near_duplicate / reembed_zero_vector_rows",
+      "line": "store.py:394-395, 320-321, 513-557, 425-462; base_graph.py:3199-3204",
+      "finding": "With voyage_api_key unset (the config default, config.py:41-43) and memory_enabled=true (default), every agent run still inserts task-outcome/failure/architecture rows with a zero embedding: dedup is skipped, the quality gate passes real content, and the insert is unconditional. Those rows are invisible to every query (vector_norm(embedding) > 0, 616-617) and can never self-heal — repair explicitly no-ops without a key. The base_graph.py:3199-3204 comment justifies skipping the versioned-lesson publish with 'same meaning-without-a-key logic app.memory.store already uses' — but store.py's zero-vector logic is query-side only; it does not skip these writes, so the claimed precedent is not what the code does.",
+      "evidence": "Cited lines; tests/test_b4_memory_store.py:260-285 proves 'stored... but dead' is the intended behavior for a provider outage (write now, repair later) — the no-key case shares that path but has no recovery until a key is configured, then repairs <=50 rows per 24 h cycle (main.py:280, memory_consolidation_interval_hours=24).",
+      "production_impact": "In any deployment without a Voyage key, memory_embeddings grows with permanently unusable rows (analytics count them; composite ranking never sees them); if a key is added later, a large backlog clears at <=50 rows/day. The misleading comment raises the risk that reviewers believe no such rows exist.",
+      "confidence": "High (behavior) / Medium (whether preserve-raw-text-for-later-embedding was a deliberate decision for the no-key case)",
+      "recommendation": "Gate the write on a real key (skip insert when voyage_api_key absent — mirroring the versioned-publish gate at base_graph.py:3207), or keep write-and-repair but document it explicitly in the _embed docstring and raise/uncouple the repair rate; fix the base_graph.py:3199-3204 wording.",
+      "effort": "Small"
+    },
+    {
+      "id": "MEM-03-005",
+      "severity": "Low",
+      "file": "backend/app/api/memory.py",
+      "location": "_VALID_CATEGORIES + get_memory_patterns filter",
+      "line": "25-38 (set has 7 values — no prompt_change); 60-63 (unknown values silently ignored, no 4xx)",
+      "finding": "prompt_change has been a real, written category since #405 (store.py:1991-1992; query at 2168; writer caller prompt_registry.py:354,370) but is absent from the endpoint's filter set and its own description string (memory.py:46). A request for it (or any typo like ?category=failures) falls through the 'in' check and returns the unfiltered aggregate/recent list instead of an error or a filtered result.",
+      "evidence": "Cited lines; the set's own comment (30-34) shows it was maintained by hand once (procedure/preference/bug added) and missed the newer category.",
+      "production_impact": "A dashboard filtering by category can silently display an all-categories feed; consumers cannot distinguish 'no data' from 'filter ignored'. Read-only surface — no data corruption.",
+      "confidence": "High",
+      "recommendation": "Single shared category constant (e.g. export the 8 values from store/models) used by both the API and writers; return 422 for unknown values.",
+      "effort": "Small"
+    },
+    {
+      "id": "MEM-03-006",
+      "severity": "Low",
+      "file": "backend/app/fleet/versioned_memory.py",
+      "location": "_publish (lock key vs similarity scope), _insert, _most_recent_draft_for_lineage",
+      "line": "621 (_lesson_lock(topic)); 622 + 115-138 (_find_most_similar_published — global, no topic filter); 642-650 (merged draft reuses lesson_id, version+1); 141-172 (_insert, no uniqueness); 218-244 (promote picks version DESC LIMIT 1, no tiebreaker)",
+      "finding": "Two concurrent publish() calls on different topics take different advisory locks but each performs a fleet-wide similarity check. If both texts are >= memory_merge_similarity_threshold (0.85) against the same published lesson, both insert a merged draft with the same lesson_id and same version number. promote() then selects one draft by version DESC LIMIT 1 with no secondary ordering (tie -> arbitrary); the other stays draft and could be promoted later, publishing a second same-lineage row without flipping the first (promote only flips supersedes_id).",
+      "evidence": "Cited lines. Design docstrings claim serialization by topic (67-112) and the consolidation sweep has its own __consolidation_sweep__ lock (684) — but publish() never takes it.",
+      "production_impact": "Duplicate draft/published versions within one lineage after concurrent similar lesson extraction (publish is called per agent run when a key is set, base_graph.py:3212). Data is not lost; history/version numbering becomes ambiguous and rollback can flip the 'wrong' sibling. Narrow window; requires two >=0.85-similar publishes against one lesson on different topics.",
+      "confidence": "Medium (mechanism verified in code; real-world frequency unproven)",
+      "recommendation": "Constrain the match to the same topic inside the lock, take a global publish/merge lock (reuse __consolidation_sweep__), or add a DB uniqueness constraint on (lesson_id, version) plus a tiebreaker in _most_recent_draft_for_lineage.",
+      "effort": "Small-Medium"
+    }
+  ],
+  "counts": {"critical": 0, "high": 0, "medium": 3, "low": 3},
+  "not_found": [
+    "PROJECT.md — still absent (same as Audits 01/02; all claims re-derived from code)",
+    "No orphaned memory functions — every embed_*/query_*/lifecycle function has a real non-test caller (sweep in report section 4); embed_prompt_change's caller is embed_prompt_change_sync (prompt_registry.py:354,370)",
+    "No cross-table similarity querying — memory_embeddings queries use embedding <=> CAST(:vec AS vector) on their own table; versioned merge detection queries versioned_lessons state='published' (115-138)",
+    "No unauthenticated memory write surface — /api/memory endpoints carry require_authenticated (patterns/analytics/search/lessons/feedback) or require_approver (rollback) (api/memory.py)",
+    "No repo-scoping gap in SQL — (repo_id IS NULL OR repo_id = :repo_id) filter present at all 9 sites (store.py:352, 618, 1017, 1176, 1372, 1559, 1766, 2096, 2172); repo isolation proved by tests/test_memory_project_scoping_queries.py",
+    "No unbounded/expensive LLM merge — model_router default claude-haiku-4-5-20251001 (config.py:35-38), max_tokens 512/768 (versioned_memory.py:577,452) / 400 (base_graph.py:582), <=3 merge groups/cycle, <=20 merges/promote",
+    "HNSW indexes present and used — memory_embeddings (migration 004_phase6_tables.py:88-91) and versioned_lessons (migration 020_versioned_lessons_hnsw.py:27-28)",
+    "No missing created_at — MemoryEmbedding.created_at present with server_default=func.now() (models.py:763-765); the historical missing-column crash remains fixed",
+    "No crash path without VOYAGE_API_KEY — all read paths short-circuit on zero vector (store.py:320, 597, 1160, 1356, 1543, 1750, 2082, 2158); versioned publish gated on the real key at its call site (base_graph.py:3207-3214)",
+    "No per-subtask N+1 memory-query loop — manager.py:1037-1045 only records outcomes per subtask (write); the query cost is the per-run 7-sub-query path (MEM-03-003)"
+  ],
+  "cross_audit_flags": [
+    "Leader-election DB pool undersized: _leader_loop_names has 16 names but 20 _run_as_leader tasks are scheduled; pool_size=16, max_overflow=0 with connections held for loop lifetime -> tail tasks fail with SQLAlchemy pool_timeout. Discovered during audit 03 evidence collection; to be scored under Audit 04 (Orchestration) / Audit 06 (Infrastructure). Refs: main.py:1625-1647, 1665-1792, 1374-1399, 1341-1343; config.py:1642-1643."
+  ],
+  "verdict": "READY"
+}

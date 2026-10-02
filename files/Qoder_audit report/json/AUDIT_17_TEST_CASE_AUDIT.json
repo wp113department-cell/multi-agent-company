@@ -1,0 +1,177 @@
+{
+  "audit_id": "17",
+  "audit_name": "Test Case Audit (fake / trivial / masking tests)",
+  "run_date": "2026-10-02T15:30:00+05:30",
+  "baseline_commit": "90dac23bad223ec39413c485d1ddb68f9646975e",
+  "type": "Test-quality audit deliverable — scan-level analysis of the entire test suite for fake, trivial, tautological, or defect-masking tests",
+  "method": [
+    "two-pass Python AST scan of 675 backend test files / 7,057 test functions (empty-body detection, assert/raises/mock-assert census, trivial-assert matcher, mock-passthrough matcher, skip inventory)",
+    "executed collection on HEAD: 8,962 collected / 25 deselected",
+    "executed skip verification: pytest tests/pending/ -q -> 49 skipped in 0.35s",
+    "executed vitest suite: 9 files / 52 tests — all passed",
+    "targeted source reads of every flagged body before classifying (no verdict from regex alone; three heuristic buckets materially corrected by these reads)"
+  ],
+  "scan_statistics": {
+    "backend_test_files": 675,
+    "backend_test_functions": 7057,
+    "collected": "8,962 collected / 25 deselected",
+    "empty_stub_tests": 4,
+    "tautological_assertions": 1,
+    "assert_false_failure_markers_legit": 3,
+    "no_assert_tests_total_flagged": 85,
+    "no_assert_breakdown": {
+      "assert_via_shared_helper_legit": 37,
+      "intentional_no_exception": 44
+    },
+    "interaction_only_tests": 29,
+    "mock_passthrough_tests_raw": 39,
+    "real_xfail": 0,
+    "weak_assert_heuristic_hits_sampled_legit": 93,
+    "skip_inventory": {
+      "module_level_pytestmark_files": 24,
+      "skipif_decorators": 11,
+      "inline_pytest_skip": 46
+    },
+    "generated_family_files": 105,
+    "frontend_vitest": "9 files / 52 tests / 109+ expect() — executed: 52/52 pass",
+    "defect_masking_via_mock_placement": "flagged -> T-17-107 (Medium)"
+  },
+  "execution_reality": {
+    "default_pytest_run_ci": "8,962 collected / 25 deselected — CI ubuntu (+Windows platform subset) under pytest.ini -m 'not slow'",
+    "slow_deselected_llm_and_network_real": 25,
+    "pending_directory_gate": "49 — never without RUN_PENDING_TESTS=1 + funded keys (verified skips cleanly)",
+    "vitest_frontend": "52 — CI (Node 22 job); executed this audit 52/52 pass",
+    "playwright_e2e_mocked_api": "11 (4 specs) — NOT in CI",
+    "e2e_real_journeys": "6 journeys (A1-A4, B, page tour) — NOT in CI; requires :8000 + next start :3100 + throwaway approver",
+    "implication": "CI green means the deterministic core is green; it does NOT cover live LLM behavior, real-network tools, browser journeys, or real-stack E2E (deliberate + documented, but the unexecuted surface must be discounted)"
+  },
+  "findings": [
+    {
+      "id": "T-17-101",
+      "severity": "Low",
+      "file": "backend/tests/test_day0_groq_integration.py",
+      "location": "test_prompt_caching_header_sent, test_image_block_param_in_call_llm, test_reflection_node_with_real_claude, test_full_pipeline_pm_to_qa_with_claude",
+      "line": "361-385",
+      "finding": "4 empty stub tests (body = docstring + pass with # TODO) — collected in the 8,962 total but can never fail",
+      "evidence": "verified at HEAD: bodies are docstring + pass with a # TODO describing the intended assertion; honest stubs, not disguised fakes",
+      "production_impact": "Anthropic-capability claims (prompt caching, vision ImageBlockParam, structured reflection) have zero executable verification today; the green collected count includes them",
+      "confidence": "High",
+      "recommendation": "Write the assertions (3 of 4 are small mock-capture tests) or mark skip(reason='stub — pending funded key') until written. Cross-ref: file 16 section A1.",
+      "effort": "Small"
+    },
+    {
+      "id": "T-17-102",
+      "severity": "Low",
+      "file": "backend/tests/test_concurrency.py",
+      "location": "test_subtask_slot_per_epic",
+      "line": "62",
+      "finding": "1 tautological assertion: assert True  # No deadlock = pass — a no-op; the real check is implicit (a deadlock would hang/timeout)",
+      "evidence": "sibling test test_subtask_slot_different_epics_independent asserts on the entered list, showing the intended style",
+      "production_impact": "A regression that keeps concurrency but loses per-epic scoping could pass green",
+      "confidence": "High",
+      "recommendation": "Assert the post-condition (len(active_a) == 0 and all 4 completions observed).",
+      "effort": "Trivial"
+    },
+    {
+      "id": "T-17-103",
+      "severity": "Low",
+      "file": "backend/tests/test_git_service.py, backend/tests/test_budget_manager.py, backend/tests/test_gap_day4.py, backend/tests/test_audit09_spend_guard.py",
+      "location": "no-exception style tests",
+      "line": "test_git_service.py:95,113; test_budget_manager.py:20,68,95,108; test_gap_day4.py (x3 test_module_importable); test_audit09_spend_guard.py:115",
+      "finding": "44 intentional no-exception tests (weakest legitimate style): body calls the unit and relies on 'it did not raise' (comments: # must not raise, # no raise)",
+      "evidence": "not fake — a raise fails the test — but there is no positive verification of the result",
+      "production_impact": "Low: correctness of returned values is unchecked in these paths",
+      "confidence": "High",
+      "recommendation": "Opportunistic strengthening only (add a post-condition where a cheap observable exists, e.g. assert returned (allowed, reason) tuples from the budget checks); no mass rewrite warranted.",
+      "effort": "Small (opportunistic)"
+    },
+    {
+      "id": "T-17-104",
+      "severity": "Low",
+      "file": "backend/tests/test_gap52_doc_agent_auto_trigger.py, backend/tests/test_batch15_prompt_auto_rollback.py, backend/tests/test_confidence_gated_control_flow.py",
+      "location": "negative-path guard tests",
+      "line": "test_gap52:225; batch15 (4 guards); confidence_gated (3)",
+      "finding": "29 interaction-only tests (all checks are mock call assertions: assert_not_called / assert_called_once, no value assertions)",
+      "evidence": "spot-checks show legit negative-path tests with real preconditions (real repo, real settings objects); asserting 'X was NOT called' is the correct way to test skip/guard behavior",
+      "production_impact": "Residual risk only: a change making the guard unreachable-but-silent (early return before the not-called point) can still show green",
+      "confidence": "High",
+      "recommendation": "Advisory note only — no action required; documented so future audits calibrate.",
+      "effort": "None"
+    },
+    {
+      "id": "T-17-105",
+      "severity": "Low",
+      "file": "backend/tests/test_summarize_output_hardening.py, backend/tests/test_generate_commit_msg_hardening.py, backend/tests/test_audit04_orchestration_fixes.py",
+      "location": "mock-passthrough pattern",
+      "line": "summarize_output:134,145; commit_msg:142; audit04:157",
+      "finding": "39 tests (raw heuristic; documented false-positive class return_value=None) assert against literals injected via their own mocks",
+      "evidence": "standard boundary-mocking: the test verifies the unit's plumbing (mocked value routed through unchanged), not the mocked component's behavior",
+      "production_impact": "None by itself; recorded as a pattern so readers calibrate what these tests can and cannot catch",
+      "confidence": "Medium",
+      "recommendation": "No action; pattern documented in report section 3 (T-17-105).",
+      "effort": "None"
+    },
+    {
+      "id": "T-17-106",
+      "severity": "Low",
+      "file": ".github/workflows/ci.yml, backend/pytest.ini, apps/web/playwright.real.config.ts",
+      "location": "CI coverage surface",
+      "line": "ci.yml (backend + frontend jobs)",
+      "finding": "CI-blind execution surface quantified: 25 slow-deselected + 49 pending + playwright e2e (11) + e2e-real (6) never run in CI; CI runs pytest/vitest/mypy strict only",
+      "evidence": "executed collection/skip/execution measurements this audit; vitest 52/52 executed locally as positive evidence",
+      "production_impact": "Any reader of the CI badge must discount live LLM behavior, real-network tools, browser journeys, and real-stack E2E — deliberate and documented but a real coverage gap",
+      "confidence": "High",
+      "recommendation": "Cross-ref file 16 execution plan; add playwright e2e to CI at minimum (mocked-API specs need no key).",
+      "effort": "Small-Medium"
+    },
+    {
+      "id": "T-17-107",
+      "severity": "Medium",
+      "file": "backend/tests/test_bhaskar_tool.py, backend/pipeline/dispatcher.py (tests), test-only production APIs",
+      "location": "mocks that mask broken production paths",
+      "line": "test_bhaskar_tool.py:978, 996, 1013 (patch run_agent_graph)",
+      "finding": "Tests that legitimately isolate a lower boundary but are the only reason CI stayed green while the corresponding production path was 100% non-functional: (1) bhaskar flagship — test_bhaskar_tool.py:983-1008 patches run_agent_graph on the module so build_agent_graph -> load_role -> roles/bhaskar_agent.md never executes in any test; 849 lines of bhaskar tests stayed green while every real call failed (ok=false, 0 tokens); (2) pipeline/dispatcher.py kept alive only by its own tests while production routing flows through FleetManager.select(); (3) ~14 test-only production APIs whose only callers are tests (v2 policy checks, sync approval-gate wrappers, s3 delete/list)",
+      "evidence": "verified in source (all three bhaskar tests at :978, :996, :1013 patch run_agent_graph); cross-ref H-3 / PROD-12-103, PROD-11-101, PROD-11-103",
+      "production_impact": "Systemic risk class 'green CI + broken feature': no individual test is fake, yet the aggregate gives false confidence on exactly the paths the product uses — this is how H-3 (High) survived a 8,900-test suite",
+      "confidence": "High",
+      "recommendation": "Targeted, not a mass rewrite: (a) add contract tests exercising each agent's real graph construction from its declared role_name (would have caught the bhaskar gap); (b) dispatcher + test-only API clusters: delete-with-tests or wire-into-production (PROD-11-101/103 recommendations); (c) convention: prefer mocking the external boundary (LLM client, network, clock) over the project's own composition functions.",
+      "effort": "Medium"
+    }
+  ],
+  "counts": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 6,
+    "total": 7
+  },
+  "verified_clean_summary": [
+    "assert False failure markers (3): legitimate try/except idiom in test_enhancements_settings_pdf.py:256,269,283",
+    "is not None validator tests (heuristic hits): e.g. test_git_merge_hardening.py:68-74, test_ssrf_nat64.py:47 — the validator contract is 'returns error string or None', so is not None IS the precise assertion; of 93 weak-assert heuristic hits the sampled >=12 were all legitimate",
+    "Helper-based assertion (37 tests): test_fleet_flags x30 and test_handlers_are_valid x7 — assertions live in shared helpers (_assert_all_flags asserts 8 conditions, verified at test_day2_agent_contracts.py:109-121); scanner false positive (no dot-prefix on helper calls)",
+    "No fabricated-value tests: no assert x == x; no hardcoded-expected-equals-own-constant; no empty test classes; 0 real xfail (single grep hit is a string literal)",
+    "Skip gates are environmental and honest: docker-absent, browser-absent, win32-only markers, key gates; no unconditional skip() shortcuts on regular tests",
+    "Generated-family quality (105 test_batch*/test_audit*/test_gap* files): real behavioral tests with 1-12 asserts per test and real fixtures (real git repos, real settings objects) — materially stronger than typical generated suites",
+    "Frontend vitest (executed 52/52): expect-per-test ratios 1.3-4.3 (109 expects); lib/api.test.ts verifies security-relevant header behavior (no Authorization leak on GET/DELETE, X-User-Id preservation); 44 toBeDefined/toBeTruthy/toBeInTheDocument are components of richer assertions, not standalone trivial checks",
+    "Playwright e2e (11 tests): intentional mocked-network UI-contract tests via page.route fixtures (real-stack alternative exists separately as e2e-real)"
+  ],
+  "not_found": [
+    "No fabricated-assertion farm: 0 fabricated-value assertions, 0 assert x == x, 0 real xfail masking",
+    "No unconditional skip() shortcuts on regular (non-environmental) tests",
+    "No empty test classes"
+  ],
+  "scan_limitations": [
+    "Classification is scan-level with source-read verification for every flagged case, but the buckets are heuristics: 'no-check' != 'no-value' (implicit no-exception semantics); mock-passthrough matcher has a documented None false-positive class",
+    "The scan cannot detect semantic weakness that compiles like strength (e.g. asserting an intermediate the unit merely forwarded — T-17-105 class)",
+    "test_fleet_flags-style helper assertions are invisible to assert-counting scans by construction (documented so the next audit does not re-flag them)",
+    "Frontend scan covered the 9 vitest files + 4 e2e specs + e2e-real spec; no per-test semantic review of every TS assertion beyond samples"
+  ],
+  "cross_audit_flags": [
+    {"flag": "17<->12", "detail": "T-17-107 instance 1 (bhaskar mocks above the failure point) is the test-side explanation of H-3 / PROD-12-103 (missing roles/bhaskar_agent.md)"},
+    {"flag": "17<->11", "detail": "T-17-107 instances 2-3 map to PROD-11-101 (production-orphan dispatcher) and PROD-11-103 (test-only production APIs)"},
+    {"flag": "17<->16", "detail": "T-17-101 stubs are also listed in file 16 section A1 (Anthropic-only pass-only TODO stubs); T-17-106 CI-blind surface cross-refs file 16 catalogs"},
+    {"flag": "17<->15", "detail": "Findings T-17-101..T-17-107 feed the series register (report 15) under the test-quality section"},
+    {"flag": "17<->07", "detail": "Eval suite exclusion EVAL-07-102 (never runs in CI/default) is part of the T-17-106 CI-blind surface"}
+  ],
+  "verdict": "SUITE IS REAL — 4 empty stubs + 1 tautological assert + 1 Medium structural masking pattern (T-17-107); no fabricated-assertion farm; the one consequential defect class (mocks above the failure point) is actionable and small"
+}

@@ -1,0 +1,134 @@
+{
+  "audit_id": "16",
+  "audit_name": "Pending LLM Testing Register (all live-LLM / real-service tests skipped by the series)",
+  "run_date": "2026-10-02T14:05:00+05:30",
+  "baseline_commit": "90dac23bad223ec39413c485d1ddb68f9646975e",
+  "type": "inventory deliverable — no new findings; every item PENDING/UNVERIFIED until run with a funded key",
+  "method": [
+    "executed collection-level verification on HEAD (pytest --collect-only: 8,962 collected / 25 deselected)",
+    "executed skip verification: pytest tests/pending/ -q -> 49 skipped in 0.35s (skips cleanly)",
+    "reconciled repository register PENDING_TESTS_API_KEYS.md (797 lines, sections A-M) against current disk",
+    "cross-referenced series deferrals from audits 02, 03, 07, 12, 14"
+  ],
+  "current_blockers": {
+    "anthropic_api_key": "no balance (real call returned BadRequestError 'Your credit balance is too low')",
+    "voyage_api_key": "not set -> semantic memory inactive by default (MEM-03-004)",
+    "groq_free_tier": "structurally unusable: 8,000 TPM vs coder minimum single request 10,958 tokens (413); paced run 12 attempted 0 passed",
+    "gemini_free_tier": "unusable: 20 requests/day (gemini-2.5-flash); lite model hangs 120s on real-size prompts"
+  },
+  "gate_inventory": [
+    {"gate": "pytest.ini addopts = -m \"not slow\"", "effect": "25 slow-marked tests deselected by default"},
+    {"gate": "tests/pending/conftest.py RUN_PENDING_TESTS=1 + key-shape gates", "effect": "49 tests skip cleanly otherwise"},
+    {"gate": "tests/evals/test_evals.py require_groq fixture", "effect": "4 eval tests skip unless settings.use_groq and groq_api_key"},
+    {"gate": "test_day0_groq_integration.py ANTHROPIC_AVAILABLE (sk-ant prefix)", "effect": "4 Anthropic-only tests skip without a real key"},
+    {"gate": "apps/web/playwright.real.config.ts + e2e-real/journeys.spec.ts", "effect": "non-LLM journeys runnable; LLM journeys deferred (L8-L10)"}
+  ],
+  "measured_numbers": {
+    "head_collect": "8,962 collected / 25 deselected (19 LLM + 6 network-real)",
+    "baseline_default_run_c927c44b": "8,870 passed / 55 skipped / 25 deselected / 0 errors (27:23)",
+    "pending_dir": "49 tests, 49 skipped in 0.35s without RUN_PENDING_TESTS"
+  },
+  "catalog_a_slow_deselected_llm": {
+    "count": 19,
+    "day0_groq_integration": {
+      "file": "backend/tests/test_day0_groq_integration.py",
+      "count": 13,
+      "real_llm_tests": [
+        "TestPlannerNodeRealLLM::test_planner_produces_json_with_steps",
+        "TestPlannerNodeRealLLM::test_planner_sets_status_running",
+        "TestPlannerNodeRealLLM::test_planner_survives_bad_model_response",
+        "TestReflectionNodeRealLLM::test_reflection_returns_satisfied_field",
+        "TestReflectionNodeRealLLM::test_reflection_is_non_fatal_on_partial_json",
+        "TestLessonExtractionRealLLM::test_lesson_extracted_and_stored",
+        "TestLessonExtractionRealLLM::test_lesson_retrieval_finds_stored_lesson",
+        "TestFullGraphRunGroq::test_mini_task_runs_end_to_end",
+        "TestFullGraphRunGroq::test_trace_id_in_final_state"
+      ],
+      "anthropic_only_todo_stubs": [
+        "test_prompt_caching_header_sent (still pass-only with TODO at HEAD)",
+        "test_image_block_param_in_call_llm (still pass-only)",
+        "test_reflection_node_with_real_claude (still pass-only)",
+        "test_full_pipeline_pm_to_qa_with_claude (still pass-only)"
+      ]
+    },
+    "day0_gemini_integration": {
+      "file": "backend/tests/test_day0_gemini_integration.py",
+      "count": 2,
+      "note": "temporary Gemini backend; not part of production verification"
+    },
+    "evals": {
+      "file": "backend/tests/evals/test_evals.py::TestAgentEvals",
+      "count": 4,
+      "tasks": "11-task suite (tests/evals/tasks.json), structural scoring only",
+      "cross_ref": "EVAL-07-102; quality_checks never executed (EVAL-07-101)"
+    }
+  },
+  "catalog_b_pending_directory": {
+    "total": 49,
+    "files": [
+      {"file": "test_pm_agent.py", "tests": 3, "requirement": "LLM"},
+      {"file": "test_architect_agent.py", "tests": 3, "requirement": "LLM"},
+      {"file": "test_decomposer_agent.py", "tests": 3, "requirement": "LLM"},
+      {"file": "test_planner_agent.py", "tests": 4, "requirement": "LLM"},
+      {"file": "test_coder_agent.py", "tests": 3, "requirement": "LLM (largest prompts; unpassable on Groq free tier)"},
+      {"file": "test_pipeline_e2e.py", "tests": 5, "requirement": "LLM"},
+      {"file": "test_research_agent.py", "tests": 3, "requirement": "LLM (skip gate fixed since register compiled: now requires_anthropic)"},
+      {"file": "test_embeddings.py", "tests": 4, "requirement": "VOYAGE_API_KEY"},
+      {"file": "test_manager_integration.py", "tests": 4, "requirement": "LLM + DB"},
+      {"file": "test_specialist_agents.py", "tests": 9, "requirement": "LLM (+DB for 3)"},
+      {"file": "test_api_e2e.py", "tests": 8, "requirement": "LLM + DB + live dev server on :8000"}
+    ],
+    "run_command": "RUN_PENDING_TESTS=1 ANTHROPIC_API_KEY=sk-ant-... DATABASE_URL=... .venv/bin/pytest tests/pending/ -v"
+  },
+  "catalog_c_audit_deferred_checks": [
+    {"id": "L1", "audit_ref": "02 / AGENT-02-002", "check": "strict vs soft submit_* schema validation decision (count real input_schema failures)", "run": "run real agents; grep logs for 'did not match its declared input_schema'"},
+    {"id": "L2", "audit_ref": "03 / MEM-03-004", "check": "live Voyage semantic memory (_embed + query_similar_tasks)", "run": "set VOYAGE_API_KEY; pytest tests/pending/test_embeddings.py; verify non-zero vectors", "note": "one-off probe by parallel series 2026-09-29; not re-verified by this series"},
+    {"id": "L3", "audit_ref": "03", "check": "versioned-lesson merge-on-conflict (_merge_via_llm) + supersede lineage", "run": "publish two near-duplicate lessons via get_versioned_memory_store().publish()"},
+    {"id": "L4", "audit_ref": "07 / EVAL-07-102", "check": "run the 11-task eval suite for real", "run": "pytest tests/evals/ -m slow -v"},
+    {"id": "L5", "audit_ref": "07 / EVAL-07-101", "check": "LLM judge for natural-language quality_checks (never executed)", "run": "add Haiku-tier judge step, then run L4"},
+    {"id": "L6", "audit_ref": "07", "check": "activate regression gate: baselines -> degraded prompt blocked by gate_deploy()", "run": "~20 real runs of one agent; propose worse prompt; expect DeploymentBlocked"},
+    {"id": "L7", "audit_ref": "07 / 09", "check": "real auxiliary spend measurement on real tasks", "run": "run 3 real tasks; read agent_runs.tokens_in/out + /api/metrics cost"},
+    {"id": "L8", "audit_ref": "12", "check": "real-stack journey C: plan approval in UI", "run": "apps/web + playwright.real.config.ts (backend :8000, next start :3100, throwaway approver, real key, economy mode)"},
+    {"id": "L9", "audit_ref": "12", "check": "real-stack journey D: agent execution to review", "run": "same harness; one small task; read agent_runs cost"},
+    {"id": "L10", "audit_ref": "12", "check": "real-stack journey G: repository chat streams answer into UI", "run": "same harness; one question"}
+  ],
+  "non_llm_bucket": [
+    {"item": "GitHub inspect tests (batch09 + hardening)", "count": 4, "gate": "slow marker; network-real"},
+    {"item": "PyPI dependency resolver tests", "count": 2, "gate": "slow marker; network-real"},
+    {"item": "PDF test (test_day2_tools.py)", "count": 1, "gate": "reportlab pip package missing"},
+    {"item": "Production-scale DR / chaos / soak / rollback", "count": null, "gate": "environment; not LLM; see audits 13/14"}
+  ],
+  "execution_plan_section_M": {
+    "balance": "$5 loaded, hard cap $4, stop at $3.50, $1 reserved",
+    "guards": ["force COST_MODE=economy", "calibrate on one cheap test", "running spend ledger", "COST_BUDGET_DAILY_USD as automatic stop"],
+    "order": [
+      {"item": "calibration single-agent pending test", "estimate_usd": "0.03-0.05"},
+      {"item": "L7 two real Smart Run tasks", "estimate_usd": "0.10-0.20"},
+      {"item": "L3 versioned-lesson merge (Voyage + Haiku)", "estimate_usd": "<0.01"},
+      {"item": "tests/pending single-agent tests", "estimate_usd": "0.8-1.2"},
+      {"item": "tests/pending manager + pipeline e2e", "estimate_usd": "0.6-1.0"},
+      {"item": "L4 11 evals structural scoring", "estimate_usd": "0.4-0.6"},
+      {"item": "L1 output-format failure rate (from logs)", "estimate_usd": "0"},
+      {"item": "L6 regression gate ~20 runs (if >= $0.8 remains)", "estimate_usd": "0.7"}
+    ],
+    "total_estimate_usd": "2.6-3.7 — fits the $3.50 stop with $1 never touched"
+  },
+  "acceptance_rule": "Each item run must be recorded PASS/FAIL and the corresponding audit finding updated (02 for L1; 03 for L2/L3; 07 for L4-L7; 12 for L8-L10; then report 15 classification updated). Until then every row remains UNVERIFIED.",
+  "verified_clean_summary": [
+    "tests/pending/ skips cleanly without keys (49 skipped in 0.35s, 0 failures, 0 errors) — verified this audit",
+    "Research-agent skip-gate inconsistency from the repo register is fixed at HEAD",
+    "e2e-real non-LLM journeys are runnable without a key; LLM journeys are correctly deferred (not silently skipped)"
+  ],
+  "not_found": [
+    "No test in the codebase is gated on OPENAI_API_KEY (register §Quick answer; no agent calls OpenAI for real work)",
+    "No live-LLM test PASS exists anywhere in this audit series (series made zero live LLM calls)"
+  ],
+  "cross_audit_flags": [
+    {"flag": "07<->16", "detail": "EVAL-07-102 (eval suite excluded/never run) and EVAL-07-101 (quality_checks never executed) are L4/L5 here"},
+    {"flag": "03<->16", "detail": "MEM-03-004 (Voyage unset -> semantic memory inactive) is L2 here"},
+    {"flag": "02<->16", "detail": "AGENT-02-002 (soft schema validation) needs real-failure-rate measurement -> L1"},
+    {"flag": "12<->16", "detail": "Real-stack LLM journeys (plan approval, agent execution, repo chat) -> L8-L10"},
+    {"flag": "15<->16", "detail": "Report 15 lists 'live-LLM suites' as a large unverified surface; this register is that surface's full inventory"}
+  ],
+  "verdict": "PENDING REGISTER COMPLETE — 19 slow-deselected LLM tests + 49 RUN_PENDING_TESTS-gated tests + 10 audit-deferred live-LLM checks + 6 network-real and 1 package-gated items inventoried; zero PASS claims; execution plan with cost guards ready to run on a funded key"
+}
