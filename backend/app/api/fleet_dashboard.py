@@ -110,6 +110,32 @@ async def list_requests(
     return [_serialize(r, auto_applicable_agents) for r in rows]
 
 
+# Production audit 12: must stay above get_request() — its path parameter
+# matched "/requests/stream" first, so this endpoint was unreachable.
+@router.get("/requests/stream")
+async def stream_dashboard_events(
+    _actor: str = Depends(require_authenticated),
+) -> StreamingResponse:
+    """SSE: new-request / status-change events for the in-app notification badge and
+    live-updating list. Distinct from GET /api/tasks/{trace_id}/stream, which streams one
+    specific approved request's execution."""
+    stream = get_activity_registry().get_or_create(_DASHBOARD_STREAM_KEY)
+
+    async def _generate() -> AsyncIterator[str]:
+        async for event in stream.subscribe(timeout=30.0):
+            yield f"data: {json.dumps(event, default=str)}\n\n"
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
 @router.get("/requests/{request_id}")
 async def get_request(
     request_id: int,
@@ -775,27 +801,3 @@ async def quality_score_report(
             for c in result.categories
         ],
     }
-
-
-@router.get("/requests/stream")
-async def stream_dashboard_events(
-    _actor: str = Depends(require_authenticated),
-) -> StreamingResponse:
-    """SSE: new-request / status-change events for the in-app notification badge and
-    live-updating list. Distinct from GET /api/tasks/{trace_id}/stream, which streams one
-    specific approved request's execution."""
-    stream = get_activity_registry().get_or_create(_DASHBOARD_STREAM_KEY)
-
-    async def _generate() -> AsyncIterator[str]:
-        async for event in stream.subscribe(timeout=30.0):
-            yield f"data: {json.dumps(event, default=str)}\n\n"
-
-    return StreamingResponse(
-        _generate(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
-    )

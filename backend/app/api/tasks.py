@@ -12,7 +12,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.budget_gate import require_daily_budget
@@ -63,6 +63,16 @@ def _clear_stale_abort(task_id: int) -> None:
 class CreateTaskRequest(BaseModel):
     title: str
     description: str
+
+    # Production audit 12: the UI refuses a blank title, but the API stored
+    # whitespace-only titles (201). Enforced here, at the real boundary.
+    @field_validator("title")
+    @classmethod
+    def _title_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("title must not be blank")
+        return v.strip()
+
     repo_id: int | None = None
     # Stage 4 Tier 3 (2026-08-05, answer2.md Q2) — was a bare `str`, meaning
     # any value (typos, empty string, arbitrary garbage) reached the DB

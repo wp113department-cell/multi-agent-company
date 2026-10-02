@@ -196,8 +196,15 @@ async def setup_first_user(
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(response: Response) -> Response:
-    """Clear the browser session cookie without exposing it to JavaScript."""
+async def logout() -> Response:
+    """Clear the browser session cookie without exposing it to JavaScript.
+
+    Production audit 12: this used to return FastAPI's injected `response`
+    parameter itself. That object is only a header/cookie carrier with
+    status_code=None — returning it made uvicorn fail to send it, so every
+    real logout was a 500 and the httpOnly cookie was never cleared.
+    """
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie(key="gridiron_token", path="/")
     return response
 

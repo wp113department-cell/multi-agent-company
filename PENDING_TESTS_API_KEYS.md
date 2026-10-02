@@ -755,6 +755,9 @@ The matching audit report marks the same item `BLOCKED (LLM credit)`, not green.
 | L5 | 07 Phase 4 | The tasks' natural-language `quality_checks` (e.g. "recommendations should be actionable") are read by `eval_runner._score_result` but never executed: they need an LLM judge. | Add an LLM-judge step (Haiku tier) scoring each quality check, then run L4. |
 | L6 | 07 Phase 3 | Regression gate becoming *active*: needs real agent runs → `_benchmark_baseline_loop` stores baselines → a degraded role-prompt change is blocked by `gate_deploy()`. | After ~20 real runs of one agent, propose a deliberately worse prompt for it via the self-improvement flow; expect `DeploymentBlocked`. |
 | L7 | 07 (cost) | Measure real auxiliary spend now that it is counted (reflection on the agent's own model every turn, critique, planning): compare `tokens_in` per run before/after the 2026-09-29 accounting fix on a few real tasks. | Run 3 real tasks; read `agent_runs.tokens_in/out` and `/api/metrics` cost; decide whether reflection should move to the Haiku tier. |
+| L8 | 12 (E2E) | Real-stack journey C — plan approval: create a task in the UI, click Run, wait for the plan, approve it in the UI, confirm the task moves to coding. | Same harness as audit 12: `apps/web/e2e-real` + `playwright.real.config.ts` (backend :8000, `next start` :3100, throwaway approver). Add a journey; real key; economy mode; use a throwaway repo, never the project repo. |
+| L9 | 12 (E2E) | Real-stack journey D — agent execution to review: after approval the coder runs in a worktree, task reaches `ready_for_review` with a diff; Review page lists it; approve. | Same harness; one small task; read `agent_runs` cost. |
+| L10 | 12 (E2E) | Real-stack journey G — repository chat answers a question about the repo and streams tokens into the UI. | Same harness; one question. |
 
 ---
 

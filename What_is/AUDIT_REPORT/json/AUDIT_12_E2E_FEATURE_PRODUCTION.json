@@ -1,0 +1,20 @@
+{
+  "audit_id": "12",
+  "audit_name": "End-to-End Feature Production",
+  "run_date": "2026-10-02",
+  "layer_score": 80,
+  "real_stack": true,
+  "findings": [
+    {"id": "E2E-12-001", "severity": "High", "status": "FIXED", "file": "backend/app/api/epics.py", "location": "batch_review route order", "finding": "GET /api/epics/batch-review shadowed by /{epic_id}; Review page always 500.", "evidence": "real-stack page tour: 500, asyncpg invalid UUID 'batch-review'; evidence/shadowed_routes.out.json", "production_impact": "Daily Review page unusable.", "confidence": "High", "recommendation": "Declare static route first.", "effort": "Small"},
+    {"id": "E2E-12-002", "severity": "High", "status": "FIXED", "file": "backend/app/api/epics.py", "location": "batch_review age", "finding": "naive utcnow minus aware created_at -> TypeError.", "evidence": "tests/test_audit12_route_reachability.py with real waiting rows", "production_impact": "Review page 500 whenever anything awaits review.", "confidence": "High", "recommendation": "datetime.now(timezone.utc).", "effort": "Small"},
+    {"id": "E2E-12-003", "severity": "High", "status": "FIXED", "file": "backend/app/api/auth.py", "location": "logout", "finding": "Returned injected Response (status None): every logout 500, cookie never cleared.", "evidence": "uvicorn KeyError: None in STATUS_LINE; test fails on old code", "production_impact": "Sessions not ended on logout.", "confidence": "High", "recommendation": "Return Response(204) deleting cookie.", "effort": "Small"},
+    {"id": "E2E-12-004", "severity": "Medium", "status": "FIXED", "file": "backend/app/api/fleet_dashboard.py", "location": "requests/stream route order", "finding": "SSE stream shadowed by /requests/{request_id}.", "evidence": "evidence/shadowed_routes.out.json", "production_impact": "NavBar live updates never connected.", "confidence": "High", "recommendation": "Declare static route first.", "effort": "Small"},
+    {"id": "E2E-12-005", "severity": "Medium", "status": "FIXED", "file": "backend/app/api/epics.py", "location": "epic_id path params", "finding": "Non-UUID epic id -> 500.", "evidence": "curl /api/epics/not-a-uuid -> 500", "production_impact": "Server errors on bad input.", "confidence": "High", "recommendation": "Validate UUID at boundary.", "effort": "Small"},
+    {"id": "E2E-12-006", "severity": "Low", "status": "FIXED", "file": "backend/app/api/tasks.py", "location": "CreateTaskRequest.title", "finding": "Whitespace-only title accepted.", "evidence": "POST /api/tasks title '   ' -> 201", "production_impact": "Blank tasks via API.", "confidence": "High", "recommendation": "Strip and reject blank.", "effort": "Small"},
+    {"id": "E2E-12-007", "severity": "High", "status": "BLOCKED", "file": "PENDING_TESTS_API_KEYS.md", "location": "L8-L10", "finding": "Plan approval, agent execution, repo chat journeys need real LLM calls.", "evidence": "no spend allowed until live-run phase", "production_impact": "Core LLM journeys unverified end to end in a browser.", "confidence": "High", "recommendation": "Run L8-L10 with the e2e-real harness.", "effort": "Medium"}
+  ],
+  "counts": {"critical": 0, "high": 4, "medium": 2, "low": 1},
+  "open_counts": {"critical": 0, "high": 1, "medium": 0, "low": 0},
+  "journeys": {"A_login": "PASS", "B_create_task": "PASS", "page_tour_16": "PASS", "A4_logout": "PASS", "F_terminal": "PASS_BACKEND", "C_plan_approval": "BLOCKED", "D_agent_execution": "BLOCKED", "G_repo_chat": "BLOCKED"},
+  "verdict": "YELLOW"
+}

@@ -46,7 +46,7 @@ A flag is never rounded up. A check that needs something not available here is m
 | 09 | Performance & Scalability | `09_PERFORMANCE_SCALABILITY_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-02): 8 fixed incl. hard daily spend cap (closes PROD-08-007) + thread-pool starvation; full suite 8887 pass, 3 flaky pass on rerun |
 | 10 | Final Consolidation | `10_FINAL_CONSOLIDATION_AUDIT_REPORT.md` | pending (last) |
 | 11 | Zero Policy | `11_ZERO_POLICY_AUDIT_REPORT.md` | ✅ 🟢 GREEN (2026-10-02): 4 fixed incl. host-mode secret leak + vault redaction; 0 blockers |
-| 12 | End-to-End Feature Production | `12_E2E_FEATURE_PRODUCTION_AUDIT_REPORT.md` | pending |
+| 12 | End-to-End Feature Production | `12_E2E_FEATURE_PRODUCTION_AUDIT_REPORT.md` | 🟡 YELLOW (2026-10-02): real-stack journeys found+fixed 6 (Review page 500 ×2, logout 500, shadowed SSE, bad-input 500, blank title); LLM journeys L8–L10 BLOCKED on live run |
 | 13 | Operations / DR / Lifecycle | `13_OPERATIONS_DR_LIFECYCLE_AUDIT_REPORT.md` | pending |
 | 14 | Reproducibility / Transfer | `14_REPRODUCIBILITY_TRANSFER_AUDIT_REPORT.md` | pending |
 

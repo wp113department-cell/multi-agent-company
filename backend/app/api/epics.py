@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import asyncio
 import logging
 import uuid
 from decimal import Decimal
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import Path as PathParam
 
 from app.api.budget_gate import require_daily_budget
 from pydantic import BaseModel
@@ -25,6 +28,15 @@ from app.pipeline.cost_controller import estimate_epic_cost
 from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
+
+# Production audit 12: a non-UUID epic id reached asyncpg and came back as a
+# 500 ("invalid UUID"); validate it at the boundary so callers get a 422.
+EpicId = Annotated[
+    str,
+    PathParam(
+        pattern=r"^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$"
+    ),
+]
 
 router = APIRouter(prefix="/api/epics", tags=["epics"])
 
@@ -158,152 +170,8 @@ async def list_epics(
     ]
 
 
-@router.get("/{epic_id}")
-async def get_epic(
-    epic_id: str,
-    db: AsyncSession = Depends(get_db),
-    _actor: str = Depends(require_authenticated),
-) -> dict[str, Any]:
-    """Get an epic with all child tasks."""
-    result = await db.execute(select(Epic).where(Epic.epic_id == epic_id))
-    epic = result.scalar_one_or_none()
-    if not epic:
-        raise HTTPException(status_code=404, detail=f"Epic {epic_id} not found")
-
-    task_result = await db.execute(select(DevTask).where(DevTask.epic_id == epic_id))
-    tasks = list(task_result.scalars().all())
-
-    return _epic_to_response(epic, tasks)
-
-
-@router.post("/{epic_id}/approve", dependencies=[Depends(require_daily_budget)])
-async def approve_epic(
-    epic_id: str,
-    user_id: str = Depends(require_approver),
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    """Approve the epic batched approval package (approver role required)."""
-    result = await db.execute(select(Epic).where(Epic.epic_id == epic_id))
-    epic = result.scalar_one_or_none()
-    if not epic:
-        raise HTTPException(status_code=404, detail=f"Epic {epic_id} not found")
-
-    if epic.status not in ("ready_for_review", "pending_cost_approval"):
-        raise HTTPException(
-            status_code=409,
-            detail=f"Epic is in status {epic.status!r}; must be ready_for_review or pending_cost_approval to approve",
-        )
-
-    epic.status = "approved"
-    await db.commit()
-
-    await publish_event(
-        GridironEvent(
-            event_type="epic.approved",
-            epic_id=epic_id,
-            payload={"approved_by": user_id},
-            emitted_by="api",
-        ),
-        db=db,
-    )
-
-    return {"epicId": epic_id, "status": "approved", "approvedBy": user_id}
-
-
-@router.post("/{epic_id}/reject")
-async def reject_epic(
-    epic_id: str,
-    user_id: str = Depends(require_approver),
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    """Reject the epic (approver role required)."""
-    result = await db.execute(select(Epic).where(Epic.epic_id == epic_id))
-    epic = result.scalar_one_or_none()
-    if not epic:
-        raise HTTPException(status_code=404, detail=f"Epic {epic_id} not found")
-
-    if epic.status not in ("ready_for_review", "pending_cost_approval", "halted"):
-        raise HTTPException(
-            status_code=409,
-            detail=f"Epic is in status {epic.status!r}; cannot reject",
-        )
-
-    epic.status = "rejected"
-    await db.commit()
-
-    await publish_event(
-        GridironEvent(
-            event_type="epic.rejected",
-            epic_id=epic_id,
-            payload={"rejected_by": user_id},
-            emitted_by="api",
-        ),
-        db=db,
-    )
-
-    return {"epicId": epic_id, "status": "rejected", "rejectedBy": user_id}
-
-
-@router.post("/{epic_id}/approve-cost", dependencies=[Depends(require_daily_budget)])
-async def approve_epic_cost(
-    epic_id: str,
-    user_id: str = Depends(require_approver),
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    """Approve cost for an epic blocked on cost approval (approver role required)."""
-    result = await db.execute(select(Epic).where(Epic.epic_id == epic_id))
-    epic = result.scalar_one_or_none()
-    if not epic:
-        raise HTTPException(status_code=404, detail=f"Epic {epic_id} not found")
-
-    if epic.status != "pending_cost_approval":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Epic is in status {epic.status!r}; must be pending_cost_approval",
-        )
-
-    epic.status = "pending"
-    await db.commit()
-
-    # Re-launch the manager with cost approval granted
-    asyncio.create_task(_launch_epic_manager(epic_id, epic.description))
-
-    return {
-        "epicId": epic_id,
-        "status": "pending",
-        "message": "Cost approved. Manager pipeline restarting.",
-    }
-
-
-@router.post("/{epic_id}/policy-approval")
-async def record_policy_approval(
-    epic_id: str,
-    body: ApprovePolicyRequest,
-    user_id: str = Depends(require_approver),
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    """Record a policy approval (or rejection) for a blocking gate on this epic."""
-    from app.policy.engine_v2 import record_approval
-
-    approval = await record_approval(
-        policy_id=body.policy_id,
-        approver_role="human",
-        decision=body.decision,
-        db=db,
-        epic_id=epic_id,
-        file_path=body.file_path,
-    )
-    await db.commit()
-
-    return {
-        "approvalId": approval.id,
-        "policyId": body.policy_id,
-        "epicId": epic_id,
-        "decision": body.decision,
-        "approvedBy": user_id,
-    }
-
-
+# Production audit 12: must stay above get_epic() — its path parameter
+# matched "/batch-review" (500: invalid UUID) first, so this endpoint was unreachable.
 @router.get("/batch-review", summary="List epics and tasks awaiting review in bulk")
 async def batch_review(
     db: AsyncSession = Depends(get_db),
@@ -337,9 +205,7 @@ async def batch_review(
                 "status": e.status,
                 "costEstimate": float(e.cost_estimate) if e.cost_estimate else None,
                 "haltReason": e.halt_reason,
-                "age": (
-                    __import__("datetime").datetime.utcnow() - e.created_at
-                ).total_seconds()
+                "age": (datetime.now(timezone.utc) - e.created_at).total_seconds()
                 / 3600,
                 "createdAt": e.created_at.isoformat(),
             }
@@ -352,15 +218,159 @@ async def batch_review(
                 "description": t.description[:300] if t.description else "",
                 "status": t.status,
                 "epicId": t.epic_id,
-                "age": (
-                    __import__("datetime").datetime.utcnow() - t.created_at
-                ).total_seconds()
+                "age": (datetime.now(timezone.utc) - t.created_at).total_seconds()
                 / 3600,
                 "createdAt": t.created_at.isoformat(),
             }
             for t in tasks
         ],
         "totalPendingReview": len(epics) + len(tasks),
+    }
+
+
+@router.get("/{epic_id}")
+async def get_epic(
+    epic_id: EpicId,
+    db: AsyncSession = Depends(get_db),
+    _actor: str = Depends(require_authenticated),
+) -> dict[str, Any]:
+    """Get an epic with all child tasks."""
+    result = await db.execute(select(Epic).where(Epic.epic_id == epic_id))
+    epic = result.scalar_one_or_none()
+    if not epic:
+        raise HTTPException(status_code=404, detail=f"Epic {epic_id} not found")
+
+    task_result = await db.execute(select(DevTask).where(DevTask.epic_id == epic_id))
+    tasks = list(task_result.scalars().all())
+
+    return _epic_to_response(epic, tasks)
+
+
+@router.post("/{epic_id}/approve", dependencies=[Depends(require_daily_budget)])
+async def approve_epic(
+    epic_id: EpicId,
+    user_id: str = Depends(require_approver),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Approve the epic batched approval package (approver role required)."""
+    result = await db.execute(select(Epic).where(Epic.epic_id == epic_id))
+    epic = result.scalar_one_or_none()
+    if not epic:
+        raise HTTPException(status_code=404, detail=f"Epic {epic_id} not found")
+
+    if epic.status not in ("ready_for_review", "pending_cost_approval"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Epic is in status {epic.status!r}; must be ready_for_review or pending_cost_approval to approve",
+        )
+
+    epic.status = "approved"
+    await db.commit()
+
+    await publish_event(
+        GridironEvent(
+            event_type="epic.approved",
+            epic_id=epic_id,
+            payload={"approved_by": user_id},
+            emitted_by="api",
+        ),
+        db=db,
+    )
+
+    return {"epicId": epic_id, "status": "approved", "approvedBy": user_id}
+
+
+@router.post("/{epic_id}/reject")
+async def reject_epic(
+    epic_id: EpicId,
+    user_id: str = Depends(require_approver),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Reject the epic (approver role required)."""
+    result = await db.execute(select(Epic).where(Epic.epic_id == epic_id))
+    epic = result.scalar_one_or_none()
+    if not epic:
+        raise HTTPException(status_code=404, detail=f"Epic {epic_id} not found")
+
+    if epic.status not in ("ready_for_review", "pending_cost_approval", "halted"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Epic is in status {epic.status!r}; cannot reject",
+        )
+
+    epic.status = "rejected"
+    await db.commit()
+
+    await publish_event(
+        GridironEvent(
+            event_type="epic.rejected",
+            epic_id=epic_id,
+            payload={"rejected_by": user_id},
+            emitted_by="api",
+        ),
+        db=db,
+    )
+
+    return {"epicId": epic_id, "status": "rejected", "rejectedBy": user_id}
+
+
+@router.post("/{epic_id}/approve-cost", dependencies=[Depends(require_daily_budget)])
+async def approve_epic_cost(
+    epic_id: EpicId,
+    user_id: str = Depends(require_approver),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Approve cost for an epic blocked on cost approval (approver role required)."""
+    result = await db.execute(select(Epic).where(Epic.epic_id == epic_id))
+    epic = result.scalar_one_or_none()
+    if not epic:
+        raise HTTPException(status_code=404, detail=f"Epic {epic_id} not found")
+
+    if epic.status != "pending_cost_approval":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Epic is in status {epic.status!r}; must be pending_cost_approval",
+        )
+
+    epic.status = "pending"
+    await db.commit()
+
+    # Re-launch the manager with cost approval granted
+    asyncio.create_task(_launch_epic_manager(epic_id, epic.description))
+
+    return {
+        "epicId": epic_id,
+        "status": "pending",
+        "message": "Cost approved. Manager pipeline restarting.",
+    }
+
+
+@router.post("/{epic_id}/policy-approval")
+async def record_policy_approval(
+    epic_id: EpicId,
+    body: ApprovePolicyRequest,
+    user_id: str = Depends(require_approver),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Record a policy approval (or rejection) for a blocking gate on this epic."""
+    from app.policy.engine_v2 import record_approval
+
+    approval = await record_approval(
+        policy_id=body.policy_id,
+        approver_role="human",
+        decision=body.decision,
+        db=db,
+        epic_id=epic_id,
+        file_path=body.file_path,
+    )
+    await db.commit()
+
+    return {
+        "approvalId": approval.id,
+        "policyId": body.policy_id,
+        "epicId": epic_id,
+        "decision": body.decision,
+        "approvedBy": user_id,
     }
 
 
