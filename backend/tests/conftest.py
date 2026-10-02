@@ -89,6 +89,11 @@ os.environ.setdefault("PIPELINE_MODE", "full")
 # The owner's .env caps real spend at $1/day; the suite was written against
 # the $25 default and must not depend on the local cap.
 os.environ.setdefault("COST_BUDGET_DAILY_USD", "25")
+# The owner's .env has a real SENTRY_DSN (2026-10-02). Test runs start the app
+# (TestClient lifespan) and tear connections down abruptly, which sent test
+# noise to the real Sentry project ("unexpected connection_lost() call").
+# Tests never report to Sentry; tests that check Sentry wiring patch it.
+os.environ["SENTRY_DSN"] = ""
 
 import pytest  # noqa: E402 — must come after env vars are set
 

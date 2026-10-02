@@ -13,10 +13,10 @@ Written 2026-10-02 (end of day). Status then: 13 of 14 audits done (7 GREEN, 6 Y
 |---|---|---|---|
 | 1 | GitHub CI | Owner disabled Actions; billing + CI **after all audits** | Deferred by owner → audit 06 records "accepted, owner deferred" |
 | 2 | Domain / `vercel.json` | **No domain, runs locally** | Not applicable until deployment |
-| 3 | Sentry | DSN added to `backend/.env`, `SENTRY_ENVIRONMENT=development`; test event `1d8bc3d7da42458982f461740452da7c` sent | ✅ **owner to confirm it appears in Sentry → Issues** |
-| 4 | Alerts | **No Slack/Discord. Build in-app (UI) notifications** for blocked/failed tasks | **Monday, build** (backend event → NavBar bell/toast + list, with tests) |
-| 5 | Backups | **Option A**: automatic backup service in docker-compose | **Monday, build**; ask the owner where copies go (2nd disk / USB / cloud; not the same disk) |
-| 6 | Live LLM tests ($3.50) | **Wait**: owner says when | **PENDING, do not start** until the owner says go |
+| 3 | Sentry | DSN added, test event confirmed by owner; it caught a real bug (4 background loops never ran, fixed) and test noise (tests no longer report) | ✅ Done |
+| 4 | Alerts | In-app (UI) notifications | ✅ Done (NavBar bell + toast) |
+| 5 | Backups | **Option A**, folder `./backups` (owner agreed 2026-10-02; copy weekly to USB/Drive) | ✅ **Running**: first backup verified; daily, 14 kept |
+| 6 | Live LLM tests ($3.50) | **Wait**: owner says when. Estimate everything $2.96–4.56; without L6 $2.26–3.86; L6 can come from normal use | **PENDING, do not start** until the owner says go |
 | 7 | Real admin | Account `wp113.department@gmail.com`, role admin, created; login + admin-only actions verified | ✅ done. (Old `admin` user still exists as approver; owner may remove it later) |
 
 ---

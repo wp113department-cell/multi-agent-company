@@ -1644,6 +1644,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "loop:prompts_score_compute",
         "loop:enhancement_quality_monitor",
         "loop:dependency_auto_dispatch",
+        # Production audit 08 follow-up (Sentry GRIDIRON-BACKEND-2): these 4
+        # loops were started below but missing here, so the pool (one held
+        # connection per leader loop, max_overflow=0) was 4 short — they
+        # timed out after 30 s and never ran. tests/test_leader_pool_sizing.py
+        # keeps this tuple equal to the loops actually started.
+        "loop:agent_historical_performance_rollup",
+        "loop:documentation_score_compute",
+        "loop:memory_embeddings_consolidation",
+        "loop:versioned_lesson_consolidation",
     )
     _leader_election_engine = (
         _make_leader_election_engine(settings, pool_size=len(_leader_loop_names))

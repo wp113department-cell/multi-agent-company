@@ -87,3 +87,15 @@
 1. configure `SENTRY_DSN` and an alert webhook (owner);
 2. fix GitHub billing so CI runs (owner, audit 06);
 3. make the daily cost cap a hard stop (audit 09, next).
+
+## Update 2026-10-02: Sentry is live, and it found 2 issues on day one
+
+Sentry was configured (`SENTRY_DSN`, `SENTRY_ENVIRONMENT=development`). The owner's dashboard showed:
+
+| Sentry issue | Cause | Fix |
+|---|---|---|
+| GRIDIRON-BACKEND-1 "Sentry test event" | the connection test | — (expected) |
+| **GRIDIRON-BACKEND-2** `QueuePool limit of size 16 overflow 0 reached` in `_run_as_leader` (3 events) | **Real bug.** The leader-election pool has one held connection per background loop and no overflow, sized from a list of 16 names, but **20** loops are started. 4 loops (agent performance rollup, documentation scores, memory consolidation, lesson consolidation) timed out after 30 s and **never ran** | Added the 4 names; `tests/test_leader_pool_sizing.py` keeps the list equal to the loops started (fails on the old code). Live check: 20/20 loops become leader, 0 timeouts |
+| GRIDIRON-BACKEND-3 `unexpected connection_lost() call` (5 events) | **Test noise:** every test run read the real DSN from `backend/.env` and reported abrupt test-teardown disconnects | `tests/conftest.py` blanks `SENTRY_DSN` for test runs |
+
+Also: in-app failure alerts (NavBar bell) built, and backups run daily into `./backups` (owner's choice), see audits 10 and 13.
