@@ -73,3 +73,6 @@ repos/
 # Runtime artifacts — created at runtime, never commit
 # ------------------------------------------------------------
 artifacts/
+
+# Local database backups (docker compose --profile backup)
+backups/

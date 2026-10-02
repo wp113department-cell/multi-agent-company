@@ -65,7 +65,24 @@ Whichever you choose, treat "backups exist" and "backups have been proven
 restorable" as two separate facts — schedule periodic restore drills (see
 below), not just periodic backups.
 
-Minimal working example (cron on the Docker host, daily at 02:30, 14 kept,
+**Built-in option (recommended):** the `backup` service in `docker-compose.yml`
+runs `backup_db.sh` every 24 h and keeps the newest 14 dumps. Put the target
+folder (on another disk) in the repo-root `.env`, then start it:
+
+```bash
+# repo-root .env
+GRIDIRON_BACKUP_DIR=/media/you/backupdisk/gridiron
+# optional: BACKUP_RETENTION_COUNT=14  BACKUP_INTERVAL_SECONDS=86400
+
+docker compose --profile backup up -d backup
+docker logs crr2906-backup-1        # "Backup verified OK: …" each run
+```
+
+Verified 2026-10-02: 3 runs at a 20 s test interval, each dump self-verified,
+retention pruning works, and a dump made by the service restored into an
+empty database (migration 062, all rows).
+
+Alternative: minimal working example (cron on the Docker host, daily at 02:30, 14 kept,
 using the same image so no local `pg_dump` is needed — this is exactly how
 the 2026-10-02 drill ran the script):
 

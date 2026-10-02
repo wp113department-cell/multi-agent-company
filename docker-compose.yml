@@ -147,5 +147,35 @@ services:
     profiles:
       - frontend
 
+  # Daily database backup (production audit 13, OPS-13-006). Runs the same
+  # scripts/backup_db.sh as the manual procedure — pg_dump custom format,
+  # self-verified with pg_restore --list, newest BACKUP_RETENTION_COUNT kept.
+  # Enabled via: docker compose --profile backup up -d backup
+  # Set GRIDIRON_BACKUP_DIR (repo-root .env) to a folder on ANOTHER disk —
+  # a backup on the database's own disk does not survive losing that disk.
+  backup:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        while true; do
+          /scripts/backup_db.sh || echo "BACKUP FAILED at $$(date -u +%FT%TZ)" >&2
+          sleep "$${BACKUP_INTERVAL_SECONDS}"
+        done
+    environment:
+      DATABASE_URL: postgresql://gridiron:${POSTGRES_PASSWORD:-gridiron_dev_only}@db:5432/gridiron_dev
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION_COUNT: ${BACKUP_RETENTION_COUNT:-14}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+    volumes:
+      - ./scripts:/scripts:ro
+      - ${GRIDIRON_BACKUP_DIR:-./backups}:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles:
+      - backup
+
 volumes:
   pgdata:
